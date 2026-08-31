@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventory - Hardware Management System</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">Welcome, <span data-current-user>User</span></div>
+            <ul class="sidebar-nav">
+                <li><a href="index.html">Main Dashboard</a></li>
+                <li><a href="pos.html">POS & Sales</a></li>
+                <li><a href="inventory.html" style="background: var(--accent);">Inventory Management</a></li>
+                <li><a href="records.html">Record Maintenance</a></li>
+                <li><a href="delivery.html">Customer Delivery</a></li>
+                <li><a href="reports.html">Reporting & Analytics</a></li>
+                <li><a href="system.html">System Maintenance</a></li>
+            </ul>
+            <div class="sidebar-logout"><a href="Login.html" onclick="logout()">Logout</a></div>
+        </aside>
+
+        <main class="main-content">
+            <header class="topbar">
+                <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+            </header>
+
+            <div class="content-area">
+                <h2>Inventory Management</h2>
+                
+                <div class="card">
+                    <div class="flex" style="gap: 10px; margin-bottom: 20px; flex-wrap: wrap;">
+                        <button class="btn">Stock Adjustment</button>
+                        <button class="btn">Reorder Point Settings</button>
+                        <button class="btn btn-success">Purchase Orders</button>
+                        <button class="btn btn-danger">Returned Items</button>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Item Code</th>
+                                    <th>Item Name</th>
+                                    <th>Category</th>
+                                    <th>Current Stock</th>
+                                    <th>Reorder Lvl</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td>HW-001</td>
+                                    <td>Power Drill 20V</td>
+                                    <td>Power Tools</td>
+                                    <td>15</td>
+                                    <td>10</td>
+                                    <td style="color: var(--success);">In Stock</td>
+                                </tr>
+                                <tr>
+                                    <td>HW-042</td>
+                                    <td>Portland Cement</td>
+                                    <td>Construction</td>
+                                    <td>5</td>
+                                    <td>20</td>
+                                    <td style="color: var(--danger); font-weight: bold;">Low Stock</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="javascript/app.js"></script>
+</body>
+</html>

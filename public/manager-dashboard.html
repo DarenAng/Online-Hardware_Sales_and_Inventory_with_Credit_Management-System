@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manager Dashboard - Hardware Management System</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">Welcome, <span data-current-user>User</span></div>
+            <ul class="sidebar-nav">
+                <li><a href="reports.html">Reports</a></li>
+                <li><a href="pos.html">Sales</a></li>
+                <li><a href="inventory.html">Stocks</a></li>
+                <li><a href="delivery.html">Deliveries</a></li>
+                <li><a href="records.html">Records</a></li>
+                <li><a href="system.html">System Maintenance</a></li>
+            </ul>
+            <div class="sidebar-logout"><a href="Login.html" onclick="logout()">Logout</a></div>
+        </aside>
+
+        <main class="main-content">
+            <header class="topbar">
+                <button class="menu-toggle" onclick="toggleSidebar()">&#9776;</button>
+            </header>
+
+            <div class="content-area">
+                <h2>Manager Dashboard</h2>
+                <div class="grid-3">
+                    <div class="card"><h3>Reports</h3><p>Review business reports and analytics.</p><a href="reports.html">Open Reports</a></div>
+                    <div class="card"><h3>Sales</h3><p>Review sales and point-of-sale activity.</p><a href="pos.html">Open Sales</a></div>
+                    <div class="card"><h3>Stocks</h3><p>Monitor inventory and stock levels.</p><a href="inventory.html">Open Stocks</a></div>
+                    <div class="card"><h3>Deliveries</h3><p>Track customer deliveries.</p><a href="delivery.html">Open Deliveries</a></div>
+                    <div class="card"><h3>Records</h3><p>Maintain operational records.</p><a href="records.html">Open Records</a></div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="javascript/app.js"></script>
+    <script>
+        const currentUser = getCurrentUser();
+        if (!currentUser || currentUser.role_name !== 'Manager') {
+            window.location.replace('Login.html');
+        }
+    </script>
+</body>
+</html>

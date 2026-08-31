@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Records - Hardware Management System</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">Welcome, <span data-current-user>User</span></div>
+            <ul class="sidebar-nav">
+                <li><a href="index.html">Main Dashboard</a></li>
+                <li><a href="pos.html">POS & Sales</a></li>
+                <li><a href="inventory.html">Inventory Management</a></li>
+                <li><a href="records.html" style="background: var(--accent);">Record Maintenance</a></li>
+                <li><a href="delivery.html">Customer Delivery</a></li>
+                <li><a href="reports.html">Reporting & Analytics</a></li>
+                <li><a href="system.html">System Maintenance</a></li>
+            </ul>
+            <div class="sidebar-logout"><a href="Login.html" onclick="logout()">Logout</a></div>
+        </aside>
+
+        <main class="main-content">
+            <header class="topbar">
+                <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+            </header>
+
+            <div class="content-area">
+                <h2>Master Records</h2>
+                
+                <div class="card">
+                    <div class="tab-header">
+                        <button class="tab-btn active" onclick="switchTab('supplier')">Supplier Records</button>
+                        <button class="tab-btn" onclick="switchTab('customer')">Customer Records</button>
+                        <button class="tab-btn" onclick="switchTab('product')">Product Records</button>
+                        <button class="tab-btn" onclick="switchTab('category')">Category Records</button>
+                        <button class="tab-btn" onclick="switchTab('unit')">Unit Records</button>
+                    </div>
+
+                    <div id="supplier" class="tab-content active">
+                        <h3>Add/Update Supplier</h3>
+                        <form>
+                            <div class="grid-2">
+                                <div class="form-group">
+                                    <label>Supplier Name</label>
+                                    <input type="text" class="form-control" placeholder="Supplier Company Inc.">
+                                </div>
+                                <div class="form-group">
+                                    <label>Contact Person</label>
+                                    <input type="text" class="form-control" placeholder="John Doe">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Address</label>
+                                <input type="text" class="form-control" placeholder="123 Warehouse St.">
+                            </div>
+                            <button type="button" class="btn btn-success">Save Record</button>
+                        </form>
+                    </div>
+
+                    <div id="customer" class="tab-content">
+                        <h3>Add/Update Customer (Credit Mgmt)</h3>
+                        <form>
+                            <div class="grid-2">
+                                <div class="form-group">
+                                    <label>Customer Name</label>
+                                    <input type="text" class="form-control">
+                                </div>
+                                <div class="form-group">
+                                    <label>Approved Credit Limit ($)</label>
+                                    <input type="number" class="form-control">
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-success">Save Record</button>
+                        </form>
+                    </div>
+                    
+                    <div id="product" class="tab-content"><p>Product configuration form here...</p></div>
+                    <div id="category" class="tab-content"><p>Category configuration form here...</p></div>
+                    <div id="unit" class="tab-content"><p>Unit of Measurement configuration form here...</p></div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="javascript/app.js"></script>
+</body>
+</html>

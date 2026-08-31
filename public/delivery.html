@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delivery - Hardware Management System</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">Welcome, <span data-current-user>User</span></div>
+            <ul class="sidebar-nav">
+                <li><a href="index.html">Main Dashboard</a></li>
+                <li><a href="pos.html">POS & Sales</a></li>
+                <li><a href="inventory.html">Inventory Management</a></li>
+                <li><a href="records.html">Record Maintenance</a></li>
+                <li><a href="delivery.html" style="background: var(--accent);">Customer Delivery</a></li>
+                <li><a href="reports.html">Reporting & Analytics</a></li>
+                <li><a href="system.html">System Maintenance</a></li>
+            </ul>
+            <div class="sidebar-logout"><a href="Login.html" onclick="logout()">Logout</a></div>
+        </aside>
+
+        <main class="main-content">
+            <header class="topbar">
+                <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+            </header>
+
+            <div class="content-area">
+                <h2>Delivery Schedule & Tracking</h2>
+                
+                <div class="grid-2">
+                    <div class="card">
+                        <h3>Update Delivery Status</h3>
+                        <form>
+                            <div class="form-group">
+                                <label>Order ID</label>
+                                <input type="text" class="form-control" placeholder="ORD-2023-001">
+                            </div>
+                            <div class="form-group">
+                                <label>Status</label>
+                                <select class="form-control">
+                                    <option>Pending Setup</option>
+                                    <option>Out for Delivery</option>
+                                    <option>Delivered</option>
+                                    <option>Failed / Returned</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Driver Remarks</label>
+                                <textarea class="form-control" rows="3" placeholder="Notes regarding delivery..."></textarea>
+                            </div>
+                            <button type="button" class="btn btn-accent">Update Tracker</button>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h3>Today's Schedules</h3>
+                        <div class="table-responsive">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Order ID</th>
+                                        <th>Destination</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td>ORD-844</td>
+                                        <td>Site A, Downtown</td>
+                                        <td style="color: var(--accent);">Out for Delivery</td>
+                                    </tr>
+                                    <tr>
+                                        <td>ORD-845</td>
+                                        <td>74 Suburbia Ln.</td>
+                                        <td>Pending</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="javascript/app.js"></script>
+</body>
+</html>

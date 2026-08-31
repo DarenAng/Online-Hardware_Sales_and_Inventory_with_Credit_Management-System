@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System - Hardware Management System</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">Welcome, <span data-current-user>User</span></div>
+            <ul class="sidebar-nav">
+                <li>
+                    <a href="#accounts" onclick="toggleDropdown('accounts-dropdown', event)" style="display: flex; justify-content: space-between; align-items: center;">
+                        Accounts Management <span>▼</span>
+                    </a>
+                    <ul id="accounts-dropdown" style="display: none; list-style: none; background: rgba(0,0,0,0.2);">
+                        <li><a href="#" onclick="showCreateAccount(event)" style="padding-left: 40px; font-size: 0.9em;">Create</a></li>
+                        <li><a href="#" onclick="showAccountsList(event)" style="padding-left: 40px; font-size: 0.9em;">List Users</a></li>
+                        <li><a href="#accounts-archive" style="padding-left: 40px; font-size: 0.9em;">Archive</a></li>
+                    </ul>
+                </li>
+                <li><a href="#logs">Audit Logs</a></li>
+                <li><a href="#backup">Backup</a></li>
+                <li><a href="#recovery">Recovery</a></li>
+            </ul>
+            <div class="sidebar-logout"><a href="Login.html" onclick="logout()">Logout</a></div>
+        </aside>
+
+        <main class="main-content">
+            <header class="topbar">
+                <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+            </header>
+
+            <div class="content-area">
+                <h2>System Administration</h2>
+                
+                <div class="card" id="accounts">
+                    <div class="flex-between" style="margin-bottom: 15px;">
+                        <h3>User Account Management</h3>
+                    </div>
+                    <div class="table-responsive">
+                        <table id="accounts-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card" id="accounts-create" style="display: none;">
+                    <h3>Create New Account</h3>
+                    <form id="create-user-form" onsubmit="handleCreateUser(event)">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Name</label>
+                                <input type="text" name="firstName" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Email</label>
+                                <input type="email" name="email" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Password</label>
+                                <input type="password" name="password" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Role</label>
+                                <select name="roleId" class="form-control" required>
+                                    <option value="1">System Administrator</option>
+                                    <option value="2">Manager</option>
+                                    <option value="3">Inventory Clerk</option>
+                                    <option value="4">Cashier</option>
+                                    <option value="5">Delivery Personnel</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="margin-top: 15px;">
+                            <button type="submit" class="btn btn-success">Create Account</button>
+                            <button type="button" class="btn btn-danger" onclick="showAccountsList()">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="grid-3">
+                    <div class="card text-center" id="backup" style="text-align: center;">
+                        <h3>Data Backup</h3>
+                        <p style="margin-bottom: 15px; font-size: 14px;">Securely backup database and files.</p>
+                        <button class="btn btn-accent">Run Backup</button>
+                    </div>
+                    <div class="card text-center" id="logs" style="text-align: center;">
+                        <h3>Audit Trail Logs</h3>
+                        <p style="margin-bottom: 15px; font-size: 14px;">View system activity and user logs.</p>
+                        <button class="btn">View Logs</button>
+                    </div>
+                    <div class="card text-center" id="recovery" style="text-align: center;">
+                        <h3>Recovery</h3>
+                        <p style="margin-bottom: 15px; font-size: 14px;">Restore the database from a backup.</p>
+                        <button class="btn">Restore Backup</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script src="javascript/app.js"></script>
+</body>
+</html>
