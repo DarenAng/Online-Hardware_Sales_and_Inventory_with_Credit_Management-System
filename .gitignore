@@ -1,0 +1,17 @@
+# installed packages, rebuilt with npm install
+node_modules/
+
+# editor and OS files
+.vscode/
+.DS_Store
+Thumbs.db
+
+# local notes and database dumps
+*.log
+*.dump.sql
+
+# dated backups written by the Backup & Recovery screen
+backups/*.sql
+
+# screenshots written by tests/shots.js
+shots/

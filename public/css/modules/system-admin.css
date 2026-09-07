@@ -1,0 +1,131 @@
+/* ==========================================================================
+   SYSTEM ADMINISTRATOR
+   system.html
+
+   Loads after general-ui.css and responsive.css, so anything here wins.
+
+   This role holds the keys: who works here, who used to, what everyone did,
+   and the copy of the whole system that gets it all back. Only the things
+   nobody else ever sees live in this file.
+   ========================================================================== */
+
+/* ==========================================================================
+   BACKUP AND RECOVERY
+
+   A backup is one complete .sql file. The three figures at the top of the
+   screen answer the only three questions worth asking before you trust one:
+   when was the last, how much room are they taking, and where are they.
+   The last of the three is a path, so it is the one thing here set in the
+   figure face.
+   ========================================================================== */
+.backup-figures {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px 28px;
+    padding-bottom: 16px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+}
+.backup-figure { min-width: 120px; }
+.backup-figure:last-child { flex: 1 1 260px; min-width: 240px; }
+
+.backup-figure-label {
+    display: block;
+    font-size: 13px;
+    color: var(--steel);
+}
+.backup-figure-value {
+    display: block;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.15;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+.backup-path {
+    display: block;
+    font-family: var(--font-figure);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--steel-soft);
+    word-break: break-all;
+    margin-top: 2px;
+}
+
+/* A backup is named after the moment it was taken. The day reads as a date
+   and the time reads as a figure, because that is what each one is. */
+.backup-day {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+}
+.backup-time {
+    font-family: var(--font-figure);
+    font-size: 12.5px;
+    color: var(--steel-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Restoring replaces everything currently in the system, so the two tiles at
+   the top of the screen are not a matched pair: one is the safe thing and
+   one is not, and they should not look alike. */
+#panel-maintenance .tile .btn { margin-top: 2px; }
+
+/* ==========================================================================
+   THE STAFF DIRECTORY
+   Two people may share a first and a last name, so the middle initial is part
+   of the name and not an afterthought.
+   ========================================================================== */
+#panel-create .grid-2 { align-items: start; }
+.initial-input { max-width: 92px; }
+
+/* Deactivate is the last button in the row and the only red one on the
+   screen: it is where a person stops being able to sign in. */
+#modal-status-btn { min-width: 168px; }
+
+/* ==========================================================================
+   ON A PHONE
+   ========================================================================== */
+@media (max-width: 640px) {
+    .backup-figures { gap: 14px 22px; padding-bottom: 14px; }
+    .backup-figure { min-width: 0; flex: 1 1 45%; }
+    .backup-figure:last-child { flex: 1 1 100%; }
+    .backup-figure-value { font-size: 22px; }
+    .initial-input { max-width: none; }
+
+    /* the whole footer of the user popup is destructive-adjacent; each
+       button gets its own line so none of them is pressed by accident */
+    #user-modal .modal-foot .btn { width: 100%; }
+    #modal-status-btn { min-width: 0; }
+}
+
+/* ==========================================================================
+   STORE & TAX
+   The form on the left says what the shop is; the card on the right shows a
+   customer being handed the result. The preview is set on paper stock rather
+   than as another card, because the thing being previewed is a printed
+   document and a preview that does not look like one teaches nothing.
+   ========================================================================== */
+.store-preview {
+    max-width: 380px;
+    margin: 0 auto;
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+
+/* what the server refused, said next to the boxes rather than only as a card
+   in the corner that has gone by the time the form is read again */
+.store-verdict {
+    margin: 4px 0 0;
+    padding: 9px 12px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+}
+.store-verdict:empty { display: none; }
+.store-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }

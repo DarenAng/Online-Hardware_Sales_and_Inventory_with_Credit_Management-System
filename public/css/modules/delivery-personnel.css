@@ -1,0 +1,93 @@
+/* ==========================================================================
+   DELIVERY PERSONNEL
+   delivery.html
+
+   Loads after general-ui.css and responsive.css, so anything here wins.
+
+   The only role that is never at a desk. This screen is read in a truck cab,
+   one-handed, often in sunlight, and everything on it is either a place to
+   go or an amount to collect. So this file does one thing above all others:
+   it makes the driver's targets big.
+   ========================================================================== */
+
+/* ==========================================================================
+   THE DAY, IN FOUR FIGURES
+   Waiting, on the road, delivered, still to collect.
+   ========================================================================== */
+#del-kpis, #drep-kpis { margin-bottom: 16px; }
+
+/* Money still owed at the door is the one figure a driver must not misread,
+   so it is the only red thing on the page and it is set as a figure. */
+#dcod-table .cell-due,
+#dact-table .cell-due,
+#drep-table .cell-due {
+    font-weight: 700;
+    font-size: 14px;
+}
+
+/* ==========================================================================
+   MOVING A DELIVERY ON
+   The action in each row is a stage, not a menu: Out for delivery, then
+   Delivered. One press, one stage, and the button says which. A row that
+   needs a note instead is opened rather than pressed, which is why the row
+   is clickable and the button is not the only way through.
+   ========================================================================== */
+#dpend-table td.cell-action .btn,
+#dact-table td.cell-action .btn { min-width: 132px; }
+
+/* ==========================================================================
+   COLLECTING THE MONEY
+   Choosing the delivery fills in the exact balance, so the amount field is
+   already right before it is touched. It is set as a figure for the same
+   reason a till display is.
+   ========================================================================== */
+#dcod-form input[name="amount"] {
+    font-family: var(--font-figure);
+    font-size: 18px;
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    min-height: 48px;
+}
+
+/* ==========================================================================
+   THE REPORT
+   Two date fields and everything between them. On a phone the two dates sit
+   side by side, because they are one control in two halves.
+   ========================================================================== */
+#panel-report .panel-actions { gap: 8px; }
+#drep-from, #drep-to {
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   ON A PHONE
+   This is the role most likely to be on one, so it gets the most room.
+   ========================================================================== */
+@media (max-width: 640px) {
+    /* four figures, two by two, still readable at arm's length */
+    #del-kpis, #drep-kpis { grid-template-columns: 1fr 1fr; gap: 10px; }
+    #del-kpis .kpi-value, #drep-kpis .kpi-value { font-size: clamp(26px, 8vw, 34px); }
+
+    /* the stage button is the whole width of the card: in a moving vehicle
+       a small target is a mis-press, and a mis-press here closes out a
+       delivery that has not happened */
+    #dpend-table td.cell-action .btn,
+    #dact-table td.cell-action .btn { min-width: 0; min-height: 48px; font-size: 15.5px; }
+
+    #dcod-form input[name="amount"] { font-size: 20px; min-height: 52px; }
+
+    /* the two dates stay on one line: they are a range, not two questions */
+    #panel-report .panel-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+    #drep-from, #drep-to { max-width: none !important; }
+    #panel-report .panel-actions .btn { grid-column: 1 / -1; }
+}
+
+@media (max-width: 420px) {
+    #del-kpis, #drep-kpis { grid-template-columns: 1fr 1fr; }
+}

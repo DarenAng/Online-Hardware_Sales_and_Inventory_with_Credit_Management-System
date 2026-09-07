@@ -1,3 +1,28 @@
+-- ==========================================================================
+-- 1-RUN-FIRST-database.sql
+-- Hardware Sales & Inventory with Credit Management
+--
+-- WHAT THIS IS
+--   The whole database: 23 tables, 2 views, and the demo data.
+--   This is the complete, current schema. There are no separate upgrade
+--   files to apply on top of it any more; every past upgrade is already
+--   folded in here.
+--
+-- HOW TO RUN IT (MySQL Workbench)
+--   File > Open SQL Script... > pick this file > click the lightning bolt.
+--   Then open 2-RUN-SECOND-stored-procedures.sql and run that.
+--
+-- HOW TO RUN IT (command line)
+--   mysql -u root -p < public/database/1-RUN-FIRST-database.sql
+--   mysql -u root -p < public/database/2-RUN-SECOND-stored-procedures.sql
+--
+-- READ THIS BEFORE RUNNING
+--   The first line below DROPS hardware_db. Every row in it is destroyed and
+--   replaced with the demo data. On a machine that holds work you want to
+--   keep, take a backup first (the System Administrator's Backup & Recovery
+--   screen writes one into backups/).
+-- ==========================================================================
+
 DROP DATABASE IF EXISTS hardware_db;
 CREATE DATABASE hardware_db;
 USE hardware_db;

@@ -1,0 +1,121 @@
+/* ==========================================================================
+   MANAGER
+   manager-dashboard.html
+
+   Loads after general-ui.css and responsive.css, so anything here wins.
+
+   The manager reads rather than types. Six screens, all of them a table, and
+   the job on every one of them is to find the row that is wrong. So the
+   figures are given the most room, the money that is owed is the one thing
+   allowed to be red, and everything else stays out of the way.
+   ========================================================================== */
+
+/* ==========================================================================
+   THE DASHBOARD
+   Six figures, then six doors. Nothing else: this screen exists to be left.
+   ========================================================================== */
+/* Six figures. Left to fill the row they break five-and-one, which reads as
+   a mistake; three by two reads as a block.
+
+   The first four are the ones the dashboard exists for: income, volume,
+   credit, and what needs reordering. The other two are context, and sit on
+   the second row where context belongs. */
+#panel-home .kpi-grid { margin-bottom: 4px; }
+@media (min-width: 900px) {
+    #panel-home .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+}
+#panel-home .grid-3 { margin-top: 18px; }
+#panel-home .tile h3 { font-size: 19px; }
+#panel-home .tile .btn { margin-top: 2px; }
+
+/* ==========================================================================
+   REPORTS
+   Four tables that used to be stacked down one page, so the fourth sat three
+   screens below the first and the third pushed it further every time it
+   loaded. One at a time now, behind tabs, each paging on its own, so no
+   report can ever obstruct another.
+   ========================================================================== */
+#panel-reports .card:last-child { margin-bottom: 0; }
+#panel-reports .tab-content { display: none; }
+#panel-reports .tab-content.active { display: block; }
+#panel-reports .panel-toolbar .panel-sub { margin: 0; align-self: center; }
+
+/* ==========================================================================
+   INCOME
+   Opened by the Total Income card. The six figures across the top are the
+   same shape as the dashboard's, deliberately: it is the same question,
+   asked over a period somebody chose.
+   ========================================================================== */
+#panel-income .kpi-grid { margin-top: 16px; }
+@media (min-width: 900px) {
+    #panel-income .kpi-grid { grid-template-columns: repeat(3, 1fr); }
+}
+#panel-income .filter-row { margin-bottom: 12px; }
+#panel-income .card + .card { margin-top: 16px; }
+
+/* ==========================================================================
+   STOCKS
+   Two screens rather than one. Reorder Alerts is a list of things to do
+   today; the Stock Report is the whole inventory to read. Stacked, the
+   second one pushed the first off the top of the screen.
+   ========================================================================== */
+#panel-reorder .cell-due { font-weight: 600; }
+#reorder-table .badge, #stocks-table .badge { margin-left: 6px; }
+
+/* Money owed is the only figure on this screen that is a problem rather than
+   a fact, so it is the only one that carries a colour. */
+#methods-table .cell-due,
+#unpaid-table .cell-due,
+#loyal-table .cell-due { font-weight: 600; }
+
+/* ==========================================================================
+   DELIVERY TRACKING
+   The stage counts sit above the table. They are a legend and a summary at
+   once: how many are at each stage, and what the words in the Status column
+   are going to be.
+   ========================================================================== */
+#panel-deliveries .track-legend { margin-bottom: 16px; }
+/* the balance still owed is the figure this screen is read for */
+#deliveries-table .cell-due { font-weight: 600; }
+
+/* ==========================================================================
+   MASTER RECORDS
+   Five kinds of record behind five tabs, and one table that changes shape
+   underneath them. The table redraws its own headings, so nothing here can
+   assume a column count.
+   ========================================================================== */
+#panel-records .tab-header { margin-bottom: 18px; }
+#records-table th { text-transform: none; }
+
+/* ==========================================================================
+   ARCHIVES
+   Everything archived anywhere in the system, filtered by where it came from.
+   ========================================================================== */
+#panel-archives .filter-row { margin-bottom: 16px; }
+
+/* ==========================================================================
+   ON A PHONE
+   A manager checking a figure between meetings is the likeliest phone user in
+   the system, so the figures stay large here rather than shrinking with
+   everything else.
+   ========================================================================== */
+@media (max-width: 640px) {
+    #panel-home .kpi-grid { grid-template-columns: 1fr 1fr; }
+    #panel-home .grid-3 { margin-top: 14px; gap: 12px; }
+    #panel-home .tile .btn { width: 100%; }
+
+    /* the tab row is wider than the screen and is meant to be swiped, so it
+       is given an edge that shows there is more of it */
+    #panel-records .tab-header {
+        margin-left: -14px;
+        margin-right: -14px;
+        padding-left: 14px;
+        padding-right: 14px;
+        -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+                mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+    }
+}
+
+@media (max-width: 420px) {
+    #panel-home .kpi-grid { grid-template-columns: 1fr; }
+}

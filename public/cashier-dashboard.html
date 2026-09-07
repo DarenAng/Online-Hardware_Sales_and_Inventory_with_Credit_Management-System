@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cashier - Hardware Management System</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="css/general-ui.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/modules/cashier.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <a href="#" class="sidebar-brand" onclick="showCashierHome(event)" title="Back to the register">
+                <span class="brand-mark">HW</span>
+                <span class="brand-text">
+                    <span class="brand-name">Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
+            </a>
+            <div class="sidebar-user">
+                <span class="sidebar-eyebrow">Cashier</span>
+                <span data-current-user>User</span>
+            </div>
+            <ul class="sidebar-nav">
+                <li>
+                    <a href="#pos" onclick="toggleDropdown('pos-dropdown', event)" class="nav-parent">
+                        Point of Sale <span class="nav-caret">&#9660;</span>
+                    </a>
+                    <ul id="pos-dropdown" class="nav-sub" style="display: block;">
+                        <li><a href="#" data-panel-link="panel-pos" onclick="showRegister(event)">New Transaction</a></li>
+                        <li><a href="#" data-panel-link="panel-delivery" onclick="showCashierDeliveries(event)">Deliveries</a></li>
+                        <li><a href="#" data-panel-link="panel-refund" onclick="showRefunds(event)">Refunds</a></li>
+                    </ul>
+                </li>
+                <li><a href="#" data-panel-link="panel-customers" onclick="showCustomers(event)">Customers &amp; Credit</a></li>
+                <li><a href="#" data-panel-link="panel-salesreport" onclick="showSalesReport(event)">Sales Report</a></li>
+                <li><a href="#" data-panel-link="panel-summary" onclick="showDailySummary(event)">Daily Summary</a></li>
+            </ul>
+        </aside>
+
+        <!-- the shade behind the menu once it slides over the page -->
+        <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
+
+        <main class="main-content">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="menu-toggle" type="button" onclick="toggleSidebar()"
+                            aria-controls="sidebar" aria-expanded="false"
+                            aria-label="Menu">&#9776;</button>
+                    <span class="topbar-title" id="cash-page-title">Point of Sale</span>
+                </div>
+            </header>
+
+            <div class="content-area">
+
+                <!-- DEFAULT: THE REGISTER -->
+                <div id="panel-pos" data-panel>
+                    <div class="pos-layout">
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Product Catalog</h3>
+                                    <p class="panel-sub">Search for an item, or open <kbd>Point of Sale</kbd> then <kbd>New Transaction</kbd> and press View All Products.</p>
+                                </div>
+                                <div class="panel-actions">
+                                    <span class="pill" id="catalog-count">Not loaded</span>
+                                    <button type="button" class="btn" onclick="loadCatalogAll(event)">View All Products</button>
+                                </div>
+                            </div>
+
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="catalog-search"
+                                       placeholder="Search by product, category, or brand" oninput="filterCatalog(this.value)">
+                            </div>
+
+                            <div id="catalog-grid"></div>
+                        </div>
+
+                        <div class="order-summary" id="order-summary">
+                            <div class="panel-head">
+                                <div>
+                                    <span class="eyebrow">Current Sale</span>
+                                    <h3>Order</h3>
+                                </div>
+                                <span class="pill" id="cart-count">0 items</span>
+                            </div>
+
+                            <div id="cart-lines"></div>
+
+                            <div class="cart-totals" id="cart-totals"></div>
+
+                            <form id="checkout-form" onsubmit="handleCheckout(event)" autocomplete="off">
+                                <!-- THE CUSTOMER, TYPED
+                                     A dropdown of every customer in the book is the wrong
+                                     control for a counter: the common case is somebody who
+                                     is not in it, and the second commonest is a regular
+                                     whose name the cashier already knows how to spell. So
+                                     it is a box you type into. A name that matches an
+                                     account attaches the sale to it and pulls the credit
+                                     record; a name that does not is kept as the walk-in's
+                                     name rather than thrown away, and the cashier is asked
+                                     once whether to open an account for them. -->
+                                <div class="form-group">
+                                    <label for="customer-name">Customer</label>
+                                    <div class="suggest-wrap">
+                                        <input type="text" id="customer-name" name="customerName"
+                                               class="form-control" autocomplete="off"
+                                               placeholder="Walk-in — type the customer's name"
+                                               role="combobox" aria-expanded="false"
+                                               aria-controls="customer-suggest" aria-autocomplete="list"
+                                               oninput="onCustomerInput(this.value)"
+                                               onfocus="onCustomerInput(this.value)"
+                                               onkeydown="onCustomerKey(event)">
+                                        <input type="hidden" name="customerId" value="">
+                                        <button type="button" class="suggest-clear" id="customer-clear"
+                                                onclick="clearCustomer()" aria-label="Clear the customer"
+                                                hidden>&times;</button>
+                                        <ul class="suggest-list" id="customer-suggest" role="listbox" hidden></ul>
+                                    </div>
+                                    <p class="customer-verdict" id="customer-verdict"></p>
+                                </div>
+
+                                <!-- What this customer's credit looks like, read before the
+                                     sale rather than discovered when the till refuses it.
+                                     Empty for a walk-in, because a walk-in has no account. -->
+                                <div class="credit-strip" id="credit-strip" style="display: none;"></div>
+                                <div class="form-group">
+                                        <label>Payment Method</label>
+                                        <select name="paymentMethod" class="form-control" onchange="onPaymentMethodChange(this.value)" required>
+                                            <option value="Cash">Cash</option>
+                                            <option value="GCash">GCash</option>
+                                            <option value="PayMaya">PayMaya</option>
+                                            <option value="PayPal">PayPal</option>
+                                            <option value="Cheque">Cheque</option>
+                                            <option value="Bank Transfer">Bank Transfer</option>
+                                            <option value="COD">Cash on Delivery</option>
+                                            <option value="Credit">Credit</option>
+                                        </select>
+                                </div>
+                                <div class="form-group" id="tender-field">
+                                    <label>Amount Entered</label>
+                                    <input type="number" name="amountPaid" class="form-control" min="0" step="0.01" value="0" oninput="renderCart()">
+                                </div>
+
+                                <!-- PART PAYMENT
+                                     Half now and half on the book is the commonest credit
+                                     transaction a hardware shop does, and the till had
+                                     nowhere to put it: a sale was either paid in full or
+                                     entirely on account. What is handed over here is taken
+                                     now; the rest is booked against the customer's credit. -->
+                                <div id="downpayment-field" style="display: none;">
+                                    <div class="grid-2">
+                                        <div class="form-group">
+                                            <label>Paid now <span class="label-hint">optional</span></label>
+                                            <input type="number" name="downPayment" class="form-control"
+                                                   min="0" step="0.01" value="0" oninput="renderCart()">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>Taken as</label>
+                                            <select name="downPaymentMethod" class="form-control">
+                                                <option value="Cash">Cash</option>
+                                                <option value="GCash">GCash</option>
+                                                <option value="PayMaya">PayMaya</option>
+                                                <option value="Cheque">Cheque</option>
+                                                <option value="Bank Transfer">Bank Transfer</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="downpayment-quick">
+                                        <span class="quick-label">Quick fill</span>
+                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(0)">Nothing</button>
+                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(0.25)">25%</button>
+                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(0.5)">Half</button>
+                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(1)">All of it</button>
+                                    </div>
+                                    <p class="credit-verdict" id="credit-verdict"></p>
+                                </div>
+                                <!-- MAKE A DELIVERY, FROM THE TRANSACTION
+                                     Booking a delivery used to be a second screen with a
+                                     dropdown of sales that had none yet, which meant the
+                                     cashier finished the sale, walked to another page and
+                                     found the right receipt number again. The delivery is
+                                     part of the order, so it is filled in beside the order
+                                     and written the moment the sale exists. -->
+                                <div class="delivery-attached" id="delivery-attached" hidden></div>
+
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-success" id="checkout-btn">Complete Sale</button>
+                                    <button type="button" class="btn btn-accent" id="make-delivery-btn"
+                                            onclick="openDeliveryForm()">Make a Delivery</button>
+                                    <button type="button" class="btn btn-ghost" onclick="clearCart()">Clear</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+
+                <!-- ============================================================
+                     CUSTOMERS & CREDIT
+                     What a cashier needs before ringing up an account sale:
+                     what this customer may owe, what they do owe, and what
+                     they have bought and paid before.
+                     ============================================================ -->
+                <div class="card" id="panel-customers" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Customers &amp; Credit</h3>
+                            <p class="panel-sub">Check an account before you ring the sale up. Click a
+                                customer to read their purchases and payments side by side, or to ask a
+                                manager for a higher limit.</p>
+                        </div>
+                        <span class="pill" id="customers-count">Not loaded</span>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="customers-search"
+                                   placeholder="Search by customer or phone"
+                                   oninput="dataPanelSearch('cash-credit', this.value)">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="customers-standing">Standing</label>
+                            <select id="customers-standing"
+                                    onchange="dataPanelFilter('cash-credit', 'standing', this.value)">
+                                <option value="all">Every standing</option>
+                                <option value="Good">Good</option>
+                                <option value="Watch">Watch</option>
+                                <option value="Hold">On hold</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('cash-credit')">Load Data</button>
+                        <button type="button" class="btn btn-ghost" onclick="clearCreditPanel()">Clear</button>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="customers-table">
+                            <thead>
+                                <tr><th>Customer</th><th>Phone</th><th>Limit</th><th>Owed</th>
+                                    <th>Available</th><th>Standing</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="customers-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     DELIVERIES — TRACKING ONLY
+                     Booking now happens where the sale happens. What is left
+                     here is the question a cashier actually comes to this
+                     screen with: where is the delivery I booked. It starts
+                     empty on purpose. Reading every delivery in the shop to
+                     answer a question about one of them is a query nobody
+                     asked for, so the table fills when it is searched or
+                     loaded and empties again when it is cleared.
+                     ============================================================ -->
+                <div class="card" id="panel-delivery" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <span class="eyebrow">Tracking</span>
+                            <h3>Delivery Tracking</h3>
+                            <p class="panel-sub">Search for a customer, an address or a receipt number.
+                                Click a row for the full record. Delivery personnel set the status from
+                                the road, so this is read only.</p>
+                        </div>
+                        <span class="pill" id="cdel-count">Not loaded</span>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="cdel-search"
+                                   placeholder="Search by customer, address, or sale number"
+                                   oninput="dataPanelSearch('cash-deliveries', this.value)">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="cdel-status">Status</label>
+                            <select id="cdel-status"
+                                    onchange="dataPanelFilter('cash-deliveries', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="Pending">Pending</option>
+                                <option value="In Transit">In Transit</option>
+                                <option value="Out for Delivery">Out for Delivery</option>
+                                <option value="Delivered">Delivered</option>
+                                <option value="Delayed">Delayed</option>
+                                <option value="Failed">Failed</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('cash-deliveries')">Load Data</button>
+                        <button type="button" class="btn btn-ghost" onclick="clearDeliveryPanel()">Clear</button>
+                    </div>
+
+                    <div class="track-legend" id="cdel-legend"></div>
+
+                    <div class="table-responsive">
+                        <table id="cdel-table">
+                            <thead>
+                                <tr><th>ID</th><th>Sale</th><th>Customer</th><th>Destination</th><th>Scheduled</th><th>Status</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="cdel-pager"></div>
+                </div>
+
+                <!-- REFUNDS -->
+                <div id="panel-refund" data-panel style="display: none;">
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Issue a Refund</h3>
+                                <p class="panel-sub">Records the refund against the product and notifies the manager. Two things are required: a sentence saying what happened, and where the goods physically go. Neither is filled in for you, because the wrong answer loses stock.</p>
+                            </div>
+                        </div>
+                        <form id="refund-form" onsubmit="handleIssueRefund(event)" autocomplete="off">
+                            <!-- WHAT CAME BACK
+                                 A dropdown of the whole catalog is the wrong control
+                                 for a counter with a customer standing at it: finding
+                                 one item in six hundred by scrolling is slower than
+                                 typing three letters of its name.
+
+                                 Unlike the customer box, this one cannot accept a name
+                                 that matches nothing. A refund moves stock, and stock
+                                 has to move against a real product. So the field's
+                                 second job is to make "nothing chosen yet" impossible
+                                 to mistake for "chosen": until a product is picked
+                                 there is no strip under the box, and the form will not
+                                 send. -->
+                            <div class="form-group">
+                                <label for="refund-product">Product</label>
+                                <div class="suggest-wrap">
+                                    <input type="text" id="refund-product" class="form-control"
+                                           autocomplete="off" placeholder="Type a product, brand, or category"
+                                           role="combobox" aria-expanded="false"
+                                           aria-controls="refund-suggest" aria-autocomplete="list"
+                                           oninput="onRefundProductInput(this.value)"
+                                           onfocus="onRefundProductInput(this.value)"
+                                           onkeydown="onRefundProductKey(event)">
+                                    <input type="hidden" name="productId" value="">
+                                    <button type="button" class="suggest-clear" id="refund-product-clear"
+                                            onclick="clearRefundProduct()" aria-label="Clear the product"
+                                            hidden>&times;</button>
+                                    <ul class="suggest-list" id="refund-suggest" role="listbox" hidden></ul>
+                                </div>
+                                <div class="pick-strip" id="refund-product-strip" hidden></div>
+                                <p class="pick-verdict" id="refund-product-verdict"></p>
+                            </div>
+
+                            <div class="grid-2">
+                                <div class="form-group">
+                                    <label for="refund-qty">Quantity</label>
+                                    <input type="number" id="refund-qty" name="quantity" class="form-control"
+                                           min="1" value="1" required oninput="onRefundQuantityInput()">
+                                </div>
+                                <div class="form-group">
+                                    <label for="refund-amount">Refund Amount</label>
+                                    <input type="number" id="refund-amount" name="refundAmount" class="form-control"
+                                           min="0" step="0.01" value="0" required
+                                           oninput="onRefundAmountInput()">
+                                    <p class="amount-source" id="refund-amount-source"></p>
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="refund-sale">Sale ID <span class="label-hint">optional</span></label>
+                                <input type="number" id="refund-sale" name="saleId" class="form-control"
+                                       min="1" placeholder="Receipt number" style="max-width: 220px;">
+                            </div>
+
+                            <!-- WHERE THE GOODS GO
+                                 This was a dropdown called "Goods Resalable" that
+                                 nobody read, and a return filed with the wrong
+                                 answer left the item unaccounted for: not on the
+                                 shelf, not written off, still in a box behind the
+                                 counter. Two choices, each saying what it does to
+                                 the stock count, and neither of them the default. -->
+                            <div class="form-group">
+                                <label>Where do these goods go?</label>
+                                <div class="disposition-choice" id="disposition-choice">
+                                    <label class="disposition-option">
+                                        <input type="radio" name="disposition" value="Return to Stock"
+                                               onchange="onDispositionChange()">
+                                        <span class="disposition-body">
+                                            <span class="disposition-title">Return to Stock</span>
+                                            <span class="disposition-note">The item is usable and sellable.
+                                                It goes back on the shelf and the stock count goes up.</span>
+                                        </span>
+                                    </label>
+                                    <label class="disposition-option is-stop">
+                                        <input type="radio" name="disposition" value="Write-Off"
+                                               onchange="onDispositionChange()">
+                                        <span class="disposition-body">
+                                            <span class="disposition-title">Exclude / Write-Off</span>
+                                            <span class="disposition-note">Damaged, defective or unsellable.
+                                                It never goes back on the shelf, and a manager is told.</span>
+                                        </span>
+                                    </label>
+                                </div>
+                                <p class="disposition-verdict" id="disposition-verdict"></p>
+                            </div>
+
+                            <!-- MANDATORY REMARKS
+                                 A reason of "damaged" explains nothing three months
+                                 later when the write-off is queried, so the bar is a
+                                 sentence rather than a word, and the counter says so
+                                 while it is being typed rather than after. -->
+                            <div class="form-group">
+                                <label for="return-reason">Remarks
+                                    <span class="label-hint">required &mdash; say what happened</span></label>
+                                <textarea name="reason" id="return-reason" class="form-control" rows="3"
+                                          minlength="10" required
+                                          oninput="onReturnReasonInput()"
+                                          placeholder="Two tins arrived dented in the delivery and cannot be sold."></textarea>
+                                <p class="reason-counter" id="reason-counter"></p>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-success">Issue Refund</button>
+                                <button type="button" class="btn btn-ghost" onclick="showCashierHome(event)">Cancel</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">History</span>
+                                <h3>Refunds Issued</h3>
+                                <p class="panel-sub">Everything you have refunded, newest first.</p>
+                            </div>
+                            <span class="pill" id="refund-count">Not loaded</span>
+                        </div>
+
+                        <div class="panel-toolbar">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="refund-search"
+                                       placeholder="Search by product or reason"
+                                       oninput="dataPanelSearch('cash-refunds', this.value)">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="refund-disposition">Goods went</label>
+                                <select id="refund-disposition"
+                                        onchange="dataPanelFilter('cash-refunds', 'disposition', this.value)">
+                                    <option value="all">Either way</option>
+                                    <option value="Return to Stock">Back on shelf</option>
+                                    <option value="Write-Off">Written off</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                            <button type="button" class="btn btn-accent" onclick="dataPanelOpen('cash-refunds')">Load Data</button>
+                            <button type="button" class="btn btn-ghost" onclick="clearRefundPanel()">Clear</button>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table id="refund-table">
+                                <thead>
+                                    <!-- The last column has no heading on purpose. A
+                                         column of buttons is not a category of
+                                         information and naming it would be a label
+                                         explaining what a button that says View does. -->
+                                    <tr><th>ID</th><th>Product</th><th>Qty</th><th>Amount</th><th>Goods Went</th><th>Filed</th><th>Status</th><th></th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="refund-pager"></div>
+                    </div>
+                </div>
+
+                <!-- SALES REPORT -->
+                <div class="card" id="panel-salesreport" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <span class="eyebrow">Reporting</span>
+                            <h3>Sales Report</h3>
+                            <p class="panel-sub">Click a row to reopen the receipt.</p>
+                        </div>
+                        <span class="pill" id="csales-count">Not loaded</span>
+                    </div>
+
+                    <div class="filter-row" id="sales-scope"></div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="csales-search"
+                                   placeholder="Search by customer, method, status, or receipt"
+                                   oninput="dataPanelSearch('cash-sales', this.value)">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="csales-method">Payment</label>
+                            <select id="csales-method"
+                                    onchange="dataPanelFilter('cash-sales', 'method', this.value)">
+                                <option value="all">Every method</option>
+                                <option value="Cash">Cash</option>
+                                <option value="Online Payment">Online Payment</option>
+                                <option value="Cheque">Cheque</option>
+                                <option value="COD">Cash on Delivery</option>
+                                <option value="Credit">Credit</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="csales-status">Status</label>
+                            <select id="csales-status"
+                                    onchange="dataPanelFilter('cash-sales', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Pending Delivery">Pending Delivery</option>
+                                <option value="Partial Credit">Partial Credit</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('cash-sales')">Load Data</button>
+                        <button type="button" class="btn btn-ghost" onclick="clearSalesPanel()">Clear</button>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table id="csales-table">
+                            <thead>
+                                <tr><th>Receipt</th><th>Date</th><th>Customer</th><th>Method</th><th>Status</th><th>Total</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="csales-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     DAILY SUMMARY
+                     Today, and only today. A cashier reading this is standing
+                     in the shift it describes, so there is no day to choose:
+                     every figure is bounded by this date, which is what makes
+                     "gross sales" mean the shift rather than the year.
+                     ============================================================ -->
+                <div id="panel-summary" data-panel style="display: none;">
+                    <div class="page-intro">
+                        <span class="eyebrow">End of Shift</span>
+                        <h2>Daily Summary</h2>
+                        <p class="panel-sub">Your own takings for today. Nothing here reaches back
+                            past midnight.</p>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">Today</span>
+                                <h3 id="summary-day">Today</h3>
+                            </div>
+                            <div class="panel-actions">
+                                <button type="button" class="btn" onclick="loadDailySummary()">Refresh</button>
+                            </div>
+                        </div>
+                        <div class="kpi-grid" id="summary-kpis"></div>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">Breakdown</span>
+                                <h3>By Payment Method</h3>
+                            </div>
+                            <span class="pill" id="summary-count">Not loaded</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table id="summary-table">
+                                <thead>
+                                    <tr><th>Method</th><th>Transactions</th><th>Total</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="summary-pager"></div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- SALES INVOICE -->
+    <div class="modal" id="receipt-modal" onclick="closeModalOnBackdrop(event, 'receipt-modal')">
+        <div class="modal-box receipt-box">
+            <div class="modal-head no-print">
+                <div class="modal-identity">
+                    <div class="avatar">IN</div>
+                    <div>
+                        <h3 id="receipt-heading">Invoice</h3>
+                        <span class="modal-role">Sales invoice</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('receipt-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div id="receipt-paper" class="receipt-paper"></div>
+            </div>
+
+            <div class="modal-foot no-print">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('receipt-modal')">Close</button>
+                <button type="button" class="btn btn-accent" onclick="printReceipt()">Print Invoice</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         MAKE A DELIVERY
+         Filled in beside the order and written the moment the sale
+         exists. Everything here is editable, including the date it was
+         booked: a customer who rings back to move their slot, or a store
+         moving one around a conflict, should be able to say so without
+         voiding a sale.
+         ============================================================ -->
+    <!-- data-modal-locked: a stray click on the shaded page behind this form
+         does not close it, and neither does Escape. Everywhere else in the
+         system a backdrop click is a convenient way out of something you were
+         only reading; here it throws away an address and a phone number
+         somebody has just typed, which is not a convenience. The two buttons
+         at the foot are the only ways out, and both of them say what they do. -->
+    <div class="modal" id="delivery-modal" data-modal-locked>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">DL</div>
+                    <div>
+                        <h3>Make a Delivery</h3>
+                        <span class="modal-role" id="delivery-modal-sub">Attached to this sale</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="cancelDeliveryForm()" aria-label="Cancel the delivery">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="make-delivery-form" onsubmit="saveDeliveryForm(event)" autocomplete="off">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="dl-name">Customer Name</label>
+                            <input type="text" id="dl-name" name="contactName" class="form-control"
+                                   placeholder="Who the driver asks for" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="dl-phone">Phone Number</label>
+                            <input type="tel" id="dl-phone" name="contactPhone" class="form-control"
+                                   placeholder="09xx xxx xxxx" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dl-address">Delivery Address</label>
+                        <input type="text" id="dl-address" name="address" class="form-control"
+                               placeholder="Street, barangay, city" required>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="dl-booked">Date Booked</label>
+                            <input type="date" id="dl-booked" name="bookedDate" class="form-control" required>
+                            <span class="label-hint">Today by default. Change it if you are writing up
+                                an order taken earlier.</span>
+                        </div>
+                        <div class="form-group">
+                            <label for="dl-scheduled">Scheduled For</label>
+                            <input type="datetime-local" id="dl-scheduled" name="scheduledDate" class="form-control">
+                            <span class="label-hint">Date and time. Leave it empty if the slot is not
+                                agreed yet.</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dl-remarks">Remarks <span class="label-hint">optional</span></label>
+                        <textarea id="dl-remarks" name="remarks" class="form-control" rows="2"
+                                  placeholder="Gate code, landmark, best time to arrive"></textarea>
+                    </div>
+
+                    <p class="delivery-verdict" id="delivery-verdict"></p>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="cancelDeliveryForm()">Cancel Delivery</button>
+                <button type="button" class="btn btn-ghost btn-quiet" id="delivery-drop"
+                        onclick="dropDeliveryForm()" hidden>Remove Delivery</button>
+                <button type="button" class="btn btn-success" onclick="saveDeliveryForm(event)">Attach to this Sale</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         WHAT WENT BACK TODAY
+         A refund total says money left the till. It does not say which
+         item went back, and the item is the part a cashier has to
+         account for at the end of the shift, so the figure opens.
+         ============================================================ -->
+    <div class="modal" id="refunds-today-modal" onclick="closeModalOnBackdrop(event, 'refunds-today-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">RF</div>
+                    <div>
+                        <h3>Refunds Today</h3>
+                        <span class="modal-role" id="refunds-today-sub">What went back, and for how much</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('refunds-today-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="detail-grid" id="refunds-today-totals"></div>
+                <div id="refunds-today-list"></div>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('refunds-today-modal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PAGED DETAIL POPUP -->
+    <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="detail-avatar">--</div>
+                    <div>
+                        <h3 id="detail-title">Record</h3>
+                        <span class="modal-role" id="detail-subtitle">Detail</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('detail-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-steps" id="detail-steps"></div>
+
+            <div class="modal-body">
+                <div id="detail-page"></div>
+            </div>
+
+            <div class="modal-foot modal-pager">
+                <button type="button" class="btn btn-ghost" id="detail-back" onclick="detailBack()">&#8592; Back</button>
+                <span class="pager-count" id="detail-counter">Page 1 of 1</span>
+                <button type="button" class="btn btn-accent" id="detail-next" onclick="detailNext()">Next &#8594;</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ONE CUSTOMER, FOR THE COUNTER
+         Purchases beside payments, and the one action a cashier can take on a
+         credit account: ask a manager for more room. -->
+    <div class="modal" id="customer-modal" onclick="closeModalOnBackdrop(event, 'customer-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="customer-avatar">--</div>
+                    <div>
+                        <h3 id="customer-name">Customer</h3>
+                        <span class="modal-role" id="customer-sub">Credit account</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('customer-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="detail-grid" id="customer-facts"></div>
+                <div class="history-split" id="customer-history"></div>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('customer-modal')">Close</button>
+                <button type="button" class="btn btn-gold" onclick="askForExtension()">Ask for a Higher Limit</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="javascript/modules/shared/helpers.js"></script>
+    <script src="javascript/modules/shared/format.js"></script>
+    <script src="javascript/modules/shared/ui-kit.js"></script>
+    <script src="javascript/modules/shared/tables.js"></script>
+    <script src="javascript/modules/shared/data-panel.js"></script>
+    <script src="javascript/modules/shared/live-sync.js"></script>
+    <script src="javascript/modules/shared/modals.js"></script>
+    <script src="javascript/modules/shared/detail-modal.js"></script>
+    <script src="javascript/modules/shared/session.js"></script>
+    <script src="javascript/modules/shared/topbar.js"></script>
+    <script src="javascript/modules/shared/subnav.js"></script>
+    <script src="javascript/modules/shared/my-account.js"></script>
+    <script src="javascript/modules/shared/notifications.js"></script>
+    <script src="javascript/modules/shared/deliveries.js"></script>
+    <script src="javascript/modules/cashier.js"></script>
+</body>
+</html>

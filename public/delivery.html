@@ -4,88 +4,301 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Delivery - Hardware Management System</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="css/general-ui.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/modules/delivery-personnel.css">
 </head>
 
 <body>
     <div class="wrapper">
         <aside class="sidebar" id="sidebar">
-            <div class="sidebar-header">Welcome, <span data-current-user>User</span></div>
+            <a href="#" class="sidebar-brand" onclick="showDeliveryHome(event)" title="Back to pending deliveries">
+                <span class="brand-mark">HW</span>
+                <span class="brand-text">
+                    <span class="brand-name">Hardware</span>
+                    <span class="brand-sub">Delivery Module</span>
+                </span>
+            </a>
+            <div class="sidebar-user">
+                <span class="sidebar-eyebrow">Delivery Personnel</span>
+                <span data-current-user>User</span>
+            </div>
             <ul class="sidebar-nav">
-                <li><a href="index.html">Main Dashboard</a></li>
-                <li><a href="pos.html">POS & Sales</a></li>
-                <li><a href="inventory.html">Inventory Management</a></li>
-                <li><a href="records.html">Record Maintenance</a></li>
-                <li><a href="delivery.html" style="background: var(--accent);">Customer Delivery</a></li>
-                <li><a href="reports.html">Reporting & Analytics</a></li>
-                <li><a href="system.html">System Maintenance</a></li>
+                <li>
+                    <a href="#runs" onclick="toggleDropdown('run-dropdown', event)" class="nav-parent">
+                        Delivery Runs <span class="nav-caret">&#9660;</span>
+                    </a>
+                    <ul id="run-dropdown" class="nav-sub" style="display: block;">
+                        <li><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)">Pending</a></li>
+                        <li><a href="#" data-panel-link="panel-active" onclick="showDeliveryActive(event)">Out for Delivery</a></li>
+                        <li><a href="#" data-panel-link="panel-cod" onclick="showDeliveryCod(event)">Cash on Delivery</a></li>
+                    </ul>
+                </li>
+                <li><a href="#" data-panel-link="panel-report" onclick="showDeliveryReports(event)">Reports</a></li>
             </ul>
-            <div class="sidebar-logout"><a href="Login.html" onclick="logout()">Logout</a></div>
         </aside>
+
+        <!-- the shade behind the menu once it slides over the page -->
+        <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
 
         <main class="main-content">
             <header class="topbar">
-                <button class="menu-toggle" onclick="toggleSidebar()">☰</button>
+                <div class="topbar-left">
+                    <button class="menu-toggle" type="button" onclick="toggleSidebar()"
+                            aria-controls="sidebar" aria-expanded="false"
+                            aria-label="Menu">&#9776;</button>
+                    <span class="topbar-title" id="del-page-title">Pending Deliveries</span>
+                </div>
             </header>
 
             <div class="content-area">
-                <h2>Delivery Schedule & Tracking</h2>
-                
-                <div class="grid-2">
+
+                <!-- DEFAULT: PENDING DELIVERIES -->
+                <div id="panel-pending" data-panel>
+                    <div class="page-intro">
+                        <span class="eyebrow">Today</span>
+                        <h2>Pending Deliveries</h2>
+                        <p class="panel-sub">Orders waiting for a truck. Press Out for Delivery once the load leaves the warehouse.</p>
+                    </div>
+
+                    <div class="kpi-grid" id="del-kpis"></div>
+
                     <div class="card">
-                        <h3>Update Delivery Status</h3>
-                        <form>
-                            <div class="form-group">
-                                <label>Order ID</label>
-                                <input type="text" class="form-control" placeholder="ORD-2023-001">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">Queue</span>
+                                <h3>Waiting to Go Out</h3>
+                                <p class="panel-sub">Press the button to send a load out. Click the row instead when you need to record a delay, a failure, or a note for the office.</p>
                             </div>
-                            <div class="form-group">
-                                <label>Status</label>
-                                <select class="form-control">
-                                    <option>Pending Setup</option>
-                                    <option>Out for Delivery</option>
-                                    <option>Delivered</option>
-                                    <option>Failed / Returned</option>
-                                </select>
+                            <div class="panel-actions">
+                                <span class="pill" id="dpend-count">0 deliveries</span>
+                                <button type="button" class="btn" onclick="loadDriverDeliveries()">Refresh</button>
                             </div>
-                            <div class="form-group">
-                                <label>Driver Remarks</label>
-                                <textarea class="form-control" rows="3" placeholder="Notes regarding delivery..."></textarea>
+                        </div>
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="dpend-search"
+                                   placeholder="Search by customer or destination"
+                                   oninput="dataPanelSearch('driver-pending', this.value)">
+                        </div>
+                        <div class="table-responsive grid-10">
+                            <table id="dpend-table">
+                                <thead>
+                                    <tr><th>ID</th><th>Customer</th><th>Destination</th><th>Scheduled</th><th>Status</th><th>Action</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="dpend-pager"></div>
+                    </div>
+                </div>
+
+                <!-- OUT FOR DELIVERY -->
+                <div id="panel-active" data-panel style="display: none;">
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">On the Road</span>
+                                <h3>Out for Delivery</h3>
+                                <p class="panel-sub">Close each order at the door. Collect the balance first when it shows in red.</p>
                             </div>
-                            <button type="button" class="btn btn-accent">Update Tracker</button>
+                            <div class="panel-actions">
+                                <span class="pill" id="dact-count">0 on the road</span>
+                                <button type="button" class="btn" onclick="loadDriverDeliveries()">Refresh</button>
+                            </div>
+                        </div>
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="dact-search"
+                                   placeholder="Search by customer or destination"
+                                   oninput="dataPanelSearch('driver-active', this.value)">
+                        </div>
+                        <div class="table-responsive grid-10">
+                            <table id="dact-table">
+                                <thead>
+                                    <tr><th>ID</th><th>Customer</th><th>Destination</th><th>Balance</th><th>Status</th><th>Action</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="dact-pager"></div>
+                    </div>
+                </div>
+
+                <!-- CASH ON DELIVERY -->
+                <div id="panel-cod" data-panel style="display: none;">
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">Collection</span>
+                                <h3>Receive Payment</h3>
+                                <p class="panel-sub">Only orders with a balance appear here. Picking one fills in the amount still owed.</p>
+                            </div>
+                        </div>
+                        <form id="dcod-form" onsubmit="handleCodPayment(event)">
+                            <div class="grid-2">
+                                <div class="form-group">
+                                    <label>Delivery</label>
+                                    <select name="deliveryId" class="form-control" id="dcod-select" onchange="onCodChange()" required></select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Amount Received</label>
+                                    <input type="number" name="amount" class="form-control" min="0" step="0.01" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>Payment Method</label>
+                                    <select name="paymentMethod" class="form-control" required>
+                                        <option value="Cash">Cash</option>
+                                        <option value="GCash">GCash</option>
+                                        <option value="PayMaya">PayMaya</option>
+                                        <option value="Cheque">Cheque</option>
+                                        <option value="Bank Transfer">Bank Transfer</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Reference No <span class="label-hint">optional</span></label>
+                                    <input type="text" name="referenceNo" class="form-control" placeholder="For non-cash payments">
+                                </div>
+                            </div>
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-success">Record Payment</button>
+                            </div>
                         </form>
                     </div>
 
                     <div class="card">
-                        <h3>Today's Schedules</h3>
-                        <div class="table-responsive">
-                            <table>
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">Outstanding</span>
+                                <h3>Money to Collect</h3>
+                                <p class="panel-sub">Every order on your list with a balance left.</p>
+                            </div>
+                            <span class="pill" id="dcod-count">0.00 to collect</span>
+                        </div>
+                        <div class="table-responsive grid-10">
+                            <table id="dcod-table">
                                 <thead>
-                                    <tr>
-                                        <th>Order ID</th>
-                                        <th>Destination</th>
-                                        <th>Status</th>
-                                    </tr>
+                                    <tr><th>ID</th><th>Customer</th><th>Method</th><th>Order Total</th><th>Balance</th><th>Status</th></tr>
                                 </thead>
-                                <tbody>
-                                    <tr>
-                                        <td>ORD-844</td>
-                                        <td>Site A, Downtown</td>
-                                        <td style="color: var(--accent);">Out for Delivery</td>
-                                    </tr>
-                                    <tr>
-                                        <td>ORD-845</td>
-                                        <td>74 Suburbia Ln.</td>
-                                        <td>Pending</td>
-                                    </tr>
-                                </tbody>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="dcod-pager"></div>
+                    </div>
+                </div>
+
+                <!-- REPORTS -->
+                <div id="panel-report" data-panel style="display: none;">
+                    <div class="page-intro">
+                        <span class="eyebrow">Reporting</span>
+                        <h2>Delivery Reports</h2>
+                        <p class="panel-sub">Your runs and your collections over any date range.
+                            Pick the dates first; nothing is read until you press
+                            <kbd>Load Report</kbd>.</p>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">Range</span>
+                                <h3>Choose Dates</h3>
+                            </div>
+                            <div class="panel-actions">
+                                <input type="date" class="form-control" id="drep-from" style="max-width: 175px;">
+                                <input type="date" class="form-control" id="drep-to" style="max-width: 175px;">
+                                <button type="button" class="btn btn-accent" onclick="loadDeliveryReport()">Load Report</button>
+                            </div>
+                        </div>
+                        <div class="kpi-grid" id="drep-kpis"></div>
+                        <div class="track-legend" id="drep-legend"></div>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">Runs</span>
+                                <h3>Deliveries Handled</h3>
+                            </div>
+                            <span class="pill" id="drep-count">0 deliveries</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table id="drep-table">
+                                <thead>
+                                    <tr><th>ID</th><th>Date</th><th>Customer</th><th>Destination</th><th>Order Total</th><th>Balance</th><th>Status</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">Cash</span>
+                                <h3>Payments Collected</h3>
+                            </div>
+                            <span class="pill" id="drep-pay-count">0.00 collected</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table id="drep-pay-table">
+                                <thead>
+                                    <tr><th>Date</th><th>Sale</th><th>Customer</th><th>Method</th><th>Reference</th><th>Amount</th></tr>
+                                </thead>
+                                <tbody></tbody>
                             </table>
                         </div>
                     </div>
                 </div>
+
             </div>
         </main>
     </div>
-    <script src="javascript/app.js"></script>
+
+    <!-- PAGED DETAIL POPUP -->
+    <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="detail-avatar">--</div>
+                    <div>
+                        <h3 id="detail-title">Record</h3>
+                        <span class="modal-role" id="detail-subtitle">Detail</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('detail-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-steps" id="detail-steps"></div>
+
+            <div class="modal-body">
+                <div id="detail-page"></div>
+            </div>
+
+            <div class="modal-foot modal-pager">
+                <button type="button" class="btn btn-ghost" id="detail-back" onclick="detailBack()">&#8592; Back</button>
+                <span class="pager-count" id="detail-counter">Page 1 of 1</span>
+                <button type="button" class="btn btn-accent" id="detail-next" onclick="detailNext()">Next &#8594;</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="javascript/modules/shared/helpers.js"></script>
+    <script src="javascript/modules/shared/format.js"></script>
+    <script src="javascript/modules/shared/ui-kit.js"></script>
+    <script src="javascript/modules/shared/tables.js"></script>
+    <script src="javascript/modules/shared/data-panel.js"></script>
+    <script src="javascript/modules/shared/live-sync.js"></script>
+    <script src="javascript/modules/shared/modals.js"></script>
+    <script src="javascript/modules/shared/detail-modal.js"></script>
+    <script src="javascript/modules/shared/session.js"></script>
+    <script src="javascript/modules/shared/topbar.js"></script>
+    <script src="javascript/modules/shared/subnav.js"></script>
+    <script src="javascript/modules/shared/my-account.js"></script>
+    <script src="javascript/modules/shared/notifications.js"></script>
+    <script src="javascript/modules/shared/deliveries.js"></script>
+    <script src="javascript/modules/delivery-personnel.js"></script>
 </body>
 </html>

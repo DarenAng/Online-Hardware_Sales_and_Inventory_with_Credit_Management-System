@@ -1,0 +1,475 @@
+/* ==========================================================================
+   INVENTORY CLERK
+   inventory-dashboard.html
+
+   Loads after general-ui.css and responsive.css, so anything here wins.
+
+   This is the only role that is usually standing up, on a phone, in front of
+   the thing being counted. Everything on these screens is either a number
+   being corrected or a number raising its hand, so this file holds the
+   banner that raises the alarm and the two places a figure is typed in.
+   ========================================================================== */
+
+/* ==========================================================================
+   THE STOCK BANNER
+   The first thing on the screen, above everything, saying whether anything
+   has run out. It carries the meaning rule on its left like every other
+   warning in the system, so a glance at the left edge of the page is enough.
+   ========================================================================== */
+.banner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px; flex-wrap: wrap;
+    padding: 13px 16px;
+    margin-bottom: 16px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--steel-soft);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-size: 14px;
+    color: var(--steel);
+}
+.banner-text { line-height: 1.5; }
+.banner strong { color: var(--ink); font-weight: 600; }
+
+.banner-ok     { border-left-color: var(--ok); }
+.banner-warn   { border-left-color: var(--signal); background: rgba(245, 179, 1, 0.08); }
+.banner-danger { border-left-color: var(--stop);   background: var(--stop-dim); }
+
+/* ==========================================================================
+   REORDER POINTS, EDITED IN PLACE
+   The figure is changed in the row it belongs to rather than in a form
+   somewhere else, so the old value and the new one are side by side.
+   ========================================================================== */
+.inline-input {
+    width: 96px;
+    padding: 7px 9px;
+    min-height: 36px;
+    font-family: var(--font-figure);
+    font-size: 14px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   BUILDING A PURCHASE ORDER
+   One line per material: what, how many, at what cost, and the way to take
+   the line back off again. The dashed rule between lines says these are
+   parts of one document rather than separate forms.
+
+   Every material box on a line is a picker rather than a dropdown, and it
+   takes a name that is not in the database yet, because half the reason for
+   raising an order is to buy something the shop has not stocked before.
+   ========================================================================== */
+.po-line {
+    display: grid;
+    grid-template-columns: 2.2fr 0.8fr 1fr 1fr auto;
+    gap: 12px;
+    align-items: start;
+    padding: 12px 0;
+    border-bottom: 1px dashed var(--line);
+}
+.po-line:last-child { border-bottom: none; }
+.po-line .form-group { margin-bottom: 0; min-width: 0; }
+
+/* the figures on the line are set as figures */
+.po-qty, .po-cost {
+    font-family: var(--font-figure);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.po-remove { align-self: start; margin-top: 25px; }
+
+/* The fields for a material that is not on the books yet drop below the line
+   they belong to rather than squeezing into it: order puts them last in the
+   grid's placement, and the span gives them the whole width. */
+.po-line .make-card,
+.recv-line .make-card {
+    grid-column: 1 / -1;
+    order: 99;
+}
+.po-line .po-sum-value { font-size: 16px; }
+
+#po-lines:empty::before {
+    content: 'No lines yet. Press Add line to start the order.';
+    display: block;
+    padding: 20px 0;
+    color: var(--steel-soft);
+    font-size: 13.5px;
+}
+
+/* The running total under the lines, so the order is priced before it is
+   sent rather than after the supplier has answered. */
+.po-sum {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-left: var(--rule) solid var(--chrome);
+    background: var(--paper);
+    border-radius: var(--radius);
+}
+.po-sum-label { font-size: 13px; color: var(--steel); }
+.po-sum-value {
+    font-family: var(--font-figure);
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   THE SUPPLIER
+
+   A supplier is a company, not a row in a dropdown. The shop deals with
+   companies it has not dealt with before, and the clerk raising the order is
+   the person who knows the name. So the box takes any name, offers the ones
+   already on file as you type, and opens for the contact details when the
+   name is a new one.
+   ========================================================================== */
+.supplier-card {
+    margin-top: 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--brand);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+.supplier-card[hidden] { display: none; }
+.supplier-card h4 { font-size: 14.5px; margin-bottom: 3px; }
+.supplier-card .make-card-sub { margin-bottom: 12px; }
+
+/* Once a company on file is chosen, what the system already knows about it,
+   so nobody retypes an address that is already right. */
+.supplier-known {
+    margin-top: 8px;
+    padding: 10px 12px;
+    border-left: var(--rule) solid var(--ok);
+    background: var(--ok-dim);
+    border-radius: var(--radius);
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--steel);
+}
+.supplier-known[hidden] { display: none; }
+.supplier-known strong { color: var(--ink); font-weight: 600; }
+
+/* ==========================================================================
+   RECEIVING WHAT ACTUALLY ARRIVED
+
+   The order said one thing and the lorry brought another, which is the
+   normal case rather than the exception: a short delivery, a substitution,
+   two extra bags nobody ordered. The old screen had one button that stocked
+   the order exactly as written. This one is a count sheet: the ordered
+   figure on the left, what came off the lorry typed on the right, and a way
+   to add a material the order never mentioned.
+   ========================================================================== */
+.recv-line {
+    display: grid;
+    grid-template-columns: 2.2fr 1fr 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px dashed var(--line);
+}
+.recv-line:last-of-type { border-bottom: none; }
+.recv-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.recv-meta { font-size: 11.5px; color: var(--steel-soft); }
+.recv-ordered {
+    font-family: var(--font-figure);
+    font-size: 14px;
+    color: var(--steel);
+    font-variant-numeric: tabular-nums;
+}
+.recv-qty {
+    width: 110px;
+    font-family: var(--font-figure);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.recv-verdict { font-size: 11.5px; line-height: 1.4; }
+.recv-verdict.is-short { color: var(--signal-ink); font-weight: 500; }
+.recv-verdict.is-over  { color: var(--go-ink); font-weight: 500; }
+.recv-verdict.is-exact { color: var(--steel-soft); }
+
+/* An extra line: something that arrived and was never ordered. It carries
+   its own left rule so a glance down the sheet separates what was expected
+   from what turned up. */
+.recv-line.is-extra {
+    border-left: var(--rule) solid var(--brand);
+    padding-left: 12px;
+    margin-left: -12px;
+    background: var(--paper);
+}
+
+/* ==========================================================================
+   THE PURCHASE ORDER AS A DOCUMENT
+
+   The supplier has no login and never will. What reaches them is paper, or a
+   PDF of this screen, so this is the one place in the system built to be
+   printed rather than read: a sheet, at a sheet's proportions, with a head
+   that survives being photocopied and three signature rules at the foot
+   because that is how goods are signed for.
+
+   The hazard stripe across the top is the second and last use of that
+   device in the system. It is here because this is the one screen that
+   leaves the building.
+   ========================================================================== */
+.po-doc {
+    max-width: 860px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+.po-doc-stripe { height: 8px; background: var(--hazard); }
+.po-doc-inner { padding: 30px 34px 34px; }
+
+.po-doc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding-bottom: 18px;
+    border-bottom: 2px solid var(--chrome);
+}
+.po-doc-shop { min-width: 0; }
+.po-doc-shop-name {
+    font-size: 23px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    line-height: 1.15;
+}
+.po-doc-shop-line {
+    font-size: 12.5px;
+    color: var(--steel);
+    line-height: 1.5;
+}
+.po-doc-kind { text-align: right; }
+.po-doc-kind-title {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--go);
+}
+.po-doc-ref {
+    font-family: var(--font-figure);
+    font-size: 26px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.2;
+}
+.po-doc-date {
+    font-family: var(--font-figure);
+    font-size: 12px;
+    color: var(--steel);
+}
+
+.po-doc-parties {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 24px;
+    padding: 20px 0;
+}
+.po-doc-party-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--steel-soft);
+    margin-bottom: 5px;
+}
+.po-doc-party-name { font-size: 16px; font-weight: 600; color: var(--ink); }
+.po-doc-party-line { font-size: 13px; color: var(--steel); line-height: 1.55; }
+
+.po-doc table { width: 100%; border-collapse: collapse; }
+.po-doc thead th {
+    background: var(--chrome);
+    color: #fff;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    padding: 9px 10px;
+}
+.po-doc tbody td {
+    padding: 10px;
+    border-bottom: 1px solid var(--line);
+    font-size: 13.5px;
+    vertical-align: top;
+}
+.po-doc .num {
+    text-align: right;
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.po-doc tfoot td {
+    padding: 11px 10px;
+    font-size: 14px;
+    font-weight: 600;
+    border-top: 2px solid var(--chrome);
+}
+.po-doc tfoot .po-doc-total {
+    font-family: var(--font-figure);
+    font-size: 18px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.po-doc-note {
+    margin-top: 20px;
+    padding: 12px 14px;
+    border-left: var(--rule) solid var(--signal);
+    background: var(--signal-dim);
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--ink);
+}
+
+.po-doc-signs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 26px;
+    margin-top: 40px;
+}
+.po-doc-sign-rule {
+    border-top: 1px solid var(--ink);
+    padding-top: 6px;
+    font-size: 11.5px;
+    color: var(--steel);
+}
+.po-doc-sign-role { display: block; font-weight: 600; color: var(--ink); font-size: 12.5px; }
+
+.po-doc-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+@media print {
+    .po-doc {
+        max-width: none;
+        border: none;
+        border-radius: 0;
+    }
+    .po-doc-inner { padding: 0; }
+    .po-doc-stripe {
+        height: 8px;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .po-doc thead th {
+        background: #222 !important;
+        color: #fff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .po-doc-kind-title { color: #000; }
+    .po-doc-note {
+        border-left: 3px solid #999;
+        background: #f4f4f4 !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .po-doc-signs { margin-top: 56px; }
+}
+
+/* ==========================================================================
+   FILING A REPORT
+   A damaged item and a refunded item ask different questions, so the refund
+   field appears and disappears. It is hidden by script, not by a rule here,
+   but it gets the room either way so the form does not jump.
+   ========================================================================== */
+#report-form textarea.form-control { min-height: 96px; }
+
+/* ==========================================================================
+   ON A PHONE
+   A clerk holding a phone in one hand and a material in the other. Every
+   figure they type gets a full-width field, and the purchase order stops
+   pretending to be a spreadsheet.
+   ========================================================================== */
+@media (max-width: 640px) {
+    .banner {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    .banner .btn { width: 100%; }
+
+    .po-line,
+    .recv-line {
+        grid-template-columns: 1fr;
+        gap: 10px;
+        padding: 14px 0;
+    }
+    .po-remove { width: 100%; margin-top: 0; }
+    .recv-qty { width: 100%; }
+
+    .po-doc-inner { padding: 20px 16px 24px; }
+    .po-doc-head { gap: 14px; }
+    .po-doc-kind { text-align: left; }
+    .po-doc-ref { font-size: 22px; }
+    .po-doc-actions .btn { flex: 1 1 100%; }
+
+    /* in a card-shaped row the field fills the line it sits on */
+    .inline-input { width: 100%; max-width: 160px; }
+    table tbody td .inline-input { max-width: none; }
+}
+
+/* ==========================================================================
+   THE ADJUSTMENT FORM
+   Two typed boxes and a sentence. The boxes borrow the picker from the shared
+   stylesheet; what is local to this screen is what the form says back.
+   ========================================================================== */
+
+/* The material field is capped rather than full-bleed: across the whole card
+   the name and the stock figure in each suggestion sat too far apart to read
+   as a pair, and the strip underneath came out the size of a banner. */
+#adjust-form .suggest-wrap,
+#adjust-form .pick-strip,
+#adjust-form .pick-verdict { max-width: 560px; }
+
+/* The unit box sits inside the two-column grid, so it takes the column. */
+#adjust-form .grid-2 .suggest-wrap { max-width: none; }
+
+/* What the typed unit is about to do. Three outcomes and all of them are
+   fine, which is why this is a note and not a warning: nothing, change what
+   this material is counted in, or add a word to the shop's list. */
+.unit-verdict {
+    margin: 6px 0 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--steel-soft);
+}
+.unit-verdict:empty { display: none; }
+.unit-verdict.is-new { color: var(--signal-ink); font-weight: 500; }
+
+/* ==========================================================================
+   WHAT THIS WILL DO TO THE SHELF
+   The arithmetic before the button rather than a refusal after it. It carries
+   the meaning rule like every other verdict in the system: green when the
+   figure lands somewhere sensible, amber when it lands on or under the
+   reorder point, red when it would take the shelf below zero.
+   ========================================================================== */
+.adjust-preview {
+    margin: 14px 0 0;
+    padding: 10px 13px;
+    font-size: 13px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+    font-variant-numeric: tabular-nums;
+}
+.adjust-preview:empty { display: none; }
+.adjust-preview.is-good  { border-left-color: var(--ok);     background: var(--ok-dim); }
+.adjust-preview.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
+.adjust-preview.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); }

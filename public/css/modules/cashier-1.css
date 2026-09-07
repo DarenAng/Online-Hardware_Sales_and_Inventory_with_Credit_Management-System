@@ -1,0 +1,633 @@
+/* ==========================================================================
+   CASHIER
+   cashier-dashboard.html
+
+   Loads after general-ui.css and responsive.css, so anything here wins.
+
+   The register is the busiest screen in the system and the only one where
+   somebody is waiting at the counter while it is used. Two columns: what is
+   for sale on the left, what is being bought on the right. Everything on the
+   right is a figure, and the figure that matters is the amount due, so it is
+   the largest thing on the screen.
+   ========================================================================== */
+
+/* ==========================================================================
+   THE REGISTER
+   The catalog scrolls. The order does not: it stays where the eye left it,
+   because the person at the counter is watching the total, not the shelves.
+   ========================================================================== */
+.pos-layout {
+    display: grid;
+    grid-template-columns: 1.9fr 1fr;
+    gap: 16px;
+    align-items: start;
+}
+
+.order-summary {
+    background: var(--surface);
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    position: sticky;
+    top: 74px;
+}
+.order-summary .panel-head { margin-bottom: 12px; padding-bottom: 10px; }
+.order-summary h3 { margin-bottom: 0; }
+
+/* ==========================================================================
+   THE CATALOG
+   Every product is a button. It says what it is, what it costs, and how many
+   are left, in that order, because that is the order the question is asked
+   in at a counter. One that has run out is still shown and still readable —
+   knowing a thing exists and is out is different from not finding it.
+   ========================================================================== */
+.product-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 10px;
+}
+.product-card {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    padding: 13px 14px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-family: var(--font-ui);
+    transition: border-color 0.15s, transform 0.09s, box-shadow 0.15s;
+}
+.product-card:hover:not(:disabled) {
+    border-color: var(--go);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(11, 31, 58, 0.08);
+}
+.product-card:active:not(:disabled) { transform: translateY(0); }
+.product-card:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
+.product-card.is-out { opacity: 0.55; cursor: not-allowed; }
+
+.prod-name { font-size: 14px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+.prod-meta { font-size: 12.5px; color: var(--steel-soft); }
+.prod-price {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    margin-top: 5px;
+}
+/* The only stock line left on a product card, and it appears on a card that
+   cannot be pressed. It is what stops a greyed-out card reading as a bug.
+   The counts that used to sit on every card have gone: a till is for serving
+   the person at the counter, not for reporting the stockroom to the shop
+   floor. .stock-ok and .stock-low went with them. */
+.prod-stock {
+    align-self: flex-start;
+    margin-top: 5px;
+    padding: 2px 7px;
+    border-radius: var(--radius);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+}
+.stock-out { color: var(--stop-hi); background: var(--stop-dim); }
+
+/* ==========================================================================
+   THE CART
+   Four things per line: what it is, how many, what that comes to, and the
+   way to take it back off. The quantity buttons are the most-pressed control
+   in the whole system, so they are sized to be hit rather than aimed at.
+   ========================================================================== */
+.cart-empty {
+    text-align: center;
+    padding: 26px 12px;
+    color: var(--steel-soft);
+    font-size: 13.5px;
+}
+
+.cart-line {
+    display: grid;
+    grid-template-columns: 1fr auto auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+}
+.cart-line:last-child { border-bottom: none; }
+.cart-line-main { min-width: 0; }
+.cart-name { display: block; font-size: 13.5px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+.cart-unit {
+    display: block;
+    font-family: var(--font-figure);
+    font-size: 11px;
+    color: var(--steel-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+.cart-qty { display: flex; align-items: center; gap: 3px; }
+.qty-btn {
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 16px; line-height: 1;
+    color: var(--ink);
+    transition: border-color 0.12s, color 0.12s;
+}
+.qty-btn:hover { border-color: var(--go); color: var(--go); }
+.qty-btn:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+.qty-value {
+    font-family: var(--font-figure);
+    font-size: 14px; font-weight: 600;
+    min-width: 26px; text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.cart-sub {
+    font-family: var(--font-figure);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    white-space: nowrap;
+}
+.cart-remove {
+    background: none; border: none; cursor: pointer;
+    color: var(--steel-soft); font-size: 19px; line-height: 1;
+    width: 28px; height: 28px;
+}
+.cart-remove:hover { color: var(--stop); }
+.cart-remove:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+
+/* ---------- what it comes to ----------
+   Subtotal and discount are small facts. The amount due is the answer, so it
+   is set at twice their size in green: it is the figure the person at the
+   counter is about to hand money for. Change is green, short is red, and on
+   account is yellow, which is the same three meanings as everywhere else. */
+.cart-totals {
+    margin: 14px 0;
+    padding: 12px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+}
+.total-row {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 3px 0;
+    font-size: 13.5px; color: var(--steel);
+}
+.total-row span:last-child {
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+}
+.total-due {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--ink);
+    padding: 8px 0 4px;
+    margin-top: 4px;
+    border-top: 1px solid var(--line);
+    align-items: baseline;
+}
+.total-due span:last-child {
+    font-family: var(--font-ui);
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--go);
+}
+.total-change span:last-child { color: var(--go);        font-weight: 600; }
+.total-short  span:last-child { color: var(--stop);      font-weight: 600; }
+.total-note   span:last-child { color: var(--signal-ink); font-weight: 600; }
+
+/* The disabled treatment is general-ui's now, one rule for every button in
+   the system, so the two lines that used to fake it here have gone. */
+#checkout-btn { min-height: 46px; font-size: 15.5px; }
+
+/* Only the receipt reaches the paper. Everything else on the screen — the
+   menu, the top bar, the buttons that printed it — is not part of the
+   document being printed. */
+@media print {
+    body.printing-receipt .wrapper,
+    body.printing-receipt .no-print,
+    body.printing-receipt .toast-deck,
+    body.printing-receipt .sidebar-shade,
+    body.printing-receipt #detail-modal { display: none !important; }
+
+    body.printing-receipt #receipt-modal {
+        display: block !important;
+        position: static !important;
+        background: none !important;
+        padding: 0 !important;
+        backdrop-filter: none !important;
+    }
+    body.printing-receipt .receipt-box {
+        max-width: 100% !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        max-height: none !important;
+        animation: none !important;
+    }
+    body.printing-receipt .modal-body {
+        padding: 0 !important;
+        overflow: visible !important;
+    }
+    body.printing-receipt .receipt-paper { font-size: 11px; }
+    @page { margin: 10mm; }
+}
+
+/* ==========================================================================
+   ON A SMALL SCREEN
+
+   Two columns become one, and the order goes underneath the catalog rather
+   than above it: a sale is picked first and totalled second, and putting the
+   total on top would mean scrolling past the answer to reach the question.
+   ========================================================================== */
+@media (max-width: 1024px) {
+    .pos-layout { grid-template-columns: 1fr; }
+    .order-summary { position: static; }
+}
+
+@media (max-width: 640px) {
+    .product-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+    .product-card { padding: 11px 12px; min-height: 96px; }
+    .prod-price { font-size: 18px; }
+
+    .order-summary { padding: 16px 14px; }
+
+    /* the line keeps its shape but drops the remove button to its own
+       corner, because at this width it was sitting under a thumb that was
+       aiming for the minus */
+    .cart-line { grid-template-columns: 1fr auto auto; row-gap: 6px; }
+    .cart-remove { grid-column: 3; grid-row: 1; }
+    .cart-sub { grid-column: 2 / 4; grid-row: 2; text-align: right; }
+    .cart-qty { grid-column: 2; grid-row: 1; }
+
+    /* the two most-pressed controls in the system, at thumb size */
+    .qty-btn { width: 38px; height: 38px; font-size: 18px; }
+    .qty-value { min-width: 32px; font-size: 15px; }
+
+    .total-due span:last-child { font-size: 26px; }
+    #checkout-btn { min-height: 50px; }
+
+    .inline-select { min-width: 100%; }
+    .receipt-box { max-width: none; }
+}
+
+@media (max-width: 420px) {
+    .product-grid { grid-template-columns: 1fr 1fr; }
+}
+
+/* ==========================================================================
+   CREDIT AT THE COUNTER
+
+   A cashier finding out about a credit limit when the till refuses the sale
+   is a cashier finding out too late, with a customer watching. So the account
+   is read the moment a customer is picked, and what it says sits above the
+   payment fields rather than arriving as an error after the fact.
+
+   The strip carries one of the three meanings the whole system uses, and
+   nothing else: green there is room, yellow look at this, red it will not go
+   through.
+   ========================================================================== */
+.credit-strip {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--steel-soft);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 11px 14px;
+    margin: 0 0 14px;
+}
+.credit-strip.is-good  { border-left-color: var(--go);     background: var(--go-dim); }
+.credit-strip.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
+.credit-strip.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); }
+
+.credit-strip-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 13px;
+    line-height: 1.7;
+}
+.credit-strip-label { color: var(--steel); }
+.credit-strip-value {
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+}
+/* the figure the cashier is actually deciding on */
+.credit-strip-main { margin-top: 4px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.07); }
+.credit-strip-main .credit-strip-label { font-weight: 600; color: var(--ink); }
+.credit-strip-main .credit-strip-value { font-size: 16px; font-weight: 700; }
+
+.credit-strip-note {
+    margin: 8px 0 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--steel);
+    font-style: italic;
+}
+
+/* What will happen if this sale is completed as it stands, in words, before
+   the button is pressed rather than as a refusal after it. */
+.credit-verdict {
+    margin: 10px 0 0;
+    padding: 10px 13px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    line-height: 1.55;
+    background: var(--paper);
+    border-left: var(--rule) solid var(--steel-soft);
+}
+.credit-verdict:empty { display: none; }
+.credit-verdict.is-good  { border-left-color: var(--go);     background: var(--go-dim); }
+.credit-verdict.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
+.credit-verdict.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); color: var(--ink); }
+
+/* Quick fill. Typing "half of 8,437.50" at a counter with somebody waiting is
+   how a down payment gets recorded wrong. */
+.downpayment-quick {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: -4px;
+}
+.quick-label {
+    font-size: 12px;
+    color: var(--steel-soft);
+    margin-right: 2px;
+}
+
+/* ==========================================================================
+   WHERE THE GOODS GO
+
+   This was a dropdown with an answer already selected, which meant it was
+   answered by not being read, and a return filed the wrong way left the item
+   unaccounted for: not on the shelf, not written off, still in a box behind
+   the counter.
+
+   Two cards, neither preselected, each saying what it does to the stock
+   count. Large enough to hit with a thumb, because the person choosing is
+   standing at a counter with somebody waiting.
+   ========================================================================== */
+.disposition-choice {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.disposition-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 13px 14px;
+    min-height: 76px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--line);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.disposition-option:hover { border-color: var(--steel-soft); }
+
+.disposition-option input {
+    margin-top: 3px;
+    width: 18px; height: 18px;
+    flex: none;
+    accent-color: var(--go);
+    cursor: pointer;
+}
+.disposition-option.is-stop input { accent-color: var(--stop); }
+
+.disposition-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.disposition-title { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.disposition-note { font-size: 12.5px; line-height: 1.5; color: var(--steel); }
+
+/* the chosen one takes its meaning: green it goes back, red it does not */
+.disposition-option:has(input:checked) {
+    background: var(--go-dim);
+    border-color: var(--go);
+    border-left-color: var(--go);
+}
+.disposition-option.is-stop:has(input:checked) {
+    background: var(--stop-dim);
+    border-color: var(--stop);
+    border-left-color: var(--stop);
+}
+.disposition-option:has(input:focus-visible) { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* asked for and not answered */
+.disposition-choice.is-missing .disposition-option {
+    border-color: var(--stop);
+    border-left-color: var(--stop);
+}
+
+.disposition-verdict {
+    margin: 9px 0 0;
+    padding: 9px 12px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+}
+.disposition-verdict:empty { display: none; }
+.disposition-verdict.is-good { border-left-color: var(--go);   background: var(--go-dim); }
+.disposition-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
+
+/* Counting up to the minimum rather than down from a maximum: the question is
+   "have you said enough yet", not "how much room is left". */
+.reason-counter {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: var(--steel-soft);
+}
+.reason-counter.is-short { color: var(--signal-ink); font-weight: 500; }
+.reason-counter.is-good  { color: var(--go-hi); }
+
+@media (max-width: 640px) {
+    .disposition-choice { grid-template-columns: 1fr; }
+}
+
+/* Which of the three outcomes is in force, said before the sale is completed
+   rather than as a refusal after it. */
+.customer-verdict {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--steel-soft);
+}
+.customer-verdict.is-good { color: var(--go-hi); font-weight: 500; }
+.customer-verdict.is-new  { color: var(--signal-ink); font-weight: 500; }
+
+/* Three buttons across a 350px order panel wrap into a ragged block where the
+   two words of "Complete Sale" break across lines. The sale is the primary
+   action and gets its own full-width row; the delivery and the clear share
+   the one below it. */
+.order-summary .form-footer { flex-wrap: wrap; }
+.order-summary .form-footer #checkout-btn { flex: 1 1 100%; }
+.order-summary .form-footer #make-delivery-btn { flex: 1 1 auto; white-space: nowrap; }
+.order-summary .form-footer .btn-ghost { flex: 0 0 auto; white-space: nowrap; }
+
+/* THE MEASURE OF THE PRODUCT FIELD
+   Full-bleed across the card, the name and the price in each suggestion sat a
+   thousand pixels apart and stopped reading as a pair. Capped, the two are
+   scannable together and the strip underneath comes out a sensible size. It
+   is wider than one column of the grid below and narrower than the row, which
+   is the hierarchy: this is the field the rest of the form depends on. */
+#refund-form .suggest-wrap,
+#refund-form .pick-strip,
+#refund-form .pick-verdict { max-width: 560px; }
+
+/* Where the refund figure came from. Quiet while it is the system's own
+   arithmetic; marked once a person has overridden it, because an overridden
+   figure is a decision somebody should be able to see they made. */
+.amount-source {
+    margin: 6px 0 0;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: var(--steel-soft);
+}
+.amount-source:empty { display: none; }
+.amount-source.is-edited { color: var(--signal-ink); }
+
+/* ==========================================================================
+   THE DELIVERY ATTACHED TO THIS ORDER
+   Filled in beside the order, written the moment the sale exists, and shown
+   above the buttons in between so it cannot be forgotten. A delivery the
+   cashier cannot see is a delivery the cashier forgets they attached.
+   ========================================================================== */
+.delivery-attached {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--go);
+    background: var(--go-dim);
+}
+.delivery-attached[hidden] { display: none; }
+
+.delivery-attached-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.delivery-attached-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--go-hi);
+}
+.delivery-attached-drop {
+    border: none;
+    background: none;
+    font-size: 18px;
+    line-height: 1;
+    color: var(--steel-soft);
+    cursor: pointer;
+    padding: 0 2px;
+}
+.delivery-attached-drop:hover { color: var(--stop); }
+.delivery-attached-drop:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+
+.delivery-attached-line {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+}
+.delivery-attached-when {
+    margin-top: 3px;
+    color: var(--steel);
+    font-variant-numeric: tabular-nums;
+}
+
+/* what the delivery form says when it will not accept what is in it */
+.delivery-verdict {
+    margin: 4px 0 0;
+    padding: 9px 12px;
+    font-size: 12.5px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+}
+.delivery-verdict:empty { display: none; }
+.delivery-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
+
+/* THE WAY BACK OUT OF THE DELIVERY FORM
+   Three buttons that do three different things, so they are not three
+   identical grey rectangles in a row. Cancel Delivery is the way back to the
+   transaction and sits apart on the left; Remove Delivery destroys a booking
+   that is already attached and is coloured like it; attaching is the green
+   one. Cancel and the × in the corner are now the only ways out, so the
+   button has to be obvious. */
+#delivery-modal .modal-foot { justify-content: flex-end; }
+#delivery-modal .modal-foot .btn:first-child { margin-right: auto; }
+
+.btn-quiet { color: var(--stop); }
+.btn-quiet:hover { color: var(--stop-hi); border-color: var(--stop); background: var(--stop-dim); }
+
+/* ==========================================================================
+   WHAT WENT BACK TODAY
+   The refunds figure on the daily summary opens into this. A total says money
+   left the till; it does not say which item went back, and the item is the
+   part that has to be accounted for at the end of a shift.
+   ========================================================================== */
+.refund-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+.refund-line {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--signal);
+    border-radius: var(--radius);
+}
+.refund-line-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.refund-line-name { font-size: 13.5px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+.refund-line-meta {
+    font-size: 12px;
+    color: var(--steel);
+    font-variant-numeric: tabular-nums;
+}
+.refund-line-reason {
+    font-size: 12px;
+    color: var(--steel-soft);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+.refund-line-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+    white-space: nowrap;
+}
+.refund-line-amount {
+    font-family: var(--font-figure);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--stop);
+}
+
+@media (max-width: 520px) {
+    .refund-line { flex-direction: column; gap: 8px; }
+    .refund-line-side { align-items: flex-start; flex-direction: row; align-items: center; }
+}
