@@ -24,14 +24,16 @@
 //   const panel = createDataPanel({
 //       key: 'admin-users',            // unique, used by the inline handlers
 //       tableId: 'accounts-table',     // the <table> it fills
-//       columns: 6,                    // colspan for message rows
+//       columns: 5,                    // colspan for message rows; must match
+//                                      // the number of <th> in that table
 //       pagerId: 'accounts-pager',     // where Previous / Next are drawn
 //       countPillId: 'accounts-count', // optional .pill showing the count
 //       load: async () => [...],       // returns every row, once
 //       match: (row, query) => true,   // optional free-text search
 //       filter: (row, filters) => true,// optional dropdown filters
 //       renderRow: (row, index) => '<tr>...</tr>',
-//       gate: { title, text, button }  // what the closed state says
+//       gate: { title, text, button },  // what the closed state says
+//       loadOnFilter: false            // optional; see dataPanelFilter below
 //   });
 //
 //   panel.open();          // run load() and show page 1
@@ -413,14 +415,31 @@ function dataPanelSearch(key, text, wait) {
     }, wait === undefined ? 220 : wait));
 }
 
+// ==========================================
+// PICKING A FILTER
+//
+// On a table that is already open this narrows what has arrived, which is the
+// whole of it.
+//
+// On a CLOSED table there are two defensible answers and the panel says which
+// one it wants. By default, picking a filter fills the table: on most screens
+// somebody reaching for a dropdown on an empty table is asking to see the
+// thing they just narrowed to, and making them press Load Data afterwards is
+// a second step for no reason.
+//
+// A panel that sets loadOnFilter: false takes the other answer -- the value is
+// remembered and nothing is read until Load Data or the search box asks. The
+// staff directory does that, because it is the one screen where the filters
+// are also how somebody sets up a query before running it, and a dropdown that
+// fetches on the way past turns three deliberate choices into three queries.
+// ==========================================
 function dataPanelFilter(key, name, value) {
     const panel = getDataPanel(key);
     if (!panel) return;
 
-    // picking a filter on a closed table is also a request to fill it
-    if (panel.state === 'closed') {
+    if (panel.state === 'closed' || panel.state === 'error') {
         panel.filters[name] = value;
-        panel.open();
+        if (panel.config.loadOnFilter !== false) panel.open();
         return;
     }
 

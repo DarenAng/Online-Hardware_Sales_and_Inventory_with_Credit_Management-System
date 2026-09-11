@@ -40,6 +40,28 @@ async function call(cookie, method, path, payload) {
   return { status: response.status, body };
 }
 
+// ==========================================================================
+// CREATING AN ACCOUNT IS TWO REQUESTS
+//
+// The review step works the account out -- including a password nobody typed
+// -- and creates nothing. The second one creates it from the draft id, so
+// what an administrator confirmed on screen is what ends up in the database.
+//
+// This helper runs both and hands back the reply of whichever step ended it,
+// so a caller that only wants an account gets one, and a caller checking a
+// refusal still sees the status the refusal came back with. `review` is
+// attached so a test can look at what the card would have said.
+// ==========================================================================
+async function createAccount(cookie, details) {
+  const review = await call(cookie, "POST", "/api/users/draft", details);
+  if (review.status !== 200) return review;
+
+  const created = await call(cookie, "POST", "/api/users",
+    { draftId: review.body.draftId });
+  created.review = review.body;
+  return created;
+}
+
 // The credit checks run in the manager block but need a cashier's cookie, and
 // the cashier session is opened further down the file. Reaching it through the
 // sessions object rather than a second login keeps this to one sign-in each.
@@ -135,14 +157,34 @@ function expect(role, label, response, allowed) {
   record("admin", "new backup is in the history",
     listed.body && listed.body.files.some((f) => f.fileName === backupName), "");
 
+  // THE ONE THAT NOBODY PRESSES
+  //
+  // The whole system is written to its own file every minute and the oldest is
+  // removed as the newest is written, so the folder settles at a fixed size
+  // instead of filling the disk. A backup somebody took on purpose is never
+  // rotated, and the list has to be able to say which kind each file is or
+  // the drawer cannot warn that one of them is on its way out.
+  record("admin", "the backup list says whether the system backs itself up",
+    listed.body && listed.body.auto && typeof listed.body.auto.enabled === "boolean" &&
+    listed.body.auto.everySeconds > 0 && listed.body.auto.keep > 0,
+    JSON.stringify(listed.body && listed.body.auto));
+  record("admin", "every backup says which kind it is",
+    listed.body && listed.body.files.every((f) => typeof f.automatic === "boolean"), "");
+  record("admin", "the backup taken by hand is not marked automatic",
+    listed.body &&
+    listed.body.files.some((f) => f.fileName === backupName && f.automatic === false), "");
+  record("admin", "the automatic backup is not failing",
+    listed.body && listed.body.auto && !listed.body.auto.lastError,
+    String(listed.body && listed.body.auto && listed.body.auto.lastError));
+
   expect("admin", "download backup", await call(admin, "GET", `/api/backups/${backupName}`), [200]);
   expect("admin", "path traversal refused",
     await call(admin, "GET", "/api/backups/..%2F..%2Fpackage.json"), [400, 403, 404]);
 
   // change something, restore, and check the change is gone again
-  await call(admin, "POST", "/api/users", {
+  await createAccount(admin, {
     firstName: "Wiped", lastName: "Away", roleId: 4,
-    email: `wiped.${Date.now()}@hardware.com`, password: "wipedpass123"
+    email: `wiped.${Date.now()}@hardware.com`
   });
   expect("admin", "restore from history",
     await call(admin, "POST", `/api/backups/${backupName}/restore`), [200]);
@@ -153,39 +195,154 @@ function expect(role, label, response, allowed) {
   record("admin", "restore kept the stored procedures",
     (await call(admin, "GET", "/api/users")).status === 200, "");
 
-  console.log("== MIDDLE INITIAL ==");
+  // THE MIDDLE NAME, AND THE INITIAL TAKEN OFF IT
+  //
+  // The column holds the whole middle name now; the rule that shortens it to
+  // one letter lives in staff.full_name and nowhere else. Both halves are
+  // checked here, because the whole point of the change is that they are
+  // different things: "dela Cruz" goes in and "Juan D. Cruz" comes out.
+  console.log("== MIDDLE NAME ==");
   const twinEmail = `twin.${Date.now()}@hardware.com`;
-  const twin = await call(admin, "POST", "/api/users", {
-    firstName: "Juan", middleInitial: "m", lastName: "Cruz", phone: "09170001111",
-    roleId: 3, email: twinEmail, password: "twinpass123"
+  const twin = await createAccount(admin, {
+    firstName: "Juan", middleName: "  dela  Cruz ", lastName: "Cruz", phone: "09170001111",
+    roleId: 3, email: twinEmail
   });
-  expect("admin", "create with middle initial", twin, [200]);
+  expect("admin", "create with middle name", twin, [200]);
   const directory = await call(admin, "GET", "/api/users");
   const twinRow = Array.isArray(directory.body)
     ? directory.body.find((u) => u.staff_id === (twin.body && twin.body.staffId)) : null;
-  record("admin", "middle initial stored as one capital letter",
-    twinRow && twinRow.middle_initial === "M", JSON.stringify(twinRow || {}).slice(0, 120));
-  record("admin", "full name carries the initial",
-    twinRow && twinRow.full_name === "Juan M. Cruz", twinRow ? twinRow.full_name : "missing");
+  record("admin", "the whole middle name is kept, trimmed and single-spaced",
+    twinRow && twinRow.middle_name === "dela Cruz", JSON.stringify(twinRow || {}).slice(0, 140));
+  record("admin", "a phone number typed as 09... is stored as +63...",
+    twinRow && twinRow.phone === "+639170001111", String(twinRow && twinRow.phone));
+  record("admin", "full name carries only the initial, in capitals",
+    twinRow && twinRow.full_name === "Juan D. Cruz", twinRow ? twinRow.full_name : "missing");
+
+  // no middle name is a name of two parts, not a name with a stray full stop
+  const noMiddle = await createAccount(admin, {
+    firstName: "Pedro", middleName: "   ", lastName: "Santos",
+    roleId: 4, email: `nomiddle.${Date.now()}@hardware.com`
+  });
+  expect("admin", "create with no middle name", noMiddle, [200]);
+  const afterNoMiddle = await call(admin, "GET", "/api/users");
+  const noMiddleRow = Array.isArray(afterNoMiddle.body)
+    ? afterNoMiddle.body.find((u) => u.staff_id === (noMiddle.body && noMiddle.body.staffId)) : null;
+  record("admin", "a blank middle name stays blank and prints no initial",
+    noMiddleRow && noMiddleRow.middle_name === null &&
+    noMiddleRow.full_name === "Pedro Santos",
+    JSON.stringify(noMiddleRow || {}).slice(0, 140));
+
+  // THE REVIEW STEP, AND THE PASSWORD NOBODY TYPED
+  //
+  // Nothing was sent for the password, so the server has to have made one --
+  // and it has to have shown it for checking BEFORE the account existed,
+  // which is the whole point of the two steps. With mail switched off, which
+  // is how the project ships, it comes back again afterwards to be handed
+  // over.
+  record("admin", "the review hands back the account before it is created",
+    twin.review && twin.review.fullName === "Juan D. Cruz" &&
+    twin.review.roleName === "Inventory Clerk" &&
+    twin.review.phone === "+639170001111" &&
+    typeof twin.review.password === "string",
+    JSON.stringify(twin.review || {}).slice(0, 200));
+  record("admin", "the password shown for checking is the one the account gets",
+    twin.review && twin.body && twin.review.password === twin.body.password,
+    "the password changed between the review and the account");
+  record("admin", "a review cannot be confirmed twice",
+    twin.review &&
+    (await call(admin, "POST", "/api/users", { draftId: twin.review.draftId })).status === 410,
+    "the same draft created a second account");
+  record("admin", "a review created nothing on its own", await (async () => {
+    const email = `never.${Date.now()}@hardware.com`;
+    const draft = await call(admin, "POST", "/api/users/draft",
+      { firstName: "Never", lastName: "Made", roleId: 4, email: email });
+    if (draft.status !== 200) return false;
+    const list = await call(admin, "GET", "/api/users");
+    return Array.isArray(list.body) && !list.body.some((u) => u.email === email);
+  })(), "a staff row appeared from the review step alone");
+
+  record("admin", "the server made the first password without being given one",
+    twin.body && twin.body.emailed === false && typeof twin.body.password === "string" &&
+    twin.body.password.length >= 8,
+    JSON.stringify(twin.body || {}).slice(0, 160));
+  record("admin", "a generated password avoids the characters that get misread",
+    twin.body && typeof twin.body.password === "string" &&
+    !/[0O1lI2Z5S8B]/.test(twin.body.password),
+    twin.body ? String(twin.body.password) : "missing");
+  record("admin", "two accounts never get the same first password",
+    twin.body && noMiddle.body && twin.body.password !== noMiddle.body.password, "");
+  const trailAfterCreate = await call(admin, "GET", "/api/audit-logs?limit=60");
+  record("admin", "the audit trail records the account, not the password",
+    !JSON.stringify(trailAfterCreate.body || []).includes(String(twin.body && twin.body.password)),
+    "a generated password was found in the audit trail");
 
   // the same name in a different role is fine, as long as the email differs
-  const sameName = await call(admin, "POST", "/api/users", {
-    firstName: "Juan", middleInitial: "P", lastName: "Cruz", phone: "09170002222",
-    roleId: 4, email: `twin2.${Date.now()}@hardware.com`, password: "twinpass123"
+  const sameName = await createAccount(admin, {
+    firstName: "Juan", middleName: "Pascual", lastName: "Cruz", phone: "09170002222",
+    roleId: 4, email: `twin2.${Date.now()}@hardware.com`
   });
   expect("admin", "same name, different role, own email", sameName, [200]);
 
-  const sameEmail = await call(admin, "POST", "/api/users", {
-    firstName: "Juan", middleInitial: "X", lastName: "Cruz",
-    roleId: 2, email: twinEmail, password: "twinpass123"
+  const sameEmail = await createAccount(admin, {
+    firstName: "Juan", middleName: "Xavier", lastName: "Cruz",
+    roleId: 2, email: twinEmail
   });
   record("admin", "duplicate email explained clearly",
     sameEmail.status === 409 && /already signs in/.test(sameEmail.body.error || ""),
     `${sameEmail.status} ${JSON.stringify(sameEmail.body)}`);
 
-  const created = await call(admin, "POST", "/api/users", {
+  // an address that cannot receive a password is refused before the account exists
+  const badAddress = await createAccount(admin, {
+    firstName: "Nope", lastName: "Person", roleId: 4, email: "not-an-address"
+  });
+  record("admin", "an unusable email is refused", badAddress.status === 400,
+    `${badAddress.status} ${JSON.stringify(badAddress.body)}`);
+
+  // ONE SPELLING OF A PHONE NUMBER
+  //
+  // The browser prints +63 beside the box and drops everything that is not a
+  // digit as it is typed. None of that is worth anything on its own, because
+  // a browser is not where a rule lives -- so the same rule is checked here,
+  // over HTTP, the way anything that skips the form would meet it.
+  const shortPhone = await call(admin, "POST", "/api/users/draft", {
+    firstName: "Short", lastName: "Phone", roleId: 4,
+    email: `short.${Date.now()}@hardware.com`, phone: "+63917123"
+  });
+  record("admin", "a phone number of the wrong length is refused with a reason",
+    shortPhone.status === 400 && /10 digits after \+63/.test(shortPhone.body.error || ""),
+    `${shortPhone.status} ${JSON.stringify(shortPhone.body)}`);
+
+  // ten digits, so it clears the length rule and is refused by the other one
+  const landline = await call(admin, "POST", "/api/users/draft", {
+    firstName: "Land", lastName: "Line", roleId: 4,
+    email: `land.${Date.now()}@hardware.com`, phone: "8171234567"
+  });
+  record("admin", "a number that does not start 9 after +63 is refused",
+    landline.status === 400 && /starts with 9/.test(landline.body.error || ""),
+    `${landline.status} ${JSON.stringify(landline.body)}`);
+
+  const lettersPhone = await call(admin, "POST", "/api/users/draft", {
+    firstName: "Letters", lastName: "Phone", roleId: 4,
+    email: `letters.${Date.now()}@hardware.com`, phone: "n/a"
+  });
+  record("admin", "letters in the phone box are dropped, never stored",
+    lettersPhone.status === 200 && lettersPhone.body.phone === null,
+    `${lettersPhone.status} ${JSON.stringify(lettersPhone.body)}`);
+
+  for (const spelling of ["09171234567", "+639171234567", "639171234567", "0917 123 4567"]) {
+    const draft = await call(admin, "POST", "/api/users/draft", {
+      firstName: "Spelling", lastName: "Test", roleId: 4,
+      email: `spell.${Date.now()}.${Math.random().toString(36).slice(2, 7)}@hardware.com`,
+      phone: spelling
+    });
+    record("admin", `"${spelling}" is stored as +639171234567`,
+      draft.status === 200 && draft.body.phone === "+639171234567",
+      `${draft.status} ${JSON.stringify(draft.body && draft.body.phone)}`);
+  }
+
+  const created = await createAccount(admin, {
     firstName: "Test", lastName: "Person", phone: "09171112222",
-    roleId: 4, email: `test.person.${Date.now()}@hardware.com`, password: "testpass123"
+    roleId: 4, email: `test.person.${Date.now()}@hardware.com`
   });
   expect("admin", "POST users", created, [200]);
   const newStaffId = created.body && created.body.staffId;
@@ -203,9 +360,9 @@ function expect(role, label, response, allowed) {
   }
 
   // duplicate email must be refused with a useful message
-  const dup = await call(admin, "POST", "/api/users", {
-    firstName: "Admin", lastName: "User", phone: "0917",
-    roleId: 2, email: "admin@hardware.com", password: "testpass123"
+  const dup = await createAccount(admin, {
+    firstName: "Admin", lastName: "User", phone: "09171112222",
+    roleId: 2, email: "admin@hardware.com"
   });
   record("admin", "duplicate email refused", dup.status === 409,
     `${dup.status} ${JSON.stringify(dup.body)}`);
@@ -691,9 +848,15 @@ function expect(role, label, response, allowed) {
       detail.body.sale.payment_status === "Partial",
       `status=${detail.body.sale.payment_status}`);
   }
-  const receivables = await call(sessions.manager.cookie, "GET", "/api/manager/summary");
-  record("manager", "receivables count the unpaid sales",
-    Number(receivables.body.receivables) > 0, `receivables=${receivables.body.receivables}`);
+  const summary = await call(sessions.manager.cookie, "GET", "/api/manager/summary");
+  record("manager", "pending credits count the unpaid sales",
+    Number(summary.body.pendingCredits) > 0, `pendingCredits=${summary.body.pendingCredits}`);
+  // the dashboard shows one receivables figure because these three are one
+  // equation; if that ever stops holding, the collapsed card is lying
+  record("manager", "billed minus collected equals what is outstanding",
+    Math.round((Number(summary.body.grossSales) - Number(summary.body.totalIncome)) * 100)
+      === Math.round(Number(summary.body.pendingCredits) * 100),
+    `${summary.body.grossSales} - ${summary.body.totalIncome} vs ${summary.body.pendingCredits}`);
 
   expect("cashier", "oversell refused", await call(cashier, "POST", "/api/sales", {
     customerId: null, discount: 0, amountPaid: 999999, paymentMethod: "Cash",
@@ -726,13 +889,28 @@ function expect(role, label, response, allowed) {
       JSON.stringify(me.body || {}).slice(0, 120));
 
     const saved = await call(cookie, "PUT", "/api/me", {
-      firstName: me.body.first_name, middleInitial: "Q",
+      firstName: me.body.first_name, middleName: "Quintana",
       lastName: me.body.last_name, phone: "09179998888", email: me.body.email
     });
     expect(role, "PUT me", saved, [200]);
-    record(role, "own middle initial saved",
-      saved.body && saved.body.user && saved.body.user.middle_initial === "Q",
-      JSON.stringify(saved.body && saved.body.user || {}).slice(0, 120));
+    record(role, "own middle name saved in full",
+      saved.body && saved.body.user && saved.body.user.middle_name === "Quintana",
+      JSON.stringify(saved.body && saved.body.user || {}).slice(0, 140));
+    record(role, "and shown as one initial",
+      saved.body && saved.body.user &&
+      saved.body.user.full_name === `${me.body.first_name} Q. ${me.body.last_name}`,
+      String(saved.body && saved.body.user && saved.body.user.full_name));
+    record(role, "own phone stored as +63",
+      saved.body && saved.body.user && saved.body.user.phone === "+639179998888",
+      String(saved.body && saved.body.user && saved.body.user.phone));
+
+    const badOwnPhone = await call(cookie, "PUT", "/api/me", {
+      firstName: me.body.first_name, lastName: me.body.last_name,
+      phone: "12345", email: me.body.email
+    });
+    record(role, "a bad phone number on my own record is refused too",
+      badOwnPhone.status === 400,
+      `${badOwnPhone.status} ${JSON.stringify(badOwnPhone.body)}`);
 
     const stolen = await call(cookie, "PUT", "/api/me", {
       firstName: me.body.first_name, lastName: me.body.last_name,

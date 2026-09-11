@@ -361,8 +361,65 @@ h4 { font-size: 17px; }
 select.form-control { cursor: pointer; }
 textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
 
-.initial-input { text-transform: uppercase; }
 .inline-select { padding: 6px 9px; min-height: 34px; font-size: 14px; min-width: 132px; width: auto; }
+
+/* ==========================================================================
+   A PHONE NUMBER
+
+   The +63 is printed, not typed. It reads as part of the field and behaves
+   as part of the field -- focus draws the ring around both halves -- but it
+   is a label, so there is no box for anybody to put a second country code
+   into and no spelling of the number for the database to have to reconcile.
+
+   The digits are set in the figure face. A phone number is a figure: it gets
+   read back one character at a time down a telephone line, and tabular
+   numerals are what keeps a 1 the same width as a 7 while somebody does
+   that.
+   ========================================================================== */
+.phone-field {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.phone-prefix {
+    display: flex; align-items: center;
+    flex: none;
+    padding: 0 10px 0 12px;
+    border-right: 1px solid var(--line);
+    background: var(--paper);
+    border-radius: var(--radius) 0 0 var(--radius);
+    font-family: var(--font-figure);
+    font-size: 14px; font-weight: 600;
+    color: var(--steel);
+    user-select: none;
+}
+/* the inner box gives its own border and ring up to the wrapper, so the two
+   halves are lit as one control */
+.phone-field .form-control {
+    border: none;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: none;
+    font-family: var(--font-figure);
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+}
+.phone-field .form-control:focus { box-shadow: none; }
+.phone-field:focus-within {
+    border-color: var(--go);
+    box-shadow: 0 0 0 3px var(--go-dim);
+}
+
+/* Ten digits typed, nine so far. Said while the box is being filled in
+   rather than after the form is submitted, and never while it is empty,
+   because the number is optional. */
+.phone-field:has(.form-control.is-bad) { border-color: var(--signal-hi); }
+.phone-field:has(.form-control.is-bad):focus-within {
+    border-color: var(--signal-hi);
+    box-shadow: 0 0 0 3px var(--signal-dim);
+}
 
 .form-footer {
     display: flex;
@@ -541,27 +598,50 @@ body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
 
 /* Solid on purpose: rows scrolling under a translucent bar made the top of
    the page look smudged. The z-index puts the account menu hanging off it in
-   front of the cards rather than behind them. */
+   front of the cards rather than behind them.
+
+   WHY IT IS NOT PLAIN WHITE ANY MORE
+   The bar was --surface on a --paper page, which is the same white as every
+   card sitting under it. On a wide monitor that made the one strip holding
+   the title, the bell and the way out read as the top of the first card,
+   and people went looking for the account menu in the menu instead. So it
+   is separated three ways at once: a tinted band along its top edge, a
+   ground a shade off the cards below it, and a soft shadow that puts it in
+   front of the page rather than in it.
+
+   All three are drawn rather than added: the tint is an inset shadow and the
+   shadow spills outside the box, so the bar is exactly the height it always
+   was. The strip below it is sticky at top: 58px, and that arithmetic must
+   keep holding. */
 .topbar {
     position: sticky;
     top: 0;
     z-index: 500;
-    background: var(--surface);
+    background: linear-gradient(var(--surface), #f7f8f9);
     padding: 10px 20px;
     min-height: 58px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 14px;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--steel-soft);
+    box-shadow: inset 0 var(--rule) 0 var(--role-tint),
+                0 6px 16px rgba(20, 24, 29, 0.10);
 }
 .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 .topbar-title {
-    font-size: 19px; font-weight: 600; letter-spacing: -0.015em;
+    font-size: 21px; font-weight: 700; letter-spacing: -0.02em;
     color: var(--ink);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* The bar is no longer plain white, so the two controls standing on it get a
+   hairline one step darker than the one they use elsewhere. Without it a
+   white chip on an off-white bar has no edge at all, which is the opposite
+   of the problem this section is solving. */
+.topbar .bell,
+.topbar .account-chip { border-color: #c2c6cd; }
+
 .topbar-user {
     display: flex; align-items: center; gap: 9px;
     padding: 4px 12px 4px 4px;
@@ -775,6 +855,14 @@ table th.col-id  { width: 1%; white-space: nowrap; }
 table th.col-action,
 table td.cell-action { text-align: right; white-space: nowrap; }
 table td.cell-action .btn + .btn { margin-left: 6px; }
+
+/* A column a filter has made redundant: pick "Cashier" in the role filter
+   and the Role column says Cashier on every row. hideFilteredColumns() in
+   tables.js marks the heading and every cell under it; the selectors are
+   weighted to beat the phone layout in responsive.css, which turns each
+   cell into a flex line and would otherwise draw it anyway. */
+table thead tr th.col-hidden,
+table tbody tr td.col-hidden { display: none; }
 
 .cell-id {
     font-family: var(--font-figure);
@@ -1342,7 +1430,7 @@ kbd {
 .account-chip:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 .account-chip .avatar { width: 30px; height: 30px; font-size: 11px; border-radius: 50%; }
 .account-chip-name {
-    font-weight: 600; max-width: 140px;
+    font-weight: 600; max-width: 180px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .account-caret { font-size: 9px; color: var(--steel-soft); }
@@ -1741,6 +1829,50 @@ kbd {
     background: var(--stop);
 }
 
+/* Crimson is for the cards that destroy something. A card listing the details
+   of an account about to be created is not one of those, and spending the
+   system's one "this stops something" colour on it is how the colour stops
+   being noticed on the card that needs it. */
+.ask-detail.is-plain {
+    background: var(--paper);
+    border-left-color: var(--steel-soft);
+}
+.ask-detail.is-plain li::before { background: var(--steel-soft); }
+
+/* ==========================================================================
+   A DETAIL LINE THAT IS A RECORD RATHER THAN A CONSEQUENCE
+
+   "Label: value" is set as two columns. The card that lists an account about
+   to be created is not warning about three things, it is showing a record to
+   be checked, and a reader checking a record reads down the values -- which
+   needs the labels to line up and stop competing with them.
+
+   The value half is the figure face: on these cards it is an email address, a
+   phone number and a password, all three of which get checked one character
+   at a time. It wraps rather than overflowing, because a long address must
+   not be the thing that hides a password under it.
+   ========================================================================== */
+.ask-detail li.ask-pair {
+    display: grid;
+    grid-template-columns: 116px 1fr;
+    gap: 4px 10px;
+    align-items: baseline;
+}
+.ask-pair-label { color: var(--steel); }
+.ask-pair-value {
+    font-family: var(--font-figure);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+    user-select: all;          /* one click selects the whole value to copy */
+}
+
+@media (max-width: 480px) {
+    .ask-detail li.ask-pair { grid-template-columns: 1fr; }
+    .ask-pair-label { font-size: 12px; }
+}
+
 /* Recorded metadata, exactly as it was written. It is machine text and is set
    as machine text: mono, small, scrolling inside its own box rather than
    stretching the card it sits in. */
@@ -2043,40 +2175,13 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 /* ==========================================================================
    LIVE SYNC
 
-   One dot in the top bar. It is not decoration: a screen that has quietly
-   stopped hearing about changes looks exactly like a screen where nothing has
-   changed, and the difference matters when the figure is stock on hand.
+   A screen that has quietly stopped hearing about changes looks exactly like
+   a screen where nothing has changed, and the difference matters when the
+   figure is stock on hand. Saying so used to be the job of a dot in the top
+   bar; that dot is gone, and the note in the footer of the table it is
+   actually about does the job instead. The reasoning is at the top of the
+   LIVE SYNC section in javascript/modules/shared/live-sync.js.
    ========================================================================== */
-.live-dot {
-    display: inline-flex;
-    align-items: center;
-    gap: 7px;
-    margin-left: 14px;
-    padding: 4px 10px 4px 8px;
-    border-radius: 999px;
-    border: 1px solid var(--line);
-    background: var(--paper);
-    font-size: 11.5px;
-    font-weight: 500;
-    color: var(--steel);
-    white-space: nowrap;
-    cursor: default;
-}
-.live-mark {
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: var(--steel-soft);
-    flex: none;
-}
-
-.live-dot.is-live { border-color: rgba(14, 122, 95, 0.35); background: var(--ok-dim); color: var(--ok-ink); }
-.live-dot.is-live .live-mark { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-dim); }
-
-.live-dot.is-down { border-color: rgba(158, 27, 50, 0.35); background: var(--stop-dim); color: var(--stop-hi); }
-.live-dot.is-down .live-mark { background: var(--stop); }
-
-.live-dot.is-stale { border-color: rgba(245, 179, 1, 0.5); background: var(--signal-dim); color: var(--signal-ink); }
-.live-dot.is-stale .live-mark { background: var(--signal-hi); }
 
 /* A table nobody is reading refreshes itself; the count flashes rather than
    throwing a popup card, because a card for every change on a busy afternoon
@@ -2116,8 +2221,6 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 .stale-note .btn { margin-left: auto; }
 
 @media (max-width: 640px) {
-    .live-dot { margin-left: 8px; padding: 3px 8px 3px 6px; }
-    .live-word { display: none; }
     .stale-note .btn { margin-left: 0; width: 100%; }
 }
 

@@ -96,7 +96,7 @@ END //
 -- ==========================================
 CREATE PROCEDURE sp_create_staff_account (
     IN p_first_name VARCHAR(100),
-    IN p_middle_initial VARCHAR(5),
+    IN p_middle_name VARCHAR(100),
     IN p_last_name VARCHAR(100),
     IN p_phone VARCHAR(20),
     IN p_role_id INT,
@@ -138,8 +138,8 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    INSERT INTO staff (first_name, middle_initial, last_name, phone, role_id, is_active)
-    VALUES (p_first_name, NULLIF(TRIM(IFNULL(p_middle_initial, '')), ''),
+    INSERT INTO staff (first_name, middle_name, last_name, phone, role_id, is_active)
+    VALUES (p_first_name, NULLIF(TRIM(IFNULL(p_middle_name, '')), ''),
             p_last_name, p_phone, p_role_id, TRUE);
 
     SET p_staff_id = LAST_INSERT_ID();
@@ -159,7 +159,7 @@ END //
 CREATE PROCEDURE sp_update_staff_account (
     IN p_staff_id INT,
     IN p_first_name VARCHAR(100),
-    IN p_middle_initial VARCHAR(5),
+    IN p_middle_name VARCHAR(100),
     IN p_last_name VARCHAR(100),
     IN p_phone VARCHAR(20),
     IN p_role_id INT,
@@ -210,7 +210,7 @@ PROC_BODY: BEGIN
 
     UPDATE staff
     SET first_name     = p_first_name,
-        middle_initial = NULLIF(TRIM(IFNULL(p_middle_initial, '')), ''),
+        middle_name    = NULLIF(TRIM(IFNULL(p_middle_name, '')), ''),
         last_name      = p_last_name,
         phone          = p_phone,
         role_id        = p_role_id

@@ -47,7 +47,7 @@ function showManagerHome(event) {
 }
 
 // The dashboard is the one screen that still fetches on arrival, and it
-// should: six figures is one query, it is the reason the page was opened, and
+// should: five figures is one query, it is the reason the page was opened, and
 // there is nothing on it to filter first.
 function showIncome(event)        { showManagerPanel('panel-income', 'Income', event); }
 function showReports(event)       { showManagerPanel('panel-reports', 'Reports', event); }
@@ -68,61 +68,74 @@ function showStocks(event) { showReorderAlerts(event); }
 //
 // A number on a dashboard that cannot be opened is a number you then have to
 // go and look up somewhere else, so every card here leads to the screen that
-// explains it. The four the brief names lead the grid; the rest follow as
-// context.
+// explains it.
+//
+// quiet is set when live-sync is the one asking: the figures are already on
+// screen and correct enough to look at, so blanking them to "Loading" would
+// be a flicker that costs more than it explains.
 // ==========================================
-async function loadManagerSummary() {
+let kpiRefreshTimer = null;
+
+// ==========================================
+async function loadManagerSummary(quiet) {
     const grid = document.getElementById('kpi-grid');
     if (!grid) return;
 
-    grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Loading</span>' +
-                     '<span class="kpi-value">&hellip;</span></div>';
+    if (!quiet) {
+        grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Loading</span>' +
+                         '<span class="kpi-value">&hellip;</span></div>';
+    }
 
     try {
         const s = await getJson('/api/manager/summary');
 
+        // Billed, collected and outstanding are one equation, not three facts:
+        // gross - collected IS the balance owed. Three cards asked a manager to
+        // do that subtraction in their head, so the outstanding card carries
+        // the billed figure as its own context instead.
+        const billed = Number(s.grossSales) || 0;
+        const collected = Number(s.totalIncome) || 0;
+        const owed = Number(s.pendingCredits) || 0;
+        const txCount = Number(s.saleCount) || 0;
+        const basket = txCount ? billed / txCount : 0;
+        const accounts = Number(s.pendingCreditCount) || 0;
+
         const cards = [
             {
-                label: 'Total Income',
-                value: peso(s.totalIncome),
-                note: peso(s.incomeToday) + ' collected today',
+                label: 'Collected',
+                value: peso(collected),
+                note: peso(s.incomeToday) + ' of it today',
                 tone: '',
                 open: 'openIncomeFromCard()'
             },
             {
-                label: 'Sales Volume',
-                value: Number(s.unitsSold).toLocaleString('en-PH'),
-                note: 'units across ' + s.saleCount + ' transactions',
-                tone: '',
-                open: "showSales(event)"
+                label: 'Outstanding',
+                value: peso(owed),
+                note: 'of ' + peso(billed) + ' billed, across ' + accounts +
+                      ' account' + (accounts === 1 ? '' : 's'),
+                tone: owed > 0 ? 'kpi-warn' : '',
+                open: 'openCreditAccounts()'
             },
             {
-                label: 'Pending Credits',
-                value: peso(s.pendingCredits),
-                note: s.pendingCreditCount + ' account' + (Number(s.pendingCreditCount) === 1 ? '' : 's') + ' owing',
-                tone: Number(s.pendingCredits) > 0 ? 'kpi-warn' : '',
-                open: "openReceivables()"
+                label: 'Transactions',
+                value: txCount.toLocaleString('en-PH'),
+                note: peso(basket) + ' average sale',
+                tone: '',
+                open: 'showSales(event)'
             },
             {
                 label: 'Reorder Alerts',
                 value: String(s.reorderAlerts),
                 note: 'of ' + s.productCount + ' products',
                 tone: Number(s.reorderAlerts) > 0 ? 'kpi-danger' : '',
-                open: "showReorderAlerts(event)"
-            },
-            {
-                label: 'Gross Sales',
-                value: peso(s.grossSales),
-                note: 'billed, paid or not',
-                tone: '',
-                open: "showSales(event)"
+                open: 'showReorderAlerts(event)'
             },
             {
                 label: 'Deliveries Moving',
                 value: String(s.deliveriesInProgress),
                 note: s.deliveryProblems + ' delayed or failed',
                 tone: Number(s.deliveryProblems) > 0 ? 'kpi-danger' : '',
-                open: "showDeliveries(event)"
+                open: 'showDeliveries(event)'
             }
         ];
 
@@ -135,6 +148,11 @@ async function loadManagerSummary() {
             '</button>'
         ).join('');
     } catch (error) {
+        // A quiet refresh that fails leaves the last good figures where they
+        // are. Replacing readable numbers with "--" because one background
+        // poll missed is a downgrade, and the Live badge already says Offline.
+        if (quiet) return;
+
         grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Offline</span>' +
                          '<span class="kpi-value">--</span>' +
                          '<span class="kpi-note">Cannot reach the server</span></div>';
@@ -148,12 +166,18 @@ async function openIncomeFromCard() {
     await loadIncome();
 }
 
-// the Pending Credits card opens the receivables tab, already loaded
-async function openReceivables() {
-    showReports();
-    showReportTab('report-unpaid');
+// The Outstanding card counts accounts, so it opens the per-customer credit
+// book filtered to those who owe -- not the per-sale receivables list, which
+// answers a different question than the one the card was clicked for.
+async function openCreditAccounts() {
+    showCredit();
 
-    const panel = getDataPanel('mgr-unpaid');
+    const owing = document.getElementById('credit-owing');
+    if (owing) owing.value = 'owing';
+
+    dataPanelFilter('mgr-credit', 'owing', 'owing');
+
+    const panel = getDataPanel('mgr-credit');
     if (panel && panel.state === 'closed') await panel.open();
 }
 
@@ -1880,5 +1904,24 @@ if (window.location.pathname.toLowerCase().endsWith('manager-dashboard.html')) {
 
         showManagerHome();
         loadNotifications();
+
+        // The Live badge sits directly above these tiles, so the tiles have to
+        // honour it -- until now they loaded once and never moved again. One
+        // sale fires several scopes at once, hence the debounce.
+        onLiveChange(['sales', 'credit', 'inventory', 'deliveries', 'returns'], function () {
+            clearTimeout(kpiRefreshTimer);
+            kpiRefreshTimer = setTimeout(function () {
+                const home = document.getElementById('panel-home');
+                if (!home || home.style.display === 'none') return;
+                if (document.querySelector('.modal.open, .drawer.open')) return;
+
+                // redrawing the grid under a pointer loses the tile that was
+                // about to be clicked
+                const active = document.activeElement;
+                if (active && active.closest && active.closest('.kpi-card')) return;
+
+                loadManagerSummary(true);
+            }, 400);
+        });
     });
 }

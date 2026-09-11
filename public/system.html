@@ -65,8 +65,9 @@
                         <div>
                             <h3>Staff Directory</h3>
                             <p class="panel-sub">Nothing is read from the database until you ask for it.
-                                Search for one person, narrow by role or account state, or press
-                                <kbd>Load Data</kbd> for the whole directory.</p>
+                                Set the filters you want, then press <kbd>Load Data</kbd> &mdash; or type a
+                                name in the search box to look one person up. The filters on their own
+                                read nothing.</p>
                         </div>
                         <div class="panel-actions">
                             <span class="pill" id="accounts-count">Not loaded</span>
@@ -93,7 +94,7 @@
                         <div class="toolbar-field">
                             <label for="accounts-presence">Signed in</label>
                             <select id="accounts-presence"
-                                    onchange="dataPanelFilter('admin-users', 'presence', this.value)">
+                                    onchange="filterDirectory('presence', this.value)">
                                 <option value="all">Anyone</option>
                                 <option value="online">Online now</option>
                                 <option value="offline">Offline</option>
@@ -103,7 +104,7 @@
                         <div class="toolbar-field">
                             <label for="accounts-role">Role</label>
                             <select id="accounts-role" data-role-filter
-                                    onchange="dataPanelFilter('admin-users', 'roleId', this.value)">
+                                    onchange="filterDirectory('roleId', this.value)">
                                 <option value="all">Every role</option>
                             </select>
                         </div>
@@ -120,6 +121,7 @@
                                     <th>Email</th>
                                     <th>Role</th>
                                     <th>Status</th>
+                                    <th>Signed In</th>
                                 </tr>
                             </thead>
                             <tbody></tbody>
@@ -134,11 +136,7 @@
                     <div class="panel-head">
                         <div>
                             <h3>Create New Account</h3>
-                            <p class="panel-sub">Two people may share a first and last name; the middle initial
-                                tells them apart. The email is the username, so it has to be one no other
-                                account uses. The new user must change this password on first login.</p>
                         </div>
-                        <button type="button" class="btn" onclick="showAccountsList(event)">Back to List</button>
                     </div>
 
                     <form id="create-user-form" onsubmit="handleCreateUser(event)">
@@ -148,34 +146,56 @@
                                 <input type="text" name="firstName" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label>Middle Initial <span class="label-hint">optional</span></label>
-                                <input type="text" name="middleInitial" class="form-control initial-input"
-                                       maxlength="1" placeholder="M">
+                                <label>Middle Name <span class="label-hint">optional</span></label>
+                                <input type="text" name="middleName" class="form-control"
+                                       maxlength="100" placeholder="Dela Cruz">
                             </div>
                             <div class="form-group">
                                 <label>Last Name</label>
                                 <input type="text" name="lastName" class="form-control" required>
                             </div>
+
+                            <!-- PHONE
+                                 The country code is not in the box, it is
+                                 printed beside it. A box that accepts +63,
+                                 0063, 09 and 9 accepts four spellings of one
+                                 number and stores all four, and then no two
+                                 records can be compared. The prefix is fixed
+                                 furniture and what is typed is the ten digits
+                                 after it, digits only, enforced as the keys
+                                 are pressed. -->
                             <div class="form-group">
-                                <label>Phone</label>
-                                <input type="text" name="phone" class="form-control" placeholder="09XXXXXXXXX">
+                                <label for="create-phone">Phone <span class="label-hint">optional</span></label>
+                                <div class="phone-field">
+                                    <span class="phone-prefix">+63</span>
+                                    <input type="text" id="create-phone" name="phone" class="form-control"
+                                           inputmode="numeric" autocomplete="tel-national"
+                                           maxlength="10" placeholder="9XXXXXXXXX"
+                                           oninput="onPhoneInput(this)">
+                                </div>
+                                <span class="label-hint">Ten digits, starting with 9</span>
                             </div>
                             <div class="form-group">
                                 <label>Role</label>
                                 <select name="roleId" class="form-control" data-role-select required></select>
                             </div>
                             <div class="form-group">
-                                <label>Email</label>
+                                <label>Email <span class="label-hint">the username, and where the password is sent</span></label>
                                 <input type="email" name="email" class="form-control" required>
                             </div>
-                            <div class="form-group">
-                                <label>Temporary Password</label>
-                                <input type="password" name="password" class="form-control" minlength="8" required>
-                            </div>
                         </div>
+
+                        <!-- WHY THERE IS NO PASSWORD BOX HERE
+                             There was one, and an administrator typed a
+                             temporary password into it for somebody else.
+                             Those all end up as Cashier123, said out loud
+                             across a shop floor and known to two people for
+                             as long as the account lasts. The server makes
+                             one instead, shows it once for checking, and
+                             sends it to the address above on confirmation. -->
                         <div class="form-footer">
-                            <button type="submit" class="btn btn-success">Create Account</button>
-                            <button type="button" class="btn btn-ghost" onclick="showAccountsList(event)">Cancel</button>
+                            <button type="submit" class="btn btn-success">Review &amp; Create</button>
+                            <button type="button" class="btn btn-ghost" onclick="cancelCreateAccount(event)">Cancel</button>
                         </div>
                     </form>
                 </div>
@@ -191,7 +211,6 @@
                         </div>
                         <div class="panel-actions">
                             <span class="pill" id="archive-count">Not loaded</span>
-                            <button type="button" class="btn" onclick="showAccountsList(event)">Back to List</button>
                         </div>
                     </div>
 
@@ -299,13 +318,31 @@
 
                 <!-- BACKUP & RECOVERY -->
                 <div id="panel-maintenance" data-panel style="display: none;">
+
+                    <!-- WHAT THE SYSTEM IS DOING ON ITS OWN
+                         Filled in from the server rather than written here,
+                         because whether the timer is actually running is a
+                         fact about the server and not about this page. A
+                         screen that claims a backup is being taken every
+                         minute because the HTML says so is worse than a
+                         screen that says nothing. -->
+                    <div class="card auto-backup" id="auto-backup-card">
+                        <span class="auto-backup-state" id="auto-backup-state">Checking</span>
+                        <div class="auto-backup-body">
+                            <h3>Automatic Backup</h3>
+                            <p class="panel-sub" id="auto-backup-text">Reading the backup folder&hellip;</p>
+                        </div>
+                    </div>
+
                     <div class="grid-2">
                         <div class="card tile">
                             <span class="eyebrow">Backup</span>
                             <h3>Save the Whole System</h3>
                             <p class="panel-sub">Writes every table, every row, both views and all
                                 stored procedures into one dated <strong>.sql</strong> file. The file is
-                                kept in the folder below and also opens in MySQL Workbench.</p>
+                                kept in the folder below and also opens in MySQL Workbench.
+                                A backup taken here is yours: it is never rotated away by the
+                                automatic one.</p>
                             <button type="button" class="btn btn-accent" id="run-backup-btn"
                                     onclick="runBackup()">Run Backup Now</button>
                         </div>
@@ -327,9 +364,10 @@
                             <div>
                                 <span class="eyebrow">Backup History</span>
                                 <h3>Saved Backups</h3>
-                                <p class="panel-sub">Every backup this system has taken, newest first.
-                                    Click a row to open it; download, restore and delete live inside
-                                    that panel rather than sitting on every row at once.</p>
+                                <p class="panel-sub">Every backup this system has, newest first, both
+                                    the automatic ones and the ones taken by hand. Click a row to open
+                                    it; download, restore and delete live inside that panel rather
+                                    than sitting on every row at once.</p>
                             </div>
                             <div class="panel-actions">
                                 <span class="pill" id="backup-count">Not loaded</span>
@@ -359,6 +397,7 @@
                                         <th>Date</th>
                                         <th>Time</th>
                                         <th>File</th>
+                                        <th>Kind</th>
                                         <th>Size</th>
                                     </tr>
                                 </thead>
@@ -413,8 +452,16 @@
                             <div class="grid-2">
                                 <div class="form-group">
                                     <label for="store-tin">TIN</label>
+                                    <!-- Digits only, dashed as they are typed. The BIR shape is nine
+                                         digits and a branch code: 000-000-000-00000. A shop that
+                                         knows its TIN as nine digits or with the old three-digit
+                                         branch code still gets in; the head-office code is filled
+                                         in and the old one is widened, both on the way out. -->
                                     <input type="text" id="store-tin" name="tin" class="form-control"
-                                           maxlength="30" placeholder="000-000-000-00000" required>
+                                           inputmode="numeric" autocomplete="off"
+                                           maxlength="17" placeholder="000-000-000-00000" required
+                                           oninput="onTinInput(this)">
+                                    <span class="label-hint">Nine digits and a branch code, as the BIR issued it</span>
                                 </div>
                                 <div class="form-group">
                                     <label for="store-registration">Tax Registration</label>
@@ -444,7 +491,8 @@
                             <p class="store-verdict" id="store-verdict"></p>
 
                             <div class="form-footer">
-                                <button type="submit" class="btn btn-success">Save Details</button>
+                                <button type="submit" class="btn btn-success" id="store-save-btn"
+                                        disabled title="Nothing has changed yet">Save Details</button>
                                 <button type="button" class="btn btn-ghost" onclick="loadStoreSettingsForm()">Reset</button>
                             </div>
                         </form>
@@ -497,17 +545,23 @@
                                 <input type="text" name="firstName" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label>Middle Initial <span class="label-hint">optional</span></label>
-                                <input type="text" name="middleInitial" class="form-control initial-input"
-                                       maxlength="1" placeholder="M">
+                                <label>Middle Name <span class="label-hint">optional</span></label>
+                                <input type="text" name="middleName" class="form-control"
+                                       maxlength="100" placeholder="Dela Cruz">
                             </div>
                             <div class="form-group">
                                 <label>Last Name</label>
                                 <input type="text" name="lastName" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label>Phone</label>
-                                <input type="text" name="phone" class="form-control">
+                                <label for="edit-phone">Phone <span class="label-hint">optional</span></label>
+                                <div class="phone-field">
+                                    <span class="phone-prefix">+63</span>
+                                    <input type="text" id="edit-phone" name="phone" class="form-control"
+                                           inputmode="numeric" autocomplete="tel-national"
+                                           maxlength="10" placeholder="9XXXXXXXXX"
+                                           oninput="onPhoneInput(this)">
+                                </div>
                             </div>
                             <div class="form-group">
                                 <label>Role</label>
@@ -518,7 +572,8 @@
                             <label>Email</label>
                             <input type="email" name="email" class="form-control">
                         </div>
-                        <button type="submit" class="btn btn-success">Save Changes</button>
+                        <button type="submit" class="btn btn-success" id="edit-user-save-btn"
+                                disabled title="Nothing has changed yet">Save Changes</button>
                     </form>
                 </div>
             </div>

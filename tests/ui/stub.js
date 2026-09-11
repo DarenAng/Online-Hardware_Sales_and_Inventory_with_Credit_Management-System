@@ -64,9 +64,11 @@ const USERS = FIRST.map((first, index) => {
   return {
     staff_id: index + 1,
     first_name: first,
-    middle_initial: index % 3 === 0 ? "M" : null,
+    middle_name: index % 3 === 0 ? "Mendoza" : null,
     last_name: LAST[index % LAST.length],
-    full_name: `${first} ${LAST[index % LAST.length]}`,
+    full_name: index % 3 === 0
+      ? `${first} M. ${LAST[index % LAST.length]}`
+      : `${first} ${LAST[index % LAST.length]}`,
     phone: "0917000" + String(1000 + index),
     is_active: active,
     staff_created_at: "2026-01-15 09:00:00",
@@ -103,7 +105,7 @@ const LOGS = Array.from({ length: 47 }, (_, index) => {
       ? JSON.stringify({ staff_id: staff.staff_id, changes: {
           role_id: { before: 4, after: 2 },
           phone: { before: "09170001111", after: "09170002222" },
-          middle_initial: { before: null, after: "M" } } })
+          middle_name: { before: null, after: "Mendoza" } } })
       : (type === "LOGIN_FAILURE"
           ? JSON.stringify({ email: "someone@hardware.com", reason: "wrong_password" })
           : null),
@@ -111,10 +113,18 @@ const LOGS = Array.from({ length: 47 }, (_, index) => {
   };
 });
 
-const BACKUPS = Array.from({ length: 14 }, (_, index) => ({
-  fileName: `hardware_db_backup_2026-08-${String(20 + (index % 10)).padStart(2, "0")}_${String(9 + index).padStart(2, "0")}30.sql`,
-  bytes: 480000 + index * 12345
-}));
+// A mix of both kinds, because the row has to say which it is and the drawer
+// warns that an automatic one is on its way out of the folder.
+const BACKUPS = Array.from({ length: 14 }, (_, index) => {
+  const automatic = index % 3 !== 0;
+  const prefix = automatic ? "hardware_db_auto_" : "hardware_db_backup_";
+  return {
+    fileName: `${prefix}2026-08-${String(20 + (index % 10)).padStart(2, "0")}_` +
+              `${String(9 + index).padStart(2, "0")}30.sql`,
+    bytes: 480000 + index * 12345,
+    automatic: automatic
+  };
+});
 
 app.post("/api/login", (request, response) =>
   response.json({ message: "ok", user: { staff_id: 1, role_name: "System Administrator" } }));
@@ -140,10 +150,83 @@ app.get("/api/audit-logs/types", (request, response) =>
   response.json(TYPES.map((type) => ({ action_type: type, entries: 4 }))));
 
 app.get("/api/backups", (request, response) =>
-  response.json({ folder: "C:/hardware/backups", files: BACKUPS }));
+  response.json({
+    folder: "C:/hardware/backups",
+    files: BACKUPS,
+    auto: {
+      enabled: true, everySeconds: 60, keep: 60,
+      lastFileName: BACKUPS[1].fileName, lastAt: "2026-08-21T09:30:00.000Z",
+      lastError: null, failures: 0
+    }
+  }));
 
 app.get("/api/notifications", (request, response) => response.json([]));
 app.get("/api/me", (request, response) => response.json(USERS[0]));
+
+// ==========================================================================
+// CREATING AN ACCOUNT IS TWO REQUESTS
+// The review step works the account out and makes a password; the second one
+// creates it from the draft id. The stub keeps the drafts in a plain object
+// because that is all the screens need to be driven through both steps.
+// ==========================================================================
+const DRAFTS = {};
+
+app.post("/api/users/draft", (request, response) => {
+  const body = request.body || {};
+  const middle = String(body.middleName || "").trim();
+  const draftId = "draft-" + Object.keys(DRAFTS).length;
+
+  DRAFTS[draftId] = body;
+  response.json({
+    draftId: draftId,
+    expiresInSeconds: 600,
+    password: "Kx7ratHmqe4$Wn",
+    willEmail: false,
+    firstName: body.firstName,
+    middleName: middle || null,
+    lastName: body.lastName,
+    phone: body.phone || null,
+    roleId: body.roleId,
+    roleName: (ROLES.find((r) => r.role_id === Number(body.roleId)) || {}).role_name || "Cashier",
+    email: body.email,
+    fullName: body.firstName + (middle ? " " + middle[0].toUpperCase() + "." : "") +
+              " " + body.lastName
+  });
+});
+
+app.post("/api/users", (request, response) => {
+  const draft = DRAFTS[String((request.body || {}).draftId)];
+  if (!draft) return response.status(410).json({ error: "That review has expired." });
+
+  response.json({
+    message: "Account created successfully.",
+    staffId: 99,
+    name: draft.firstName + " " + draft.lastName,
+    email: draft.email,
+    emailed: false,
+    password: "Kx7ratHmqe4$Wn",
+    reason: "Mail is not set up on this server, so the password could not be sent."
+  });
+});
+
+// the Edit tab of the user card saves through this
+app.put("/api/users/:id", (request, response) => {
+  const user = USERS.find((row) => row.staff_id === Number(request.params.id));
+  if (!user) return response.status(404).json({ error: "Staff record not found" });
+
+  const body = request.body || {};
+  user.first_name = body.firstName;
+  user.middle_name = body.middleName || null;
+  user.last_name = body.lastName;
+  user.phone = body.phone || null;
+  user.role_id = Number(body.roleId);
+  user.role_name = (ROLES.find((r) => r.role_id === user.role_id) || {}).role_name || user.role_name;
+  user.full_name = user.first_name +
+    (user.middle_name ? " " + user.middle_name[0].toUpperCase() + "." : "") + " " + user.last_name;
+  if (body.email) user.email = body.email;
+
+  response.json({ message: "Account updated." });
+});
 
 app.patch("/api/users/:id/status", (request, response) => {
   const user = USERS.find((row) => row.staff_id === Number(request.params.id));
@@ -303,19 +386,14 @@ app.get("/api/manager/summary", (request, response) => {
   response.json({
     saleCount: live.length,
     grossSales: money(live, "final_amount"),
-    receivables: money(live, "balance_due"),
-    productCount: STOCKS.length,
-    lowStock: STOCKS.filter((p) => p.stock_status !== "In Stock").length,
-    deliveryCount: DELIVERIES.length,
-    deliveriesInProgress: DELIVERIES.filter((d) => ["Pending", "In Transit", "Out for Delivery"].includes(d.status)).length,
-    deliveryProblems: DELIVERIES.filter((d) => ["Delayed", "Failed"].includes(d.status)).length,
-    archiveCount: ARCHIVES.length,
     totalIncome: money(live, "amount_paid"),
     incomeToday: 4820,
-    unitsSold: 1284,
     pendingCredits: money(live, "balance_due"),
     pendingCreditCount: live.filter((s) => s.balance_due > 0).length,
-    reorderAlerts: STOCKS.filter((p) => p.stock_status !== "In Stock").length
+    productCount: STOCKS.length,
+    reorderAlerts: STOCKS.filter((p) => p.stock_status !== "In Stock").length,
+    deliveriesInProgress: DELIVERIES.filter((d) => ["Pending", "In Transit", "Out for Delivery"].includes(d.status)).length,
+    deliveryProblems: DELIVERIES.filter((d) => ["Delayed", "Failed"].includes(d.status)).length
   });
 });
 
@@ -679,7 +757,7 @@ app.get("/api/sales/undelivered", (request, response) => response.json([]));
 // one of their own checks passed. A suite that goes red when nothing is wrong
 // is a suite people stop reading, which is how the two genuinely stale checks
 // above sat broken for as long as they did.
-app.get("/api/store-settings", (request, response) => response.json({
+const STORE = {
   setting_id: 1,
   store_name: "Stub Hardware & Supply",
   address: "123 Rizal Avenue, Quezon City",
@@ -689,7 +767,33 @@ app.get("/api/store-settings", (request, response) => response.json({
   invoice_note: "Thank you for your business.",
   updated_at: "2026-09-01 09:00:00",
   updated_by: "Admin S. User"
-}));
+};
+
+app.get("/api/store-settings", (request, response) => response.json(STORE));
+
+// The Store & Tax form saves through this. The stub keeps the row in memory
+// and refuses the same TIN shapes the real server refuses, so the screen's
+// own check and the server's answer can both be driven.
+app.put("/api/store-settings", (request, response) => {
+  const body = request.body || {};
+  const digits = String(body.tin || "").replace(/\D/g, "");
+
+  if (![9, 12, 14].includes(digits.length) || /^0+$/.test(digits.slice(0, 9))) {
+    return response.status(400).json({ error: "That is not a TIN the BIR would have issued." });
+  }
+
+  Object.assign(STORE, {
+    store_name: body.storeName,
+    address: body.address,
+    tin: body.tin,
+    registration_type: body.registrationType,
+    vat_rate: String(Number(body.vatRate || 0).toFixed(2)),
+    invoice_note: body.invoiceNote || null,
+    updated_at: "2026-09-11 10:00:00"
+  });
+
+  response.json({ message: "Saved. Invoices now show a 12.00% VAT breakdown." });
+});
 
 app.get("/api/returns", (request, response) => response.json(RETURNS));
 app.get("/api/cashier/summary", (request, response) =>

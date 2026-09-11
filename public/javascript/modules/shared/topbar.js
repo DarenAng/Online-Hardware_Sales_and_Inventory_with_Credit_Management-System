@@ -60,14 +60,15 @@ function buildTopbarCorner() {
                     <span class="account-drop-mail" data-current-email>No email</span>
                 </div>
             </div>
+            <!-- ONE DOOR, NOT THREE
+                 Edit my credentials and Change my password used to stand here
+                 as menu items of their own. All three opened the same popup:
+                 the popup has Credentials, Edit Details and Password as tabs
+                 across the top of it, so the menu was offering three ways in
+                 to one place and then showing the tabs anyway. Now the menu
+                 opens the popup and the popup's own tabs do the choosing. -->
             <button type="button" class="account-action" onclick="openMyAccount('view')">
                 <span class="account-action-mark">&#9776;</span>View my credentials
-            </button>
-            <button type="button" class="account-action" onclick="openMyAccount('edit')">
-                <span class="account-action-mark">&#9998;</span>Edit my credentials
-            </button>
-            <button type="button" class="account-action" onclick="openMyAccount('password')">
-                <span class="account-action-mark">&#9913;</span>Change my password
             </button>
             <button type="button" class="account-action is-logout" onclick="confirmLogout()">
                 <span class="account-action-mark">&#9099;</span>Log out

@@ -56,6 +56,13 @@ function isOurProblem(text) {
 
   const shot = (name) => page.screenshot({ path: path.join(OUT, name + ".png"), fullPage: true });
 
+  // the headings a reader can see, which is not the same as the headings in
+  // the markup once a filter has taken one off the grid
+  const shownHeaders = (table) => page.evaluate((id) =>
+    [...document.querySelectorAll("#" + id + " thead th")]
+      .filter((th) => getComputedStyle(th).display !== "none")
+      .map((th) => th.textContent.trim()), table);
+
   // ---------- 1. nothing loads on its own ----------
   const requested = [];
   page.on("request", (r) => { if (r.url().includes("/api/")) requested.push(r.url()); });
@@ -106,23 +113,52 @@ function isOurProblem(text) {
     (await page.textContent(".pager-page")).trim() === "Page 2 of 3");
 
   // ---------- 4. filters ----------
+  check("status and presence have a column each",
+    JSON.stringify(await shownHeaders("accounts-table")) ===
+    JSON.stringify(["ID", "Name", "Email", "Role", "Status", "Signed In"]),
+    (await shownHeaders("accounts-table")).join(" / "));
+
   await page.selectOption("#accounts-presence", "online");
   await page.waitForTimeout(300);
   const online = await page.locator("#accounts-table tbody tr").count();
   check("the presence filter narrows the grid", online > 0 && online <= 10, `saw ${online}`);
   check("every row left is online",
     await page.locator("#accounts-table tbody tr .presence.is-online").count() === online);
+  check("the presence filter takes the Signed In column off the grid",
+    !(await shownHeaders("accounts-table")).includes("Signed In") &&
+    (await shownHeaders("accounts-table")).includes("Status"),
+    (await shownHeaders("accounts-table")).join(" / "));
   await shot("04-accounts-online");
 
   await page.selectOption("#accounts-presence", "all");
+  await page.waitForTimeout(300);
+  check("clearing the filter brings the column back",
+    (await shownHeaders("accounts-table")).includes("Signed In"));
+
   await page.selectOption("#accounts-status", "inactive");
   await page.waitForTimeout(500);
   const inactive = await page.locator("#accounts-table tbody tr").count();
   check("the account-state filter goes back to the server",
     inactive > 0 && await page.locator("#accounts-table .badge-danger").count() === inactive,
     `saw ${inactive} rows`);
+  check("the account-state filter takes the Status column off the grid",
+    !(await shownHeaders("accounts-table")).includes("Status") &&
+    (await shownHeaders("accounts-table")).includes("Signed In"),
+    (await shownHeaders("accounts-table")).join(" / "));
   await page.selectOption("#accounts-status", "all");
   await page.waitForTimeout(500);
+
+  await page.selectOption("#accounts-role", "4");
+  await page.waitForTimeout(300);
+  check("the role filter takes the Role column off the grid",
+    !(await shownHeaders("accounts-table")).includes("Role"),
+    (await shownHeaders("accounts-table")).join(" / "));
+  check("the rows left are all one role, and the row no longer says so",
+    await page.locator("#accounts-table tbody tr").count() > 0 &&
+    await page.locator("#accounts-table tbody tr td:nth-child(4)").evaluateAll(
+      (cells) => cells.every((cell) => getComputedStyle(cell).display === "none")));
+  await page.selectOption("#accounts-role", "all");
+  await page.waitForTimeout(300);
 
   // ---------- 5. search ----------
   await page.fill("#accounts-search", "rosa");
@@ -146,8 +182,53 @@ function isOurProblem(text) {
   check("the card reports presence",
     (await page.textContent("#modal-user-details")).includes("Signed In Now"));
   await shot("06-user-card");
+
+  // Save is off until something has actually changed
+  await page.click("#modal-edit-tab");
+  await page.waitForTimeout(200);
+  check("Save Changes starts off, because nothing has been edited",
+    await page.locator("#edit-user-save-btn").isDisabled());
+  const firstNameBox = page.locator("#edit-user-form input[name='firstName']");
+  const original = await firstNameBox.inputValue();
+  await firstNameBox.fill(original + "x");
+  check("Save Changes comes on with the first edit",
+    await page.locator("#edit-user-save-btn").isEnabled());
+  await firstNameBox.fill(original);
+  check("undoing the edit puts Save Changes back off",
+    await page.locator("#edit-user-save-btn").isDisabled());
+  await firstNameBox.fill(original + "   ");
+  check("spaces on the end do not count as an edit",
+    await page.locator("#edit-user-save-btn").isDisabled());
+  await firstNameBox.fill(original);
+  await shot("06b-user-edit-clean");
+
   await page.click("#user-modal .modal-close");
   await page.waitForTimeout(300);
+
+  // ---------- 6b. cancelling the create form empties it ----------
+  await page.evaluate("showCreateAccount()");
+  await page.waitForTimeout(200);
+  await page.fill("#create-user-form input[name='firstName']", "Half");
+  await page.fill("#create-user-form input[name='lastName']", "Typed");
+  await page.fill("#create-user-form input[name='email']", "half@typed.com");
+  await page.fill("#create-phone", "91");
+  await page.selectOption("#create-user-form select[name='roleId']", "4");
+  check("a short phone number is flagged while it is typed",
+    await page.locator("#create-phone.is-bad").count() === 1);
+  await page.click("#panel-create button:has-text('Cancel')");
+  await page.waitForTimeout(200);
+  check("Cancel goes back to the directory",
+    await page.locator("#panel-accounts").isVisible() && !(await page.locator("#panel-create").isVisible()));
+  await page.evaluate("showCreateAccount()");
+  const leftBehind = await page.evaluate(() =>
+    [...document.querySelectorAll("#create-user-form input")].map((box) => box.value).join(""));
+  check("Cancel emptied every box on the create form", leftBehind === "", "left: " + leftBehind);
+  check("Cancel also cleared the phone box's verdict",
+    await page.locator("#create-phone.is-bad").count() === 0);
+  check("Cancel put the role back to the first one",
+    (await page.locator("#create-user-form select[name='roleId']").inputValue()) === "1");
+  await shot("06c-create-cancelled");
+  await page.evaluate("showAccountsList()");
 
   // ---------- 7. the archive and its restoration card ----------
   await page.evaluate("showArchiveModule()");
@@ -210,6 +291,10 @@ function isOurProblem(text) {
   check("the type filter narrows the trail",
     await page.locator("#logs-table tbody .badge:has-text('Failed sign-in')").count() ===
     await page.locator("#logs-table tbody tr").count());
+  check("the type filter takes the Action Type column off the grid",
+    !(await shownHeaders("logs-table")).includes("Action Type") &&
+    (await shownHeaders("logs-table")).includes("Timestamp"),
+    (await shownHeaders("logs-table")).join(" / "));
   await shot("12-logs-failures");
 
   await page.selectOption("#logs-type", "UPDATE");
@@ -268,6 +353,52 @@ function isOurProblem(text) {
 
   await page.evaluate("closeBackupDrawer()");
   await page.waitForTimeout(300);
+
+  // ---------- 9b. store & tax: Save waits for an edit, and the TIN is checked ----------
+  await page.evaluate("showStoreSettings()");
+  await page.waitForTimeout(700);
+  check("Save Details starts off, because the boxes say what the record says",
+    await page.locator("#store-save-btn").isDisabled());
+
+  await page.fill("#store-tin", "");
+  await page.type("#store-tin", "123456789");
+  check("the TIN is dashed as it is typed",
+    (await page.inputValue("#store-tin")) === "123-456-789", await page.inputValue("#store-tin"));
+  check("an edit to the TIN switches Save Details on",
+    await page.locator("#store-save-btn").isEnabled());
+
+  await page.fill("#store-tin", "");
+  await page.type("#store-tin", "12 34");
+  check("a TIN with the wrong number of digits is flagged while typed",
+    await page.locator("#store-tin.is-bad").count() === 1);
+
+  const saves = [];
+  page.on("request", (r) => { if (r.method() === "PUT" && r.url().includes("/api/store-settings")) saves.push(r.url()); });
+  await page.click("#store-save-btn");
+  await page.waitForTimeout(300);
+  check("a bad TIN is refused at the form and nothing is sent",
+    /A TIN is 9 digits/.test(await page.textContent("#store-verdict")) && saves.length === 0,
+    await page.textContent("#store-verdict"));
+
+  await page.fill("#store-tin", "");
+  await page.type("#store-tin", "000000000");
+  await page.click("#store-save-btn");
+  await page.waitForTimeout(300);
+  check("the all-zero placeholder is not accepted as a TIN",
+    /placeholder/.test(await page.textContent("#store-verdict")) && saves.length === 0);
+  await shot("17-store-bad-tin");
+
+  await page.fill("#store-tin", "");
+  await page.type("#store-tin", "987654321001");
+  await page.click("#store-save-btn");
+  await page.waitForTimeout(1200);
+  check("a TIN with the old three-digit branch code saves",
+    saves.length === 1 && (await page.textContent("#store-verdict")).trim() === "");
+  check("it is stored widened to the five-digit branch code",
+    (await page.inputValue("#store-tin")) === "987-654-321-00001", await page.inputValue("#store-tin"));
+  check("Save Details goes back off once the save has landed",
+    await page.locator("#store-save-btn").isDisabled());
+  await shot("18-store-saved");
 
   // ---------- 10. the toast clock ----------
   const life = await page.evaluate("JSON.stringify(TOAST_LIFE)");

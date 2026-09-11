@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventory - Hardware Management System</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="css/general-ui.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/modules/inventory-clerk.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <a href="#" class="sidebar-brand" onclick="showInventoryHome(event)" title="Back to Inventory Management">
+                <span class="brand-mark">HW</span>
+                <span class="brand-text">
+                    <span class="brand-name">Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
+            </a>
+            <div class="sidebar-user">
+                <span class="sidebar-eyebrow">Inventory Clerk</span>
+                <span data-current-user>User</span>
+            </div>
+            <ul class="sidebar-nav">
+                <li>
+                    <a href="#inventory" onclick="toggleDropdown('inventory-dropdown', event)" class="nav-parent">
+                        Inventory Management <span class="nav-caret">&#9660;</span>
+                    </a>
+                    <ul id="inventory-dropdown" class="nav-sub" style="display: block;">
+                        <li><a href="#" data-panel-link="panel-inventory" onclick="loadInventoryAll(event)">Material List</a></li>
+                        <li><a href="#" data-panel-link="panel-adjust" onclick="showAdjust(event)">Stock Adjustment</a></li>
+                        <li><a href="#" data-panel-link="panel-adjust-log" onclick="showAdjustmentHistory(event)">Adjustment History</a></li>
+                        <li><a href="#" data-panel-link="panel-reorder" onclick="showReorder(event)">Reorder Point Settings</a></li>
+                        <li><a href="#" data-panel-link="panel-po" onclick="showPurchaseOrders(event)">Purchase Order</a></li>
+                        <li><a href="#" data-panel-link="panel-returns" onclick="showReturns(event)">Returned Items</a></li>
+                    </ul>
+                </li>
+                <li><a href="#" data-panel-link="panel-report" onclick="showDamageReport(event)">Make a Report</a></li>
+                <li><a href="#" data-panel-link="panel-archive" onclick="showInventoryArchive(event)">Archive</a></li>
+            </ul>
+        </aside>
+
+        <!-- the shade behind the menu once it slides over the page -->
+        <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
+
+        <main class="main-content">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="menu-toggle" type="button" onclick="toggleSidebar()"
+                            aria-controls="sidebar" aria-expanded="false"
+                            aria-label="Menu">&#9776;</button>
+                    <span class="topbar-title" id="inv-page-title">Inventory Management</span>
+                </div>
+            </header>
+
+            <div class="content-area">
+
+                <!-- STOCK WARNING BANNER -->
+                <div id="stock-banner"></div>
+
+                <!-- DEFAULT: INVENTORY MANAGEMENT -->
+                <div class="card" id="panel-inventory" data-panel>
+                    <div class="panel-head">
+                        <div>
+                            <h3>Material List</h3>
+                            <p class="panel-sub">Nothing is read from the database until you ask for it. Search for a material, pick a stock status, or press <kbd>Load Data</kbd> for the whole list. Archived materials stay out of this table.</p>
+                        </div>
+                        <span class="pill" id="inv-count">Not loaded</span>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="inv-search"
+                                   placeholder="Search by material, category, or supplier"
+                                   oninput="dataPanelSearch('clerk-materials', this.value)">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="inv-status">Stock status</label>
+                            <select id="inv-status"
+                                    onchange="dataPanelFilter('clerk-materials', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="In Stock">In stock</option>
+                                <option value="Low Stock">Low stock</option>
+                                <option value="Out of Stock">Out of stock</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('clerk-materials')">Load Data</button>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="inv-table">
+                            <thead>
+                                <tr><th>ID</th><th>Material</th><th>Category</th><th>On Hand</th><th>Reorder At</th><th>Status</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="inv-pager"></div>
+                </div>
+
+                <!-- STOCK ADJUSTMENT -->
+                <!-- ============================================================
+                     STOCK ADJUSTMENT
+                     The form on its own. The log used to sit underneath it,
+                     which meant the clerk who came to correct one figure
+                     scrolled past a hundred rows of history they had not
+                     asked for to reach the button. History is its own screen
+                     now, one click away in the menu.
+                     ============================================================ -->
+                <div class="card" id="panel-adjust" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Stock Adjustment</h3>
+                            <p class="panel-sub">Add stock, remove stock, or correct the figure after a
+                                physical count. Every change is logged with its reason.</p>
+                        </div>
+                    </div>
+
+                    <form id="adjust-form" onsubmit="handleAdjustStock(event)" autocomplete="off">
+                        <!-- WHICH MATERIAL
+                             A dropdown of the whole catalogue is the wrong control
+                             for a stockroom: finding one item in six hundred by
+                             scrolling is slower than typing three letters of it.
+                             Text that matches nothing is not an answer here, so
+                             the strip below is the only thing that says a choice
+                             was made, and the form will not send without one. -->
+                        <div class="form-group">
+                            <label for="adjust-material">Material</label>
+                            <div class="suggest-wrap">
+                                <input type="text" id="adjust-material" class="form-control"
+                                       autocomplete="off" placeholder="Type a material, brand, or category"
+                                       role="combobox" aria-expanded="false"
+                                       aria-controls="adjust-suggest" aria-autocomplete="list"
+                                       oninput="onAdjustMaterialInput(this.value)"
+                                       onfocus="onAdjustMaterialInput(this.value)"
+                                       onkeydown="onAdjustMaterialKey(event)">
+                                <input type="hidden" name="productId" value="">
+                                <button type="button" class="suggest-clear" id="adjust-material-clear"
+                                        onclick="clearAdjustMaterial()" aria-label="Clear the material"
+                                        hidden>&times;</button>
+                                <ul class="suggest-list" id="adjust-suggest" role="listbox" hidden></ul>
+                            </div>
+                            <div class="pick-strip" id="adjust-material-strip" hidden></div>
+                            <p class="pick-verdict" id="adjust-material-verdict"></p>
+                        </div>
+
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="adjust-type">Adjustment Type</label>
+                                <select id="adjust-type" name="adjustmentType" class="form-control"
+                                        onchange="renderAdjustPreview()" required>
+                                    <option value="Add">Add to stock</option>
+                                    <option value="Remove">Remove from stock</option>
+                                    <option value="Recount">Recount, set exact figure</option>
+                                </select>
+                            </div>
+
+                            <!-- COUNTED IN WHAT
+                                 Cement in bags, pipe in metres, nails by the kilo.
+                                 The list suggests what the shop already uses and
+                                 accepts anything it does not: a unit typed for the
+                                 first time joins the list rather than being
+                                 refused, because a clerk holding a sack should not
+                                 have to wait for somebody to open the database. -->
+                            <div class="form-group">
+                                <label for="adjust-unit">Counted In</label>
+                                <div class="suggest-wrap">
+                                    <input type="text" id="adjust-unit" name="unitName" class="form-control"
+                                           autocomplete="off" placeholder="pcs, bag, kilogram, box"
+                                           maxlength="20"
+                                           role="combobox" aria-expanded="false"
+                                           aria-controls="unit-suggest" aria-autocomplete="list"
+                                           oninput="onAdjustUnitInput(this.value)"
+                                           onfocus="onAdjustUnitInput(this.value)"
+                                           onkeydown="onAdjustUnitKey(event)">
+                                    <ul class="suggest-list" id="unit-suggest" role="listbox" hidden></ul>
+                                </div>
+                                <p class="unit-verdict" id="adjust-unit-verdict"></p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="adjust-qty">Quantity</label>
+                                <input type="number" id="adjust-qty" name="quantity" class="form-control"
+                                       min="0" required oninput="renderAdjustPreview()">
+                            </div>
+
+                            <div class="form-group">
+                                <label for="adjust-reason">Reason</label>
+                                <input type="text" id="adjust-reason" name="reason" class="form-control"
+                                       placeholder="Delivery received, breakage, recount" required>
+                            </div>
+                        </div>
+
+                        <!-- What this will do to the figure on the shelf, before
+                             the button is pressed rather than as a refusal after
+                             it. A Remove that would take stock below zero is the
+                             mistake this catches. -->
+                        <p class="adjust-preview" id="adjust-preview"></p>
+
+                        <div class="form-footer">
+                            <button type="submit" class="btn btn-success">Apply Adjustment</button>
+                            <button type="button" class="btn btn-ghost" onclick="showInventoryHome(event)">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- ============================================================
+                     ADJUSTMENT HISTORY
+                     Its own screen, because it is history rather than a working
+                     list: nobody scrolls it on the way to doing something else.
+                     ============================================================ -->
+                <div class="card" id="panel-adjust-log" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <span class="eyebrow">History</span>
+                            <h3>Adjustment History</h3>
+                            <p class="panel-sub">Every stock movement on record, newest first.</p>
+                        </div>
+                        <span class="pill" id="adjust-count">Not loaded</span>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="adjust-search"
+                                   placeholder="Search by material, reason, or who adjusted it"
+                                   oninput="dataPanelSearch('clerk-adjustments', this.value)">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="adjust-type-filter">Type</label>
+                            <select id="adjust-type-filter"
+                                    onchange="dataPanelFilter('clerk-adjustments', 'type', this.value)">
+                                <option value="all">Every type</option>
+                                <option value="Add">Added</option>
+                                <option value="Remove">Removed</option>
+                                <option value="Recount">Recounted</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('clerk-adjustments')">Load Data</button>
+                        <button type="button" class="btn btn-ghost" onclick="clearAdjustmentPanel()">Clear</button>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="adjust-table">
+                            <thead>
+                                <tr><th>When</th><th>Material</th><th>Type</th><th>Before</th>
+                                    <th>Change</th><th>After</th><th>By</th><th></th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="adjust-pager"></div>
+                </div>
+
+                <!-- REORDER POINT SETTINGS -->
+                <div class="card" id="panel-reorder" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Reorder Point Settings</h3>
+                            <p class="panel-sub">Set the level at which each material raises a warning. Saving re-checks stock straight away.</p>
+                        </div>
+                        <span class="pill" id="reorder-count">Not loaded</span>
+                    </div>
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="reorder-search"
+                                   placeholder="Search by material"
+                                   oninput="dataPanelSearch('clerk-reorder', this.value)">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="reorder-status">Stock status</label>
+                            <select id="reorder-status"
+                                    onchange="dataPanelFilter('clerk-reorder', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="Low Stock">Low stock</option>
+                                <option value="Out of Stock">Out of stock</option>
+                                <option value="In Stock">In stock</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('clerk-reorder')">Load Data</button>
+                    </div>
+                    <div class="table-responsive grid-10">
+                        <table id="reorder-table">
+                            <thead>
+                                <tr><th>Material</th><th>On Hand</th><th>Reorder At</th><th>New Value</th><th>Status</th><th>Action</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="reorder-pager"></div>
+                </div>
+
+                <!-- PURCHASE ORDERS -->
+                <div id="panel-po" data-panel style="display: none;">
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Raise a Purchase Order</h3>
+                                <p class="panel-sub">Pick a supplier, add the lines, and send it. Receiving the order later adds the stock automatically.</p>
+                            </div>
+                        </div>
+                        <form id="po-form" onsubmit="handleCreatePurchaseOrder(event)">
+                            <div class="form-group">
+                                <label>Supplier</label>
+                                <select name="supplierId" class="form-control" data-supplier-select required></select>
+                            </div>
+                            <div id="po-lines"></div>
+                            <div class="form-footer">
+                                <button type="button" class="btn btn-ghost" onclick="addPurchaseLine()">Add Line</button>
+                                <button type="submit" class="btn btn-success">Create Purchase Order</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <span class="eyebrow">History</span>
+                                <h3>Purchase Orders</h3>
+                                <p class="panel-sub">Click a row for the lines. Pending orders can be received.</p>
+                            </div>
+                            <span class="pill" id="po-count">Not loaded</span>
+                        </div>
+                        <div class="panel-toolbar">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="po-search"
+                                       placeholder="Search by supplier or order number"
+                                       oninput="dataPanelSearch('clerk-po', this.value)">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="po-status">Status</label>
+                                <select id="po-status"
+                                        onchange="dataPanelFilter('clerk-po', 'status', this.value)">
+                                    <option value="all">Every status</option>
+                                    <option value="Pending">Pending</option>
+                                    <option value="Received">Received</option>
+                                    <option value="Cancelled">Cancelled</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                            <button type="button" class="btn btn-accent" onclick="dataPanelOpen('clerk-po')">Load Data</button>
+                        </div>
+                        <div class="table-responsive grid-10">
+                            <table id="po-table">
+                                <thead>
+                                    <tr><th>PO</th><th>Supplier</th><th>Ordered</th><th>Lines</th><th>Total Cost</th><th>Status</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="po-pager"></div>
+                    </div>
+                </div>
+
+                <!-- RETURNED ITEMS -->
+                <div class="card" id="panel-returns" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Returned Items</h3>
+                            <p class="panel-sub">Every return, damage, and refund on record. Click a row for the full report.</p>
+                        </div>
+                        <div class="panel-actions">
+                            <span class="pill" id="returns-count">Not loaded</span>
+                        </div>
+                    </div>
+                    <div class="filter-row" id="return-filters"></div>
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="returns-search"
+                                   placeholder="Search by material or reason"
+                                   oninput="dataPanelSearch('clerk-returns', this.value)">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="returns-where">Goods went</label>
+                            <select id="returns-where"
+                                    onchange="dataPanelFilter('clerk-returns', 'where', this.value)">
+                                <option value="all">Either way</option>
+                                <option value="Return to Stock">Back on shelf</option>
+                                <option value="Write-Off">Written off</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('clerk-returns')">Load Data</button>
+                    </div>
+                    <div class="table-responsive grid-10">
+                        <table id="returns-table">
+                            <thead>
+                                <tr><th>ID</th><th>Type</th><th>Material</th><th>Qty</th><th>Goods Went</th><th>Filed</th><th>Status</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="returns-pager"></div>
+                </div>
+
+                <!-- MAKE A REPORT -->
+                <div class="card" id="panel-report" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <span class="eyebrow">Reporting</span>
+                            <h3>Make a Report</h3>
+                            <p class="panel-sub">File a damaged or refunded item. Damaged stock comes off the shelf, refunded stock goes back on if it is resalable. The manager is notified either way.</p>
+                        </div>
+                    </div>
+                    <form id="report-form" onsubmit="handleFileReport(event)">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label>Report Type</label>
+                                <select name="reportType" class="form-control" onchange="onReportTypeChange(this.value)" required>
+                                    <option value="Damaged">Damaged item</option>
+                                    <option value="Refunded">Refunded item</option>
+                                    <option value="Return">Plain return</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Material</label>
+                                <select name="productId" class="form-control" data-product-select required></select>
+                            </div>
+                            <div class="form-group">
+                                <label>Quantity</label>
+                                <input type="number" name="quantity" class="form-control" min="1" value="1" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Sale ID <span class="label-hint">optional</span></label>
+                                <input type="number" name="saleId" class="form-control" min="1" placeholder="Leave blank if not from a sale">
+                            </div>
+                            <div class="form-group" id="refund-field">
+                                <label>Refund Amount</label>
+                                <input type="number" name="refundAmount" class="form-control" min="0" step="0.01" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>Put Back on the Shelf</label>
+                                <select name="restock" class="form-control">
+                                    <option value="false">No, keep it off stock</option>
+                                    <option value="true">Yes, item is resalable</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Reason</label>
+                            <textarea name="reason" class="form-control" rows="3" placeholder="What happened to the item" required></textarea>
+                        </div>
+                        <div class="form-footer">
+                            <button type="submit" class="btn btn-success">File Report</button>
+                            <button type="button" class="btn btn-ghost" onclick="showInventoryHome(event)">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- ARCHIVE -->
+                <div class="card" id="panel-archive" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Archived Materials</h3>
+                            <p class="panel-sub">Discontinued or out-of-stock materials live here and stay out of the material list. Restore brings one back.</p>
+                        </div>
+                        <div class="panel-actions">
+                            <span class="pill" id="arch-count">Not loaded</span>
+                        </div>
+                    </div>
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="arch-search"
+                                   placeholder="Search archived materials"
+                                   oninput="dataPanelSearch('clerk-archive', this.value)">
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('clerk-archive')">Load Data</button>
+                    </div>
+                    <div class="table-responsive grid-10">
+                        <table id="arch-table">
+                            <thead>
+                                <tr><th>ID</th><th>Material</th><th>Category</th><th>On Hand</th><th>Archived On</th><th>Action</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="arch-pager"></div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- PAGED DETAIL POPUP -->
+    <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="detail-avatar">--</div>
+                    <div>
+                        <h3 id="detail-title">Record</h3>
+                        <span class="modal-role" id="detail-subtitle">Detail</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('detail-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-steps" id="detail-steps"></div>
+
+            <div class="modal-body">
+                <div id="detail-page"></div>
+            </div>
+
+            <div class="modal-foot modal-pager">
+                <button type="button" class="btn btn-ghost" id="detail-back" onclick="detailBack()">&#8592; Back</button>
+                <span class="pager-count" id="detail-counter">Page 1 of 1</span>
+                <button type="button" class="btn btn-accent" id="detail-next" onclick="detailNext()">Next &#8594;</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="javascript/modules/shared/helpers.js"></script>
+    <script src="javascript/modules/shared/format.js"></script>
+    <script src="javascript/modules/shared/ui-kit.js"></script>
+    <script src="javascript/modules/shared/tables.js"></script>
+    <script src="javascript/modules/shared/data-panel.js"></script>
+    <script src="javascript/modules/shared/live-sync.js"></script>
+    <script src="javascript/modules/shared/modals.js"></script>
+    <script src="javascript/modules/shared/detail-modal.js"></script>
+    <script src="javascript/modules/shared/session.js"></script>
+    <script src="javascript/modules/shared/topbar.js"></script>
+    <script src="javascript/modules/shared/my-account.js"></script>
+    <script src="javascript/modules/shared/notifications.js"></script>
+    <script src="javascript/modules/inventory-clerk.js"></script>
+</body>
+</html>
