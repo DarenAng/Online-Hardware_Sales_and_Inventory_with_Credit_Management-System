@@ -52,17 +52,24 @@ function buildAccountModal() {
                                 <input type="text" id="me-first" name="firstName" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label for="me-initial">Middle Initial <span class="label-hint">optional</span></label>
-                                <input type="text" id="me-initial" name="middleInitial"
-                                       class="form-control initial-input" maxlength="1" placeholder="M">
+                                <label for="me-middle">Middle Name <span class="label-hint">optional</span></label>
+                                <input type="text" id="me-middle" name="middleName"
+                                       class="form-control" maxlength="100" placeholder="Dela Cruz">
                             </div>
                             <div class="form-group">
                                 <label for="me-last">Last Name</label>
                                 <input type="text" id="me-last" name="lastName" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label for="me-phone">Phone</label>
-                                <input type="text" id="me-phone" name="phone" class="form-control" placeholder="09XXXXXXXXX">
+                                <label for="me-phone">Phone <span class="label-hint">optional</span></label>
+                                <div class="phone-field">
+                                    <span class="phone-prefix">+63</span>
+                                    <input type="text" id="me-phone" name="phone" class="form-control"
+                                           inputmode="numeric" autocomplete="tel-national"
+                                           maxlength="10" placeholder="9XXXXXXXXX"
+                                           oninput="onPhoneInput(this)">
+                                </div>
+                                <span class="label-hint">Ten digits, starting with 9</span>
                             </div>
                         </div>
                         <div class="form-group">
@@ -152,7 +159,7 @@ function renderMyAccount() {
     const me = myAccount;
     if (!me) return;
 
-    const name = me.full_name || `${me.first_name} ${me.last_name}`;
+    const name = staffName(me);
     document.getElementById('account-name').textContent = name;
     document.getElementById('account-role').textContent = me.role_name;
     document.getElementById('account-avatar').textContent =
@@ -162,14 +169,16 @@ function renderMyAccount() {
         detailRow('Staff ID', '#' + escapeHtml(me.staff_id)) +
         detailRow('Full Name', escapeHtml(name)) +
         detailRow('First Name', escapeHtml(me.first_name)) +
-        detailRow('Middle Initial', me.middle_initial
-            ? escapeHtml(me.middle_initial) + '.'
+        detailRow('Middle Name', me.middle_name
+            ? escapeHtml(me.middle_name)
             : '<span class="muted">Not set</span>') +
         detailRow('Last Name', escapeHtml(me.last_name)) +
         detailRow('Username / Email', me.email
             ? escapeHtml(me.email)
             : '<span class="muted">No login account</span>') +
-        detailRow('Phone', me.phone ? escapeHtml(me.phone) : '<span class="muted">Not set</span>') +
+        detailRow('Phone', me.phone
+            ? '<span class="mono">' + escapeHtml(phoneForDisplay(me.phone)) + '</span>'
+            : '<span class="muted">Not set</span>') +
         detailRow('Role', escapeHtml(me.role_name)) +
         detailRow('Account Status', `<span class="badge ${me.is_active ? 'badge-success' : 'badge-danger'}">${me.is_active ? 'Active' : 'Inactive'}</span>`) +
         detailRow('Hired On', escapeHtml(me.staff_created_at)) +
@@ -180,9 +189,9 @@ function renderMyAccount() {
 
     const form = document.getElementById('account-form');
     form.elements.firstName.value = me.first_name || '';
-    form.elements.middleInitial.value = me.middle_initial || '';
+    form.elements.middleName.value = me.middle_name || '';
     form.elements.lastName.value = me.last_name || '';
-    form.elements.phone.value = me.phone || '';
+    form.elements.phone.value = phoneToInput(me.phone);
     form.elements.email.value = me.email || '';
 }
 
@@ -192,9 +201,9 @@ async function handleSaveMyProfile(event) {
 
     const data = {
         firstName: form.elements.firstName.value.trim(),
-        middleInitial: form.elements.middleInitial.value.trim(),
+        middleName: form.elements.middleName.value.trim(),
         lastName: form.elements.lastName.value.trim(),
-        phone: form.elements.phone.value.trim(),
+        phone: phoneToStore(form.elements.phone.value),
         email: form.elements.email.value.trim()
     };
 
@@ -267,7 +276,7 @@ function rememberCurrentUser(user) {
     if (!current || !user) return;
 
     current.first_name = user.first_name;
-    current.middle_initial = user.middle_initial;
+    current.middle_name = user.middle_name;
     current.last_name = user.last_name;
     current.full_name = user.full_name;
     if (user.email) current.email = user.email;

@@ -31,12 +31,12 @@ const TOURS = {
     email: "manager@hardware.com", password: "manager123", page: "manager-dashboard.html",
     steps: [
       ["home", "showManagerHome()"],
-      // the income breakdown the Total Income card opens, over two periods
+      // the income breakdown the Collected card opens, over two periods
       ["income", "openIncomeFromCard()"],
       ["income-year", "pickIncomeRange('annual')"],
       ["reports", "showReports()"],
       ["reports-methods", "dataPanelOpen('mgr-methods')"],
-      ["reports-receivables", "openReceivables()"],
+      ["reports-receivables", "(showReports(), showReportTab('report-unpaid'), dataPanelOpen('mgr-unpaid'))"],
       ["sales-closed", "showSales()"],
       ["sales", "dataPanelOpen('mgr-sales')"],
       ["reorder-alerts", "(showReorderAlerts(), dataPanelOpen('mgr-reorder'))"],

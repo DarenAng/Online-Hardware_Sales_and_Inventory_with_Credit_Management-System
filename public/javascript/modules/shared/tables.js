@@ -37,6 +37,60 @@ function alignTableColumns(table) {
     }
 
     labelTableCells(table);
+    hideFilteredColumns(table);
+}
+
+// ==========================================
+// A FILTERED COLUMN IS A COLUMN THAT SAYS THE SAME THING ON EVERY ROW
+//
+// Pick "Cashier" in the role filter and every row that is left says Cashier
+// in the Role column. That column is now telling the reader what they just
+// told it, and it is taking the width that a column with something to say
+// could have used. So a module can name the columns its filters have made
+// redundant and they are taken off the grid until the filter is cleared.
+//
+// The list lives on the <table> as data-hidden-columns, 1-based, and is
+// applied here on every redraw, because the panels rebuild their rows on
+// every page turn and a class put on a cell by hand would be gone by the
+// next one. A message row -- "Loading...", "No match found" -- spans the
+// table and is left alone.
+// ==========================================
+function setHiddenColumns(table, indexes) {
+    if (!table) return;
+
+    const list = (indexes || [])
+        .map((index) => Number(index))
+        .filter((index) => Number.isInteger(index) && index > 0);
+
+    if (list.length === 0) delete table.dataset.hiddenColumns;
+    else table.dataset.hiddenColumns = list.join(',');
+
+    hideFilteredColumns(table);
+}
+
+function hideFilteredColumns(table) {
+    if (!table || !table.tHead || !table.tHead.rows.length) return;
+
+    const hidden = String(table.dataset.hiddenColumns || '')
+        .split(',')
+        .map((index) => Number(index))
+        .filter((index) => Number.isInteger(index) && index > 0);
+
+    const headerCells = table.tHead.rows[0].cells;
+    const columns = headerCells.length;
+
+    const mark = (cell, index) => {
+        cell.classList.toggle('col-hidden', hidden.indexOf(index + 1) !== -1);
+    };
+
+    Array.from(headerCells).forEach(mark);
+
+    for (const body of table.tBodies) {
+        for (const row of body.rows) {
+            if (row.cells.length !== columns) continue;
+            Array.from(row.cells).forEach(mark);
+        }
+    }
 }
 
 // ==========================================

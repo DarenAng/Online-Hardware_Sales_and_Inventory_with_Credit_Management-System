@@ -62,16 +62,16 @@ function isOurProblem(text) {
 
   // ---------- 1. the dashboard, and its cards ----------
   const cards = await page.locator("#kpi-grid button.kpi-card").count();
-  check("every dashboard card is clickable", cards === 6, `${cards} clickable of 6`);
+  check("every dashboard card is clickable", cards === 5, `${cards} clickable of 5`);
 
   const labels = await page.locator("#kpi-grid .kpi-label").allTextContents();
-  check("the four named figures are on the dashboard",
-    ["Total Income", "Sales Volume", "Pending Credits", "Reorder Alerts"]
+  check("the five named figures are on the dashboard",
+    ["Collected", "Outstanding", "Transactions", "Reorder Alerts", "Deliveries Moving"]
       .every((name) => labels.includes(name)), labels.join(" / "));
   await shot("01-dashboard");
 
-  // ---------- 2. Total Income opens the breakdown, filled ----------
-  await page.click("#kpi-grid button.kpi-card:has-text('Total Income')");
+  // ---------- 2. Collected opens the income breakdown, filled ----------
+  await page.click("#kpi-grid button.kpi-card:has-text('Collected')");
   await page.waitForTimeout(900);
 
   check("the income card opens the income screen",
@@ -142,14 +142,16 @@ function isOurProblem(text) {
   check("receivables pages ten at a time", unpaidRows === 10, `saw ${unpaidRows}`);
   await shot("05-reports-receivables");
 
-  // ---------- 5. the Pending Credits card lands on receivables, loaded ----------
+  // ---------- 5. Outstanding lands on the credit book, filtered to who owes ----------
   await page.evaluate("showManagerHome()");
   await page.waitForTimeout(600);
-  await page.click("#kpi-grid button.kpi-card:has-text('Pending Credits')");
+  await page.click("#kpi-grid button.kpi-card:has-text('Outstanding')");
   await page.waitForTimeout(800);
-  check("the credits card opens receivables directly",
-    await page.locator("#report-unpaid").isVisible() &&
-    await page.locator("#unpaid-table tbody tr").count() > 0);
+  check("the outstanding card opens the credit accounts, not the sales list",
+    await page.locator("#panel-credit").isVisible() &&
+    await page.locator("#credit-table tbody tr").count() > 0);
+  check("and it arrives filtered to customers who owe",
+    await page.inputValue("#credit-owing") === "owing");
 
   // ---------- 6. sales filters ----------
   await page.evaluate("showSales()");

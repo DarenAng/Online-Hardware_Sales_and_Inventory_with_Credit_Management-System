@@ -5,6 +5,7 @@ const fsp = require("fs/promises");
 const crypto = require("crypto");
 const mysql = require("mysql2/promise");
 const { escape: sqlValue, escapeId: sqlName } = require("mysql2");
+const { isMailConfigured, sendMail, firstPasswordMessage } = require("./mailer");
 
 const app = express();
 
@@ -50,6 +51,60 @@ function isHashed(stored) {
   return typeof stored === "string" && stored.startsWith("scrypt$");
 }
 
+// ==========================================
+// THE FIRST PASSWORD IS NOT TYPED BY ANYBODY
+//
+// An administrator used to type a temporary password into the create-account
+// form. Every one of those was a password an administrator invented on the
+// spot for somebody else, on a busy afternoon, and it went the way they all
+// go: Cashier123, then Cashier124, then the same one for everybody because
+// it is easier to say down a corridor. It was also typed on screen, said out
+// loud, and known to two people for as long as the account lasted.
+//
+// So the system makes it, nobody sees it here, and it is sent to the address
+// the account signs in with. The person who receives it is the only one who
+// reads it, and must_change_password is already TRUE on a new account, so it
+// buys exactly one sign-in and is then replaced by one they chose.
+//
+// WHAT THE ALPHABET LEAVES OUT
+// A password that has to survive being read off a phone and typed into a
+// terminal at a counter cannot contain a character whose identity depends on
+// the font. So no O or 0, no I, l or 1, no B or 8, no S or 5, no Z or 2. The
+// punctuation is the four marks that sit in the same place on every keyboard
+// layout the shop is likely to meet; the ones that move -- @ # ~ \ | -- are
+// left out, because a password that cannot be typed is a support call.
+//
+// What is left is 55 characters over 14 places, drawn from crypto's random
+// bytes rather than Math.random. That is about 81 bits, for a secret that
+// only has to survive until its owner's first sign-in.
+// ==========================================
+const PASSWORD_ALPHABET =
+  "ACDEFGHJKLMNPQRTUVWXY" +     // no B, I, O, S, Z
+  "acdefghjkmnpqrtuvwxy" +      // no b, i, l, o, s, z
+  "34679" +                     // no 0, 1, 2, 5, 8
+  "!?-+.$%";
+const PASSWORD_LENGTH = 14;
+
+function generatePassword() {
+  // A modulo over a random byte would hand the first characters of the
+  // alphabet a slightly larger share of the draws. randomInt is uniform, and
+  // over a password this is the difference between a fact and a footnote.
+  let password = "";
+  while (password.length < PASSWORD_LENGTH) {
+    password += PASSWORD_ALPHABET[crypto.randomInt(PASSWORD_ALPHABET.length)];
+  }
+
+  // Every rule this system checks a password against, met by construction:
+  // eight characters at the least, and it is never all of one kind. A shop
+  // that later adds "must contain a digit" gets it here rather than in a
+  // retry loop somewhere else.
+  if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) ||
+      !/[0-9]/.test(password)) {
+    return generatePassword();
+  }
+  return password;
+}
+
 async function verifyPassword(plainText, stored) {
   // a row that was never hashed holds the password itself; it is accepted once
   // and hashed on the spot by the caller, never left readable
@@ -81,6 +136,89 @@ async function hashLegacyPasswords() {
   console.log(`Hashed ${plain.length} password(s) that were stored as readable text.`);
 }
 
+// ==========================================
+// STAFF.MIDDLE_INITIAL -> STAFF.MIDDLE_NAME
+//
+// A one-time upgrade in the same shape as the one above it, for the same
+// reason: a machine already running this system with real staff on it cannot
+// be told to run 1-RUN-FIRST-database.sql again, because that file's first
+// statement is DROP DATABASE.
+//
+// It renames the column and widens it to a real middle name. The letters
+// already in there stay exactly as they are and remain valid middle names of
+// one letter, so nothing is lost and nothing has to be retyped -- the
+// administrator can fill in the whole name the next time each record is
+// opened. full_name is a generated column that reads the old name, so it is
+// dropped and rebuilt around the new one in the same statement; MySQL will
+// not let the column it depends on be renamed underneath it.
+//
+// Does nothing at all once the column is already middle_name, which is the
+// case on every machine that ran the schema fresh.
+async function migrateMiddleNameColumn() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'staff'
+       AND COLUMN_NAME IN ('middle_initial', 'middle_name')`,
+    [DB_NAME]
+  );
+
+  const names = columns.map((row) => row.COLUMN_NAME);
+  if (names.indexOf("middle_initial") === -1) return;   // already migrated, or no staff table
+
+  await db.query("ALTER TABLE staff DROP COLUMN full_name");
+  await db.query(
+    "ALTER TABLE staff CHANGE COLUMN middle_initial middle_name VARCHAR(100) NULL"
+  );
+  await db.query(
+    `ALTER TABLE staff ADD COLUMN full_name VARCHAR(220) AS (
+       CONCAT(first_name,
+              IF(middle_name IS NULL OR middle_name = '', '',
+                 CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),
+              ' ', last_name)
+     ) VIRTUAL AFTER created_at`
+  );
+
+  console.log("Upgraded staff.middle_initial to staff.middle_name. " +
+    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+}
+
+// ==========================================
+// STAFF PHONE NUMBERS -> +63
+//
+// The phone box was free text, so the column holds whatever anybody typed:
+// 09171234567, 0917 123 4567, +639171234567, and on some rows nothing that
+// is a number at all. One spelling is now the rule, and a rule that only
+// applies to rows written from today is not a rule -- it is two rules, and
+// the column still cannot be compared.
+//
+// So every row is rewritten to +63 followed by the ten national digits.
+// Anything that does not reduce to a usable number is emptied rather than
+// half-converted: a phone column with "n/a" in it is a column somebody will
+// eventually try to dial.
+//
+// Runs on every start and does nothing once every row is already +63.
+async function migratePhoneNumbers() {
+  const [rows] = await db.query(
+    "SELECT staff_id, phone FROM staff WHERE phone IS NOT NULL AND phone <> ''");
+
+  const wrong = rows.filter((row) => row.phone !== cleanPhone(row.phone));
+  if (wrong.length === 0) return;
+
+  let emptied = 0;
+
+  for (const row of wrong) {
+    const fixed = phoneComplaint(row.phone) === null ? cleanPhone(row.phone) : null;
+    if (fixed === null) emptied += 1;
+
+    await db.query("UPDATE staff SET phone = ? WHERE staff_id = ?", [fixed, row.staff_id]);
+  }
+
+  console.log(`Rewrote ${wrong.length} staff phone number(s) to +63 form.` +
+    (emptied > 0
+      ? ` ${emptied} of them was not a usable number and was cleared; re-enter it on the staff record.`
+      : ""));
+}
+
 // tells you at startup whether the database connection works,
 // instead of failing later on the first request
 // Kept as a named figure rather than a number typed twice: adding a procedure
@@ -88,24 +226,101 @@ async function hashLegacyPasswords() {
 // lying about a database that is actually fine.
 const EXPECTED_PROCEDURES = 27;
 
+// ==========================================
+// WHEN THE PROCEDURES ARE NOT THERE
+//
+// Nearly every write in this system goes through a stored procedure, so a
+// database that has the tables but not the procedures is a database that
+// reads perfectly and cannot be written to at all.
+//
+// It happens for one ordinary reason: 1-RUN-FIRST-database.sql was run and
+// 2-RUN-SECOND-stored-procedures.sql was not. File 1 rebuilds the tables and
+// the demo data; the procedures only exist because of file 2. Anybody
+// resetting their database has done exactly half of the job at that point,
+// and the half that is missing is invisible.
+//
+// This used to be one warning line at startup, and then every write answered
+// "Unable to create the account" -- which names the wrong cause. Somebody
+// reading that message goes looking at the account form. The warning that
+// would have told them the truth scrolled off the top of the terminal
+// twenty requests ago.
+//
+// So the count is remembered rather than printed and forgotten, and the
+// guard below turns those writes into one sentence that names the actual
+// fix. It is re-checked whenever it is bad, so loading file 2 while the
+// server is running is picked up on the next request -- no restart needed.
+// ==========================================
+let proceduresLoaded = null;      // null until the first count
+let procedureCheckAt = 0;
+const PROCEDURE_RECHECK_MS = 5000;
+
+async function countProcedures() {
+  const [rows] = await db.query(
+    "SELECT COUNT(*) AS total FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ?",
+    [DB_NAME]
+  );
+  proceduresLoaded = rows[0].total;
+  procedureCheckAt = Date.now();
+  return proceduresLoaded;
+}
+
+// Cheap on the happy path: once the full set has been seen it is believed,
+// because procedures do not vanish while a server runs unless somebody
+// reloads them, and reloading them can only make this better.
+async function proceduresAreMissing() {
+  if (proceduresLoaded !== null && proceduresLoaded >= EXPECTED_PROCEDURES) return false;
+  if (Date.now() - procedureCheckAt < PROCEDURE_RECHECK_MS) return true;
+
+  try {
+    return (await countProcedures()) < EXPECTED_PROCEDURES;
+  } catch (error) {
+    return false;   // the database is unreachable; that is a different message
+  }
+}
+
+function procedureAdvice() {
+  return `This database has ${proceduresLoaded} of ${EXPECTED_PROCEDURES} stored ` +
+    "procedures, so nothing can be saved. Run " +
+    "public/database/2-RUN-SECOND-stored-procedures.sql in MySQL Workbench or " +
+    "the mysql command line. It touches no table and no row, and can be re-run " +
+    "at any time. Nothing else is wrong: your data is intact.";
+}
+
 db.getConnection()
   .then(async (connection) => {
     connection.release();
     console.log(`Connected to MySQL database "${DB_NAME}" on ${DB_HOST}.`);
 
     // warns you when 2-RUN-SECOND-stored-procedures.sql was never loaded on this machine
-    const [rows] = await db.query(
-      "SELECT COUNT(*) AS total FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ?",
-      [DB_NAME]
-    );
-    if (rows[0].total < EXPECTED_PROCEDURES) {
-      console.warn(`WARNING: only ${rows[0].total} of ${EXPECTED_PROCEDURES} stored procedures found.`);
-      console.warn("Run public/database/2-RUN-SECOND-stored-procedures.sql in MySQL Workbench or the mysql CLI.");
+    const total = await countProcedures();
+
+    if (total < EXPECTED_PROCEDURES) {
+      // Loud on purpose. The single-line version of this warning is what
+      // scrolled away while somebody tried to work out why the system had
+      // stopped saving.
+      console.warn("");
+      console.warn("  ###############################################################");
+      console.warn(`  #  ONLY ${String(total).padEnd(2)} OF ${EXPECTED_PROCEDURES} STORED PROCEDURES ARE LOADED.`.padEnd(63) + "#");
+      console.warn("  #  NOTHING CAN BE SAVED UNTIL THEY ARE.".padEnd(63) + "#");
+      console.warn("  #".padEnd(63) + "#");
+      console.warn("  #  Run this, then reload the page -- no restart needed:".padEnd(63) + "#");
+      console.warn("  #    public/database/2-RUN-SECOND-stored-procedures.sql".padEnd(63) + "#");
+      console.warn("  #".padEnd(63) + "#");
+      console.warn("  #  It touches no table and no row. Your data is intact.".padEnd(63) + "#");
+      console.warn("  ###############################################################");
+      console.warn("");
     } else {
       console.log(`All ${EXPECTED_PROCEDURES} stored procedures are loaded.`);
     }
 
+    await migrateMiddleNameColumn();
+    await migratePhoneNumbers();
     await hashLegacyPasswords();
+
+    // Last, and only once the database has answered and the upgrades above
+    // have run. Starting the timer before that would take its first backup of
+    // a schema that is one statement from being changed.
+    startAutoBackup();
   })
   .catch((error) => {
     console.error("DATABASE CONNECTION FAILED:", error.message);
@@ -138,7 +353,14 @@ app.get(["/favicon.ico", "/favicon.svg"], (request, response) => {
 // downloaded. The server's own source and the SQL files sit in that same folder
 // and are not: they carry the database password and the whole schema. Blocking
 // them here keeps the folder layout the project already has.
-const PRIVATE_FILES = [/^\/javascript\/server\.js$/i, /^\/database(\/|$)/i];
+// mailer.js is on this list for the same reason server.js is: it names the
+// mail account the system sends from, and mail-password.txt beside it holds
+// that account's password and nothing else.
+const PRIVATE_FILES = [
+  /^\/javascript\/(server|mailer)\.js$/i,
+  /^\/javascript\/mail-password\.txt$/i,
+  /^\/database(\/|$)/i
+];
 
 // THE SAME PATH THE FILE SERVER WILL SEE
 //
@@ -196,7 +418,15 @@ async function callProcedure(sql, params, outputNames) {
   const connection = await db.getConnection();
   try {
     await connection.query(sql, params);
-    const selectList = outputNames.map((name) => `@${name} AS ${name}`).join(", ");
+
+    // The alias is quoted because some of these OUT parameters are named
+    // after words MySQL has reserved. "lines" is one, and receiving a
+    // purchase order read its result back as `SELECT @lines AS lines`, which
+    // is a parse error rather than a wrong answer -- so the whole route
+    // answered 500 and the shop could not book in a delivery. Quoting every
+    // alias means the next OUT parameter named after a reserved word is not
+    // a bug waiting to be found by whoever tries to use that screen.
+    const selectList = outputNames.map((name) => `@${name} AS ${sqlName(name)}`).join(", ");
     const [rows] = await connection.query(`SELECT ${selectList}`);
     return rows[0];
   } finally {
@@ -204,12 +434,123 @@ async function callProcedure(sql, params, outputNames) {
   }
 }
 
-// A middle initial is one letter. Anything longer is a typing slip, so only the
-// first letter is kept, and an empty box stays empty rather than becoming "".
-function cleanInitial(value) {
+// ==========================================
+// A STAFF PHONE NUMBER: +63, THEN TEN DIGITS
+//
+// The browser prints the +63 beside the box and drops anything that is not a
+// digit as it is typed, which is where that rule belongs -- at the moment
+// somebody presses the key. It is enforced again here because a rule that
+// only exists in a browser is a rule anybody can walk past with curl, and
+// because this route is not the only way a row gets written.
+//
+// Everything is reduced to the national digits first, so a number pasted in
+// any of the spellings the old free-text box accepted -- 09171234567,
+// +639171234567, 639171234567, 0917 123 4567 -- lands in the column once,
+// spelled +639171234567. The trunk 0 and the +63 are the same thing and
+// never both appear.
+//
+// Blank stays blank rather than becoming "": the number is optional, and a
+// staff record without one is not a broken record.
+// ==========================================
+const PHONE_NATIONAL_DIGITS = 10;
+
+function phoneNationalDigits(value) {
+  return String(value === null || value === undefined ? "" : value)
+    .replace(/\D/g, "")
+    .replace(/^63/, "")
+    .replace(/^0+/, "")
+    .slice(0, PHONE_NATIONAL_DIGITS);
+}
+
+// null when there is nothing to complain about, otherwise the one sentence
+// the screen shows. Kept apart from cleanPhone so a route can refuse a bad
+// number with a reason rather than quietly storing a shortened one.
+function phoneComplaint(value) {
+  const digits = phoneNationalDigits(value);
+
+  if (digits === "") return null;               // optional, and left empty
+  if (digits.length !== PHONE_NATIONAL_DIGITS) {
+    return `A phone number is ${PHONE_NATIONAL_DIGITS} digits after +63. ` +
+           `That one has ${digits.length}.`;
+  }
+  if (digits[0] !== "9") {
+    return "After +63 a Philippine mobile number starts with 9.";
+  }
+  return null;
+}
+
+function cleanPhone(value) {
+  const digits = phoneNationalDigits(value);
+  return digits === "" ? null : "+63" + digits;
+}
+
+// THE WHOLE MIDDLE NAME, KEPT AS IT WAS TYPED
+//
+// This used to throw away everything but the first letter, because the first
+// letter is all any screen prints. The name is what tells two people with the
+// same first and last name apart when a record is being checked against
+// something outside the system, so the name is what is stored. The initial is
+// worked out where it is shown, from staff.full_name, and never here.
+//
+// Inner runs of spaces are collapsed so that "Dela  Cruz" and "Dela Cruz" are
+// one name and not two, and an empty box stays empty rather than becoming "".
+function cleanMiddleName(value) {
   if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed === "" ? null : trimmed[0].toUpperCase();
+  const trimmed = value.trim().replace(/\s+/g, " ");
+  return trimmed === "" ? null : trimmed.slice(0, 100);
+}
+
+// ==========================================
+// THE SHOP'S TIN
+//
+// A BIR Tax Identification Number is nine digits and a branch code, written
+// 000-000-000-00000. The branch code is 00000 for the head office and was
+// three digits wide until the BIR widened it, so a TIN copied off an older
+// certificate reads 000-000-000-000. Both spellings are accepted and both
+// are stored as the full one, the way the BIR did it: two zeros in front of
+// the old code. Nine digits on their own are taken to mean the head office.
+//
+// The screen enforces the same rule as the digits are typed; it is enforced
+// again here because the screen is not the only way this row gets written,
+// and because what it protects is the head of every invoice the shop issues.
+// All zeros is refused as well: that is the placeholder a fresh install
+// ships with, and an invoice printed under it is an invoice under no TIN.
+// ==========================================
+const TIN_BASE_DIGITS = 9;
+const TIN_BRANCH_DIGITS = 5;
+
+function tinDigitsOf(value) {
+  return String(value === null || value === undefined ? "" : value)
+    .replace(/\D/g, "")
+    .slice(0, TIN_BASE_DIGITS + TIN_BRANCH_DIGITS);
+}
+
+function tinComplaint(value) {
+  const digits = tinDigitsOf(value);
+
+  if (digits === "") {
+    return "The shop needs a TIN. It is printed on every invoice.";
+  }
+  if (digits.length !== TIN_BASE_DIGITS &&
+      digits.length !== TIN_BASE_DIGITS + 3 &&
+      digits.length !== TIN_BASE_DIGITS + TIN_BRANCH_DIGITS) {
+    return `A TIN is ${TIN_BASE_DIGITS} digits and a branch code, written ` +
+           `000-000-000-00000. That one has ${digits.length} digits.`;
+  }
+  if (/^0+$/.test(digits.slice(0, TIN_BASE_DIGITS))) {
+    return "000-000-000 is the placeholder, not a TIN. Enter the number on the " +
+           "shop's BIR certificate of registration.";
+  }
+  return null;
+}
+
+// the stored spelling, always 000-000-000-00000
+function cleanTin(value) {
+  const digits = tinDigitsOf(value);
+  const base = digits.slice(0, TIN_BASE_DIGITS);
+  const branch = digits.slice(TIN_BASE_DIGITS).padStart(TIN_BRANCH_DIGITS, "0");
+  const whole = base + branch;
+  return `${whole.slice(0, 3)}-${whole.slice(3, 6)}-${whole.slice(6, 9)}-${whole.slice(9)}`;
 }
 
 // ==========================================
@@ -613,9 +954,13 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/roles$/,                          [ADMIN]],
   ["GET",   /^\/api\/users$/,                          [ADMIN]],
   ["GET",   /^\/api\/users\/\d+$/,                     [ADMIN]],
+  // the review step of each pair, which creates nothing but does make a
+  // readable password, so it is guarded exactly as tightly as the write is
+  ["POST",  /^\/api\/users\/draft$/,                    [ADMIN]],
   ["POST",  /^\/api\/users$/,                          [ADMIN]],
   ["PUT",   /^\/api\/users\/\d+$/,                     [ADMIN]],
   ["PATCH", /^\/api\/users\/\d+\/status$/,             [ADMIN]],
+  ["POST",  /^\/api\/users\/\d+\/account\/draft$/,      [ADMIN]],
   ["POST",  /^\/api\/users\/\d+\/account$/,            [ADMIN]],
   ["POST",  /^\/api\/users\/\d+\/reset-password$/,     [ADMIN]],
   ["GET",   /^\/api\/audit-logs$/,                     [ADMIN]],
@@ -726,6 +1071,22 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/notifications\/read-all$/,        SIGNED_IN]
 ];
 
+// ==========================================
+// A POST THAT CHANGES NOTHING
+//
+// The hook further down announces every successful write to every other
+// screen, and it decides what is a write from the HTTP verb. That is the
+// right default and it is wrong for the review step of creating an account:
+// those are POSTs because they must not be cached or repeated from a URL, but
+// they touch no table. Announcing them would send every other administrator's
+// directory off to re-read rows that did not move, every time somebody
+// pressed Review.
+// ==========================================
+const CHANGES_NOTHING = [
+  /^\/api\/users\/draft$/,
+  /^\/api\/users\/\d+\/account\/draft$/
+];
+
 function findRule(method, pathname) {
   for (const [ruleMethod, pattern, allowed] of ACCESS_RULES) {
     if (ruleMethod === method && pattern.test(pathname)) return allowed;
@@ -733,7 +1094,7 @@ function findRule(method, pathname) {
   return null;
 }
 
-app.use((request, response, next) => {
+app.use(async (request, response, next) => {
   if (!request.path.startsWith("/api/")) return next();
 
   const allowed = findRule(request.method, request.path);
@@ -741,6 +1102,28 @@ app.use((request, response, next) => {
   // an endpoint nobody granted is an endpoint nobody may call
   if (allowed === null) {
     return response.status(403).json({ error: "This feature is not available." });
+  }
+
+  // ==========================================
+  // A HALF-INSTALLED DATABASE SAYS SO, ONCE, IN THE RIGHT WORDS
+  //
+  // Reading still works with no procedures, so reads are let through and the
+  // screens stay usable. Writes cannot work, and this is where they are
+  // stopped -- with the sentence that names the actual fix rather than the
+  // route's own "Unable to create the account", which sends the reader off
+  // to inspect a form that is perfectly fine.
+  //
+  // Sign-in is exempt: it is a POST, it uses no procedure, and locking
+  // somebody out of the screen that would show them this message is the
+  // wrong way round.
+  // ==========================================
+  if (request.method !== "GET" && request.method !== "HEAD" &&
+      request.path !== "/api/login" && request.path !== "/api/logout" &&
+      request.path !== "/api/heartbeat" &&
+      await proceduresAreMissing()) {
+    console.error(`Refused ${request.method} ${request.path}: ` +
+      `${proceduresLoaded} of ${EXPECTED_PROCEDURES} stored procedures are loaded.`);
+    return response.status(503).json({ error: procedureAdvice() });
   }
 
   if (allowed === PUBLIC) return next();
@@ -768,7 +1151,8 @@ app.use((request, response, next) => {
   // It fires after the response is actually finished and only for a write that
   // succeeded: an announcement for a request that was refused would send every
   // other desktop off to re-read data that did not move.
-  if (request.method !== "GET" && request.method !== "HEAD") {
+  if (request.method !== "GET" && request.method !== "HEAD" &&
+      !CHANGES_NOTHING.some((pattern) => pattern.test(request.path))) {
     response.on("finish", () => {
       if (response.statusCode >= 200 && response.statusCode < 300) {
         publishChange(
@@ -788,7 +1172,7 @@ app.use((request, response, next) => {
 // restoration card that cannot say when or by whom is not a card worth
 // opening.
 const USER_SELECT = `
-  SELECT s.staff_id, s.first_name, s.middle_initial, s.last_name, s.full_name,
+  SELECT s.staff_id, s.first_name, s.middle_name, s.last_name, s.full_name,
          s.phone, s.is_active,
          s.created_at AS staff_created_at,
          s.archived_at, ab.full_name AS archived_by,
@@ -815,7 +1199,7 @@ app.post("/api/login", async (request, response) => {
     // holds a hash that no plain value will ever equal
     const [rows] = await db.query(
       `SELECT u.user_id, u.staff_id, u.email, u.password, u.must_change_password,
-              s.first_name, s.middle_initial, s.last_name, s.full_name, s.is_active,
+              s.first_name, s.middle_name, s.last_name, s.full_name, s.is_active,
               r.role_id, r.role_name
        FROM users u
        JOIN staff s ON s.staff_id = u.staff_id
@@ -1074,7 +1458,7 @@ app.get("/api/me", async (request, response) => {
 });
 
 app.put("/api/me", async (request, response) => {
-  const { firstName, middleInitial, lastName, phone, email } = request.body;
+  const { firstName, middleName, lastName, phone, email } = request.body;
   const actor = request.actor;
 
   if (!firstName || !lastName) {
@@ -1086,12 +1470,15 @@ app.put("/api/me", async (request, response) => {
     return response.status(400).json({ error: "That email address does not look right" });
   }
 
+  const phoneProblem = phoneComplaint(phone);
+  if (phoneProblem) return response.status(400).json({ error: phoneProblem });
+
   try {
     // the role passed in is the one already on file, never one from the browser
     const output = await callProcedure(
       "CALL sp_update_staff_account(?, ?, ?, ?, ?, ?, ?, @status_code, @message)",
-      [actor.staffId, String(firstName).trim(), cleanInitial(middleInitial),
-       String(lastName).trim(), phone ? String(phone).trim() : null,
+      [actor.staffId, String(firstName).trim(), cleanMiddleName(middleName),
+       String(lastName).trim(), cleanPhone(phone),
        actor.roleId, email ? String(email).trim() : null],
       ["status_code", "message"]
     );
@@ -1176,6 +1563,152 @@ app.get("/api/roles", async (request, response) => {
 // STAFF ACCOUNTS
 // ==========================================
 
+// ==========================================
+// HANDING OVER A NEW PASSWORD
+//
+// Two ways, and the screen is told which one happened, because they leave the
+// administrator with different jobs to do.
+//
+// Mail is the one that is meant to happen: the password goes to the person it
+// belongs to and to nobody else, and it is never on the administrator's
+// screen at all.
+//
+// The other way is the fallback, and it exists because the alternative is
+// worse. A shop whose mail is not set up yet, or whose internet is down, or
+// whose mail provider is refusing the app password this afternoon, would
+// otherwise be a shop that cannot take on a new cashier. So the account is
+// created either way and the password comes back to the screen to be read
+// out and handed over, with the reason it is on the screen rather than in an
+// inbox.
+//
+// A password is NEVER written to the audit trail, on either path. The trail
+// records that an account was created and who created it, which is the fact
+// an audit is for; the secret itself would turn the log into a list of
+// working credentials for anybody who can read logs.
+// ==========================================
+async function deliverFirstPassword({ email, name, roleName, password }) {
+  if (!isMailConfigured()) {
+    return {
+      emailed: false,
+      password: password,
+      reason: "Mail is not set up on this server, so the password could not be sent."
+    };
+  }
+
+  try {
+    const [rows] = await db.query(
+      "SELECT store_name FROM store_settings WHERE setting_id = 1");
+    const storeName = (rows[0] && rows[0].store_name) || DEFAULT_STORE_SETTINGS.store_name;
+
+    await sendMail(firstPasswordMessage({
+      name: name,
+      email: email,
+      roleName: roleName,
+      password: password,
+      storeName: storeName
+    }));
+
+    return { emailed: true };
+  } catch (error) {
+    // the reason is passed on rather than swallowed: "Username and Password
+    // not accepted" tells the administrator to go and fix the app password,
+    // and "could not send the email" tells them nothing
+    console.error("Sending the first password failed:", error.message);
+    return {
+      emailed: false,
+      password: password,
+      reason: `The mail server refused the message: ${error.message}`
+    };
+  }
+}
+
+// the role a new account was given, for the mail that announces it
+async function roleNameById(roleId) {
+  const [rows] = await db.query(
+    "SELECT role_name FROM roles WHERE role_id = ?", [roleId]);
+  return (rows[0] && rows[0].role_name) || "staff";
+}
+
+// ==========================================
+// DRAFTS: THE ACCOUNT THAT HAS NOT BEEN MADE YET
+//
+// Creating an account is two requests now, not one, because there is a person
+// reading the details in between. The administrator fills the form, the server
+// works out everything the account will consist of -- including the password,
+// which nobody types -- and hands that back to be read. Nothing exists in the
+// database yet. On confirmation the account is created from the draft and the
+// password is sent.
+//
+// WHY THE DRAFT LIVES HERE AND NOT IN THE BROWSER
+//
+// The obvious shortcut is to send the details and the password down, show
+// them, and send them all back up on confirmation. That makes the review a
+// piece of theatre: whatever comes back up is what gets created, so the thing
+// confirmed on screen and the thing written to the database are only related
+// by the browser's good manners. A confirmation step is worth having exactly
+// because what was read is what happens.
+//
+// So the second request carries a draft id and nothing else. Every field --
+// the name, the role, the email, the password -- is read from this map, on the
+// server, where the browser cannot reach it between the two calls.
+//
+// It is deliberately in memory. A draft is a few seconds of one person's
+// attention; a table for it would outlive the decision it belongs to, and a
+// restart is allowed to lose one. Each draft is held to one administrator, so
+// nobody can confirm somebody else's, and expires on its own so an abandoned
+// form does not leave a password sitting in memory all afternoon.
+// ==========================================
+const accountDrafts = new Map();      // draftId -> { by, kind, details, password, expires }
+const DRAFT_LIFE_MS = 10 * 60 * 1000; // long enough to read a card, short enough to forget
+const DRAFT_MAX = 200;                // one runaway client cannot grow this without limit
+
+function newAccountDraft(staffId, kind, details, password) {
+  // A form left open is the ordinary case, not the exception, so the sweep is
+  // here rather than on a timer: the map only grows when it is being used.
+  const now = Date.now();
+  for (const [id, draft] of accountDrafts) {
+    if (draft.expires <= now) accountDrafts.delete(id);
+  }
+  if (accountDrafts.size >= DRAFT_MAX) {
+    const oldest = [...accountDrafts.entries()]
+      .sort((left, right) => left[1].expires - right[1].expires)[0];
+    if (oldest) accountDrafts.delete(oldest[0]);
+  }
+
+  const draftId = crypto.randomBytes(18).toString("base64url");
+  accountDrafts.set(draftId, {
+    by: staffId,
+    kind: kind,
+    details: details,
+    password: password,
+    expires: now + DRAFT_LIFE_MS
+  });
+
+  return { draftId, expiresInSeconds: Math.round(DRAFT_LIFE_MS / 1000) };
+}
+
+// Reads a draft and removes it in the same breath. A draft is good for one
+// confirmation: without that, a repeated request -- a double-clicked button,
+// a retried POST on a slow shop network -- is a second account.
+function takeAccountDraft(draftId, staffId, kind) {
+  const draft = accountDrafts.get(String(draftId || ""));
+
+  if (!draft) return { error: "That review has expired. Fill the form in again." };
+  accountDrafts.delete(String(draftId));
+
+  if (draft.expires <= Date.now()) {
+    return { error: "That review has expired. Fill the form in again." };
+  }
+  if (draft.by !== staffId) {
+    return { error: "That review belongs to another administrator's session." };
+  }
+  if (draft.kind !== kind) {
+    return { error: "That review was for a different kind of account." };
+  }
+
+  return { draft };
+}
+
 // Every staff member, including anyone with no login account yet, each row
 // carrying whether its owner is signed in at this moment.
 //
@@ -1225,22 +1758,112 @@ app.get("/api/users/:staffId", async (request, response) => {
   }
 });
 
+// ==========================================
+// STEP 1 OF 2: WORK OUT THE ACCOUNT, CREATE NOTHING
+//
+// Checks everything that can be checked before anything is written -- the
+// name, the phone number, the role, the address, and whether that address
+// already signs in somewhere -- then makes the password and hands the whole
+// account back to be read. A refusal here costs nothing, which is the point:
+// finding out the email is taken is much better before the review card than
+// after it.
+//
+// Nothing is in the database when this returns. POST /api/users is what
+// writes, and it writes from the draft rather than from the browser.
+// ==========================================
+app.post("/api/users/draft", async (request, response) => {
+  const { firstName, middleName, lastName, phone, roleId, email } = request.body;
+
+  if (!firstName || !lastName || !roleId || !email) {
+    return response.status(400).json({ error: "Name, role and email are required" });
+  }
+
+  // The email is not just the username any more, it is where the password
+  // goes, so an address that cannot receive one is refused here rather than
+  // becoming an account nobody can get into.
+  const address = String(email).trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+    return response.status(400).json({ error: "That email address does not look right" });
+  }
+
+  const phoneProblem = phoneComplaint(phone);
+  if (phoneProblem) return response.status(400).json({ error: phoneProblem });
+
+  try {
+    const [roles] = await db.query(
+      "SELECT role_name FROM roles WHERE role_id = ?", [roleId]);
+    if (roles.length === 0) {
+      return response.status(400).json({ error: "The selected role does not exist." });
+    }
+
+    // The procedure checks this too, and has to: between this draft and its
+    // confirmation somebody else may take the address. Checking it here as
+    // well is what keeps the answer in front of the form instead of arriving
+    // after the review card has been read and confirmed.
+    const [taken] = await db.query("SELECT user_id FROM users WHERE email = ?", [address]);
+    if (taken.length > 0) {
+      return response.status(409).json({
+        error: `The email ${address} already signs in to another account. ` +
+               "Two people may share a name, but not an email address."
+      });
+    }
+
+    const details = {
+      firstName: String(firstName).trim(),
+      middleName: cleanMiddleName(middleName),
+      lastName: String(lastName).trim(),
+      phone: cleanPhone(phone),
+      roleId: Number(roleId),
+      roleName: roles[0].role_name,
+      email: address
+    };
+
+    const password = generatePassword();
+    const { draftId, expiresInSeconds } =
+      newAccountDraft(request.actor.staffId, "staff", details, password);
+
+    // The one place in this system a readable password crosses the wire on
+    // purpose. It is the whole point of the step: the administrator is being
+    // asked to check the account before it is made, and the password is part
+    // of the account.
+    response.json({
+      draftId: draftId,
+      expiresInSeconds: expiresInSeconds,
+      password: password,
+      willEmail: isMailConfigured(),
+      ...details,
+      // the name as the directory will spell it, worked out the same way
+      // staff.full_name does, so the review says what the list will say
+      fullName: details.firstName +
+        (details.middleName ? ` ${details.middleName[0].toUpperCase()}.` : "") +
+        ` ${details.lastName}`
+    });
+  } catch (error) {
+    console.error("Account review failed:", error.message);
+    response.status(500).json({ error: "Unable to prepare the account" });
+  }
+});
+
+// ==========================================
+// STEP 2 OF 2: CREATE IT, AND SEND THE PASSWORD
+//
+// Takes a draft id and nothing else. Every value written here came from the
+// draft the administrator read, so what was confirmed on screen is what
+// exists afterwards.
+// ==========================================
 app.post("/api/users", async (request, response) => {
-  const { firstName, middleInitial, lastName, phone, roleId, email, password } = request.body;
+  const { draft, error } = takeAccountDraft(
+    request.body.draftId, request.actor.staffId, "staff");
 
-  if (!firstName || !lastName || !roleId || !email || !password) {
-    return response.status(400).json({ error: "Name, role, email and password are required" });
-  }
+  if (error) return response.status(410).json({ error });
 
-  if (password.length < 8) {
-    return response.status(400).json({ error: "Password must contain at least 8 characters" });
-  }
+  const details = draft.details;
 
   try {
     const output = await callProcedure(
       "CALL sp_create_staff_account(?, ?, ?, ?, ?, ?, ?, @staff_id, @status_code, @message)",
-      [firstName, cleanInitial(middleInitial), lastName, phone || null, roleId,
-       email, await hashPassword(password)],
+      [details.firstName, details.middleName, details.lastName, details.phone,
+       details.roleId, details.email, await hashPassword(draft.password)],
       ["staff_id", "status_code", "message"]
     );
 
@@ -1248,14 +1871,39 @@ app.post("/api/users", async (request, response) => {
       return response.status(output.status_code).json({ error: output.message });
     }
 
+    // read back rather than rebuilt from the body, so the mail greets the
+    // person by the same name the directory shows: first, middle initial, last
+    const [created] = await db.query(
+      "SELECT full_name FROM staff WHERE staff_id = ?", [output.staff_id]);
+    const name = (created[0] && created[0].full_name) || details.firstName;
+
+    const delivery = await deliverFirstPassword({
+      email: details.email,
+      name: name,
+      roleName: details.roleName,
+      password: draft.password
+    });
+
+    // Whether the mail went is part of what happened and belongs in the
+    // trail. The password itself never is.
     await writeAuditLog(
       request,
       "CREATE_ACCOUNT",
-      `Created account for ${email}`,
-      { staff_id: output.staff_id, email: email, role_id: Number(roleId),
-        name: `${firstName} ${lastName}`.trim() }
+      `Created account for ${details.email}` +
+        (delivery.emailed ? " and emailed the first password" : " (password not emailed)"),
+      { staff_id: output.staff_id, email: details.email, role_id: details.roleId,
+        name: name, password_emailed: delivery.emailed }
     );
-    response.json({ message: output.message, staffId: output.staff_id });
+
+    response.json({
+      message: output.message,
+      staffId: output.staff_id,
+      name: name,
+      email: details.email,
+      emailed: delivery.emailed,
+      password: delivery.password,   // absent when the mail went; see above
+      reason: delivery.reason
+    });
   } catch (error) {
     console.error("Create account failed:", error.message);
     response.status(500).json({ error: "Unable to create the account" });
@@ -1263,17 +1911,20 @@ app.post("/api/users", async (request, response) => {
 });
 
 app.put("/api/users/:staffId", async (request, response) => {
-  const { firstName, middleInitial, lastName, phone, roleId, email } = request.body;
+  const { firstName, middleName, lastName, phone, roleId, email } = request.body;
 
   if (!firstName || !lastName || !roleId) {
     return response.status(400).json({ error: "Name and role are required" });
   }
 
+  const phoneProblem = phoneComplaint(phone);
+  if (phoneProblem) return response.status(400).json({ error: phoneProblem });
+
   try {
     // read before writing, so the audit entry can say what actually changed
     // rather than only that something did
     const [existing] = await db.query(
-      `SELECT s.first_name, s.middle_initial, s.last_name, s.phone,
+      `SELECT s.first_name, s.middle_name, s.last_name, s.phone,
               s.role_id, u.email
        FROM staff s LEFT JOIN users u ON u.staff_id = s.staff_id
        WHERE s.staff_id = ?`,
@@ -1283,8 +1934,8 @@ app.put("/api/users/:staffId", async (request, response) => {
 
     const output = await callProcedure(
       "CALL sp_update_staff_account(?, ?, ?, ?, ?, ?, ?, @status_code, @message)",
-      [request.params.staffId, firstName, cleanInitial(middleInitial), lastName,
-       phone || null, roleId, email || null],
+      [request.params.staffId, firstName, cleanMiddleName(middleName), lastName,
+       cleanPhone(phone), roleId, email || null],
       ["status_code", "message"]
     );
 
@@ -1297,9 +1948,9 @@ app.put("/api/users/:staffId", async (request, response) => {
 
     const after = {
       first_name: firstName,
-      middle_initial: cleanInitial(middleInitial),
+      middle_name: cleanMiddleName(middleName),
       last_name: lastName,
-      phone: phone || null,
+      phone: cleanPhone(phone),
       role_id: Number(roleId),
       email: email || null
     };
@@ -1348,22 +1999,99 @@ app.patch("/api/users/:staffId/status", async (request, response) => {
   }
 });
 
-// gives a login account to a staff member who has none yet
-app.post("/api/users/:staffId/account", async (request, response) => {
-  const { email, password } = request.body;
+// ==========================================
+// A LOGIN FOR SOMEBODY WHO ALREADY HAS A STAFF RECORD
+//
+// The same act as creating an account, arriving from the other direction, so
+// it goes through the same two steps and the same review card: work out the
+// login and its password, hand it back to be read, create it on
+// confirmation. The staff record already exists, so all that is asked for is
+// the address.
+// ==========================================
+app.post("/api/users/:staffId/account/draft", async (request, response) => {
+  const { email } = request.body;
+  const staffId = Number(request.params.staffId);
 
-  if (!email || !password) {
-    return response.status(400).json({ error: "Email and password are required" });
+  if (!email) {
+    return response.status(400).json({ error: "An email address is required" });
   }
 
-  if (password.length < 8) {
-    return response.status(400).json({ error: "Password must contain at least 8 characters" });
+  const address = String(email).trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
+    return response.status(400).json({ error: "That email address does not look right" });
+  }
+
+  try {
+    const [staff] = await db.query(
+      `SELECT s.staff_id, s.full_name, s.phone, s.middle_name, r.role_name, u.user_id
+       FROM staff s
+       JOIN roles r ON r.role_id = s.role_id
+       LEFT JOIN users u ON u.staff_id = s.staff_id
+       WHERE s.staff_id = ?`,
+      [staffId]
+    );
+
+    if (staff.length === 0) {
+      return response.status(404).json({ error: "Staff record not found" });
+    }
+    if (staff[0].user_id) {
+      return response.status(409).json({ error: "That person already has a login account." });
+    }
+
+    const [taken] = await db.query("SELECT user_id FROM users WHERE email = ?", [address]);
+    if (taken.length > 0) {
+      return response.status(409).json({
+        error: `The email ${address} already signs in to another account. ` +
+               "Give this account its own email."
+      });
+    }
+
+    const details = {
+      staffId: staffId,
+      fullName: staff[0].full_name,
+      middleName: staff[0].middle_name,
+      phone: staff[0].phone,
+      roleName: staff[0].role_name,
+      email: address
+    };
+
+    const password = generatePassword();
+    const { draftId, expiresInSeconds } =
+      newAccountDraft(request.actor.staffId, "login", details, password);
+
+    response.json({
+      draftId: draftId,
+      expiresInSeconds: expiresInSeconds,
+      password: password,
+      willEmail: isMailConfigured(),
+      ...details
+    });
+  } catch (error) {
+    console.error("Login review failed:", error.message);
+    response.status(500).json({ error: "Unable to prepare the login account" });
+  }
+});
+
+app.post("/api/users/:staffId/account", async (request, response) => {
+  const { draft, error } = takeAccountDraft(
+    request.body.draftId, request.actor.staffId, "login");
+
+  if (error) return response.status(410).json({ error });
+
+  const details = draft.details;
+
+  // the draft carries which staff record it was prepared for, so a draft
+  // cannot be confirmed against a different person by changing the URL
+  if (details.staffId !== Number(request.params.staffId)) {
+    return response.status(409).json({
+      error: "That review was prepared for a different staff record."
+    });
   }
 
   try {
     const output = await callProcedure(
       "CALL sp_create_login_for_staff(?, ?, ?, @status_code, @message)",
-      [request.params.staffId, email, await hashPassword(password)],
+      [details.staffId, details.email, await hashPassword(draft.password)],
       ["status_code", "message"]
     );
 
@@ -1371,8 +2099,30 @@ app.post("/api/users/:staffId/account", async (request, response) => {
       return response.status(output.status_code).json({ error: output.message });
     }
 
-    await writeAuditLog(request, "CREATE_LOGIN", `Login created for staff #${request.params.staffId}`);
-    response.json({ message: output.message });
+    const delivery = await deliverFirstPassword({
+      email: details.email,
+      name: details.fullName || "there",
+      roleName: details.roleName || "staff",
+      password: draft.password
+    });
+
+    await writeAuditLog(
+      request,
+      "CREATE_LOGIN",
+      `Login created for staff #${details.staffId}` +
+        (delivery.emailed ? " and the first password was emailed" : " (password not emailed)"),
+      { staff_id: details.staffId, email: details.email,
+        password_emailed: delivery.emailed }
+    );
+
+    response.json({
+      message: output.message,
+      name: details.fullName,
+      email: details.email,
+      emailed: delivery.emailed,
+      password: delivery.password,
+      reason: delivery.reason
+    });
   } catch (error) {
     console.error("Create login failed:", error.message);
     response.status(500).json({ error: "Unable to create the login account" });
@@ -1499,25 +2249,42 @@ app.get("/api/audit-logs/types", async (request, response) => {
 const BACKUP_DIR = path.join(__dirname, "..", "..", "backups");
 const BACKUP_PREFIX = "hardware_db_backup_";
 
+// ==========================================
+// TWO KINDS OF BACKUP, TOLD APART BY THEIR NAME
+//
+// A backup somebody pressed the button for is a decision: taken before a
+// restore, before a schema change, at the end of a day. It is kept until
+// somebody deletes it.
+//
+// An automatic one is a point on a rolling clock, and there is a new one
+// every minute. Those cannot all be kept -- see the note on the timer below
+// for the arithmetic -- so they carry their own prefix and are the only files
+// the rotation is ever allowed to delete. Nothing automatic can remove
+// something an administrator chose to keep.
+// ==========================================
+const AUTO_PREFIX = "hardware_db_auto_";
+
 // only files this system wrote itself, never a path typed by the browser
-const BACKUP_NAME = /^hardware_db_backup_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
+const BACKUP_NAME =
+  /^hardware_db_(backup|auto)_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
+const AUTO_NAME = /^hardware_db_auto_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
 
 async function ensureBackupFolder() {
   await fsp.mkdir(BACKUP_DIR, { recursive: true });
 }
 
 // 2026-09-04 14:07 local time -> hardware_db_backup_2026-09-04_1407.sql
-function backupFileName(when) {
+function backupFileName(when, prefix) {
   const pad = (number) => String(number).padStart(2, "0");
   const stamp = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}` +
                 `_${pad(when.getHours())}${pad(when.getMinutes())}`;
-  return `${BACKUP_PREFIX}${stamp}.sql`;
+  return `${prefix || BACKUP_PREFIX}${stamp}.sql`;
 }
 
 // two backups inside the same minute must not overwrite each other
-async function freeBackupPath(when) {
+async function freeBackupPath(when, prefix) {
   await ensureBackupFolder();
-  const base = backupFileName(when);
+  const base = backupFileName(when, prefix);
   let name = base;
   let counter = 2;
 
@@ -1577,9 +2344,10 @@ function stripDefiner(sql) {
 }
 
 // Writes the whole database to one .sql file and returns what it contains.
-async function writeBackupFile() {
+// Pass AUTO_PREFIX to write one of the rotating automatic ones instead.
+async function writeBackupFile(prefix) {
   const now = new Date();
-  const { name, fullPath } = await freeBackupPath(now);
+  const { name, fullPath } = await freeBackupPath(now, prefix);
 
   const tables = await listBaseTables();
   const views = await listViews();
@@ -1767,6 +2535,23 @@ function splitSqlStatements(sql) {
 
 // Runs a backup file back into the database on one connection, so the whole
 // restore either lands or leaves the database exactly as it was.
+// ==========================================
+// A RESTORE AND THE BACKUP TIMER MUST NOT OVERLAP
+//
+// A restore drops and rebuilds every table in turn. For the seconds that
+// takes, the database is neither the old contents nor the new ones. The
+// automatic backup below fires every sixty seconds and reads every table, so
+// left alone the two would eventually meet -- and what would land in the
+// backup folder is a dump of a half-restored database, indistinguishable
+// from a good one and useless as the thing you reach for next.
+//
+// So a restore raises this flag and the timer stands down while it is up. The
+// backup that would have been taken during those seconds is skipped rather
+// than queued: the interesting snapshot is the one after the restore has
+// finished, and that is a minute away at most.
+// ==========================================
+let restoreInProgress = false;
+
 async function runSqlScript(sql) {
   const statements = splitSqlStatements(sql);
 
@@ -1775,6 +2560,7 @@ async function runSqlScript(sql) {
   }
 
   const connection = await db.getConnection();
+  restoreInProgress = true;
 
   try {
     await connection.query("SET FOREIGN_KEY_CHECKS = 0");
@@ -1788,8 +2574,221 @@ async function runSqlScript(sql) {
     await connection.query("SET FOREIGN_KEY_CHECKS = 1");
     return statements.length;
   } finally {
+    restoreInProgress = false;
     connection.release();
   }
+}
+
+// ==========================================
+// THE AUTOMATIC BACKUP
+//
+// A full backup of everything, every sixty seconds, without anybody pressing
+// anything. The most that can be lost is the last minute of trading.
+//
+// WHY OLD ONES ARE OVERWRITTEN
+//
+// Sixty seconds is 1,440 complete .sql files a day. At even a megabyte each
+// that is a gigabyte and a half a day into a folder that never stops growing,
+// so within a week the backup feature is the reason the disk is full -- and a
+// full disk is how the next backup fails, quietly, at the moment it matters.
+//
+// So the automatic ones rotate: AUTO_KEEP of them exist at a time, and
+// writing the newest deletes the oldest. The folder settles at a fixed size
+// on the first hour and stays there. Sixty of them is the last hour covered
+// minute by minute, which is what a rolling backup is for -- going back to
+// last Tuesday is what the backup somebody took on purpose is for, and those
+// are never touched by this.
+//
+// WHY IT IS NOT ONE FILE REWRITTEN IN PLACE
+//
+// The literal reading of "overwrite the old one" is a single file rewritten
+// every minute, and it has one restore point. A dump takes a moment to write;
+// a crash, a full disk or a killed process halfway through leaves a truncated
+// file, and if that file is the only one there is, the system has no backup at
+// all -- and it had one a minute ago. Sixty files is the same idea with the
+// last fifty-nine still standing.
+//
+// WHY NOTHING IS WRITTEN TO THE AUDIT TRAIL
+//
+// An entry a minute is 1,440 entries a day, and the trail is where somebody
+// looks to find out who deactivated an account. Burying that under a wall of
+// identical backup lines does not make the system more auditable, it makes
+// the audit trail unreadable, which is worse than not logging a routine
+// success. Failures ARE logged, once, because a backup that has stopped
+// working is exactly the thing nobody notices.
+// ==========================================
+const AUTO_BACKUP_ENABLED = true;
+const AUTO_BACKUP_MS = 60 * 1000;   // every sixty seconds
+const AUTO_KEEP = 60;               // the last hour, minute by minute
+
+// Removes the oldest automatic backups until AUTO_KEEP remain. Only ever
+// looks at AUTO_NAME, so a backup an administrator took cannot be rotated
+// away by a timer.
+async function rotateAutoBackups() {
+  const names = (await fsp.readdir(BACKUP_DIR)).filter((name) => AUTO_NAME.test(name));
+  if (names.length <= AUTO_KEEP) return 0;
+
+  // the names sort chronologically because the stamp inside them is
+  // year-first, so this needs no stat() call per file
+  names.sort();
+
+  const doomed = names.slice(0, names.length - AUTO_KEEP);
+  for (const name of doomed) {
+    try {
+      await fsp.unlink(path.join(BACKUP_DIR, name));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;   // already gone is fine
+    }
+  }
+  return doomed.length;
+}
+
+// ==========================================
+// A ROLLING BACKUP MUST NOT ROTATE HEALTH AWAY FOR CORRUPTION
+//
+// This is the failure the rotation had, and it is worth spelling out because
+// it is the kind that only shows up on the day the backup is needed.
+//
+// Somebody rebuilt this database from 1-RUN-FIRST-database.sql and did not
+// run file 2 after it, so the tables came back and the 27 stored procedures
+// did not. The timer then did exactly what it was told: it took a faithful
+// backup of a database that could not be written to, once a minute, and each
+// one rotated an older file out. Sixteen of those went into the folder before
+// anybody noticed. At the steady state of AUTO_KEEP files, one hour of that
+// would have rotated out every last backup that still had the procedures in
+// it -- and the folder would then hold sixty flawless copies of a broken
+// database and no way back.
+//
+// A rolling window is only safe if what it is rolling over is known good. So
+// the count is checked before anything is deleted, and if the database is
+// missing procedures the backup is still WRITTEN -- the rows are real and
+// worth keeping -- and nothing is DELETED. The folder grows for as long as
+// the fault lasts, which is a cost that can be recovered with a broom. The
+// other way round cannot be recovered at all.
+// ==========================================
+async function safeToRotate() {
+  if (await proceduresAreMissing()) {
+    return {
+      ok: false,
+      why: `the database has only ${proceduresLoaded} of ${EXPECTED_PROCEDURES} ` +
+           "stored procedures, so older backups that still have them are being kept"
+    };
+  }
+  return { ok: true };
+}
+
+// The state the Backup & Recovery screen reads so it can say whether this is
+// running, and say so from the server rather than from a constant compiled
+// into a page.
+const autoBackup = {
+  running: false,        // a dump is in flight right now
+  lastFileName: null,
+  lastAt: null,
+  lastBytes: null,
+  lastError: null,
+  failures: 0,
+  // set while the rotation is standing down, and shown on the screen: a
+  // folder quietly growing past its cap is otherwise something nobody knows
+  // about until the disk is full
+  rotationHeld: null
+};
+
+async function runAutoBackup() {
+  // A dump of a large database can take longer than sixty seconds. Starting a
+  // second one on top of the first would have two writers reading every table
+  // at once and would make the problem worse the slower it got, so a tick that
+  // arrives while one is still running is skipped rather than queued.
+  if (autoBackup.running) return;
+
+  // and a dump taken halfway through a restore is a dump of neither database;
+  // see the note above runSqlScript
+  if (restoreInProgress) return;
+
+  autoBackup.running = true;
+
+  try {
+    const summary = await writeBackupFile(AUTO_PREFIX);
+
+    // The backup is always written. Whether anything is DELETED to make room
+    // for it is a separate question, and the answer is no while the database
+    // is in a state worth going back from -- see the note above safeToRotate.
+    const rotate = await safeToRotate();
+    if (rotate.ok) {
+      await rotateAutoBackups();
+      if (autoBackup.rotationHeld) {
+        console.log("Automatic backup rotation has resumed; the folder will settle " +
+          `back to ${AUTO_KEEP} ${AUTO_KEEP === 1 ? "file" : "files"}.`);
+      }
+      autoBackup.rotationHeld = null;
+    } else if (autoBackup.rotationHeld !== rotate.why) {
+      // once per change of reason, not once a minute
+      console.warn(`Automatic backup is still running, but nothing is being ` +
+        `rotated away: ${rotate.why}.`);
+      autoBackup.rotationHeld = rotate.why;
+    }
+
+    autoBackup.lastFileName = summary.fileName;
+    autoBackup.lastAt = summary.createdAt;
+    autoBackup.lastBytes = summary.bytes;
+
+    // a run that works after a run that failed is worth one line, because the
+    // failure printed one and silence afterwards reads as still broken
+    if (autoBackup.lastError) {
+      console.log(`Automatic backup is working again (${summary.fileName}).`);
+    }
+    autoBackup.lastError = null;
+    autoBackup.failures = 0;
+  } catch (error) {
+    autoBackup.failures += 1;
+    autoBackup.lastError = error.message;
+
+    // Said once when it starts failing, and not once a minute forever: a
+    // console line every sixty seconds is a console nobody reads. The count
+    // is on the screen either way.
+    if (autoBackup.failures === 1) {
+      console.error("Automatic backup failed:", error.message);
+      console.error("It will keep trying every minute. The Backup & Recovery screen shows this.");
+    }
+
+    // The trail gets one entry, not one a minute. A backup that has stopped
+    // working is a real event and belongs in the history; the sixty after it
+    // are the same event.
+    if (autoBackup.failures === 1) {
+      try {
+        await writeAuditLog(
+          { staffId: null, request: null },
+          "BACKUP_FAILED",
+          `The automatic backup failed: ${error.message}`
+        );
+      } catch (ignored) { /* the database is the thing that is broken */ }
+    }
+  } finally {
+    autoBackup.running = false;
+  }
+}
+
+function startAutoBackup() {
+  if (!AUTO_BACKUP_ENABLED) {
+    console.log("Automatic backup is switched off (AUTO_BACKUP_ENABLED in server.js).");
+    return;
+  }
+
+  const minutes = Math.round((AUTO_KEEP * AUTO_BACKUP_MS) / 60000);
+  console.log(`Automatic backup every ${AUTO_BACKUP_MS / 1000}s, keeping the last ` +
+    `${AUTO_KEEP} (about ${minutes} ${minutes === 1 ? "minute" : "minutes"}). ` +
+    "Backups taken by hand are never rotated.");
+
+  // The first one is immediate rather than a minute from now: a server that
+  // has just been started is a server that has possibly just been restarted
+  // after something went wrong, and waiting a minute to take the first
+  // snapshot is the wrong instinct.
+  runAutoBackup();
+
+  const timer = setInterval(runAutoBackup, AUTO_BACKUP_MS);
+
+  // A backup timer is not a reason to keep the process alive on its own. If
+  // everything else has finished, this should not be what holds the door open.
+  if (typeof timer.unref === "function") timer.unref();
 }
 
 // the dated history the Backup & Recovery screen lists, newest first
@@ -1800,11 +2799,38 @@ app.get("/api/backups", async (request, response) => {
 
     const files = await Promise.all(names.map(async (name) => {
       const stats = await fsp.stat(path.join(BACKUP_DIR, name));
-      return { fileName: name, bytes: stats.size, createdAt: stats.mtime.toISOString() };
+      return {
+        fileName: name,
+        bytes: stats.size,
+        createdAt: stats.mtime.toISOString(),
+        // so a row can say which kind it is, and the drawer can warn that an
+        // automatic one is on its way out of the folder
+        automatic: AUTO_NAME.test(name)
+      };
     }));
 
     files.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-    response.json({ folder: BACKUP_DIR, files });
+
+    response.json({
+      folder: BACKUP_DIR,
+      files: files,
+      auto: {
+        enabled: AUTO_BACKUP_ENABLED,
+        everySeconds: AUTO_BACKUP_MS / 1000,
+        keep: AUTO_KEEP,
+        lastFileName: autoBackup.lastFileName,
+        lastAt: autoBackup.lastAt,
+        lastError: autoBackup.lastError,
+        failures: autoBackup.failures,
+        rotationHeld: autoBackup.rotationHeld
+      },
+      // so the screen can say the one thing that stops every write, rather
+      // than leaving each form to report it as its own failure
+      procedures: {
+        loaded: proceduresLoaded,
+        expected: EXPECTED_PROCEDURES
+      }
+    });
   } catch (error) {
     console.error("Backup list failed:", error.message);
     response.status(500).json({ error: "Unable to read the backup folder" });
@@ -1864,6 +2890,43 @@ app.delete("/api/backups/:fileName", async (request, response) => {
   }
 });
 
+// ==========================================
+// A RESTORE CAN SUCCEED AND STILL LEAVE YOU STUCK
+//
+// A backup taken while the database was missing its stored procedures is a
+// perfectly valid file: every table, every row, and it restores without a
+// single error. It simply has no procedures in it -- and, because it has
+// none, it also carries no DROP PROCEDURE lines. So restoring one onto a
+// healthy database is harmless: the procedures already there are left alone.
+//
+// The case that bites is restoring one onto a database that has no
+// procedures either -- after a rebuild from file 1, say. Nothing is wrong
+// with the restore, it reports success, the rows all arrive, and the system
+// still cannot save anything. "Database restored" is true and is the last
+// sentence anybody would think to doubt.
+//
+// So the count is taken AFTER the restore and reported in the same breath as
+// the success. After rather than before on purpose: the honest test is not
+// what the file appeared to contain, it is what the database ended up with.
+//
+// Returns "" when all is well, so callers can append it unconditionally.
+// ==========================================
+async function restoreShortfall() {
+  try {
+    proceduresLoaded = null;                 // force a fresh count
+    procedureCheckAt = 0;
+    const total = await countProcedures();
+    if (total >= EXPECTED_PROCEDURES) return "";
+
+    return ` WARNING: that backup did not carry the stored procedures -- this ` +
+      `database now has ${total} of ${EXPECTED_PROCEDURES} and nothing can be ` +
+      `saved until they are put back. Run ` +
+      `public/database/2-RUN-SECOND-stored-procedures.sql. Your data is intact.`;
+  } catch (error) {
+    return "";
+  }
+}
+
 // restore from a file already sitting in the backups folder
 app.post("/api/backups/:fileName/restore", async (request, response) => {
   const name = request.params.fileName;
@@ -1881,7 +2944,10 @@ app.post("/api/backups/:fileName/restore", async (request, response) => {
   try {
     const count = await runSqlScript(await fsp.readFile(fullPath, "utf8"));
     await writeAuditLog(request, "RESTORE", `Restored from ${name}`);
-    response.json({ message: `Database restored from ${name}. ${count} statements ran.` });
+    response.json({
+      message: `Database restored from ${name}. ${count} statements ran.` +
+        await restoreShortfall()
+    });
   } catch (error) {
     console.error("Restore failed:", error.message);
     response.status(500).json({ error: "Restore failed: " + error.message });
@@ -1899,7 +2965,9 @@ app.post("/api/restore", async (request, response) => {
   try {
     const count = await runSqlScript(sql);
     await writeAuditLog(request, "RESTORE", "Restored from an uploaded .sql file");
-    response.json({ message: `Database restored. ${count} statements ran.` });
+    response.json({
+      message: `Database restored. ${count} statements ran.` + await restoreShortfall()
+    });
   } catch (error) {
     console.error("Restore failed:", error.message);
     response.status(500).json({ error: "Restore failed: " + error.message });
@@ -2000,7 +3068,7 @@ const BUCKET_SQL = {
 // ==========================================
 // THE INCOME BREAKDOWN
 //
-// The Total Income card on the dashboard opens this. It answers one question
+// The Collected card on the dashboard opens this. It answers one question
 // four ways, because "how much did we make" means four different figures to
 // four different people, and a screen that shows only one of them gets
 // argued with:
@@ -2300,12 +3368,17 @@ app.get("/api/reports/daily-tally", async (request, response) => {
 });
 
 // dashboard headline numbers
+//
+// Five queries, and every field below is read by the dashboard. Gross sales is
+// what was billed and total income is what was actually collected; the
+// difference between them IS the outstanding balance, so the three travel
+// together as one receivables figure rather than as three cards that a manager
+// has to subtract in their head.
 app.get("/api/manager/summary", async (request, response) => {
   try {
     const [[sales]] = await db.query(
       `SELECT COUNT(*) AS sale_count,
-              COALESCE(SUM(final_amount), 0) AS gross_sales,
-              COALESCE(SUM(CASE WHEN payment_status <> 'Paid' THEN final_amount - amount_paid ELSE 0 END), 0) AS receivables
+              COALESCE(SUM(final_amount), 0) AS gross_sales
        FROM sales WHERE is_archived = FALSE`
     );
     const [[stock]] = await db.query(
@@ -2316,30 +3389,16 @@ app.get("/api/manager/summary", async (request, response) => {
        WHERE p.is_archived = FALSE`
     );
     const [[delivery]] = await db.query(
-      `SELECT COUNT(*) AS delivery_count,
-              COALESCE(SUM(CASE WHEN status IN ('Pending','In Transit','Out for Delivery') THEN 1 ELSE 0 END), 0) AS in_progress,
+      `SELECT COALESCE(SUM(CASE WHEN status IN ('Pending','In Transit','Out for Delivery') THEN 1 ELSE 0 END), 0) AS in_progress,
               COALESCE(SUM(CASE WHEN status IN ('Delayed','Failed') THEN 1 ELSE 0 END), 0) AS problem
        FROM deliveries WHERE is_archived = FALSE`
     );
-    const [[archive]] = await db.query("SELECT COUNT(*) AS archive_count FROM vw_archives");
 
-    // The four figures the clickable cards are built on. Gross sales is what
-    // was billed; total income is what was actually collected, and on a
-    // dashboard with a credit book beside it those are not the same number
-    // and should never share one card.
     const [[income]] = await db.query(
       `SELECT COALESCE(SUM(LEAST(amount_paid, final_amount)), 0) AS collected,
               COALESCE(SUM(CASE WHEN DATE(sale_date) = CURDATE()
                                 THEN LEAST(amount_paid, final_amount) ELSE 0 END), 0) AS collected_today
        FROM sales WHERE is_archived = FALSE`
-    );
-
-    const [[volume]] = await db.query(
-      `SELECT COALESCE(SUM(si.quantity), 0) AS units_sold,
-              COUNT(DISTINCT si.sale_id) AS sales_with_items
-       FROM sale_items si
-       JOIN sales s ON s.sale_id = si.sale_id
-       WHERE s.is_archived = FALSE`
     );
 
     const [[credits]] = await db.query(
@@ -2352,20 +3411,14 @@ app.get("/api/manager/summary", async (request, response) => {
     response.json({
       saleCount: sales.sale_count,
       grossSales: sales.gross_sales,
-      receivables: sales.receivables,
-      productCount: stock.product_count,
-      lowStock: stock.low_stock,
-      deliveryCount: delivery.delivery_count,
-      deliveriesInProgress: delivery.in_progress,
-      deliveryProblems: delivery.problem,
-      archiveCount: archive.archive_count,
-
       totalIncome: income.collected,
       incomeToday: income.collected_today,
-      unitsSold: volume.units_sold,
       pendingCredits: credits.owed,
       pendingCreditCount: credits.open_accounts,
-      reorderAlerts: stock.low_stock
+      productCount: stock.product_count,
+      reorderAlerts: stock.low_stock,
+      deliveriesInProgress: delivery.in_progress,
+      deliveryProblems: delivery.problem
     });
   } catch (error) {
     console.error("Manager summary failed:", error.message);
@@ -2417,7 +3470,7 @@ app.get("/api/reports/overview", async (request, response) => {
 
     // Sales belong to the transaction, not to whether the person still works
     // here. Filtering on is_active used to hide a leaver's history and make
-    // this table disagree with the Gross Sales figure on the dashboard.
+    // this table disagree with the billed figure on the dashboard.
     // Everyone who sold anything is listed, plus cashiers on duty who have
     // not sold yet, so a quiet shift still shows up as a zero rather than
     // vanishing. is_active comes along so the screen can label a leaver.
@@ -2966,6 +4019,13 @@ app.get("/api/store-settings", async (request, response) => {
 app.put("/api/store-settings", async (request, response) => {
   const { storeName, address, tin, registrationType, vatRate, invoiceNote } = request.body;
 
+  // refused with the reason rather than stored as typed: what is stored here
+  // is printed at the head of every invoice from now on
+  const tinProblem = tinComplaint(tin);
+  if (tinProblem) return response.status(400).json({ error: tinProblem });
+
+  const storedTin = cleanTin(tin);
+
   try {
     // read first, so the trail can say what the TIN and the registration were
     // before somebody changed what every future invoice claims about the shop
@@ -2978,7 +4038,7 @@ app.put("/api/store-settings", async (request, response) => {
       "CALL sp_update_store_settings(?, ?, ?, ?, ?, ?, ?, @status_code, @message)",
       [String(storeName || "").trim().slice(0, 150),
        String(address || "").trim().slice(0, 255),
-       String(tin || "").trim().slice(0, 30),
+       storedTin,
        String(registrationType || "").trim().toUpperCase(),
        Number(vatRate) || 0,
        String(invoiceNote || "").trim().slice(0, 255),
@@ -3002,7 +4062,7 @@ app.put("/api/store-settings", async (request, response) => {
         changes: fieldChanges(existing[0] || null, {
           store_name: String(storeName || "").trim().slice(0, 150),
           address: String(address || "").trim().slice(0, 255),
-          tin: String(tin || "").trim().slice(0, 30),
+          tin: storedTin,
           registration_type: String(registrationType || "").trim().toUpperCase(),
           vat_rate: Number(vatRate) || 0,
           invoice_note: String(invoiceNote || "").trim().slice(0, 255)

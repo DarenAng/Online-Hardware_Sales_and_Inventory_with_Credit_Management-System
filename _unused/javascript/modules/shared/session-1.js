@@ -277,44 +277,16 @@ function startHeartbeat() {
     });
 }
 
-// ==========================================
-// ONE SPELLING OF A NAME, AND IT CARRIES THE MIDDLE INITIAL
-//
-// staff.full_name in the database is first name, middle initial, last name,
-// and that is the spelling every screen shows. This is the fallback for the
-// moment before /api/me has answered and the page is working from what was
-// stored at sign-in, so it has to spell a name the same way rather than
-// dropping the initial and giving the corner of the screen a different name
-// from the one in the directory.
-//
-// A middle name may be blank, in which case there is no initial to show and
-// the name is first and last -- that is a person with no middle name on file,
-// not a name being shortened.
-// ==========================================
-function staffName(user) {
-    if (!user) return '';
-    if (user.full_name) return user.full_name;
-
-    const middle = (user.middle_name || '').trim();
-    const initial = middle === '' ? '' : ' ' + middle[0].toUpperCase() + '.';
-
-    return `${user.first_name || ''}${initial} ${user.last_name || ''}`.trim() ||
-        user.email || '';
-}
-
 // writes the signed-in person into every place the page shows them
 function applyCurrentUserToPage(currentUser) {
     if (!currentUser) return;
 
-    const fullName = staffName(currentUser) || currentUser.email;
+    const fullName = currentUser.full_name ||
+        `${currentUser.first_name || ''} ${currentUser.last_name || ''}`.trim() ||
+        currentUser.email;
 
-    // The chip in the corner and the plate in the menu used to show a bare
-    // first name. Two Cashier Users on the same shift then saw the same word
-    // in the same corner, which is the whole reason the middle initial is
-    // part of a name in this system: the name on the screen has to be the
-    // name in the directory.
     document.querySelectorAll('[data-current-user]').forEach((element) => {
-        element.textContent = fullName;
+        element.textContent = currentUser.first_name || currentUser.email;
     });
     document.querySelectorAll('[data-current-fullname]').forEach((element) => {
         element.textContent = fullName;

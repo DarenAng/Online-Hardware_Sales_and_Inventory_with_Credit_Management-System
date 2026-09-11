@@ -73,12 +73,68 @@
 #panel-maintenance .tile .btn { margin-top: 2px; }
 
 /* ==========================================================================
+   IS THIS SYSTEM BACKING ITSELF UP?
+
+   The first thing on the screen, above both tiles, because it is the one
+   question on it whose answer the administrator did not choose. A backup that
+   has quietly stopped working looks exactly like a backup that is working,
+   right up until the afternoon somebody needs it.
+
+   So the state carries the system meaning rather than a decoration: green
+   for nothing to do, crimson for the one that is actually broken, grey for
+   switched off -- which is a setting somebody chose and not a fault.
+   ========================================================================== */
+.auto-backup {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    border-left: var(--rule) solid var(--steel-soft);
+}
+.auto-backup .auto-backup-body { min-width: 0; }
+.auto-backup h3 { margin-bottom: 2px; }
+.auto-backup .panel-sub { margin-bottom: 0; }
+
+.auto-backup-state {
+    flex: none;
+    margin-top: 2px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--steel);
+    white-space: nowrap;
+}
+
+.auto-backup.is-on { border-left-color: var(--ok); }
+.auto-backup.is-on .auto-backup-state {
+    border-color: rgba(14, 122, 95, 0.35);
+    background: var(--ok-dim);
+    color: var(--ok-ink);
+}
+
+.auto-backup.is-bad { border-left-color: var(--stop); background: var(--stop-dim); }
+.auto-backup.is-bad .auto-backup-state {
+    border-color: rgba(158, 27, 50, 0.4);
+    background: var(--surface);
+    color: var(--stop-hi);
+}
+
+.auto-backup.is-off { border-left-color: var(--steel-soft); }
+
+@media (max-width: 640px) {
+    .auto-backup { flex-direction: column; gap: 10px; }
+}
+
+/* ==========================================================================
    THE STAFF DIRECTORY
-   Two people may share a first and a last name, so the middle initial is part
-   of the name and not an afterthought.
+   Two people may share a first and a last name, so the middle name is part of
+   the name and not an afterthought. It used to have a box of its own, 92px
+   wide, because it held one letter; it holds a whole name now and takes the
+   same box as the first and last names beside it.
    ========================================================================== */
 #panel-create .grid-2 { align-items: start; }
-.initial-input { max-width: 92px; }
 
 /* Deactivate is the last button in the row and the only red one on the
    screen: it is where a person stops being able to sign in. */
@@ -92,7 +148,6 @@
     .backup-figure { min-width: 0; flex: 1 1 45%; }
     .backup-figure:last-child { flex: 1 1 100%; }
     .backup-figure-value { font-size: 22px; }
-    .initial-input { max-width: none; }
 
     /* the whole footer of the user popup is destructive-adjacent; each
        button gets its own line so none of them is pressed by accident */
@@ -114,6 +169,21 @@
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--surface);
+}
+
+/* The TIN box says whether it is happy as it is being filled in, the same
+   way the phone box does. The phone rule in general-ui.css is written for
+   the two-part phone control and does not reach a plain box, so it is said
+   again here for this one. */
+#store-tin {
+    font-family: var(--font-figure);
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+}
+#store-tin.is-bad { border-color: var(--signal-hi); }
+#store-tin.is-bad:focus {
+    border-color: var(--signal-hi);
+    box-shadow: 0 0 0 3px var(--signal-dim);
 }
 
 /* what the server refused, said next to the boxes rather than only as a card

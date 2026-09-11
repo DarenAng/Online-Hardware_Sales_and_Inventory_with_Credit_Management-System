@@ -40,19 +40,42 @@ function showAccountsList(event) {
     });
 }
 
-// "List Users" in the sidebar still means "show me everyone", so it is the
-// one menu item that opens a panel and fills it in the same move.
-async function showAllUsers(event) {
+// ==========================================
+// OPENING THE DIRECTORY IS NOT ASKING FOR IT
+//
+// "List Users" used to open this panel and read the whole staff directory in
+// the same move, and so did every one of the three filters above it. That
+// left four ways to start a query and only one of them -- the button that
+// says Load Data -- was somebody actually asking for one. Opening a screen to
+// get to the Create tab, or setting a filter before choosing what to filter,
+// both fetched the directory.
+//
+// Now there are exactly two ways in, and both are a request:
+//
+//   Load Data   the button, which says what it does
+//   the search  typing a name is asking for that name
+//
+// The filters narrow what has already arrived and no longer fetch anything;
+// on a closed table they are remembered and applied to the first load. A
+// table that is already open still re-reads when a filter needs the server,
+// because that is a filter applied to rows somebody is looking at.
+// ==========================================
+function showAllUsers(event) {
     showPanel('panel-accounts', event);
-
-    const panel = getDataPanel('admin-users');
-    if (panel) await panel.open();
 }
 
 function showCreateAccount(event) { showPanel('panel-create', event); }
 function showArchiveModule(event) { showPanel('panel-archive', event); }
 function showAuditLogs(event)     { showPanel('panel-logs', event); }
-function showMaintenance(event)   { showPanel('panel-maintenance', event); }
+// The tables on this screen still wait to be asked. The card at the top of it
+// does not, because it answers "is this system backing itself up?" and a
+// question like that is worthless behind a button: the administrator who has
+// to press something to find out the backups have been failing for a week is
+// the administrator who finds out in a week's time.
+function showMaintenance(event) {
+    showPanel('panel-maintenance', event);
+    loadAutoBackupState();
+}
 function showStoreSettings(event) { showPanel('panel-store', event); loadStoreSettingsForm(); }
 
 // ==========================================
@@ -87,37 +110,41 @@ async function loadRoles() {
 // ==========================================
 // THE STAFF DIRECTORY
 //
-// Two facts share the last column and they are not the same fact. Active or
-// Inactive is a decision an administrator made about the account. Online or
-// Offline is whether the person is at a screen right now, which the server
-// answers from its own session store. Showing only the first has had people
-// ring a colleague who was signed in two desks away; showing only the second
-// would hide a deactivated account that happens to be quiet.
+// Two facts, and they are not the same fact. Active or Inactive is a
+// decision an administrator made about the account. Online or Offline is
+// whether the person is at a screen right now, which the server answers from
+// its own session store. Showing only the first has had people ring a
+// colleague who was signed in two desks away; showing only the second would
+// hide a deactivated account that happens to be quiet.
+//
+// They used to share one column. They have one each now, because each has a
+// filter of its own above the grid, and a filter takes its column off the
+// grid when it is set (see syncDirectoryColumns below): "Active only" should
+// remove the word Active from every row without also removing who is online.
 // ==========================================
 let selectedUser = null;
 
-function presenceCell(user) {
-    const account = user.is_active
+function accountCell(user) {
+    return user.is_active
         ? '<span class="badge badge-success">Active</span>'
         : '<span class="badge badge-danger">Inactive</span>';
+}
 
+function presenceCell(user) {
     // somebody with no login account cannot be online, and calling them
     // "Offline" would suggest they could be
     if (!user.user_id) {
-        return '<div class="status-stack">' + account +
-               '<span class="presence"><span class="presence-dot"></span>No login</span></div>';
+        return '<span class="presence"><span class="presence-dot"></span>No login</span>';
     }
 
-    const presence = user.is_online
+    return user.is_online
         ? '<span class="presence is-online"><span class="presence-dot"></span>Online now</span>'
         : '<span class="presence"><span class="presence-dot"></span>Offline</span>';
-
-    return '<div class="status-stack">' + account + presence + '</div>';
 }
 
 function userHaystack(user) {
     return [
-        user.full_name, user.first_name, user.middle_initial, user.last_name,
+        user.full_name, user.first_name, user.middle_name, user.last_name,
         user.email, user.role_name, '#' + user.staff_id
     ].join(' ').toLowerCase();
 }
@@ -131,28 +158,81 @@ function currentStatusFilter() {
 }
 
 async function reloadUsers() {
+    syncDirectoryColumns();
+
     const panel = getDataPanel('admin-users');
     if (!panel) return;
 
-    // changing a filter on a table nobody has loaded is a request to load it,
-    // not a request to filter nothing
-    await panel.open();
+    // Account state is the one filter the server applies, so changing it on a
+    // table that is already open means re-reading. On a closed table it means
+    // nothing at all: the value is sitting in the dropdown and load() reads it
+    // from there when somebody does ask.
+    if (panel.state === 'ready') await panel.refresh();
+}
+
+// the role and presence dropdowns: narrow the rows, then drop the column
+function filterDirectory(name, value) {
+    dataPanelFilter('admin-users', name, value);
+    syncDirectoryColumns();
+}
+
+// ==========================================
+// A FILTER TAKES ITS COLUMN OFF THE GRID
+//
+// Set the role filter to Cashier and every row left says Cashier in the Role
+// column. The column is repeating the dropdown back to the reader and using
+// the width to do it, so while a filter is set, the column it decides is not
+// drawn. Clear the filter and the column comes back.
+//
+// The columns are named by position, 1-based, to match the <th> order in
+// system.html: ID, Name, Email, Role, Status, Signed In. The list is kept on
+// the table itself and re-applied by tables.js on every redraw, so paging
+// and refreshing do not bring a hidden column back.
+// ==========================================
+const DIRECTORY_COLUMN = { role: 4, status: 5, presence: 6 };
+const LOG_COLUMN = { type: 5 };
+
+function selectValue(id) {
+    const select = document.getElementById(id);
+    return select ? select.value : 'all';
+}
+
+function syncDirectoryColumns() {
+    const hidden = [];
+    if (selectValue('accounts-role') !== 'all') hidden.push(DIRECTORY_COLUMN.role);
+    if (selectValue('accounts-status') !== 'all') hidden.push(DIRECTORY_COLUMN.status);
+    if (selectValue('accounts-presence') !== 'all') hidden.push(DIRECTORY_COLUMN.presence);
+
+    setHiddenColumns(document.getElementById('accounts-table'), hidden);
+}
+
+// The date boxes are left out on purpose: a range still leaves a different
+// timestamp on every row, so that column is still saying something.
+function syncLogColumns() {
+    const hidden = [];
+    if (selectValue('logs-type') !== 'all') hidden.push(LOG_COLUMN.type);
+
+    setHiddenColumns(document.getElementById('logs-table'), hidden);
 }
 
 function buildUsersPanel() {
     createDataPanel({
         key: 'admin-users',
         tableId: 'accounts-table',
-        columns: 5,
+        columns: 6,
         pagerId: 'accounts-pager',
         countPillId: 'accounts-count',
         idField: 'staff_id',
         filters: { presence: 'all', roleId: 'all' },
 
+        // the filters here set up a query rather than run one; see
+        // dataPanelFilter in shared/data-panel.js
+        loadOnFilter: false,
+
         gate: {
             title: 'The directory is not loaded',
-            text: 'Search for one person above, pick a filter, or press Load Data to read ' +
-                  'the whole staff directory from the database.',
+            text: 'Set the filters you want, then press Load Data to read the staff ' +
+                  'directory &mdash; or type a name in the search box to look one person up.',
             button: 'Load Data'
         },
 
@@ -175,9 +255,10 @@ function buildUsersPanel() {
             <tr class="row-clickable row-reveal" style="animation-delay: ${(index % 10) * 28}ms"
                 onclick="openUserModal(${user.staff_id})" title="Click to view full details">
                 <td class="cell-id">#${escapeHtml(user.staff_id)}</td>
-                <td class="cell-name">${escapeHtml(user.full_name || (user.first_name + ' ' + user.last_name))}</td>
+                <td class="cell-name">${escapeHtml(staffName(user))}</td>
                 <td>${user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>'}</td>
                 <td>${escapeHtml(user.role_name)}</td>
+                <td>${accountCell(user)}</td>
                 <td>${presenceCell(user)}</td>
             </tr>`
     });
@@ -189,7 +270,7 @@ function openUserModal(staffId) {
     if (!selectedUser) return;
 
     document.getElementById('modal-user-name').textContent =
-        selectedUser.full_name || `${selectedUser.first_name} ${selectedUser.last_name}`;
+        staffName(selectedUser);
     document.getElementById('modal-user-role').textContent = selectedUser.role_name;
 
     const initials = (selectedUser.first_name[0] + selectedUser.last_name[0]).toUpperCase();
@@ -198,15 +279,16 @@ function openUserModal(staffId) {
     document.getElementById('modal-user-details').innerHTML =
         detailRow('Staff ID', '#' + escapeHtml(selectedUser.staff_id)) +
         detailRow('User ID', selectedUser.user_id ? '#' + escapeHtml(selectedUser.user_id) : '<span class="muted">None</span>') +
-        detailRow('Full Name', escapeHtml(selectedUser.full_name ||
-            `${selectedUser.first_name} ${selectedUser.last_name}`)) +
+        detailRow('Full Name', escapeHtml(staffName(selectedUser))) +
         detailRow('First Name', escapeHtml(selectedUser.first_name)) +
-        detailRow('Middle Initial', selectedUser.middle_initial
-            ? escapeHtml(selectedUser.middle_initial) + '.'
+        detailRow('Middle Name', selectedUser.middle_name
+            ? escapeHtml(selectedUser.middle_name)
             : '<span class="muted">Not set</span>') +
         detailRow('Last Name', escapeHtml(selectedUser.last_name)) +
         detailRow('Email', selectedUser.email ? escapeHtml(selectedUser.email) : '<span class="muted">No login account</span>') +
-        detailRow('Phone', selectedUser.phone ? escapeHtml(selectedUser.phone) : '<span class="muted">Not set</span>') +
+        detailRow('Phone', selectedUser.phone
+            ? '<span class="mono">' + escapeHtml(phoneForDisplay(selectedUser.phone)) + '</span>'
+            : '<span class="muted">Not set</span>') +
         detailRow('Role', escapeHtml(selectedUser.role_name)) +
         detailRow('Account Status', `<span class="badge ${selectedUser.is_active ? 'badge-success' : 'badge-danger'}">${selectedUser.is_active ? 'Active' : 'Inactive'}</span>`) +
         detailRow('Signed In Now', selectedUser.is_online
@@ -219,11 +301,15 @@ function openUserModal(staffId) {
 
     const form = document.getElementById('edit-user-form');
     form.elements.firstName.value = selectedUser.first_name;
-    form.elements.middleInitial.value = selectedUser.middle_initial || '';
+    form.elements.middleName.value = selectedUser.middle_name || '';
     form.elements.lastName.value = selectedUser.last_name;
-    form.elements.phone.value = selectedUser.phone || '';
+    form.elements.phone.value = phoneToInput(selectedUser.phone);
     form.elements.email.value = selectedUser.email || '';
     form.elements.roleId.value = selectedUser.role_id;
+
+    // what is in the boxes is what is on the record, so there is nothing to
+    // save until one of them is changed
+    markFormClean(form, document.getElementById('edit-user-save-btn'));
 
     const statusButton = document.getElementById('modal-status-btn');
     statusButton.textContent = selectedUser.is_active ? 'Deactivate Account' : 'Activate Account';
@@ -246,6 +332,11 @@ function showUserTab(tab) {
     document.getElementById('modal-edit-tab').classList.toggle('active', isEdit);
 }
 
+// Returns the server's reply on success and false on any failure, so a
+// caller with something more to say than "it worked" -- the first-password
+// dialog is the one -- can read what came back. Passing no successMessage
+// says that caller will do the talking, and stops the corner card that would
+// otherwise appear behind its dialog.
 async function sendUserRequest(url, method, data, successMessage) {
     try {
         const response = await fetch(url, {
@@ -260,14 +351,14 @@ async function sendUserRequest(url, method, data, successMessage) {
             return false;
         }
 
-        notifySuccess(successMessage);
+        if (successMessage) notifySuccess(successMessage);
         closeModal('user-modal');
 
         // re-read, but keep whichever page and filters were being looked at
         const panel = getDataPanel('admin-users');
         if (panel) await panel.refresh();
 
-        return true;
+        return result || true;
     } catch (error) {
         notifyOffline();
         return false;
@@ -279,16 +370,26 @@ async function handleUpdateUser(event) {
     if (!selectedUser) return;
 
     const form = event.target;
+
+    // The button is off until something changes, but a form can still be
+    // sent by other routes, and a save of nothing writes an audit entry that
+    // says "unchanged" and signs the person out for a role change that did
+    // not happen.
+    if (!isFormDirty(form)) {
+        notifyInfo('Nothing on this form has been changed, so there is nothing to save.', 'No changes');
+        return;
+    }
+
     const data = {
         firstName: form.elements.firstName.value.trim(),
-        middleInitial: form.elements.middleInitial.value.trim(),
+        middleName: form.elements.middleName.value.trim(),
         lastName: form.elements.lastName.value.trim(),
-        phone: form.elements.phone.value.trim(),
+        phone: phoneToStore(form.elements.phone.value),
         email: form.elements.email.value.trim(),
         roleId: parseInt(form.elements.roleId.value, 10)
     };
 
-    const name = selectedUser.full_name || `${selectedUser.first_name} ${selectedUser.last_name}`;
+    const name = staffName(selectedUser);
 
     // Changing somebody's role changes what they can see, so it is asked
     // about. Correcting a spelling is not: a dialog on every save is what
@@ -318,7 +419,7 @@ async function toggleUserStatus() {
     if (!selectedUser) return;
 
     const makeActive = !selectedUser.is_active;
-    const name = selectedUser.full_name || `${selectedUser.first_name} ${selectedUser.last_name}`;
+    const name = staffName(selectedUser);
 
     const yes = makeActive
         ? await askConfirm(`${name} will be able to sign in again straight away.`, {
@@ -358,7 +459,7 @@ async function resetUserPassword() {
     const newPassword = await askInput({
         title: 'Reset this password',
         eyebrow: 'Accounts Management',
-        message: `Give ${selectedUser.full_name || selectedUser.first_name} a temporary password. ` +
+        message: `Give ${staffName(selectedUser)} a temporary password. ` +
                  'They will have to choose their own the next time they sign in.',
         label: 'Temporary password',
         type: 'password',
@@ -377,41 +478,203 @@ async function resetUserPassword() {
     );
 }
 
+// ==========================================
+// SAVE IS OFF UNTIL SOMETHING HAS CHANGED
+//
+// Both edit forms on this page used to save whatever was in the boxes the
+// moment the button was pressed, whether anything had been typed or not. A
+// save of nothing is not harmless: the account one writes an audit entry
+// reading "unchanged" and signs the person out, because the server cannot
+// tell a role that was re-chosen from a role that was changed; the store one
+// re-stamps who last touched the shop's registration.
+//
+// So when a form is filled from the record, what is in it is written down,
+// and the Save button stays off until the boxes say something different from
+// that. Typing a letter and deleting it again puts the button back off,
+// because the form is back to what the record says. Spaces at the ends do
+// not count: the server trims them, so they would be a save of nothing too.
+// ==========================================
+const formBaselines = new WeakMap();
+
+function formValues(form) {
+    const values = {};
+    Array.from(form.elements).forEach((field) => {
+        if (!field.name || field.disabled) return;
+        values[field.name] = String(field.value === undefined ? '' : field.value).trim();
+    });
+    return JSON.stringify(values);
+}
+
+function isFormDirty(form) {
+    if (!form) return false;
+    const baseline = formBaselines.get(form);
+    return baseline === undefined ? true : formValues(form) !== baseline;
+}
+
+// call this after the boxes have been filled from the record
+function markFormClean(form, button) {
+    if (!form) return;
+    formBaselines.set(form, formValues(form));
+    syncSaveButton(form, button);
+}
+
+function syncSaveButton(form, button) {
+    if (!form || !button) return;
+    const dirty = isFormDirty(form);
+    button.disabled = !dirty;
+    button.title = dirty ? '' : 'Nothing has changed yet';
+}
+
+// every keystroke and every dropdown change re-decides the button
+function watchFormEdits(form, button) {
+    if (!form || !button) return;
+    const update = () => syncSaveButton(form, button);
+    form.addEventListener('input', update);
+    form.addEventListener('change', update);
+}
+
+// ==========================================
+// CANCELLING THE CREATE FORM EMPTIES IT
+//
+// Cancel used to go back to the directory and leave the half-typed account
+// in the boxes, so the next person to open Create found somebody else's
+// name, phone number and email waiting to be submitted under a new role.
+// Cancelling means "not this account", so the account goes.
+// ==========================================
+function clearCreateForm() {
+    const form = document.getElementById('create-user-form');
+    if (!form) return;
+
+    form.reset();
+
+    // reset() puts the values back but not the box's own verdict on them
+    const phone = form.elements.phone;
+    if (phone) phone.classList.remove('is-bad');
+}
+
+function cancelCreateAccount(event) {
+    clearCreateForm();
+    showAccountsList(event);
+}
+
+// ==========================================
+// CREATING AN ACCOUNT IS TWO STEPS, AND A PERSON READS THE MIDDLE ONE
+//
+// The form is filled in and submitted, and nothing is created. The server
+// works out the whole account -- including the password, which nobody types
+// -- and it comes back to be read: the name as the directory will spell it,
+// the role, the number, the address the password is about to be sent to, and
+// the password itself. That card is where a typo in an email address gets
+// caught, which is the one typo on this form that cannot be corrected
+// afterwards, because by then the password has already been sent to it.
+//
+// Confirming creates the account and sends the password. Cancelling creates
+// nothing: there is no half-made account to tidy up, because the first
+// request wrote nothing.
+//
+// The card is a dialog rather than a card in the corner. A corner card is
+// for something that has happened; this is a question, it is the last chance
+// to stop, and it holds a secret that has to be read before it is dismissed.
+// ==========================================
+function reviewCard(review, lines) {
+    const wait = review.willEmail
+        ? `Confirm and the password is emailed to ${review.email}. Nothing has been created yet.`
+        : `Mail is not set up on this server, so write this password down now -- ` +
+          `it is not shown again and is not stored anywhere you can read it back. ` +
+          `Nothing has been created yet.`;
+
+    return askConfirm(wait, {
+        title: 'Check this before it is created',
+        eyebrow: 'Accounts Management',
+        mark: '?',
+        confirmLabel: review.willEmail ? 'Create and send' : 'Create the account',
+        cancelLabel: 'Go back and edit',
+        detail: lines
+    });
+}
+
+// What the administrator is told afterwards. Emailed is a corner card,
+// because there is nothing left to do. Not emailed keeps the password on
+// screen in a dialog that waits, because it still has to be handed over.
+async function reportFirstPassword(result, email, name) {
+    if (result.emailed) {
+        notifySuccess(`The first password was emailed to ${email}. ` +
+            `${name} must change it the first time they sign in.`, 'Account created');
+        return;
+    }
+
+    await askConfirm(
+        `The account exists, but the password could not be sent. Read it out to ` +
+        `${name} now: it is not shown again after this card.`,
+        {
+            title: 'The password was not sent',
+            eyebrow: 'Accounts Management',
+            mark: '!',
+            confirmLabel: 'I have written it down',
+            cancelLabel: 'Close',
+            tone: 'danger',
+            detail: [
+                'Password: ' + result.password,
+                'Signs in with: ' + email,
+                result.reason || 'The password could not be emailed.',
+                name + ' must change it the first time they sign in.'
+            ]
+        });
+}
+
 async function handleCreateUser(event) {
     event.preventDefault();
     const form = event.target;
 
+    // No password is sent up. The server makes it, shows it for checking, and
+    // sends it on confirmation.
     const data = {
         firstName: form.elements.firstName.value.trim(),
-        middleInitial: form.elements.middleInitial.value.trim(),
+        middleName: form.elements.middleName.value.trim(),
         lastName: form.elements.lastName.value.trim(),
-        phone: form.elements.phone.value.trim(),
+        phone: phoneToStore(form.elements.phone.value),
         email: form.elements.email.value.trim(),
-        password: form.elements.password.value,
         roleId: parseInt(form.elements.roleId.value, 10)
     };
 
-    if (data.password.length < 8) {
-        notifyWarning('A temporary password needs at least 8 characters.', 'Account not created');
+    // said at the form rather than after the review card, because it is the
+    // form that has to be corrected
+    const phoneProblem = phoneComplaint(form.elements.phone.value);
+    if (phoneProblem) {
+        notifyWarning(phoneProblem, 'Check the phone number');
+        form.elements.phone.focus();
         return;
     }
 
     try {
-        const response = await fetch('/api/users', {
-            method: 'POST',
-            headers: apiHeaders(),
-            body: JSON.stringify(data)
-        });
-        const result = await response.json();
+        // ---------- step 1: work it out, create nothing ----------
+        const review = await postJson('/api/users/draft', data);
+        if (!review) return;
 
-        if (!response.ok) {
-            if (!handleAuthFailure(response, result)) notifyError(result.error);
-            return;
-        }
+        const yes = await reviewCard(review, [
+            'Name: ' + review.fullName,
+            'Middle name: ' + (review.middleName || 'none'),
+            'Role: ' + review.roleName,
+            'Phone: ' + (review.phone ? phoneForDisplay(review.phone) : 'none'),
+            'Signs in with: ' + review.email,
+            'Password: ' + review.password
+        ]);
 
-        notifySuccess('The new user must change this password the first time they sign in.', 'Account created');
-        form.reset();
-        await showAllUsers();
+        if (!yes) return;
+
+        // ---------- step 2: create it and send the password ----------
+        const result = await postJson('/api/users', { draftId: review.draftId });
+        if (!result) return;
+
+        clearCreateForm();
+        showPanel('panel-accounts');
+
+        // the directory is not fetched to show one new row; it is refreshed
+        // only if somebody already had it open
+        const panel = getDataPanel('admin-users');
+        if (panel && panel.state === 'ready') await panel.refresh();
+
+        await reportFirstPassword(result, result.email, result.name);
     } catch (error) {
         notifyOffline();
     }
@@ -420,17 +683,18 @@ async function handleCreateUser(event) {
 async function createLoginAccount() {
     if (!selectedUser || selectedUser.user_id) return;
 
-    const name = selectedUser.full_name || `${selectedUser.first_name} ${selectedUser.last_name}`;
+    const name = staffName(selectedUser);
 
     const email = await askInput({
         title: 'Create a login',
         eyebrow: 'Accounts Management',
         message: `${name} has a staff record but no way to sign in yet. The email is the username, ` +
-                 'so it has to be one no other account already uses.',
+                 'so it has to be one no other account already uses, and it is where the system ' +
+                 'sends the first password.',
         label: 'Email address',
         type: 'email',
         placeholder: 'name@hardware.com',
-        confirmLabel: 'Next',
+        confirmLabel: 'Review',
         check: (value) => {
             if (value.trim() === '') return 'An email address is required.';
             if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) return 'That does not look like an email address.';
@@ -440,25 +704,36 @@ async function createLoginAccount() {
 
     if (email === false || email === null) return;
 
-    const password = await askInput({
-        title: 'Temporary password',
-        eyebrow: 'Accounts Management',
-        message: `${name} will have to choose their own password the first time they sign in.`,
-        label: 'Temporary password',
-        type: 'password',
-        placeholder: 'At least 8 characters',
-        confirmLabel: 'Create login',
-        check: (value) => value.length < 8 ? 'A password needs at least 8 characters.' : null
-    });
+    const staffId = selectedUser.staff_id;
 
-    if (password === false || password === null) return;
+    try {
+        const review = await postJson('/api/users/' + staffId + '/account/draft',
+            { email: email.trim() });
+        if (!review) return;
 
-    await sendUserRequest(
-        '/api/users/' + selectedUser.staff_id + '/account',
-        'POST',
-        { email: email.trim(), password: password },
-        'Login account created. The user must change the password on first login.'
-    );
+        const yes = await reviewCard(review, [
+            'Name: ' + review.fullName,
+            'Role: ' + review.roleName,
+            'Phone: ' + (review.phone ? phoneForDisplay(review.phone) : 'none'),
+            'Signs in with: ' + review.email,
+            'Password: ' + review.password
+        ]);
+
+        if (!yes) return;
+
+        const result = await postJson('/api/users/' + staffId + '/account',
+            { draftId: review.draftId });
+        if (!result) return;
+
+        closeModal('user-modal');
+
+        const panel = getDataPanel('admin-users');
+        if (panel && panel.state === 'ready') await panel.refresh();
+
+        await reportFirstPassword(result, result.email, result.name || name);
+    } catch (error) {
+        notifyOffline();
+    }
 }
 
 // ==========================================
@@ -496,7 +771,7 @@ function buildArchivePanel() {
             <tr class="row-clickable row-reveal" style="animation-delay: ${(index % 10) * 28}ms"
                 onclick="openRestoreCard(${user.staff_id})" title="Click to open the restoration card">
                 <td class="cell-id">#${escapeHtml(user.staff_id)}</td>
-                <td class="cell-name">${escapeHtml(user.full_name || (user.first_name + ' ' + user.last_name))}</td>
+                <td class="cell-name">${escapeHtml(staffName(user))}</td>
                 <td>${user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>'}</td>
                 <td>${escapeHtml(user.role_name)}</td>
                 <td>${user.archived_at ? escapeHtml(user.archived_at) : '<span class="muted">Not recorded</span>'}</td>
@@ -510,7 +785,7 @@ function openRestoreCard(staffId) {
     if (!selectedArchived) return;
 
     const user = selectedArchived;
-    const name = user.full_name || `${user.first_name} ${user.last_name}`;
+    const name = staffName(user);
 
     document.getElementById('restore-name').textContent = name;
     document.getElementById('restore-role').textContent = user.role_name;
@@ -523,7 +798,9 @@ function openRestoreCard(staffId) {
             ? escapeHtml(user.email)
             : '<span class="muted">No login account</span>') +
         detailRow('Role', escapeHtml(user.role_name)) +
-        detailRow('Phone', user.phone ? escapeHtml(user.phone) : '<span class="muted">Not set</span>') +
+        detailRow('Phone', user.phone
+            ? '<span class="mono">' + escapeHtml(phoneForDisplay(user.phone)) + '</span>'
+            : '<span class="muted">Not set</span>') +
         detailRow('Date Archived', user.archived_at
             ? escapeHtml(user.archived_at)
             : '<span class="muted">Not recorded</span>') +
@@ -554,7 +831,7 @@ async function restoreSelectedAccount() {
     if (!selectedArchived) return;
 
     const user = selectedArchived;
-    const name = user.full_name || `${user.first_name} ${user.last_name}`;
+    const name = staffName(user);
 
     const yes = await askConfirm(
         `${name} goes back on the active staff list as a ${user.role_name}.`,
@@ -653,6 +930,8 @@ function auditLogQuery() {
 // one of them means going back to the server rather than hiding rows that are
 // already on the screen.
 async function refreshAuditLogs() {
+    syncLogColumns();
+
     const panel = getDataPanel('admin-logs');
     if (panel) await panel.open();
 }
@@ -803,24 +1082,128 @@ function backupTakenAt(fileName) {
     return { day: day, time: `${parts[4]}:${parts[5]}` };
 }
 
+// ==========================================
+// WHETHER THE SYSTEM IS BACKING ITSELF UP
+//
+// Every fact on this card comes from the server. Whether the timer is running
+// is a fact about the server, and a screen that says "backing up every minute"
+// because that sentence is in its own HTML is a screen that will keep saying
+// it after the timer has died.
+//
+// The failure state is the one worth having. A backup that has quietly stopped
+// working looks exactly like a backup that is working, right up until the
+// afternoon somebody needs it, so a failure is said here in plain words with
+// what the server actually reported.
+// ==========================================
+function renderAutoBackupCard(auto, procedures) {
+    const card = document.getElementById('auto-backup-card');
+    const state = document.getElementById('auto-backup-state');
+    const text = document.getElementById('auto-backup-text');
+    if (!card || !state || !text) return;
+
+    if (!auto) {
+        card.className = 'card auto-backup';
+        state.textContent = 'Unknown';
+        text.textContent = 'This server did not say whether it backs itself up.';
+        return;
+    }
+
+    // ==========================================
+    // THE HALF-INSTALLED DATABASE COMES FIRST
+    //
+    // If the stored procedures are missing, nothing in the system can be
+    // saved, and that outranks anything this card would otherwise say about
+    // backups. It is reported here because this is the screen somebody is
+    // already on when they come looking for what went wrong -- and because
+    // it is also the reason the backup folder has stopped rotating.
+    // ==========================================
+    if (procedures && procedures.loaded < procedures.expected) {
+        card.className = 'card auto-backup is-bad';
+        state.textContent = 'Read this';
+        text.textContent = `This database has ${procedures.loaded} of ` +
+            `${procedures.expected} stored procedures, so nothing can be saved — not an ` +
+            `account, not a sale, not a stock change. Run ` +
+            `public/database/2-RUN-SECOND-stored-procedures.sql in MySQL Workbench or the ` +
+            `mysql command line, then reload this page. It touches no table and no row, and ` +
+            `your data is intact. Backups are still being written every minute meanwhile, ` +
+            `and nothing older is being deleted, so the backups that still have the ` +
+            `procedures in them are safe.`;
+        return;
+    }
+
+    if (!auto.enabled) {
+        card.className = 'card auto-backup is-off';
+        state.textContent = 'Off';
+        text.textContent = 'Nothing is backed up on its own. Every backup on this system is one ' +
+            'somebody pressed the button for. Switch it on with AUTO_BACKUP_ENABLED in server.js.';
+        return;
+    }
+
+    const every = auto.everySeconds === 60
+        ? 'every minute'
+        : `every ${auto.everySeconds} seconds`;
+    const window = Math.round((auto.keep * auto.everySeconds) / 60);
+
+    if (auto.lastError) {
+        card.className = 'card auto-backup is-bad';
+        state.textContent = 'Failing';
+        text.textContent = `The automatic backup has failed ${auto.failures} ` +
+            `time${auto.failures === 1 ? '' : 's'} in a row and the most recent reason was: ` +
+            `${auto.lastError}. It is still trying ${every}. ` +
+            (auto.lastFileName
+                ? `The last one that worked was ${auto.lastFileName}.`
+                : 'None has worked since this server started.') +
+            ' Take one by hand until this is fixed.';
+        return;
+    }
+
+    card.className = 'card auto-backup is-on';
+    state.textContent = 'On';
+    text.textContent = `The whole system is written to its own .sql file ${every}, so at most ` +
+        `${auto.everySeconds === 60 ? 'a minute' : auto.everySeconds + ' seconds'} of work can be ` +
+        `lost. The last ${auto.keep} are kept — about ${window} minutes — and writing a new one ` +
+        `removes the oldest, which is what stops the folder growing without limit. ` +
+        (auto.lastFileName
+            ? `The most recent is ${auto.lastFileName}.`
+            : 'The first one is on its way.');
+}
+
+// Reads the state without opening the table, for the moment the screen is
+// opened. The folder listing comes back with it either way, so the two
+// figures at the top of the card below are filled in from the same request
+// rather than from a second one.
+async function loadAutoBackupState() {
+    try {
+        const body = await getJson('/api/backups');
+        renderAutoBackupCard(body.auto, body.procedures);
+
+        const path = document.getElementById('backup-folder');
+        if (path) path.textContent = body.folder;
+    } catch (error) {
+        renderAutoBackupCard(null);
+    }
+}
+
 function buildBackupPanel() {
     createDataPanel({
         key: 'admin-backups',
         tableId: 'backup-table',
-        columns: 4,
+        columns: 5,
         pagerId: 'backup-pager',
         countPillId: 'backup-count',
         idField: 'fileName',
 
         gate: {
             title: 'The backup folder has not been read',
-            text: 'Press Load Data to list every backup this system has taken.',
+            text: 'Press Load Data to list every backup this system has, automatic and by hand.',
             button: 'Load Data'
         },
 
         load: async () => {
             const body = await getJson('/api/backups');
             const files = body.files || [];
+
+            renderAutoBackupCard(body.auto, body.procedures);
 
             const path = document.getElementById('backup-folder');
             if (path) path.textContent = body.folder;
@@ -849,6 +1232,14 @@ function buildBackupPanel() {
         renderRow: (file, index) => {
             const when = backupTakenAt(file.fileName);
 
+            // Which kind it is, on the row, because it decides how long the
+            // file will be there: an automatic one is on a rolling hour and
+            // will be gone, and one taken by hand stays until somebody
+            // deletes it. Restoring from either works the same way.
+            const kind = file.automatic
+                ? '<span class="badge badge-neutral">Automatic</span>'
+                : '<span class="badge badge-success">Kept</span>';
+
             // the name goes through a handler rather than into the attribute,
             // so a file name is never able to close the quote it sits in
             return '<tr class="row-clickable row-reveal" style="animation-delay:' +
@@ -858,6 +1249,7 @@ function buildBackupPanel() {
                 '<td><span class="backup-day">' + escapeHtml(when.day) + '</span></td>' +
                 '<td><span class="backup-time">' + escapeHtml(when.time) + '</span></td>' +
                 '<td class="cell-id">' + escapeHtml(file.fileName) + '</td>' +
+                '<td>' + kind + '</td>' +
                 '<td class="cell-num">' + escapeHtml(formatBytes(file.bytes)) + '</td>' +
                 '</tr>';
         }
@@ -876,7 +1268,11 @@ function openBackupDrawer(index) {
         detailRow('Taken On', escapeHtml(when.day)) +
         detailRow('Taken At', escapeHtml(when.time)) +
         detailRow('File Name', '<span class="mono">' + escapeHtml(selectedBackup.fileName) + '</span>') +
-        detailRow('Size', escapeHtml(formatBytes(selectedBackup.bytes)));
+        detailRow('Size', escapeHtml(formatBytes(selectedBackup.bytes))) +
+        detailRow('Kind', selectedBackup.automatic
+            ? 'Automatic &mdash; <span class="muted">on a rolling window, so this file will be ' +
+              'removed as newer ones are written. Download it if you want to keep it.</span>'
+            : 'Taken by hand &mdash; <span class="muted">kept until somebody deletes it.</span>');
 
     document.getElementById('backup-drawer').classList.add('open');
     document.getElementById('backup-shade').classList.add('open');
@@ -1109,6 +1505,92 @@ async function handleRestoreFile(event) {
 // ==========================================
 let storeSettings = null;
 
+// ==========================================
+// THE TIN
+//
+// A BIR Tax Identification Number is nine digits and a branch code, written
+// 000-000-000-00000. The branch code is 00000 for the head office and was
+// three digits long until the BIR widened it, so a TIN copied off an older
+// certificate of registration reads 000-000-000-000.
+//
+// The box used to take anything up to thirty characters, and "anything" is
+// what it got: a TIN with spaces in it, one with the dashes in the wrong
+// places, one that was somebody's phone number. Every one of those was then
+// printed at the head of every invoice the shop issued.
+//
+// So the box now works the way the phone box does. Digits only, the dashes
+// put in as the digits arrive, and one sentence about what is wrong if the
+// count is not one of the three the BIR issues. Nine digits on their own are
+// taken as the head office; a three-digit branch code is widened to five the
+// way the BIR did it, with two zeros in front. The stored form is always the
+// full 000-000-000-00000, and the same rule is enforced again in server.js,
+// because a check that lives only in a browser is a check anybody can skip.
+// ==========================================
+const TIN_BASE_DIGITS = 9;
+const TIN_BRANCH_DIGITS = 5;
+
+function tinDigits(value) {
+    return String(value === null || value === undefined ? '' : value)
+        .replace(/\D/g, '')
+        .slice(0, TIN_BASE_DIGITS + TIN_BRANCH_DIGITS);
+}
+
+// 000-000-000-00000 from however many digits there are so far
+function tinFormat(digits) {
+    const parts = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9), digits.slice(9)];
+    return parts.filter((part) => part !== '').join('-');
+}
+
+// Wired to oninput on the TIN box. It rewrites the box rather than blocking
+// the key, so a TIN pasted with spaces or without dashes lands in shape.
+function onTinInput(input) {
+    if (!input) return;
+
+    const shaped = tinFormat(tinDigits(input.value));
+    if (shaped !== input.value) input.value = shaped;
+
+    // a verdict while it is being typed, and none while it is empty: the box
+    // is required, and the form says so at submit rather than on every key
+    input.classList.toggle('is-bad', shaped !== '' && tinComplaint(shaped) !== null);
+}
+
+// The one sentence said about a bad TIN, or null when there is nothing to
+// say. Returned rather than shown, so the caller decides where it goes.
+function tinComplaint(value) {
+    const digits = tinDigits(value);
+
+    if (digits === '') {
+        return 'The shop needs a TIN. It is printed on every invoice.';
+    }
+
+    if (digits.length !== TIN_BASE_DIGITS &&
+        digits.length !== TIN_BASE_DIGITS + 3 &&
+        digits.length !== TIN_BASE_DIGITS + TIN_BRANCH_DIGITS) {
+        return `A TIN is ${TIN_BASE_DIGITS} digits and a branch code, ` +
+               `written 000-000-000-00000. That one has ${digits.length} digits.`;
+    }
+
+    if (/^0+$/.test(digits.slice(0, TIN_BASE_DIGITS))) {
+        return '000-000-000 is the placeholder, not a TIN. Enter the number on the ' +
+               'shop\'s BIR certificate of registration.';
+    }
+
+    return null;
+}
+
+// the stored form: 000-000-000-00000, with a missing or three-digit branch
+// code brought up to five the way the BIR did it. A value that does not
+// pass is handed back as it was, so a bad TIN already on file is shown as
+// it stands rather than as a corrected version of itself.
+function tinToStore(value) {
+    const digits = tinDigits(value);
+    if (tinComplaint(digits) !== null) return String(value || '').trim();
+
+    const base = digits.slice(0, TIN_BASE_DIGITS);
+    const branch = digits.slice(TIN_BASE_DIGITS).padStart(TIN_BRANCH_DIGITS, '0');
+    return tinFormat(base + branch);
+}
+
 async function loadStoreSettingsForm() {
     const form = document.getElementById('store-form');
     if (!form) return;
@@ -1125,7 +1607,8 @@ async function loadStoreSettingsForm() {
 
     form.elements.storeName.value = storeSettings.store_name || '';
     form.elements.address.value = storeSettings.address || '';
-    form.elements.tin.value = storeSettings.tin || '';
+    form.elements.tin.value = tinToStore(storeSettings.tin || '');
+    form.elements.tin.classList.remove('is-bad');
     form.elements.registrationType.value = storeSettings.registration_type || 'VAT';
     form.elements.invoiceNote.value = storeSettings.invoice_note || '';
 
@@ -1139,6 +1622,10 @@ async function loadStoreSettingsForm() {
         : 'Non-VAT');
 
     onRegistrationChange(form.elements.registrationType.value);
+
+    // the boxes now say what the record says: nothing to save yet
+    showStoreVerdict('');
+    markFormClean(form, document.getElementById('store-save-btn'));
 }
 
 // The rate box only means anything to a VAT-registered shop. Leaving it on
@@ -1150,10 +1637,32 @@ function onRegistrationChange(value) {
     renderStorePreview();
 }
 
+// what the server refused, or what this screen refused, next to the boxes
+function showStoreVerdict(text) {
+    const box = document.getElementById('store-verdict');
+    if (!box) return;
+    box.className = text ? 'store-verdict is-stop' : 'store-verdict';
+    box.textContent = text || '';
+}
+
 async function handleSaveStoreSettings(event) {
     event.preventDefault();
     const form = event.target;
     const registration = form.elements.registrationType.value;
+
+    if (!isFormDirty(form)) {
+        notifyInfo('Nothing on this form has been changed, so there is nothing to save.', 'No changes');
+        return;
+    }
+
+    // said at the form, because it is the form that has to be corrected
+    const tinProblem = tinComplaint(form.elements.tin.value);
+    if (tinProblem) {
+        showStoreVerdict(tinProblem);
+        form.elements.tin.classList.add('is-bad');
+        form.elements.tin.focus();
+        return;
+    }
 
     // Switching registration changes what every future invoice claims about
     // the business, which is not a thing to do by brushing past a form.
@@ -1185,7 +1694,7 @@ async function handleSaveStoreSettings(event) {
             body: JSON.stringify({
                 storeName: form.elements.storeName.value.trim(),
                 address: form.elements.address.value.trim(),
-                tin: form.elements.tin.value.trim(),
+                tin: tinToStore(form.elements.tin.value),
                 registrationType: registration,
                 vatRate: registration === 'VAT' ? parseFloat(form.elements.vatRate.value) : 0,
                 invoiceNote: form.elements.invoiceNote.value.trim()
@@ -1194,18 +1703,11 @@ async function handleSaveStoreSettings(event) {
         const result = await response.json();
 
         if (!response.ok) {
-            if (!handleAuthFailure(response, result)) {
-                const box = document.getElementById('store-verdict');
-                if (box) {
-                    box.className = 'store-verdict is-stop';
-                    box.textContent = result.error;
-                }
-            }
+            if (!handleAuthFailure(response, result)) showStoreVerdict(result.error);
             return;
         }
 
-        const box = document.getElementById('store-verdict');
-        if (box) { box.textContent = ''; box.className = 'store-verdict'; }
+        showStoreVerdict('');
 
         notifySuccess(result.message, 'Store details saved');
         await loadStoreSettingsForm();
@@ -1289,6 +1791,16 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
         // than after saving it.
         const storeForm = document.getElementById('store-form');
         if (storeForm) storeForm.addEventListener('input', renderStorePreview);
+
+        // the two edit forms: Save is off until something in them changes
+        watchFormEdits(storeForm, document.getElementById('store-save-btn'));
+        watchFormEdits(document.getElementById('edit-user-form'),
+                       document.getElementById('edit-user-save-btn'));
+
+        // a filter left set from before -- the browser remembers dropdowns
+        // across a reload -- takes its column off the grid from the start
+        syncDirectoryColumns();
+        syncLogColumns();
 
         await loadRoles();
         loadNotifications();

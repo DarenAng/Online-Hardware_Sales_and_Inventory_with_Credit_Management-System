@@ -35,12 +35,26 @@ CREATE TABLE roles (
     role_name VARCHAR(50) NOT NULL UNIQUE
 );
 
--- middle_initial separates two people who share a first and last name.
--- It is optional, so older records and single-name staff stay valid.
+-- WHY THE WHOLE MIDDLE NAME IS KEPT AND ONLY ITS FIRST LETTER IS SHOWN
+--
+-- The middle name separates two people who share a first and a last name,
+-- and this column used to hold one letter because one letter is all the
+-- screens ever print. That is the wrong way round. The letter is what a
+-- reader needs; the name is what settles which of the two Juan Cruzes the
+-- record belongs to when somebody is checking a person against a payslip or
+-- a barangay ID, and a stored "S" cannot settle anything -- there are two of
+-- those in any big enough shop as well.
+--
+-- So the name is stored in full, at the length a real middle name runs to,
+-- and full_name below still prints the initial. The whole name is on the
+-- person's record for anybody who opens it; the shortening is a display
+-- rule and lives in exactly one place.
+--
+-- It stays optional, so older records and single-name staff remain valid.
 CREATE TABLE staff (
     staff_id INT AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(100) NOT NULL,
-    middle_initial VARCHAR(5) NULL,
+    middle_name VARCHAR(100) NULL,
     last_name VARCHAR(100) NOT NULL,
     phone VARCHAR(20),
     role_id INT NOT NULL,
@@ -49,11 +63,13 @@ CREATE TABLE staff (
     archived_by_staff_id INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     -- One definition of a staff name for the whole system, so the directory,
-    -- the receipt, the audit trail and every report spell it the same way.
+    -- the receipt, the audit trail and every report spell it the same way:
+    -- first name, middle initial, last name. It is never first and last
+    -- alone, because that is the spelling that cannot tell two people apart.
     full_name VARCHAR(220) AS (
         CONCAT(first_name,
-               IF(middle_initial IS NULL OR middle_initial = '', '',
-                  CONCAT(' ', UPPER(LEFT(middle_initial, 1)), '.')),
+               IF(middle_name IS NULL OR middle_name = '', '',
+                  CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),
                ' ', last_name)
     ) VIRTUAL,
     FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE RESTRICT ON UPDATE CASCADE
@@ -584,14 +600,14 @@ INSERT INTO roles (role_id, role_name) VALUES
 (1, 'System Administrator'), (2, 'Manager'), (3, 'Inventory Clerk'),
 (4, 'Cashier'), (5, 'Delivery Personnel');
 
-INSERT INTO staff (staff_id, first_name, middle_initial, last_name, phone, role_id, is_active) VALUES
-(1, 'Admin',    'S', 'User',    '09170000001', 1, TRUE),
-(2, 'Manager',  'M', 'User',    '09170000002', 2, TRUE),
-(3, 'Clerk',    'I', 'User',    '09170000003', 3, TRUE),
-(4, 'Cashier',  'C', 'User',    '09170000004', 4, TRUE),
-(5, 'Delivery', 'D', 'User',    '09170000005', 5, TRUE),
-(6, 'Ana',      'B', 'Reyes',   '09170000006', 4, TRUE),
-(7, 'Ben',      'L', 'Cruz',    '09170000007', 5, FALSE);
+INSERT INTO staff (staff_id, first_name, middle_name, last_name, phone, role_id, is_active) VALUES
+(1, 'Admin',    'Santos',    'User',    '+639170000001', 1, TRUE),
+(2, 'Manager',  'Mendoza',   'User',    '+639170000002', 2, TRUE),
+(3, 'Clerk',    'Ibarra',    'User',    '+639170000003', 3, TRUE),
+(4, 'Cashier',  'Castro',    'User',    '+639170000004', 4, TRUE),
+(5, 'Delivery', 'Dela Cruz', 'User',    '+639170000005', 5, TRUE),
+(6, 'Ana',      'Bautista',  'Reyes',   '+639170000006', 4, TRUE),
+(7, 'Ben',      'Lorenzo',   'Cruz',    '+639170000007', 5, FALSE);
 
 UPDATE staff SET archived_at = '2026-08-18 09:00:00', archived_by_staff_id = 1 WHERE staff_id = 7;
 

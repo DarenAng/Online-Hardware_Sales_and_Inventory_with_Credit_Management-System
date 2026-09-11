@@ -79,65 +79,29 @@
             </header>
 
             <div class="content-area">
-
                 <!-- ============================================================
                      DASHBOARD HOME
-                     Four figures that lead somewhere, then the rest as context.
-                     A number on a dashboard that cannot be opened is a number
-                     you have to go and look up somewhere else.
+                     Five figures that lead somewhere. A number on a dashboard
+                     that cannot be opened is a number you have to go and look
+                     up somewhere else, so every tile is the door to the screen
+                     that explains it -- which is also why there is no grid of
+                     link cards under them any more: the sidebar already lists
+                     every destination, and the tiles are already the shortcut.
                      ============================================================ -->
                 <div id="panel-home" data-panel>
                     <div class="page-intro">
                         <span class="eyebrow">Overview</span>
                         <h2>Manager Dashboard</h2>
-                        <p class="panel-sub">Every card below opens the screen behind it. Figures are live
+                        <p class="panel-sub">Every figure below opens the screen behind it. Live
                             across sales, stock, deliveries and receivables.</p>
                     </div>
 
                     <div class="kpi-grid" id="kpi-grid"></div>
-
-                    <div class="grid-3" style="margin-top: 20px;">
-                        <div class="card tile">
-                            <h3>Income</h3>
-                            <p class="panel-sub">What was billed against what was actually collected, over any period.</p>
-                            <button type="button" class="btn" onclick="showIncome(event)">Open Income</button>
-                        </div>
-                        <div class="card tile">
-                            <h3>Reports</h3>
-                            <p class="panel-sub">Payment mix, receivables, repeat buyers, and staff performance.</p>
-                            <button type="button" class="btn" onclick="showReports(event)">Open Reports</button>
-                        </div>
-                        <div class="card tile">
-                            <h3>Sales</h3>
-                            <p class="panel-sub">Every transaction, filtered by payment method and status.</p>
-                            <button type="button" class="btn" onclick="showSales(event)">Open Sales</button>
-                        </div>
-                        <div class="card tile">
-                            <h3>Stocks</h3>
-                            <p class="panel-sub">Reorder alerts and the full stock report, on their own screens.</p>
-                            <button type="button" class="btn" onclick="showReorderAlerts(event)">Open Stocks</button>
-                        </div>
-                        <div class="card tile">
-                            <h3>Credit</h3>
-                            <p class="panel-sub">Limits, standings, what is owed, and extensions waiting on a decision.</p>
-                            <button type="button" class="btn" onclick="showCredit(event)">Open Credit</button>
-                        </div>
-                        <div class="card tile">
-                            <h3>Deliveries</h3>
-                            <p class="panel-sub">Every order from dispatch to doorstep, and whether it has been paid for.</p>
-                            <button type="button" class="btn" onclick="showDeliveries(event)">Open Deliveries</button>
-                        </div>
-                        <div class="card tile">
-                            <h3>Records</h3>
-                            <p class="panel-sub">Suppliers, customers, products, categories, and units.</p>
-                            <button type="button" class="btn" onclick="showRecords(event)">Open Records</button>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- ============================================================
                      INCOME BREAKDOWN
-                     Opened by the Total Income card. One question asked over
+                     Opened by the Collected card. One question asked over
                      any period, answered four ways, because "how much did we
                      make" means four different figures to four different
                      people and a screen showing one of them gets argued with.

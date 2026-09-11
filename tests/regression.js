@@ -124,11 +124,48 @@ async function signIn(email, demoPassword, chosenPassword) {
   await call(admin.cookie, "POST", "/api/users/6/reset-password", { newPassword: "anapass1234" });
   const otherCashier = await signIn("ana.reyes@hardware.com", "anapass1234", "anapass5678");
 
-  await call(admin.cookie, "POST", "/api/users", {
-    firstName: "Probe", lastName: "Driver", roleId: 5,
-    email: "probe.driver@hardware.com", password: "probedriver1"
+  // ==========================================
+  // A SECOND DRIVER, AND A PASSWORD NOBODY CHOSE
+  //
+  // Creating an account is two requests: the review works it out and makes
+  // the password, and the second one creates it from the draft. Nothing here
+  // gets to pick that password, so the reply is where it is read from -- the
+  // server hands it back when it could not email it, which is the case on any
+  // machine that has not filled in the SETUP block in mailer.js.
+  //
+  // This file is run repeatedly against the same database during development,
+  // so the account may already be there from the last run. Then the address
+  // is taken, the review says so, and the password is reset to something
+  // known instead.
+  // ==========================================
+  const probeEmail = "probe.driver@hardware.com";
+  let probePassword = null;
+
+  const probeReview = await call(admin.cookie, "POST", "/api/users/draft", {
+    firstName: "Probe", lastName: "Driver", roleId: 5, email: probeEmail
   });
-  const otherDriver = await signIn("probe.driver@hardware.com", "probedriver1", "probedriver2");
+
+  if (probeReview.status === 200) {
+    const made = await call(admin.cookie, "POST", "/api/users",
+      { draftId: probeReview.body.draftId });
+    probePassword = made.body && made.body.password;
+  } else {
+    const directory = await call(admin.cookie, "GET", "/api/users");
+    const existing = (directory.body || []).find((row) => row.email === probeEmail);
+    if (existing) {
+      probePassword = "probedriver1";
+      await call(admin.cookie, "POST", `/api/users/${existing.staff_id}/reset-password`,
+        { newPassword: probePassword });
+      await call(admin.cookie, `PATCH`, `/api/users/${existing.staff_id}/status`,
+        { isActive: true });
+    }
+  }
+
+  record("the second driver's password came from the server, not from this file",
+    typeof probePassword === "string" && probePassword.length >= 8,
+    `${probeReview.status} ${JSON.stringify(probeReview.body).slice(0, 120)}`);
+
+  const otherDriver = await signIn(probeEmail, probePassword, "probedriver2");
 
   record("every account used by this file signed in",
     [admin, manager, cashier, driver, otherCashier, otherDriver].every((s) => s.cookie),
@@ -262,7 +299,7 @@ async function signIn(email, demoPassword, chosenPassword) {
     tin: "111-222-333-00000", registrationType: "VAT", vatRate: 12, invoiceNote: "probe"
   });
   await call(manager.cookie, "PUT", "/api/me", {
-    firstName: "Manager", middleInitial: "M", lastName: "User", phone: "09171234567"
+    firstName: "Manager", middleName: "Mendoza", lastName: "User", phone: "09171234567"
   });
   await call(manager.cookie, "POST", "/api/me/password", {
     currentPassword: "managerpass123", newPassword: "managerpass456"

@@ -26,6 +26,13 @@ reset_everything() {
   cat /tmp/hardware-server.log
 }
 
+# First, and without touching the database or the server: the SMTP client
+# talks to a fake mail server of its own, so it is the one suite that says
+# nothing about whether MySQL is up.
+echo "== sending mail =="
+node tests/mailer.js
+
+echo ""
 echo "== API checks =="
 reset_everything
 node tests/smoke.js

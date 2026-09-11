@@ -235,49 +235,17 @@ function openAsk(options) {
     okButton.textContent = options.confirmLabel || 'Confirm';
     okButton.className = 'btn ' + (options.tone === 'danger' ? 'btn-danger' : 'btn-accent');
 
-    // ==========================================
     // Exactly what is about to happen, one consequence per line. Prose runs
     // together and gets skimmed; a list of three short lines gets counted.
-    //
-    // A line may also be written "Label: value", and then it is set as two
-    // columns rather than as a sentence. That is for the cards that are not
-    // listing consequences but listing a record for checking -- the account
-    // about to be created is the one -- where the labels lining up is what
-    // lets somebody read down the values instead of reading every line.
-    //
-    // The value half is set in the figure face, because on those cards it is
-    // an email address, a phone number and a password: three things that get
-    // checked character by character, where a 1 and an l have to look
-    // different. Both halves are escaped either way.
-    // ==========================================
     const detail = document.getElementById('ask-detail');
     if (Array.isArray(options.detail) && options.detail.length > 0) {
-        detail.innerHTML = options.detail.map((line) => {
-            const text = String(line);
-            const split = text.indexOf(': ');
-
-            // only a short leading label counts; a colon in the middle of a
-            // sentence is part of the sentence
-            if (split > 0 && split <= 22) {
-                return '<li class="ask-pair">' +
-                    '<span class="ask-pair-label">' + escapeHtml(text.slice(0, split)) + '</span>' +
-                    '<span class="ask-pair-value">' + escapeHtml(text.slice(split + 2)) + '</span>' +
-                    '</li>';
-            }
-            return '<li>' + escapeHtml(text) + '</li>';
-        }).join('');
+        detail.innerHTML = options.detail
+            .map((line) => '<li>' + escapeHtml(line) + '</li>').join('');
         detail.style.display = 'block';
     } else {
         detail.innerHTML = '';
         detail.style.display = 'none';
     }
-
-    // The block is crimson on a card that is about to destroy something and
-    // grey on one that is not. It used to be crimson on both, which spent the
-    // system's one "this stops something" colour on a card listing the
-    // details of an account being created -- and a colour that appears on
-    // every dialog is a colour that means nothing on the one that matters.
-    detail.classList.toggle('is-plain', options.tone !== 'danger');
 
     const field = document.getElementById('ask-field');
     const input = document.getElementById('ask-input');

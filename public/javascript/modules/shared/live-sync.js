@@ -182,8 +182,35 @@ function readLiveEvent(event) {
 // ==========================================
 // WHAT TO DO ABOUT A CHANGE
 // ==========================================
+
+// ==========================================
+// SUBSCRIBERS THAT ARE NOT TABLES
+//
+// A data panel refreshes itself because live-sync knows its key. Dashboard KPI
+// tiles are not a table and have no key, but they read the same rows -- and a
+// "Live" badge sitting above figures that only ever load once is making a
+// claim the page does not honour. This is how anything that is not a table
+// asks to hear about the same scopes.
+// ==========================================
+const liveListeners = [];
+
+function onLiveChange(scopes, handler) {
+    if (typeof handler !== 'function') return;
+    liveListeners.push({ scopes: [].concat(scopes || []), handler: handler });
+}
+
+function runLiveListeners(scope) {
+    liveListeners.forEach((entry) => {
+        if (entry.scopes.indexOf(scope) === -1) return;
+        // one widget throwing must not stop the rest of the page updating
+        try { entry.handler(scope); } catch (error) { console.error(error); }
+    });
+}
+
 function noticeChange(scope, change) {
     if (!scope) return;
+
+    runLiveListeners(scope);
 
     // the bell is cheap and nobody is reading it as a table
     if (scope === 'notifications') {
@@ -283,38 +310,43 @@ async function refreshStalePanel(key) {
 }
 
 // ==========================================
-// THE INDICATOR
+// THERE IS NO INDICATOR ANY MORE
 //
-// One dot in the top bar. It is not decoration: a screen that has quietly
-// stopped hearing about changes looks exactly like a screen where nothing has
-// changed, and the difference matters when the figure is stock on hand.
+// There was a dot in the top bar, beside the page title, and it reported the
+// browser's connection to this server: green while changes were arriving,
+// crimson while they were not, amber when the screen had fallen behind. It
+// went in stages -- first it lost the word beside it, then the dot itself --
+// and both stages were the same decision.
+//
+// It described the plumbing. A shop cannot act on "the change channel is
+// reconnecting": there is no button for it, no procedure, and nothing the
+// person at the counter is expected to do differently. What the shop can act
+// on is what the screen in front of them says, and that is still handled --
+// and handled better -- by the two things that survive:
+//
+//   - A table that has quietly gone out of date says so, in its own footer,
+//     in words, and waits to be asked. That is a message about the rows
+//     somebody is reading rather than about a socket.
+//   - A screen that has fallen far enough behind to be untrustworthy is told
+//     to reload, as a card. That one is worth interrupting for.
+//
+// So the state is still tracked, still drives both of those, and is no longer
+// drawn. These two functions are kept as no-ops rather than deleted, because
+// they are called from four places in the reconnection logic below and a
+// silent indicator is a smaller change than four conditionals.
+//
+// To put it back: build the element here and write the state onto it. The
+// state names have not changed -- live, down, stale.
 // ==========================================
-function buildLiveIndicator() {
-    if (document.getElementById('live-dot')) return;
+function buildLiveIndicator() { /* deliberately nothing; see above */ }
 
-    const left = document.querySelector('.topbar-left');
-    if (!left) return;
-
-    const dot = document.createElement('span');
-    dot.className = 'live-dot';
-    dot.id = 'live-dot';
-    dot.innerHTML = '<span class="live-mark"></span><span class="live-word">Connecting</span>';
-    dot.title = 'Whether this screen is hearing about changes made on other machines';
-    left.appendChild(dot);
-}
+// Nothing is drawn, but the state is still recorded. A connection state that
+// is not written down anywhere cannot be read by anything -- not by a check
+// driving two browsers against each other, not by somebody typing liveState
+// into a console to find out why a screen has gone quiet. The dot was the
+// only place it was written down, so with the dot gone it is written here.
+let liveState = 'connecting';
 
 function setLiveIndicator(state, word) {
-    const dot = document.getElementById('live-dot');
-    if (!dot) return;
-
-    dot.className = 'live-dot is-' + state;
-
-    const label = dot.querySelector('.live-word');
-    if (label) label.textContent = word;
-
-    dot.title = state === 'live'
-        ? 'Changes made on other machines reach this screen'
-        : state === 'down'
-            ? 'Not hearing about changes right now. Reconnecting.'
-            : 'This screen has fallen behind. Reload it.';
+    liveState = state;
 }

@@ -11,57 +11,45 @@
        general-ui.css  ->  responsive.css  ->  modules/<role>.css
 
    WHAT THE COLOURS MEAN
-   Four meanings, learned once, holding on every screen:
+   One rule, learned once, holding on every screen:
 
-     ORANGE  press this. It is the shop's own orange, and in here it is
-             reserved for things a person does: primary buttons, the menu
-             item you are on, the tab you are reading, the brand corner.
-     GREEN   this is fine, nothing to do. Paid, Delivered, In Stock, saved.
-     AMBER   look at this. Nothing is broken yet.
+     BLUE    this is the way forward, or this is fine.
+             Primary buttons, the menu item you are on, Paid, Delivered,
+             In Stock.
+     YELLOW  look at this. Nothing is broken yet.
              Unread alerts, low stock, part payments, delays, counts.
-     CRIMSON this stops something, or money is owed.
+     RED     this stops something, or money is owed.
              Delete, deactivate, restore-over-everything, Unpaid, Failed.
 
-   Anything that is none of those four is grey, so the coloured things stay
+   Anything that is none of those three is grey, so the coloured things stay
    worth noticing.
 
-   WHY ACTIONS AND STATES ARE DIFFERENT COLOURS
-   The earlier palette gave one colour both jobs: the same blue meant "press
-   this" and "this is fine". It reads well on a button and badly in a table,
-   where a column of blue badges and a blue button in the corner compete for
-   the same glance. Splitting them means a table's badges are never the same
-   colour as the thing you press on that screen. The orange belongs to the
-   shop, so the shop's colour is the one you act with.
+   WHERE THE BLUE AND THE YELLOW COME FROM
+   Not from a palette generator. They are the two colours the trade already
+   uses: the vitreous enamel blue of hardware signage and galvanised steel,
+   and the safety yellow of hazard tape, hard hats and the lines painted on
+   a warehouse floor. Anyone who works in a hardware shop has been reading
+   this pair as "go" and "mind this" for their whole working life, which is
+   most of the argument for using it here.
 
-   WHERE THE ORANGE AND THE AMBER COME FROM
-   The orange is the store's own, taken from the sign over the door and the
-   logo on the vans. The amber did not move when the system was repainted: it
-   was already a safety yellow rather than a decorative gold, and it already
-   means on a low-stock row exactly what it means on a hard hat.
+   The yellow did not move when the system was repainted. It was already a
+   safety yellow rather than a decorative gold, and it already meant exactly
+   what it means on a hard hat.
 
-   THE ORANGE AND THE CRIMSON ARE KEPT APART ON PURPOSE
-   Two warm colours a hue apart is how somebody deletes a cashier account on
-   a Friday afternoon while meaning to save one. So they are separated by
-   weight rather than by hue: the orange is bright and the crimson is dark,
-   twice its depth, and no destructive button is ever the brightest thing on
-   its screen. Colour is never the only carrier either — every badge, button
-   and banner says its own word — so the system reads the same to somebody
-   who cannot tell the orange from the crimson.
+   Red stays red. A system where "delete this account" and "stock is low"
+   share a colour is a system where somebody deactivates a cashier on a
+   Friday afternoon by accident, so the third meaning keeps its own hue no
+   matter what the other two are.
 
-   Every pair here was measured rather than eyeballed: text clears 4.5:1 on
-   its own ground and every meaningful edge clears 3:1.
+   Colour is never the only carrier: every badge, button and banner says its
+   own word as well, so the system reads the same to somebody who cannot
+   tell the blue from the red.
 
-   TWO STRUCTURAL DEVICES, AND NO MORE
-   Meaning is carried by a 3px rule down the left edge. It marks KPI cards,
-   warning banners, alerts, popup cards, notes and the menu item you are on.
-   Every other separation in the system is a hairline.
-
-   The second is the hazard stripe, and it appears in exactly two places: on
-   a purchase order, which is the one screen printed and handed to somebody
-   outside the shop, and on the callout that says a material is not on the
-   books yet. Both are moments where the screen is telling you it has left
-   the ordinary run of things. Keeping both devices rare is what keeps them
-   readable.
+   ONE STRUCTURAL DEVICE
+   Meaning is carried by a 3px rule down the left edge, and by nothing else.
+   It marks KPI cards, warning banners, alerts, popup cards, notes and the
+   menu item you are on. Every other separation in the system is a hairline.
+   Keeping the device rare is what keeps it readable.
    ========================================================================== */
 
 /* The two families are pulled in by each page with a non-blocking <link>, so
@@ -70,66 +58,38 @@
 
 :root {
     /* ---- ink and ground ----
-       The greys are the greys of the trade: poured concrete underfoot and
-       galvanised steel on the racking. They are very slightly cool, which is
-       what keeps the orange warm rather than muddy, and they are neutral
-       enough that a page of mostly text reads as paper rather than as a
-       tinted sheet. */
-    --ink:         #14181d;   /* body text */
-    --chrome:      #1b1f24;   /* menu, table heads, popup heads */
-    --chrome-2:    #2b323a;
-    --steel:       #4d5661;   /* secondary text */
-    --steel-soft:  #616b78;   /* captions, placeholders, disabled */
-    --paper:       #edeef0;   /* the page */
-    --paper-2:     #e2e5e9;   /* pressed and hovered surfaces */
+       Every grey here is mixed with a little of the blue rather than being
+       neutral, so a page of mostly text still reads as part of the system
+       instead of as a white sheet with blue buttons dropped on it. */
+    --ink:         #0d1a2b;   /* body text */
+    --chrome:      #0b1f3a;   /* menu, table heads, popup heads */
+    --chrome-2:    #123055;
+    --steel:       #55647a;   /* secondary text */
+    --steel-soft:  #6a7889;   /* captions, placeholders, disabled */
+    --paper:       #eef2f8;   /* the page */
+    --paper-2:     #e0e7f1;   /* pressed and hovered surfaces */
     --surface:     #ffffff;   /* cards, rows, fields */
-    --line:        #d5d8dd;   /* every hairline in the system */
+    --line:        #d3dcea;   /* every hairline in the system */
 
-    /* ---- the four meanings ----
+    /* ---- the three meanings ----
        Each pair is measured rather than eyeballed: text on its own ground
-       clears 4.5:1 and every meaningful edge clears 3:1, checked before it
-       was used. The ratio is written beside anything that was close. */
-
-    /* The sign over the door. Bright enough to be the shop's colour, so it
-       is kept for edges, marks and the 3px rule where 3:1 is the bar. */
-    --brand:       #f04e23;   /* 3.6:1 on white -- edges and marks only */
-
-    /* The same orange taken down until white text on it clears 4.5:1. This
-       is the one that fills a button. */
-    --go:          #d0400f;   /* white on it, 4.8:1 */
-    --go-hi:       #a83309;   /* pressed and hovered, 6.7:1 */
-    --go-dim:      rgba(208, 64, 15, 0.10);
-    --go-ink:      #a83309;   /* orange as small text, 5.9:1 on --go-dim */
-
-    /* Nothing to do here. Deep enough to sit in a table all day without
-       shouting, and far enough from the orange that a glance tells them
-       apart at badge size. */
-    --ok:          #0e7a5f;   /* white on it, 5.3:1 */
-    --ok-hi:       #0b6650;
-    --ok-dim:      rgba(14, 122, 95, 0.10);
-    --ok-ink:      #0b6650;   /* 6.1:1 on --ok-dim */
+       clears 4.5:1 and every edge clears 3:1, checked before it was used. */
+    --go:          #1857b8;
+    --go-hi:       #12459a;
+    --go-dim:      rgba(24, 87, 184, 0.09);
 
     --signal:      #f5b301;
     --signal-hi:   #d99e00;
     --signal-dim:  rgba(245, 179, 1, 0.16);
     --signal-ink:  #6b4f00;   /* the readable version for small text */
 
-    /* Twice the depth of the orange, which is the whole point: the thing
-       that deletes is never the brightest thing on the screen. */
-    --stop:        #9e1b32;   /* white on it, 7.9:1 */
-    --stop-hi:     #7d1327;
-    --stop-dim:    rgba(158, 27, 50, 0.09);
+    --stop:        #c62828;
+    --stop-hi:     #a11d1d;
+    --stop-dim:    rgba(198, 40, 40, 0.09);
 
     /* Each role tints the rule under its own menu brand, so a glance at the
        top left corner says which system you are in. Modules override it. */
-    --role-tint:   var(--brand);
-
-    /* The second structural device, mixed once here and used twice: on a
-       purchase order and on the not-on-the-books callout. */
-    --hazard: repeating-linear-gradient(
-        -45deg,
-        var(--brand) 0 10px,
-        var(--chrome) 10px 20px);
+    --role-tint:   var(--signal);
 
     /* ---- shape ---- */
     --radius:      3px;
@@ -140,8 +100,8 @@
     /* Only things that float above the page carry a shadow: popups, the
        menus that hang off the top bar, and the alert cards. Cards on the
        page are separated by a hairline and nothing else. */
-    --lift:        0 14px 34px rgba(20, 24, 29, 0.16);
-    --lift-high:   0 24px 60px rgba(20, 24, 29, 0.32);
+    --lift:        0 14px 34px rgba(11, 31, 58, 0.16);
+    --lift-high:   0 24px 60px rgba(11, 31, 58, 0.30);
 
     /* ---- type ----
        Archivo is signage type: drawn for road signs and newspaper headlines,
@@ -163,10 +123,7 @@
     --border: var(--line);
     --danger: var(--stop);
     --danger-dim: var(--stop-dim);
-    /* --success used to be the same token as --go. It is the green now: the
-       places that reach for it are saying "this went through", not "press
-       this". Anything that wanted the button colour asks for --go. */
-    --success: var(--ok);
+    --success: var(--go);
     --graphite: var(--chrome);
     --graphite-2: var(--chrome-2);
     --gold: var(--signal);
@@ -361,65 +318,8 @@ h4 { font-size: 17px; }
 select.form-control { cursor: pointer; }
 textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
 
+.initial-input { text-transform: uppercase; }
 .inline-select { padding: 6px 9px; min-height: 34px; font-size: 14px; min-width: 132px; width: auto; }
-
-/* ==========================================================================
-   A PHONE NUMBER
-
-   The +63 is printed, not typed. It reads as part of the field and behaves
-   as part of the field -- focus draws the ring around both halves -- but it
-   is a label, so there is no box for anybody to put a second country code
-   into and no spelling of the number for the database to have to reconcile.
-
-   The digits are set in the figure face. A phone number is a figure: it gets
-   read back one character at a time down a telephone line, and tabular
-   numerals are what keeps a 1 the same width as a 7 while somebody does
-   that.
-   ========================================================================== */
-.phone-field {
-    display: flex;
-    align-items: stretch;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
-    transition: border-color 0.15s, box-shadow 0.15s;
-}
-.phone-prefix {
-    display: flex; align-items: center;
-    flex: none;
-    padding: 0 10px 0 12px;
-    border-right: 1px solid var(--line);
-    background: var(--paper);
-    border-radius: var(--radius) 0 0 var(--radius);
-    font-family: var(--font-figure);
-    font-size: 14px; font-weight: 600;
-    color: var(--steel);
-    user-select: none;
-}
-/* the inner box gives its own border and ring up to the wrapper, so the two
-   halves are lit as one control */
-.phone-field .form-control {
-    border: none;
-    border-radius: 0 var(--radius) var(--radius) 0;
-    background: none;
-    font-family: var(--font-figure);
-    letter-spacing: 0.04em;
-    font-variant-numeric: tabular-nums;
-}
-.phone-field .form-control:focus { box-shadow: none; }
-.phone-field:focus-within {
-    border-color: var(--go);
-    box-shadow: 0 0 0 3px var(--go-dim);
-}
-
-/* Ten digits typed, nine so far. Said while the box is being filled in
-   rather than after the form is submitted, and never while it is empty,
-   because the number is optional. */
-.phone-field:has(.form-control.is-bad) { border-color: var(--signal-hi); }
-.phone-field:has(.form-control.is-bad):focus-within {
-    border-color: var(--signal-hi);
-    box-shadow: 0 0 0 3px var(--signal-dim);
-}
 
 .form-footer {
     display: flex;
@@ -473,13 +373,11 @@ textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
 .sidebar-brand:active .brand-mark { transform: scale(0.94); }
 .sidebar-brand:focus-visible { outline: 2px solid var(--signal); outline-offset: -3px; }
 
-/* The one place the shop's own orange is allowed to be at full strength, on
-   a dark ground where it does not have to carry text of its own. */
 .brand-mark {
-    width: 38px; height: 38px; flex-shrink: 0;
+    width: 36px; height: 36px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    background: var(--brand);
-    color: #fff;
+    background: var(--signal);
+    color: var(--ink);
     border-radius: var(--radius);
     font-family: var(--font-ui);
     font-size: 15px; font-weight: 700; letter-spacing: 0.02em;
@@ -517,7 +415,7 @@ textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
     display: block;
     font-size: 10.5px; font-weight: 600;
     letter-spacing: 0.13em; text-transform: uppercase;
-    color: var(--brand);
+    color: var(--signal);
     margin-bottom: 2px;
 }
 
@@ -535,12 +433,12 @@ textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
     letter-spacing: -0.005em;
     transition: color 0.15s, background 0.15s;
 }
-/* the meaning rule again, in the shop's orange, because this is where you are */
+/* the meaning rule again: green, because this is where you are */
 .sidebar-nav li a::before {
     content: '';
     position: absolute; left: 0; top: 6px; bottom: 6px;
     width: var(--rule);
-    background: var(--brand);
+    background: var(--go);
     transform: scaleY(0); transform-origin: center;
     transition: transform 0.16s ease;
 }
@@ -548,7 +446,7 @@ textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
 .sidebar-nav li a:hover::before { transform: scaleY(1); }
 .sidebar-nav li a.active {
     color: var(--surface);
-    background: rgba(240, 78, 35, 0.20);
+    background: rgba(24, 87, 184, 0.22);
 }
 .sidebar-nav li a.active::before { transform: scaleY(1); }
 .sidebar-nav li a:focus-visible { outline: 2px solid var(--signal); outline-offset: -3px; }
@@ -563,14 +461,6 @@ textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
     color: rgba(255, 255, 255, 0.6);
 }
 
-/* Once the strip at the top is carrying a module's screens, the menu stops
-   carrying them too: one list, one job. The class is put on <body> by
-   subnav.js only after a strip has actually been built, so if that script
-   never runs the menu keeps its sub-lists and nothing is unreachable. */
-body.has-subnav .sidebar-nav .nav-sub { display: none !important; }
-body.has-subnav .sidebar-nav .nav-caret { display: none; }
-body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
-
 /* The shade that appears behind the menu once it slides over the page. It is
    inert on a desktop; responsive.css gives it a size. */
 .sidebar-shade {
@@ -581,7 +471,7 @@ body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
        the bell and the account chip lit made the corner look like it was
        still live while the menu was over everything else */
     z-index: 900;
-    background: rgba(20, 24, 29, 0.55);
+    background: rgba(6, 18, 34, 0.55);
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.24s ease;
@@ -598,50 +488,27 @@ body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
 
 /* Solid on purpose: rows scrolling under a translucent bar made the top of
    the page look smudged. The z-index puts the account menu hanging off it in
-   front of the cards rather than behind them.
-
-   WHY IT IS NOT PLAIN WHITE ANY MORE
-   The bar was --surface on a --paper page, which is the same white as every
-   card sitting under it. On a wide monitor that made the one strip holding
-   the title, the bell and the way out read as the top of the first card,
-   and people went looking for the account menu in the menu instead. So it
-   is separated three ways at once: a tinted band along its top edge, a
-   ground a shade off the cards below it, and a soft shadow that puts it in
-   front of the page rather than in it.
-
-   All three are drawn rather than added: the tint is an inset shadow and the
-   shadow spills outside the box, so the bar is exactly the height it always
-   was. The strip below it is sticky at top: 58px, and that arithmetic must
-   keep holding. */
+   front of the cards rather than behind them. */
 .topbar {
     position: sticky;
     top: 0;
     z-index: 500;
-    background: linear-gradient(var(--surface), #f7f8f9);
+    background: var(--surface);
     padding: 10px 20px;
     min-height: 58px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 14px;
-    border-bottom: 1px solid var(--steel-soft);
-    box-shadow: inset 0 var(--rule) 0 var(--role-tint),
-                0 6px 16px rgba(20, 24, 29, 0.10);
+    border-bottom: 1px solid var(--line);
 }
 .topbar-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 .topbar-title {
-    font-size: 21px; font-weight: 700; letter-spacing: -0.02em;
+    font-size: 19px; font-weight: 600; letter-spacing: -0.015em;
     color: var(--ink);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* The bar is no longer plain white, so the two controls standing on it get a
-   hairline one step darker than the one they use elsewhere. Without it a
-   white chip on an off-white bar has no edge at all, which is the opposite
-   of the problem this section is solving. */
-.topbar .bell,
-.topbar .account-chip { border-color: #c2c6cd; }
-
 .topbar-user {
     display: flex; align-items: center; gap: 9px;
     padding: 4px 12px 4px 4px;
@@ -662,89 +529,6 @@ body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
     font-size: 18px; cursor: pointer; color: var(--ink);
 }
 .menu-toggle:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
-
-/* ==========================================================================
-   THE SUBMODULE STRIP
-
-   The menu on the left is how you get anywhere in the system: it holds the
-   modules, and it is the same on every screen. This strip holds one module's
-   screens and nothing else, so it changes as you move and it disappears
-   entirely on a module that has only one screen. Two levels, each with one
-   job, and neither repeating the other.
-
-   It is built by subnav.js from the menu that is already in the page, so a
-   screen a role cannot reach never has a tab here: the strip is generated
-   from what the person can actually open, not filtered afterwards.
-
-   Set in caps because it is signage rather than prose -- it is the only
-   place in the system that is, apart from the role plate in the menu -- and
-   the hairlines between tabs are the same hairlines as everywhere else.
-   ========================================================================== */
-.subnav {
-    position: sticky;
-    top: 58px;
-    z-index: 490;
-    display: flex;
-    align-items: stretch;
-    gap: 0;
-    padding: 0 20px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--line);
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: thin;
-}
-.subnav[hidden] { display: none; }
-.subnav::-webkit-scrollbar { height: 0; }
-
-/* Sized so that a module of seven screens still fits a laptop without
-   scrolling: a tab you have to find by dragging is a tab nobody presses. */
-.subnav-tab {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    padding: 12px 13px;
-    min-height: 44px;
-    border: 0;
-    border-right: 1px solid var(--line);
-    background: none;
-    color: var(--steel);
-    font-family: var(--font-ui);
-    font-size: 11.5px;
-    font-weight: 600;
-    letter-spacing: 0.055em;
-    text-transform: uppercase;
-    white-space: nowrap;
-    cursor: pointer;
-    transition: color 0.15s, background 0.15s;
-}
-.subnav-tab:first-child { border-left: 1px solid var(--line); }
-.subnav-tab:hover { color: var(--ink); background: var(--paper); }
-
-/* the meaning rule, laid on its side: this is the screen you are on */
-.subnav-tab::after {
-    content: '';
-    position: absolute; left: 0; right: 0; bottom: -1px;
-    height: var(--rule);
-    background: var(--brand);
-    transform: scaleX(0);
-    transition: transform 0.16s ease;
-}
-.subnav-tab.is-current { color: var(--ink); }
-.subnav-tab.is-current::after { transform: scaleX(1); }
-.subnav-tab:focus-visible { outline: 2px solid var(--go); outline-offset: -3px; }
-
-/* A count riding on a tab: how many rows are waiting on that screen. */
-.subnav-count {
-    margin-left: 8px;
-    padding: 1px 6px;
-    border-radius: 999px;
-    background: var(--signal-dim);
-    color: var(--signal-ink);
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0;
-}
 
 .content-area { padding: 22px 20px 44px; }
 
@@ -848,21 +632,13 @@ table td {
     vertical-align: middle;
 }
 table tbody tr:last-child td { border-bottom: none; }
-table tbody tr:nth-child(even) { background: #f7f8f9; }
+table tbody tr:nth-child(even) { background: #f7f9fc; }
 
 table th.col-num { text-align: right; }
 table th.col-id  { width: 1%; white-space: nowrap; }
 table th.col-action,
 table td.cell-action { text-align: right; white-space: nowrap; }
 table td.cell-action .btn + .btn { margin-left: 6px; }
-
-/* A column a filter has made redundant: pick "Cashier" in the role filter
-   and the Role column says Cashier on every row. hideFilteredColumns() in
-   tables.js marks the heading and every cell under it; the selectors are
-   weighted to beat the phone layout in responsive.css, which turns each
-   cell into a flex line and would otherwise draw it anyway. */
-table thead tr th.col-hidden,
-table tbody tr td.col-hidden { display: none; }
 
 .cell-id {
     font-family: var(--font-figure);
@@ -951,8 +727,7 @@ kbd {
 
 /* ==========================================================================
    BADGES
-   The state of one record. A badge reports; it is never something you press,
-   so a badge is never the action orange.
+   The state of one record, in one of the three colours.
    ========================================================================== */
 .badge {
     display: inline-flex;
@@ -973,10 +748,10 @@ kbd {
     background: currentColor;
     flex-shrink: 0;
 }
-.badge-success { background: var(--ok-dim);     color: var(--ok-ink);     border-color: rgba(14, 122, 95, 0.30); }
-.badge-danger  { background: var(--stop-dim);   color: var(--stop-hi);    border-color: rgba(158, 27, 50, 0.28); }
+.badge-success { background: var(--go-dim);     color: var(--go-hi);      border-color: rgba(24, 87, 184, 0.28); }
+.badge-danger  { background: var(--stop-dim);   color: var(--stop-hi);    border-color: rgba(198, 40, 40, 0.28); }
 .badge-warning { background: var(--signal-dim); color: var(--signal-ink); border-color: rgba(245, 179, 1, 0.5); }
-.badge-neutral { background: rgba(20, 24, 29, 0.06); color: var(--steel); border-color: rgba(20, 24, 29, 0.14); }
+.badge-neutral { background: rgba(11, 31, 58, 0.06); color: var(--steel); border-color: rgba(11, 31, 58, 0.14); }
 
 /* ==========================================================================
    THE FIGURES
@@ -1092,7 +867,7 @@ kbd {
    ========================================================================== */
 .modal {
     display: none; position: fixed; inset: 0; z-index: 2000;
-    background: rgba(20, 24, 29, 0.62);
+    background: rgba(6, 18, 34, 0.62);
     backdrop-filter: blur(3px);
     padding: 26px; overflow-y: auto;
     overscroll-behavior: contain;
@@ -1153,7 +928,7 @@ kbd {
     gap: 24px;
     padding: 0 22px;
     border-bottom: 1px solid var(--line);
-    background: #fafafb;
+    background: #fafcff;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
 }
@@ -1430,7 +1205,7 @@ kbd {
 .account-chip:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 .account-chip .avatar { width: 30px; height: 30px; font-size: 11px; border-radius: 50%; }
 .account-chip-name {
-    font-weight: 600; max-width: 180px;
+    font-weight: 600; max-width: 140px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .account-caret { font-size: 9px; color: var(--steel-soft); }
@@ -1454,7 +1229,7 @@ kbd {
 .account-drop-head {
     display: flex; align-items: center; gap: 12px;
     padding: 14px 16px;
-    background: #fafafb;
+    background: #fafcff;
     border-bottom: 1px solid var(--line);
 }
 .account-drop-head .avatar { width: 40px; height: 40px; font-size: 14px; }
@@ -1530,7 +1305,7 @@ kbd {
     display: flex; align-items: center; justify-content: center;
     border-radius: 50%;
     font-size: 14px; font-weight: 700; line-height: 1;
-    background: rgba(20, 24, 29, 0.07); color: var(--steel);
+    background: rgba(11, 31, 58, 0.07); color: var(--steel);
 }
 .toast-title { display: block; font-size: 15.5px; font-weight: 600; color: var(--ink); line-height: 1.3; }
 .toast-text  { font-size: 13.5px; color: var(--steel); line-height: 1.5; margin-top: 2px; }
@@ -1553,14 +1328,14 @@ kbd {
 .toast-card.is-clickable { cursor: pointer; }
 .toast-card.is-clickable:hover { border-color: var(--signal); }
 
-.toast-card.toast-success .toast-stripe { background: var(--ok); }
-.toast-card.toast-success .toast-mark   { background: var(--ok-dim); color: var(--ok-ink); }
+.toast-card.toast-success .toast-stripe { background: var(--go); }
+.toast-card.toast-success .toast-mark   { background: var(--go-dim); color: var(--go-hi); }
 .toast-card.toast-danger  .toast-stripe { background: var(--stop); }
 .toast-card.toast-danger  .toast-mark   { background: var(--stop-dim); color: var(--stop-hi); }
 .toast-card.toast-warning .toast-stripe { background: var(--signal); }
 .toast-card.toast-warning .toast-mark   { background: var(--signal-dim); color: var(--signal-ink); }
 .toast-card.toast-info    .toast-stripe { background: var(--chrome); }
-.toast-card.toast-info    .toast-mark   { background: rgba(20, 24, 29, 0.07); color: var(--steel); }
+.toast-card.toast-info    .toast-mark   { background: rgba(11, 31, 58, 0.07); color: var(--steel); }
 
 /* ==========================================================================
    BOOTSTRAP COMPATIBILITY
@@ -1692,7 +1467,7 @@ kbd {
 .pager-controls .btn:disabled:hover { background: var(--surface); color: var(--steel); }
 
 /* the "that did not load" mark wears the colour that means it stopped */
-.empty-mark-bad { border-color: rgba(158, 27, 50, 0.4); }
+.empty-mark-bad { border-color: rgba(198, 40, 40, 0.4); }
 .empty-mark-bad svg { stroke: var(--stop); }
 
 /* ==========================================================================
@@ -1736,7 +1511,7 @@ kbd {
    ========================================================================== */
 .drawer-shade {
     position: fixed; inset: 0;
-    background: rgba(20, 24, 29, 0.42);
+    background: rgba(11, 31, 58, 0.42);
     opacity: 0; visibility: hidden;
     transition: opacity 0.2s ease, visibility 0.2s;
     z-index: 1200;
@@ -1827,50 +1602,6 @@ kbd {
     width: 5px; height: 5px;
     border-radius: 50%;
     background: var(--stop);
-}
-
-/* Crimson is for the cards that destroy something. A card listing the details
-   of an account about to be created is not one of those, and spending the
-   system's one "this stops something" colour on it is how the colour stops
-   being noticed on the card that needs it. */
-.ask-detail.is-plain {
-    background: var(--paper);
-    border-left-color: var(--steel-soft);
-}
-.ask-detail.is-plain li::before { background: var(--steel-soft); }
-
-/* ==========================================================================
-   A DETAIL LINE THAT IS A RECORD RATHER THAN A CONSEQUENCE
-
-   "Label: value" is set as two columns. The card that lists an account about
-   to be created is not warning about three things, it is showing a record to
-   be checked, and a reader checking a record reads down the values -- which
-   needs the labels to line up and stop competing with them.
-
-   The value half is the figure face: on these cards it is an email address, a
-   phone number and a password, all three of which get checked one character
-   at a time. It wraps rather than overflowing, because a long address must
-   not be the thing that hides a password under it.
-   ========================================================================== */
-.ask-detail li.ask-pair {
-    display: grid;
-    grid-template-columns: 116px 1fr;
-    gap: 4px 10px;
-    align-items: baseline;
-}
-.ask-pair-label { color: var(--steel); }
-.ask-pair-value {
-    font-family: var(--font-figure);
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--ink);
-    overflow-wrap: anywhere;
-    user-select: all;          /* one click selects the whole value to copy */
-}
-
-@media (max-width: 480px) {
-    .ask-detail li.ask-pair { grid-template-columns: 1fr; }
-    .ask-pair-label { font-size: 12px; }
 }
 
 /* Recorded metadata, exactly as it was written. It is machine text and is set
@@ -2068,14 +1799,13 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
    is allowed its full height rather than the ten rows the screen shows.
    ========================================================================== */
 @media print {
-    .sidebar, .sidebar-shade, .topbar, .subnav, .toast-deck,
+    .sidebar, .sidebar-shade, .topbar, .toast-deck,
     .no-print, .pager, .panel-toolbar, .tab-header,
     .menu-toggle, .drawer, .drawer-shade, .modal { display: none !important; }
 
     .main-content { margin-left: 0 !important; }
     .content-area { padding: 0 !important; }
-    /* the page ground is grey on screen; on paper it is paper */
-    body, .main-content, .content-area { background: #fff; }
+    body { background: #fff; }
 
     .card {
         border: none;
@@ -2175,13 +1905,40 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 /* ==========================================================================
    LIVE SYNC
 
-   A screen that has quietly stopped hearing about changes looks exactly like
-   a screen where nothing has changed, and the difference matters when the
-   figure is stock on hand. Saying so used to be the job of a dot in the top
-   bar; that dot is gone, and the note in the footer of the table it is
-   actually about does the job instead. The reasoning is at the top of the
-   LIVE SYNC section in javascript/modules/shared/live-sync.js.
+   One dot in the top bar. It is not decoration: a screen that has quietly
+   stopped hearing about changes looks exactly like a screen where nothing has
+   changed, and the difference matters when the figure is stock on hand.
    ========================================================================== */
+.live-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    margin-left: 14px;
+    padding: 4px 10px 4px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    font-size: 11.5px;
+    font-weight: 500;
+    color: var(--steel);
+    white-space: nowrap;
+    cursor: default;
+}
+.live-mark {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--steel-soft);
+    flex: none;
+}
+
+.live-dot.is-live { border-color: rgba(24, 87, 184, 0.35); background: var(--go-dim); color: var(--go-hi); }
+.live-dot.is-live .live-mark { background: var(--go); box-shadow: 0 0 0 3px var(--go-dim); }
+
+.live-dot.is-down { border-color: rgba(198, 40, 40, 0.35); background: var(--stop-dim); color: var(--stop-hi); }
+.live-dot.is-down .live-mark { background: var(--stop); }
+
+.live-dot.is-stale { border-color: rgba(245, 179, 1, 0.5); background: var(--signal-dim); color: var(--signal-ink); }
+.live-dot.is-stale .live-mark { background: var(--signal-hi); }
 
 /* A table nobody is reading refreshes itself; the count flashes rather than
    throwing a popup card, because a card for every change on a busy afternoon
@@ -2221,6 +1978,8 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 .stale-note .btn { margin-left: auto; }
 
 @media (max-width: 640px) {
+    .live-dot { margin-left: 8px; padding: 3px 8px 3px 6px; }
+    .live-word { display: none; }
     .stale-note .btn { margin-left: 0; width: 100%; }
 }
 
@@ -2496,73 +2255,4 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 }
 .pick-verdict:empty { display: none; }
 .pick-verdict.is-stop { color: var(--stop); font-weight: 500; }
-.pick-verdict.is-new  { color: var(--go-ink); font-weight: 500; }
-
-/* ==========================================================================
-   THE MATERIAL THAT IS NOT ON THE BOOKS YET
-
-   A picker that only offers what is already in the database is a picker that
-   cannot be used the one time it matters: a lorry is at the door with a
-   pallet of something nobody has typed into the system yet, and the clerk is
-   holding it. So the last row of the list is always the way out of the list.
-   It looks unlike a suggestion on purpose -- suggestions are things that
-   exist, and this is not one of them.
-   ========================================================================== */
-.suggest-item.is-make {
-    flex-direction: row;
-    align-items: center;
-    gap: 9px;
-    margin-top: 4px;
-    padding-top: 9px;
-    border-top: 1px solid var(--line);
-    border-radius: 0 0 var(--radius) var(--radius);
-    color: var(--go-ink);
-    font-size: 13px;
-    font-weight: 600;
-}
-.suggest-item.is-make:hover,
-.suggest-item.is-make.is-active { background: var(--go-dim); }
-.suggest-item.is-make .make-mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px; height: 20px;
-    flex: none;
-    border-radius: var(--radius);
-    background: var(--go);
-    color: #fff;
-    font-size: 14px;
-    line-height: 1;
-}
-.suggest-item.is-make .make-quoted { color: var(--ink); }
-
-/* The form that opens under the box once that row is taken. The hazard
-   stripe along its head is the second of the system's two structural
-   devices, and this is one of its two uses: you are about to add something
-   to the shop's books, which is not an ordinary edit. */
-.make-card {
-    margin-top: 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    background: var(--surface);
-    overflow: hidden;
-}
-.make-card[hidden] { display: none; }
-.make-card-stripe { height: 6px; background: var(--hazard); }
-.make-card-body { padding: 14px 16px 16px; }
-.make-card-body h4 { margin-bottom: 3px; font-size: 15px; }
-.make-card-sub {
-    margin-bottom: 12px;
-    font-size: 12.5px;
-    line-height: 1.5;
-    color: var(--steel);
-    max-width: 64ch;
-}
-.make-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
-}
-.make-card .form-group { margin-bottom: 0; }
-.make-card .form-footer { margin-top: 14px; }
 

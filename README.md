@@ -58,7 +58,18 @@ Recovery** screen writes one into `backups/` — then run file 1 and restore wha
 you need from the backup.
 
 File 2 is the safe one. It only drops and recreates procedures and touches no
-table and no row, so it can be re-run on its own at any time.
+table and no row, so it can be re-run on its own at any time. **Re-run it** if
+your database was created before `staff.middle_name` existed: the server
+renames the column for you at startup, but the stored procedures still expect
+the old name until file 2 is loaded again.
+
+There is one automatic upgrade, and it happens on `npm start`: `staff`'s old
+`middle_initial VARCHAR(5)` column is renamed to `middle_name VARCHAR(100)` and
+`full_name` is rebuilt around it. The letters already in there are kept and are
+still valid middle names of one letter, so nothing is lost and nothing has to
+be retyped — fill in the whole name the next time you open each record. The
+server says so on the console when it does it, and does nothing at all once the
+column is already `middle_name`.
 
 Earlier versions of the project shipped `upgrade.sql` through `upgrade_v8.sql`
 and `fix_patch.sql` for stepping an existing database forward one version at a
@@ -80,7 +91,54 @@ const port = 3000;
 
 `DB_PASSWORD` is the MySQL root password on the new machine.
 
-### 5. Start the server
+### 5. Point the server at a mail account (optional)
+
+The system sends one kind of email: the first password for an account somebody
+has just been given. It works without this step — the password is shown once on
+the administrator's screen instead, to be handed over — so leave it until the
+rest is running.
+
+Open `public/javascript/mailer.js` and edit the SETUP block at the top:
+
+```js
+const MAIL_ENABLED = false;
+const MAIL_HOST = "smtp.gmail.com";
+const MAIL_PORT = 465;
+const MAIL_SECURE = true;          // true on 465, false on 587
+const MAIL_USER = "";              // the full address, e.g. shop@gmail.com
+const MAIL_PASSWORD = readPasswordFile();   // see WHERE THE PASSWORD GOES, above
+```
+
+Set `MAIL_ENABLED` to `true` and fill in the address. The password does not go
+in this file: create `public/javascript/mail-password.txt` next to it, holding
+the password on one line and nothing else. That file is in `.gitignore`, so it
+stays on the machine and never reaches GitHub; every computer this is set up on
+makes its own. With no such file, mail is simply off and the fallback is used.
+
+**For a Gmail account,** the password in that file is not the password you sign
+in to Gmail with — Google refuses those over SMTP. Turn on 2-Step Verification
+on the account, make an App Password (16 letters) at
+`myaccount.google.com/apppasswords`, and put that in the file. Leave the host
+and port as they are.
+
+**For anything else,** port 465 is TLS from the first byte, so `MAIL_SECURE`
+stays `true`; port 587 starts in the clear and is upgraded with STARTTLS, so set
+it to `false`. Port 25 is not offered: it is unencrypted, and this connection
+carries a password.
+
+There is no package to install. `mailer.js` speaks SMTP over Node's own `tls`,
+for the same reason passwords are hashed with Node's own scrypt rather than with
+bcrypt off npm: `npm install` should fetch as little as possible on a machine
+this is being set up on. Check it without sending anything real:
+
+```
+node tests/mailer.js
+```
+
+`mailer.js` and `mail-password.txt` sit under `public/`, so — like `server.js`
+— the server refuses to serve either of them to a browser.
+
+### 6. Start the server
 
 ```
 npm start
@@ -122,6 +180,15 @@ modules and is the same list all day. The strip across the top holds the
 screens inside whichever module is open, and it changes as you move; on a
 module that has only one screen it is not there at all. The strip is built
 from the menu itself, so a screen a role cannot open never gets a tab.
+
+The bar itself is separated from the page three ways: a tinted band along its
+top edge, a ground a shade off the white of the cards below it, and a soft
+shadow that puts it in front of the page rather than in it. It used to be the
+same white as every card under it, which on a wide monitor made the one strip
+holding the page title, the alert bell and the way out read as the top of the
+first card — and people went looking for the account menu in the menu. All
+three marks are drawn rather than added, so the bar is the same height it
+always was and the tab strip still sits flush under it.
 
 On a narrow screen the menu slides in over the page instead of sitting beside
 it. Press the button at the top left to open it; the shaded page behind it,
@@ -186,14 +253,110 @@ The rest of it:
 
 Every role has an account menu in the top right corner of its dashboard — the
 only way out of the system, so it is in one place rather than two. It opens on
-a click and offers three things:
+a click and offers two things: **View my credentials**, and **Log out**.
 
-- **View my credentials** — everything the system holds about you.
-- **Edit my credentials** — first name, middle initial, last name, phone and
-  the email you sign in with. Your role is not editable here; only the system
+View my credentials opens a card with three tabs, and everything about your own
+account is behind them:
+
+- **Credentials** — everything the system holds about you.
+- **Edit Details** — first name, middle name, last name, phone and the email
+  you sign in with. Your role is not editable here; only the system
   administrator moves people between roles.
-- **Change my password** — your current password is asked for first, so an
-  unattended screen cannot be used to lock you out of your own account.
+- **Password** — your current password is asked for first, so an unattended
+  screen cannot be used to lock you out of your own account.
+
+The menu used to list all three as items of their own. All three opened the
+same card, which then showed its tabs anyway, so the menu was offering three
+doors into one room. It offers the door and the room does the rest.
+
+## The first password, and who is allowed to know it
+
+**Nobody types the first password**, and **the account is not created until
+somebody has read it back.** Creating an account is two steps:
+
+1. Fill the form in — a name, a role, a phone number, an email address — and
+   press **Review & Create**. Nothing is created. The server works the whole
+   account out, makes the password, and shows you the lot: the name as the
+   directory will spell it, the middle name, the role, the number in +63 form,
+   the address the password is about to go to, and the password itself.
+2. Press **Create the account**. Now it exists, and the password is sent.
+
+**Go back and edit** creates nothing, because the first step wrote nothing.
+
+That middle card is there for one thing above all: the email address. It is the
+one field on the form that cannot be corrected afterwards, because by the time
+you notice, the password has already been sent to whatever was typed.
+
+There used to be a **Temporary Password** box on that form, and an administrator
+typed one into it for somebody else. Every one of those went the way they all
+go: `Cashier123`, then `Cashier124`, then the same one for everybody because it
+is easier to say down a corridor. It was also typed on a screen in a shop, said
+out loud, and known to two people for as long as the account lasted. A password
+one person invents for another is not that person's password.
+
+What the generated one looks like, and why:
+
+- **Fourteen characters** drawn from `crypto`'s random bytes, not
+  `Math.random`. That is about 81 bits, for a secret that only has to survive
+  until its owner's first sign-in.
+- **No character whose identity depends on the font.** No `O` or `0`, no `I`,
+  `l` or `1`, no `B` or `8`, no `S` or `5`, no `Z` or `2`. It has to survive
+  being read off a phone and typed at a counter.
+- **Only punctuation that sits in the same place on every keyboard.** `@ # ~ \ |`
+  move between layouts, so they are left out; a password that cannot be typed is
+  a support call.
+- **It buys exactly one sign-in.** A new account already has
+  `must_change_password` set, so the system asks for a password of the user's own
+  choosing the first time they sign in and the sent one stops working the moment
+  they choose.
+
+### What is confirmed is what is created
+
+The second request carries a draft id and nothing else. Every field — the name,
+the role, the email, the password — is read back from the server's own memory,
+not from the browser.
+
+The shortcut would be to send the details and the password down, show them, and
+send them all back up on confirmation. That makes the review a piece of theatre:
+whatever comes back up is what gets created, so the thing read on screen and the
+thing written to the database are related only by the browser's good manners. A
+confirmation step is worth having exactly because what was read is what happens.
+
+A draft is good for one confirmation and expires after ten minutes. Confirming
+twice does not make two accounts — the second time says the review has expired —
+which is what stops a double-clicked button or a retried request on a slow shop
+network from creating a duplicate.
+
+### If the mail cannot go
+
+The account is still created, and the password comes back to the administrator's
+screen once, in a card that stays until it is dismissed and says why it is there
+rather than in an inbox — mail is not set up on this server, or the mail server
+refused the message and here is what it said. It is read out and handed over.
+
+That path exists because the alternative is worse: a shop whose internet is
+down would otherwise be a shop that cannot take on a cashier. It is the fallback
+and not the plan, which is why the card says what to fix.
+
+### What the letter says, and what it does not
+
+The mail names the shop, the address to sign in with, the password, and the fact
+that the system will ask for a new one immediately. It carries **no link and no
+web address**, on purpose: a mail with a password and a link in it is the shape
+of every phishing message ever sent, and teaching staff that such a mail is
+normal is worse than making them ask a colleague for the address once. It also
+says, in as many words, that nobody will ever ask them for their password.
+
+### It is never written down where it can be read back
+
+The audit trail records that an account was created, by whom, from which
+machine, and whether the password was emailed. It never records the password
+itself. The database stores only a scrypt hash. `tests/smoke.js` checks the
+trail for the generated password and fails if it finds it.
+
+**Reset Password** on an existing account still asks an administrator to type
+one. It is the same server-side machinery now, so moving it over is a small
+change, but it has not been made.
 
 ## Alerts
 
@@ -210,11 +373,69 @@ New alerts also appear as cards in the bottom right corner of the screen.
 Clicking one opens the full list. They step aside on their own after a few
 seconds; the bell keeps them.
 
-## Staff names and the middle initial
+## Phone numbers
 
-Two people may share a first and a last name. The middle initial is what tells
-them apart, and it appears everywhere a staff name is shown: the directory, the
-receipt, the audit trail and every report.
+**One spelling, and it is `+63` followed by ten digits.**
+
+The box used to be plain text, so it took anything: letters, spaces, brackets,
+`n/a`, and the same number written as `09171234567`, `+639171234567`,
+`639171234567` and `0917 123 4567` by four different people on four different
+afternoons. Four spellings of one number is a column that cannot be searched,
+cannot be compared, and cannot be dialled from without being read by a human
+first.
+
+So the country code is not typed at all. It is printed beside the box as fixed
+furniture, and what is typed is the ten national digits:
+
+```
+ +63 | 9171234567
+```
+
+Everything that is not a digit is dropped as the keys are pressed, rather than
+complained about after the form is submitted — a rule that refuses a keystroke
+teaches the rule in the moment, and a rule that refuses the form at the end
+teaches nothing and loses the other nine fields. Paste any of the four spellings
+above and the box keeps the ten digits that matter. The trunk `0` and the `+63`
+are the same thing and never both appear.
+
+An incomplete number turns the box amber while it is being filled in, and says
+nothing at all while it is empty, because the number is optional.
+
+The same rule is enforced again in `server.js`, because a check that only exists
+in a browser is a check anybody can skip with `curl`. A number is stored as
+`+639171234567` and shown as `+63 917 123 4567`.
+
+Numbers already in the database from before this rule are rewritten to `+63`
+form on the next `npm start`. Anything that does not reduce to a usable number
+is cleared rather than half-converted, and the server says how many — a phone
+column with `n/a` in it is a column somebody will eventually try to dial.
+
+## Staff names and the middle name
+
+Two people may share a first and a last name. The middle name is what tells them
+apart, and it is optional, so a person with none on file is not a problem.
+
+**The whole middle name is stored, and only its first letter is shown.** Those
+are two different jobs and it is worth being clear about which is which:
+
+- The *name* is what settles which of the two Juan Cruzes a record belongs to
+  when somebody is checking it against a payslip or an ID. So `staff.middle_name`
+  holds the whole thing, at the length a real middle name runs to. It is on the
+  person's record for anybody who opens it.
+- The *initial* is what a reader needs at a glance, so that is what is printed.
+  `Juan D. Cruz`, everywhere a staff name appears: the directory, the account
+  chip in the corner, the receipt, the audit trail and every report. Never first
+  and last alone — that is the spelling that cannot tell two people apart.
+
+The shortening happens in exactly one place, the generated `full_name` column in
+the `staff` table, so there is one definition of a staff name for the whole
+system and no screen can spell it differently.
+
+The column used to be `middle_initial VARCHAR(5)` and held one letter, because
+one letter was all any screen printed. That is the wrong way round: a stored
+"S" cannot tell two people apart either. A machine already running the old
+schema is upgraded on the next `npm start` — see *Already have a `hardware_db`*
+above.
 
 An email address is a different matter. It is the username, MySQL enforces it as
 unique, and two accounts cannot share one. If the email is already taken the
@@ -222,17 +443,144 @@ create screen says so in plain words and asks for a different one.
 
 ## Backup and recovery
 
-The System Administrator's **Backup & Recovery** screen writes the whole system
-to one dated `.sql` file: every table, every row, both views and all eighteen
-stored procedures. Files are named after the moment they were taken —
-`hardware_db_backup_2026-09-04_1407.sql` — and are kept in the `backups/` folder
-in the project, so the folder builds up a history instead of one file being
-overwritten.
+The whole system is written to one `.sql` file: every table, every row, both
+views and all the stored procedures. A backup taken here opens and runs in MySQL
+Workbench, which is what makes it a real backup rather than an export only this
+application understands.
 
-Each backup in the list can be downloaded, restored, or deleted. A backup taken
-here also opens and runs in MySQL Workbench, which is what makes it a real
-backup rather than an export only this application understands. Restoring
-replaces everything currently in the system, so the screen asks first.
+There are two kinds, and they are told apart by their name.
+
+### The automatic one, every sixty seconds
+
+The server backs the whole database up **once a minute**, on its own, with
+nobody pressing anything. The most that can be lost is the last minute of
+trading. The **Backup & Recovery** screen says so at the top, from the server
+rather than from a sentence written into the page — a screen that claims a
+backup is being taken every minute because its own HTML says so is worse than a
+screen that says nothing.
+
+**Old ones are overwritten.** Sixty seconds is 1,440 complete `.sql` files a
+day. At even a megabyte each that is a gigabyte and a half a day into a folder
+that never stops growing, so within a week the backup feature is the reason the
+disk is full — and a full disk is how the *next* backup fails, quietly, at the
+moment it matters. So the automatic ones rotate: sixty exist at a time, and
+writing the newest deletes the oldest. The folder settles at a fixed size on the
+first hour and stays there, covering the last hour minute by minute.
+
+It is sixty files rather than one file rewritten in place on purpose. A dump
+takes a moment to write; a crash, a full disk or a killed process halfway
+through leaves a truncated file, and if that file is the only one there is, the
+system has no backup at all — and it had one a minute ago. Sixty files is the
+same idea with the last fifty-nine still standing.
+
+Nothing is written to the audit trail for a successful automatic backup. An
+entry a minute is 1,440 entries a day, and the trail is where somebody looks to
+find out who deactivated an account; burying that under a wall of identical
+backup lines makes the trail unreadable. A *failure* is recorded, once, and said
+on the screen in plain words with what the server actually reported — because a
+backup that has quietly stopped working looks exactly like one that is working,
+right up until the afternoon somebody needs it.
+
+The three settings are three lines near the top of the backup section in
+`server.js`:
+
+```js
+const AUTO_BACKUP_ENABLED = true;
+const AUTO_BACKUP_MS = 60 * 1000;   // every sixty seconds
+const AUTO_KEEP = 60;               // the last hour, minute by minute
+```
+
+A restore and the timer never overlap. A restore drops and rebuilds every table
+in turn, and for the seconds that takes the database is neither the old contents
+nor the new ones; a backup taken then would be a dump of a half-restored
+database, indistinguishable from a good one and useless as the thing you reach
+for next. So the timer stands down while a restore is running.
+
+### The one you take yourself
+
+**Run Backup Now** writes a file named `hardware_db_backup_...`. Those are
+decisions — taken before a restore, before a schema change, at the end of a day
+— and they are **never rotated away**. Nothing automatic can delete something an
+administrator chose to keep.
+
+The list shows both kinds with a **Kind** column saying which is which, because
+it decides how long the file will be there. Each one can be downloaded,
+restored, or deleted from the drawer that opens when you click its row.
+Restoring replaces everything currently in the system, so the screen asks first.
+
+## "Nothing can be saved" — the half-installed database
+
+This one is worth reading before it happens to you, because it has happened
+already and the symptom points at the wrong thing.
+
+**Every write in this system goes through a stored procedure.** So a database
+that has the tables but not the procedures reads perfectly and cannot be
+written to at all. Every form answers with its own failure — *Unable to create
+the account*, *Unable to complete the sale* — and every one of those names the
+wrong cause. The form is fine.
+
+It happens for one ordinary reason: **`1-RUN-FIRST-database.sql` was run and
+`2-RUN-SECOND-stored-procedures.sql` was not.** File 1 rebuilds the tables and
+the demo data. The procedures only exist because of file 2. Anybody resetting
+their database has done exactly half the job at that point, and the missing half
+is invisible.
+
+Three things now make that state announce itself:
+
+- **The server says so at startup, in a box you cannot miss** — not the single
+  warning line it used to print, which scrolled off the top of the terminal
+  twenty requests before anybody went looking.
+- **Writes are refused with the actual fix.** A `503` naming
+  `2-RUN-SECOND-stored-procedures.sql`, instead of each form blaming itself.
+  Reading still works, so the screens stay usable, and signing in still works,
+  because locking somebody out of the screen that explains the problem is the
+  wrong way round. The **Backup & Recovery** screen leads with it in red.
+- **The rolling backup stops deleting things.** See below — this is the part
+  that could have cost real data.
+
+Run file 2 and **reload the page — no restart needed.** The server re-checks
+whenever the count is short, so writes start working again within seconds. It
+touches no table and no row.
+
+### Why the rolling backup stands down
+
+This is the flaw that mattered, and it is worth being blunt about it.
+
+When the procedures went missing, the automatic backup did exactly what it was
+told: it took a faithful backup of a database that could not be written to, once
+a minute, and each one rotated an older file out. Sixteen went into the folder
+before anybody noticed. At the steady state of 60 files, **one hour of that would
+have rotated out every last backup that still had the procedures in it** — sixty
+flawless copies of a broken database and no way back.
+
+A rolling window is only safe if what it is rolling over is known good. So the
+procedure count is checked before anything is deleted:
+
+- the backup is still **written** — the rows are real and worth keeping;
+- nothing is **deleted** while the count is short.
+
+The folder grows for as long as the fault lasts, which is a cost you can recover
+with a broom. The other way round cannot be recovered at all. The screen says
+when rotation is standing down, and the server logs it once — a folder quietly
+growing past its cap is otherwise something nobody learns about until the disk
+is full. Rotation resumes on its own on the next tick after the procedures come
+back, and the folder settles to its cap again.
+
+### A restore that succeeds and still leaves you stuck
+
+A backup taken during that fault is a valid file: every table, every row,
+restores without an error. It just has no procedures in it — and, having none,
+it carries no `DROP PROCEDURE` lines either, so restoring one **onto a healthy
+database is harmless**. The procedures already there are left alone.
+
+The case that bites is restoring one onto a database that has no procedures
+either. Everything reports success, every row arrives, and the system still
+cannot save anything.
+
+So a restore counts the procedures **afterwards** and says so in the same
+sentence that reports the success — after rather than before, because the honest
+test is not what the file appeared to contain, it is what the database ended up
+with.
 
 ## Tables that wait to be asked
 
@@ -244,6 +592,34 @@ This is not a loading trick. Five dashboards each fetching four or five tables
 on open is twenty queries fired for the one screen a person actually wanted,
 and the person who opened the page to look up a single customer waited for all
 of them.
+
+### The staff directory asks twice as little
+
+On most screens, picking a filter on an empty table also fills it: somebody
+reaching for a dropdown on an empty table is usually asking to see the thing
+they just narrowed to, and making them press **Load Data** afterwards is a
+second step for no reason.
+
+The **Staff Directory** is the exception, and takes the other answer. There are
+exactly two ways to make it read anything:
+
+- **Load Data**, the button, which says what it does.
+- **the search box** — typing a name is asking for that name.
+
+Its three filters — account state, signed in, role — narrow what has already
+arrived and fetch nothing at all on a closed table. The values are remembered
+and applied to the first load when one is asked for. A filter that is set also
+takes its own column off the grid — pick **Cashier** and every row would say
+Cashier in the Role column, so the column goes until the filter is cleared.
+The audit trail's action-type filter does the same. **List Users** in the menu
+opens the screen without reading anything, and so does creating an account:
+the new row does not cause the directory to be fetched, it is only refreshed if
+somebody already had it open.
+
+It is the one screen where the filters are also how somebody sets up a query
+before running it, and a dropdown that fetches on the way past turns three
+deliberate choices into three queries. A panel opts into this with
+`loadOnFilter: false`.
 
 Once loaded, a table shows **ten rows at a time** with Previous and Next under
 it, and it is the same height whether the page holds two rows or ten, so
@@ -284,7 +660,7 @@ before/after table.
 
 ## Income, and the four ways to answer it
 
-The **Total Income** card on the manager's dashboard opens a breakdown over any
+The **Collected** card on the manager's dashboard opens a breakdown over any
 period: today, 7 days, 30, 90, six months, twelve, all time, or two dates typed
 in. Named periods count back from today rather than snapping to a calendar
 month, because "this month" on the third of the month is four days of trading
@@ -445,10 +821,33 @@ Three pieces of restraint matter more than the refresh itself:
 - **A browser ignores the change it caused.** Every write carries a client id;
   a change stamped with our own has already been handled by whichever screen
   made it.
-- **A lost connection is visible.** The dot in the top bar reads Live, Offline
-  or Behind, because a screen that has quietly stopped hearing about changes
-  looks exactly like a screen where nothing has changed, and the difference
-  matters when the figure is stock on hand.
+- **A lost connection is answered where it matters, not in the corner.** There
+  used to be a dot in the top bar reporting the browser's connection to the
+  server — green, crimson, amber, with a word beside it. It went in two stages
+  and both were the same decision: it described the plumbing. A shop cannot act
+  on "the change channel is reconnecting". There is no button for it, no
+  procedure, and nothing the person at the counter is expected to do
+  differently, so on every screen all day it was a standing distraction that
+  answered a question nobody had asked.
+
+  What a screen that has quietly gone out of date actually needs is the two
+  things that survive, and both are about the rows in front of the reader
+  rather than about a socket: a table that has fallen behind says so **in its
+  own footer, in words**, and waits to be asked; and a screen that has fallen
+  far enough behind to be untrustworthy is told to reload, as a card. That one
+  is worth interrupting for.
+
+  The state is still tracked and still drives both. It is simply not drawn. To
+  put the dot back, build the element in `buildLiveIndicator()` in
+  `shared/live-sync.js` and write the state onto it — the state names have not
+  changed.
+- **The dashboard tiles honour the badge above them.** The manager's five
+  figures used to load once on arrival and never move again, with a green dot
+  sitting directly over them. Anything that is not a table can now
+  subscribe to the same scopes through `onLiveChange`, so the tiles re-read
+  themselves when a sale, a payment, a stock move or a delivery lands. A
+  background refresh that fails leaves the last good figures where they are
+  rather than blanking them.
 
 A browser that was disconnected long enough to fall behind the server's change
 log is told to reload rather than shown a half-updated screen.
@@ -483,6 +882,7 @@ public/
 
   javascript/
     server.js               Express server and API routes
+    mailer.js               SMTP, hand-written over Node's own tls
     modules/
       shared/
         helpers.js          the menu, tab switching, escaping, API headers
@@ -510,8 +910,11 @@ public/
     0-READ-ME-FIRST.md                    how to run the two files below
     1-RUN-FIRST-database.sql              23 tables, 2 views, and the demo data
     2-RUN-SECOND-stored-procedures.sql    27 stored procedures
-backups/                    dated .sql backups written by the admin screen
+backups/                    dated .sql backups
+  hardware_db_auto_*.sql      written every minute, oldest rotated away
+  hardware_db_backup_*.sql    taken by hand, never rotated
 tests/                      the checks described below
+  mailer.js                 the SMTP client, against a fake mail server
   smoke.js                  every API route as every role, against MySQL
   regression.js             the bugs that were found and fixed, held down
   shots.js                  every screen photographed, against MySQL
@@ -542,7 +945,9 @@ from drifting apart.
 sh tests/run-all.sh
 ```
 
-That rebuilds the database, restarts the server, runs `tests/smoke.js` (every
+That runs `tests/mailer.js` first — it needs neither MySQL nor the server, and
+drives the SMTP client against a fake mail server on a local port — then
+rebuilds the database, restarts the server, runs `tests/smoke.js` (every
 API route as every role, plus the rules that matter: that a cashier cannot
 export a report or set a credit limit, that the reorder point matches its own
 inputs, that a delivered order owing money is not Completed, that a return
@@ -577,6 +982,17 @@ one is a failing check rather than a discovery months later.
 
 Every screen is photographed twice now, closed and loaded, because a table that
 starts empty is a state worth being able to look at.
+
+**Run the suites through `run-all.sh`, not on their own against a database you
+have been using.** Each one signs the demo accounts in, and every account except
+the administrator has to pick a real password on its first sign-in — so a second
+run against the same database finds passwords that are no longer the ones in the
+table above, and reports a wall of failures that are about the state of the
+database rather than about the code. `run-all.sh` rebuilds from the two SQL files
+before each suite for exactly that reason.
+
+`tests/mailer.js` is the exception and can be run whenever: it touches neither
+MySQL nor the server.
 
 `tests/shots.js` needs Playwright:
 

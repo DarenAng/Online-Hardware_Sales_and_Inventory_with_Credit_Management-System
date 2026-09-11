@@ -62,13 +62,23 @@ function isOurProblem(text) {
   const one = await screenFor(browser, "Manager", "Manager M. User", 2,
     "manager-dashboard.html", problems);
 
-  check("the screen says it is live",
-    (await one.tab.textContent("#live-dot")).trim() === "Live",
-    await one.tab.textContent("#live-dot"));
+  // THE CONNECTION IS NOT DRAWN ANY MORE
+  //
+  // There used to be a dot in the top bar reporting it, and these checks read
+  // the word out of that dot. It has been removed on purpose -- it described
+  // the plumbing, which is not a thing the shop can act on -- so the state is
+  // read from where it now lives: the client's own variable, and the server's
+  // count of open connections. Both were the truth behind the dot all along.
+  check("the screen is hearing about changes",
+    (await one.tab.evaluate("liveState")) === "live",
+    String(await one.tab.evaluate("liveState")));
   check("and the server sees the connection",
     Number(await one.tab.evaluate(
       "fetch('/api/events/status').then((r) => r.json()).then((d) => d.connections)")) >= 1);
-  await shot(one.tab, "01-live-dot");
+  check("and nothing about it is printed on the top bar",
+    (await one.tab.locator("#live-dot").count()) === 0,
+    "the live indicator is still being drawn");
+  await shot(one.tab, "01-connected");
 
   await one.tab.evaluate("showStockReport()");
   await one.tab.waitForTimeout(300);
@@ -93,8 +103,9 @@ function isOurProblem(text) {
   const two = await screenFor(browser, "Inventory Clerk", "Clerk I. User", 3,
     "inventory-dashboard.html", problems);
 
-  check("the second screen is live too",
-    (await two.tab.textContent("#live-dot")).trim() === "Live");
+  check("the second screen is hearing about changes too",
+    (await two.tab.evaluate("liveState")) === "live",
+    String(await two.tab.evaluate("liveState")));
 
   const before = Number(await one.tab.evaluate("liveVersion"));
 
@@ -194,11 +205,16 @@ function isOurProblem(text) {
 
   await one.tab.evaluate("closeModal('detail-modal')");
 
-  // ---------- the dot reports a lost connection ----------
+  // ---------- a lost connection ----------
+  //
+  // What a reader is told about it is the note in the footer of the table it
+  // affects, checked further up. All that is asserted here is that the client
+  // notices, because a client that does not notice cannot put the note there.
   await one.tab.evaluate("liveSource.close(); setLiveIndicator('down', 'Offline');");
   await one.tab.waitForTimeout(400);
-  check("a lost connection is visible on the screen",
-    (await one.tab.getAttribute("#live-dot", "class")).includes("is-down"));
+  check("a lost connection is noticed",
+    (await one.tab.evaluate("liveState")) === "down",
+    String(await one.tab.evaluate("liveState")));
   await shot(one.tab, "06-offline");
 
   await one.context.close();
