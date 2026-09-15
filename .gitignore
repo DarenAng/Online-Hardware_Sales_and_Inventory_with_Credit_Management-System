@@ -26,3 +26,10 @@ public/javascript/mail-password.txt
 .claude/
 Capstone outputs/
 ~$*
+
+# old snapshots kept locally only
+_unused/
+Claude outputs/
+*-1.js
+*-1.css
+*-1.html
