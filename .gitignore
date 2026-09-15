@@ -21,3 +21,8 @@ shots/
 
 # the mail account's app password, read by public/javascript/mailer.js
 public/javascript/mail-password.txt
+
+# local editor config and paper drafts
+.claude/
+Capstone outputs/
+~$*

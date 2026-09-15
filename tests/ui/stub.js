@@ -1,19 +1,9 @@
-// ==========================================================================
-// A STAND-IN FOR server.js, WITH NO DATABASE BEHIND IT
-//
-// It serves the real public/ folder and answers the routes the pages ask for
-// with invented rows: 23 staff, 47 audit entries, 34 sales, 18 products, 21
-// deliveries, 17 credit accounts. Enough of each that paging, filtering and
-// the empty states are all real rather than theoretical.
-//
-// This exists so the front end can be driven end to end on a machine with no
-// MySQL on it — a second laptop, a marking session, a coffee shop. It proves
-// nothing about the database; tests/smoke.js does that. What it proves is
-// that the screens behave, which is the half that is tedious to check by hand.
+// A stand-in for server.js with no database behind it: serves the real
+// public/ folder and answers the routes with invented rows, so the screens
+// can be driven on a machine with no MySQL. tests/smoke.js covers the database.
 //
 //     node tests/ui/stub.js          then open http://localhost:3311
 //     sh tests/ui/run-all.sh         to drive every screen and report
-// ==========================================================================
 const express = require("express");
 const path = require("path");
 
@@ -25,10 +15,7 @@ const PUBLIC_DIR = process.env.PUBLIC_DIR ||
 
 app.use(express.static(PUBLIC_DIR));
 
-// The project ships no favicon, so every page load logs a 404 that has
-// nothing to do with anything. Answered here rather than filtered out of the
-// console, because a console with one line of known noise in it is a console
-// people stop reading.
+// no favicon ships, so answer it rather than log a 404 on every load
 app.get("/favicon.ico", (request, response) => response.status(204).end());
 
 // mirrors the real server: one hook, after any successful write
@@ -113,8 +100,7 @@ const LOGS = Array.from({ length: 47 }, (_, index) => {
   };
 });
 
-// A mix of both kinds, because the row has to say which it is and the drawer
-// warns that an automatic one is on its way out of the folder.
+// a mix of both kinds, so the row can say which it is
 const BACKUPS = Array.from({ length: 14 }, (_, index) => {
   const automatic = index % 3 !== 0;
   const prefix = automatic ? "hardware_db_auto_" : "hardware_db_backup_";
@@ -160,14 +146,318 @@ app.get("/api/backups", (request, response) =>
     }
   }));
 
-app.get("/api/notifications", (request, response) => response.json([]));
+// Three alerts, served only once a suite asks (POST /api/test/alerts), since
+// the other suites assume nothing pops up uninvited.
+let alertsOn = false;
+const NOTIFICATIONS = [
+  { notification_id: 1, notif_type: "Out of Stock", title: "Portland Cement 40kg is out of stock",
+    message: "Nothing left on the shelf. The last 6 bags went out on sale #1012 this morning.",
+    is_read: 0, created_at: "2026-09-11 08:40:00", product_id: 6, product_name: "Portland Cement 40kg",
+    from_name: "System", from_role: "Automatic" },
+  { notification_id: 2, notif_type: "Purchase Order", title: "Purchase order #216 raised",
+    message: "3 line(s) ordered, awaiting delivery. Check the goods against it when they arrive.",
+    is_read: 0, created_at: "2026-09-10 16:05:00", product_id: null, product_name: null,
+    from_name: "Manager M. User", from_role: "Manager" },
+  { notification_id: 3, notif_type: "Damage Report", title: "2 Claw Hammer reported damaged",
+    message: "Handles cracked in the box. Written off.",
+    is_read: 1, created_at: "2026-09-09 11:20:00", product_id: 2, product_name: "Claw Hammer",
+    from_name: "Clerk I. User", from_role: "Inventory Clerk" }
+];
+
+app.get("/api/notifications", (request, response) => response.json(alertsOn ? NOTIFICATIONS : []));
+app.post("/api/test/alerts", (request, response) => {
+  alertsOn = Boolean(request.body && request.body.on);
+  NOTIFICATIONS.forEach((n, i) => { n.is_read = i === 2 ? 1 : 0; });
+  response.json({ on: alertsOn });
+});
+app.post("/api/notifications/:id/read", (request, response) => {
+  const n = NOTIFICATIONS.find((item) => item.notification_id === Number(request.params.id));
+  if (n) n.is_read = 1;
+  response.json({ message: "Marked as read" });
+});
+app.post("/api/notifications/read-all", (request, response) => {
+  NOTIFICATIONS.forEach((n) => { n.is_read = 1; });
+  response.json({ message: "All read" });
+});
 app.get("/api/me", (request, response) => response.json(USERS[0]));
 
 // ==========================================================================
-// CREATING AN ACCOUNT IS TWO REQUESTS
-// The review step works the account out and makes a password; the second one
-// creates it from the draft id. The stub keeps the drafts in a plain object
-// because that is all the screens need to be driven through both steps.
+// THE CONNECTED SYSTEMS -- the stub always answers as the administrator
+// ==========================================================================
+const SYSTEMS = [
+  { key: "database", name: "MySQL Database", kind: "Internal", enabled: true,
+    description: "The hardware_db schema every screen reads and every procedure writes.",
+    status: { state: "ok", summary: "Answering in 2 ms with all 30 stored procedures loaded.",
+      facts: { "Server": "MySQL 8.0.36 on localhost", "Tables": "26", "Stored procedures": "30 of 30", "Round trip": "2 ms" } },
+    actions: [{ key: "recount-procedures", label: "Re-count the stored procedures", hint: "", danger: false }] },
+  { key: "backup", name: "Automatic Backup", kind: "Internal", enabled: true,
+    description: "The rolling backup the server takes on its own and the folder it writes to.",
+    status: { state: "ok", summary: "Running every 60 seconds; the last 60 are kept.",
+      facts: { "Last automatic backup": "hardware_db_auto_2026-09-13_1030.sql (512 KB)", "Automatic files in the folder": "60 of 60", "Paused": "No" } },
+    actions: [{ key: "run-now", label: "Run a backup now", hint: "", danger: false },
+              { key: "pause", label: "Pause the automatic backup", hint: "", danger: true },
+              { key: "resume", label: "Resume the automatic backup", hint: "", danger: false }] },
+  { key: "archive-sweep", name: "Archive Sweep", kind: "Internal", enabled: false,
+    description: "The nightly pass that puts away closed deliveries and dead stock.",
+    status: { state: "ok", summary: "Runs at startup and once a day. 3 closed deliveries look due on the next pass.",
+      facts: { "Interval": "every 24 hours", "Deliveries past 90 days": "3" } },
+    actions: [{ key: "run-now", label: "Run the sweep now", hint: "", danger: false }] },
+  { key: "live-sync", name: "Live Sync Channel", kind: "Internal", enabled: true,
+    description: "The open connection every signed-in browser holds.",
+    status: { state: "ok", summary: "4 open connections from 3 people; 412 changes announced since this server started.",
+      facts: { "Open connections": "4", "People connected": "3", "Changes announced": "412" } },
+    actions: [{ key: "resync-all", label: "Tell every screen to reload", hint: "", danger: true }] },
+  { key: "mail", name: "Mail Relay", kind: "Internal", enabled: true,
+    description: "The SMTP account first passwords are sent from.",
+    status: { state: "off", summary: "Not set up on this server, so new and reset passwords are shown once on the administrator's screen instead.",
+      facts: { "Configured": "No" } },
+    actions: [{ key: "send-test", label: "Send a test message to my own address", hint: "", danger: false }] },
+  { key: "courier", name: "Courier Tracking", kind: "External", enabled: true,
+    description: "The courier's tracking API for deliveries beyond Nasugbu.", endpointUrl: "https://tracking.example.com/health",
+    status: { state: "bad", summary: "Could not reach https://tracking.example.com/health: no answer within 5 seconds.",
+      facts: { "Address": "https://tracking.example.com/health" } },
+    actions: [{ key: "ping", label: "Ping it", hint: "", danger: false },
+              { key: "send", label: "Send it a message", hint: "", danger: true, needsMessage: true }] }
+];
+
+const ALL_LEVELS = { monitor: true, manage: true, control: true };
+
+// staff_id -> { system key -> grant }; two people hold something to begin with
+const GRANTS = {
+  2: { backup: { monitor: true, manage: false, control: true, note: "Takes a backup before the month-end count", grantedBy: "Admin S. User", grantedAt: "2026-05-02 09:15:00", updatedAt: "2026-05-02 09:15:00" } },
+  7: { database: { monitor: true, manage: false, control: false, note: "", grantedBy: "Admin S. User", grantedAt: "2026-06-11 08:40:00", updatedAt: "2026-06-11 08:40:00" } }
+};
+
+function grantsOf(staffId) {
+  return Object.entries(GRANTS[staffId] || {}).map(([key, grant]) => {
+    const system = SYSTEMS.find((s) => s.key === key);
+    return Object.assign({ key, name: system.name, kind: system.kind, enabled: system.enabled }, grant);
+  });
+}
+
+app.get("/api/me/access", (request, response) => response.json({
+  staffId: 1, roleName: "System Administrator", page: "/system.html", isAdmin: true,
+  isManagement: true, canEditOwnDetails: false, canChangeOwnPassword: true, canEditOwnEmail: false,
+  canReachSystems: true, systems: SYSTEMS.map((s) => Object.assign({ key: s.key, name: s.name }, ALL_LEVELS))
+}));
+
+
+// ==========================================================================
+// SCREENS BY ROLE -- /api/me/* works the role out from the Referer
+// ==========================================================================
+const FEATURES = [
+  ["pos", "New Transaction", "Point of Sale", ["Cashier"], ["Cashier"]],
+  ["refunds", "Refunds", "Point of Sale", ["Cashier"], ["Cashier"]],
+  ["sales-report", "Sales Report", "Point of Sale", ["Cashier"], ["Cashier"]],
+  ["daily-summary", "Daily Summary", "Point of Sale", ["Cashier"], ["Cashier"]],
+  ["credit", "Customer Credit", "Credit", ["Manager", "Cashier"], ["Manager", "Cashier"]],
+  ["credit-requests", "Extension Requests", "Credit", ["Manager"], ["Manager"]],
+  ["income", "Income", "Reports", ["Manager"], ["Manager"]],
+  ["reports", "Reports", "Reports", ["Manager"], ["Manager"]],
+  ["sales", "Sales", "Reports", ["Manager"], ["Manager"]],
+  ["material-list", "Material List", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
+  ["stock-adjustment", "Stock Adjustment", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
+  ["adjustment-history", "Adjustment History", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
+  ["reorder-points", "Reorder Points", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
+  ["reorder-alerts", "Reorder Alerts", "Inventory", ["Manager"], ["Manager"]],
+  ["stock-reports", "Stock Reports", "Inventory", ["Manager"], ["Manager"]],
+  ["returns", "Returned Items", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
+  ["damage-report", "Make a Report", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
+  ["purchase-orders", "Purchase Orders", "Inventory", ["Manager", "Inventory Clerk"], ["Manager", "Inventory Clerk"]],
+  ["deliveries", "Delivery Tracking", "Deliveries", ["Manager", "Cashier"], ["Manager", "Cashier"]],
+  ["delivery-runs", "Delivery Runs", "Deliveries", ["Delivery Personnel"], ["Delivery Personnel"]],
+  ["delivery-reports", "Delivery Reports", "Deliveries", ["Delivery Personnel"], ["Delivery Personnel"]],
+  ["delivery-schedule", "Delivery Schedule", "Deliveries",
+    ["Manager", "Cashier", "Inventory Clerk", "Delivery Personnel"], ["Manager"]],
+  ["records", "Records", "Records", ["Manager"], ["Manager"]],
+  ["archives", "Archives", "Records", ["Manager", "Inventory Clerk"], ["Manager", "Inventory Clerk"]]
+].map(([key, name, module, available, defaults]) => ({
+  key, name, module, description: `The ${name} screen.`, available, defaults
+}));
+
+const FEATURE_ROLES = ROLES.filter((role) => role.role_name !== "System Administrator");
+
+// role name -> { feature key -> { granted, note, grantedBy, updatedAt } }
+const FEATURE_OVERRIDES = {};
+
+function featureCell(feature, roleName) {
+  if (!feature.available.includes(roleName)) return { available: false, byDefault: false, held: false, overridden: false };
+  const byDefault = feature.defaults.includes(roleName);
+  const override = (FEATURE_OVERRIDES[roleName] || {})[feature.key] || null;
+  const held = override ? override.granted : byDefault;
+  return { available: true, byDefault, held, overridden: Boolean(override) && override.granted !== byDefault,
+           note: override ? override.note : null, grantedBy: override ? override.grantedBy : null,
+           updatedAt: override ? override.updatedAt : null };
+}
+
+function roleOfPage(request) {
+  const page = String(request.headers.referer || "").toLowerCase();
+  if (page.includes("manager-dashboard")) return "Manager";
+  if (page.includes("inventory-dashboard")) return "Inventory Clerk";
+  if (page.includes("cashier-dashboard")) return "Cashier";
+  if (page.includes("delivery.html")) return "Delivery Personnel";
+  return "System Administrator";
+}
+
+app.get("/api/me/features", (request, response) => {
+  const roleName = roleOfPage(request);
+  const features = FEATURES
+    .filter((feature) => feature.available.includes(roleName) || roleName === "System Administrator")
+    .map((feature) => Object.assign({ key: feature.key, name: feature.name, module: feature.module },
+      roleName === "System Administrator"
+        ? { available: true, byDefault: true, held: true, overridden: false }
+        : featureCell(feature, roleName)));
+  response.json({ roleName, features, held: features.filter((f) => f.held).map((f) => f.key) });
+});
+
+// the counts the pages mirror onto their headings and into the top bar
+const FEATURE_COUNTS = {
+  "Manager": { "credit-requests": 2, "reorder-alerts": 3, "deliveries": 1, "delivery-schedule": 4 },
+  "Inventory Clerk": { "reorder-points": 3, "returns": 2, "delivery-schedule": 4 },
+  "Cashier": { "delivery-schedule": 4 },
+  "Delivery Personnel": { "delivery-runs": 5, "delivery-schedule": 4 }
+};
+
+app.get("/api/me/counts", (request, response) => {
+  const roleName = roleOfPage(request);
+  const counts = {};
+  for (const [key, count] of Object.entries(FEATURE_COUNTS[roleName] || {})) {
+    const feature = FEATURES.find((f) => f.key === key);
+    if (feature && featureCell(feature, roleName).held) counts[key] = count;
+  }
+  response.json(counts);
+});
+
+app.get("/api/features", (request, response) => response.json({
+  roles: FEATURE_ROLES,
+  features: FEATURES.map((feature) => ({
+    key: feature.key, name: feature.name, module: feature.module, description: feature.description,
+    roles: Object.fromEntries(FEATURE_ROLES.map((role) => [role.role_name, featureCell(feature, role.role_name)]))
+  }))
+}));
+
+app.put("/api/features/:key/roles/:roleId", (request, response) => {
+  const feature = FEATURES.find((f) => f.key === request.params.key);
+  const role = ROLES.find((r) => r.role_id === Number(request.params.roleId));
+  const body = request.body || {};
+  if (!feature) return response.status(404).json({ error: "No screen is listed under that name." });
+  if (!role) return response.status(404).json({ error: "No such role." });
+  if (typeof body.granted !== "boolean") return response.status(400).json({ error: "Say whether the screen is granted: true or false." });
+  if (role.role_name === "System Administrator") {
+    return response.status(403).json({ error: "The System Administrator holds every screen by role. Nothing here is granted or taken away." });
+  }
+  if (!feature.available.includes(role.role_name)) {
+    return response.status(400).json({ error: `The ${role.role_name} dashboard has no ${feature.name} screen to show, so it cannot be granted there.` });
+  }
+
+  const byDefault = feature.defaults.includes(role.role_name);
+  FEATURE_OVERRIDES[role.role_name] = FEATURE_OVERRIDES[role.role_name] || {};
+  if (body.granted === byDefault) {
+    delete FEATURE_OVERRIDES[role.role_name][feature.key];
+  } else {
+    FEATURE_OVERRIDES[role.role_name][feature.key] = {
+      granted: body.granted, note: body.note || null, grantedBy: "Admin S. User", updatedAt: "2026-09-15 10:00:00"
+    };
+  }
+
+  response.json({
+    message: `${feature.name} is now ${body.granted ? "on" : "off"} the ${role.role_name} menu.`,
+    changed: true,
+    cell: featureCell(feature, role.role_name)
+  });
+});
+
+// a way for a test to put the switches back
+app.post("/api/test/features/reset", (request, response) => {
+  for (const key of Object.keys(FEATURE_OVERRIDES)) delete FEATURE_OVERRIDES[key];
+  response.json({ ok: true });
+});
+app.get("/api/systems", (request, response) =>
+  response.json(SYSTEMS.map((s) => Object.assign({}, s, { access: ALL_LEVELS }))));
+
+app.get("/api/systems/:key/status", (request, response) => {
+  const system = SYSTEMS.find((s) => s.key === request.params.key);
+  if (!system) return response.status(404).json({ error: "No connected system is registered under that name." });
+  response.json(Object.assign({}, system, { access: ALL_LEVELS }));
+});
+
+app.post("/api/systems", (request, response) => {
+  const body = request.body || {};
+  if (SYSTEMS.some((s) => s.key === body.key)) {
+    return response.status(409).json({ error: `A system is already registered as "${body.key}".` });
+  }
+  const system = { key: body.key, name: body.name, kind: "External", enabled: true, description: body.description || null,
+    endpointUrl: body.endpointUrl, status: { state: "ok", summary: "Answering HTTP 200 in 41 ms.", facts: { "Address": body.endpointUrl } },
+    actions: SYSTEMS[5].actions };
+  SYSTEMS.push(system);
+  response.json({ message: `${body.name} is registered.`, system: Object.assign({}, system, { access: ALL_LEVELS }) });
+});
+
+app.put("/api/systems/:key", (request, response) => {
+  const system = SYSTEMS.find((s) => s.key === request.params.key);
+  if (!system) return response.status(404).json({ error: "No connected system is registered under that name." });
+  const body = request.body || {};
+  if (body.name !== undefined) system.name = body.name;
+  if (body.description !== undefined) system.description = body.description || null;
+  if (body.enabled !== undefined) system.enabled = body.enabled === true;
+  if (body.endpointUrl !== undefined && system.kind === "External") system.endpointUrl = body.endpointUrl;
+  response.json({ message: `${system.name} was updated.`, system: Object.assign({}, system, { access: ALL_LEVELS }) });
+});
+
+app.post("/api/systems/:key/actions/:action", (request, response) => {
+  const system = SYSTEMS.find((s) => s.key === request.params.key);
+  if (!system) return response.status(404).json({ error: "No connected system is registered under that name." });
+  if (!system.enabled) return response.status(409).json({ error: `${system.name} is switched off.` });
+  const action = system.actions.find((a) => a.key === request.params.action);
+  if (!action) return response.status(404).json({ error: `${system.name} has no command called "${request.params.action}".` });
+  if (action.key === "pause") system.status.facts.Paused = "Yes";
+  if (action.key === "resume") system.status.facts.Paused = "No";
+  response.json({ system: system.key, action: action.key, ok: true, message: `"${action.label}" ran on ${system.name}.` });
+});
+
+app.get("/api/access/permissions", (request, response) =>
+  response.json(USERS
+    .filter((user) => user.user_id && user.role_name !== "System Administrator")
+    .map((user) => Object.assign({}, user, { grants: grantsOf(user.staff_id) }))));
+
+app.get("/api/access/users/:id", (request, response) => {
+  const user = USERS.find((row) => row.staff_id === Number(request.params.id));
+  if (!user) return response.status(404).json({ error: "Staff record not found" });
+  response.json(Object.assign({}, user, { grants: grantsOf(user.staff_id) }));
+});
+
+app.put("/api/access/users/:id/systems/:key", (request, response) => {
+  const staffId = Number(request.params.id);
+  const user = USERS.find((row) => row.staff_id === staffId);
+  const system = SYSTEMS.find((s) => s.key === request.params.key);
+  if (!user) return response.status(404).json({ error: "Staff record not found" });
+  if (!system) return response.status(404).json({ error: "No connected system is registered under that name." });
+  if (staffId === 1) return response.status(403).json({ error: "You cannot change your own account from here." });
+
+  const body = request.body || {};
+  const monitor = body.monitor === true || body.manage === true || body.control === true;
+  GRANTS[staffId] = GRANTS[staffId] || {};
+
+  if (!monitor) {
+    const had = Boolean(GRANTS[staffId][system.key]);
+    delete GRANTS[staffId][system.key];
+    return response.json({ message: `${user.full_name} no longer has any access to ${system.name}.`, changed: had, grant: null });
+  }
+
+  GRANTS[staffId][system.key] = {
+    monitor: true, manage: body.manage === true, control: body.control === true,
+    note: String(body.note || ""), grantedBy: "Admin S. User",
+    grantedAt: "2026-09-13 10:00:00", updatedAt: "2026-09-13 10:00:00"
+  };
+  response.json({
+    message: `${user.full_name} may now ${body.control ? "monitor and control" : "monitor"} ${system.name}.`,
+    changed: true,
+    grant: grantsOf(staffId).find((g) => g.key === system.key)
+  });
+});
+
+// ==========================================================================
+// CREATING AN ACCOUNT IS TWO REQUESTS (review, then create from the draft)
 // ==========================================================================
 const DRAFTS = {};
 
@@ -239,8 +529,6 @@ app.listen(PORT, () => console.log(`stub serving ${PUBLIC_DIR} on http://localho
 
 // ==========================================================================
 // MANAGER MODULE
-// Enough rows to make paging, filtering and the chart real: 34 sales across
-// three months, 18 products, 21 deliveries.
 // ==========================================================================
 const PRODUCTS = [
   "Cordless Drill 18V", "Claw Hammer", "PVC Pipe 1/2\"", "Latex Paint White",
@@ -320,8 +608,7 @@ const DELIVERY_STATUS = ["Delivered", "Out for Delivery", "In Transit", "Pending
 const DELIVERIES = Array.from({ length: 21 }, (_, index) => {
   const status = DELIVERY_STATUS[index % DELIVERY_STATUS.length];
   const final = 1200 + index * 310;
-  // every third delivered order still has money owed on it: the case the
-  // whole Pending Cash Collection rule exists for
+  // every third delivered order still has money owed: the Pending Cash Collection case
   const paid = status === "Delivered" && index % 3 === 0 ? 0 : final;
   const owed = Math.max(final - paid, 0);
 
@@ -541,23 +828,45 @@ app.get("/api/reports/export", (request, response) => {
 
 // ==========================================================================
 // CREDIT MANAGEMENT
-// Three standings, accounts over and under their limits, and one request
-// already waiting, so every branch on both screens has something to show.
 // ==========================================================================
 const STANDINGS = ["Good", "Good", "Watch", "Good", "Hold", "Good", "Watch"];
+
+// the same rules as vw_customer_credit
+function standingOf(row) {
+  const manual = row.manual_standing;
+  const limit = Number(row.credit_limit), owed = Number(row.current_credit);
+  const days = row.oldest_debt_days === null ? 0 : Number(row.oldest_debt_days);
+  const note = row.credit_notes ? `: ${row.credit_notes}` : "";
+
+  if (manual === "Hold") return ["Hold", `Put on hold by a manager${note}`];
+  if (limit > 0 && owed > limit) return ["Hold", `Over the limit by ${(owed - limit).toFixed(2)}`];
+  if (days > 90) return ["Hold", `Oldest unpaid sale is ${days} days old; the limit is 90`];
+  if (manual === "Watch") return ["Watch", `Flagged by a manager${note}`];
+  if (days > 30) return ["Watch", `Oldest unpaid sale is ${days} days old; watched past 30`];
+  if (limit > 0 && owed >= limit * 0.75) return ["Watch", `Owes ${Math.round(owed / limit * 100)}% of the limit; watched from 75%`];
+  return ["Good", owed > 0 ? "Owes within terms" : "Nothing owed"];
+}
+
+function applyStanding(row) {
+  const [standing, reason] = standingOf(row);
+  row.computed_standing = standingOf({ ...row, manual_standing: "Good" })[0];
+  row.standing = standing;
+  row.standing_reason = reason;
+  return row;
+}
 
 const CREDIT = RECORDS.customer.map((c, index) => {
   const limit = 10000 + index * 5000;
   // every third account owes something, and one of them is over its limit
   const owed = index % 3 === 0 ? Math.round(limit * (index === 6 ? 1.2 : 0.45)) : 0;
 
-  return {
+  return applyStanding({
     customer_id: c.id,
     customer_name: c.name,
     phone: c.phone,
     address: "Quezon City, Metro Manila",
     credit_limit: limit,
-    standing: STANDINGS[index % STANDINGS.length],
+    manual_standing: STANDINGS[index % STANDINGS.length],
     credit_notes: STANDINGS[index % STANDINGS.length] === "Hold"
       ? "Cheque bounced in August. No new credit until it clears." : null,
     credit_updated_at: "2026-08-30 09:00:00",
@@ -569,7 +878,7 @@ const CREDIT = RECORDS.customer.map((c, index) => {
     last_purchase: "2026-09-0" + ((index % 4) + 1) + " 10:00:00",
     last_payment: owed > 0 ? "2026-08-2" + (index % 9) + " 14:00:00" : null,
     pending_requests: index === 3 ? 1 : 0
-  };
+  });
 });
 
 let REQUEST_ID = 900;
@@ -628,9 +937,10 @@ app.put("/api/credit/customers/:id/limit", (request, response) => {
   if (!credit) return response.status(404).json({ error: "Not found" });
 
   credit.credit_limit = Number(request.body.creditLimit);
-  credit.standing = request.body.standing || "Good";
+  credit.manual_standing = request.body.standing || "Good";
   credit.credit_notes = request.body.notes || null;
   credit.available_credit = Math.max(credit.credit_limit - credit.current_credit, 0);
+  applyStanding(credit);
 
   response.json({
     message: `Saved. ${credit.customer_name} may owe up to ${credit.credit_limit}.`
@@ -751,12 +1061,7 @@ app.get("/api/inventory/products", (request, response) =>
 
 app.get("/api/sales/undelivered", (request, response) => response.json([]));
 
-// Every till screen reads this to head an invoice, so its absence here was a
-// 404 in the console of every cashier page. That made the credit and returns
-// suites report a problem they had not caused, and exit non-zero while every
-// one of their own checks passed. A suite that goes red when nothing is wrong
-// is a suite people stop reading, which is how the two genuinely stale checks
-// above sat broken for as long as they did.
+// every till screen reads this to head an invoice
 const STORE = {
   setting_id: 1,
   store_name: "Stub Hardware & Supply",
@@ -771,9 +1076,7 @@ const STORE = {
 
 app.get("/api/store-settings", (request, response) => response.json(STORE));
 
-// The Store & Tax form saves through this. The stub keeps the row in memory
-// and refuses the same TIN shapes the real server refuses, so the screen's
-// own check and the server's answer can both be driven.
+// refuses the same TIN shapes the real server refuses
 app.put("/api/store-settings", (request, response) => {
   const body = request.body || {};
   const digits = String(body.tin || "").replace(/\D/g, "");
@@ -865,15 +1168,71 @@ app.get("/api/inventory/adjustments", (request, response) =>
     created_at: `2026-09-0${(i % 4) + 1} 09:${String(i % 60).padStart(2, "0")}:00`
   }))));
 
-app.get("/api/purchase-orders", (request, response) =>
-  response.json(Array.from({ length: 17 }, (_, i) => ({
-    po_id: 200 + i,
-    supplier_name: i % 2 ? "Cebu Tool Co." : "Manila Hardware Supply",
-    order_date: `2026-08-${String(10 + (i % 19)).padStart(2, "0")} 08:00:00`,
-    line_count: (i % 4) + 1,
-    total_cost: 12000 + i * 2300,
-    status: ["Pending", "Received", "Cancelled"][i % 3]
-  }))));
+// ==========================================================================
+// PURCHASE ORDERS
+// ==========================================================================
+const PURCHASE_ORDERS = Array.from({ length: 17 }, (_, i) => ({
+  po_id: 200 + i,
+  supplier_id: (i % 2) + 1,
+  supplier_name: i % 2 ? "Cebu Tool Co." : "Manila Hardware Supply",
+  contact_person: i % 2 ? "Rina Ocampo" : "Ben Cruz",
+  contact_number: "0917000" + String(2000 + i),
+  order_date: `2026-08-${String(10 + (i % 19)).padStart(2, "0")} 08:00:00`,
+  line_count: (i % 4) + 1,
+  total_units: ((i % 4) + 1) * 12,
+  total_cost: 12000 + i * 2300,
+  status: ["Pending", "Received", "Cancelled"][i % 3]
+}));
+
+function purchaseOrderLines(poId) {
+  const po = PURCHASE_ORDERS.find((p) => p.po_id === Number(poId));
+  if (!po) return [];
+  return Array.from({ length: po.line_count }, (_, i) => {
+    const p = STOCKS[(poId + i) % STOCKS.length];
+    return {
+      product_id: p.product_id, product_name: p.product_name, unit_name: p.unit_name,
+      category_name: p.category_name, brand_name: p.brand_name,
+      quantity: 12, unit_cost: 250 + i * 10, line_cost: 12 * (250 + i * 10),
+      quantity_in_stock: p.quantity_in_stock
+    };
+  });
+}
+
+app.get("/api/purchase-orders", (request, response) => response.json(PURCHASE_ORDERS));
+app.get("/api/purchase-orders/:id/items", (request, response) =>
+  response.json(purchaseOrderLines(request.params.id)));
+app.get("/api/purchase-orders/:id/document", (request, response) => {
+  const po = PURCHASE_ORDERS.find((p) => p.po_id === Number(request.params.id));
+  if (!po) return response.status(404).json({ error: "That purchase order does not exist" });
+  response.json({
+    order: Object.assign({ supplier_email: "sales@supplier.test", supplier_address: "Cebu City",
+                           raised_by: "Manager M. User" }, po),
+    items: purchaseOrderLines(po.po_id),
+    shop: STORE
+  });
+});
+app.post("/api/purchase-orders", (request, response) => {
+  const items = Array.isArray(request.body.items) ? request.body.items : [];
+  const po = {
+    po_id: 200 + PURCHASE_ORDERS.length,
+    supplier_id: 1,
+    supplier_name: request.body.supplierName || "Manila Hardware Supply",
+    contact_person: request.body.contactPerson || "Ben Cruz",
+    contact_number: request.body.contactNumber || "09170002000",
+    order_date: "2026-09-11 09:00:00",
+    line_count: items.length,
+    total_units: items.reduce((sum, it) => sum + Number(it.quantity || 0), 0),
+    total_cost: items.reduce((sum, it) => sum + Number(it.quantity || 0) * Number(it.unitCost || 0), 0),
+    status: "Pending"
+  };
+  PURCHASE_ORDERS.unshift(po);
+  response.json({ message: `Purchase order #${po.po_id} created.`, poId: po.po_id });
+});
+app.post("/api/purchase-orders/:id/receive", (request, response) => {
+  const po = PURCHASE_ORDERS.find((p) => p.po_id === Number(request.params.id));
+  if (po) po.status = "Received";
+  response.json({ message: `Purchase order #${request.params.id} received.`, lines: 1, extras: 0 });
+});
 
 app.get("/api/delivery/list", (request, response) => response.json(DELIVERIES));
 app.get("/api/delivery/summary", (request, response) =>
@@ -897,9 +1256,7 @@ app.get("/api/inventory/summary", (request, response) =>
   }));
 
 // ==========================================================================
-// THE LIVE CHANNEL
-// The same shape the real server sends, so the browser side can be driven
-// without MySQL: a hello, then a change frame per write.
+// THE LIVE CHANNEL -- a hello, then a change frame per write
 // ==========================================================================
 let stubVersion = 0;
 const stubClients = new Set();
@@ -913,6 +1270,9 @@ function stubScopeOf(pathname) {
   if (/^\/api\/sales/.test(pathname)) return "sales";
   if (/^\/api\/(backups|restore)/.test(pathname)) return "system";
   if (/^\/api\/archives/.test(pathname)) return "archives";
+  if (/^\/api\/access/.test(pathname)) return "access";
+  if (/^\/api\/features/.test(pathname)) return "features";
+  if (/^\/api\/systems/.test(pathname)) return "systems";
   return null;
 }
 

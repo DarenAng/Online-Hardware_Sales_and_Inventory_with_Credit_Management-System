@@ -17,7 +17,8 @@ const DB_HOST = "localhost";
 const DB_USER = "root";
 const DB_PASSWORD = "Password";
 const DB_NAME = "hardware_db";
-const port = 3000;
+// the tests start a second copy beside a running one (HARDWARE_PORT=3005 npm start)
+const port = Number(process.env.HARDWARE_PORT) || 3000;
 
 const db = mysql.createPool({
   host: DB_HOST,
@@ -27,15 +28,13 @@ const db = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  dateStrings: true
+  dateStrings: true,
+  // DECIMAL columns arrive as numbers: 37.500 kg reads as 37.5
+  decimalNumbers: true
 });
 
 // ==========================================
-// PASSWORDS
-//
-// Stored as scrypt hashes, never as readable text. scrypt ships inside
-// Node itself, so this needs no extra package installed on a new computer.
-// Format: scrypt$<salt>$<hash>
+// PASSWORDS -- stored as scrypt hashes, format scrypt$<salt>$<hash>
 // ==========================================
 const scrypt = require("util").promisify(crypto.scrypt);
 const SCRYPT_KEYLEN = 64;
@@ -51,33 +50,10 @@ function isHashed(stored) {
   return typeof stored === "string" && stored.startsWith("scrypt$");
 }
 
-// ==========================================
-// THE FIRST PASSWORD IS NOT TYPED BY ANYBODY
-//
-// An administrator used to type a temporary password into the create-account
-// form. Every one of those was a password an administrator invented on the
-// spot for somebody else, on a busy afternoon, and it went the way they all
-// go: Cashier123, then Cashier124, then the same one for everybody because
-// it is easier to say down a corridor. It was also typed on screen, said out
-// loud, and known to two people for as long as the account lasted.
-//
-// So the system makes it, nobody sees it here, and it is sent to the address
-// the account signs in with. The person who receives it is the only one who
-// reads it, and must_change_password is already TRUE on a new account, so it
-// buys exactly one sign-in and is then replaced by one they chose.
-//
-// WHAT THE ALPHABET LEAVES OUT
-// A password that has to survive being read off a phone and typed into a
-// terminal at a counter cannot contain a character whose identity depends on
-// the font. So no O or 0, no I, l or 1, no B or 8, no S or 5, no Z or 2. The
-// punctuation is the four marks that sit in the same place on every keyboard
-// layout the shop is likely to meet; the ones that move -- @ # ~ \ | -- are
-// left out, because a password that cannot be typed is a support call.
-//
-// What is left is 55 characters over 14 places, drawn from crypto's random
-// bytes rather than Math.random. That is about 81 bits, for a secret that
-// only has to survive until its owner's first sign-in.
-// ==========================================
+// The first password is made by the server and mailed, never typed by an
+// administrator. The alphabet leaves out characters that depend on the font
+// (O/0, I/l/1, B/8, S/5, Z/2) and punctuation that moves between keyboard
+// layouts. 55 characters over 14 places is about 81 bits.
 const PASSWORD_ALPHABET =
   "ACDEFGHJKLMNPQRTUVWXY" +     // no B, I, O, S, Z
   "acdefghjkmnpqrtuvwxy" +      // no b, i, l, o, s, z
@@ -86,18 +62,13 @@ const PASSWORD_ALPHABET =
 const PASSWORD_LENGTH = 14;
 
 function generatePassword() {
-  // A modulo over a random byte would hand the first characters of the
-  // alphabet a slightly larger share of the draws. randomInt is uniform, and
-  // over a password this is the difference between a fact and a footnote.
+  // randomInt is uniform; a modulo over a random byte is not
   let password = "";
   while (password.length < PASSWORD_LENGTH) {
     password += PASSWORD_ALPHABET[crypto.randomInt(PASSWORD_ALPHABET.length)];
   }
 
-  // Every rule this system checks a password against, met by construction:
-  // eight characters at the least, and it is never all of one kind. A shop
-  // that later adds "must contain a digit" gets it here rather than in a
-  // retry loop somewhere else.
+  // every rule this system checks a password against, met by construction
   if (!/[a-z]/.test(password) || !/[A-Z]/.test(password) ||
       !/[0-9]/.test(password)) {
     return generatePassword();
@@ -106,8 +77,7 @@ function generatePassword() {
 }
 
 async function verifyPassword(plainText, stored) {
-  // a row that was never hashed holds the password itself; it is accepted once
-  // and hashed on the spot by the caller, never left readable
+  // a row that was never hashed holds the password itself; the caller hashes it
   if (!isHashed(stored)) {
     return typeof stored === "string" && stored.length > 0 && stored === plainText;
   }
@@ -120,9 +90,8 @@ async function verifyPassword(plainText, stored) {
   return crypto.timingSafeEqual(derived, expectedBytes);   // constant time
 }
 
-// One-time upgrade for a database created before hashing existed. The stored
-// value IS the password on those rows, so it can be hashed in place. Runs on
-// every start and does nothing once every row is already hashed.
+// One-time upgrade for a database created before hashing existed. Runs on
+// every start and does nothing once every row is hashed.
 async function hashLegacyPasswords() {
   const [rows] = await db.query("SELECT user_id, password FROM users");
   const plain = rows.filter((row) => !isHashed(row.password));
@@ -136,24 +105,9 @@ async function hashLegacyPasswords() {
   console.log(`Hashed ${plain.length} password(s) that were stored as readable text.`);
 }
 
-// ==========================================
-// STAFF.MIDDLE_INITIAL -> STAFF.MIDDLE_NAME
-//
-// A one-time upgrade in the same shape as the one above it, for the same
-// reason: a machine already running this system with real staff on it cannot
-// be told to run 1-RUN-FIRST-database.sql again, because that file's first
-// statement is DROP DATABASE.
-//
-// It renames the column and widens it to a real middle name. The letters
-// already in there stay exactly as they are and remain valid middle names of
-// one letter, so nothing is lost and nothing has to be retyped -- the
-// administrator can fill in the whole name the next time each record is
-// opened. full_name is a generated column that reads the old name, so it is
-// dropped and rebuilt around the new one in the same statement; MySQL will
-// not let the column it depends on be renamed underneath it.
-//
-// Does nothing at all once the column is already middle_name, which is the
-// case on every machine that ran the schema fresh.
+// One-time upgrade: staff.middle_initial -> staff.middle_name. full_name is
+// a generated column reading it, so it is dropped and rebuilt in the same
+// statement. Does nothing once the column is already middle_name.
 async function migrateMiddleNameColumn() {
   const [columns] = await db.query(
     `SELECT COLUMN_NAME FROM information_schema.COLUMNS
@@ -182,21 +136,8 @@ async function migrateMiddleNameColumn() {
     "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
 }
 
-// ==========================================
-// STAFF PHONE NUMBERS -> +63
-//
-// The phone box was free text, so the column holds whatever anybody typed:
-// 09171234567, 0917 123 4567, +639171234567, and on some rows nothing that
-// is a number at all. One spelling is now the rule, and a rule that only
-// applies to rows written from today is not a rule -- it is two rules, and
-// the column still cannot be compared.
-//
-// So every row is rewritten to +63 followed by the ten national digits.
-// Anything that does not reduce to a usable number is emptied rather than
-// half-converted: a phone column with "n/a" in it is a column somebody will
-// eventually try to dial.
-//
-// Runs on every start and does nothing once every row is already +63.
+// One-time upgrade: every staff phone rewritten to +63 and ten digits.
+// Anything that does not reduce to a usable number is emptied.
 async function migratePhoneNumbers() {
   const [rows] = await db.query(
     "SELECT staff_id, phone FROM staff WHERE phone IS NOT NULL AND phone <> ''");
@@ -219,37 +160,160 @@ async function migratePhoneNumbers() {
       : ""));
 }
 
-// tells you at startup whether the database connection works,
-// instead of failing later on the first request
-// Kept as a named figure rather than a number typed twice: adding a procedure
-// and forgetting to change one of the two copies is how a warning starts
-// lying about a database that is actually fine.
-const EXPECTED_PROCEDURES = 27;
+// ==========================================
+// One-time upgrades, each a no-op on a database that already has it:
+//   - the access control tables (register of connected systems, who may
+//     reach them, ACCESS and CONTROL audit types, seeded internal systems)
+//   - quantity columns widened to take a fraction (nails by the kilo);
+//     sale_items.subtotal is generated from quantity so it is dropped,
+//     widened and put back
+// The procedures they need come from file 2, which the console says to
+// re-run when they are missing.
+// ==========================================
+async function migrateMeasuredQuantities() {
+  const columns = [
+    ["inventory", "quantity_in_stock", "NOT NULL DEFAULT 0"],
+    ["stock_adjustments", "quantity_before", "NOT NULL"],
+    ["stock_adjustments", "quantity_change", "NOT NULL"],
+    ["stock_adjustments", "quantity_after", "NOT NULL"],
+    ["sale_items", "quantity", "NOT NULL"],
+    ["returned_items", "quantity", "NOT NULL"]
+  ];
 
-// ==========================================
-// WHEN THE PROCEDURES ARE NOT THERE
-//
-// Nearly every write in this system goes through a stored procedure, so a
-// database that has the tables but not the procedures is a database that
-// reads perfectly and cannot be written to at all.
-//
-// It happens for one ordinary reason: 1-RUN-FIRST-database.sql was run and
-// 2-RUN-SECOND-stored-procedures.sql was not. File 1 rebuilds the tables and
-// the demo data; the procedures only exist because of file 2. Anybody
-// resetting their database has done exactly half of the job at that point,
-// and the half that is missing is invisible.
-//
-// This used to be one warning line at startup, and then every write answered
-// "Unable to create the account" -- which names the wrong cause. Somebody
-// reading that message goes looking at the account form. The warning that
-// would have told them the truth scrolled off the top of the terminal
-// twenty requests ago.
-//
-// So the count is remembered rather than printed and forgotten, and the
-// guard below turns those writes into one sentence that names the actual
-// fix. It is re-checked whenever it is bad, so loading file 2 while the
-// server is running is picked up on the next request -- no restart needed.
-// ==========================================
+  let widened = 0;
+  for (const [table, column, rest] of columns) {
+    const [rows] = await db.query(
+      `SELECT DATA_TYPE FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [DB_NAME, table, column]);
+    if (!rows[0] || String(rows[0].DATA_TYPE).toLowerCase() !== "int") continue;
+
+    if (table === "sale_items") {
+      await db.query("ALTER TABLE sale_items DROP COLUMN subtotal");
+      await db.query(`ALTER TABLE sale_items MODIFY quantity DECIMAL(12,3) ${rest}`);
+      await db.query("ALTER TABLE sale_items ADD COLUMN subtotal DECIMAL(12,2) AS (quantity * unit_price) STORED");
+    } else {
+      await db.query(`ALTER TABLE ${table} MODIFY ${column} DECIMAL(12,3) ${rest}`);
+    }
+    widened += 1;
+  }
+
+  if (widened > 0) {
+    console.log(`Widened ${widened} quantity column(s) to take fractions (kilos, metres). ` +
+      "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures take them too.");
+  }
+}
+
+async function migrateAccessControlTables() {
+  const [tables] = await db.query(
+    `SELECT TABLE_NAME FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('connected_systems', 'system_permissions', 'role_feature_permissions')`,
+    [DB_NAME]
+  );
+  const have = tables.map((row) => row.TABLE_NAME);
+  let created = 0;
+
+  if (!have.includes("connected_systems")) {
+    await db.query(
+      `CREATE TABLE connected_systems (
+         system_id INT AUTO_INCREMENT PRIMARY KEY,
+         system_key VARCHAR(40) NOT NULL UNIQUE,
+         system_name VARCHAR(100) NOT NULL,
+         system_kind ENUM('Internal','External') NOT NULL DEFAULT 'External',
+         description VARCHAR(255) NULL,
+         endpoint_url VARCHAR(255) NULL,
+         is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+         created_by_staff_id INT NULL,
+         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+       )`);
+    created += 1;
+  }
+
+  if (!have.includes("system_permissions")) {
+    await db.query(
+      `CREATE TABLE system_permissions (
+         permission_id INT AUTO_INCREMENT PRIMARY KEY,
+         staff_id INT NOT NULL,
+         system_id INT NOT NULL,
+         can_monitor BOOLEAN NOT NULL DEFAULT FALSE,
+         can_manage BOOLEAN NOT NULL DEFAULT FALSE,
+         can_control BOOLEAN NOT NULL DEFAULT FALSE,
+         note VARCHAR(255) NULL,
+         granted_by_staff_id INT NULL,
+         granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         UNIQUE KEY uq_system_permission (staff_id, system_id),
+         FOREIGN KEY (staff_id) REFERENCES staff(staff_id) ON DELETE CASCADE ON UPDATE CASCADE,
+         FOREIGN KEY (system_id) REFERENCES connected_systems(system_id) ON DELETE CASCADE ON UPDATE CASCADE,
+         FOREIGN KEY (granted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
+         CONSTRAINT chk_permission_grants_something CHECK (can_monitor OR can_manage OR can_control)
+       )`);
+    created += 1;
+  }
+
+  // the switches for which screens each role's menu holds; one row per override
+  if (!have.includes("role_feature_permissions")) {
+    await db.query(
+      `CREATE TABLE role_feature_permissions (
+         permission_id INT AUTO_INCREMENT PRIMARY KEY,
+         role_id INT NOT NULL,
+         feature_key VARCHAR(40) NOT NULL,
+         is_granted BOOLEAN NOT NULL DEFAULT TRUE,
+         note VARCHAR(255) NULL,
+         granted_by_staff_id INT NULL,
+         granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         UNIQUE KEY uq_role_feature (role_id, feature_key),
+         FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE ON UPDATE CASCADE,
+         FOREIGN KEY (granted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+       )`);
+    created += 1;
+  }
+
+  const [typeColumn] = await db.query(
+    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'audit_logs' AND COLUMN_NAME = 'action_type'`,
+    [DB_NAME]
+  );
+  let widened = false;
+  if (typeColumn[0] && !/'CONTROL'/i.test(typeColumn[0].COLUMN_TYPE)) {
+    await db.query(
+      `ALTER TABLE audit_logs MODIFY action_type
+         ENUM('CREATE','UPDATE','DELETE','VOID','RESTORE','BACKUP',
+              'LOGIN','LOGOUT','LOGIN_FAILURE','SECURITY','PAYMENT',
+              'ACCESS','CONTROL','OTHER') NOT NULL DEFAULT 'OTHER'`);
+    widened = true;
+  }
+
+  // internal systems added if missing; renamed or switched-off rows are left alone
+  let seeded = 0;
+  for (const [key, system] of Object.entries(INTERNAL_SYSTEMS)) {
+    const [result] = await db.query(
+      `INSERT IGNORE INTO connected_systems (system_key, system_name, system_kind, description)
+       VALUES (?, ?, 'Internal', ?)`,
+      [key, system.name, system.description]);
+    seeded += result.affectedRows;
+  }
+
+  if (created > 0 || widened || seeded > 0) {
+    console.log(`Added the access control tables (${created} created, ${seeded} internal ` +
+      `system(s) registered${widened ? ", audit types widened" : ""}).` +
+      (proceduresLoaded !== null && proceduresLoaded < EXPECTED_PROCEDURES
+        ? " Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the two procedures they need exist."
+        : ""));
+  }
+}
+
+// a named figure so adding a procedure changes one number, not two
+const EXPECTED_PROCEDURES = 30;
+
+// Nearly every write goes through a stored procedure, so a database with the
+// tables but not the procedures (file 1 run, file 2 not) reads fine and
+// cannot be written to. The count is remembered and the guard below turns
+// those writes into one sentence naming the fix. Re-checked whenever it is
+// bad, so loading file 2 is picked up without a restart.
 let proceduresLoaded = null;      // null until the first count
 let procedureCheckAt = 0;
 const PROCEDURE_RECHECK_MS = 5000;
@@ -264,9 +328,7 @@ async function countProcedures() {
   return proceduresLoaded;
 }
 
-// Cheap on the happy path: once the full set has been seen it is believed,
-// because procedures do not vanish while a server runs unless somebody
-// reloads them, and reloading them can only make this better.
+// once the full set has been seen it is believed
 async function proceduresAreMissing() {
   if (proceduresLoaded !== null && proceduresLoaded >= EXPECTED_PROCEDURES) return false;
   if (Date.now() - procedureCheckAt < PROCEDURE_RECHECK_MS) return true;
@@ -291,13 +353,10 @@ db.getConnection()
     connection.release();
     console.log(`Connected to MySQL database "${DB_NAME}" on ${DB_HOST}.`);
 
-    // warns you when 2-RUN-SECOND-stored-procedures.sql was never loaded on this machine
     const total = await countProcedures();
 
     if (total < EXPECTED_PROCEDURES) {
-      // Loud on purpose. The single-line version of this warning is what
-      // scrolled away while somebody tried to work out why the system had
-      // stopped saving.
+      // loud on purpose: a one-line warning scrolled away unread
       console.warn("");
       console.warn("  ###############################################################");
       console.warn(`  #  ONLY ${String(total).padEnd(2)} OF ${EXPECTED_PROCEDURES} STORED PROCEDURES ARE LOADED.`.padEnd(63) + "#");
@@ -315,12 +374,13 @@ db.getConnection()
 
     await migrateMiddleNameColumn();
     await migratePhoneNumbers();
+    await migrateAccessControlTables();
+    await migrateMeasuredQuantities();
     await hashLegacyPasswords();
 
-    // Last, and only once the database has answered and the upgrades above
-    // have run. Starting the timer before that would take its first backup of
-    // a schema that is one statement from being changed.
+    // last, so the first backup is not taken of a schema about to change
     startAutoBackup();
+    startArchiveSweep();
   })
   .catch((error) => {
     console.error("DATABASE CONNECTION FAILED:", error.message);
@@ -334,10 +394,7 @@ app.get("/", (request, response) => {
   response.redirect("/Login.html");
 });
 
-// Every browser asks for this without being told to, and every page in the
-// system was answering it with a 404 in the console. A console with a standing
-// error in it is a console nobody reads, which is where a real error goes to
-// hide. One small mark, drawn rather than shipped as a file.
+// every browser asks for this; a 404 in the console hides real errors
 const FAVICON =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">` +
   `<rect width="32" height="32" rx="6" fill="#1d4ed8"/>` +
@@ -349,30 +406,18 @@ app.get(["/favicon.ico", "/favicon.svg"], (request, response) => {
   response.send(FAVICON);
 });
 
-// The pages, the stylesheet and app.js live under public/ and are meant to be
-// downloaded. The server's own source and the SQL files sit in that same folder
-// and are not: they carry the database password and the whole schema. Blocking
-// them here keeps the folder layout the project already has.
-// mailer.js is on this list for the same reason server.js is: it names the
-// mail account the system sends from, and mail-password.txt beside it holds
-// that account's password and nothing else.
+// Everything under public/ is served except the server's own source and the
+// SQL files, which carry the database password and the schema. mailer.js
+// names the mail account and mail-password.txt holds its password.
 const PRIVATE_FILES = [
   /^\/javascript\/(server|mailer)\.js$/i,
   /^\/javascript\/mail-password\.txt$/i,
   /^\/database(\/|$)/i
 ];
 
-// THE SAME PATH THE FILE SERVER WILL SEE
-//
-// request.path is the raw text out of the address bar. express.static does not
-// use it raw: it percent-decodes it and collapses the result down to one real
-// filesystem path, so "//javascript/server.js" and "/javascript/%73erver.js"
-// both end up at the same file that "/javascript/server.js" does.
-//
-// A guard that tests the raw text is therefore testing a different string from
-// the one that decides which file is sent, and every spelling the guard has not
-// thought of walks straight past it. This resolves the path the same way first,
-// so the guard and the file server are always arguing about the same thing.
+// express.static percent-decodes and normalises the path before choosing a
+// file, so the guard has to resolve it the same way or a spelling it did not
+// think of walks past it.
 function resolvedPath(rawPath) {
   let pathname;
 
@@ -382,13 +427,10 @@ function resolvedPath(rawPath) {
     return null;   // a malformed %-escape; nothing legitimate is spelled this way
   }
 
-  // a null byte truncates a filename inside the operating system, and a
-  // backslash is a separator on the Windows machines this runs on
+  // a null byte truncates a filename; a backslash is a separator on Windows
   if (pathname.indexOf("\0") !== -1) return null;
   pathname = pathname.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
 
-  // resolves . and .. so a private folder cannot be reached by walking out of
-  // a public one and back in
   pathname = path.posix.normalize(pathname);
   return pathname.startsWith("/") ? pathname : "/" + pathname;
 }
@@ -407,6 +449,59 @@ app.use((request, response, next) => {
   next();
 });
 
+// the five roles, spelled exactly as the roles table spells them
+const ADMIN = "System Administrator";
+const MANAGER = "Manager";
+const CLERK = "Inventory Clerk";
+const CASHIER = "Cashier";
+const DRIVER = "Delivery Personnel";
+
+// the two halves of the shop: the office decides, the floor does
+const MANAGEMENT = [ADMIN, MANAGER];
+const STAFF = [CLERK, CASHIER, DRIVER];
+
+// A dashboard page is served to its role only, checked here from the session
+// cookie before the file server sees the request. No session goes to sign-in;
+// the wrong role goes to its own dashboard.
+const PAGE_ROLES = {
+  "/system.html":              [ADMIN],
+  "/manager-dashboard.html":   [MANAGER],
+  "/inventory-dashboard.html": [CLERK],
+  "/cashier-dashboard.html":   [CASHIER],
+  "/delivery.html":            [DRIVER]
+};
+
+const ROLE_PAGES = {
+  [ADMIN]:   "/system.html",
+  [MANAGER]: "/manager-dashboard.html",
+  [CLERK]:   "/inventory-dashboard.html",
+  [CASHIER]: "/cashier-dashboard.html",
+  [DRIVER]:  "/delivery.html"
+};
+
+app.use((request, response, next) => {
+  if (request.method !== "GET" && request.method !== "HEAD") return next();
+
+  const pathname = resolvedPath(request.path);
+  if (pathname === null) return next();
+
+  // matched regardless of case, as the file server on Windows will
+  const page = Object.keys(PAGE_ROLES).find((name) => name.toLowerCase() === pathname.toLowerCase());
+  const changePassword = pathname.toLowerCase() === "/change-password.html";
+  if (!page && !changePassword) return next();
+
+  const session = currentSession(request);
+  if (!session) return response.redirect("/Login.html");
+
+  if (changePassword) return next();
+
+  if (!PAGE_ROLES[page].includes(session.roleName)) {
+    return response.redirect(ROLE_PAGES[session.roleName] || "/Login.html");
+  }
+
+  next();
+});
+
 app.use(express.static(path.join(__dirname, "..")));
 
 // ==========================================
@@ -419,13 +514,8 @@ async function callProcedure(sql, params, outputNames) {
   try {
     await connection.query(sql, params);
 
-    // The alias is quoted because some of these OUT parameters are named
-    // after words MySQL has reserved. "lines" is one, and receiving a
-    // purchase order read its result back as `SELECT @lines AS lines`, which
-    // is a parse error rather than a wrong answer -- so the whole route
-    // answered 500 and the shop could not book in a delivery. Quoting every
-    // alias means the next OUT parameter named after a reserved word is not
-    // a bug waiting to be found by whoever tries to use that screen.
+    // the alias is quoted because some OUT parameters are named after reserved
+    // words ("lines")
     const selectList = outputNames.map((name) => `@${name} AS ${sqlName(name)}`).join(", ");
     const [rows] = await connection.query(`SELECT ${selectList}`);
     return rows[0];
@@ -434,88 +524,72 @@ async function callProcedure(sql, params, outputNames) {
   }
 }
 
-// ==========================================
-// A STAFF PHONE NUMBER: +63, THEN TEN DIGITS
-//
-// The browser prints the +63 beside the box and drops anything that is not a
-// digit as it is typed, which is where that rule belongs -- at the moment
-// somebody presses the key. It is enforced again here because a rule that
-// only exists in a browser is a rule anybody can walk past with curl, and
-// because this route is not the only way a row gets written.
-//
-// Everything is reduced to the national digits first, so a number pasted in
-// any of the spellings the old free-text box accepted -- 09171234567,
-// +639171234567, 639171234567, 0917 123 4567 -- lands in the column once,
-// spelled +639171234567. The trunk 0 and the +63 are the same thing and
-// never both appear.
-//
-// Blank stays blank rather than becoming "": the number is optional, and a
-// staff record without one is not a broken record.
-// ==========================================
-const PHONE_NATIONAL_DIGITS = 10;
+// A staff phone number is stored as + country code and digits, +639171234567.
+// The browser enforces the same rule as it is typed; it is enforced again here
+// because this route is not the only way a row gets written. Any Philippine
+// spelling (09171234567, 0917 123 4567, 639171234567) lands as +63...; under
+// +63 a number must be ten digits starting 9. Blank stays blank.
+const PHONE_MAX_DIGITS = 15;
+const PHONE_MIN_DIGITS = 7;
+const PH_CODE = "63";
+const PH_NATIONAL_DIGITS = 10;
 
-function phoneNationalDigits(value) {
+function phoneDigitsAll(value) {
   return String(value === null || value === undefined ? "" : value)
     .replace(/\D/g, "")
-    .replace(/^63/, "")
-    .replace(/^0+/, "")
-    .slice(0, PHONE_NATIONAL_DIGITS);
+    .replace(/^0+/, PH_CODE)
+    .replace(new RegExp("^" + PH_CODE + "0+"), PH_CODE);
+}
+
+function phoneDigits(value) {
+  return phoneDigitsAll(value).slice(0, PHONE_MAX_DIGITS);
 }
 
 // null when there is nothing to complain about, otherwise the one sentence
-// the screen shows. Kept apart from cleanPhone so a route can refuse a bad
-// number with a reason rather than quietly storing a shortened one.
+// the screen shows
 function phoneComplaint(value) {
-  const digits = phoneNationalDigits(value);
+  const digits = phoneDigitsAll(value);
 
   if (digits === "") return null;               // optional, and left empty
-  if (digits.length !== PHONE_NATIONAL_DIGITS) {
-    return `A phone number is ${PHONE_NATIONAL_DIGITS} digits after +63. ` +
-           `That one has ${digits.length}.`;
+
+  // only Philippine numbers are taken; any other code is refused with a reason
+  if (digits.indexOf(PH_CODE) !== 0) {
+    return "Only Philippine numbers are accepted: 09XX XXX XXXX, or +63 9XX XXX XXXX.";
   }
-  if (digits[0] !== "9") {
-    return "After +63 a Philippine mobile number starts with 9.";
+
+  const national = digits.slice(PH_CODE.length);
+  if (national.length !== PH_NATIONAL_DIGITS) {
+    return `A Philippine mobile number is ${PH_NATIONAL_DIGITS} digits after +63 ` +
+           `(09XX XXX XXXX). That one has ${national.length}.`;
+  }
+  if (national[0] !== "9") {
+    return "A Philippine mobile number starts with 09 (or +63 9).";
   }
   return null;
 }
 
 function cleanPhone(value) {
-  const digits = phoneNationalDigits(value);
-  return digits === "" ? null : "+63" + digits;
+  const digits = phoneDigits(value);
+  return digits === "" ? null : "+" + digits;
 }
 
-// THE WHOLE MIDDLE NAME, KEPT AS IT WAS TYPED
-//
-// This used to throw away everything but the first letter, because the first
-// letter is all any screen prints. The name is what tells two people with the
-// same first and last name apart when a record is being checked against
-// something outside the system, so the name is what is stored. The initial is
-// worked out where it is shown, from staff.full_name, and never here.
-//
-// Inner runs of spaces are collapsed so that "Dela  Cruz" and "Dela Cruz" are
-// one name and not two, and an empty box stays empty rather than becoming "".
+// The whole middle name is stored; the initial is worked out where it is
+// shown. Inner runs of spaces are collapsed, and an empty box stays empty.
 function cleanMiddleName(value) {
   if (typeof value !== "string") return null;
   const trimmed = value.trim().replace(/\s+/g, " ");
   return trimmed === "" ? null : trimmed.slice(0, 100);
 }
 
-// ==========================================
-// THE SHOP'S TIN
-//
-// A BIR Tax Identification Number is nine digits and a branch code, written
-// 000-000-000-00000. The branch code is 00000 for the head office and was
-// three digits wide until the BIR widened it, so a TIN copied off an older
-// certificate reads 000-000-000-000. Both spellings are accepted and both
-// are stored as the full one, the way the BIR did it: two zeros in front of
-// the old code. Nine digits on their own are taken to mean the head office.
-//
-// The screen enforces the same rule as the digits are typed; it is enforced
-// again here because the screen is not the only way this row gets written,
-// and because what it protects is the head of every invoice the shop issues.
-// All zeros is refused as well: that is the placeholder a fresh install
-// ships with, and an invoice printed under it is an invoice under no TIN.
-// ==========================================
+// A search matches the start of a field (LIKE 'text%'), the same rule as
+// prefixMatch in shared/data-panel.js. % and _ are escaped.
+function searchPrefix(text) {
+  return String(text).replace(/[\\%_]/g, "\\$&") + "%";
+}
+
+// A TIN is nine digits and a branch code, 000-000-000-00000. An older
+// three-digit branch code is widened with two zeros; nine digits alone mean
+// the head office. All zeros is refused: that is the fresh-install placeholder.
 const TIN_BASE_DIGITS = 9;
 const TIN_BRANCH_DIGITS = 5;
 
@@ -544,7 +618,6 @@ function tinComplaint(value) {
   return null;
 }
 
-// the stored spelling, always 000-000-000-00000
 function cleanTin(value) {
   const digits = tinDigitsOf(value);
   const base = digits.slice(0, TIN_BASE_DIGITS);
@@ -556,20 +629,13 @@ function cleanTin(value) {
 // ==========================================
 // THE AUDIT TRAIL
 //
-// An entry used to be a staff id, an action name and a line of prose. That
-// records that something happened without answering what an audit is for:
-// which role the person held at the time, which machine it came from, what
-// kind of action it was, and what the values were before and after.
-//
-// The role is written down rather than joined, because a person moves between
-// roles and a join would rewrite last month's history the day they are
-// promoted. The address is read off the socket, never off a header the
-// browser controls, unless this server is knowingly behind a proxy.
+// An entry carries the role the person held at the time (written, not joined,
+// so a promotion does not rewrite history), the machine it came from, the kind
+// of action, and the values before and after.
 // ==========================================
 
-// Set to true only when this server sits behind a reverse proxy you control.
-// Left false, X-Forwarded-For is ignored, because on a directly reachable
-// server any browser can put whatever it likes in that header.
+// Set to true only behind a reverse proxy you control; otherwise any browser
+// can put whatever it likes in X-Forwarded-For.
 const TRUST_PROXY_HEADERS = false;
 
 function clientIp(request) {
@@ -581,25 +647,28 @@ function clientIp(request) {
     address = request.socket.remoteAddress;
   }
 
-  // an IPv4 address arriving over an IPv6 socket comes wrapped, and the two
-  // spellings of one machine should not read as two machines
+  // an IPv4 address over an IPv6 socket comes wrapped
   if (address.startsWith("::ffff:")) address = address.slice(7);
   if (address === "::1") address = "127.0.0.1";
 
   return address || null;
 }
 
-// The category the audit screen filters on. The action name still says
-// exactly what happened; this says what kind of thing it was.
+// the category the audit screen filters on
 const AUDIT_TYPES = [
   "CREATE", "UPDATE", "DELETE", "VOID", "RESTORE", "BACKUP",
-  "LOGIN", "LOGOUT", "LOGIN_FAILURE", "SECURITY", "PAYMENT", "OTHER"
+  "LOGIN", "LOGOUT", "LOGIN_FAILURE", "SECURITY", "PAYMENT",
+  "ACCESS", "CONTROL", "OTHER"
 ];
 
 function actionTypeOf(action) {
   const name = String(action || "").toUpperCase();
 
   if (AUDIT_TYPES.includes(name)) return name;
+  // the connected systems: keys handed out or taken back, and commands run with them
+  if (name.startsWith("GRANT_") || name.startsWith("REVOKE_") ||
+      name.startsWith("SYSTEM_ACCESS")) return "ACCESS";
+  if (name.startsWith("SYSTEM_")) return "CONTROL";
   if (name.includes("VOID")) return "VOID";
   if (name.includes("PASSWORD")) return "SECURITY";
   if (name.includes("RESTORE")) return "RESTORE";
@@ -615,8 +684,7 @@ function actionTypeOf(action) {
   return "OTHER";
 }
 
-// Accepts the request itself (the usual case, and the only one that can know
-// the role and the address), or a plain staff id from the few places that
+// Takes the request itself, or a plain staff id from the few places that
 // write an entry before a session exists.
 function auditContext(context) {
   if (context && typeof context === "object" && context.headers) {
@@ -639,9 +707,7 @@ function auditContext(context) {
   return { staffId: context || null, roleName: null, ip: null };
 }
 
-// metadata is the before and after of whatever changed. It is stored as text
-// so it survives any backup, and capped so one runaway object cannot fill the
-// column; an entry is never worth losing over its own detail.
+// stored as text so it survives any backup, and capped
 function auditMetadata(metadata) {
   if (metadata === undefined || metadata === null) return null;
 
@@ -654,8 +720,7 @@ function auditMetadata(metadata) {
   }
 }
 
-// Only the fields that actually moved. An entry listing every column of a
-// record, most of them unchanged, buries the one edit that mattered.
+// only the fields that actually moved
 function fieldChanges(before, after) {
   if (!before) return after;
 
@@ -665,8 +730,7 @@ function fieldChanges(before, after) {
     const was = before[field] === undefined ? null : before[field];
     const now = after[field] === undefined ? null : after[field];
 
-    // loose on purpose: a number out of the database and the same number out
-    // of a form field are the same value, not a change
+    // loose on purpose: a number from the database and the same number from a form are equal
     if (String(was === null ? "" : was) !== String(now === null ? "" : now)) {
       changes[field] = { before: was, after: now };
     }
@@ -692,11 +756,7 @@ async function writeAuditLog(context, action, details, metadata) {
 }
 
 // ==========================================
-// SESSIONS
-//
-// The browser never tells us who it is. It sends an opaque session
-// cookie, and the server looks the staff id up from its own store.
-// Nothing the browser can edit decides what it is allowed to do.
+// SESSIONS -- an opaque cookie; the server looks the staff id up itself
 // ==========================================
 const SESSION_HOURS = 8;
 const sessions = new Map();   // token -> { staffId, userId, roleId, roleName, email, expiresAt }
@@ -730,7 +790,6 @@ function readCookie(request, name) {
   return null;
 }
 
-// returns the live session, or null when it is missing or expired
 function currentSession(request) {
   const token = readCookie(request, "sid");
   if (!token) return null;
@@ -748,24 +807,9 @@ function currentSession(request) {
   return session;
 }
 
-// ==========================================
-// PRESENCE
-//
-// Two different facts get confused whenever a staff list shows only one of
-// them. An account being Active says the administrator has not deactivated
-// it. It says nothing at all about whether the person is sitting in front of
-// a screen right now, which is what somebody scanning the directory during a
-// shift actually wants to know.
-//
-// So presence is answered from the session store, which already knows: a
-// session is refreshed by every request its owner makes, and the browser
-// sends a heartbeat while a page is open but idle. Anything quiet for longer
-// than the window below is counted as gone.
-//
-// It is deliberately memory only. A restarted server has no sessions, and
-// nobody is signed in to a server that just restarted, so the answer is
-// right rather than merely persistent.
-// ==========================================
+// Presence (at a screen right now) is answered from the session store:
+// every request and the heartbeat refresh it, and anything quiet longer
+// than the window is gone. Memory only on purpose.
 const PRESENCE_WINDOW_MS = 2 * 60 * 1000;
 
 function presenceByStaff() {
@@ -781,8 +825,7 @@ function presenceByStaff() {
     }
   }
 
-  // A browser holding the live channel open is a page somebody has in front of
-  // them, whether or not it has asked the server for anything lately.
+  // a browser holding the live channel open is a page somebody has in front of them
   for (const client of liveClients) {
     seen.set(client.staffId, now);
   }
@@ -790,7 +833,6 @@ function presenceByStaff() {
   return seen;
 }
 
-// decorates staff rows with whether their owner is here right now
 function withPresence(rows) {
   const seen = presenceByStaff();
   const now = Date.now();
@@ -809,14 +851,8 @@ function endSession(request) {
   if (token) sessions.delete(token);
 }
 
-// SWEEPING UP AFTER THE ONES NOBODY COMES BACK FOR
-//
-// An expired session was only ever dropped when its own browser presented the
-// cookie again, and the browser of somebody who closed their laptop on Friday
-// never does. Every sign-in of every shift therefore left an entry behind for
-// good, in a process that is meant to run for months at a time.
-//
-// unref() so this timer is not itself a reason for the process to stay alive.
+// Expired sessions were only dropped when their own browser came back, so
+// they are swept on a timer. unref() so the timer does not keep the process alive.
 const SESSION_SWEEP_MS = 15 * 60 * 1000;
 
 setInterval(() => {
@@ -826,15 +862,33 @@ setInterval(() => {
   }
 }, SESSION_SWEEP_MS).unref();
 
-// drops every session belonging to one staff member, so deactivating
-// or demoting somebody takes effect immediately instead of in 8 hours
-function endSessionsForStaff(staffId) {
+// One person, one session: a sign-in ends every other session the same
+// person holds, and the screen left behind is told over the live channel.
+function endSessionsForStaff(staffId, keepToken, reason) {
+  const id = Number(staffId);
+
   for (const [token, session] of sessions) {
-    if (session.staffId === Number(staffId)) sessions.delete(token);
+    if (session.staffId !== id) continue;
+    if (keepToken && token === keepToken) continue;
+    sessions.delete(token);
+  }
+
+  for (const client of [...liveClients]) {
+    if (client.staffId !== id) continue;
+    if (keepToken && client.token === keepToken) continue;
+
+    try {
+      client.response.write(`event: evicted\ndata: ${JSON.stringify({
+        reason: reason || "Your session was ended."
+      })}\n\n`);
+      client.response.end();
+    } catch (error) {
+    }
+    liveClients.delete(client);
   }
 }
 
-// the signed-in staff id, taken from the session and never from the request body
+// the signed-in staff id, from the session and never from the request body
 function getActorId(request) {
   return request.actor ? request.actor.staffId : null;
 }
@@ -842,33 +896,17 @@ function getActorId(request) {
 // ==========================================
 // LIVE SYNC ACROSS DESKTOPS
 //
-// The shop runs on more than one machine. A clerk adjusts stock on the
-// stockroom PC and the cashier at the till is looking at the figure from
-// before the adjustment, which is how two people sell the same last bag of
-// cement. The answer used to be to restore the database by hand, which is not
-// an answer.
-//
-// So the server keeps a running version number and a short log of what
-// changed, and every signed-in browser holds one open connection to hear
-// about it. Server-Sent Events rather than WebSockets: this is one-way
-// traffic — the server telling browsers something moved — and SSE is a plain
-// GET over the HTTP server that is already running, reconnects by itself, and
-// needs no new dependency and no second port to open on a shop network.
-//
-// What travels is deliberately not the data. A change says "inventory moved,
-// version 412" and nothing else; the browser decides whether it is looking at
-// anything affected and asks for it through the normal route, with the normal
-// access check. Pushing rows down this channel would mean a second copy of
-// every permission rule.
+// A running version number and a short log of what changed; every signed-in
+// browser holds one SSE connection to hear about it. What travels is only
+// "inventory moved, version 412"; the browser re-reads through the normal
+// routes with the normal access checks.
 // ==========================================
 let changeVersion = 0;
 const changeLog = [];          // the last few changes, for a client that reconnects
 const CHANGE_LOG_SIZE = 200;
 const liveClients = new Set(); // { id, staffId, roleName, response }
 
-// Which part of the system a route belongs to. A browser subscribes to the
-// scopes its open tables read, so a purchase order does not wake up a screen
-// showing the staff directory.
+// which part of the system a route belongs to; browsers subscribe by scope
 function scopeOf(pathname) {
   if (/^\/api\/(users|roles)/.test(pathname)) return "staff";
   if (/^\/api\/(inventory|purchase-orders|stocks|units|materials)/.test(pathname)) return "inventory";
@@ -879,6 +917,11 @@ function scopeOf(pathname) {
   if (/^\/api\/(backups|restore|store-settings)/.test(pathname)) return "system";
   if (/^\/api\/archives/.test(pathname)) return "archives";
   if (/^\/api\/notifications/.test(pathname)) return "notifications";
+  // a grant changes what somebody's menu offers
+  if (/^\/api\/access/.test(pathname)) return "access";
+  // a screen switched on or off for a role changes every menu that role has open
+  if (/^\/api\/features/.test(pathname)) return "features";
+  if (/^\/api\/systems/.test(pathname)) return "systems";
   return null;
 }
 
@@ -904,15 +947,12 @@ function publishChange(scope, detail, origin) {
     try {
       client.response.write(frame);
     } catch (error) {
-      // a browser that has gone away is removed by its own close handler;
-      // one failed write is not worth tearing anything down over
+      // a browser that has gone away is removed by its own close handler
     }
   }
 }
 
-// Everything that changed since a version a reconnecting browser last saw. A
-// gap wider than the log means it has been away too long to catch up, and it
-// is told to reload rather than shown a partial history.
+// everything since a version; a gap wider than the log means reload
 function changesSince(version) {
   if (!Number.isInteger(version) || version <= 0) return { changes: [], gap: false };
   if (changeLog.length === 0) return { changes: [], gap: false };
@@ -921,17 +961,9 @@ function changesSince(version) {
 }
 
 // ==========================================
-// ACCESS CONTROL
-//
-// The whole policy lives in this one table so it can be read, reviewed
-// and defended in one place. Rules are matched in order, first match wins,
-// and anything under /api with no rule at all is refused.
+// ACCESS CONTROL -- the whole policy in one table. Rules are matched in
+// order, first match wins, and anything under /api with no rule is refused.
 // ==========================================
-const ADMIN = "System Administrator";
-const MANAGER = "Manager";
-const CLERK = "Inventory Clerk";
-const CASHIER = "Cashier";
-const DRIVER = "Delivery Personnel";
 
 const PUBLIC = "public";              // no session needed
 const SIGNED_IN = "signed-in";        // any role, just not a stranger
@@ -947,6 +979,7 @@ const ACCESS_RULES = [
 
   // --- your own account, any role ---
   ["GET",   /^\/api\/me$/,                             SIGNED_IN],
+  ["GET",   /^\/api\/me\/access$/,                      SIGNED_IN],
   ["PUT",   /^\/api\/me$/,                             SIGNED_IN],
   ["POST",  /^\/api\/me\/password$/,                   SIGNED_IN],
 
@@ -954,8 +987,7 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/roles$/,                          [ADMIN]],
   ["GET",   /^\/api\/users$/,                          [ADMIN]],
   ["GET",   /^\/api\/users\/\d+$/,                     [ADMIN]],
-  // the review step of each pair, which creates nothing but does make a
-  // readable password, so it is guarded exactly as tightly as the write is
+  // the review step creates nothing but does make a readable password
   ["POST",  /^\/api\/users\/draft$/,                    [ADMIN]],
   ["POST",  /^\/api\/users$/,                          [ADMIN]],
   ["PUT",   /^\/api\/users\/\d+$/,                     [ADMIN]],
@@ -965,6 +997,25 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/users\/\d+\/reset-password$/,     [ADMIN]],
   ["GET",   /^\/api\/audit-logs$/,                     [ADMIN]],
   ["GET",   /^\/api\/audit-logs\/types$/,              [ADMIN]],
+
+  // --- who may reach the connected systems: administrator only ---
+  ["GET",   /^\/api\/access\/permissions$/,            [ADMIN]],
+  ["GET",   /^\/api\/access\/users\/\d+$/,             [ADMIN]],
+  ["PUT",   /^\/api\/access\/users\/\d+\/systems\/[a-z0-9-]+$/, [ADMIN]],
+
+  // --- which screens each role holds ---
+  ["GET",   /^\/api\/me\/features$/,                    SIGNED_IN],
+  ["GET",   /^\/api\/me\/counts$/,                      SIGNED_IN],
+  ["GET",   /^\/api\/features$/,                        [ADMIN]],
+  ["PUT",   /^\/api\/features\/[a-z0-9-]+\/roles\/\d+$/, [ADMIN]],
+
+  // --- the connected systems themselves: a permission, not a role ---
+  // each route below carries requireSystemAccess with the level it needs
+  ["GET",   /^\/api\/systems$/,                        SIGNED_IN],
+  ["POST",  /^\/api\/systems$/,                        [ADMIN]],
+  ["GET",   /^\/api\/systems\/[a-z0-9-]+\/status$/,    SIGNED_IN],
+  ["PUT",   /^\/api\/systems\/[a-z0-9-]+$/,            SIGNED_IN],
+  ["POST",  /^\/api\/systems\/[a-z0-9-]+\/actions\/[a-z0-9-]+$/, SIGNED_IN],
 
   // --- backup and recovery, administrator only ---
   ["GET",    /^\/api\/backups$/,                       [ADMIN]],
@@ -981,13 +1032,9 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/stocks$/,                         [MANAGER]],
   ["PUT",   /^\/api\/stocks\/\d+\/reorder-policy$/,    [MANAGER]],
 
-  // Exporting is the line between the two reporting roles. A manager can take
-  // a report off the premises; a cashier or clerk reads their daily tally on
-  // the screen and nothing leaves the building with them. That rule is
-  // enforced here rather than by hiding a button, because a hidden button is
-  // still a URL anybody can type.
+  // exporting is the line between the reporting roles; a hidden button is still a URL
   ["GET",   /^\/api\/reports\/export$/,                [MANAGER]],
-  ["GET",   /^\/api\/reports\/daily-tally$/,           [MANAGER, CASHIER, CLERK]],
+  ["GET",   /^\/api\/reports\/daily-tally$/,           [MANAGER, ...STAFF]],
 
   // --- selling ---
   ["POST",  /^\/api\/sales$/,                          [CASHIER]],
@@ -1012,20 +1059,17 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/inventory\/adjust$/,              [CLERK]],
   ["PUT",   /^\/api\/inventory\/reorder\/\d+$/,        [CLERK]],
 
-  // The clerk who can create a unit by typing it is the clerk who has to be
-  // able to correct it. A manager keeps the same reach for the same reason.
+  // the clerk who can create a unit by typing it can correct it
   ["PUT",   /^\/api\/units\/\d+$/,                     [CLERK, MANAGER]],
-  ["GET",   /^\/api\/purchase-orders$/,                [CLERK]],
-  ["GET",   /^\/api\/purchase-orders\/\d+\/items$/,    [CLERK]],
-  // The printed order is the one thing here a manager also needs to be able
-  // to pull up: they are the ones asked about it when a supplier telephones.
-  ["GET",   /^\/api\/purchase-orders\/\d+\/document$/, [CLERK, MANAGER]],
-  ["POST",  /^\/api\/purchase-orders$/,                [CLERK]],
-  ["POST",  /^\/api\/purchase-orders\/\d+\/receive$/,  [CLERK]],
 
-  // Opening a record for a material the shop has never stocked. The clerk is
-  // the person standing in front of the delivery, so the clerk is the person
-  // who can do it.
+  // purchase orders belong to the manager; the clerk reads them
+  ["GET",   /^\/api\/purchase-orders$/,                [CLERK, MANAGER]],
+  ["GET",   /^\/api\/purchase-orders\/\d+\/items$/,    [CLERK, MANAGER]],
+  ["GET",   /^\/api\/purchase-orders\/\d+\/document$/, [CLERK, MANAGER]],
+  ["POST",  /^\/api\/purchase-orders$/,                [MANAGER]],
+  ["POST",  /^\/api\/purchase-orders\/\d+\/receive$/,  [MANAGER]],
+
+  // opening a record for a material the shop has never stocked
   ["POST",  /^\/api\/materials$/,                      [CLERK]],
 
   // --- returns, damage and refunds ---
@@ -1034,9 +1078,7 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/returns\/\d+\/resolve$/,          [CLERK]],
 
   // --- credit management ---
-  // Reading a customer's credit is a counter action: the cashier has to know
-  // before ringing a sale up. Changing a limit or deciding an extension is a
-  // manager action, and no amount of standing at the counter makes it one.
+  // reading is a counter action; changing a limit is a manager action
   ["GET",   /^\/api\/credit\/customers$/,              [MANAGER, CASHIER]],
   ["GET",   /^\/api\/credit\/customers\/\d+$/,         [MANAGER, CASHIER]],
   ["PUT",   /^\/api\/credit\/customers\/\d+\/limit$/,  [MANAGER]],
@@ -1045,23 +1087,17 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/credit\/requests\/\d+\/decide$/,  [MANAGER]],
   ["GET",   /^\/api\/customers\/\d+\/history$/,        [MANAGER, CASHIER]],
 
-  // Opening an account is a counter action; giving it a credit limit is not,
-  // and the route that sets a limit stays manager-only above. A cashier can
-  // therefore name a regular customer without being able to lend to them.
+  // opening an account is a counter action; giving it a limit is not
   ["POST",  /^\/api\/customers$/,                      [MANAGER, CASHIER]],
 
   // --- shared lookups and archives ---
   ["GET",   /^\/api\/records\/\w+$/,                   [MANAGER, CASHIER, CLERK]],
-  ["GET",   /^\/api\/archives$/,                       [MANAGER, ADMIN]],
-  ["POST",  /^\/api\/archives\/archive$/,              [CLERK, MANAGER, ADMIN]],
-  ["POST",  /^\/api\/archives\/restore$/,              [CLERK, MANAGER, ADMIN]],
+  ["GET",   /^\/api\/archives$/,                       MANAGEMENT],
+  ["POST",  /^\/api\/archives\/archive$/,              [CLERK, ...MANAGEMENT]],
+  ["POST",  /^\/api\/archives\/restore$/,              [CLERK, ...MANAGEMENT]],
 
   // --- who the shop is, and how it is registered ---
-  // Every dashboard that prints or previews an invoice needs to read this,
-  // so reading is open to anyone signed in. Changing a TIN or flipping the
-  // shop between VAT and non-VAT changes what every future invoice claims
-  // about the business, which is an administrator's decision and nobody
-  // else's.
+  // every dashboard prints an invoice, so reading is open; changing is the administrator's
   ["GET",   /^\/api\/store-settings$/,                 SIGNED_IN],
   ["PUT",   /^\/api\/store-settings$/,                 [ADMIN]],
 
@@ -1071,21 +1107,444 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/notifications\/read-all$/,        SIGNED_IN]
 ];
 
-// ==========================================
-// A POST THAT CHANGES NOTHING
-//
-// The hook further down announces every successful write to every other
-// screen, and it decides what is a write from the HTTP verb. That is the
-// right default and it is wrong for the review step of creating an account:
-// those are POSTs because they must not be cached or repeated from a URL, but
-// they touch no table. Announcing them would send every other administrator's
-// directory off to re-read rows that did not move, every time somebody
-// pressed Review.
-// ==========================================
+// POSTs that touch no table, so the write hook below does not announce them.
 const CHANGES_NOTHING = [
   /^\/api\/users\/draft$/,
   /^\/api\/users\/\d+\/account\/draft$/
 ];
+
+// Every /api request is checked against the table above. Routes that destroy
+// or replace data carry requireRole as well, so a loosened rule in the table
+// still meets a no in the route.
+function requireRole(...roles) {
+  const allowed = roles.flat();
+  return (request, response, next) => {
+    if (!request.actor || !allowed.includes(request.actor.roleName)) {
+      return response.status(403).json({
+        error: `A ${request.actor ? request.actor.roleName : "visitor"} cannot use this feature.`
+      });
+    }
+    next();
+  };
+}
+
+// An administrator does not edit their own record: rename, re-role,
+// deactivate and reset are refused for the signed-in person. A second
+// administrator makes those changes and is on the trail for them. The
+// password stays in their own hands through My Account.
+function notOwnAccount(request, response, next) {
+  if (request.actor && Number(request.params.staffId) === Number(request.actor.staffId)) {
+    return response.status(403).json({
+      error: "You cannot change your own account from here. " +
+             "Ask another administrator to make this change."
+    });
+  }
+  next();
+}
+
+// The connected systems are decided by a grant, not a role: three levels,
+// read from the database on every request so a revocation bites at once. A
+// refusal is written to the trail.
+const ACCESS_LEVELS = ["monitor", "manage", "control"];
+
+const NO_ACCESS = Object.freeze({ monitor: false, manage: false, control: false });
+const ALL_ACCESS = Object.freeze({ monitor: true, manage: true, control: true });
+
+const SYSTEM_SELECT = `
+  SELECT cs.system_id, cs.system_key, cs.system_name, cs.system_kind,
+         cs.description, cs.endpoint_url, cs.is_enabled,
+         cs.created_at, cs.updated_at, cb.full_name AS created_by
+  FROM connected_systems cs
+  LEFT JOIN staff cb ON cb.staff_id = cs.created_by_staff_id
+`;
+
+async function findSystem(systemKey) {
+  const [rows] = await db.query(`${SYSTEM_SELECT} WHERE cs.system_key = ?`,
+    [String(systemKey || "").toLowerCase()]);
+  return rows[0] || null;
+}
+
+// what one person holds, keyed by system; empty for somebody never granted a thing
+async function permissionsOf(staffId) {
+  const [rows] = await db.query(
+    `SELECT cs.system_key, p.can_monitor, p.can_manage, p.can_control,
+            p.note, p.granted_at, p.updated_at, gb.full_name AS granted_by
+     FROM system_permissions p
+     JOIN connected_systems cs ON cs.system_id = p.system_id
+     LEFT JOIN staff gb ON gb.staff_id = p.granted_by_staff_id
+     WHERE p.staff_id = ?`,
+    [staffId]);
+
+  const held = new Map();
+  for (const row of rows) {
+    held.set(row.system_key, {
+      monitor: Boolean(row.can_monitor),
+      manage: Boolean(row.can_manage),
+      control: Boolean(row.can_control),
+      note: row.note,
+      grantedAt: row.granted_at,
+      updatedAt: row.updated_at,
+      grantedBy: row.granted_by
+    });
+  }
+  return held;
+}
+
+async function accessOf(actor, systemKey) {
+  if (!actor) return NO_ACCESS;
+  if (actor.roleName === ADMIN) return ALL_ACCESS;
+
+  const held = (await permissionsOf(actor.staffId)).get(systemKey);
+  return held
+    ? { monitor: held.monitor, manage: held.manage, control: held.control }
+    : NO_ACCESS;
+}
+
+function requireSystemAccess(level) {
+  if (!ACCESS_LEVELS.includes(level)) throw new Error(`Unknown access level: ${level}`);
+
+  return async (request, response, next) => {
+    try {
+      const system = await findSystem(request.params.systemKey);
+      if (!system) {
+        return response.status(404).json({ error: "No connected system is registered under that name." });
+      }
+
+      const access = await accessOf(request.actor, system.system_key);
+
+      if (!access[level]) {
+        await writeAuditLog(request, "SYSTEM_ACCESS_DENIED",
+          `${request.actor.email} tried to ${level} ${system.system_name} without permission`,
+          { system_key: system.system_key, level_needed: level, held: access,
+            attempted: `${request.method} ${request.path}` });
+
+        return response.status(403).json({
+          error: `You do not have ${level} access to ${system.system_name}. ` +
+                 "The System Administrator grants it from Access Control."
+        });
+      }
+
+      request.system = system;
+      request.systemAccess = access;
+      next();
+    } catch (error) {
+      console.error("Access check failed:", error.message);
+      response.status(500).json({ error: "Unable to check your access to that system." });
+    }
+  };
+}
+
+// ==========================================
+// SCREENS BY ROLE
+//
+// Every entry is one screen: the roles whose page can draw it, the roles that
+// hold it by role, and the routes it is made of. The administrator grants or
+// revokes a screen per role; an override is one row in role_feature_permissions.
+//
+// Enforcement in the access hook:
+//   revoked  a route is refused when every screen using it is off for the role
+//   granted  a route the role table would refuse is allowed when the role
+//            holds a screen needing it BY GRANT (not by default)
+// Read from the database and cached in memory between writes.
+// ==========================================
+const FEATURES = [
+  // --- selling and the counter ---
+  { key: "pos", name: "New Transaction", module: "Point of Sale",
+    description: "The register: ring a sale up, take the payment, book the delivery.",
+    available: [CASHIER], defaults: [CASHIER],
+    routes: [["POST", /^\/api\/sales$/], ["POST", /^\/api\/deliveries$/], ["POST", /^\/api\/customers$/]] },
+  { key: "refunds", name: "Refunds", module: "Point of Sale",
+    description: "Take a sold item back and refund it at the counter.",
+    available: [CASHIER], defaults: [CASHIER],
+    routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/]] },
+  { key: "sales-report", name: "Sales Report", module: "Point of Sale",
+    description: "The cashier's own sales, by day and by method.",
+    available: [CASHIER], defaults: [CASHIER],
+    routes: [["GET", /^\/api\/sales$/], ["GET", /^\/api\/sales\/\d+$/], ["GET", /^\/api\/reports\/daily-tally$/]] },
+  { key: "daily-summary", name: "Daily Summary", module: "Point of Sale",
+    description: "What the till took today.",
+    available: [CASHIER], defaults: [CASHIER],
+    routes: [["GET", /^\/api\/cashier\/summary$/]] },
+
+  // --- credit ---
+  { key: "credit", name: "Customer Credit", module: "Credit",
+    description: "Every credit account and its standing; the cashier's copy files extension requests, the manager's decides limits.",
+    available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
+    routes: [["GET", /^\/api\/credit\/customers$/], ["GET", /^\/api\/credit\/customers\/\d+$/],
+             ["PUT", /^\/api\/credit\/customers\/\d+\/limit$/], ["GET", /^\/api\/customers\/\d+\/history$/],
+             ["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests$/]] },
+  { key: "credit-requests", name: "Extension Requests", module: "Credit",
+    description: "The queue of credit-limit requests waiting for a decision.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests\/\d+\/decide$/]] },
+
+  // --- the manager's reporting ---
+  { key: "income", name: "Income", module: "Reports",
+    description: "Collected, billed, outstanding and discounts over any period.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/reports\/income$/]] },
+  { key: "reports", name: "Reports", module: "Reports",
+    description: "Payment methods, receivables, repeat customers, staff performance.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/reports\/overview$/]] },
+  { key: "sales", name: "Sales", module: "Reports",
+    description: "Every sale rung up, with its lines and its payments.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/sales$/], ["GET", /^\/api\/sales\/\d+$/], ["POST", /^\/api\/sales\/\d+\/payment$/]] },
+
+  // --- stock ---
+  { key: "material-list", name: "Material List", module: "Inventory",
+    description: "Everything on the shelf, with what is in stock.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["GET", /^\/api\/inventory\/summary$/]] },
+  { key: "stock-adjustment", name: "Stock Adjustment", module: "Inventory",
+    description: "Correct a stock figure by hand, and open a record for a material the shop has never stocked.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["POST", /^\/api\/inventory\/adjust$/], ["POST", /^\/api\/materials$/]] },
+  { key: "adjustment-history", name: "Adjustment History", module: "Inventory",
+    description: "Every correction made, by whom and why.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["GET", /^\/api\/inventory\/adjustments$/]] },
+  { key: "reorder-points", name: "Reorder Points", module: "Inventory",
+    description: "Where each material's reorder point sits, and the formula behind it.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["PUT", /^\/api\/inventory\/reorder\/\d+$/]] },
+  { key: "reorder-alerts", name: "Reorder Alerts", module: "Inventory",
+    description: "The materials at or under their reorder point today.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/stocks$/], ["PUT", /^\/api\/stocks\/\d+\/reorder-policy$/]] },
+  { key: "stock-reports", name: "Stock Reports", module: "Inventory",
+    description: "The whole inventory to read, sort and print.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/stocks$/]] },
+  { key: "returns", name: "Returned Items", module: "Inventory",
+    description: "Returns and damage reports, and putting them back on the shelf or writing them off.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/], ["POST", /^\/api\/returns\/\d+\/resolve$/]] },
+  { key: "damage-report", name: "Make a Report", module: "Inventory",
+    description: "Report damaged goods and take them off the shelf.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["POST", /^\/api\/returns$/]] },
+  { key: "purchase-orders", name: "Purchase Orders", module: "Inventory",
+    description: "Orders to suppliers: the manager raises and receives them, the clerk reads them.",
+    available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
+    routes: [["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/],
+             ["GET", /^\/api\/purchase-orders\/\d+\/document$/], ["POST", /^\/api\/purchase-orders$/],
+             ["POST", /^\/api\/purchase-orders\/\d+\/receive$/]] },
+
+  // --- deliveries ---
+  { key: "deliveries", name: "Delivery Tracking", module: "Deliveries",
+    description: "Every delivery booked and where it has got to; the manager's copy can move one along.",
+    available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
+    routes: [["GET", /^\/api\/deliveries$/], ["PATCH", /^\/api\/deliveries\/\d+\/status$/]] },
+  { key: "delivery-runs", name: "Delivery Runs", module: "Deliveries",
+    description: "The driver's own round: pending, out for delivery, and cash to collect.",
+    available: [DRIVER], defaults: [DRIVER],
+    routes: [["GET", /^\/api\/delivery\/list$/], ["PATCH", /^\/api\/deliveries\/\d+\/status$/],
+             ["POST", /^\/api\/delivery\/\d+\/payment$/]] },
+  { key: "delivery-reports", name: "Delivery Reports", module: "Deliveries",
+    description: "The driver's deliveries and collections over a period.",
+    available: [DRIVER], defaults: [DRIVER],
+    routes: [["GET", /^\/api\/delivery\/summary$/]] },
+  // drawn by script (shared/delivery-schedule.js), so every page can draw it
+  { key: "delivery-schedule", name: "Delivery Schedule", module: "Deliveries",
+    description: "Deliveries still to go out, by the day they are due: overdue, today, tomorrow, later.",
+    available: [MANAGER, CASHIER, CLERK, DRIVER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/deliveries$/]] },
+
+  // --- records ---
+  { key: "records", name: "Records", module: "Records",
+    description: "Suppliers, customers, products, categories and units.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [] },
+  { key: "archives", name: "Archives", module: "Records",
+    description: "What has been put away, and restoring it.",
+    available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
+    routes: [["GET", /^\/api\/archives$/], ["POST", /^\/api\/archives\/archive$/], ["POST", /^\/api\/archives\/restore$/]] }
+];
+
+const FEATURE_ROLES = [MANAGER, CLERK, CASHIER, DRIVER];   // the matrix's columns
+
+function findFeature(key) {
+  return FEATURES.find((feature) => feature.key === String(key || "").toLowerCase()) || null;
+}
+
+function featuresCovering(method, pathname) {
+  return FEATURES.filter((feature) =>
+    feature.routes.some(([ruleMethod, pattern]) => ruleMethod === method && pattern.test(pathname)));
+}
+
+// the overrides, cached between writes:
+// role name -> Map(feature key -> { granted, note, grantedBy, grantedAt, updatedAt })
+let featureOverrides = null;
+
+async function loadFeatureOverrides() {
+  if (featureOverrides) return featureOverrides;
+
+  const byRole = new Map();
+  try {
+    const [rows] = await db.query(
+      `SELECT r.role_name, p.feature_key, p.is_granted, p.note,
+              p.granted_at, p.updated_at, gb.full_name AS granted_by
+       FROM role_feature_permissions p
+       JOIN roles r ON r.role_id = p.role_id
+       LEFT JOIN staff gb ON gb.staff_id = p.granted_by_staff_id`);
+
+    for (const row of rows) {
+      if (!byRole.has(row.role_name)) byRole.set(row.role_name, new Map());
+      byRole.get(row.role_name).set(row.feature_key, {
+        granted: Boolean(row.is_granted),
+        note: row.note,
+        grantedBy: row.granted_by,
+        grantedAt: row.granted_at,
+        updatedAt: row.updated_at
+      });
+    }
+  } catch (error) {
+  }
+
+  featureOverrides = byRole;
+  return byRole;
+}
+
+function forgetFeatureOverrides() {
+  featureOverrides = null;
+}
+
+// what one role holds: the defaults with the overrides applied
+async function featuresOf(roleName) {
+  const overrides = (await loadFeatureOverrides()).get(roleName) || new Map();
+
+  return FEATURES
+    .filter((feature) => feature.available.includes(roleName) || roleName === ADMIN)
+    .map((feature) => {
+      const byDefault = roleName === ADMIN || feature.defaults.includes(roleName);
+      const override = overrides.get(feature.key) || null;
+      const held = override ? override.granted : byDefault;
+      return {
+        key: feature.key,
+        name: feature.name,
+        module: feature.module,
+        held: held,
+        byDefault: byDefault,
+        overridden: Boolean(override) && override.granted !== byDefault,
+        note: override ? override.note : null,
+        grantedBy: override ? override.grantedBy : null,
+        updatedAt: override ? (override.updatedAt || override.grantedAt) : null
+      };
+    });
+}
+
+// everything held, and the part held by grant rather than by role
+async function heldFeatures(roleName) {
+  const held = new Set();
+  const granted = new Set();
+  for (const feature of await featuresOf(roleName)) {
+    if (!feature.held) continue;
+    held.add(feature.key);
+    if (!feature.byDefault) granted.add(feature.key);
+  }
+  return { held, granted };
+}
+
+// ==========================================
+// THE COUNT ON A MENU ITEM
+//
+// Each count is the screen's own rule so the two agree. The clerk's Reorder
+// Points reads the typed reorder point; the manager's Reorder Alerts reads
+// the EFFECTIVE one (calculated for a product on Dynamic).
+// ==========================================
+const LOW_STOCK_TYPED_SQL = `
+  SELECT COUNT(*) AS n FROM products p
+  LEFT JOIN inventory i ON i.product_id = p.product_id
+  WHERE p.is_archived = FALSE
+    AND COALESCE(i.quantity_in_stock, 0) <= p.reorder_point`;
+
+// the same formula as /api/stocks; the three ? are SALES_WINDOW_DAYS
+const LOW_STOCK_EFFECTIVE_SQL = `
+  WITH window_days AS (
+    SELECT GREATEST(LEAST(?, COALESCE(DATEDIFF(CURDATE(), DATE(MIN(sale_date))) + 1, ?)), 1) AS days
+    FROM sales WHERE is_archived = FALSE
+  ),
+  recent AS (
+    SELECT si.product_id, COALESCE(SUM(si.quantity), 0) AS units
+    FROM sale_items si
+    JOIN sales s ON s.sale_id = si.sale_id
+    WHERE s.is_archived = FALSE AND s.sale_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+    GROUP BY si.product_id
+  )
+  SELECT COUNT(*) AS n
+  FROM products p
+  CROSS JOIN window_days w
+  LEFT JOIN recent rc ON rc.product_id = p.product_id
+  LEFT JOIN inventory i ON i.product_id = p.product_id
+  WHERE p.is_archived = FALSE
+    AND COALESCE(i.quantity_in_stock, 0) <=
+        CASE WHEN p.reorder_mode = 'Dynamic'
+             THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock
+             ELSE p.reorder_point END`;
+
+const FEATURE_COUNTS = {
+  "credit-requests": {
+    roles: [MANAGER],
+    sql: `SELECT COUNT(*) AS n FROM credit_requests WHERE status = 'Pending'`
+  },
+  "reorder-alerts": {
+    roles: [MANAGER],
+    sql: LOW_STOCK_EFFECTIVE_SQL,
+    params: () => [SALES_WINDOW_DAYS, SALES_WINDOW_DAYS, SALES_WINDOW_DAYS]
+  },
+  "reorder-points": { roles: [CLERK], sql: LOW_STOCK_TYPED_SQL },
+  "returns": {
+    roles: [CLERK],
+    sql: `SELECT COUNT(*) AS n FROM returned_items WHERE status = 'Open'`
+  },
+  "deliveries": {
+    roles: [MANAGER],
+    sql: `SELECT COUNT(*) AS n FROM deliveries WHERE is_archived = FALSE AND status = 'Pending'`
+  },
+  "delivery-runs": {
+    roles: [DRIVER],
+    sql: `SELECT COUNT(*) AS n FROM deliveries
+          WHERE is_archived = FALSE AND status = 'Pending'
+            AND (delivery_staff_id = ? OR delivery_staff_id IS NULL)`,
+    params: (actor) => [actor.staffId]
+  },
+  "delivery-schedule": {
+    roles: FEATURE_ROLES,
+    sql: `SELECT COUNT(*) AS n FROM deliveries
+          WHERE is_archived = FALSE AND status NOT IN ('Delivered', 'Failed')
+            AND scheduled_date IS NOT NULL AND DATE(scheduled_date) <= CURDATE()`
+  }
+};
+
+async function featureCountsFor(actor) {
+  const counts = {};
+  if (!actor || actor.roleName === ADMIN) return counts;
+
+  const { held } = await heldFeatures(actor.roleName);
+
+  for (const [key, counter] of Object.entries(FEATURE_COUNTS)) {
+    if (!held.has(key) || !counter.roles.includes(actor.roleName)) continue;
+    try {
+      const [[row]] = await db.query(counter.sql, counter.params ? counter.params(actor) : []);
+      counts[key] = Number(row.n) || 0;
+    } catch (error) {
+    }
+  }
+  return counts;
+}
+
+// the same rule, for the administrator's own profile screen
+function notOwnDetailsIfAdmin(request, response, next) {
+  if (request.actor && request.actor.roleName === ADMIN) {
+    return response.status(403).json({
+      error: "A System Administrator's details are changed by another administrator, " +
+             "not from this screen. Your password is still yours to change."
+    });
+  }
+  next();
+}
 
 function findRule(method, pathname) {
   for (const [ruleMethod, pattern, allowed] of ACCESS_RULES) {
@@ -1099,24 +1558,12 @@ app.use(async (request, response, next) => {
 
   const allowed = findRule(request.method, request.path);
 
-  // an endpoint nobody granted is an endpoint nobody may call
   if (allowed === null) {
     return response.status(403).json({ error: "This feature is not available." });
   }
 
-  // ==========================================
-  // A HALF-INSTALLED DATABASE SAYS SO, ONCE, IN THE RIGHT WORDS
-  //
-  // Reading still works with no procedures, so reads are let through and the
-  // screens stay usable. Writes cannot work, and this is where they are
-  // stopped -- with the sentence that names the actual fix rather than the
-  // route's own "Unable to create the account", which sends the reader off
-  // to inspect a form that is perfectly fine.
-  //
-  // Sign-in is exempt: it is a POST, it uses no procedure, and locking
-  // somebody out of the screen that would show them this message is the
-  // wrong way round.
-  // ==========================================
+  // With no procedures, reads still work and writes cannot: writes are stopped
+  // here with the sentence that names the fix. Sign-in is exempt.
   if (request.method !== "GET" && request.method !== "HEAD" &&
       request.path !== "/api/login" && request.path !== "/api/logout" &&
       request.path !== "/api/heartbeat" &&
@@ -1133,7 +1580,34 @@ app.use(async (request, response, next) => {
     return response.status(401).json({ error: "Your session has ended. Please sign in again." });
   }
 
-  if (allowed !== SIGNED_IN && !allowed.includes(session.roleName)) {
+  const byRole = allowed === SIGNED_IN || allowed.includes(session.roleName);
+
+  // Screens by role: a route is refused once every screen using it is off for
+  // this role, and allowed past the role table when held by grant. The
+  // administrator is never narrowed.
+  const covering = session.roleName === ADMIN ? [] : featuresCovering(request.method, request.path);
+  if (covering.length > 0) {
+    let held;
+    try {
+      held = await heldFeatures(session.roleName);
+    } catch (error) {
+      held = { held: new Set(), granted: new Set() };
+    }
+
+    const stillHeld = covering.filter((feature) => held.held.has(feature.key));
+    if (stillHeld.length === 0) {
+      return response.status(403).json({
+        error: `${covering[0].name} has been switched off for ${session.roleName} accounts. ` +
+               "The System Administrator turns screens on and off under Screens by Role."
+      });
+    }
+
+    if (!byRole && !stillHeld.some((feature) => held.granted.has(feature.key))) {
+      return response.status(403).json({
+        error: `A ${session.roleName} cannot use this feature.`
+      });
+    }
+  } else if (!byRole) {
     return response.status(403).json({
       error: `A ${session.roleName} cannot use this feature.`
     });
@@ -1141,16 +1615,8 @@ app.use(async (request, response, next) => {
 
   request.actor = session;
 
-  // ONE HOOK, NOT FIFTY
-  //
-  // Every write in the system already passes through here, so this is where a
-  // change is announced from. Doing it per route would mean remembering to add
-  // a line to every new one, and the line that gets forgotten is the screen
-  // that silently stops updating.
-  //
-  // It fires after the response is actually finished and only for a write that
-  // succeeded: an announcement for a request that was refused would send every
-  // other desktop off to re-read data that did not move.
+  // Every write passes through here, so this is where a change is announced
+  // from, after the response finished and only when it succeeded.
   if (request.method !== "GET" && request.method !== "HEAD" &&
       !CHANGES_NOTHING.some((pattern) => pattern.test(request.path))) {
     response.on("finish", () => {
@@ -1167,10 +1633,7 @@ app.use(async (request, response, next) => {
   next();
 });
 
-// archived_at and archived_by come along because the archive screen shows a
-// record on its own now rather than a row with a button on the end, and a
-// restoration card that cannot say when or by whom is not a card worth
-// opening.
+// archived_at and archived_by because the restore card says when and by whom
 const USER_SELECT = `
   SELECT s.staff_id, s.first_name, s.middle_name, s.last_name, s.full_name,
          s.phone, s.is_active,
@@ -1186,33 +1649,56 @@ const USER_SELECT = `
 
 // ==========================================
 // AUTH
+//
+// The address is always trimmed. A password is tried again with its edges
+// trimmed while the account is still on the system-made password (which never
+// contains a space); one a person chose is checked exactly as typed. Gmail
+// ignores dots, so an address that matches nothing is tried once more with
+// the dots removed, for the Google domains only.
 // ==========================================
+const LOGIN_SELECT =
+  `SELECT u.user_id, u.staff_id, u.email, u.password, u.must_change_password,
+          s.first_name, s.middle_name, s.last_name, s.full_name, s.is_active,
+          r.role_id, r.role_name
+   FROM users u
+   JOIN staff s ON s.staff_id = u.staff_id
+   JOIN roles r ON r.role_id = s.role_id`;
+
+async function findLoginByEmail(email) {
+  const address = String(email).trim();
+
+  let [rows] = await db.query(`${LOGIN_SELECT} WHERE u.email = ? LIMIT 1`, [address]);
+  if (rows.length > 0) return rows[0];
+
+  const at = address.lastIndexOf("@");
+  if (at < 1) return null;
+  const domain = address.slice(at + 1).toLowerCase();
+  if (domain !== "gmail.com" && domain !== "googlemail.com") return null;
+
+  const local = address.slice(0, at).replace(/\./g, "");
+  [rows] = await db.query(
+    `${LOGIN_SELECT}
+     WHERE LOWER(SUBSTRING_INDEX(u.email, '@', -1)) IN ('gmail.com', 'googlemail.com')
+       AND REPLACE(SUBSTRING_INDEX(u.email, '@', 1), '.', '') = ?
+     LIMIT 1`,
+    [local]);
+  return rows[0] || null;
+}
+
 app.post("/api/login", async (request, response) => {
-  const { email, password } = request.body;
+  const email = String(request.body.email || "").trim();
+  const password = request.body.password;
 
   if (!email || !password) {
     return response.status(400).json({ error: "Email and password are required" });
   }
 
   try {
-    // the password is checked here, not in the query, because the column
-    // holds a hash that no plain value will ever equal
-    const [rows] = await db.query(
-      `SELECT u.user_id, u.staff_id, u.email, u.password, u.must_change_password,
-              s.first_name, s.middle_name, s.last_name, s.full_name, s.is_active,
-              r.role_id, r.role_name
-       FROM users u
-       JOIN staff s ON s.staff_id = u.staff_id
-       JOIN roles r ON r.role_id = s.role_id
-       WHERE u.email = ?
-       LIMIT 1`,
-      [email]
-    );
+    // checked here, not in the query: the column holds a hash
+    const found = await findLoginByEmail(email);
+    const rows = found ? [found] : [];
 
-    // A failed sign-in is the one event an audit trail is most often opened
-    // for, and it was the one event this system did not record. Both failures
-    // are logged; the reply stays identical either way, so nobody can use the
-    // difference to find out which addresses exist.
+    // both failures are logged; the reply stays identical so nobody can tell which addresses exist
     if (rows.length === 0) {
       await writeAuditLog(
         { staffId: null, request: request },
@@ -1225,7 +1711,12 @@ app.post("/api/login", async (request, response) => {
 
     const user = rows[0];
 
-    if (!(await verifyPassword(password, user.password))) {
+    const trimmed = String(password).trim();
+    const accepted = await verifyPassword(password, user.password) ||
+      (user.must_change_password && trimmed !== password &&
+       await verifyPassword(trimmed, user.password));
+
+    if (!accepted) {
       await writeAuditLog(
         { staffId: user.staff_id, roleName: user.role_name, request: request },
         "LOGIN_FAILURE",
@@ -1235,13 +1726,11 @@ app.post("/api/login", async (request, response) => {
       return response.status(401).json({ error: "Invalid email or password" });
     }
 
-    // A database restored from an older backup can bring back rows whose
-    // password column still holds readable text. Upgrading that row here, on
-    // the sign-in that proves the password, means a restore does not lock
-    // people out until somebody restarts the server.
+    // a database restored from an older backup can bring back readable passwords;
+    // upgrade the row on the sign-in that proves it
     if (!isHashed(user.password)) {
       await db.query("UPDATE users SET password = ? WHERE user_id = ?",
-        [await hashPassword(password), user.user_id]);
+        [await hashPassword(user.password), user.user_id]);
     }
 
     delete user.password;   // never let the hash leave the server
@@ -1264,6 +1753,20 @@ app.post("/api/login", async (request, response) => {
     );
 
     const token = startSession(user);
+
+    const previous = [...sessions.values()]
+      .filter((session) => session.staffId === user.staff_id).length - 1;
+    endSessionsForStaff(user.staff_id, token,
+      "This account signed in on another device, so this screen was signed out.");
+    if (previous > 0) {
+      await writeAuditLog(
+        { staffId: user.staff_id, roleName: user.role_name, request: request },
+        "SESSION_REPLACED",
+        `${user.email} signed in again; ${previous} earlier session${previous === 1 ? "" : "s"} ended`,
+        { sessions_ended: previous }
+      );
+    }
+
     response.cookie("sid", token, {
       httpOnly: true,                              // JavaScript on the page cannot read it
       sameSite: "strict",                          // not sent from another site
@@ -1271,8 +1774,7 @@ app.post("/api/login", async (request, response) => {
       path: "/"
     });
 
-    // the browser still gets the profile, but only to draw the screen with.
-    // Nothing it sends back is trusted for permission decisions.
+    // the profile is only for drawing the screen; nothing sent back is trusted
     response.json({ message: "Login successful", user });
   } catch (error) {
     console.error("Login failed:", error.message);
@@ -1281,7 +1783,6 @@ app.post("/api/login", async (request, response) => {
 });
 
 app.post("/api/logout", async (request, response) => {
-  // written before the session is torn down, while it still knows the role
   await writeAuditLog(request, "LOGOUT", `${request.actor.email} signed out`);
 
   endSession(request);
@@ -1289,15 +1790,8 @@ app.post("/api/logout", async (request, response) => {
   response.json({ message: "Signed out" });
 });
 
-// ==========================================
-// HEARTBEAT
-//
-// A page left open makes no requests, and a person reading a report for ten
-// minutes is not gone. This is the one call the browser makes on its own, so
-// the staff directory can tell somebody who is here from somebody who closed
-// their laptop. It touches nothing: the access check ahead of it has already
-// refreshed the session's clock.
-// ==========================================
+// Heartbeat: a page left open makes no requests, so the browser sends this
+// once a minute to stay present. The access check ahead of it refreshes the session.
 app.post("/api/heartbeat", (request, response) => {
   response.json({
     ok: true,
@@ -1309,15 +1803,9 @@ app.post("/api/heartbeat", (request, response) => {
 // ==========================================
 // THE LIVE CHANNEL
 //
-// One open GET per signed-in browser. Nothing is sent down it but "something
-// in this area moved, at this version"; the browser decides whether it cares
-// and then asks through the normal routes, with the normal access checks.
-//
-// Three things make it survive a shop network rather than only a laptop:
-// a comment every twenty-five seconds so a proxy does not time the connection
-// out as idle, X-Accel-Buffering off so nginx does not hold the frames back
-// waiting for a buffer to fill, and Last-Event-ID honoured on reconnect so a
-// browser that dropped for a minute catches up instead of guessing.
+// One open GET per signed-in browser. A comment every twenty-five seconds
+// keeps a proxy from timing it out, X-Accel-Buffering off keeps nginx from
+// holding frames, and Last-Event-ID lets a reconnecting browser catch up.
 // ==========================================
 const LIVE_PING_MS = 25000;
 
@@ -1331,7 +1819,6 @@ app.get("/api/events", (request, response) => {
     "X-Accel-Buffering": "no"
   });
 
-  // browsers wait this long before reconnecting after a drop
   response.write("retry: 3000\n\n");
 
   const client = {
@@ -1343,8 +1830,7 @@ app.get("/api/events", (request, response) => {
   };
   liveClients.add(client);
 
-  // What was missed while the browser was away. A gap wider than the log is
-  // said so plainly rather than papered over with a partial history.
+  // what was missed while away; a gap wider than the log says so plainly
   const lastSeen = parseInt(request.headers["last-event-id"], 10);
   const missed = changesSince(lastSeen);
 
@@ -1363,9 +1849,7 @@ app.get("/api/events", (request, response) => {
     }
   }
 
-  // A page held open on this stream is a person at a screen, so the ping is
-  // also what keeps their session alive and marks them present. Without this
-  // a reader would be signed out mid-report by their own stillness.
+  // the ping also keeps the session alive and marks the person present
   const ping = setInterval(() => {
     const session = client.token ? sessions.get(client.token) : null;
 
@@ -1395,7 +1879,6 @@ app.get("/api/events", (request, response) => {
   request.on("aborted", close);
 });
 
-// what the live channel currently looks like, for the administrator's screen
 app.get("/api/events/status", (request, response) => {
   response.json({
     version: changeVersion,
@@ -1408,8 +1891,7 @@ app.get("/api/events/status", (request, response) => {
 app.post("/api/change-password", async (request, response) => {
   const { newPassword } = request.body;
 
-  // the account being changed is always the one that is signed in,
-  // never one named in the request body
+  // always the signed-in account, never one named in the body
   const userId = request.actor.userId;
 
   if (!userId || typeof newPassword !== "string" || newPassword.length < 8) {
@@ -1417,6 +1899,22 @@ app.post("/api/change-password", async (request, response) => {
   }
 
   try {
+    // choosing the temporary password again keeps it; checked here against the
+    // stored hash because the screen never sees it
+    const [current] = await db.query(
+      "SELECT password FROM users WHERE user_id = ? AND must_change_password = TRUE",
+      [userId]
+    );
+    const sameAsGiven = current.length > 0 && (
+      await verifyPassword(newPassword, current[0].password) ||
+      (newPassword.trim() !== newPassword &&
+       await verifyPassword(newPassword.trim(), current[0].password)));
+    if (sameAsGiven) {
+      return response.status(400).json({
+        error: "Choose a password that is different from the temporary one you were given"
+      });
+    }
+
     const [result] = await db.query(
       "UPDATE users SET password = ?, must_change_password = FALSE WHERE user_id = ? AND must_change_password = TRUE",
       [await hashPassword(newPassword), userId]
@@ -1426,22 +1924,106 @@ app.post("/api/change-password", async (request, response) => {
       return response.status(403).json({ error: "Password change is not allowed" });
     }
 
-    response.json({ message: "Password changed successfully" });
+    await writeAuditLog(request, "CHANGE_OWN_PASSWORD",
+      `${request.actor.email} chose their own password on first sign-in`);
+
+    signOutAfterPasswordChange(request, response);
+    response.json({ message: "Password changed successfully", signedOut: true });
   } catch (error) {
     console.error("Password update failed:", error.message);
     response.status(500).json({ error: "Unable to change password" });
   }
 });
 
+// A changed password ends every session, this one included: the old password
+// may be known to somebody else, and signing in with the new one straight
+// away is what proves it was typed right.
+const PASSWORD_CHANGED =
+  "Your password was changed. Sign in again with the new one.";
+
+function signOutAfterPasswordChange(request, response) {
+  endSessionsForStaff(request.actor.staffId, null, PASSWORD_CHANGED);
+  response.clearCookie("sid", { path: "/" });
+}
+
 // ==========================================
-// YOUR OWN ACCOUNT
-//
-// Every role reaches these three routes from the account menu in the top right
-// corner. They always act on the signed-in account: the staff id comes from the
-// session, so nobody can edit somebody else's details by changing a request.
-// A role is deliberately not editable here; only an administrator moves people
-// between roles.
+// YOUR OWN ACCOUNT -- always the signed-in account; the role is not editable here
 // ==========================================
+// What the signed-in person is, for the screens to shape themselves around.
+// A convenience for the page and never a permission.
+app.get("/api/me/access", async (request, response) => {
+  const actor = request.actor;
+
+  // the connected systems this person may reach; still a convenience, not a permission
+  let systems = [];
+  try {
+    if (actor.roleName === ADMIN) {
+      const [rows] = await db.query(`${SYSTEM_SELECT} ORDER BY cs.system_kind, cs.system_name`);
+      systems = rows.map((row) => ({ key: row.system_key, name: row.system_name, ...ALL_ACCESS }));
+    } else {
+      const held = await permissionsOf(actor.staffId);
+      systems = [...held.entries()].map(([key, access]) => ({
+        key, monitor: access.monitor, manage: access.manage, control: access.control
+      }));
+    }
+  } catch (error) {
+    systems = [];
+  }
+
+  response.json({
+    staffId: actor.staffId,
+    roleName: actor.roleName,
+    page: ROLE_PAGES[actor.roleName] || "/Login.html",
+    isAdmin: actor.roleName === ADMIN,
+    isManagement: MANAGEMENT.includes(actor.roleName),
+    canEditOwnDetails: actor.roleName !== ADMIN,
+    canChangeOwnPassword: actor.roleName === ADMIN,
+    canEditOwnEmail: false,
+    canReachSystems: systems.length > 0,
+    systems: systems
+  });
+});
+
+// What this person's menu holds, and what is waiting on it. A convenience
+// for the page; the access hook reads the same table for itself.
+app.get("/api/me/features", async (request, response) => {
+  try {
+    const features = await featuresOf(request.actor.roleName);
+    response.json({
+      roleName: request.actor.roleName,
+      features: features,
+      held: features.filter((feature) => feature.held).map((feature) => feature.key)
+    });
+  } catch (error) {
+    console.error("Reading a role's screens failed:", error.message);
+    response.status(500).json({ error: "Unable to read which screens you hold" });
+  }
+});
+
+app.get("/api/me/counts", async (request, response) => {
+  try {
+    response.json(await featureCountsFor(request.actor));
+  } catch (error) {
+    console.error("Counting what is waiting failed:", error.message);
+    response.status(500).json({ error: "Unable to count what is waiting" });
+  }
+});
+
+
+// A credential (the sign-in email, the password, the role) is not changed by
+// its own holder: a standard user edits name and phone only, and a new
+// password comes from the administrator's Reset Password. The administrator
+// keeps the right to change their own password.
+function notOwnCredentials(request, response, next) {
+  if (request.actor && request.actor.roleName !== ADMIN) {
+    return response.status(403).json({
+      error: "Your password is reset by the System Administrator, who sends a new " +
+             "one to your email. You choose your own on the next sign-in."
+    });
+  }
+  next();
+}
+
 app.get("/api/me", async (request, response) => {
   try {
     const [rows] = await db.query(`${USER_SELECT} WHERE s.staff_id = ?`, [request.actor.staffId]);
@@ -1457,7 +2039,7 @@ app.get("/api/me", async (request, response) => {
   }
 });
 
-app.put("/api/me", async (request, response) => {
+app.put("/api/me", notOwnDetailsIfAdmin, async (request, response) => {
   const { firstName, middleName, lastName, phone, email } = request.body;
   const actor = request.actor;
 
@@ -1465,21 +2047,24 @@ app.put("/api/me", async (request, response) => {
     return response.status(400).json({ error: "First name and last name are required" });
   }
 
+  // the email is a credential (see notOwnCredentials); refused rather than dropped
   if (email !== undefined && email !== null && String(email).trim() !== "" &&
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email).trim())) {
-    return response.status(400).json({ error: "That email address does not look right" });
+      String(email).trim().toLowerCase() !== String(actor.email || "").toLowerCase()) {
+    return response.status(403).json({
+      error: "Your sign-in email is changed by the System Administrator from the staff directory."
+    });
   }
 
   const phoneProblem = phoneComplaint(phone);
   if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
   try {
-    // the role passed in is the one already on file, never one from the browser
+    // the role and the email are the ones on file, never from the browser
     const output = await callProcedure(
       "CALL sp_update_staff_account(?, ?, ?, ?, ?, ?, ?, @status_code, @message)",
       [actor.staffId, String(firstName).trim(), cleanMiddleName(middleName),
        String(lastName).trim(), cleanPhone(phone),
-       actor.roleId, email ? String(email).trim() : null],
+       actor.roleId, actor.email || null],
       ["status_code", "message"]
     );
 
@@ -1487,11 +2072,6 @@ app.put("/api/me", async (request, response) => {
       return response.status(output.status_code).json({ error: output.message });
     }
 
-    // the session caches the email for the audit trail, so keep it current
-    if (email && String(email).trim() !== "") actor.email = String(email).trim();
-
-    // the request, not the bare staff id: an entry that cannot say which role
-    // the person held or which machine it came from is half an audit entry
     await writeAuditLog(request, "UPDATE_OWN_PROFILE", `${actor.email} updated their own details`);
 
     const [rows] = await db.query(`${USER_SELECT} WHERE s.staff_id = ?`, [actor.staffId]);
@@ -1502,7 +2082,7 @@ app.put("/api/me", async (request, response) => {
   }
 });
 
-app.post("/api/me/password", async (request, response) => {
+app.post("/api/me/password", notOwnCredentials, async (request, response) => {
   const { currentPassword, newPassword } = request.body;
   const actor = request.actor;
 
@@ -1514,8 +2094,10 @@ app.post("/api/me/password", async (request, response) => {
     return response.status(400).json({ error: "Enter your current password" });
   }
 
-  if (currentPassword === newPassword) {
-    return response.status(400).json({ error: "The new password must be different from the current one" });
+  // the old password typed in the new box from habit is refused before the
+  // database is asked
+  if (newPassword === currentPassword) {
+    return response.status(400).json({ error: "The new password must be different from your current password" });
   }
 
   try {
@@ -1525,8 +2107,6 @@ app.post("/api/me/password", async (request, response) => {
       return response.status(404).json({ error: "This account has no login yet." });
     }
 
-    // knowing the current password is what proves an unattended screen
-    // is not being used by somebody else
     if (!(await verifyPassword(currentPassword, rows[0].password))) {
       return response.status(403).json({ error: "That is not your current password" });
     }
@@ -1536,8 +2116,11 @@ app.post("/api/me/password", async (request, response) => {
       [await hashPassword(newPassword), actor.staffId]
     );
 
-    await writeAuditLog(request, "CHANGE_OWN_PASSWORD", `${actor.email} changed their own password`);
-    response.json({ message: "Your password was changed." });
+    await writeAuditLog(request, "CHANGE_OWN_PASSWORD",
+      `${actor.email} changed their own password; every session on the old one was ended`);
+
+    signOutAfterPasswordChange(request, response);
+    response.json({ message: "Your password was changed.", signedOut: true });
   } catch (error) {
     console.error("Own password change failed:", error.message);
     response.status(500).json({ error: "Unable to change your password" });
@@ -1556,36 +2139,15 @@ app.get("/api/roles", async (request, response) => {
   }
 });
 
-// (GET /api/products was removed: nothing called it, and
-//  GET /api/inventory/products already returns a better shaped list)
+// (GET /api/products was removed; GET /api/inventory/products replaces it)
 
 // ==========================================
 // STAFF ACCOUNTS
 // ==========================================
 
-// ==========================================
-// HANDING OVER A NEW PASSWORD
-//
-// Two ways, and the screen is told which one happened, because they leave the
-// administrator with different jobs to do.
-//
-// Mail is the one that is meant to happen: the password goes to the person it
-// belongs to and to nobody else, and it is never on the administrator's
-// screen at all.
-//
-// The other way is the fallback, and it exists because the alternative is
-// worse. A shop whose mail is not set up yet, or whose internet is down, or
-// whose mail provider is refusing the app password this afternoon, would
-// otherwise be a shop that cannot take on a new cashier. So the account is
-// created either way and the password comes back to the screen to be read
-// out and handed over, with the reason it is on the screen rather than in an
-// inbox.
-//
-// A password is NEVER written to the audit trail, on either path. The trail
-// records that an account was created and who created it, which is the fact
-// an audit is for; the secret itself would turn the log into a list of
-// working credentials for anybody who can read logs.
-// ==========================================
+// Handing over a new password: by mail when it works, otherwise back to the
+// administrator's screen to be read out, with the reason. A password is
+// NEVER written to the audit trail on either path.
 async function deliverFirstPassword({ email, name, roleName, password }) {
   if (!isMailConfigured()) {
     return {
@@ -1610,9 +2172,7 @@ async function deliverFirstPassword({ email, name, roleName, password }) {
 
     return { emailed: true };
   } catch (error) {
-    // the reason is passed on rather than swallowed: "Username and Password
-    // not accepted" tells the administrator to go and fix the app password,
-    // and "could not send the email" tells them nothing
+    // the reason is passed on: "Username and Password not accepted" is the diagnosis
     console.error("Sending the first password failed:", error.message);
     return {
       emailed: false,
@@ -1622,49 +2182,22 @@ async function deliverFirstPassword({ email, name, roleName, password }) {
   }
 }
 
-// the role a new account was given, for the mail that announces it
 async function roleNameById(roleId) {
   const [rows] = await db.query(
     "SELECT role_name FROM roles WHERE role_id = ?", [roleId]);
   return (rows[0] && rows[0].role_name) || "staff";
 }
 
-// ==========================================
-// DRAFTS: THE ACCOUNT THAT HAS NOT BEEN MADE YET
-//
-// Creating an account is two requests now, not one, because there is a person
-// reading the details in between. The administrator fills the form, the server
-// works out everything the account will consist of -- including the password,
-// which nobody types -- and hands that back to be read. Nothing exists in the
-// database yet. On confirmation the account is created from the draft and the
-// password is sent.
-//
-// WHY THE DRAFT LIVES HERE AND NOT IN THE BROWSER
-//
-// The obvious shortcut is to send the details and the password down, show
-// them, and send them all back up on confirmation. That makes the review a
-// piece of theatre: whatever comes back up is what gets created, so the thing
-// confirmed on screen and the thing written to the database are only related
-// by the browser's good manners. A confirmation step is worth having exactly
-// because what was read is what happens.
-//
-// So the second request carries a draft id and nothing else. Every field --
-// the name, the role, the email, the password -- is read from this map, on the
-// server, where the browser cannot reach it between the two calls.
-//
-// It is deliberately in memory. A draft is a few seconds of one person's
-// attention; a table for it would outlive the decision it belongs to, and a
-// restart is allowed to lose one. Each draft is held to one administrator, so
-// nobody can confirm somebody else's, and expires on its own so an abandoned
-// form does not leave a password sitting in memory all afternoon.
-// ==========================================
+// Drafts: creating an account is two requests with a person reading the
+// details in between. The draft lives here, in memory, keyed by id and held
+// to one administrator, so what was confirmed on screen is what is written.
+// Drafts expire on their own.
 const accountDrafts = new Map();      // draftId -> { by, kind, details, password, expires }
 const DRAFT_LIFE_MS = 10 * 60 * 1000; // long enough to read a card, short enough to forget
 const DRAFT_MAX = 200;                // one runaway client cannot grow this without limit
 
 function newAccountDraft(staffId, kind, details, password) {
-  // A form left open is the ordinary case, not the exception, so the sweep is
-  // here rather than on a timer: the map only grows when it is being used.
+  // swept here rather than on a timer: the map only grows when it is being used
   const now = Date.now();
   for (const [id, draft] of accountDrafts) {
     if (draft.expires <= now) accountDrafts.delete(id);
@@ -1687,9 +2220,8 @@ function newAccountDraft(staffId, kind, details, password) {
   return { draftId, expiresInSeconds: Math.round(DRAFT_LIFE_MS / 1000) };
 }
 
-// Reads a draft and removes it in the same breath. A draft is good for one
-// confirmation: without that, a repeated request -- a double-clicked button,
-// a retried POST on a slow shop network -- is a second account.
+// Reads a draft and removes it: a draft is good for one confirmation, so a
+// double-clicked button is not a second account.
 function takeAccountDraft(draftId, staffId, kind) {
   const draft = accountDrafts.get(String(draftId || ""));
 
@@ -1709,14 +2241,8 @@ function takeAccountDraft(draftId, staffId, kind) {
   return { draft };
 }
 
-// Every staff member, including anyone with no login account yet, each row
-// carrying whether its owner is signed in at this moment.
-//
-// The two optional filters are applied here rather than in the browser so a
-// directory that grows past a few hundred people does not have to travel
-// across the wire in full to answer "show me the inactive ones". The reply is
-// still a plain array either way, because every screen that already reads
-// this route expects one.
+// Every staff member, including anyone with no login, with presence. The
+// filters are applied here so a large directory need not travel in full.
 app.get("/api/users", async (request, response) => {
   const status = String(request.query.status || "all").toLowerCase();
   const search = String(request.query.search || "").trim();
@@ -1727,9 +2253,10 @@ app.get("/api/users", async (request, response) => {
   if (status === "active") where.push("s.is_active = TRUE");
   else if (status === "inactive") where.push("s.is_active = FALSE");
 
+  // starts-with, not contains; see searchPrefix
   if (search !== "") {
     where.push("(s.full_name LIKE ? OR u.email LIKE ? OR r.role_name LIKE ?)");
-    const like = `%${search}%`;
+    const like = searchPrefix(search);
     params.push(like, like, like);
   }
 
@@ -1758,19 +2285,8 @@ app.get("/api/users/:staffId", async (request, response) => {
   }
 });
 
-// ==========================================
-// STEP 1 OF 2: WORK OUT THE ACCOUNT, CREATE NOTHING
-//
-// Checks everything that can be checked before anything is written -- the
-// name, the phone number, the role, the address, and whether that address
-// already signs in somewhere -- then makes the password and hands the whole
-// account back to be read. A refusal here costs nothing, which is the point:
-// finding out the email is taken is much better before the review card than
-// after it.
-//
-// Nothing is in the database when this returns. POST /api/users is what
-// writes, and it writes from the draft rather than from the browser.
-// ==========================================
+// Step 1 of 2: check everything, make the password, hand the account back to
+// be read. Nothing is in the database when this returns.
 app.post("/api/users/draft", async (request, response) => {
   const { firstName, middleName, lastName, phone, roleId, email } = request.body;
 
@@ -1778,9 +2294,7 @@ app.post("/api/users/draft", async (request, response) => {
     return response.status(400).json({ error: "Name, role and email are required" });
   }
 
-  // The email is not just the username any more, it is where the password
-  // goes, so an address that cannot receive one is refused here rather than
-  // becoming an account nobody can get into.
+  // the email is where the password goes, so an address that cannot receive one is refused
   const address = String(email).trim();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
     return response.status(400).json({ error: "That email address does not look right" });
@@ -1796,10 +2310,7 @@ app.post("/api/users/draft", async (request, response) => {
       return response.status(400).json({ error: "The selected role does not exist." });
     }
 
-    // The procedure checks this too, and has to: between this draft and its
-    // confirmation somebody else may take the address. Checking it here as
-    // well is what keeps the answer in front of the form instead of arriving
-    // after the review card has been read and confirmed.
+    // the procedure checks this too; checking here keeps the answer in front of the form
     const [taken] = await db.query("SELECT user_id FROM users WHERE email = ?", [address]);
     if (taken.length > 0) {
       return response.status(409).json({
@@ -1822,18 +2333,14 @@ app.post("/api/users/draft", async (request, response) => {
     const { draftId, expiresInSeconds } =
       newAccountDraft(request.actor.staffId, "staff", details, password);
 
-    // The one place in this system a readable password crosses the wire on
-    // purpose. It is the whole point of the step: the administrator is being
-    // asked to check the account before it is made, and the password is part
-    // of the account.
+    // the one place a readable password crosses the wire on purpose
     response.json({
       draftId: draftId,
       expiresInSeconds: expiresInSeconds,
       password: password,
       willEmail: isMailConfigured(),
       ...details,
-      // the name as the directory will spell it, worked out the same way
-      // staff.full_name does, so the review says what the list will say
+      // the name as the directory will spell it (same as staff.full_name)
       fullName: details.firstName +
         (details.middleName ? ` ${details.middleName[0].toUpperCase()}.` : "") +
         ` ${details.lastName}`
@@ -1844,13 +2351,7 @@ app.post("/api/users/draft", async (request, response) => {
   }
 });
 
-// ==========================================
-// STEP 2 OF 2: CREATE IT, AND SEND THE PASSWORD
-//
-// Takes a draft id and nothing else. Every value written here came from the
-// draft the administrator read, so what was confirmed on screen is what
-// exists afterwards.
-// ==========================================
+// Step 2 of 2: create it from the draft and send the password.
 app.post("/api/users", async (request, response) => {
   const { draft, error } = takeAccountDraft(
     request.body.draftId, request.actor.staffId, "staff");
@@ -1871,8 +2372,7 @@ app.post("/api/users", async (request, response) => {
       return response.status(output.status_code).json({ error: output.message });
     }
 
-    // read back rather than rebuilt from the body, so the mail greets the
-    // person by the same name the directory shows: first, middle initial, last
+    // read back so the mail greets the person by the name the directory shows
     const [created] = await db.query(
       "SELECT full_name FROM staff WHERE staff_id = ?", [output.staff_id]);
     const name = (created[0] && created[0].full_name) || details.firstName;
@@ -1884,8 +2384,7 @@ app.post("/api/users", async (request, response) => {
       password: draft.password
     });
 
-    // Whether the mail went is part of what happened and belongs in the
-    // trail. The password itself never is.
+    // whether the mail went is in the trail; the password never is
     await writeAuditLog(
       request,
       "CREATE_ACCOUNT",
@@ -1910,7 +2409,7 @@ app.post("/api/users", async (request, response) => {
   }
 });
 
-app.put("/api/users/:staffId", async (request, response) => {
+app.put("/api/users/:staffId", notOwnAccount, async (request, response) => {
   const { firstName, middleName, lastName, phone, roleId, email } = request.body;
 
   if (!firstName || !lastName || !roleId) {
@@ -1921,8 +2420,7 @@ app.put("/api/users/:staffId", async (request, response) => {
   if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
   try {
-    // read before writing, so the audit entry can say what actually changed
-    // rather than only that something did
+    // read before writing, so the audit entry can say what changed
     const [existing] = await db.query(
       `SELECT s.first_name, s.middle_name, s.last_name, s.phone,
               s.role_id, u.email
@@ -1943,7 +2441,6 @@ app.put("/api/users/:staffId", async (request, response) => {
       return response.status(output.status_code).json({ error: output.message });
     }
 
-    // the role may have changed, so the old session's cached role is no longer safe
     endSessionsForStaff(request.params.staffId);
 
     const after = {
@@ -1968,7 +2465,7 @@ app.put("/api/users/:staffId", async (request, response) => {
   }
 });
 
-app.patch("/api/users/:staffId/status", async (request, response) => {
+app.patch("/api/users/:staffId/status", notOwnAccount, async (request, response) => {
   const isActive = request.body.isActive === true;
 
   try {
@@ -1982,7 +2479,6 @@ app.patch("/api/users/:staffId/status", async (request, response) => {
       return response.status(output.status_code).json({ error: output.message });
     }
 
-    // a deactivated account must lose access now, not when its session lapses
     if (!isActive) endSessionsForStaff(request.params.staffId);
 
     await writeAuditLog(
@@ -1999,16 +2495,9 @@ app.patch("/api/users/:staffId/status", async (request, response) => {
   }
 });
 
-// ==========================================
-// A LOGIN FOR SOMEBODY WHO ALREADY HAS A STAFF RECORD
-//
-// The same act as creating an account, arriving from the other direction, so
-// it goes through the same two steps and the same review card: work out the
-// login and its password, hand it back to be read, create it on
-// confirmation. The staff record already exists, so all that is asked for is
-// the address.
-// ==========================================
-app.post("/api/users/:staffId/account/draft", async (request, response) => {
+// A login for somebody who already has a staff record: the same two steps
+// and the same review card; only the address is asked for.
+app.post("/api/users/:staffId/account/draft", notOwnAccount, async (request, response) => {
   const { email } = request.body;
   const staffId = Number(request.params.staffId);
 
@@ -2072,7 +2561,7 @@ app.post("/api/users/:staffId/account/draft", async (request, response) => {
   }
 });
 
-app.post("/api/users/:staffId/account", async (request, response) => {
+app.post("/api/users/:staffId/account", notOwnAccount, async (request, response) => {
   const { draft, error } = takeAccountDraft(
     request.body.draftId, request.actor.staffId, "login");
 
@@ -2080,8 +2569,7 @@ app.post("/api/users/:staffId/account", async (request, response) => {
 
   const details = draft.details;
 
-  // the draft carries which staff record it was prepared for, so a draft
-  // cannot be confirmed against a different person by changing the URL
+  // a draft cannot be confirmed against a different person by changing the URL
   if (details.staffId !== Number(request.params.staffId)) {
     return response.status(409).json({
       error: "That review was prepared for a different staff record."
@@ -2129,18 +2617,26 @@ app.post("/api/users/:staffId/account", async (request, response) => {
   }
 });
 
-app.post("/api/users/:staffId/reset-password", async (request, response) => {
-  const { newPassword } = request.body;
-
-  // the length rule now has to live here: the procedure only ever sees a hash
-  if (typeof newPassword !== "string" || newPassword.length < 8) {
-    return response.status(400).json({ error: "Password must contain at least 8 characters" });
-  }
-
+// Resetting a password is the same machinery as the first one: the server
+// makes it, mails it, and every session the person holds is ended.
+app.post("/api/users/:staffId/reset-password", notOwnAccount, async (request, response) => {
   try {
+    const [rows] = await db.query(
+      `SELECT s.full_name, u.email, r.role_name
+       FROM staff s JOIN roles r ON r.role_id = s.role_id
+       LEFT JOIN users u ON u.staff_id = s.staff_id
+       WHERE s.staff_id = ?`,
+      [request.params.staffId]);
+
+    if (rows.length === 0) return response.status(404).json({ error: "Staff record not found" });
+    if (!rows[0].email) {
+      return response.status(404).json({ error: "This staff member has no login account." });
+    }
+
+    const password = generatePassword();
     const output = await callProcedure(
       "CALL sp_reset_user_password(?, ?, @status_code, @message)",
-      [request.params.staffId, await hashPassword(newPassword)],
+      [request.params.staffId, await hashPassword(password)],
       ["status_code", "message"]
     );
 
@@ -2148,8 +2644,30 @@ app.post("/api/users/:staffId/reset-password", async (request, response) => {
       return response.status(output.status_code).json({ error: output.message });
     }
 
-    await writeAuditLog(request, "RESET_PASSWORD", `Staff #${request.params.staffId}`);
-    response.json({ message: output.message });
+    endSessionsForStaff(Number(request.params.staffId), null,
+      "Your password was reset by the administrator. Sign in with the one that was sent to you.");
+
+    const delivery = await deliverFirstPassword({
+      email: rows[0].email,
+      name: rows[0].full_name,
+      roleName: rows[0].role_name,
+      password: password
+    });
+
+    await writeAuditLog(request, "RESET_PASSWORD",
+      `Password reset for ${rows[0].email}` +
+        (delivery.emailed ? " and the new one was emailed" : " (password not emailed)"),
+      { staff_id: Number(request.params.staffId), email: rows[0].email,
+        password_emailed: delivery.emailed });
+
+    response.json({
+      message: "Password reset. The new one has to be changed on the next sign-in.",
+      name: rows[0].full_name,
+      email: rows[0].email,
+      emailed: delivery.emailed,
+      password: delivery.password,
+      reason: delivery.reason
+    });
   } catch (error) {
     console.error("Password reset failed:", error.message);
     response.status(500).json({ error: "Unable to reset the password" });
@@ -2157,12 +2675,8 @@ app.post("/api/users/:staffId/reset-password", async (request, response) => {
 });
 
 // ==========================================
-// AUDIT LOGS
+// AUDIT LOGS -- newest first, filtered by kind, date range and free text
 // ==========================================
-// The trail, newest first, with the four filters the screen offers: the kind
-// of action, a date range, and free text across the person, the action and
-// the detail. An entry keeps the role it was written under; only entries from
-// before that column existed fall back to the role the person holds now.
 app.get("/api/audit-logs", async (request, response) => {
   const actionType = String(request.query.actionType || "all").toUpperCase();
   const search = String(request.query.search || "").trim();
@@ -2179,8 +2693,7 @@ app.get("/api/audit-logs", async (request, response) => {
     params.push(actionType);
   }
 
-  // a date is inclusive of the whole day, which is what somebody typing one
-  // into a box means by it
+  // a date is inclusive of the whole day
   if (/^\d{4}-\d{2}-\d{2}$/.test(from)) {
     where.push("l.created_at >= ?");
     params.push(`${from} 00:00:00`);
@@ -2192,7 +2705,7 @@ app.get("/api/audit-logs", async (request, response) => {
 
   if (search !== "") {
     where.push("(s.full_name LIKE ? OR l.action LIKE ? OR l.details LIKE ? OR l.ip_address LIKE ?)");
-    const like = `%${search}%`;
+    const like = searchPrefix(search);
     params.push(like, like, like, like);
   }
 
@@ -2220,7 +2733,6 @@ app.get("/api/audit-logs", async (request, response) => {
   }
 });
 
-// the list of action types, so the filter offers exactly what the trail holds
 app.get("/api/audit-logs/types", async (request, response) => {
   try {
     const [rows] = await db.query(
@@ -2238,33 +2750,18 @@ app.get("/api/audit-logs/types", async (request, response) => {
 // ==========================================
 // BACKUP & RECOVERY
 //
-// A backup is a complete .sql file: the schema, every row of every table,
-// the two views and the stored procedures. It is written into the project's
-// backups/ folder and named after the moment it was taken, so the folder
-// becomes a history rather than one file that keeps being overwritten.
-//
-// The same file opens in MySQL Workbench and runs there, which is what makes
-// it a real backup instead of an export only this application understands.
+// A backup is a complete .sql file (schema, rows, views, procedures) written
+// into backups/ and named after the moment it was taken. It opens and runs in
+// MySQL Workbench.
 // ==========================================
 const BACKUP_DIR = path.join(__dirname, "..", "..", "backups");
 const BACKUP_PREFIX = "hardware_db_backup_";
 
-// ==========================================
-// TWO KINDS OF BACKUP, TOLD APART BY THEIR NAME
-//
-// A backup somebody pressed the button for is a decision: taken before a
-// restore, before a schema change, at the end of a day. It is kept until
-// somebody deletes it.
-//
-// An automatic one is a point on a rolling clock, and there is a new one
-// every minute. Those cannot all be kept -- see the note on the timer below
-// for the arithmetic -- so they carry their own prefix and are the only files
-// the rotation is ever allowed to delete. Nothing automatic can remove
-// something an administrator chose to keep.
-// ==========================================
+// Two kinds, told apart by name: one somebody pressed the button for is kept
+// until deleted; an automatic one carries its own prefix and is the only kind
+// the rotation may delete.
 const AUTO_PREFIX = "hardware_db_auto_";
 
-// only files this system wrote itself, never a path typed by the browser
 const BACKUP_NAME =
   /^hardware_db_(backup|auto)_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
 const AUTO_NAME = /^hardware_db_auto_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
@@ -2273,7 +2770,6 @@ async function ensureBackupFolder() {
   await fsp.mkdir(BACKUP_DIR, { recursive: true });
 }
 
-// 2026-09-04 14:07 local time -> hardware_db_backup_2026-09-04_1407.sql
 function backupFileName(when, prefix) {
   const pad = (number) => String(number).padStart(2, "0");
   const stamp = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}` +
@@ -2281,7 +2777,6 @@ function backupFileName(when, prefix) {
   return `${prefix || BACKUP_PREFIX}${stamp}.sql`;
 }
 
-// two backups inside the same minute must not overwrite each other
 async function freeBackupPath(when, prefix) {
   await ensureBackupFolder();
   const base = backupFileName(when, prefix);
@@ -2295,9 +2790,7 @@ async function freeBackupPath(when, prefix) {
   return { name, fullPath: path.join(BACKUP_DIR, name) };
 }
 
-// Generated columns are computed by MySQL from the other columns, so writing
-// them back is refused. They are read from the catalogue rather than listed by
-// hand, so a new generated column never silently breaks a restore.
+// generated columns cannot be written back; read from the catalogue so a new one never breaks a restore
 async function generatedColumnsOf(table) {
   const [rows] = await db.query(
     `SELECT COLUMN_NAME FROM information_schema.COLUMNS
@@ -2317,13 +2810,29 @@ async function listBaseTables() {
   return rows.map((row) => row.TABLE_NAME);
 }
 
+// in the order they can be created: a view that names another view goes after it
 async function listViews() {
   const [rows] = await db.query(
-    `SELECT TABLE_NAME FROM information_schema.VIEWS
+    `SELECT TABLE_NAME, VIEW_DEFINITION FROM information_schema.VIEWS
      WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME`,
     [DB_NAME]
   );
-  return rows.map((row) => row.TABLE_NAME);
+
+  const pending = rows.map((row) => ({
+    name: row.TABLE_NAME,
+    definition: String(row.VIEW_DEFINITION || "").toLowerCase()
+  }));
+  const ordered = [];
+
+  while (pending.length > 0) {
+    const index = pending.findIndex((view) =>
+      !pending.some((other) => other !== view &&
+        view.definition.includes(`\`${other.name.toLowerCase()}\``)));
+    const next = pending.splice(index === -1 ? 0 : index, 1)[0];
+    ordered.push(next.name);
+  }
+
+  return ordered;
 }
 
 async function listProcedures() {
@@ -2336,15 +2845,12 @@ async function listProcedures() {
   return rows.map((row) => row.ROUTINE_NAME);
 }
 
-// A DEFINER clause names the MySQL account that created the object. Restoring
-// on another computer, where that account does not exist, fails on it. Dropping
-// it is what lets one machine's backup open on another machine.
+// a DEFINER names an account that may not exist on another machine
 function stripDefiner(sql) {
   return String(sql).replace(/DEFINER\s*=\s*`[^`]*`@`[^`]*`\s*/gi, "");
 }
 
-// Writes the whole database to one .sql file and returns what it contains.
-// Pass AUTO_PREFIX to write one of the rotating automatic ones instead.
+// Writes the whole database to one .sql file. Pass AUTO_PREFIX for a rotating one.
 async function writeBackupFile(prefix) {
   const now = new Date();
   const { name, fullPath } = await freeBackupPath(now, prefix);
@@ -2373,7 +2879,6 @@ async function writeBackupFile(prefix) {
       `SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n`
     );
 
-    // views first, because a view that reads a table being rebuilt is invalid
     for (const view of views) {
       await write(`DROP VIEW IF EXISTS ${sqlName(view)};\n`);
     }
@@ -2398,7 +2903,6 @@ async function writeBackupFile(prefix) {
       const columns = Object.keys(rows[0]).filter((column) => !skip.includes(column));
       const columnList = columns.map((column) => sqlName(column)).join(", ");
 
-      // batched so a large table does not become one unreadable line
       for (let start = 0; start < rows.length; start += 100) {
         const batch = rows.slice(start, start + 100).map((row) =>
           "  (" + columns.map((column) => sqlValue(row[column])).join(", ") + ")"
@@ -2451,8 +2955,7 @@ async function writeBackupFile(prefix) {
 }
 
 // Splits a .sql file into statements the way a client does: quotes, comments
-// and DELIMITER are all respected, so a semicolon inside a procedure body or
-// inside a piece of text does not cut a statement in half.
+// and DELIMITER are respected.
 function splitSqlStatements(sql) {
   const statements = [];
   let delimiter = ";";
@@ -2463,7 +2966,6 @@ function splitSqlStatements(sql) {
     const character = sql[index];
     const rest = sql.slice(index);
 
-    // a DELIMITER line only counts at the start of a statement
     if (current.trim() === "" && /^delimiter[ \t]+/i.test(rest)) {
       const line = rest.slice(0, rest.indexOf("\n") === -1 ? rest.length : rest.indexOf("\n"));
       delimiter = line.replace(/^delimiter[ \t]+/i, "").trim() || ";";
@@ -2484,7 +2986,6 @@ function splitSqlStatements(sql) {
           continue;
         }
         if (sql[index] === quote) {
-          // '' inside a quoted string is an escaped quote, not the end of it
           if (sql[index + 1] === quote) {
             current += quote + quote;
             index += 2;
@@ -2534,22 +3035,9 @@ function splitSqlStatements(sql) {
 }
 
 // Runs a backup file back into the database on one connection, so the whole
-// restore either lands or leaves the database exactly as it was.
-// ==========================================
-// A RESTORE AND THE BACKUP TIMER MUST NOT OVERLAP
-//
-// A restore drops and rebuilds every table in turn. For the seconds that
-// takes, the database is neither the old contents nor the new ones. The
-// automatic backup below fires every sixty seconds and reads every table, so
-// left alone the two would eventually meet -- and what would land in the
-// backup folder is a dump of a half-restored database, indistinguishable
-// from a good one and useless as the thing you reach for next.
-//
-// So a restore raises this flag and the timer stands down while it is up. The
-// backup that would have been taken during those seconds is skipped rather
-// than queued: the interesting snapshot is the one after the restore has
-// finished, and that is a minute away at most.
-// ==========================================
+// restore either lands or leaves the database as it was. A restore raises
+// restoreInProgress and the backup timer stands down while it is up, so a
+// half-restored database is never dumped.
 let restoreInProgress = false;
 
 async function runSqlScript(sql) {
@@ -2566,7 +3054,6 @@ async function runSqlScript(sql) {
     await connection.query("SET FOREIGN_KEY_CHECKS = 0");
 
     for (const statement of statements) {
-      // USE and the connection's own settings are decided here, not by the file
       if (/^use[\s`]/i.test(statement)) continue;
       await connection.query(statement);
     }
@@ -2582,54 +3069,22 @@ async function runSqlScript(sql) {
 // ==========================================
 // THE AUTOMATIC BACKUP
 //
-// A full backup of everything, every sixty seconds, without anybody pressing
-// anything. The most that can be lost is the last minute of trading.
-//
-// WHY OLD ONES ARE OVERWRITTEN
-//
-// Sixty seconds is 1,440 complete .sql files a day. At even a megabyte each
-// that is a gigabyte and a half a day into a folder that never stops growing,
-// so within a week the backup feature is the reason the disk is full -- and a
-// full disk is how the next backup fails, quietly, at the moment it matters.
-//
-// So the automatic ones rotate: AUTO_KEEP of them exist at a time, and
-// writing the newest deletes the oldest. The folder settles at a fixed size
-// on the first hour and stays there. Sixty of them is the last hour covered
-// minute by minute, which is what a rolling backup is for -- going back to
-// last Tuesday is what the backup somebody took on purpose is for, and those
-// are never touched by this.
-//
-// WHY IT IS NOT ONE FILE REWRITTEN IN PLACE
-//
-// The literal reading of "overwrite the old one" is a single file rewritten
-// every minute, and it has one restore point. A dump takes a moment to write;
-// a crash, a full disk or a killed process halfway through leaves a truncated
-// file, and if that file is the only one there is, the system has no backup at
-// all -- and it had one a minute ago. Sixty files is the same idea with the
-// last fifty-nine still standing.
-//
-// WHY NOTHING IS WRITTEN TO THE AUDIT TRAIL
-//
-// An entry a minute is 1,440 entries a day, and the trail is where somebody
-// looks to find out who deactivated an account. Burying that under a wall of
-// identical backup lines does not make the system more auditable, it makes
-// the audit trail unreadable, which is worse than not logging a routine
-// success. Failures ARE logged, once, because a backup that has stopped
-// working is exactly the thing nobody notices.
+// A full backup every sixty seconds. AUTO_KEEP of them exist at a time and
+// the newest deletes the oldest: the last hour, minute by minute, at a fixed
+// folder size. Sixty files rather than one rewritten in place, so a crash
+// mid-write leaves fifty-nine good ones. Successes are not written to the
+// audit trail (1,440 a day would bury it); failures are, once.
 // ==========================================
 const AUTO_BACKUP_ENABLED = true;
 const AUTO_BACKUP_MS = 60 * 1000;   // every sixty seconds
 const AUTO_KEEP = 60;               // the last hour, minute by minute
 
-// Removes the oldest automatic backups until AUTO_KEEP remain. Only ever
-// looks at AUTO_NAME, so a backup an administrator took cannot be rotated
-// away by a timer.
+// removes the oldest automatic backups until AUTO_KEEP remain; never touches a manual one
 async function rotateAutoBackups() {
   const names = (await fsp.readdir(BACKUP_DIR)).filter((name) => AUTO_NAME.test(name));
   if (names.length <= AUTO_KEEP) return 0;
 
-  // the names sort chronologically because the stamp inside them is
-  // year-first, so this needs no stat() call per file
+  // the stamp is year-first, so the names sort chronologically
   names.sort();
 
   const doomed = names.slice(0, names.length - AUTO_KEEP);
@@ -2643,29 +3098,9 @@ async function rotateAutoBackups() {
   return doomed.length;
 }
 
-// ==========================================
-// A ROLLING BACKUP MUST NOT ROTATE HEALTH AWAY FOR CORRUPTION
-//
-// This is the failure the rotation had, and it is worth spelling out because
-// it is the kind that only shows up on the day the backup is needed.
-//
-// Somebody rebuilt this database from 1-RUN-FIRST-database.sql and did not
-// run file 2 after it, so the tables came back and the 27 stored procedures
-// did not. The timer then did exactly what it was told: it took a faithful
-// backup of a database that could not be written to, once a minute, and each
-// one rotated an older file out. Sixteen of those went into the folder before
-// anybody noticed. At the steady state of AUTO_KEEP files, one hour of that
-// would have rotated out every last backup that still had the procedures in
-// it -- and the folder would then hold sixty flawless copies of a broken
-// database and no way back.
-//
-// A rolling window is only safe if what it is rolling over is known good. So
-// the count is checked before anything is deleted, and if the database is
-// missing procedures the backup is still WRITTEN -- the rows are real and
-// worth keeping -- and nothing is DELETED. The folder grows for as long as
-// the fault lasts, which is a cost that can be recovered with a broom. The
-// other way round cannot be recovered at all.
-// ==========================================
+// A rolling window is only safe if what it rolls over is known good. If the
+// database is missing procedures the backup is still WRITTEN and nothing is
+// DELETED, so the last good file is never rotated away.
 async function safeToRotate() {
   if (await proceduresAreMissing()) {
     return {
@@ -2677,9 +3112,7 @@ async function safeToRotate() {
   return { ok: true };
 }
 
-// The state the Backup & Recovery screen reads so it can say whether this is
-// running, and say so from the server rather than from a constant compiled
-// into a page.
+// the state the Backup & Recovery screen reads, from the server not a constant
 const autoBackup = {
   running: false,        // a dump is in flight right now
   lastFileName: null,
@@ -2687,21 +3120,25 @@ const autoBackup = {
   lastBytes: null,
   lastError: null,
   failures: 0,
-  // set while the rotation is standing down, and shown on the screen: a
-  // folder quietly growing past its cap is otherwise something nobody knows
-  // about until the disk is full
-  rotationHeld: null
+  // set while the rotation is standing down, and shown on the screen
+  rotationHeld: null,
+  // paused by somebody holding control; memory only, so a restart always backs up
+  paused: false,
+  pausedBy: null,
+  pausedAt: null,
+  ticksSkipped: 0
 };
 
 async function runAutoBackup() {
-  // A dump of a large database can take longer than sixty seconds. Starting a
-  // second one on top of the first would have two writers reading every table
-  // at once and would make the problem worse the slower it got, so a tick that
-  // arrives while one is still running is skipped rather than queued.
+  // a dump can take longer than sixty seconds; a tick that arrives mid-run is skipped
   if (autoBackup.running) return;
 
-  // and a dump taken halfway through a restore is a dump of neither database;
-  // see the note above runSqlScript
+  if (autoBackup.paused) {
+    autoBackup.ticksSkipped += 1;
+    return;
+  }
+
+  // a dump taken halfway through a restore is a dump of neither database
   if (restoreInProgress) return;
 
   autoBackup.running = true;
@@ -2709,9 +3146,7 @@ async function runAutoBackup() {
   try {
     const summary = await writeBackupFile(AUTO_PREFIX);
 
-    // The backup is always written. Whether anything is DELETED to make room
-    // for it is a separate question, and the answer is no while the database
-    // is in a state worth going back from -- see the note above safeToRotate.
+    // always written; whether anything is deleted is a separate question (safeToRotate)
     const rotate = await safeToRotate();
     if (rotate.ok) {
       await rotateAutoBackups();
@@ -2721,7 +3156,6 @@ async function runAutoBackup() {
       }
       autoBackup.rotationHeld = null;
     } else if (autoBackup.rotationHeld !== rotate.why) {
-      // once per change of reason, not once a minute
       console.warn(`Automatic backup is still running, but nothing is being ` +
         `rotated away: ${rotate.why}.`);
       autoBackup.rotationHeld = rotate.why;
@@ -2731,8 +3165,7 @@ async function runAutoBackup() {
     autoBackup.lastAt = summary.createdAt;
     autoBackup.lastBytes = summary.bytes;
 
-    // a run that works after a run that failed is worth one line, because the
-    // failure printed one and silence afterwards reads as still broken
+    // a run that works after a failure is worth one line
     if (autoBackup.lastError) {
       console.log(`Automatic backup is working again (${summary.fileName}).`);
     }
@@ -2742,17 +3175,13 @@ async function runAutoBackup() {
     autoBackup.failures += 1;
     autoBackup.lastError = error.message;
 
-    // Said once when it starts failing, and not once a minute forever: a
-    // console line every sixty seconds is a console nobody reads. The count
-    // is on the screen either way.
+    // said once when it starts failing, not once a minute
     if (autoBackup.failures === 1) {
       console.error("Automatic backup failed:", error.message);
       console.error("It will keep trying every minute. The Backup & Recovery screen shows this.");
     }
 
-    // The trail gets one entry, not one a minute. A backup that has stopped
-    // working is a real event and belongs in the history; the sixty after it
-    // are the same event.
+    // one trail entry, not one a minute
     if (autoBackup.failures === 1) {
       try {
         await writeAuditLog(
@@ -2778,20 +3207,893 @@ function startAutoBackup() {
     `${AUTO_KEEP} (about ${minutes} ${minutes === 1 ? "minute" : "minutes"}). ` +
     "Backups taken by hand are never rotated.");
 
-  // The first one is immediate rather than a minute from now: a server that
-  // has just been started is a server that has possibly just been restarted
-  // after something went wrong, and waiting a minute to take the first
-  // snapshot is the wrong instinct.
+  // the first one is immediate: a just-started server may have just been restarted after a fault
   runAutoBackup();
 
   const timer = setInterval(runAutoBackup, AUTO_BACKUP_MS);
 
-  // A backup timer is not a reason to keep the process alive on its own. If
-  // everything else has finished, this should not be what holds the door open.
+  // a backup timer is not a reason to keep the process alive
   if (typeof timer.unref === "function") timer.unref();
 }
 
-// the dated history the Backup & Recovery screen lists, newest first
+// The archive sweep: once at startup and once a day. The rules are in
+// sp_sweep_archives beside the manual ones in sp_archive_record; here it is
+// only announced on the live channel.
+const ARCHIVE_SWEEP_MS = 24 * 60 * 60 * 1000;
+
+async function runArchiveSweep() {
+  if (await proceduresAreMissing()) return;   // nothing can be written anyway
+
+  try {
+    const output = await callProcedure(
+      "CALL sp_sweep_archives(@deliveries, @materials)", [],
+      ["deliveries", "materials"]);
+
+    const deliveries = Number(output.deliveries) || 0;
+    const materials = Number(output.materials) || 0;
+    if (deliveries < 0) {
+      console.error("Archive sweep failed inside the database; see the MySQL log.");
+      return;
+    }
+    if (deliveries > 0 || materials > 0) {
+      console.log(`Archive sweep: put away ${deliveries} closed ` +
+        `${deliveries === 1 ? "delivery" : "deliveries"} and ${materials} idle ` +
+        `${materials === 1 ? "material" : "materials"}.`);
+      publishChange("archives", "sweep", null);
+      if (deliveries > 0) publishChange("deliveries", "sweep", null);
+      if (materials > 0) publishChange("inventory", "sweep", null);
+    }
+  } catch (error) {
+    console.error("Archive sweep failed:", error.message);
+  }
+}
+
+function startArchiveSweep() {
+  runArchiveSweep();
+  const timer = setInterval(runArchiveSweep, ARCHIVE_SWEEP_MS);
+  if (typeof timer.unref === "function") timer.unref();
+}
+
+// ==========================================
+// THE CONNECTED SYSTEMS
+//
+// The database, the backup, the sweep, the live channel, the mail relay, and
+// any external system registered by the administrator (reached over HTTP with
+// a short patience). Each answers by key with:
+//   status  { state: 'ok' | 'warn' | 'bad' | 'off' | 'unknown',
+//             summary: 'one sentence a person can act on',
+//             facts:   { 'Label': 'value', ... } }
+//   actions returning { ok, message, ... } or throwing
+// Every command is written to the trail.
+// ==========================================
+const REMOTE_TIMEOUT_MS = 5000;
+
+// http or https, no credentials, and never a scheme that opens a local file
+function remoteUrlComplaint(url) {
+  let parsed;
+  try {
+    parsed = new URL(String(url || ""));
+  } catch (error) {
+    return "The address is not a valid URL.";
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return "The address must start http:// or https://.";
+  }
+  if (parsed.username || parsed.password) {
+    return "The address must not carry a username or password.";
+  }
+  return null;
+}
+
+async function reachRemote(url, options) {
+  const complaint = remoteUrlComplaint(url);
+  if (complaint) throw new Error(complaint);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS);
+  const started = Date.now();
+
+  try {
+    const response = await fetch(url, Object.assign({ signal: controller.signal }, options || {}));
+    const text = await response.text();
+    return {
+      status: response.status,
+      ok: response.ok,
+      ms: Date.now() - started,
+      body: text.slice(0, 300)
+    };
+  } catch (error) {
+    const reason = error.name === "AbortError"
+      ? `no answer within ${REMOTE_TIMEOUT_MS / 1000} seconds`
+      : (error.cause && error.cause.code) || error.message;
+    throw new Error(`Could not reach ${url}: ${reason}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const INTERNAL_SYSTEMS = {
+  database: {
+    name: "MySQL Database",
+    description: "The hardware_db schema every screen reads and every procedure writes.",
+    status: async () => {
+      const started = Date.now();
+      const [[ping]] = await db.query("SELECT VERSION() AS version, DATABASE() AS name");
+      const ms = Date.now() - started;
+      const total = await countProcedures();
+      const [[sizes]] = await db.query(
+        `SELECT COUNT(*) AS tables, ROUND(SUM(DATA_LENGTH + INDEX_LENGTH) / 1024 / 1024, 1) AS mb
+         FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'`,
+        [DB_NAME]);
+
+      const short = total < EXPECTED_PROCEDURES;
+      return {
+        state: short ? "bad" : "ok",
+        summary: short
+          ? `Answering, but only ${total} of ${EXPECTED_PROCEDURES} stored procedures are loaded, so nothing can be saved.`
+          : `Answering in ${ms} ms with all ${EXPECTED_PROCEDURES} stored procedures loaded.`,
+        facts: {
+          "Server": `MySQL ${ping.version} on ${DB_HOST}`,
+          "Schema": ping.name,
+          "Tables": String(sizes.tables),
+          "Size on disk": `${sizes.mb} MB`,
+          "Stored procedures": `${total} of ${EXPECTED_PROCEDURES}`,
+          "Round trip": `${ms} ms`
+        }
+      };
+    },
+    actions: {
+      "recount-procedures": {
+        label: "Re-count the stored procedures",
+        hint: "Checks whether 2-RUN-SECOND-stored-procedures.sql has been loaded, without waiting for the next request to notice.",
+        run: async () => {
+          proceduresLoaded = null;
+          procedureCheckAt = 0;
+          const total = await countProcedures();
+          return {
+            ok: total >= EXPECTED_PROCEDURES,
+            message: total >= EXPECTED_PROCEDURES
+              ? `All ${EXPECTED_PROCEDURES} stored procedures are loaded.`
+              : `${total} of ${EXPECTED_PROCEDURES} stored procedures are loaded. Run file 2.`,
+            procedures: total
+          };
+        }
+      }
+    }
+  },
+
+  backup: {
+    name: "Automatic Backup",
+    description: "The rolling backup the server takes on its own and the folder it writes to.",
+    status: async () => {
+      await ensureBackupFolder();
+      const names = (await fsp.readdir(BACKUP_DIR)).filter((name) => BACKUP_NAME.test(name));
+      const automatic = names.filter((name) => AUTO_NAME.test(name)).length;
+
+      let state = "ok";
+      let summary = `Running every ${AUTO_BACKUP_MS / 1000} seconds; the last ${AUTO_KEEP} are kept.`;
+      if (!AUTO_BACKUP_ENABLED) {
+        state = "off";
+        summary = "Switched off in server.js (AUTO_BACKUP_ENABLED). Only backups taken by hand exist.";
+      } else if (autoBackup.paused) {
+        state = "warn";
+        summary = `Paused by ${autoBackup.pausedBy || "somebody with control"}; ` +
+          `${autoBackup.ticksSkipped} tick${autoBackup.ticksSkipped === 1 ? "" : "s"} skipped so far. Resume it when the work is done.`;
+      } else if (autoBackup.lastError) {
+        state = "bad";
+        summary = `Failing: ${autoBackup.lastError} (${autoBackup.failures} in a row).`;
+      } else if (autoBackup.rotationHeld) {
+        state = "warn";
+        summary = `Writing, but not rotating: ${autoBackup.rotationHeld}.`;
+      }
+
+      return {
+        state, summary,
+        facts: {
+          "Last automatic backup": autoBackup.lastAt
+            ? `${autoBackup.lastFileName} (${Math.round((autoBackup.lastBytes || 0) / 1024)} KB)`
+            : "None since this server started",
+          "Automatic files in the folder": `${automatic} of ${AUTO_KEEP}`,
+          "Backups taken by hand": String(names.length - automatic),
+          "Folder": BACKUP_DIR,
+          "Paused": autoBackup.paused ? `Yes, since ${autoBackup.pausedAt}` : "No"
+        }
+      };
+    },
+    actions: {
+      "run-now": {
+        label: "Run a backup now",
+        hint: "Writes a backup that is kept until somebody deletes it, the same as Run Backup Now on the Backup & Recovery screen.",
+        run: async () => {
+          const summary = await writeBackupFile();
+          return {
+            ok: true,
+            message: `Backup saved as ${summary.fileName} (${summary.rowCount} rows across ${summary.tableCount} tables).`,
+            fileName: summary.fileName
+          };
+        }
+      },
+      "pause": {
+        label: "Pause the automatic backup",
+        hint: "The timer keeps ticking and skips. Use it while a disk is being swapped or a restore is being prepared outside the system.",
+        danger: true,
+        run: async (context) => {
+          if (autoBackup.paused) return { ok: true, message: "The automatic backup was already paused." };
+          autoBackup.paused = true;
+          autoBackup.pausedBy = context.actor.email;
+          autoBackup.pausedAt = new Date().toISOString();
+          autoBackup.ticksSkipped = 0;
+          console.warn(`Automatic backup paused by ${context.actor.email}.`);
+          return { ok: true, message: "The automatic backup is paused. Nothing is written until it is resumed." };
+        }
+      },
+      "resume": {
+        label: "Resume the automatic backup",
+        hint: "Takes a backup straight away, then carries on every minute.",
+        run: async () => {
+          if (!autoBackup.paused) return { ok: true, message: "The automatic backup was not paused." };
+          autoBackup.paused = false;
+          autoBackup.pausedBy = null;
+          autoBackup.pausedAt = null;
+          console.log("Automatic backup resumed.");
+          await runAutoBackup();
+          return {
+            ok: !autoBackup.lastError,
+            message: autoBackup.lastError
+              ? `Resumed, but the first backup failed: ${autoBackup.lastError}`
+              : `Resumed. ${autoBackup.lastFileName} was written straight away.`
+          };
+        }
+      }
+    }
+  },
+
+  "archive-sweep": {
+    name: "Archive Sweep",
+    description: "The nightly pass that puts away closed deliveries and dead stock.",
+    status: async () => {
+      const [[last]] = await db.query(
+        `SELECT details, created_at FROM audit_logs
+         WHERE action = 'ARCHIVE_SWEEP' ORDER BY log_id DESC LIMIT 1`);
+      const [[due]] = await db.query(
+        `SELECT
+           (SELECT COUNT(*) FROM deliveries d JOIN sales s ON s.sale_id = d.sale_id
+            WHERE d.is_archived = FALSE
+              AND ((d.status = 'Delivered' AND s.payment_status = 'Paid') OR d.status = 'Failed')
+              AND COALESCE(d.delivered_at, d.updated_at) < DATE_SUB(NOW(), INTERVAL 90 DAY)) AS deliveries,
+           (SELECT COUNT(*) FROM products p JOIN inventory i ON i.product_id = p.product_id
+            WHERE p.is_archived = FALSE AND i.quantity_in_stock = 0
+              AND p.created_at < DATE_SUB(NOW(), INTERVAL 180 DAY)) AS materials`);
+
+      return {
+        state: "ok",
+        summary: `Runs at startup and once a day. ${due.deliveries} closed ` +
+          `${due.deliveries === 1 ? "delivery" : "deliveries"} and up to ${due.materials} ` +
+          `${due.materials === 1 ? "material" : "materials"} look due on the next pass.`,
+        facts: {
+          "Last pass that put something away": last ? `${last.created_at} — ${last.details}` : "Nothing yet",
+          "Interval": `every ${ARCHIVE_SWEEP_MS / 3600000} hours`,
+          "Deliveries past 90 days": String(due.deliveries),
+          "Materials idle 180 days (upper bound)": String(due.materials)
+        }
+      };
+    },
+    actions: {
+      "run-now": {
+        label: "Run the sweep now",
+        hint: "Applies the same two rules the nightly pass applies. Anything it puts away can be restored from Archives.",
+        run: async () => {
+          const before = changeVersion;
+          await runArchiveSweep();
+          return {
+            ok: true,
+            message: changeVersion > before
+              ? "The sweep ran and put something away; the Archives screen has it."
+              : "The sweep ran and found nothing due."
+          };
+        }
+      }
+    }
+  },
+
+  "live-sync": {
+    name: "Live Sync Channel",
+    description: "The open connection every signed-in browser holds, and what has been announced over it.",
+    status: async () => {
+      const people = new Set([...liveClients].map((client) => client.staffId)).size;
+      const latest = changeLog[changeLog.length - 1];
+      return {
+        state: "ok",
+        summary: `${liveClients.size} open ${liveClients.size === 1 ? "connection" : "connections"} ` +
+          `from ${people} ${people === 1 ? "person" : "people"}; ${changeVersion} changes announced since this server started.`,
+        facts: {
+          "Open connections": String(liveClients.size),
+          "People connected": String(people),
+          "Changes announced": String(changeVersion),
+          "Held for reconnection": `${changeLog.length} of ${CHANGE_LOG_SIZE}`,
+          "Most recent": latest ? `${latest.scope}: ${latest.detail} at ${latest.at}` : "None yet"
+        }
+      };
+    },
+    actions: {
+      "resync-all": {
+        label: "Tell every screen to reload",
+        hint: "Every open dashboard is told it has fallen behind and offered a reload. Use it after a restore or a change every desk must see.",
+        danger: true,
+        run: async () => {
+          let told = 0;
+          for (const client of liveClients) {
+            try {
+              client.response.write(`event: resync\ndata: ${JSON.stringify({ version: changeVersion })}\n\n`);
+              told += 1;
+            } catch (error) { /* a browser that has gone is removed by its own close handler */ }
+          }
+          return { ok: true, message: `${told} open ${told === 1 ? "screen was" : "screens were"} told to reload.`, told };
+        }
+      }
+    }
+  },
+
+  mail: {
+    name: "Mail Relay",
+    description: "The SMTP account first passwords are sent from.",
+    status: async () => {
+      const configured = isMailConfigured();
+      return {
+        state: configured ? "ok" : "off",
+        summary: configured
+          ? "Set up. New and reset passwords are emailed; the fallback shows them on screen only when a send fails."
+          : "Not set up on this server, so new and reset passwords are shown once on the administrator's screen instead.",
+        facts: {
+          "Configured": configured ? "Yes" : "No",
+          "Where it is set": "public/javascript/mailer.js and mail-password.txt beside it",
+          "Off for tests": process.env.HARDWARE_MAIL_OFF === "1" ? "Yes (HARDWARE_MAIL_OFF=1)" : "No"
+        }
+      };
+    },
+    actions: {
+      "send-test": {
+        label: "Send a test message to my own address",
+        hint: "Proves the relay accepts the account's password and delivers. It goes to the address you sign in with and to nobody else.",
+        run: async (context) => {
+          if (!isMailConfigured()) {
+            throw new Error("Mail is not set up on this server, so there is nothing to test. " +
+              "Fill in the SETUP block at the top of public/javascript/mailer.js.");
+          }
+          if (!context.actor.email) throw new Error("Your account has no email address to send to.");
+
+          await sendMail({
+            to: context.actor.email,
+            subject: "Test message from the hardware system",
+            body: `Hello,\n\nThis is a test message sent from the Connected Systems screen by ` +
+              `${context.actor.email} at ${new Date().toLocaleString("en-PH")}.\n\n` +
+              `If you are reading it, the mail relay is working. Nothing else has to be done.\n`
+          });
+          return { ok: true, message: `A test message was sent to ${context.actor.email}.` };
+        }
+      }
+    }
+  }
+};
+
+const EXTERNAL_ACTIONS = {
+  ping: {
+    label: "Ping it",
+    hint: "One request to its address, timed. The same check as the status card, written to the trail as a command.",
+    run: async (context) => {
+      const reply = await reachRemote(context.system.endpoint_url);
+      return {
+        ok: reply.ok,
+        message: reply.ok
+          ? `${context.system.system_name} answered HTTP ${reply.status} in ${reply.ms} ms.`
+          : `${context.system.system_name} answered HTTP ${reply.status} in ${reply.ms} ms, which is not a healthy reply.`,
+        httpStatus: reply.status,
+        ms: reply.ms
+      };
+    }
+  },
+  send: {
+    label: "Send it a message",
+    hint: "Posts a short JSON message to its address, signed with who sent it and when.",
+    danger: true,
+    run: async (context) => {
+      const message = String((context.body && context.body.message) || "").trim().slice(0, 500);
+      if (message === "") throw new Error("Type the message to send first.");
+
+      const reply = await reachRemote(context.system.endpoint_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: message,
+          from: context.actor.email,
+          system: context.system.system_key,
+          sent_at: new Date().toISOString()
+        })
+      });
+      return {
+        ok: reply.ok,
+        message: reply.ok
+          ? `${context.system.system_name} accepted the message (HTTP ${reply.status}).`
+          : `${context.system.system_name} refused the message with HTTP ${reply.status}.`,
+        httpStatus: reply.status,
+        sent: message
+      };
+    }
+  }
+};
+
+async function externalStatus(system) {
+  if (!system.endpoint_url) {
+    return { state: "unknown", summary: "No address is registered for this system.", facts: {} };
+  }
+  try {
+    const reply = await reachRemote(system.endpoint_url);
+    return {
+      state: reply.ok ? "ok" : "bad",
+      summary: reply.ok
+        ? `Answering HTTP ${reply.status} in ${reply.ms} ms.`
+        : `Reachable, but answering HTTP ${reply.status}.`,
+      facts: { "Address": system.endpoint_url, "HTTP status": String(reply.status), "Round trip": `${reply.ms} ms` }
+    };
+  } catch (error) {
+    return {
+      state: "bad",
+      summary: error.message,
+      facts: { "Address": system.endpoint_url }
+    };
+  }
+}
+
+function actionsOf(system) {
+  if (system.system_kind === "Internal") {
+    const known = INTERNAL_SYSTEMS[system.system_key];
+    return known ? known.actions : {};
+  }
+  return EXTERNAL_ACTIONS;
+}
+
+// a status that cannot be read is still a status
+async function statusOf(system) {
+  try {
+    if (system.system_kind === "Internal") {
+      const known = INTERNAL_SYSTEMS[system.system_key];
+      if (!known) {
+        return { state: "unknown", summary: "This server does not know how to answer for this system.", facts: {} };
+      }
+      return await known.status();
+    }
+    return await externalStatus(system);
+  } catch (error) {
+    return { state: "bad", summary: `Could not read its status: ${error.message}`, facts: {} };
+  }
+}
+
+// the shape every screen draws
+async function describeSystem(system, access) {
+  const actions = access.control
+    ? Object.entries(actionsOf(system)).map(([key, action]) => ({
+        key: key, label: action.label, hint: action.hint || "", danger: Boolean(action.danger),
+        needsMessage: key === "send"
+      }))
+    : [];
+
+  return {
+    key: system.system_key,
+    name: system.system_name,
+    kind: system.system_kind,
+    description: system.description,
+    endpointUrl: system.endpoint_url,
+    enabled: Boolean(system.is_enabled),
+    createdBy: system.created_by,
+    createdAt: system.created_at,
+    updatedAt: system.updated_at,
+    access: access,
+    status: access.monitor ? await statusOf(system) : null,
+    actions: actions
+  };
+}
+
+// ---------- the systems, as the caller may see them ----------
+app.get("/api/systems", async (request, response) => {
+  try {
+    const [rows] = await db.query(`${SYSTEM_SELECT} ORDER BY cs.system_kind, cs.system_name`);
+
+    let visible;
+    if (request.actor.roleName === ADMIN) {
+      visible = rows.map((row) => [row, ALL_ACCESS]);
+    } else {
+      const held = await permissionsOf(request.actor.staffId);
+      visible = rows
+        .filter((row) => held.has(row.system_key))
+        .map((row) => [row, held.get(row.system_key)]);
+    }
+
+    // read side by side, so a slow external address costs its own five seconds only
+    const systems = await Promise.all(visible.map(([row, access]) =>
+      describeSystem(row, { monitor: access.monitor, manage: access.manage, control: access.control })));
+
+    response.json(systems);
+  } catch (error) {
+    console.error("Listing systems failed:", error.message);
+    response.status(500).json({ error: "Unable to list the connected systems" });
+  }
+});
+
+app.get("/api/systems/:systemKey/status", requireSystemAccess("monitor"), async (request, response) => {
+  try {
+    response.json(await describeSystem(request.system, request.systemAccess));
+  } catch (error) {
+    console.error("System status failed:", error.message);
+    response.status(500).json({ error: "Unable to read that system's status" });
+  }
+});
+
+// ---------- registering an external system: administrator only ----------
+app.post("/api/systems", requireRole(ADMIN), async (request, response) => {
+  const { key, name, description, endpointUrl } = request.body || {};
+  const systemKey = String(key || "").trim().toLowerCase();
+
+  try {
+    if (await findSystem(systemKey)) {
+      return response.status(409).json({ error: `A system is already registered as "${systemKey}". Edit that one, or pick another key.` });
+    }
+
+    const urlProblem = remoteUrlComplaint(endpointUrl);
+    if (urlProblem) return response.status(400).json({ error: urlProblem });
+
+    const output = await callProcedure(
+      "CALL sp_save_connected_system(?, ?, ?, ?, TRUE, ?, @status_code, @message, @system_id, @created)",
+      [systemKey, String(name || "").trim().slice(0, 100),
+       String(description || "").trim().slice(0, 255),
+       String(endpointUrl || "").trim().slice(0, 255), request.actor.staffId],
+      ["status_code", "message", "system_id", "created"]);
+
+    if (output.status_code !== 200) {
+      return response.status(output.status_code).json({ error: output.message });
+    }
+
+    await writeAuditLog(request, "CREATE_CONNECTED_SYSTEM",
+      `Registered the external system ${name} (${systemKey}) at ${endpointUrl}`,
+      { system_key: systemKey, system_name: name, endpoint_url: endpointUrl });
+
+    response.json({ message: output.message, system: await describeSystem(await findSystem(systemKey), ALL_ACCESS) });
+  } catch (error) {
+    console.error("Registering a system failed:", error.message);
+    response.status(500).json({ error: "Unable to register the system" });
+  }
+});
+
+// ---------- changing how a system is set up: MANAGE ----------
+app.put("/api/systems/:systemKey", requireSystemAccess("manage"), async (request, response) => {
+  const system = request.system;
+  const { name, description, endpointUrl, enabled } = request.body || {};
+
+  const after = {
+    system_name: name === undefined ? system.system_name : String(name || "").trim().slice(0, 100),
+    description: description === undefined ? system.description : (String(description || "").trim().slice(0, 255) || null),
+    endpoint_url: system.system_kind === "Internal"
+      ? null
+      : (endpointUrl === undefined ? system.endpoint_url : String(endpointUrl || "").trim().slice(0, 255)),
+    is_enabled: enabled === undefined ? Boolean(system.is_enabled) : enabled === true
+  };
+
+  if (system.system_kind === "External") {
+    const urlProblem = remoteUrlComplaint(after.endpoint_url);
+    if (urlProblem) return response.status(400).json({ error: urlProblem });
+  }
+
+  try {
+    const output = await callProcedure(
+      "CALL sp_save_connected_system(?, ?, ?, ?, ?, ?, @status_code, @message, @system_id, @created)",
+      [system.system_key, after.system_name, after.description, after.endpoint_url,
+       after.is_enabled, request.actor.staffId],
+      ["status_code", "message", "system_id", "created"]);
+
+    if (output.status_code !== 200) {
+      return response.status(output.status_code).json({ error: output.message });
+    }
+
+    const before = {
+      system_name: system.system_name, description: system.description,
+      endpoint_url: system.endpoint_url, is_enabled: Boolean(system.is_enabled)
+    };
+
+    await writeAuditLog(request, "UPDATE_CONNECTED_SYSTEM",
+      `${system.system_name} (${system.system_key}) settings changed` +
+        (before.is_enabled !== after.is_enabled ? (after.is_enabled ? ": switched on" : ": switched off") : ""),
+      { system_key: system.system_key, changes: fieldChanges(before, after) });
+
+    response.json({
+      message: output.message,
+      system: await describeSystem(await findSystem(system.system_key), request.systemAccess)
+    });
+  } catch (error) {
+    console.error("Updating a system failed:", error.message);
+    response.status(500).json({ error: "Unable to save the system" });
+  }
+});
+
+// ---------- running a command against a system: CONTROL ----------
+app.post("/api/systems/:systemKey/actions/:action", requireSystemAccess("control"), async (request, response) => {
+  const system = request.system;
+  const actionKey = String(request.params.action || "").toLowerCase();
+  const action = actionsOf(system)[actionKey];
+
+  if (!action) {
+    return response.status(404).json({ error: `${system.system_name} has no command called "${actionKey}".` });
+  }
+
+  // a system switched off takes no commands; switching it on is a MANAGE change
+  if (!system.is_enabled) {
+    return response.status(409).json({
+      error: `${system.system_name} is switched off. Switch it on under its settings before running commands against it.`
+    });
+  }
+
+  const context = { actor: request.actor, system: system, body: request.body || {} };
+
+  try {
+    const result = await action.run(context);
+
+    // the command and its outcome, in one entry, whoever ran it
+    await writeAuditLog(request, "SYSTEM_ACTION",
+      `Ran "${action.label}" on ${system.system_name}: ${result.message}`,
+      { system_key: system.system_key, action: actionKey, ok: Boolean(result.ok),
+        result: Object.assign({}, result, { message: undefined }) });
+
+    response.json(Object.assign({ system: system.system_key, action: actionKey }, result));
+  } catch (error) {
+    await writeAuditLog(request, "SYSTEM_ACTION",
+      `Ran "${action.label}" on ${system.system_name} and it failed: ${error.message}`,
+      { system_key: system.system_key, action: actionKey, ok: false, error: error.message });
+
+    response.status(502).json({ error: error.message });
+  }
+});
+
+// Who holds what: every person with a login who is not an administrator,
+// including those who hold nothing.
+const GRANT_SELECT = `
+  SELECT p.staff_id, cs.system_key, cs.system_name, cs.system_kind, cs.is_enabled,
+         p.can_monitor, p.can_manage, p.can_control, p.note,
+         p.granted_at, p.updated_at, gb.full_name AS granted_by
+  FROM system_permissions p
+  JOIN connected_systems cs ON cs.system_id = p.system_id
+  LEFT JOIN staff gb ON gb.staff_id = p.granted_by_staff_id
+`;
+
+function grantShape(row) {
+  return {
+    key: row.system_key,
+    name: row.system_name,
+    kind: row.system_kind,
+    enabled: Boolean(row.is_enabled),
+    monitor: Boolean(row.can_monitor),
+    manage: Boolean(row.can_manage),
+    control: Boolean(row.can_control),
+    note: row.note,
+    grantedBy: row.granted_by,
+    grantedAt: row.granted_at,
+    updatedAt: row.updated_at
+  };
+}
+
+app.get("/api/access/permissions", async (request, response) => {
+  try {
+    const [people] = await db.query(
+      `${USER_SELECT} WHERE u.user_id IS NOT NULL AND r.role_name <> ? ORDER BY s.full_name`, [ADMIN]);
+    const [grants] = await db.query(`${GRANT_SELECT} ORDER BY cs.system_kind, cs.system_name`);
+
+    const byStaff = new Map();
+    for (const row of grants) {
+      if (!byStaff.has(row.staff_id)) byStaff.set(row.staff_id, []);
+      byStaff.get(row.staff_id).push(grantShape(row));
+    }
+
+    response.json(withPresence(people).map((person) => Object.assign({}, person, {
+      grants: byStaff.get(person.staff_id) || []
+    })));
+  } catch (error) {
+    console.error("Listing permissions failed:", error.message);
+    response.status(500).json({ error: "Unable to list who holds access" });
+  }
+});
+
+app.get("/api/access/users/:staffId", async (request, response) => {
+  try {
+    const [people] = await db.query(`${USER_SELECT} WHERE s.staff_id = ?`, [request.params.staffId]);
+    if (people.length === 0) return response.status(404).json({ error: "Staff record not found" });
+
+    const [grants] = await db.query(`${GRANT_SELECT} WHERE p.staff_id = ? ORDER BY cs.system_kind, cs.system_name`,
+      [request.params.staffId]);
+
+    response.json(Object.assign({}, withPresence(people)[0], { grants: grants.map(grantShape) }));
+  } catch (error) {
+    response.status(500).json({ error: "Unable to read that person's access" });
+  }
+});
+
+// One request sets everything one person holds on one system; all three
+// levels false is a revocation. notOwnAccount: an administrator grants to others.
+app.put("/api/access/users/:staffId/systems/:systemKey", notOwnAccount, async (request, response) => {
+  const staffId = Number(request.params.staffId);
+  const systemKey = String(request.params.systemKey || "").toLowerCase();
+  const body = request.body || {};
+
+  const wanted = {
+    monitor: body.monitor === true || body.manage === true || body.control === true,
+    manage: body.manage === true,
+    control: body.control === true
+  };
+  const note = String(body.note || "").trim().slice(0, 255);
+
+  try {
+    const [people] = await db.query(
+      `SELECT s.full_name, r.role_name, u.email FROM staff s
+       JOIN roles r ON r.role_id = s.role_id
+       LEFT JOIN users u ON u.staff_id = s.staff_id WHERE s.staff_id = ?`, [staffId]);
+    if (people.length === 0) return response.status(404).json({ error: "Staff record not found" });
+
+    const system = await findSystem(systemKey);
+    if (!system) return response.status(404).json({ error: "No connected system is registered under that name." });
+
+    const output = await callProcedure(
+      "CALL sp_set_system_permission(?, ?, ?, ?, ?, ?, ?, @status_code, @message, " +
+      "@was_monitor, @was_manage, @was_control, @changed)",
+      [staffId, systemKey, wanted.monitor, wanted.manage, wanted.control, note || null,
+       request.actor.staffId],
+      ["status_code", "message", "was_monitor", "was_manage", "was_control", "changed"]);
+
+    if (output.status_code !== 200) {
+      return response.status(output.status_code).json({ error: output.message });
+    }
+
+    const before = {
+      can_monitor: Boolean(output.was_monitor),
+      can_manage: Boolean(output.was_manage),
+      can_control: Boolean(output.was_control)
+    };
+    const after = {
+      can_monitor: wanted.monitor,
+      can_manage: wanted.manage,
+      can_control: wanted.control
+    };
+    const changed = Boolean(output.changed);
+
+    if (changed) {
+      const revoked = !wanted.monitor;
+      await writeAuditLog(request,
+        revoked ? "REVOKE_SYSTEM_ACCESS" : "GRANT_SYSTEM_ACCESS",
+        revoked
+          ? `${people[0].full_name} no longer has any access to ${system.system_name}`
+          : output.message.replace(/\.$/, ""),
+        { staff_id: staffId, staff_name: people[0].full_name, role_name: people[0].role_name,
+          system_key: systemKey, system_name: system.system_name,
+          changes: fieldChanges(before, after), note: note || null });
+    }
+
+    const [grants] = await db.query(`${GRANT_SELECT} WHERE p.staff_id = ? AND cs.system_key = ?`,
+      [staffId, systemKey]);
+
+    response.json({
+      message: changed ? output.message : "Nothing changed: those are the levels already held.",
+      changed: changed,
+      grant: grants[0] ? grantShape(grants[0]) : null
+    });
+  } catch (error) {
+    console.error("Setting a permission failed:", error.message);
+    response.status(500).json({ error: "Unable to change that permission" });
+  }
+});
+
+// Screens by role: read as a whole, written one cell at a time.
+app.get("/api/features", async (request, response) => {
+  try {
+    const [roleRows] = await db.query("SELECT role_id, role_name FROM roles ORDER BY role_id");
+    const roles = roleRows.filter((row) => FEATURE_ROLES.includes(row.role_name));
+
+    const perRole = new Map();
+    for (const role of roles) {
+      perRole.set(role.role_name, new Map((await featuresOf(role.role_name)).map((f) => [f.key, f])));
+    }
+
+    response.json({
+      roles: roles,
+      features: FEATURES.map((feature) => {
+        const cells = {};
+        for (const role of roles) {
+          const held = perRole.get(role.role_name).get(feature.key) || null;
+          cells[role.role_name] = held
+            ? { available: true, byDefault: held.byDefault, held: held.held, overridden: held.overridden,
+                note: held.note, grantedBy: held.grantedBy, updatedAt: held.updatedAt }
+            : { available: false, byDefault: false, held: false, overridden: false };
+        }
+        return {
+          key: feature.key,
+          name: feature.name,
+          module: feature.module,
+          description: feature.description,
+          roles: cells
+        };
+      })
+    });
+  } catch (error) {
+    console.error("Listing screens by role failed:", error.message);
+    response.status(500).json({ error: "Unable to list the screens by role" });
+  }
+});
+
+// Setting a cell back to the role's default removes the override row rather
+// than writing one that agrees with the page.
+app.put("/api/features/:featureKey/roles/:roleId", async (request, response) => {
+  const feature = findFeature(request.params.featureKey);
+  const roleId = Number(request.params.roleId);
+  const body = request.body || {};
+  const wanted = body.granted === true;
+  const note = String(body.note || "").trim().slice(0, 255);
+
+  if (!feature) return response.status(404).json({ error: "No screen is listed under that name." });
+  if (typeof body.granted !== "boolean") {
+    return response.status(400).json({ error: "Say whether the screen is granted: true or false." });
+  }
+
+  try {
+    const [roles] = await db.query("SELECT role_id, role_name FROM roles WHERE role_id = ?", [roleId]);
+    if (roles.length === 0) return response.status(404).json({ error: "No such role." });
+    const role = roles[0];
+
+    if (role.role_name === ADMIN) {
+      return response.status(403).json({ error: "The System Administrator holds every screen by role. Nothing here is granted or taken away." });
+    }
+    if (!feature.available.includes(role.role_name)) {
+      return response.status(400).json({
+        error: `The ${role.role_name} dashboard has no ${feature.name} screen to show, so it cannot be granted there.`
+      });
+    }
+
+    const before = (await featuresOf(role.role_name)).find((f) => f.key === feature.key);
+    const byDefault = feature.defaults.includes(role.role_name);
+
+    if (before.held === wanted && (wanted === byDefault || (before.note || "") === note)) {
+      return response.json({
+        message: `Nothing changed: ${role.role_name} accounts already ${wanted ? "hold" : "do not hold"} ${feature.name}.`,
+        changed: false
+      });
+    }
+
+    if (wanted === byDefault) {
+      await db.query("DELETE FROM role_feature_permissions WHERE role_id = ? AND feature_key = ?",
+        [roleId, feature.key]);
+    } else {
+      await db.query(
+        `INSERT INTO role_feature_permissions (role_id, feature_key, is_granted, note, granted_by_staff_id)
+         VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted), note = VALUES(note),
+                                 granted_by_staff_id = VALUES(granted_by_staff_id)`,
+        [roleId, feature.key, wanted, note || null, request.actor.staffId]);
+    }
+    forgetFeatureOverrides();
+
+    const message = wanted
+      ? `${feature.name} is now on the ${role.role_name} menu${byDefault ? " again" : ""}.`
+      : `${feature.name} is off the ${role.role_name} menu${byDefault ? "" : " again"}.`;
+
+    if (before.held !== wanted) {
+      await writeAuditLog(request, wanted ? "GRANT_SCREEN" : "REVOKE_SCREEN",
+        `${feature.name} switched ${wanted ? "on" : "off"} for ${role.role_name} accounts`,
+        { role_id: roleId, role_name: role.role_name, feature_key: feature.key, feature_name: feature.name,
+          by_default: byDefault,
+          changes: fieldChanges({ held: before.held }, { held: wanted }), note: note || null });
+    }
+
+    const after = (await featuresOf(role.role_name)).find((f) => f.key === feature.key);
+    response.json({ message: message, changed: true, cell: after });
+  } catch (error) {
+    console.error("Switching a screen failed:", error.message);
+    response.status(500).json({ error: "Unable to change that screen" });
+  }
+});
+
 app.get("/api/backups", async (request, response) => {
   try {
     await ensureBackupFolder();
@@ -2803,8 +4105,7 @@ app.get("/api/backups", async (request, response) => {
         fileName: name,
         bytes: stats.size,
         createdAt: stats.mtime.toISOString(),
-        // so a row can say which kind it is, and the drawer can warn that an
-        // automatic one is on its way out of the folder
+        // so a row can say which kind it is
         automatic: AUTO_NAME.test(name)
       };
     }));
@@ -2822,10 +4123,12 @@ app.get("/api/backups", async (request, response) => {
         lastAt: autoBackup.lastAt,
         lastError: autoBackup.lastError,
         failures: autoBackup.failures,
-        rotationHeld: autoBackup.rotationHeld
+        rotationHeld: autoBackup.rotationHeld,
+        paused: autoBackup.paused,
+        pausedBy: autoBackup.pausedBy,
+        pausedAt: autoBackup.pausedAt
       },
-      // so the screen can say the one thing that stops every write, rather
-      // than leaving each form to report it as its own failure
+      // so the screen can say the one thing that stops every write
       procedures: {
         loaded: proceduresLoaded,
         expected: EXPECTED_PROCEDURES
@@ -2837,7 +4140,7 @@ app.get("/api/backups", async (request, response) => {
   }
 });
 
-app.post("/api/backups", async (request, response) => {
+app.post("/api/backups", requireRole(ADMIN), async (request, response) => {
   try {
     const summary = await writeBackupFile();
 
@@ -2870,7 +4173,7 @@ app.get("/api/backups/:fileName", async (request, response) => {
   response.download(fullPath, name);
 });
 
-app.delete("/api/backups/:fileName", async (request, response) => {
+app.delete("/api/backups/:fileName", requireRole(ADMIN), async (request, response) => {
   const name = request.params.fileName;
 
   if (!BACKUP_NAME.test(name)) {
@@ -2890,27 +4193,9 @@ app.delete("/api/backups/:fileName", async (request, response) => {
   }
 });
 
-// ==========================================
-// A RESTORE CAN SUCCEED AND STILL LEAVE YOU STUCK
-//
-// A backup taken while the database was missing its stored procedures is a
-// perfectly valid file: every table, every row, and it restores without a
-// single error. It simply has no procedures in it -- and, because it has
-// none, it also carries no DROP PROCEDURE lines. So restoring one onto a
-// healthy database is harmless: the procedures already there are left alone.
-//
-// The case that bites is restoring one onto a database that has no
-// procedures either -- after a rebuild from file 1, say. Nothing is wrong
-// with the restore, it reports success, the rows all arrive, and the system
-// still cannot save anything. "Database restored" is true and is the last
-// sentence anybody would think to doubt.
-//
-// So the count is taken AFTER the restore and reported in the same breath as
-// the success. After rather than before on purpose: the honest test is not
-// what the file appeared to contain, it is what the database ended up with.
-//
-// Returns "" when all is well, so callers can append it unconditionally.
-// ==========================================
+// A backup taken without procedures restores without error and leaves the
+// system unable to save, so the count is taken AFTER the restore and reported
+// with the success. Returns "" when all is well.
 async function restoreShortfall() {
   try {
     proceduresLoaded = null;                 // force a fresh count
@@ -2927,8 +4212,7 @@ async function restoreShortfall() {
   }
 }
 
-// restore from a file already sitting in the backups folder
-app.post("/api/backups/:fileName/restore", async (request, response) => {
+app.post("/api/backups/:fileName/restore", requireRole(ADMIN), async (request, response) => {
   const name = request.params.fileName;
 
   if (!BACKUP_NAME.test(name)) {
@@ -2954,8 +4238,7 @@ app.post("/api/backups/:fileName/restore", async (request, response) => {
   }
 });
 
-// restore from a .sql file the administrator picked off their own computer
-app.post("/api/restore", async (request, response) => {
+app.post("/api/restore", requireRole(ADMIN), async (request, response) => {
   const sql = request.body && request.body.sql;
 
   if (typeof sql !== "string" || sql.trim() === "") {
@@ -2978,18 +4261,8 @@ app.post("/api/restore", async (request, response) => {
 // MANAGER MODULE
 // ==========================================
 
-// ==========================================
-// DATE RANGES
-//
-// Every report on the manager's screen is asked the same question in one of
-// seven ways, so the seven are resolved in one place and everything
-// downstream deals in a plain from-and-to pair.
-//
-// The ranges are counted back from today rather than snapped to calendar
-// boundaries, because "this month" on the third of the month is four days of
-// trading and reads as a collapse in sales. A manager asking for the month
-// wants the last thirty days.
-// ==========================================
+// Date ranges are counted back from today rather than snapped to calendar
+// boundaries: "this month" on the third would read as a collapse.
 const REPORT_RANGES = {
   daily:     { days: 1,   label: "Today" },
   weekly:    { days: 7,   label: "Last 7 days" },
@@ -3004,22 +4277,14 @@ function isDateText(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
 
-// The calendar day this machine is having, not the one Greenwich is having.
-//
-// toISOString() always answers in UTC. Every date comparison downstream of
-// this ends up beside CURDATE() or DATE(sale_date) in SQL, which MySQL answers
-// in the server's own timezone, so a UTC answer here quietly disagreed with the
-// database for the first eight hours of every Philippine day: a manager opening
-// Today's income at seven in the morning was shown yesterday's trading, while
-// the cashier's end-of-shift card on the next desk correctly said today.
+// The calendar day this machine is having: toISOString() answers in UTC,
+// which disagreed with CURDATE() for the first eight hours of every day.
 function isoDay(date) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
   return local.toISOString().slice(0, 10);
 }
 
-// Resolves whatever the screen asked for into { from, to, label, bucket }.
-// A custom pair always wins over a named range, so a manager who has typed
-// two dates is never quietly given something else.
+// { from, to, label, bucket }; a custom pair always wins over a named range
 function resolveRange(query) {
   const from = String(query.from || "");
   const to = String(query.to || "");
@@ -3050,8 +4315,7 @@ function resolveRange(query) {
   };
 }
 
-// A chart with 365 columns is a smear and a chart with 2 is a nothing, so the
-// bucket follows the span rather than the name of the range.
+// the bucket follows the span: 365 columns is a smear, 2 is nothing
 function bucketFor(from, to) {
   const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
   if (days <= 62) return "day";
@@ -3065,24 +4329,8 @@ const BUCKET_SQL = {
   month: "DATE_FORMAT(s.sale_date, '%Y-%m-01')"
 };
 
-// ==========================================
-// THE INCOME BREAKDOWN
-//
-// The Collected card on the dashboard opens this. It answers one question
-// four ways, because "how much did we make" means four different figures to
-// four different people, and a screen that shows only one of them gets
-// argued with:
-//
-//   billed     what was rung up, whether or not the money arrived
-//   collected  what is actually in hand, which is what pays the suppliers
-//   outstanding what is still owed on it
-//   discounts  what was given away to get the sale
-//
-// Collected is the headline, because this is a shop with a credit book and
-// billed income that never arrives is not income.
-// ==========================================
-// One function behind both the screen and the export, so a downloaded file
-// and the page it came from can never disagree about a figure.
+// The income breakdown: billed, collected (the headline), outstanding and
+// discounts. One function behind both the screen and the export.
 async function incomeReport(range) {
   const bucket = BUCKET_SQL[range.bucket] || BUCKET_SQL.day;
   const window = [`${range.from} 00:00:00`, `${range.to} 23:59:59`];
@@ -3199,35 +4447,22 @@ app.get("/api/reports/income", async (request, response) => {
   }
 });
 
-// ==========================================
-// TAKING A REPORT AWAY
-//
-// CSV rather than a real .xlsx, and deliberately: Excel, LibreOffice and
-// Google Sheets all open a CSV without being asked twice, it needs no library
-// on the server, and there is nothing in a sales report that wants a formula.
-// A PDF is the browser's own print dialogue over a print stylesheet, for the
-// same reason: what a manager wants is the page they are already looking at,
-// on paper, not a second rendering of it that drifts from the screen.
-//
-// The access rule above is what actually stops a cashier exporting. This
-// function only decides what the file says.
-// ==========================================
+// Exports are CSV: every spreadsheet opens one and nothing here wants a
+// formula. The access table is what stops a cashier exporting.
 function csvCell(value) {
   if (value === null || value === undefined) return "";
 
   const text = String(value);
-  // a comma, a quote or a line break turns the field into a quoted one, and a
-  // quote inside a quoted field is doubled. That is the whole format.
   return /[",\n\r]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 function csvDocument(headers, rows) {
-  // A BOM, so Excel on Windows reads it as UTF-8 rather than as the local
-  // code page and turns a peso sign into mojibake. Every other reader
-  // ignores it.
-  return "﻿" +
-    [headers.map(csvCell).join(","), ...rows.map((row) => row.map(csvCell).join(","))]
-      .join("\r\n") + "\r\n";
+  // BOM so Excel on Windows reads UTF-8; an empty header list means the
+  // report writes its own section headers among the rows
+  const lines = rows.map((row) => row.map(csvCell).join(","));
+  if (headers.length > 0) lines.unshift(headers.map(csvCell).join(","));
+
+  return "﻿" + lines.join("\r\n") + "\r\n";
 }
 
 function sendCsv(response, fileName, headers, rows) {
@@ -3277,6 +4512,25 @@ const EXPORTS = {
       ["Outstanding", data.totals.outstanding],
       ["Average sale", data.totals.averageSale]
     ]
+  },
+
+  // the whole income screen in one file
+  "income-breakdown": {
+    title: "income-breakdown",
+    headers: [],
+    rows: (data) => {
+      const section = (name, headers, body) =>
+        [[], [name], headers, ...body];
+
+      return [
+        ["Income breakdown", data.range.label, `${data.range.from} to ${data.range.to}`],
+        ...section("Summary", ["Figure", "Value"], EXPORTS["income-summary"].rows(data).slice(3)),
+        ...section("Over time", EXPORTS["income-series"].headers, EXPORTS["income-series"].rows(data)),
+        ...section("By payment method", EXPORTS["payment-methods"].headers, EXPORTS["payment-methods"].rows(data)),
+        ...section("Best sellers", EXPORTS["top-products"].headers, EXPORTS["top-products"].rows(data)),
+        ...section("Who sold it", EXPORTS["staff-sales"].headers, EXPORTS["staff-sales"].rows(data))
+      ];
+    }
   }
 };
 
@@ -3293,8 +4547,6 @@ app.get("/api/reports/export", async (request, response) => {
   const range = resolveRange(request.query);
 
   try {
-    // the export reads exactly what the screen reads, through the same route,
-    // so a downloaded file and the page it came from can never disagree
     const data = await incomeReport(range);
     const rows = plan.rows(data);
 
@@ -3309,18 +4561,8 @@ app.get("/api/reports/export", async (request, response) => {
   }
 });
 
-// ==========================================
-// THE DAILY TALLY
-//
-// What a cashier or a clerk gets instead of the reporting suite: one day, on
-// the screen, for balancing a drawer at the end of a shift. A manager asking
-// for it sees the whole shop's day rather than their own, because a manager
-// has no drawer of their own to balance.
-//
-// canExport travels with it so the screen knows whether to draw the export
-// buttons. It is a convenience, not the control: the export route refuses a
-// cashier whatever this says.
-// ==========================================
+// The daily tally for a cashier or clerk: one day on the screen. A manager
+// sees the whole shop's day. canExport is a convenience, not the control.
 app.get("/api/reports/daily-tally", async (request, response) => {
   const day = isDateText(request.query.date) ? request.query.date : null;
   const actor = request.actor;
@@ -3367,13 +4609,8 @@ app.get("/api/reports/daily-tally", async (request, response) => {
   }
 });
 
-// dashboard headline numbers
-//
-// Five queries, and every field below is read by the dashboard. Gross sales is
-// what was billed and total income is what was actually collected; the
-// difference between them IS the outstanding balance, so the three travel
-// together as one receivables figure rather than as three cards that a manager
-// has to subtract in their head.
+// Dashboard headline numbers. Gross sales is what was billed and total income
+// what was collected; the difference is the outstanding balance.
 app.get("/api/manager/summary", async (request, response) => {
   try {
     const [[sales]] = await db.query(
@@ -3381,13 +4618,13 @@ app.get("/api/manager/summary", async (request, response) => {
               COALESCE(SUM(final_amount), 0) AS gross_sales
        FROM sales WHERE is_archived = FALSE`
     );
+    // the tile opens Reorder Alerts, so it counts what that screen lists
     const [[stock]] = await db.query(
-      `SELECT COUNT(*) AS product_count,
-              COALESCE(SUM(CASE WHEN i.quantity_in_stock <= p.reorder_point THEN 1 ELSE 0 END), 0) AS low_stock
-       FROM products p
-       LEFT JOIN inventory i ON i.product_id = p.product_id
-       WHERE p.is_archived = FALSE`
+      `SELECT COUNT(*) AS product_count FROM products p WHERE p.is_archived = FALSE`
     );
+    const [[lowStock]] = await db.query(LOW_STOCK_EFFECTIVE_SQL,
+      [SALES_WINDOW_DAYS, SALES_WINDOW_DAYS, SALES_WINDOW_DAYS]);
+    stock.low_stock = lowStock.n;
     const [[delivery]] = await db.query(
       `SELECT COALESCE(SUM(CASE WHEN status IN ('Pending','In Transit','Out for Delivery') THEN 1 ELSE 0 END), 0) AS in_progress,
               COALESCE(SUM(CASE WHEN status IN ('Delayed','Failed') THEN 1 ELSE 0 END), 0) AS problem
@@ -3469,11 +4706,7 @@ app.get("/api/reports/overview", async (request, response) => {
     );
 
     // Sales belong to the transaction, not to whether the person still works
-    // here. Filtering on is_active used to hide a leaver's history and make
-    // this table disagree with the billed figure on the dashboard.
-    // Everyone who sold anything is listed, plus cashiers on duty who have
-    // not sold yet, so a quiet shift still shows up as a zero rather than
-    // vanishing. is_active comes along so the screen can label a leaver.
+    // here; cashiers on duty with no sales still show as zero. is_active labels a leaver.
     const [staffPerf] = await db.query(
       `SELECT st.staff_id, st.full_name AS staff_name,
               r.role_name, st.is_active,
@@ -3498,26 +4731,12 @@ app.get("/api/reports/overview", async (request, response) => {
 // ==========================================
 // THE SALES LIST
 //
-// Two things are filtered here that the sales table does not hold as columns,
-// and both are derived rather than stored, so there is one definition of each
-// and no second copy to fall out of step.
-//
-// PAYMENT GROUP. The payment_method column names eight ways of paying. A
-// manager asking "how much came in online" does not mean GCash specifically,
-// so the four electronic methods answer as one group while Cash, Cheque, COD
-// and Credit stay themselves.
-//
-// TRANSACTION STATUS. This is not payment_status. A sale can be paid in full
-// and still be sitting on a truck, and a voided sale is not "unpaid", it is
-// cancelled. So:
-//
-//   Voided           the sale was archived; it did not happen
-//   Pending Delivery goods are booked out and have not arrived yet
-//   Partial Credit   money is still owed on it
-//   Completed        paid, and either collected in store or delivered
-//
-// Deriving it means it can never disagree with the delivery record, which is
-// what a stored copy of it would eventually do.
+// Two derived filters: PAYMENT GROUP (the four electronic methods answer as
+// one) and TRANSACTION STATUS, which is not payment_status:
+//   Voided           archived; it did not happen
+//   Pending Delivery goods booked out and not yet arrived
+//   Partial Credit   money still owed
+//   Completed        paid, and collected or delivered
 // ==========================================
 const SALE_STATUS_SQL = `
   CASE
@@ -3533,21 +4752,13 @@ const PAYMENT_GROUP_SQL = `
     ELSE s.payment_method
   END`;
 
-// WHO THE SALE WAS FOR
-//
-// In the order the record actually knows it: the account it was booked
-// against, then the name the cashier took at the till, and only then the
-// admission that nobody asked. "Walk-in" used to be the answer to all three,
-// which made a receipt reprinted a week later unreadable.
+// who the sale was for: the account, then the name taken at the till, then walk-in
 const SALE_CUSTOMER_SQL = `
   COALESCE(NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), ''),
            NULLIF(TRIM(s.walk_in_name), ''),
            'Walk-in')`;
 
-// The same question for a delivery, where what was written on the booking
-// outranks the customer record: the person who took the order is closer to
-// the truth than a customer row from six months ago, and a driver holding
-// the manifest needs the name the customer will answer to at the gate.
+// for a delivery the name on the booking outranks the customer record
 const DELIVERY_CONTACT_SQL = `
   COALESCE(NULLIF(TRIM(d.contact_name), ''),
            NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), ''),
@@ -3563,8 +4774,7 @@ app.get("/api/sales", async (request, response) => {
   const from = String(request.query.from || "");
   const to = String(request.query.to || "");
 
-  // A voided sale is archived, so it is outside the default list by
-  // definition. Asking for it explicitly is the one way to see it.
+  // a voided sale is archived, so it is outside the default list
   const where = [status === "Voided" ? "s.is_archived = TRUE" : "s.is_archived = FALSE"];
   const params = [];
 
@@ -3611,18 +4821,8 @@ app.get("/api/sales", async (request, response) => {
 // ==========================================
 // CREDIT MANAGEMENT
 //
-// The shop's credit book, which is the part of this system the business
-// actually runs on. Three screens read from here:
-//
-//   The manager sets limits and standings and decides extensions.
-//   The cashier checks an account before ringing a sale up, and raises a
-//   request when a regular customer will not fit under their limit.
-//   The customer page shows what they bought and what they have paid, side
-//   by side, because neither half means much without the other.
-//
-// Every balance on these routes is derived in vw_customer_credit from the
-// sales themselves. Nothing about a balance is stored, so nothing about a
-// balance can go stale.
+// Every balance is derived in vw_customer_credit from the sales themselves;
+// nothing about a balance is stored, so nothing can go stale.
 // ==========================================
 
 app.get("/api/credit/customers", async (request, response) => {
@@ -3637,15 +4837,13 @@ app.get("/api/credit/customers", async (request, response) => {
     params.push(standing);
   }
 
-  // "who owes us money" is the commonest question this list is opened for
   if (request.query.owing === "true") where.push("v.current_credit > 0");
 
-  // and "who is over their limit" is the one that needs acting on today
   if (request.query.overLimit === "true") where.push("v.current_credit > v.credit_limit");
 
   if (search !== "") {
     where.push("(v.customer_name LIKE ? OR v.phone LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`);
+    params.push(searchPrefix(search), searchPrefix(search));
   }
 
   const filter = where.length ? ` WHERE ${where.join(" AND ")}` : "";
@@ -3696,7 +4894,7 @@ app.get("/api/credit/customers/:customerId", async (request, response) => {
   }
 });
 
-app.put("/api/credit/customers/:customerId/limit", async (request, response) => {
+app.put("/api/credit/customers/:customerId/limit", requireRole(MANAGER), async (request, response) => {
   const { creditLimit, standing, notes } = request.body;
 
   const limit = Number(creditLimit);
@@ -3708,7 +4906,7 @@ app.put("/api/credit/customers/:customerId/limit", async (request, response) => 
 
   try {
     const [before] = await db.query(
-      "SELECT customer_name, credit_limit, standing FROM vw_customer_credit WHERE customer_id = ?",
+      "SELECT customer_name, credit_limit, manual_standing AS standing FROM vw_customer_credit WHERE customer_id = ?",
       [request.params.customerId]
     );
 
@@ -3808,12 +5006,11 @@ app.post("/api/credit/requests", async (request, response) => {
   }
 });
 
-app.post("/api/credit/requests/:requestId/decide", async (request, response) => {
+app.post("/api/credit/requests/:requestId/decide", requireRole(MANAGER), async (request, response) => {
   const approve = request.body.approve === true;
   const note = request.body.note;
 
-  // A refusal with no reason is a question the cashier has to ask again
-  // tomorrow, so declining says why or it does not happen.
+  // declining says why or it does not happen
   if (!approve && (typeof note !== "string" || note.trim() === "")) {
     return response.status(400).json({
       error: "Say why the request was declined, so whoever asked knows what to tell the customer."
@@ -3845,14 +5042,7 @@ app.post("/api/credit/requests/:requestId/decide", async (request, response) => 
   }
 });
 
-// ==========================================
-// ONE CUSTOMER, IN FULL
-//
-// What they bought beside what they have paid. They are two halves of the
-// same account and neither means much alone: a purchase history says how
-// good a customer somebody is, a payment history says how good a payer, and
-// the shop needs both before extending anything.
-// ==========================================
+// One customer in full: what they bought beside what they have paid.
 app.get("/api/customers/:customerId/history", async (request, response) => {
   const customerId = request.params.customerId;
 
@@ -3901,8 +5091,6 @@ app.get("/api/customers/:customerId/history", async (request, response) => {
       [customerId]
     );
 
-    // What they buy, which is the part of a customer record that tells you
-    // what to stock rather than what to chase.
     const [products] = await db.query(
       `SELECT p.product_name, u.unit_name,
               SUM(si.quantity) AS units, SUM(si.subtotal) AS spent,
@@ -3925,18 +5113,8 @@ app.get("/api/customers/:customerId/history", async (request, response) => {
   }
 });
 
-// Open an account from the counter.
-//
-// The regular who has been buying for months and was never typed in has no
-// purchase history and no credit book entry, and the cashier retypes their
-// name on every sale. The counter is where that person is standing, so the
-// counter is where the account is opened.
-//
-// A cashier can create the record and nothing else: the procedure sets the
-// limit to zero and the standing to Good, which together mean "known
-// customer, sells for cash". Moving that limit is a manager's decision and
-// the route that does it is manager-only, so opening an account here is not
-// a way to grant credit to yourself.
+// Open an account from the counter. The procedure sets the limit to zero and
+// the standing to Good; moving the limit is manager-only.
 app.post("/api/customers", async (request, response) => {
   const { firstName, lastName, phone, address } = request.body;
 
@@ -3955,9 +5133,7 @@ app.post("/api/customers", async (request, response) => {
       ["customer_id", "status_code", "message"]
     );
 
-    // 200 means the account already existed and was handed back; 201 means a
-    // new one. Both are a success from the counter's point of view, because
-    // either way this sale now has the right customer attached to it.
+    // 200: the account already existed and was handed back; 201: a new one
     if (output.status_code !== 201 && output.status_code !== 200) {
       return response.status(output.status_code).json({ error: output.message });
     }
@@ -3973,19 +5149,8 @@ app.post("/api/customers", async (request, response) => {
   }
 });
 
-// ==========================================
-// WHO THE SHOP IS, AND HOW IT IS REGISTERED
-//
-// The invoice used to print a shop name hard-coded into a JavaScript file, no
-// TIN and no tax breakdown, which is not a document a Philippine shop can
-// hand a customer. This is where the real ones live.
-//
-// Registration is a setting rather than a constant because both kinds of
-// hardware shop exist: above the 3,000,000 annual threshold a shop is
-// VAT-registered and its prices carry 12% inside them, below it the shop is
-// non-VAT, charges no VAT at all, and pays percentage tax instead. A VAT
-// block printed on a non-VAT shop's invoice would be a fiction.
-// ==========================================
+// Who the shop is and how it is registered. Above the 3,000,000 threshold a
+// shop is VAT-registered with 12% inside its prices; below it charges no VAT.
 const DEFAULT_STORE_SETTINGS = {
   store_name: "Hardware Sales & Inventory",
   address: "Set your address in System Administration",
@@ -4006,9 +5171,7 @@ app.get("/api/store-settings", async (request, response) => {
        WHERE cfg.setting_id = 1`
     );
 
-    // A database mid-install has no row yet. Handing back the defaults lets
-    // the till keep printing something rather than failing on a sale, and the
-    // placeholder TIN is obvious enough that nobody mistakes it for real.
+    // a database mid-install has no row yet; the defaults keep the till printing
     response.json(rows[0] || DEFAULT_STORE_SETTINGS);
   } catch (error) {
     console.error("Store settings failed:", error.message);
@@ -4016,19 +5179,17 @@ app.get("/api/store-settings", async (request, response) => {
   }
 });
 
-app.put("/api/store-settings", async (request, response) => {
+app.put("/api/store-settings", requireRole(ADMIN), async (request, response) => {
   const { storeName, address, tin, registrationType, vatRate, invoiceNote } = request.body;
 
-  // refused with the reason rather than stored as typed: what is stored here
-  // is printed at the head of every invoice from now on
+  // refused with the reason: this is printed at the head of every invoice
   const tinProblem = tinComplaint(tin);
   if (tinProblem) return response.status(400).json({ error: tinProblem });
 
   const storedTin = cleanTin(tin);
 
   try {
-    // read first, so the trail can say what the TIN and the registration were
-    // before somebody changed what every future invoice claims about the shop
+    // read first, so the trail can say what stood before
     const [existing] = await db.query(
       `SELECT store_name, address, tin, registration_type, vat_rate, invoice_note
        FROM store_settings WHERE setting_id = 1`
@@ -4050,10 +5211,6 @@ app.put("/api/store-settings", async (request, response) => {
       return response.status(output.status_code).json({ error: output.message });
     }
 
-    // Every other administrative change writes an entry and this one did not,
-    // which left the single most consequential setting in the system — whether
-    // the shop charges VAT, and under which TIN — the one change nobody could
-    // trace afterwards.
     await writeAuditLog(
       request,
       "UPDATE_STORE_SETTINGS",
@@ -4081,14 +5238,9 @@ app.put("/api/store-settings", async (request, response) => {
 // CASHIER MODULE
 // ==========================================
 
-// Ring up a sale. The procedure deducts stock, checks the credit limit and
-// the account's standing, and works out whether the sale is paid, part paid
-// or wholly on the book.
-//
-// downPaymentMethod is how the money handed over on a Credit sale actually
-// arrived. The sale itself says Credit, which is not a way of handing over
-// money, so the part that was handed over needs its own name or the payment
-// history cannot say how it got there.
+// Ring up a sale. The procedure deducts stock, checks the limit and standing,
+// and decides paid, part paid or on the book. downPaymentMethod is how the
+// money on a Credit sale actually arrived.
 app.post("/api/sales", async (request, response) => {
   const { customerId, walkInName, discount, amountPaid, paymentMethod, items, downPaymentMethod } = request.body;
 
@@ -4099,10 +5251,7 @@ app.post("/api/sales", async (request, response) => {
   const TENDER_METHODS = ["Cash", "Cheque", "GCash", "PayMaya", "PayPal", "Bank Transfer"];
   const downMethod = TENDER_METHODS.includes(downPaymentMethod) ? downPaymentMethod : "Cash";
 
-  // The name typed at the till for somebody with no account. Trimmed and
-  // capped here rather than trusted at its typed length, because the column
-  // is 150 and a paste of a whole address into the name box should shorten
-  // the name, not fail the sale.
+  // trimmed and capped to the column (150) rather than failing the sale
   const typedName = typeof walkInName === "string"
     ? walkInName.trim().slice(0, 150)
     : "";
@@ -4126,10 +5275,8 @@ app.post("/api/sales", async (request, response) => {
   }
 });
 
-// A browser's datetime-local field sends "2026-09-05T14:30". MySQL wants a
-// space where the T is and will take the seconds or leave them. Anything that
-// is not one of those two shapes is dropped rather than passed through, so a
-// hand-edited request cannot smuggle an expression into a DATETIME column.
+// "2026-09-05T14:30" from datetime-local becomes "2026-09-05 14:30"; any other
+// shape is dropped so nothing reaches a DATETIME column unparsed
 function toMysqlDateTime(value) {
   const text = String(value || "").trim();
   if (text === "") return null;
@@ -4137,13 +5284,11 @@ function toMysqlDateTime(value) {
   const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?$/.exec(text);
   if (match) return `${match[1]} ${match[2]}${match[3] || ":00"}`;
 
-  // a plain date is a legitimate answer: it means midnight on that day
   if (isDateText(text)) return `${text} 00:00:00`;
 
   return null;
 }
 
-// book a delivery against a sale
 app.post("/api/deliveries", async (request, response) => {
   const { saleId, address, scheduledDate, remarks, contactName, contactPhone, bookedDate } = request.body;
 
@@ -4154,8 +5299,7 @@ app.post("/api/deliveries", async (request, response) => {
   const scheduled = toMysqlDateTime(scheduledDate);
   const booked = isDateText(bookedDate) ? bookedDate : null;
 
-  // A schedule that was typed but not understood is worse than no schedule:
-  // the delivery would be saved as unscheduled and nobody would be told.
+  // a schedule typed but not understood must not become "unscheduled" silently
   if (scheduledDate && !scheduled) {
     return response.status(400).json({
       error: "The scheduled date and time could not be read. Use the picker rather than typing it."
@@ -4183,9 +5327,7 @@ app.post("/api/deliveries", async (request, response) => {
   }
 });
 
-// The one route that moves a delivery. Both the driver screen and the manager
-// screen call this; the procedure decides what each role is allowed to do,
-// so the answer cannot depend on which URL the browser happened to use.
+// The one route that moves a delivery; the procedure decides what each role may do.
 app.patch("/api/deliveries/:deliveryId/status", async (request, response) => {
   const { status, remarks } = request.body;
   const actor = request.actor;
@@ -4195,7 +5337,6 @@ app.patch("/api/deliveries/:deliveryId/status", async (request, response) => {
   }
 
   try {
-    // a driver who picks up an unclaimed delivery becomes its driver
     if (actor.roleName === DRIVER) {
       await db.query(
         `UPDATE deliveries SET delivery_staff_id = ?
@@ -4221,7 +5362,6 @@ app.patch("/api/deliveries/:deliveryId/status", async (request, response) => {
   }
 });
 
-// sales that still have no delivery booked, for the delivery form
 app.get("/api/sales/undelivered", async (request, response) => {
   try {
     const [rows] = await db.query(
@@ -4242,48 +5382,18 @@ app.get("/api/sales/undelivered", async (request, response) => {
   }
 });
 
-// ==========================================
-// END OF SHIFT
-//
-// One cashier, one day, and by default that day is today. The screen that
-// reads this shows the shift the cashier is standing in, so the date is a
-// fact about now rather than a question to be answered before the figures
-// appear; a date can still be passed for a manager reading back over a
-// closed day.
-//
-// Every figure is bounded by DATE(sale_date) = that day. Nothing here is a
-// running or year-to-date total, because a cashier counting a drawer at six
-// o'clock is answering "what happened on my shift", and a figure that quietly
-// includes January is the wrong answer to that question.
-//
-// The refund list comes back line by line rather than as a total alone. A
-// refund total says money left the till; it does not say which item went
-// back, and the item is the part the cashier has to account for.
-// ==========================================
+// End of shift: one cashier, one day (today by default), every figure bounded
+// by DATE(sale_date). Refunds come back line by line.
 app.get("/api/cashier/summary", async (request, response) => {
-  // WHOSE SHIFT THIS IS
-  //
-  // The session's, always. A staff id in the address bar used to decide it,
-  // which meant one cashier could read another's takings and refund lines by
-  // editing a number in the URL. The screen still sends it and it is still
-  // ignored, the same way the notification routes ignore one.
+  // the session's shift, always; a staff id in the URL is ignored
   const staffId = request.actor.staffId;
 
-  // An unreadable date is treated as no date, which means today. Passing a
-  // fragment straight through would let it reach DATE() as something MySQL
-  // has to guess at.
+  // an unreadable date means today
   const day = isDateText(request.query.date) ? request.query.date : null;
 
   try {
     const [[totals]] = await db.query(
-      // COLLECTED IS WHAT STAYED IN THE DRAWER
-      //
-      // amount_paid is what the customer handed over, which on a cash sale
-      // includes the note they broke: 100,000 tendered against a 120 bill is
-      // 120 collected and 99,880 handed straight back. Summing amount_paid
-      // made this card disagree with the manager's daily tally for the same
-      // cashier on the same day, and the card a drawer is balanced against was
-      // the one that was wrong.
+      // collected is what stayed in the drawer, not amount_paid (which includes the note they broke)
       `SELECT COUNT(*) AS sale_count,
               COALESCE(SUM(final_amount), 0) AS gross,
               COALESCE(SUM(discount), 0) AS discounts,
@@ -4313,9 +5423,7 @@ app.get("/api/cashier/summary", async (request, response) => {
       [staffId, day]
     );
 
-    // What actually went back, so the popup can show the item rather than
-    // only the money. Capped, because a day with two hundred refunds is a
-    // day for the manager's report and not for a card at the counter.
+    // what actually went back, capped
     const [refundLines] = await db.query(
       `SELECT r.return_id, r.quantity, r.refund_amount, r.reason, r.disposition,
               r.return_date, r.sale_id,
@@ -4337,9 +5445,7 @@ app.get("/api/cashier/summary", async (request, response) => {
     );
 
     response.json({
-      // The day the figures are actually for, resolved server side. A screen
-      // that says "today" and a database that decided which day that was
-      // should not be two opinions.
+      // the day the figures are for, resolved server side
       date: stamp.day,
       saleCount: totals.sale_count,
       gross: totals.gross,
@@ -4357,7 +5463,6 @@ app.get("/api/cashier/summary", async (request, response) => {
   }
 });
 
-// SALES detail for the popup
 app.get("/api/sales/:saleId", async (request, response) => {
   try {
     const [rows] = await db.query(
@@ -4415,24 +5520,10 @@ app.get("/api/sales/:saleId", async (request, response) => {
 //
 //     ROP = (average daily sales x lead time) + safety stock
 //
-// Average daily sales is counted over a window of real trading, not over all
-// history: a product that sold well two years ago and not since should not
-// still be ordered as though it does. The window is 90 days by default, and
-// the divisor is the number of days the shop has actually been recording
-// sales rather than a flat 90, so a database three weeks old does not report
-// every product as barely moving.
-//
-// Two guards matter more than the arithmetic:
-//
-//   A product with no sales in the window gets a calculated ROP of its safety
-//   stock alone, which for most items is small and for a genuinely dead item
-//   is zero. Ordering to zero is right for a dead item and wrong for a slow
-//   one, which is why Dynamic is a per-product choice and not the default.
-//
-//   The effective reorder point is the calculated one only when the product
-//   is set to Dynamic. Everything else keeps the number a person typed, and
-//   the calculated figure is still shown beside it as a suggestion, so the
-//   formula can be judged before it is trusted.
+// Average daily sales is over a window of real trading (90 days), divided by
+// the days the shop has actually recorded sales. The effective reorder point
+// is the calculated one only when the product is set to Dynamic; otherwise
+// the typed figure, with the calculated one shown beside it.
 // ==========================================
 const SALES_WINDOW_DAYS = 90;
 
@@ -4523,8 +5614,7 @@ app.get("/api/stocks", async (request, response) => {
   }
 });
 
-// The manager sets the policy; the clerk still sets a manual reorder point
-// through the inventory screen. Two different decisions, two different roles.
+// the manager sets the policy; the clerk sets a manual reorder point
 app.put("/api/stocks/:productId/reorder-policy", async (request, response) => {
   const { leadTimeDays, safetyStock, reorderMode, reorderPoint } = request.body;
 
@@ -4542,8 +5632,7 @@ app.put("/api/stocks/:productId/reorder-policy", async (request, response) => {
     return response.status(400).json({ error: "Reorder mode must be Manual or Dynamic" });
   }
 
-  // a manual reorder point is optional here; the clerk's screen owns it, and
-  // leaving it out means "do not touch what is already there"
+  // a manual reorder point left out means "do not touch what is there"
   const manual = reorderPoint === undefined || reorderPoint === null || reorderPoint === ""
     ? null : parseInt(reorderPoint, 10);
 
@@ -4601,21 +5690,9 @@ app.put("/api/stocks/:productId/reorder-policy", async (request, response) => {
   }
 });
 
-// ==========================================
-// DELIVERIES, AND WHEN ONE IS ACTUALLY FINISHED
-//
-// Delivered and finished are two different things. A driver hands over eight
-// bags of cement on a COD order and marks it Delivered; the goods have
-// arrived and the shop has not been paid. Treating that as done is how a
-// day's takings go missing, so a delivered order with money still owed on it
-// sits at Pending Cash Collection and does not become Completed until the
-// balance is cleared.
-//
-// It is derived from the sale's own figures rather than stored on the
-// delivery, which means the transition happens by itself: the moment a
-// cashier or a driver records the payment, the row is Completed. There is no
-// second flag to be set, and therefore no second flag to be forgotten.
-// ==========================================
+// Delivered and finished are different: a delivered order with money owed
+// sits at Pending Cash Collection until the balance is cleared. Derived from
+// the sale's own figures, so there is no second flag to forget.
 const FULFILMENT_SQL = `
   CASE
     WHEN d.status <> 'Delivered' THEN d.status
@@ -4666,8 +5743,7 @@ app.get("/api/deliveries", async (request, response) => {
 
 // deliveries assigned to this driver, plus any nobody claimed yet
 app.get("/api/delivery/list", async (request, response) => {
-  // the driver reading the screen, taken from the session rather than from a
-  // number in the address bar, so one driver cannot pull up another's round
+  // from the session, so one driver cannot pull up another's round
   const staffId = request.actor.staffId;
 
   try {
@@ -4695,9 +5771,6 @@ app.get("/api/delivery/list", async (request, response) => {
     response.status(500).json({ error: error.message });
   }
 });
-
-// (the driver's status route used to live here as a second copy of the same
-//  logic; it is now the single PATCH /api/deliveries/:id/status above)
 
 // cash on delivery collected at the door
 app.post("/api/delivery/:deliveryId/payment", async (request, response) => {
@@ -4734,12 +5807,10 @@ app.post("/api/delivery/:deliveryId/payment", async (request, response) => {
   }
 });
 
-// report data for one driver over a date range
 app.get("/api/delivery/summary", async (request, response) => {
   const staffId = request.actor.staffId;   // this driver's own round, never another's
 
-  // A date that cannot be read is dropped rather than handed to MySQL to guess
-  // at, the same rule the rest of the reporting routes follow.
+  // an unreadable date is dropped rather than handed to MySQL to guess at
   const from = isDateText(request.query.from) ? request.query.from : "2000-01-01";
   const to = isDateText(request.query.to) ? request.query.to : "2100-12-31";
 
@@ -4772,9 +5843,7 @@ app.get("/api/delivery/summary", async (request, response) => {
       [staffId, from, to]
     );
 
-    // Money owed is counted only against the driver actually carrying the
-    // order. Including the unclaimed pool here showed the same pesos as
-    // outstanding on every driver's report at once.
+    // money owed is counted only against the driver actually carrying the order
     const [[open]] = await db.query(
       `SELECT COUNT(*) AS cod_count,
               COALESCE(SUM(s.final_amount - s.amount_paid), 0) AS cod_due
@@ -4915,6 +5984,17 @@ app.post("/api/archives/archive", async (request, response) => {
     return response.status(400).json({ error: "Module and record id are required" });
   }
 
+  // who may ask; the procedure holds the rules for each kind
+  const allowed = {
+    Inventory: [CLERK, ...MANAGEMENT],
+    Sales: MANAGEMENT,
+    Delivery: MANAGEMENT,
+    Staff: [ADMIN]
+  }[module];
+  if (!allowed || !allowed.includes(request.actor.roleName)) {
+    return response.status(403).json({ error: `Your role cannot archive ${module} records.` });
+  }
+
   try {
     const output = await callProcedure(
       "CALL sp_archive_record(?, ?, ?, @status_code, @message)",
@@ -4933,7 +6013,6 @@ app.post("/api/archives/archive", async (request, response) => {
   }
 });
 
-// record a payment against a credit or COD sale
 app.post("/api/sales/:saleId/payment", async (request, response) => {
   const { amount, paymentMethod, referenceNo } = request.body;
 
@@ -5009,7 +6088,6 @@ app.get("/api/inventory/summary", async (request, response) => {
   }
 });
 
-// the product list the clerk works from
 app.get("/api/inventory/products", async (request, response) => {
   const archived = request.query.archived === "true";
 
@@ -5047,22 +6125,8 @@ app.get("/api/inventory/products", async (request, response) => {
   }
 });
 
-// ==========================================
-// ADDING A MATERIAL FROM THE SHOP FLOOR
-//
-// Every picker in the system suggests materials that are already on the
-// books, which is right up until the moment the shop takes delivery of
-// something it has never stocked. Until now that moment stopped the clerk
-// dead: nothing on any of their screens could open a new record, so a pallet
-// sat in the yard until somebody with a different login typed the name in.
-//
-// This is that name being typed in, by the person holding the pallet. The
-// unit, category and brand are created alongside it if they are new too, so
-// the first bag of a material the shop has never sold does not need three
-// other screens visited first. A name that already exists returns the
-// existing material rather than a duplicate: two rows called Portland Cement
-// is a worse outcome than a clerk being told they already had one.
-// ==========================================
+// Adding a material from the shop floor: unit, category and brand are
+// created alongside it if new. An existing name returns the existing material.
 app.post("/api/materials", async (request, response) => {
   const { name, brandName, categoryName, unitName, price, supplierId } = request.body;
 
@@ -5099,20 +6163,8 @@ app.post("/api/materials", async (request, response) => {
 });
 
 // STOCK ADJUSTMENT
-// ==========================================
-// UNITS
-//
-// The list grows on its own: a unit typed on a stock adjustment that is not
-// here yet gets added, because a list only a DBA can extend is a list that
-// stays wrong while a clerk stands there holding a sack of nails.
-//
-// The cost of that is typos, and a typo here is not cosmetic: "kilogrms"
-// alongside "kilogram" splits a shop's nails across two units that mean the
-// same thing. So the same clerk who can create one can correct one, and
-// renaming onto a name that already exists merges rather than fails, because
-// looking at the two side by side and wanting one gone is exactly why anybody
-// opens this screen.
-// ==========================================
+// Units: a unit typed on an adjustment is added; the same clerk can rename
+// one, and renaming onto an existing name merges.
 app.put("/api/units/:unitId", async (request, response) => {
   const { unitName } = request.body;
 
@@ -5172,9 +6224,7 @@ app.post("/api/inventory/adjust", async (request, response) => {
     return response.status(400).json({ error: "Product, type, quantity and reason are all required" });
   }
 
-  // Capped at the column's own width rather than trusted at its typed length.
-  // Empty means "keep whatever this material is already counted in", which is
-  // what an older client that does not send a unit at all will produce.
+  // capped at the column width; empty means "keep what this material is counted in"
   const unit = typeof unitName === "string" ? unitName.trim().slice(0, 20) : "";
 
   try {
@@ -5267,15 +6317,7 @@ app.get("/api/purchase-orders/:poId/items", async (request, response) => {
   }
 });
 
-// ==========================================
-// THE ORDER AS A DOCUMENT
-//
-// The supplier has no login and never will, so what reaches them is a printed
-// sheet. Everything that sheet needs comes back in one request rather than
-// three: who the shop is, who the supplier is, and what is being bought. It
-// is assembled here because a document assembled in the browser from three
-// separate calls is a document that can print half-finished.
-// ==========================================
+// The order as a printable document, assembled in one request.
 app.get("/api/purchase-orders/:poId/document", async (request, response) => {
   try {
     const [orders] = await db.query(
@@ -5326,16 +6368,8 @@ app.get("/api/purchase-orders/:poId/document", async (request, response) => {
   }
 });
 
-// ==========================================
-// RAISING AN ORDER
-//
-// The supplier arrives as a company name rather than an id, and a line may
-// name a material that is not on the books yet. Both are the normal case: a
-// purchase order is how a shop buys something it does not have, often from
-// somebody it has not bought from before. The procedure creates whatever is
-// new inside the order's own transaction, so a failure leaves neither a
-// half-written order nor an orphan material.
-// ==========================================
+// Raising an order: the supplier arrives as a name and a line may name a new
+// material. The procedure creates whatever is new inside the order's transaction.
 app.post("/api/purchase-orders", async (request, response) => {
   const {
     supplierId, supplierName, contactPerson, contactNumber,
@@ -5350,8 +6384,7 @@ app.post("/api/purchase-orders", async (request, response) => {
     });
   }
 
-  // Only the fields the procedure reads are passed on, trimmed to their column
-  // widths here rather than being truncated by MySQL without anybody saying so.
+  // only the fields the procedure reads, trimmed to their column widths
   const lines = items.map((item) => ({
     product_id: Number(item.productId || item.product_id) || null,
     quantity: Number(item.quantity) || 0,
@@ -5393,14 +6426,8 @@ app.post("/api/purchase-orders", async (request, response) => {
   }
 });
 
-// ==========================================
-// RECEIVING WHAT ARRIVED
-//
-// The body carries the count sheet: what actually came off the lorry, line by
-// line, including anything that was never ordered. An empty body receives the
-// order exactly as written, which is what the old button did, so nothing that
-// called this before is broken by the change.
-// ==========================================
+// Receiving: the body carries the count sheet, including anything never
+// ordered. An empty body receives the order exactly as written.
 app.post("/api/purchase-orders/:poId/receive", async (request, response) => {
   const received = Array.isArray(request.body && request.body.received)
     ? request.body.received : [];
@@ -5454,23 +6481,8 @@ app.get("/api/returns", async (request, response) => {
   }
 });
 
-// ==========================================
-// FILING A RETURN
-//
-// Two things are compulsory here and neither was before.
-//
-// A REASON. Not a word: a sentence. "Damaged" explains nothing three months
-// later when somebody queries a write-off, and a stock count that disagrees
-// with the system by two bags of cement is settled by reading these lines.
-//
-// A DISPOSITION. Where the goods actually go, said in words rather than left
-// to a checkbox called "restock" that nobody read. A return filed with that
-// box unticked used to leave the goods unaccounted for: not on the shelf, not
-// written off, still in a box behind the counter.
-//
-// restock is still accepted from older callers and mapped across, so nothing
-// that already works stops working.
-// ==========================================
+// Filing a return: a reason (a sentence) and a disposition are compulsory.
+// restock is still accepted from older callers and mapped across.
 const RETURN_DISPOSITIONS = ["Return to Stock", "Write-Off"];
 const MINIMUM_RETURN_REASON = 10;
 
@@ -5490,7 +6502,6 @@ app.post("/api/returns", async (request, response) => {
     });
   }
 
-  // the words win; the old flag is the fallback for anything still sending it
   const where = RETURN_DISPOSITIONS.includes(disposition)
     ? disposition
     : (restock === true ? "Return to Stock" : null);
@@ -5554,10 +6565,7 @@ app.post("/api/returns/:reportId/resolve", async (request, response) => {
   }
 });
 
-// NOTIFICATIONS
-// Which alerts you see is decided by the role on your session, not by a number
-// in the address bar. Asking for another role's alerts used to be a matter of
-// editing the URL.
+// NOTIFICATIONS -- which alerts you see is decided by the role on your session
 app.get("/api/notifications", async (request, response) => {
   const roleId = request.actor.roleId;
 
@@ -5614,7 +6622,6 @@ app.post("/api/notifications/read-all", async (request, response) => {
 
 // ==========================================
 // START
-// (the connection is already opened and checked at the top of this file)
 // ==========================================
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);

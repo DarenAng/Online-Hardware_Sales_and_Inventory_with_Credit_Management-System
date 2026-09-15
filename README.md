@@ -33,9 +33,10 @@ public/database/2-RUN-SECOND-stored-procedures.sql
 ```
 
 The names give the order. `1-RUN-FIRST-database.sql` drops and rebuilds
-`hardware_db`, creates 23 tables and 2 views, and loads the demo data.
-`2-RUN-SECOND-stored-procedures.sql` loads the 27 stored procedures; the tables
-have to exist before it will run.
+`hardware_db`, creates the 26 tables, loads the demo data, and then six months
+of mock trading on top of it (see *Mock data* below).
+`2-RUN-SECOND-stored-procedures.sql` loads the 3 views and the 30 stored
+procedures; the tables have to exist before it will run.
 
 Run them in MySQL Workbench or the `mysql` command line. Those two honour the
 `DELIMITER` keyword. Other clients sometimes do not, and the procedures fail to
@@ -63,13 +64,20 @@ your database was created before `staff.middle_name` existed: the server
 renames the column for you at startup, but the stored procedures still expect
 the old name until file 2 is loaded again.
 
-There is one automatic upgrade, and it happens on `npm start`: `staff`'s old
-`middle_initial VARCHAR(5)` column is renamed to `middle_name VARCHAR(100)` and
-`full_name` is rebuilt around it. The letters already in there are kept and are
-still valid middle names of one letter, so nothing is lost and nothing has to
-be retyped — fill in the whole name the next time you open each record. The
-server says so on the console when it does it, and does nothing at all once the
-column is already `middle_name`.
+There are two automatic upgrades, and both happen on `npm start`. The first:
+`staff`'s old `middle_initial VARCHAR(5)` column is renamed to
+`middle_name VARCHAR(100)` and `full_name` is rebuilt around it. The letters
+already in there are kept and are still valid middle names of one letter, so
+nothing is lost and nothing has to be retyped — fill in the whole name the
+next time you open each record. The second: the three access-control tables
+(`connected_systems` and `system_permissions`, see *Connected systems*
+below, and `role_feature_permissions`, see *Screens by role*) are created if
+they are missing, the five internal systems are registered, and the audit
+trail's list of action types is widened to take the two new ones. Each
+upgrade says so on the console when it does something
+and does nothing at all on a database that already has it — but **re-run file
+2 afterwards** if the console says to, because the two procedures the new
+tables need only come from there.
 
 Earlier versions of the project shipped `upgrade.sql` through `upgrade_v8.sql`
 and `fix_patch.sql` for stepping an existing database forward one version at a
@@ -150,7 +158,7 @@ On startup you should see three lines:
 
 ```
 Connected to MySQL database "hardware_db" on localhost.
-All 27 stored procedures are loaded.
+All 30 stored procedures are loaded.
 Server running at http://localhost:3000
 ```
 
@@ -170,6 +178,34 @@ A warning about missing procedures means step 3 did not finish. Run
 Only the admin account skips the first login password change. The other five
 land on `change-password.html` and pick a new password of 8 characters or more.
 
+### Mock data
+
+The demo data above is a handful of rows so every screen has something to
+show. Section 8 of `1-RUN-FIRST-database.sql` then loads six months of
+trading for a hardware shop in Nasugbu, Batangas, so the system can be tested
+and evaluated against something that looks like a shop rather than against
+tables with three rows in them: seven more staff (one of whom left in June),
+twenty-six more customers with credit accounts in every standing, four more
+suppliers, forty more materials with stock on the shelf, eleven purchase
+orders, a hundred-odd sales with their lines and payments, deliveries at
+every stage, returns, stock movements, credit extension requests, alerts and
+an audit trail to match — including two people who hold a key to a
+connected system (the manager may watch and run the backup; the senior clerk
+may watch the database), so the Access Control screen has something to show
+besides "Nothing".
+
+The extra accounts sign in with the pattern `firstname12345` —
+`liza.gonzales@hardware.com` / `liza12345`, `carlo.dizon@hardware.com` /
+`carlo12345`, and so on; the directory lists them. Every one of them has to
+choose a password on first sign-in, as above.
+
+None of it is special. Every row is the kind a day's trading writes, and the
+credit book deliberately holds one account of each standing worked out by the
+rules below rather than typed in: one over its limit, one whose oldest debt
+has passed ninety days, one being watched at forty-odd days, and the rest in
+good standing. It is generated from a script with a fixed seed, so it is the
+same on every machine and the ids continue from the demo data.
+
 ## Getting around
 
 The menu on the left stays put while a page scrolls, and so does the bar across
@@ -179,7 +215,11 @@ Navigation is two levels, each with one job. The menu on the left holds the
 modules and is the same list all day. The strip across the top holds the
 screens inside whichever module is open, and it changes as you move; on a
 module that has only one screen it is not there at all. The strip is built
-from the menu itself, so a screen a role cannot open never gets a tab.
+from the menu itself, so a screen a role cannot open never gets a tab. Which
+screens a role's menu holds is the administrator's to change (see *Screens
+by role*), and a screen with things waiting on it says how many, on the item,
+on the heading above it and in the top bar (see *What is waiting, and where
+it shows*).
 
 The bar itself is separated from the page three ways: a tinted band along its
 top edge, a ground a shade off the white of the cards below it, and a soft
@@ -225,6 +265,55 @@ against its own background and every edge clears 3:1. The whole palette is the
 `:root` block at the top of `css/general-ui.css`, and changing the system's
 colours means changing those values and nothing else.
 
+## The register
+
+The cashier's screen is the busiest in the system and the only one used with
+somebody waiting, so it is laid out for that. The catalog is a **list**, one
+product a line — name, category, brand, price, whether it can be sold, and
+an Add button — rather than a grid of cards, because six hundred products
+read faster down a column than across a wall, and the prices sit in one
+column where they can be compared. The Add button is the only thing that
+puts a product on the order; pressing the line anywhere else opens the
+product on a card — everything the catalog knows about it, with its own Add
+button — because a row that adds on a press adds a bag of cement when
+somebody meant to read about it. A product that has run out says so on its
+line and on its card, and neither will add it.
+
+**Counted and measured.** A bag of cement is counted, and Add puts one on
+the order; nails are weighed and wire is cut, so a product sold by the
+kilogram, gram, metre, litre, foot or gallon is *measured*: Add opens a
+card asking how much — *2.5* kg — with what is on the shelf as the ceiling,
+the cart line reads *2.5 kg* and its − / + step by a half, and the amount
+can be retyped by pressing it. Which a unit is comes from its name
+(`MEASURED_UNITS` in `shared/format.js`); every other unit is counted. The
+quantity columns behind this — stock on hand, sale lines, adjustments,
+returns — take three decimal places, and the server widens them on a
+database from before at startup; **re-run file 2 afterwards**, because the
+procedures that read them come from there and until then a fraction is
+rounded inside the procedure, as it always was.
+
+The printed invoice carries a **Total Items Purchased** line above the
+subtotal: the quantities added up, and the number of lines beside it when
+that is a different figure (*5 (2 lines)*), so what is counted at the gate
+or against the delivery is the figure on the paper.
+
+The **search finds the typed letters anywhere** in a name, a category or a
+brand: *ad* finds Shade, Adapter and Thread. Everywhere else in the system a
+search matches the start of a field, because a directory searched for *an*
+returns most of the directory; the catalog is the one place that rule is
+wrong, because a product at a counter is asked for by whatever part of its
+name the customer said. Two filters beside the search narrow the same list,
+by category and by whether the product is in stock.
+
+The catalog and the order **scroll on their own**, each inside its own
+column the height of the window: running down the list never carries the
+total off the screen, and a long order never pushes the catalog out of
+reach. On a narrow screen the two become one column and the page scrolls as
+a whole. And the three screens of the till — New Transaction, Deliveries,
+Refunds — are listed under **Point of Sale** in the menu, folding open and
+shut under the heading the way the manager's Credit does, rather than as a
+strip of tabs across the page.
+
 ## On a phone
 
 Every screen works on a phone, and the tables are the reason that took work.
@@ -255,15 +344,59 @@ Every role has an account menu in the top right corner of its dashboard — the
 only way out of the system, so it is in one place rather than two. It opens on
 a click and offers two things: **View my credentials**, and **Log out**.
 
-View my credentials opens a card with three tabs, and everything about your own
-account is behind them:
+View my credentials opens a card, and what is behind it depends on who you
+are.
+
+**A standard user — manager, clerk, cashier, driver — edits their name and
+phone number, and nothing else.** The card has two tabs:
 
 - **Credentials** — everything the system holds about you.
-- **Edit Details** — first name, middle name, last name, phone and the email
-  you sign in with. Your role is not editable here; only the system
-  administrator moves people between roles.
-- **Password** — your current password is asked for first, so an unattended
-  screen cannot be used to lock you out of your own account.
+- **Edit Details** — first name, middle name, last name and phone. The email
+  you sign in with is shown for checking and cannot be changed here, and
+  neither can your role.
+
+There is no Password tab. A credential is the thing that gets somebody in —
+the sign-in email, the password, the role — and none of the three is changed
+by its own holder from their own screen. The email is the username, and a
+username somebody can change for themselves is a username the audit trail
+loses track of. The password is the one that matters: a screen left signed
+in at a counter is otherwise a screen on which anybody who sits down can set
+a new password and own the account from then on, and asking for the current
+one first only helps if the person who sat down does not know it.
+
+So a new password comes from the administrator: **Reset Password** on the
+staff card makes one the way a new account's is made (see *The first
+password* below) — nobody types it, it is mailed to the address on file,
+every screen the person has open is signed out, and the system asks for a
+password of their own choosing on the next sign-in. Nobody but the owner
+ever knows the password they end up with. The server refuses the two routes
+whichever screen sends them (`notOwnCredentials` in `server.js`).
+
+**The System Administrator is the other way round.** They keep the Password
+tab — an administrator locked out with nobody above them is a shop that is
+locked out — and lose the Edit Details tab: the account that can rename,
+re-role, deactivate and reset anybody in the directory does not also do those
+things to itself with nobody else on the audit trail. An administrator's own
+details are changed by another administrator from the staff directory, and
+the directory refuses the administrator's own row: their card has no Edit tab
+and its buttons are off, and the server refuses the requests whichever screen
+sends them (`notOwnAccount` in `server.js`).
+
+**Changing a password ends every session the account holds**, the one that
+made the change included, and the browser is sent back to sign in with the
+new one. A password is changed because the old one might be known to
+somebody else, and a session that old password opened should not outlive it;
+and a new password nobody has typed at the sign-in screen is a new password
+nobody has checked.
+
+## One person, one session
+
+Signing in ends every other session the same account holds. The screen left
+behind on the other machine is told at once over the live channel, sent back
+to the sign-in page, and shown why — "This account signed in on another
+device, so this screen was signed out." The audit trail records it as
+`SESSION_REPLACED`. A till that stays open under a cashier who went home was
+the reason.
 
 The menu used to list all three as items of their own. All three opened the
 same card, which then showed its tabs anyway, so the menu was offering three
@@ -275,9 +408,9 @@ doors into one room. It offers the door and the room does the rest.
 somebody has read it back.** Creating an account is two steps:
 
 1. Fill the form in — a name, a role, a phone number, an email address — and
-   press **Review & Create**. Nothing is created. The server works the whole
+   press **Create**. Nothing is created yet. The server works the whole
    account out, makes the password, and shows you the lot: the name as the
-   directory will spell it, the middle name, the role, the number in +63 form,
+   directory will spell it, the middle name, the role, the number as it will be stored,
    the address the password is about to go to, and the password itself.
 2. Press **Create the account**. Now it exists, and the password is sent.
 
@@ -354,15 +487,18 @@ machine, and whether the password was emailed. It never records the password
 itself. The database stores only a scrypt hash. `tests/smoke.js` checks the
 trail for the generated password and fails if it finds it.
 
-**Reset Password** on an existing account still asks an administrator to type
-one. It is the same server-side machinery now, so moving it over is a small
-change, but it has not been made.
+**Reset Password** on an existing account is the same machinery. Nobody types
+the new password: the server makes one, mails it, ends every session the
+account holds, and the person chooses their own on the next sign-in. If the
+mail cannot go, the password comes back to the administrator's screen once,
+as it does for a new account.
 
 ## Alerts
 
 The bell in the top right corner holds every alert for your role: low stock,
-out of stock, damage and refund reports, new purchase orders, and deliveries
-that have just been booked. Unread ones are marked and carry a yellow edge.
+out of stock, damage and refund reports, a purchase order the clerk should
+expect a delivery against, and deliveries that have just been booked. Unread
+ones are marked and carry a yellow edge.
 
 Every alert says three things, in the panel and on the popup card alike: what
 happened, **who** raised it, and **when** — as a date and time plus how long
@@ -375,40 +511,72 @@ seconds; the bell keeps them.
 
 ## Phone numbers
 
-**One spelling, and it is `+63` followed by ten digits.**
+**Philippine numbers, and one spelling of them: `+639171234567`.** The box
+takes the ten digits after `+63`, or the whole number the way everybody
+writes it, `09171234567`, and stores both the same way. A number under any
+other country code is refused, in the browser as it is typed and on the
+server as it arrives, with the two spellings that are taken. The shop is in
+Nasugbu and its staff, customers and suppliers are reached on Philippine
+numbers; a column that could hold a number from anywhere was a column
+nobody could be sure of dialling.
+
+The picker below still knows every country, because the rule is one line
+(`PHONE_ONLY_COUNTRY` in `phone-picker.js`, and `phoneComplaint` in
+`format.js` and `server.js`) and a shop that one day takes a number from
+abroad sets it to `null` and gets the button back. Until then the country
+beside the box is printed, not pressed.
 
 The box used to be plain text, so it took anything: letters, spaces, brackets,
 `n/a`, and the same number written as `09171234567`, `+639171234567`,
 `639171234567` and `0917 123 4567` by four different people on four different
 afternoons. Four spellings of one number is a column that cannot be searched,
 cannot be compared, and cannot be dialled from without being read by a human
-first.
+first. For a while after that it took a number from any country, with a
+button beside the box to pick one; that has gone back to one country, for
+the reason above.
 
-So the country code is not typed at all. It is printed beside the box as fixed
-furniture, and what is typed is the ten national digits:
+So the box is the country, printed, and the number as it is dialled inside it:
 
 ```
- +63 | 9171234567
+ PH +63 | 9171234567
 ```
 
 Everything that is not a digit is dropped as the keys are pressed, rather than
 complained about after the form is submitted — a rule that refuses a keystroke
 teaches the rule in the moment, and a rule that refuses the form at the end
-teaches nothing and loses the other nine fields. Paste any of the four spellings
-above and the box keeps the ten digits that matter. The trunk `0` and the `+63`
-are the same thing and never both appear.
+teaches nothing and loses the other nine fields. The trunk `0` goes the same
+way: `0917…` is `+63 917…`, because with the code in front the `0` is never
+dialled, so the whole number can be typed as it is written on a card. A
+number is then held to what a Philippine mobile number is, ten digits
+starting with `9`. One pasted with another country's code in front is left
+in the box and refused with the reason — *Only Philippine numbers are
+accepted: 09XX XXX XXXX, or +63 9XX XXX XXXX* — rather than quietly
+reshaped into a Philippine number it never was.
 
 An incomplete number turns the box amber while it is being filled in, and says
 nothing at all while it is empty, because the number is optional.
 
 The same rule is enforced again in `server.js`, because a check that only exists
 in a browser is a check anybody can skip with `curl`. A number is stored as
-`+639171234567` and shown as `+63 917 123 4567`.
+`+639171234567` and shown as `+63 917 123 4567`, spaced the way it is read out.
 
-Numbers already in the database from before this rule are rewritten to `+63`
-form on the next `npm start`. Anything that does not reduce to a usable number
-is cleared rather than half-converted, and the server says how many — a phone
+Numbers already in the database from before this rule are rewritten to `+` form
+on the next `npm start`. Anything that does not reduce to a usable number is
+cleared rather than half-converted, and the server says how many — a phone
 column with `n/a` in it is a column somebody will eventually try to dial.
+A number from another country already on file is treated the same way now
+that only Philippine numbers are taken: it is cleared at startup and counted
+in that line, so check the console the first time the server starts after
+this change.
+
+## Money
+
+Every amount in the system is Philippine pesos and reads as one: `₱1,250.00`.
+The sign is put on by `peso()` in `shared/format.js`, the one function every
+figure of money goes through, so there is no screen that prints a bare
+number and leaves the reader to know the currency. The spreadsheet export
+strips it again on the way out, so a column of money lands in the sheet as
+numbers.
 
 ## Staff names and the middle name
 
@@ -582,11 +750,52 @@ sentence that reports the success — after rather than before, because the hone
 test is not what the file appeared to contain, it is what the database ended up
 with.
 
+## Fewer columns, and the rest a press away
+
+A seven-column table is read by nobody: the eye finds the name and the one
+figure it came for and skips the rest, and the rest is still taking the
+width. So every table with more to say than fits a glance shows its main
+columns and keeps the others off the grid until asked for. A heading is
+marked in the page —
+
+```html
+<th data-secondary>Supplier</th>
+```
+
+— and `shared/tables.js` does the rest: the column is hidden, a switch
+appears above the table, *Show 3 more columns* / *Fewer columns*, and the
+reader's choice is remembered per table on that browser. The Reorder Alerts
+table went from eight columns to five this way; the staff directory lost its
+ID column, the audit trail its IP address, the credit book its open-sales
+count and oldest debt. Nothing is dropped: the spreadsheet export and the
+print still carry every column, because a report read away from the screen
+has no switch to press.
+
+The details are one press away either way. A row that opens a popup of its
+own — most of them do — opens it as before, and the popup carries
+everything. A row that has no popup unfolds in place: pressed, it shows a
+line underneath naming the hidden columns and their values, and pressed
+again it folds back. The chevron at the start of such a row is what says it
+will.
+
 ## Tables that wait to be asked
 
 Every table in the system starts closed. It shows a search box, whatever
 filters it offers, and a **Load Data** button, and it queries the database when
-somebody presses one of them and not before.
+somebody picks a filter, presses the button, or types a search and presses
+**Enter** — and not before. Nothing is read on the way into a screen, the
+driver's run included: one **Load Data** on any of the driver's three lists
+reads the run once and fills all three.
+
+### Searching
+
+A search runs when **Enter** is pressed, not on every keystroke, so nothing
+goes to the server until the person has finished typing; **Escape** clears it.
+And a search matches the **start** of a field: `ros` finds Rosa Villamor and
+`rosa@hardware.com`, and not everybody whose name merely contains those
+letters. The server's queries use `LIKE 'text%'` and the screens filter their
+rows by the same rule (`prefixMatch` in `shared/data-panel.js`), so the two
+never disagree.
 
 This is not a loading trick. Five dashboards each fetching four or five tables
 on open is twenty queries fired for the one screen a person actually wanted,
@@ -628,6 +837,217 @@ nothing walks up and down the screen while somebody reads.
 The whole of it lives in `javascript/modules/shared/data-panel.js`, so a table
 that loads on demand and a table that pages are the same table in two states
 rather than thirty copies of the same logic.
+
+## Who may do what
+
+Access is decided on the server, in one table — `ACCESS_RULES` in
+`server.js` — that names, for every `/api` route, which roles may call it.
+Anything under `/api` with no rule is refused. The routes that replace or
+destroy data (backups, restores, the receipt details, credit limits and
+decisions) carry `requireRole(...)` on the route as well, so that a rule
+loosened by mistake still meets a second no.
+
+The pages are checked the same way. `system.html` is served to a System
+Administrator and to nobody else; each dashboard to its own role. With no
+session the browser is sent to sign in, and with the wrong role it is sent to
+its own dashboard. On the page, any element marked
+`data-access="Manager,System Administrator"` is removed for every other role,
+so a screen two roles share does not show the second a button that would only
+ever answer "not allowed". Hiding is never granting: the server's answer is the
+one that counts.
+
+## Connected systems, and who may touch them
+
+A role says what somebody does in the shop. It says nothing about whether
+they may reach past the shop into the systems around it: the MySQL database
+underneath, the backup that ticks on its own, the nightly archive sweep, the
+live channel between the desktops, the mail relay first passwords go out
+through — and whatever outside service the shop later plugs in, a courier's
+tracking API or a supplier portal or a second branch. None of that is a sale
+or a stock count, and a Manager is no more entitled to pause the backup than
+a Cashier is.
+
+So reaching those is **a permission and not a role**, held by one person on
+one system at one of three levels, and by default nobody holds any:
+
+| Level | Lets the person |
+|---|---|
+| **Monitor** | read the system's state — the card on the Connected Systems screen |
+| **Manage** | change how it is set up: switch it on or off, rename it, change the address an external one answers at |
+| **Control** | run commands against it: take a backup now, pause or resume the timer, run the sweep, send a test mail, ping a remote service or post it a message |
+
+Manage and control both include monitor, and the database procedure forces
+that whichever screen or tool sent the request: nobody may command what
+they cannot see. The System Administrator holds every level on every system
+by role and is the only one who hands them out.
+
+**Where it is done.** Access Control on the administrator's page has two
+screens. *Who Holds Access* lists every person with a login who is not an
+administrator — including the ones who hold nothing, because that is the
+default and the screen has to be able to show it — and opening a person
+gives a matrix: one line per system, the three levels as boxes, and a line
+for why. Ticking control ticks monitor with it; Save reads the changes back
+first, in a card that turns crimson when control is among them. *Connected
+Systems* is the systems themselves, and it is the same screen every other
+dashboard carries.
+
+**Where it shows.** Every dashboard has a Connected Systems entry in its
+menu, hidden. It is unhidden only once the server (`/api/me/access`) says
+the person holds a key to something, and hidden again over the live channel
+the moment the last key is taken back — with no reload, and with the screen
+saying so if it happens to be open. A cashier granted control of the backup
+sees one card with its commands; the same cashier granted monitor on the
+database sees a second card with none. Nobody else sees the entry at all.
+
+**How it is enforced.** Not from the session. The three levels are read
+from `system_permissions` on every request under `/api/systems`, so a
+revocation bites on the very next call rather than at the next sign-in. The
+access table in `server.js` lets any signed-in person *ask*, and each route
+then carries `requireSystemAccess('monitor' | 'manage' | 'control')`, which
+looks the grant up and refuses with the level that was missing. Handing out
+keys is under `/api/access` and administrator-only; `notOwnAccount` is on
+the route as well, and the procedure refuses a grant to any administrator,
+to a person with no login, or to a deactivated account (keys can still be
+taken back from those).
+
+**What is written down.** Two new kinds of audit entry, filterable on the
+Audit Trail as *Access granted / revoked* and *Commands run on
+connected systems*:
+
+- `GRANT_SYSTEM_ACCESS` and `REVOKE_SYSTEM_ACCESS` — who was given or lost
+  what on which system, with the levels before and after and the reason the
+  administrator typed. A save of the same three boxes writes nothing.
+- `SYSTEM_ACTION` — every command, by whoever ran it, whether it worked, and
+  what it reported (the backup file it wrote, the HTTP status the remote
+  answered). A command that failed is an entry too, with the reason.
+- `SYSTEM_ACCESS_DENIED` — somebody without the key trying the door. The
+  role-based refusals elsewhere are ordinary screens hiding ordinary
+  buttons; this one is a person reaching for something they were never
+  offered, which is exactly what an audit is opened to find.
+- `CREATE_CONNECTED_SYSTEM` and `UPDATE_CONNECTED_SYSTEM` — a system
+  registered, renamed, re-addressed, or switched off and on.
+
+Each carries the role held at the time and the address it came from, like
+every other entry.
+
+**The internal systems** are seeded by file 1 and re-seeded by the server
+if any is missing, keyed by names `server.js` knows how to answer for
+(`INTERNAL_SYSTEMS`). **An external system** is registered from the
+Connected Systems screen with a key that never changes, a name, and the
+`http://` or `https://` address it answers at — no username or password in
+it. Its status is whether that address answers, read with a five-second
+patience and shown as a state rather than an error when it does not; its
+commands are to ask it again and to post it a short JSON message signed
+with who sent it. A system switched off keeps its row and its grants and
+takes no commands until it is switched back on, which is a manage change
+made on purpose.
+
+## Screens by role
+
+A role decides what somebody does, and each role's menu is written into its
+own page: a manager's page lists the manager's screens, a cashier's the
+cashier's. That is the right default and it was rigid. A cashier who also
+loads the van could not be shown the delivery schedule without being made a
+manager, and a clerk who should not be resolving returns kept the screen
+because every clerk did.
+
+So every screen is now an entry in a catalogue (`FEATURES` in `server.js`):
+its name, the roles whose page can draw it, the roles that hold it by role,
+and the routes it is made of. **Screens by Role**, under Access Control on
+the administrator's page, is that catalogue as a matrix — one row per screen,
+one column per role, each cell a switch — and the administrator can:
+
+- **switch a screen off** for a role that holds it by role. Refunds off the
+  cashiers, say, or Adjustment History off the clerks.
+- **switch a screen on** for a role whose page can draw it but does not hold
+  it by role. Today that is the **Delivery Schedule** — the deliveries still
+  to go out, under Overdue, Today, Tomorrow and Later — which the manager
+  holds by role and any of the other three can be given.
+
+A cell the switch cannot reach is shown as a dash: that role's dashboard has
+no such screen, and a menu item with nothing behind it is a dead end, not a
+feature. The System Administrator is not in the matrix at all; the
+administrator's screens are the administrator's by role and nobody grants
+them anything. The word under each switch says what it means for that role —
+*by role*, *granted*, *off* — and Save reads the changes back first, in a
+card that turns crimson when a screen is being taken away, because somebody
+may be standing in front of it.
+
+**Where it shows.** Every menu item on the four staff dashboards names the
+screen it opens (`data-feature="credit-requests"`), and
+`shared/features.js` asks `/api/me/features` which screens the role holds
+and hides or unhides the items to match — on arrival, and again over the live
+channel the moment a switch is thrown, with no reload. A heading whose
+screens have all been taken away goes with them, and the strip of tabs
+across the top follows the menu. If the screen somebody is looking at is
+switched off while they are on it, their page goes back to its first screen
+and says why. The Delivery Schedule is drawn by `shared/delivery-schedule.js`
+rather than written into a page, the way the Connected Systems screen is,
+because a screen that can land on any page has to be able to draw itself on
+any page; its menu item is in each page's markup, hidden until the role has
+it.
+
+**How it is enforced.** Not by the menu. Each screen lists the routes it is
+made of, and the access hook in `server.js` reads them after `ACCESS_RULES`
+has had its say:
+
+- a route is **refused once every screen using it is switched off** for the
+  role. A route two screens share — `/api/stocks` under both Reorder Alerts
+  and Stock Reports — is not refused while either is still held.
+- a route the role table would refuse is **allowed when the role holds a
+  screen that needs it by grant** — an override, not a default. A screen held
+  by role has its routes in the role table already, and a default never
+  widens them: the cashier's Delivery Tracking is read-only by role, and
+  granting the cashiers nothing new leaves it so. A clerk given the schedule
+  may read `/api/deliveries` and still may not move a delivery along.
+
+The overrides are one row each in `role_feature_permissions`, and only the
+administrator's changes are rows — set a switch back to what the page has and
+the row is deleted, so an empty table means every menu is exactly what its
+page says. Read on every request rather than kept on the session, like the
+connected-systems grants, so a revocation bites on the very next call; cached
+in memory between writes, because it is a few rows. Every switch thrown is on
+the audit trail as `GRANT_SCREEN` or `REVOKE_SCREEN`, filterable as *Access
+granted / revoked* beside the connected-systems keys. The table is created by
+the server at startup on a database from before it existed, the way the
+access-control tables are.
+
+Making another screen grantable means drawing it by script the way the
+schedule is (so any page can carry it), giving each page a hidden menu item
+for it, and listing the roles whose pages have one under `available` in the
+catalogue. A screen that is only ever on one page needs none of that: its
+entry in the catalogue is what lets the administrator switch it off.
+
+## What is waiting, and where it shows
+
+A request nobody sees is a queue at the till nobody knows about. A menu item
+with things waiting on it carries the number — the manager's Extension
+Requests has for a while — but that number was only visible once the heading
+above it had been folded open, which is to say, only to somebody who already
+knew to look.
+
+So every count on the menu now shows in three places:
+
+- **on the item**, as before: *Extension Requests 2*;
+- **on the heading above it**, added up across the items under it, while the
+  heading is folded: *Credit 2*, *Stocks 3*. It steps aside while the list is
+  open, because then the item's own badge is in view and the same number
+  twice, one above the other, reads as two queues;
+- **in the top bar**, beside the bell, as one chip that adds up every count
+  on the menu — *10 waiting* — and opens to a list of what is waiting where.
+  A line on the list presses the menu item it names, so there is one route
+  into each screen and nothing to keep in step.
+
+The counts come from `/api/me/counts`, one small query each, for the screens
+the person holds and no others: pending extension requests and pending
+deliveries for the manager, materials at or under their reorder point for the
+manager and the clerk, open returns for the clerk, the driver's own pending
+run, and deliveries due today or overdue for whoever holds the schedule. They
+are read on arrival and again whenever the live channel says the tables
+behind them moved, so the number on the menu is the number in the table and
+not the number from when the page opened. The module scripts still write the
+same badges when their own tables load, and the mirrors follow whichever
+wrote last.
 
 ## Who is actually here
 
@@ -679,10 +1099,71 @@ different figures to four different people:
 Collected leads, because this is a shop with a credit book and billed income
 that never arrives is not income.
 
-Managers can export any of it as CSV or print it to PDF. Cashiers and clerks
-get a daily tally on the screen for balancing a drawer, and nothing leaves the
-building with them. That rule is enforced by the server, not by hiding a
-button, because a hidden button is still a URL anybody can type.
+Under the figures and the chart sits one table at a time — Payment Method,
+Best Sellers, or Who Sold It — chosen from the **Income** entry in the menu,
+which folds open to list the three. The entry for the table on the screen is
+the marked one, so the menu and the page can never say two different things,
+and the other two tables are one click away rather than two screens down.
+
+**Reports** and **Records** work the same way. Each is one screen holding one
+table at a time — four reports, five kinds of record — and the one showing is
+chosen from the entry in the menu, which folds open under the heading the way
+Income does. Reports also carries a dropdown at the top of its card, because
+a report is often switched while it is being read; both call the same
+function, so they always agree. Records has no second control: the card is
+headed with the kind of record showing, and the menu is beside it.
+
+### Two ways off every screen
+
+Every table the manager reads has the same pair of buttons in its corner:
+
+| | |
+|---|---|
+| **Spreadsheet** | a CSV of every row that survived the search and the filters, not only the ten on the page. It opens in Excel, LibreOffice or Google Sheets |
+| **Print / PDF** | the browser's own print dialogue, with the table unpaged for the duration so paper gets all of it. Save as PDF is in that dialogue |
+
+Both are dead until the table holds rows. A Print button that can be pressed
+over an empty table prints an empty table; a grey one says "not yet". The
+income breakdown is exported by the server rather than assembled from the
+page — it is the one report the export route was built for, it carries the
+same period the screen was loaded with, and it is the one export that is
+audited. Cashiers and clerks get a daily tally on the screen for balancing a
+drawer, and nothing leaves the building with them. That rule is enforced by
+the server, not by hiding a button, because a hidden button is still a URL
+anybody can type.
+
+### The shelf, read by quantity
+
+Stock status says whether a product is under its reorder point, which is a
+rule about ordering. It says nothing about how much is actually on the shelf,
+which is the question a manager walking the stockroom is asking. So the stock
+report also filters by quantity — nothing on hand, below the reorder point,
+within a quarter above it, or a band of round numbers — and sorts by what is
+on hand, by how far under the reorder point a product has fallen, by stock
+value, or by days of cover.
+
+## Purchase orders: raised upstairs, counted in at the door
+
+Buying is a manager's decision, so a purchase order is raised on the manager's
+page: name the supplier, list the materials, send it, and the printed order
+opens ready to hand to a company that has no login to this system. The
+supplier is typed rather than picked, and so is each material, because a
+purchase order is how a shop buys something it does not have yet, often from
+somebody it has not bought from before.
+
+Receiving is the manager's too: the count sheet — what was ordered on the
+left, what came off the lorry typed on the right — books the goods onto the
+shelf and closes the order.
+
+The clerk's page keeps a read-only copy. Every order is listed there as a
+reference — what is meant to arrive, and from whom — with the printed sheet
+to hold beside the delivery receipt when it does. There is no form on the
+clerk's page and no Receive button, and the server refuses a clerk who calls
+either route anyway.
+
+The screens are one piece of code (`shared/purchase-orders.js`) that each
+page configures with what it is allowed to do, so the two desks cannot
+disagree about what an order is.
 
 ## The reorder point the system works out for itself
 
@@ -723,14 +1204,54 @@ A credit limit on its own is not a policy. A customer who always pays and one
 who has owed for four months both fit under the same limit, and only one of
 them should be sold to on account.
 
-**Standing** is what separates them, and it sits beside the limit because they
-are one decision:
+**Standing** is what separates them. It is the one word that says whether to
+sell to this account on credit today:
 
 | | |
 |---|---|
 | **Good** | sell on account as normal |
-| **Watch** | still allowed, but every screen says to look at this account |
-| **Hold** | no new credit at all until a manager lifts it |
+| **Watch** | still allowed, but every screen says to look at this account first |
+| **Hold** | no new credit at all |
+
+### What standing means, exactly
+
+Standing used to be a word a manager typed and nobody recalculated, so an
+account that had owed for four months read Good until somebody remembered to
+change it. It is **worked out from the figures now, every time it is read**,
+by `vw_customer_credit`, and the rules are these:
+
+| Standing | Any one of |
+|---|---|
+| **Hold** | the balance owed is over the credit limit; the oldest unpaid sale is more than **90 days** old; a manager has put the account on hold |
+| **Watch** | the oldest unpaid sale is more than **30 days** old; the balance owed is **75%** or more of the credit limit; a manager has flagged the account |
+| **Good** | none of the above, including an account that owes nothing |
+
+The manager's word is an **override upwards**. A manager can put a Good
+account on Watch or Hold — a cheque that bounced is a fact the figures do not
+know yet — but cannot mark an account Good while the figures say otherwise:
+on the credit card the control is called *Standing override*, and setting it
+to *None* means "let the figures decide". The three thresholds are the three
+numbers in the view, and a shop that wants sixty days instead of ninety
+changes them there and nowhere else.
+
+Every screen that shows the badge also says **why**: the reason names the
+first rule that applied, in the same order the tier was decided — "Over the
+limit by 1,200.00", "Oldest unpaid sale is 97 days old; the limit is 90",
+"Owes 76% of the limit; watched from 75%", "Put on hold by a manager: cheque
+returned in July". It is a tooltip on the badge in the credit book, a line on
+the account card, and the note under the credit strip at the till, so a
+cashier told the sale will not go through is told the reason in the same
+breath. The sale procedure reads the same computed standing, so the till and
+the manager's screen cannot disagree about who may buy on account.
+
+**On the cashier's own credit book** the last column is not the standing
+but the **due date**: the oldest unpaid sale plus the shop's term of thirty
+days — the same thirty days after which an account's standing turns to
+Watch, so the two screens agree about who is late. Each row says the date and
+how far off it is, *due in 12 days*, *3 days overdue*, and the filter beside
+the search narrows the book to what is overdue, due within the week, owing,
+or clear. The question at a counter is "when does this customer have to pay",
+and a tier is one word further from it than a date.
 
 **At the counter**, the cashier sees the account the moment they pick the
 customer — the limit, what is owed, and what can still be taken — rather than
@@ -775,6 +1296,47 @@ not on the shelf, not written off, still in a box behind the counter.
 A write-off is read back before it happens, naming the quantity and the
 product, because correcting one afterwards means a stock adjustment rather than
 an undo.
+
+## What "archived" means, and when it happens
+
+Nothing in this system is deleted. A record that is finished with is
+**archived**: it leaves the live lists and the figures, keeps every field it
+had, shows on the manager's **Archives** screen with who archived it and
+when, and can be restored from there. What "finished with" means is
+different for each of the four kinds of record, and so is who decides:
+
+| Record | Archived means | By hand | On its own |
+|---|---|---|---|
+| **Staff** | the account is deactivated and cannot sign in | the administrator, from the staff card; the last active administrator cannot be | never — a person leaving is a decision |
+| **Material** | the shop no longer stocks it: off the material list, the catalog and the register | the clerk or a manager, from the material card, and only once nothing is left on the shelf and no purchase order for it is open | nightly, once it has had **no stock, no sale, no stock movement and no open order for 180 days** |
+| **Sale** | it is **voided**: it reads Voided on every screen and counts for nothing | a manager, from the sale's card, **on the day it was made only**, and only while its goods are not out for delivery | never — an old sale is corrected with a return or a refund, which keeps the money trail |
+| **Delivery** | it is closed: Delivered with the sale paid for, or Failed | a manager, from the delivery's card, once it is closed | nightly, **90 days** after it closed |
+
+The rules live in the database rather than in the screens — `sp_archive_record`
+holds the manual ones and `sp_sweep_archives` the automatic ones — so a
+request that breaks one is refused with the reason whichever screen sends
+it, and the two sets cannot drift apart.
+
+**Voiding a sale puts the stock back.** Every line on it goes back on the
+shelf with an entry in the stock log saying which sale was voided, a delivery
+booked for it and not yet on the road is cancelled with it, and restoring the
+sale takes the stock off again — and is refused if that stock has since been
+sold to somebody else. Money already taken is not touched: a void is for a
+sale rung up twice, and the cash for the duplicate is handed back at the
+counter. The same-day rule is what keeps that honest; a sale from last week
+that was wrong is a return, not a void.
+
+**A material with stock on hand cannot be archived.** A shelf the system has
+stopped counting is a shelf somebody counts by hand in three months and
+cannot explain. Sell it off or write it off first, and then it can go.
+
+**The sweep** runs when the server starts and once a day after that. Ninety
+days is three statement cycles — long enough for any query about a drop to
+have come and gone — and a hundred and eighty days with nothing on the shelf
+and no movement is dead stock. Each run that put something away writes one
+line to the audit trail saying what and how many, with no staff id, so the
+Archives screen shows "System" against those rows. Nothing else is ever
+archived automatically.
 
 ## Asking before doing
 
@@ -871,6 +1433,9 @@ public/
     general-ui.css          colours, type, the shell, and every component
                             two or more roles share
     responsive.css          the phone layout, for every role
+    purchase-orders.css     the order form, the printed order and the count
+                            sheet, on the manager's page and the clerk's
+    connected-systems.css   the system cards, on every dashboard
     modules/
       login.css                    the sign-in and password screens
       system-admin.css             system.html
@@ -898,6 +1463,15 @@ public/
         my-account.js       my credentials
         notifications.js    the alert list
         deliveries.js       the delivery record, shared by three roles
+        purchase-orders.js  raising, printing and counting in an order,
+                            shared by the manager and the clerk
+        connected-systems.js the systems beyond the shop, shown to whoever
+                            holds a key to them, on every dashboard
+        features.js         the menu as the administrator has set it for the
+                            role, and the counts mirrored onto headings and
+                            into the top bar
+        delivery-schedule.js the deliveries still to go out, by the day they
+                            are due; drawn by script so any page can carry it
       system-admin.js       system.html
       manager.js            manager-dashboard.html
       inventory-clerk.js    inventory-dashboard.html
@@ -908,8 +1482,9 @@ public/
   vendor/bootstrap/         Bootstrap 5, kept in the project, no internet needed
   database/
     0-READ-ME-FIRST.md                    how to run the two files below
-    1-RUN-FIRST-database.sql              23 tables, 2 views, and the demo data
-    2-RUN-SECOND-stored-procedures.sql    27 stored procedures
+    1-RUN-FIRST-database.sql              26 tables, the demo data, and six
+                                          months of mock trading
+    2-RUN-SECOND-stored-procedures.sql    3 views and 30 stored procedures
 backups/                    dated .sql backups
   hardware_db_auto_*.sql      written every minute, oldest rotated away
   hardware_db_backup_*.sql    taken by hand, never rotated
@@ -933,6 +1508,15 @@ js:   shared/*        ->  modules/<role>.js
 
 The general stylesheet sets the system, the responsive one overrides it for
 small screens, and a role's own file has the last word on its own screens.
+The manager's page and the clerk's also load `css/purchase-orders.css` and
+`shared/purchase-orders.js` between the shared set and their own file, for
+the one feature the two desks share. Every page loads
+`css/connected-systems.css` and `shared/connected-systems.js` the same way,
+for the one screen every desk carries and almost none of them show. The
+four staff pages also load `shared/features.js` and
+`shared/delivery-schedule.js`: the first shapes the menu to what the
+administrator has switched on for the role, the second is the one screen
+any of them can be given (see *Screens by role*).
 
 Adding a screen to a role means editing that role's two files and nothing
 else. If a change would touch two roles it belongs in `general-ui.css` or in
@@ -951,7 +1535,10 @@ rebuilds the database, restarts the server, runs `tests/smoke.js` (every
 API route as every role, plus the rules that matter: that a cashier cannot
 export a report or set a credit limit, that the reorder point matches its own
 inputs, that a delivered order owing money is not Completed, that a return
-cannot be filed without a reason or a disposition), then `tests/regression.js`,
+cannot be filed without a reason or a disposition, that a cashier holds no
+connected system until granted one and loses it on the very next request
+when it is revoked, and that every grant and every command is on the trail),
+then `tests/regression.js`,
 then `tests/shots.js`, which signs in as all five roles with a real browser,
 walks every screen, saves a screenshot of each into `shots/`, and reports any
 console error or failed request it saw on the way.
@@ -994,6 +1581,13 @@ before each suite for exactly that reason.
 `tests/mailer.js` is the exception and can be run whenever: it touches neither
 MySQL nor the server.
 
+`run-all.sh` starts the server with `HARDWARE_MAIL_OFF=1`, which makes
+`mailer.js` report that mail is not set up whatever the SETUP block says.
+The passwords the server makes for new and reset accounts then come back in
+its replies, where the checks can sign in with them, instead of going to a
+real inbox nobody is watching. It is an environment variable rather than a
+setting so it cannot be left switched on by accident in the file people edit.
+
 `tests/shots.js` needs Playwright:
 
 ```
@@ -1015,13 +1609,14 @@ rather than theoretical — and then drives every module in a real browser:
 
 | Suite | What it walks |
 |-------|---------------|
-| `admin.js` | the directory, presence, the archive card, the audit trail, the backup drawer |
-| `manager.js` | clickable cards, the income breakdown, tabbed reports, sales filters, the reorder formula, fulfilment states |
+| `admin.js` | the directory, presence, the archive card, the audit trail, the backup drawer, the access matrix and the system cards |
+| `manager.js` | clickable cards, the income breakdown with its tables chosen from the Income dropdown, the Spreadsheet and Print pair dead until a table has rows, the reports and the kinds of record as screens in the strip, sales filters, the stock report sorted and filtered by quantity, the reorder formula, raising a purchase order, fulfilment states |
 | `credit.js` | limits and standings, purchases beside payments, an extension raised at the till and decided by a manager |
 | `returns.js` | the mandatory remarks and the disposition, on both refusals |
 | `filters.js` | that a table still agrees with the dropdowns above it after two filters are changed in quick succession |
-| `lazy-loading.js` | that every table starts closed and pages ten at a time |
+| `lazy-loading.js` | that every table starts closed and pages ten at a time, and that the clerk can read a purchase order but neither raise nor receive one |
 | `live-sync.js` | two browsers at once: a change on one reaching the other, and the three cases where it deliberately does not redraw |
+| `features.js` | the administrator switches a screen on for the cashiers and off again; the cashier's menu and tab strip follow with no reload, and the counts on the manager's menu show on the heading above them and in the top bar |
 
 It proves nothing about MySQL; `tests/smoke.js` does that against the real
 database. What it proves is that the screens behave, which is the half that is

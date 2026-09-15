@@ -1,18 +1,7 @@
-// ui-kit.js  --  UI KIT
+// ui-kit.js -- cards, dialogs and prompts that replace alert/confirm/prompt
 // Loaded by: every page
-// ------------------------------------------------------------------------
-// ==========================================
-// UI KIT
-//
-// Everything the system says to the person using it comes through here.
-// Browser alert, confirm and prompt boxes were doing that job before: they
-// freeze the page, they cannot be styled, and they look like the browser
-// rather than like this system. They are replaced by cards.
-//
-// Bootstrap supplies the toast component and the base layer; the look is this
-// project's own. If Bootstrap has not loaded for any reason the cards still
-// appear and still close themselves, so a message is never lost.
-// ==========================================
+// Bootstrap supplies the toast base; if it has not loaded the cards still
+// appear and close themselves.
 
 const TOAST_LOOK = {
     success: { mark: '✓', title: 'Done' },
@@ -21,37 +10,9 @@ const TOAST_LOOK = {
     info:    { mark: '●', title: 'Notice' }
 };
 
-// ==========================================
-// HOW LONG A CARD STAYS
-//
-// This was one line of arithmetic buried inside showCard, and it is the
-// difference between a message being read and a message being seen leaving.
-// A card saying "Invalid password" has to survive the moment somebody spends
-// looking back at the field they just typed into, which is most of a second
-// before they look up at all.
-//
-// So a card reporting a problem stays long enough to be read twice, and a
-// card only confirming that something worked leaves sooner, because nobody
-// reads "Saved" carefully.
-//
-// Most cards here run to about seven seconds: past that a card stops reading
-// as a message and starts reading as something stuck on the screen. A card
-// that must not leave on its own is passed stay: true instead.
-//
-// THE SIGN-IN SCREEN IS THE EXCEPTION
-//
-// Seven seconds is the right length for a message somebody is expecting,
-// beside a screen they already understand. It is the wrong length for the
-// one message in the system that arrives while the reader is looking
-// somewhere else entirely.
-//
-// Somebody who has just mistyped a password is looking at the keyboard, or
-// at a note with the password on it, or at nothing at all. By the time they
-// look up, the card explaining what went wrong has often already gone, and
-// what they are left with is a form that simply did not do anything. So the
-// sign-in screen passes its own longer life, set below, and the card stays
-// up long enough to still be there when the reader gets back to the screen.
-// ==========================================
+// How long a card stays, by tone: a problem stays long enough to be read
+// twice, a confirmation leaves sooner. Past ~7s a card reads as stuck; a card
+// that must not leave on its own is passed stay: true.
 const TOAST_LIFE = {
     danger:  7000,   // something failed, and the reason has to be read
     warning: 5500,   // something needs attention before it fails
@@ -59,12 +20,10 @@ const TOAST_LIFE = {
     success: 4000    // it worked, and the screen already shows that it did
 };
 
-// long enough to read twice and still be there on the way back from the
-// keyboard; short enough that an unattended till clears itself
+// the sign-in screen's reader is looking at the keyboard, so its card lasts longer
 const SIGN_IN_MESSAGE_LIFE = 15000;
 
-// The furniture every page needs is built here rather than repeated in five
-// HTML files, so every module gets exactly the same cards and dialogs.
+// shared furniture built once rather than repeated in five HTML files
 function ensureUiFurniture() {
     if (!document.body || document.getElementById('toast-deck')) return;
 
@@ -106,10 +65,6 @@ function ensureUiFurniture() {
         </div>`;
     document.body.appendChild(ask);
 
-    ask.addEventListener('click', function (event) {
-        if (event.target === ask) closeAsk(false);
-    });
-
     document.getElementById('ask-input').addEventListener('keydown', function (event) {
         if (event.key === 'Enter') {
             event.preventDefault();
@@ -130,8 +85,6 @@ function showCard(options) {
     const tone = TOAST_LOOK[options.tone] ? options.tone : 'info';
     const look = TOAST_LOOK[tone];
 
-    // An alert that names who raised it and when reads very differently from
-    // one that just appears. The same two facts show behind the bell.
     const meta = [];
     if (options.from) meta.push('From ' + options.from);
     if (options.when) meta.push(whenText(options.when));
@@ -154,8 +107,6 @@ function showCard(options) {
 
     deck.appendChild(card);
 
-    // a card passed stay: true waits for a person; the rest leave on the
-    // clock their tone sets
     const life = options.stay ? 0 : (options.life || TOAST_LIFE[tone] || TOAST_LIFE.info);
 
     const remove = () => {
@@ -189,29 +140,24 @@ function showCard(options) {
         if (life > 0) setTimeout(remove, life);
     }
 
-    // never let the corner fill up with cards nobody has read
     const cards = deck.querySelectorAll('.toast-card');
     if (cards.length > 3) cards[0].remove();
 
     return card;
 }
 
-// takes every popup card off the screen at once
 function clearCards() {
     const deck = document.getElementById('toast-deck');
     if (!deck) return;
     deck.querySelectorAll('.toast-card').forEach((card) => card.remove());
 }
 
-// The fourth argument is for the few callers that know something showCard
-// cannot: how long their own reader will be looking away. Everything else
-// leaves it out and takes the life its tone sets.
+// the fourth argument overrides the life for callers whose reader is looking away
 function notifySuccess(message, title, options) { return showCard({ tone: 'success', title: title, message: message, ...options }); }
 function notifyError(message, title, options)   { return showCard({ tone: 'danger',  title: title, message: message, ...options }); }
 function notifyWarning(message, title, options) { return showCard({ tone: 'warning', title: title, message: message, ...options }); }
 function notifyInfo(message, title, options)    { return showCard({ tone: 'info',    title: title, message: message, ...options }); }
 
-// the one line every screen uses when the server cannot be reached
 function notifyOffline() {
     notifyError('The server did not answer. Check that it is still running, then try again.',
         'Cannot reach the server');
@@ -235,29 +181,14 @@ function openAsk(options) {
     okButton.textContent = options.confirmLabel || 'Confirm';
     okButton.className = 'btn ' + (options.tone === 'danger' ? 'btn-danger' : 'btn-accent');
 
-    // ==========================================
-    // Exactly what is about to happen, one consequence per line. Prose runs
-    // together and gets skimmed; a list of three short lines gets counted.
-    //
-    // A line may also be written "Label: value", and then it is set as two
-    // columns rather than as a sentence. That is for the cards that are not
-    // listing consequences but listing a record for checking -- the account
-    // about to be created is the one -- where the labels lining up is what
-    // lets somebody read down the values instead of reading every line.
-    //
-    // The value half is set in the figure face, because on those cards it is
-    // an email address, a phone number and a password: three things that get
-    // checked character by character, where a 1 and an l have to look
-    // different. Both halves are escaped either way.
-    // ==========================================
+    // One consequence per line. A line written "Label: value" is set as two
+    // columns in the figure face (for checking an email, phone or password).
     const detail = document.getElementById('ask-detail');
     if (Array.isArray(options.detail) && options.detail.length > 0) {
         detail.innerHTML = options.detail.map((line) => {
             const text = String(line);
             const split = text.indexOf(': ');
 
-            // only a short leading label counts; a colon in the middle of a
-            // sentence is part of the sentence
             if (split > 0 && split <= 22) {
                 return '<li class="ask-pair">' +
                     '<span class="ask-pair-label">' + escapeHtml(text.slice(0, split)) + '</span>' +
@@ -272,11 +203,7 @@ function openAsk(options) {
         detail.style.display = 'none';
     }
 
-    // The block is crimson on a card that is about to destroy something and
-    // grey on one that is not. It used to be crimson on both, which spent the
-    // system's one "this stops something" colour on a card listing the
-    // details of an account being created -- and a colour that appears on
-    // every dialog is a colour that means nothing on the one that matters.
+    // crimson only on a card that destroys something; grey otherwise
     detail.classList.toggle('is-plain', options.tone !== 'danger');
 
     const field = document.getElementById('ask-field');
@@ -318,8 +245,6 @@ function submitAsk() {
     const error = document.getElementById('ask-error');
     const value = input.value;
 
-    // the question stays open until the answer is usable, rather than
-    // closing and then complaining
     const complaint = askOptions.check ? askOptions.check(value) : null;
     if (complaint) {
         error.textContent = complaint;
@@ -331,7 +256,6 @@ function submitAsk() {
     closeAsk(value);
 }
 
-// confirm(), as a card. Resolves true or false, and never blocks the page.
 function askConfirm(message, options) {
     const settings = options || {};
     return openAsk({
@@ -346,14 +270,8 @@ function askConfirm(message, options) {
     });
 }
 
-// The same card, for the actions that cannot be taken back: voiding a sale,
-// restoring over a live database, deleting an account, approving credit.
-//
-// It exists as its own function so the tone, the mark and the wording of the
-// cancel button are decided once. A dialog that asks "are you sure?" in the
-// same voice for a saved filter and for a wiped database has taught everybody
-// to press Confirm without reading it, so the dangerous one looks different
-// and its confirm button says what it is about to do rather than "Yes".
+// For actions that cannot be taken back: the tone, the mark and the wording of
+// the buttons are decided here so the dangerous dialog looks different.
 function askDanger(message, options) {
     const settings = options || {};
 
@@ -369,7 +287,6 @@ function askDanger(message, options) {
     });
 }
 
-// prompt(), as a card. Resolves the typed value, or null when it is cancelled.
 function askInput(options) {
     return openAsk(Object.assign({ ask: true, mark: '✎', eyebrow: 'Input needed' }, options));
 }

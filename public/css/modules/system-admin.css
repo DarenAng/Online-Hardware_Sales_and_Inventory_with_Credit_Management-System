@@ -1,22 +1,11 @@
 /* ==========================================================================
-   SYSTEM ADMINISTRATOR
-   system.html
-
+   SYSTEM ADMINISTRATOR -- system.html
    Loads after general-ui.css and responsive.css, so anything here wins.
-
-   This role holds the keys: who works here, who used to, what everyone did,
-   and the copy of the whole system that gets it all back. Only the things
-   nobody else ever sees live in this file.
    ========================================================================== */
 
 /* ==========================================================================
-   BACKUP AND RECOVERY
-
-   A backup is one complete .sql file. The three figures at the top of the
-   screen answer the only three questions worth asking before you trust one:
-   when was the last, how much room are they taking, and where are they.
-   The last of the three is a path, so it is the one thing here set in the
-   figure face.
+   BACKUP AND RECOVERY -- the three figures at the top: when was the last,
+   how much room, and where; the path is set in the figure face
    ========================================================================== */
 .backup-figures {
     display: flex;
@@ -67,22 +56,12 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* Restoring replaces everything currently in the system, so the two tiles at
-   the top of the screen are not a matched pair: one is the safe thing and
-   one is not, and they should not look alike. */
+/* the safe tile and the destructive one should not look alike */
 #panel-maintenance .tile .btn { margin-top: 2px; }
 
 /* ==========================================================================
-   IS THIS SYSTEM BACKING ITSELF UP?
-
-   The first thing on the screen, above both tiles, because it is the one
-   question on it whose answer the administrator did not choose. A backup that
-   has quietly stopped working looks exactly like a backup that is working,
-   right up until the afternoon somebody needs it.
-
-   So the state carries the system meaning rather than a decoration: green
-   for nothing to do, crimson for the one that is actually broken, grey for
-   switched off -- which is a setting somebody chose and not a fault.
+   IS THIS SYSTEM BACKING ITSELF UP? -- green for fine, crimson for broken,
+   grey for switched off
    ========================================================================== */
 .auto-backup {
     display: flex;
@@ -122,17 +101,19 @@
 }
 
 .auto-backup.is-off { border-left-color: var(--steel-soft); }
+.auto-backup.is-paused { border-left-color: var(--signal-hi); }
+.auto-backup.is-paused .auto-backup-state {
+    border-color: rgba(245, 179, 1, 0.5);
+    background: var(--signal-dim);
+    color: var(--signal-ink);
+}
 
 @media (max-width: 640px) {
     .auto-backup { flex-direction: column; gap: 10px; }
 }
 
 /* ==========================================================================
-   THE STAFF DIRECTORY
-   Two people may share a first and a last name, so the middle name is part of
-   the name and not an afterthought. It used to have a box of its own, 92px
-   wide, because it held one letter; it holds a whole name now and takes the
-   same box as the first and last names beside it.
+   THE STAFF DIRECTORY -- the middle name takes the same box as the others
    ========================================================================== */
 #panel-create .grid-2 { align-items: start; }
 
@@ -141,9 +122,136 @@
 #modal-status-btn { min-width: 168px; }
 
 /* ==========================================================================
+   ACCESS CONTROL -- one chip per system on a row, control marked; the card
+   behind a row is a matrix of levels
+   ========================================================================== */
+.access-chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    margin: 1px 4px 1px 0;
+    padding: 2px 8px;
+    border-radius: var(--radius);
+    border: 1px solid rgba(20, 24, 29, 0.14);
+    background: rgba(20, 24, 29, 0.05);
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink);
+    white-space: nowrap;
+}
+.access-chip.has-control {
+    border-color: rgba(245, 179, 1, 0.5);
+    background: var(--signal-dim);
+}
+.access-levels {
+    font-family: var(--font-figure);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--steel);
+}
+
+.access-modal-box { max-width: 780px; }
+.access-matrix th.col-check,
+.access-matrix td.cell-check { text-align: center; width: 84px; }
+.access-matrix td.cell-check input {
+    width: 20px; height: 20px;
+    accent-color: var(--go);
+    cursor: pointer;
+}
+.access-matrix td.cell-check input:disabled { cursor: not-allowed; }
+.access-matrix .access-note { min-width: 180px; font-size: 13px; padding: 6px 9px; min-height: 34px; }
+.access-system-meta {
+    display: block;
+    font-size: 11.5px;
+    font-weight: 400;
+    color: var(--steel-soft);
+}
+.access-warn { margin: 0 0 14px; }
+
+/* a deactivated person still on the list, because the keys they hold can be
+   taken back; the row reads quieter so the live ones stand out */
+#access-table tr.is-inactive td { color: var(--steel-soft); }
+
+/* ==========================================================================
+   SCREENS BY ROLE -- one row per screen, one column per role; the switch is
+   orange (an action), the word under it grey, amber or crimson (a state)
+   ========================================================================== */
+.feature-legend {
+    display: flex; flex-wrap: wrap; gap: 8px 20px;
+    margin: 0 0 14px;
+    font-size: 12.5px; color: var(--steel);
+}
+.feature-legend-item { display: inline-flex; align-items: center; gap: 7px; }
+
+.feature-matrix th.col-role { text-align: center; width: 132px; }
+.feature-matrix .feature-module-row th {
+    background: var(--paper);
+    color: var(--steel);
+    font-size: 11px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    padding: 8px 12px;
+}
+.feature-matrix td.feature-name { min-width: 220px; }
+.feature-desc {
+    display: block;
+    font-size: 12px; font-weight: 400;
+    color: var(--steel-soft);
+    margin-top: 2px;
+}
+.feature-matrix td.feature-cell { text-align: center; vertical-align: middle; }
+.feature-matrix td.feature-cell.is-unavailable { color: var(--steel-soft); }
+
+.feature-toggle {
+    display: inline-flex; flex-direction: column; align-items: center; gap: 5px;
+    cursor: pointer;
+    margin: 0;
+}
+.feature-toggle .feature-box {
+    position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none;
+}
+.feature-switch {
+    position: relative;
+    display: block;
+    width: 40px; height: 22px;
+    border-radius: 999px;
+    background: var(--steel-soft);
+    transition: background 0.15s;
+}
+.feature-switch::after {
+    content: '';
+    position: absolute; top: 3px; left: 3px;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.15s;
+}
+.feature-box:checked + .feature-switch { background: var(--go); }
+.feature-box:checked + .feature-switch::after { transform: translateX(18px); }
+.feature-box:focus-visible + .feature-switch { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+.feature-state {
+    display: inline-block;
+    min-width: 54px;
+    white-space: nowrap;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-family: var(--font-figure);
+    font-size: 11px; font-weight: 600;
+    text-align: center;
+    background: var(--paper-2); color: var(--steel);
+}
+.feature-state.is-granted { background: var(--signal-dim); color: var(--signal-ink); }
+.feature-state.is-revoked { background: var(--stop-dim); color: var(--stop); }
+.feature-state.is-unavailable { background: transparent; color: var(--steel-soft); min-width: 0; }
+
+/* ==========================================================================
    ON A PHONE
    ========================================================================== */
 @media (max-width: 640px) {
+    .access-chip { white-space: normal; }
+    .access-matrix td.cell-check { width: auto; }
+    .feature-matrix th.col-role { width: auto; }
+
     .backup-figures { gap: 14px 22px; padding-bottom: 14px; }
     .backup-figure { min-width: 0; flex: 1 1 45%; }
     .backup-figure:last-child { flex: 1 1 100%; }
@@ -156,11 +264,8 @@
 }
 
 /* ==========================================================================
-   STORE & TAX
-   The form on the left says what the shop is; the card on the right shows a
-   customer being handed the result. The preview is set on paper stock rather
-   than as another card, because the thing being previewed is a printed
-   document and a preview that does not look like one teaches nothing.
+   RECEIPT MAINTENANCE -- the form on the left, a printed-looking preview
+   on the right
    ========================================================================== */
 .store-preview {
     max-width: 380px;
@@ -171,10 +276,7 @@
     background: var(--surface);
 }
 
-/* The TIN box says whether it is happy as it is being filled in, the same
-   way the phone box does. The phone rule in general-ui.css is written for
-   the two-part phone control and does not reach a plain box, so it is said
-   again here for this one. */
+/* the TIN box says whether it is happy as it is filled in, like the phone box */
 #store-tin {
     font-family: var(--font-figure);
     letter-spacing: 0.04em;

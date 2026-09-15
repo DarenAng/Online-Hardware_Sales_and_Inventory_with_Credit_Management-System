@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="css/general-ui.css">
     <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/connected-systems.css">
     <link rel="stylesheet" href="css/modules/system-admin.css">
 </head>
 
@@ -28,19 +29,32 @@
                 <span data-current-user>User</span>
             </div>
             <ul class="sidebar-nav">
-                <li>
-                    <a href="#accounts" onclick="toggleDropdown('accounts-dropdown', event)" class="nav-parent">
+                <li data-sidebar-dropdown>
+                    <a href="#accounts" onclick="toggleAccountsMenu(event)" class="nav-parent" id="accounts-nav"
+                       aria-expanded="false" aria-controls="accounts-dropdown">
                         Accounts Management <span class="nav-caret">&#9660;</span>
                     </a>
-                    <ul id="accounts-dropdown" class="nav-sub" style="display: block;">
+                    <ul id="accounts-dropdown" class="nav-sub" style="display: none;">
                         <li><a href="#" data-panel-link="panel-create" onclick="showCreateAccount(event)">Create</a></li>
                         <li><a href="#" data-panel-link="panel-accounts" onclick="showAllUsers(event)">List Users</a></li>
                         <li><a href="#" data-panel-link="panel-archive" onclick="showArchiveModule(event)">Archive</a></li>
                     </ul>
                 </li>
+                <!-- a permission rather than a role: by default nobody below the administrator holds any -->
+                <li data-sidebar-dropdown>
+                    <a href="#access" onclick="toggleAccessMenu(event)" class="nav-parent" id="access-nav"
+                       aria-expanded="false" aria-controls="access-dropdown">
+                        Access Control <span class="nav-caret">&#9660;</span>
+                    </a>
+                    <ul id="access-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-access" onclick="showAccessControl(event)">Who Holds Access</a></li>
+                        <li><a href="#" data-panel-link="panel-features" onclick="showScreensByRole(event)">Screens by Role</a></li>
+                        <li id="nav-systems"><a href="#" data-panel-link="panel-systems" onclick="showConnectedSystems(event)">Connected Systems</a></li>
+                    </ul>
+                </li>
                 <li><a href="#" data-panel-link="panel-logs" onclick="showAuditLogs(event)">Audit Logs</a></li>
                 <li><a href="#" data-panel-link="panel-maintenance" onclick="showMaintenance(event)">Backup &amp; Recovery</a></li>
-                <li><a href="#" data-panel-link="panel-store" onclick="showStoreSettings(event)">Store &amp; Tax</a></li>
+                <li><a href="#" data-panel-link="panel-store" onclick="showStoreSettings(event)">Receipt Maintenance</a></li>
             </ul>
         </aside>
 
@@ -53,7 +67,7 @@
                     <button class="menu-toggle" type="button" onclick="toggleSidebar()"
                             aria-controls="sidebar" aria-expanded="false"
                             aria-label="Menu">&#9776;</button>
-                    <span class="topbar-title">System Administration</span>
+                    <span class="topbar-title" id="admin-page-title">System Administration</span>
                 </div>
             </header>
 
@@ -63,11 +77,8 @@
                 <div class="card" id="panel-accounts" data-panel>
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Accounts Management</span>
                             <h3>Staff Directory</h3>
-                            <p class="panel-sub">Nothing is read from the database until you ask for it.
-                                Set the filters you want, then press <kbd>Load Data</kbd> &mdash; or type a
-                                name in the search box to look one person up. The filters on their own
-                                read nothing.</p>
                         </div>
                         <div class="panel-actions">
                             <span class="pill" id="accounts-count">Not loaded</span>
@@ -79,7 +90,7 @@
                         <div class="search-wrap">
                             <input type="search" id="accounts-search" class="form-control search-input"
                                    placeholder="Search by name, email, or role"
-                                   oninput="dataPanelSearch('admin-users', this.value)">
+                                   onkeydown="dataPanelSearchKey('admin-users', event)" title="Type, then press Enter to search">
                         </div>
 
                         <div class="toolbar-field">
@@ -116,7 +127,7 @@
                         <table id="accounts-table">
                             <thead>
                                 <tr>
-                                    <th>ID</th>
+                                    <th data-secondary>ID</th>
                                     <th>Name</th>
                                     <th>Email</th>
                                     <th>Role</th>
@@ -135,6 +146,7 @@
                 <div class="card" id="panel-create" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Accounts Management</span>
                             <h3>Create New Account</h3>
                         </div>
                     </div>
@@ -142,38 +154,31 @@
                     <form id="create-user-form" onsubmit="handleCreateUser(event)">
                         <div class="grid-2">
                             <div class="form-group">
-                                <label>First Name</label>
+                                <label>First name</label>
                                 <input type="text" name="firstName" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label>Middle Name <span class="label-hint">optional</span></label>
+                                <label>Middle name <span class="label-hint">optional</span></label>
                                 <input type="text" name="middleName" class="form-control"
                                        maxlength="100" placeholder="Dela Cruz">
                             </div>
                             <div class="form-group">
-                                <label>Last Name</label>
+                                <label>Last name</label>
                                 <input type="text" name="lastName" class="form-control" required>
                             </div>
 
-                            <!-- PHONE
-                                 The country code is not in the box, it is
-                                 printed beside it. A box that accepts +63,
-                                 0063, 09 and 9 accepts four spellings of one
-                                 number and stores all four, and then no two
-                                 records can be compared. The prefix is fixed
-                                 furniture and what is typed is the ten digits
-                                 after it, digits only, enforced as the keys
-                                 are pressed. -->
+                            <!-- PHONE -- the country button (phone-picker.js) beside the national number,
+                                 digits only; a whole number pasted with its + sets the country -->
                             <div class="form-group">
                                 <label for="create-phone">Phone <span class="label-hint">optional</span></label>
                                 <div class="phone-field">
-                                    <span class="phone-prefix">+63</span>
+                                    <span class="phone-prefix">+</span>
                                     <input type="text" id="create-phone" name="phone" class="form-control"
-                                           inputmode="numeric" autocomplete="tel-national"
-                                           maxlength="10" placeholder="9XXXXXXXXX"
+                                           inputmode="numeric" autocomplete="tel"
+                                           maxlength="20" placeholder="9XXXXXXXXX"
                                            oninput="onPhoneInput(this)">
                                 </div>
-                                <span class="label-hint">Ten digits, starting with 9</span>
+                                <span class="label-hint">Pick the country, then the number as dialled there &mdash; or paste it whole with its +</span>
                             </div>
                             <div class="form-group">
                                 <label>Role</label>
@@ -185,16 +190,10 @@
                             </div>
                         </div>
 
-                        <!-- WHY THERE IS NO PASSWORD BOX HERE
-                             There was one, and an administrator typed a
-                             temporary password into it for somebody else.
-                             Those all end up as Cashier123, said out loud
-                             across a shop floor and known to two people for
-                             as long as the account lasts. The server makes
-                             one instead, shows it once for checking, and
-                             sends it to the address above on confirmation. -->
+                        <!-- no password box: the server makes one, shows it once for checking, and
+                             sends it to the address above on confirmation -->
                         <div class="form-footer">
-                            <button type="submit" class="btn btn-success">Review &amp; Create</button>
+                            <button type="submit" class="btn btn-success">Create</button>
                             <button type="button" class="btn btn-ghost" onclick="cancelCreateAccount(event)">Cancel</button>
                         </div>
                     </form>
@@ -204,10 +203,8 @@
                 <div class="card" id="panel-archive" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Accounts Management</span>
                             <h3>Archived Accounts</h3>
-                            <p class="panel-sub">Deactivated staff. Restoring an account is not a button
-                                on the end of a row any more &mdash; open the person and read the card
-                                first, because restoring one lets them sign in again immediately.</p>
                         </div>
                         <div class="panel-actions">
                             <span class="pill" id="archive-count">Not loaded</span>
@@ -218,7 +215,7 @@
                         <div class="search-wrap">
                             <input type="search" id="archive-search" class="form-control search-input"
                                    placeholder="Search archived staff by name, email, or role"
-                                   oninput="dataPanelSearch('admin-archive', this.value)">
+                                   onkeydown="dataPanelSearchKey('admin-archive', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-spacer"></div>
                         <button type="button" class="btn btn-accent" onclick="dataPanelOpen('admin-archive')">Load Data</button>
@@ -242,15 +239,114 @@
                     <div class="pager is-single" id="archive-pager"></div>
                 </div>
 
+                <!-- ============================================================
+                     ACCESS CONTROL: WHO HOLDS ACCESS -- every non-administrator with a login,
+                     including those who hold nothing
+                     ============================================================ -->
+                <div class="card" id="panel-access" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <span class="eyebrow">Access Control</span>
+                            <h3>Who Holds Access</h3>
+                            <p class="panel-sub">Access to the connected systems is a permission, not a role.
+                                Nobody holds any until it is granted here, and every grant and every
+                                revocation is written to the audit trail.</p>
+                        </div>
+                        <div class="panel-actions">
+                            <span class="pill" id="access-count">Not loaded</span>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" id="access-search" class="form-control search-input"
+                                   placeholder="Search by name, email, role, or system"
+                                   onkeydown="dataPanelSearchKey('admin-access', event)" title="Type, then press Enter to search">
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="access-holding">Holding</label>
+                            <select id="access-holding" onchange="dataPanelFilter('admin-access', 'holding', this.value)">
+                                <option value="all">Everyone</option>
+                                <option value="some">Holds access to something</option>
+                                <option value="none">Holds nothing</option>
+                            </select>
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="access-role">Role</label>
+                            <select id="access-role" data-role-filter
+                                    onchange="dataPanelFilter('admin-access', 'roleId', this.value)">
+                                <option value="all">Every role</option>
+                            </select>
+                        </div>
+
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('admin-access')">Load Data</button>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="access-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Role</th>
+                                    <th>Systems</th>
+                                    <th>Granted By</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <div class="pager is-single" id="access-pager"></div>
+                </div>
+
+                <!-- SCREENS BY ROLE -- one row per screen, one column per role, each cell a
+                     switch; drawn by system-admin.js from /api/features -->
+                <div class="card" id="panel-features" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <span class="eyebrow">Access Control</span>
+                            <h3>Screens by Role</h3>
+                            <p class="panel-sub">Which screens show in each role's menu. Flip a switch off to
+                                hide a screen from every account in that role, or on to give the role a screen
+                                its dashboard can show. People already signed in see the change straight
+                                away, and every change is written to the audit trail.</p>
+                        </div>
+                        <div class="panel-actions">
+                            <span class="pill" id="features-count">Not loaded</span>
+                            <button type="button" class="btn" onclick="loadFeatureMatrix()">Refresh</button>
+                            <button type="button" class="btn btn-success" id="features-save-btn"
+                                    onclick="saveFeatureMatrix()" disabled title="Nothing has changed yet">Save Screens</button>
+                        </div>
+                    </div>
+
+                    <div class="feature-legend" aria-hidden="true">
+                        <span class="feature-legend-item"><span class="feature-state is-default">on by default</span> the role's own page has it</span>
+                        <span class="feature-legend-item"><span class="feature-state is-granted">switched on</span> you gave it to the role</span>
+                        <span class="feature-legend-item"><span class="feature-state is-revoked">switched off</span> you took it off the role</span>
+                        <span class="feature-legend-item"><span class="feature-state is-unavailable">&mdash;</span> that dashboard has no such screen</span>
+                    </div>
+
+                    <div class="table-responsive">
+                        <table class="feature-matrix" id="features-matrix">
+                            <thead>
+                                <tr><th>Screen</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td class="table-empty">Loading the screens</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <!-- AUDIT LOGS -->
                 <div class="card" id="panel-logs" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
                             <span class="eyebrow">System Activity</span>
                             <h3>Audit Trail</h3>
-                            <p class="panel-sub">Every recorded action, newest first, with the role and
-                                the machine it came from. Open any entry to read exactly what changed.
-                                Failed sign-ins are recorded here too.</p>
                         </div>
                         <div class="panel-actions">
                             <span class="pill" id="logs-count">Not loaded</span>
@@ -262,7 +358,7 @@
                         <div class="search-wrap">
                             <input type="search" id="logs-search" class="form-control search-input"
                                    placeholder="Search by person, action, detail, or address"
-                                   oninput="dataPanelSearch('admin-logs', this.value)">
+                                   onkeydown="dataPanelSearchKey('admin-logs', event)" title="Type, then press Enter to search">
                         </div>
 
                         <div class="toolbar-field">
@@ -277,6 +373,8 @@
                                 <option value="RESTORE">Restore</option>
                                 <option value="BACKUP">Backup</option>
                                 <option value="SECURITY">Password / security</option>
+                                <option value="ACCESS">Access granted / revoked</option>
+                                <option value="CONTROL">Commands run on connected systems</option>
                                 <option value="LOGIN">Sign in</option>
                                 <option value="LOGOUT">Sign out</option>
                                 <option value="LOGIN_FAILURE">Failed sign-in</option>
@@ -304,7 +402,7 @@
                                     <th>Timestamp</th>
                                     <th>User</th>
                                     <th>Role</th>
-                                    <th>IP Address</th>
+                                    <th data-secondary>IP Address</th>
                                     <th>Action Type</th>
                                     <th>Detail</th>
                                 </tr>
@@ -319,13 +417,7 @@
                 <!-- BACKUP & RECOVERY -->
                 <div id="panel-maintenance" data-panel style="display: none;">
 
-                    <!-- WHAT THE SYSTEM IS DOING ON ITS OWN
-                         Filled in from the server rather than written here,
-                         because whether the timer is actually running is a
-                         fact about the server and not about this page. A
-                         screen that claims a backup is being taken every
-                         minute because the HTML says so is worse than a
-                         screen that says nothing. -->
+                    <!-- filled in from the server: whether the timer is running is a fact about the server -->
                     <div class="card auto-backup" id="auto-backup-card">
                         <span class="auto-backup-state" id="auto-backup-state">Checking</span>
                         <div class="auto-backup-body">
@@ -338,20 +430,12 @@
                         <div class="card tile">
                             <span class="eyebrow">Backup</span>
                             <h3>Save the Whole System</h3>
-                            <p class="panel-sub">Writes every table, every row, both views and all
-                                stored procedures into one dated <strong>.sql</strong> file. The file is
-                                kept in the folder below and also opens in MySQL Workbench.
-                                A backup taken here is yours: it is never rotated away by the
-                                automatic one.</p>
                             <button type="button" class="btn btn-accent" id="run-backup-btn"
                                     onclick="runBackup()">Run Backup Now</button>
                         </div>
                         <div class="card tile">
                             <span class="eyebrow">Recovery</span>
                             <h3>Restore From a File</h3>
-                            <p class="panel-sub">Restore any backup in the list below, or load a
-                                <strong>.sql</strong> file you kept somewhere else. Restoring replaces
-                                everything currently in the system.</p>
                             <button type="button" class="btn btn-danger" onclick="chooseRestoreFile()">
                                 Restore From My Computer</button>
                             <input type="file" id="restore-file" accept=".sql,application/sql,text/plain"
@@ -364,10 +448,6 @@
                             <div>
                                 <span class="eyebrow">Backup History</span>
                                 <h3>Saved Backups</h3>
-                                <p class="panel-sub">Every backup this system has, newest first, both
-                                    the automatic ones and the ones taken by hand. Click a row to open
-                                    it; download, restore and delete live inside that panel rather
-                                    than sitting on every row at once.</p>
                             </div>
                             <div class="panel-actions">
                                 <span class="pill" id="backup-count">Not loaded</span>
@@ -384,7 +464,7 @@
                                 <span class="backup-figure-label">Space Used</span>
                                 <span class="backup-figure-value" id="backup-total">--</span>
                             </div>
-                            <div class="backup-figure" style="flex: 1; min-width: 260px;">
+                            <div class="backup-figure">
                                 <span class="backup-figure-label">Saved In</span>
                                 <span class="backup-path" id="backup-folder">Loading...</span>
                             </div>
@@ -410,41 +490,28 @@
                 </div>
 
                 <!-- ============================================================
-                     STORE & TAX
-                     What every invoice claims about the business. It used to
-                     be a shop name written into a JavaScript file, no TIN and
-                     no tax breakdown, which meant every installation of this
-                     system printed the same shop and none of them printed a
-                     document the BIR would accept.
-
-                     Registration is a setting because both kinds of hardware
-                     shop exist: above the threshold a shop charges 12% VAT
-                     inside its prices, below it the shop charges none at all
-                     and pays percentage tax instead.
+                     RECEIPT MAINTENANCE -- what every invoice claims about the business;
+                     VAT-registered above the threshold, non-VAT below it
                      ============================================================ -->
                 <div id="panel-store" data-panel style="display: none;">
                     <div class="card">
                         <div class="panel-head">
                             <div>
                                 <span class="eyebrow">Invoicing</span>
-                                <h3>Store &amp; Tax Details</h3>
-                                <p class="panel-sub">Printed at the head of every invoice, and used to
-                                    work out the tax breakdown at its foot. Changing this affects
-                                    invoices from now on; sales already rung up keep the registration
-                                    and rate they were issued under.</p>
+                                <h3>Receipt Maintenance</h3>
                             </div>
                             <span class="pill" id="store-state">Not loaded</span>
                         </div>
 
                         <form id="store-form" onsubmit="handleSaveStoreSettings(event)">
                             <div class="form-group">
-                                <label for="store-name">Registered Name</label>
+                                <label for="store-name">Registered name</label>
                                 <input type="text" id="store-name" name="storeName" class="form-control"
                                        maxlength="150" placeholder="Lucelyn Hardware" required>
                             </div>
 
                             <div class="form-group">
-                                <label for="store-address">Business Address</label>
+                                <label for="store-address">Business address</label>
                                 <input type="text" id="store-address" name="address" class="form-control"
                                        maxlength="255" placeholder="Wawa, Nasugbu, Batangas" required>
                             </div>
@@ -452,11 +519,8 @@
                             <div class="grid-2">
                                 <div class="form-group">
                                     <label for="store-tin">TIN</label>
-                                    <!-- Digits only, dashed as they are typed. The BIR shape is nine
-                                         digits and a branch code: 000-000-000-00000. A shop that
-                                         knows its TIN as nine digits or with the old three-digit
-                                         branch code still gets in; the head-office code is filled
-                                         in and the old one is widened, both on the way out. -->
+                                    <!-- digits only, dashed as typed: 000-000-000-00000; nine digits or the
+                                         old three-digit branch code are brought up to shape on the way out -->
                                     <input type="text" id="store-tin" name="tin" class="form-control"
                                            inputmode="numeric" autocomplete="off"
                                            maxlength="17" placeholder="000-000-000-00000" required
@@ -464,7 +528,7 @@
                                     <span class="label-hint">Nine digits and a branch code, as the BIR issued it</span>
                                 </div>
                                 <div class="form-group">
-                                    <label for="store-registration">Tax Registration</label>
+                                    <label for="store-registration">Tax registration</label>
                                     <select id="store-registration" name="registrationType" class="form-control"
                                             onchange="onRegistrationChange(this.value)" required>
                                         <option value="VAT">VAT-registered</option>
@@ -474,7 +538,7 @@
                             </div>
 
                             <div class="form-group" id="store-rate-field">
-                                <label for="store-rate">VAT Rate</label>
+                                <label for="store-rate">VAT rate</label>
                                 <input type="number" id="store-rate" name="vatRate" class="form-control"
                                        min="0.01" max="100" step="0.01" value="12" style="max-width: 160px;">
                                 <span class="label-hint">The Philippine rate is 12. It is a setting rather
@@ -483,7 +547,7 @@
                             </div>
 
                             <div class="form-group">
-                                <label for="store-note">Invoice Footnote <span class="label-hint">optional</span></label>
+                                <label for="store-note">Invoice footnote <span class="label-hint">optional</span></label>
                                 <input type="text" id="store-note" name="invoiceNote" class="form-control"
                                        maxlength="255" placeholder="Returns accepted within 7 days with this invoice.">
                             </div>
@@ -503,8 +567,6 @@
                             <div>
                                 <span class="eyebrow">Preview</span>
                                 <h3>How the Invoice Will Read</h3>
-                                <p class="panel-sub">A sample sale of &#8369;1,000.00, split the way the
-                                    settings above would split it.</p>
                             </div>
                         </div>
                         <div class="receipt-paper store-preview" id="store-preview"></div>
@@ -535,33 +597,39 @@
             </div>
 
             <div class="modal-body">
+                <!-- shown only on the signed-in administrator's own card (openUserModal) -->
+                <p class="cred-note" id="modal-own-note" style="display: none;">This is your own account.
+                    An administrator's details, role, status and password are changed by another
+                    administrator, so nothing on this card can be edited from here. Your password is
+                    still yours to change under My Account.</p>
                 <div class="detail-grid" id="modal-user-details"></div>
 
                 <div id="modal-user-edit" style="display: none;">
                     <form id="edit-user-form" onsubmit="handleUpdateUser(event)">
                         <div class="grid-2">
                             <div class="form-group">
-                                <label>First Name</label>
+                                <label>First name</label>
                                 <input type="text" name="firstName" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label>Middle Name <span class="label-hint">optional</span></label>
+                                <label>Middle name <span class="label-hint">optional</span></label>
                                 <input type="text" name="middleName" class="form-control"
                                        maxlength="100" placeholder="Dela Cruz">
                             </div>
                             <div class="form-group">
-                                <label>Last Name</label>
+                                <label>Last name</label>
                                 <input type="text" name="lastName" class="form-control" required>
                             </div>
                             <div class="form-group">
                                 <label for="edit-phone">Phone <span class="label-hint">optional</span></label>
                                 <div class="phone-field">
-                                    <span class="phone-prefix">+63</span>
+                                    <span class="phone-prefix">+</span>
                                     <input type="text" id="edit-phone" name="phone" class="form-control"
-                                           inputmode="numeric" autocomplete="tel-national"
-                                           maxlength="10" placeholder="9XXXXXXXXX"
+                                           inputmode="numeric" autocomplete="tel"
+                                           maxlength="20" placeholder="9XXXXXXXXX"
                                            oninput="onPhoneInput(this)">
                                 </div>
+                                <span class="label-hint">Pick the country, then the number as dialled there &mdash; or paste it whole with its +</span>
                             </div>
                             <div class="form-group">
                                 <label>Role</label>
@@ -586,10 +654,7 @@
         </div>
     </div>
 
-    <!-- CREDENTIALS & RESTORATION CARD
-         An archived person, on their own, with the one action that applies to
-         them. It replaces a Restore button on the end of a row, which offered
-         no way to check who you were about to let back in. -->
+    <!-- CREDENTIALS & RESTORATION CARD -- an archived person, with the one action that applies -->
     <div class="modal" id="restore-modal" onclick="closeModalOnBackdrop(event, 'restore-modal')">
         <div class="modal-box">
             <div class="modal-head">
@@ -614,6 +679,51 @@
             <div class="modal-foot">
                 <button type="button" class="btn btn-ghost" onclick="closeModal('restore-modal')">Cancel</button>
                 <button type="button" class="btn btn-success" onclick="restoreSelectedAccount()">Restore Account</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WHAT ONE PERSON MAY REACH -- one line per system; manage or control
+         ticks monitor with it; nothing is saved until Save Access -->
+    <div class="modal" id="access-modal" onclick="closeModalOnBackdrop(event, 'access-modal')">
+        <div class="modal-box access-modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="access-avatar">--</div>
+                    <div>
+                        <h3 id="access-name">Person</h3>
+                        <span class="modal-role" id="access-role-line">Role</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('access-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <p class="cred-note">Monitor reads a system's state. Manage changes how it is set up.
+                    Control runs commands against it. Manage and control both include monitor. Every
+                    change here is written to the audit trail with your name on it.</p>
+                <p class="detail-warn access-warn" id="access-inactive-note" style="display: none;"></p>
+
+                <div class="table-responsive">
+                    <table class="mini-table access-matrix" id="access-matrix">
+                        <thead>
+                            <tr>
+                                <th>System</th>
+                                <th class="col-check">Monitor</th>
+                                <th class="col-check">Manage</th>
+                                <th class="col-check">Control</th>
+                                <th>Why</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('access-modal')">Cancel</button>
+                <button type="button" class="btn btn-success" id="access-save-btn" onclick="saveAccessMatrix()"
+                        disabled title="Nothing has changed yet">Save Access</button>
             </div>
         </div>
     </div>
@@ -643,10 +753,7 @@
         </div>
     </div>
 
-    <!-- BACKUP ACTIONS, IN A DRAWER
-         The three things you can do to a backup used to sit on every row, so
-         a list of twenty backups carried sixty buttons, two of which destroy
-         data. They now open with the backup they belong to. -->
+    <!-- BACKUP ACTIONS, IN A DRAWER -- opened with the backup they belong to -->
     <div class="drawer-shade" id="backup-shade" onclick="closeBackupDrawer()"></div>
     <aside class="drawer" id="backup-drawer" role="dialog" aria-labelledby="backup-drawer-title">
         <div class="drawer-head">
@@ -675,6 +782,7 @@
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="javascript/modules/shared/helpers.js"></script>
     <script src="javascript/modules/shared/format.js"></script>
+    <script src="javascript/modules/shared/phone-picker.js"></script>
     <script src="javascript/modules/shared/ui-kit.js"></script>
     <script src="javascript/modules/shared/tables.js"></script>
     <script src="javascript/modules/shared/data-panel.js"></script>
@@ -686,6 +794,7 @@
     <script src="javascript/modules/shared/subnav.js"></script>
     <script src="javascript/modules/shared/my-account.js"></script>
     <script src="javascript/modules/shared/notifications.js"></script>
+    <script src="javascript/modules/shared/connected-systems.js"></script>
     <script src="javascript/modules/system-admin.js"></script>
 </body>
 </html>

@@ -24,9 +24,6 @@
         </div>
 
         <h2>Sign in</h2>
-        <p class="login-lead">Your dashboard depends on your role, so you land on the right
-            one automatically.</p>
-
         <form onsubmit="handleLogin(event)">
             <!-- A refused sign-in is answered here, beside the two boxes it is
                  about, rather than in a card in the corner of the screen.
@@ -44,9 +41,12 @@
             </div>
             <div class="form-group">
                 <label for="login-password">Password</label>
-                <input id="login-password" type="password" name="password" class="form-control"
-                       autocomplete="current-password" required placeholder="Your password"
-                       aria-describedby="login-alert">
+                <div class="password-field">
+                    <input id="login-password" type="password" name="password" class="form-control"
+                           autocomplete="current-password" required placeholder="Your password"
+                           aria-describedby="login-alert">
+                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                </div>
             </div>
 
             <button type="submit" class="btn btn-accent login-submit">Sign in</button>
@@ -59,6 +59,7 @@
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="javascript/modules/shared/helpers.js"></script>
     <script src="javascript/modules/shared/format.js"></script>
+    <script src="javascript/modules/shared/phone-picker.js"></script>
     <script src="javascript/modules/shared/ui-kit.js"></script>
     <script src="javascript/modules/shared/tables.js"></script>
     <script src="javascript/modules/shared/modals.js"></script>

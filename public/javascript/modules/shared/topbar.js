@@ -1,14 +1,5 @@
-// topbar.js  --  THE TOP RIGHT CORNER
+// topbar.js -- the bell and account chip, built once for every module
 // Loaded by: all five dashboards
-// ------------------------------------------------------------------------
-// ==========================================
-// THE TOP RIGHT CORNER
-//
-// Every module gets the same corner: the alert bell, and the account chip that
-// opens on a click. Building it here rather than in five HTML files is what
-// keeps it identical everywhere, and it is why the administrator and cashier
-// screens now have the bell the other three already had.
-// ==========================================
 function buildTopbarCorner() {
     const topbar = document.querySelector('.topbar');
     if (!topbar || topbar.querySelector('.account-menu')) return;
@@ -20,7 +11,6 @@ function buildTopbarCorner() {
         topbar.appendChild(corner);
     }
 
-    // an old plain user chip is replaced by the menu version
     const plainUser = corner.querySelector('.topbar-user') || topbar.querySelector('.topbar-user');
     if (plainUser) plainUser.remove();
 
@@ -30,9 +20,7 @@ function buildTopbarCorner() {
         bell.className = 'bell';
         bell.setAttribute('aria-label', 'Notifications');
         bell.setAttribute('onclick', 'toggleNotifications(event)');
-        // A drawn bell rather than a character. The circled dot that stood
-        // here reads as a record button, and this is the one control on the
-        // page that has to be recognised without being read.
+        // a drawn bell: the circled-dot glyph reads as a record button
         bell.innerHTML = '<span class="bell-icon" aria-hidden="true">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
             'stroke-linecap="round" stroke-linejoin="round">' +
@@ -76,7 +64,6 @@ function buildTopbarCorner() {
         </div>`;
     corner.appendChild(menu);
 
-    // the alert panel lives on every module too, not only on three of them
     const main = topbar.closest('.main-content') || document.body;
     if (!document.getElementById('notif-drop')) {
         const drop = document.createElement('div');
@@ -94,6 +81,32 @@ function buildTopbarCorner() {
         topbar.insertAdjacentElement('afterend', drop);
         if (!main.contains(drop)) main.appendChild(drop);
     }
+
+    // pressing a line behind the bell opens the alert as its own card
+    if (!document.getElementById('notif-modal')) {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.id = 'notif-modal';
+        modal.setAttribute('onclick', "closeModalOnBackdrop(event, 'notif-modal')");
+        modal.innerHTML = `
+            <div class="modal-box notif-modal-box">
+                <div class="modal-head">
+                    <div class="modal-identity">
+                        <div class="avatar" id="notif-modal-avatar">!</div>
+                        <div>
+                            <span class="notif-modal-kind" id="notif-modal-kind">Alert</span>
+                            <h3 id="notif-modal-title">Alert</h3>
+                            <span class="modal-role" id="notif-modal-sub">Alert</span>
+                        </div>
+                    </div>
+                    <button type="button" class="modal-close" onclick="closeModal('notif-modal')"
+                            aria-label="Close">&times;</button>
+                </div>
+                <div class="modal-body" id="notif-modal-body"></div>
+                <div class="modal-foot" id="notif-modal-foot"></div>
+            </div>`;
+        document.body.appendChild(modal);
+    }
 }
 
 function toggleAccountMenu(event) {
@@ -107,7 +120,6 @@ function toggleAccountMenu(event) {
     drop.classList.toggle('open', open);
     if (chip) chip.setAttribute('aria-expanded', String(open));
 
-    // only one thing hangs off the top bar at a time
     if (open) closeNotifications();
 }
 
@@ -118,7 +130,6 @@ function closeAccountMenu() {
     if (chip) chip.setAttribute('aria-expanded', 'false');
 }
 
-// clicking anywhere else puts both panels away
 document.addEventListener('click', function (event) {
     if (!event.target.closest('.account-menu')) closeAccountMenu();
 

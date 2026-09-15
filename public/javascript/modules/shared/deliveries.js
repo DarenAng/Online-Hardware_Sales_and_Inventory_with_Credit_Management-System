@@ -1,9 +1,8 @@
-// deliveries.js  --  DELIVERY RECORDS
+// deliveries.js -- delivery records
 // Loaded by: manager-dashboard.html, cashier-dashboard.html, delivery.html
-// ------------------------------------------------------------------------
-// Which moves the system will accept from each stage. This mirrors the rule
-// in sp_update_delivery_status; the database is what actually enforces it,
-// this copy just avoids offering a choice that would only come back refused.
+
+// Mirrors sp_update_delivery_status; the database enforces it, this only
+// avoids offering a move that would come back refused.
 const NEXT_DELIVERY_STATUS = {
     'Pending':          ['In Transit', 'Out for Delivery', 'Delayed', 'Failed'],
     'In Transit':       ['Out for Delivery', 'Delayed', 'Failed'],
@@ -13,13 +12,10 @@ const NEXT_DELIVERY_STATUS = {
     'Delivered':        []
 };
 
-// One delivery popup for every screen that shows deliveries. The manager,
-// cashier and driver lists carry slightly different columns, so the money
-// page shows the balance fields only when the caller supplied them.
-// canUpdate adds the step where a note can be attached to a status change;
-// the cashier does not get it, because booking a delivery is where their
-// part ends.
-function showDeliveryRecord(d, canUpdate) {
+// One delivery popup for every screen. canUpdate adds the status change with
+// a note (not the cashier); canArchive adds putting a closed delivery away
+// (manager only).
+function showDeliveryRecord(d, canUpdate, canArchive) {
     if (!d) return;
 
     const route = '<div class="detail-grid">' +
@@ -60,13 +56,21 @@ function showDeliveryRecord(d, canUpdate) {
         { label: 'Payment', body: '<div class="detail-grid">' + money + '</div>' }
     ];
 
+    const archiveBlock = !canArchive ? ''
+        : (d.status === 'Delivered' || d.status === 'Failed')
+        ? '<div class="detail-actions">' +
+          '<button type="button" class="btn btn-ghost" onclick="archiveDelivery(' + d.delivery_id + ')">Archive this delivery</button>' +
+          '</div>'
+        : '<p class="detail-note">A delivery is archived once it is Delivered and paid for, or Failed. ' +
+          'The sweep puts it away ninety days after that on its own.</p>';
+
     if (canUpdate) {
         const next = NEXT_DELIVERY_STATUS[d.status] || [];
         pages.push({
             label: 'Update',
             body: next.length === 0
-                ? '<p class="detail-note">This delivery is closed. Nothing further can be recorded against it.</p>'
-                : '<div class="form-group"><label>New Status</label>' +
+                ? '<p class="detail-note">This delivery is closed. Nothing further can be recorded against it.</p>' + archiveBlock
+                : '<div class="form-group"><label>New status</label>' +
                   '<select class="form-control" id="drec-status">' +
                   next.map((s) => '<option value="' + s + '">' + s + '</option>').join('') +
                   '</select></div>' +
@@ -82,7 +86,6 @@ function showDeliveryRecord(d, canUpdate) {
     openDetailModal('Delivery #' + d.delivery_id, d.customer_name + ' · ' + d.status, 'D' + d.delivery_id, pages);
 }
 
-// the note-carrying path, for the times a plain button is not enough
 async function submitDeliveryRecordUpdate(deliveryId) {
     const status = document.getElementById('drec-status');
     if (!status) return;
@@ -111,14 +114,16 @@ async function sendDeliveryStatus(deliveryId, status, remarks) {
 
         notifySuccess(result.message);
 
-        // Refresh whichever delivery list the caller is looking at. The
-        // driver's page and the manager's page each show one of these lists
-        // and neither loads the other's module, so the function that fills
-        // the list is checked alongside the list itself.
+        // refresh whichever delivery list this page has
         if (typeof loadDriverDeliveries === 'function' && document.getElementById('dpend-table')) {
             await loadDriverDeliveries();
         } else if (typeof loadDeliveries === 'function' && document.getElementById('deliveries-table')) {
             await loadDeliveries();
+        }
+
+        // the schedule reads the same rows, and a browser is not told about its own writes
+        if (typeof loadDeliverySchedule === 'function' && typeof scheduleRows !== 'undefined' && scheduleRows !== null) {
+            await loadDeliverySchedule(true);
         }
     } catch (error) {
         notifyOffline();

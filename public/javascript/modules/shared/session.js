@@ -1,25 +1,8 @@
-// session.js  --  SESSION AND SIGN IN
+// session.js -- session and sign in
 // Loaded by: every page
-// ------------------------------------------------------------------------
 
-// ==========================================
-// WHERE A REFUSED SIGN-IN IS ANSWERED
-//
-// Everywhere else in the system, a problem is reported by a card in the
-// corner. That is right for a problem that arrives while somebody is reading
-// a table: the card is out of the way of the thing they are working on.
-//
-// The sign-in screen is the one place where it is wrong. There is no table.
-// There are two boxes and a button, the reader's eyes are on them, and the
-// problem is about something they have just typed into one of them. A card
-// in the far corner of a wide monitor is a message delivered somewhere the
-// reader is demonstrably not looking.
-//
-// So a refused sign-in is answered at the form, and it stays until the next
-// attempt rather than timing out. A card is still the right answer for the
-// other failure on this screen — the server not being there at all — because
-// that one is not about anything on the form.
-// ==========================================
+// A refused sign-in is answered at the form, not by a corner card, and stays
+// until the next attempt.
 function showLoginAlert(message) {
     const box = document.getElementById('login-alert');
     if (!box) return;
@@ -36,11 +19,66 @@ function clearLoginAlert() {
     box.hidden = true;
 }
 
+// The server answers a wrong address and a wrong password with the same
+// sentence, so a domain one letter off a common one is pointed out here first.
+const COMMON_MAIL_DOMAINS = [
+    'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com',
+    'icloud.com', 'live.com', 'protonmail.com', 'yahoo.com.ph'
+];
+
+function editDistance(a, b) {
+    const rows = [];
+    for (let i = 0; i <= a.length; i += 1) {
+        rows[i] = [i];
+        for (let j = 1; j <= b.length; j += 1) {
+            rows[i][j] = i === 0 ? j : Math.min(
+                rows[i - 1][j] + 1,
+                rows[i][j - 1] + 1,
+                rows[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+        }
+    }
+    return rows[a.length][b.length];
+}
+
+// the domain this address probably meant, or null
+function likelyMailDomain(email) {
+    const at = String(email).lastIndexOf('@');
+    if (at < 1) return null;
+
+    const domain = String(email).slice(at + 1).toLowerCase();
+    if (COMMON_MAIL_DOMAINS.indexOf(domain) !== -1) return null;
+
+    let best = null;
+    for (const known of COMMON_MAIL_DOMAINS) {
+        const distance = editDistance(domain, known);
+        if (distance > 0 && distance <= 2 && (!best || distance < best.distance)) {
+            best = { domain: known, distance: distance };
+        }
+    }
+    return best ? best.domain : null;
+}
+
+// A screen that sends the browser to sign in has a sentence to say; a card
+// would be destroyed by the navigation, so it is parked in sessionStorage.
+function rememberSignOutReason(text) {
+    try { sessionStorage.setItem('signOutReason', String(text || '')); } catch (error) { /* private mode */ }
+}
+
+function showRememberedSignOutReason() {
+    let text = '';
+    try {
+        text = sessionStorage.getItem('signOutReason') || '';
+        sessionStorage.removeItem('signOutReason');
+    } catch (error) { /* nothing stored */ }
+
+    if (text) showLoginAlert(text);
+}
+
 async function handleLogin(event) {
     event.preventDefault();
 
     const form = event.currentTarget;
-    const email = form.elements.email.value;
+    const email = form.elements.email.value.trim();
     const password = form.elements.password.value;
 
     try {
@@ -53,33 +91,18 @@ async function handleLogin(event) {
         const result = await response.json();
 
         if (!response.ok) {
-            // WHY THE MESSAGE USED TO VANISH
-            //
-            // This went through handleAuthFailure, which exists for the other
-            // 401 in the system: a session that has quietly run out while
-            // somebody was working. Its job there is to say so and send the
-            // browser back to the sign-in screen, and it does that by calling
-            // location.replace.
-            //
-            // A wrong password is also a 401, so a mistyped password was being
-            // read as an expired session and the sign-in page reloaded itself.
-            // The card explaining what went wrong was destroyed by that reload
-            // a fraction of a second after it appeared, which is why the
-            // message could be seen leaving but never read. Raising the card's
-            // life would not have helped: nothing was timing out, the page was
-            // being thrown away underneath it.
-            //
-            // On this form a 401 never means an expired session. There is no
-            // session yet. So it is answered here.
-            // the server's sentence, ended properly, then what to do about it
+            // A wrong password is also a 401, but on this form it never means an
+            // expired session, so it is answered here instead of via handleAuthFailure.
             const reason = String(result.error || 'That sign-in did not work').trim();
 
-            showLoginAlert(reason.replace(/[.!]?$/, '.') +
-                ' Check the email address, then type the password again.');
+            const meant = likelyMailDomain(email);
+            const advice = meant
+                ? ' The address ends in ' + email.slice(email.lastIndexOf('@') + 1) +
+                  ' \u2014 did you mean ' + meant + '? Check the email address, then type the password again.'
+                : ' Check the email address, then type the password again.';
 
-            // Retyping the password is the next thing that happens either way,
-            // so the box is emptied and the cursor is put back in it. The email
-            // is left alone: it is usually right, and usually the long one.
+            showLoginAlert(reason.replace(/[.!]?$/, '.') + advice);
+
             const passwordBox = form.elements.password;
             if (passwordBox) {
                 passwordBox.value = '';
@@ -137,9 +160,9 @@ async function handlePasswordChange(event) {
             return;
         }
 
-        currentUser.must_change_password = false;
-        localStorage.setItem('currentUser', JSON.stringify(currentUser));
-        window.location.href = getRolePage(currentUser.role_name);
+        signOutWithReason(result.message
+            ? result.message.replace(/[.!]?$/, '.') + ' Sign in again with the new one.'
+            : 'Your password was changed. Sign in again with the new one.');
     } catch (error) {
         notifyError('The server is not answering. Start it with npm start in the project folder, then try again.', 'Cannot reach the server');
     }
@@ -154,15 +177,18 @@ function getRolePage(roleName) {
         'Delivery Personnel': 'delivery.html'
     };
 
-    // an unrecognised role gets no landing page at all, rather than a
-    // generic dashboard it was never meant to see
     return rolePages[roleName] || 'Login.html';
+}
+
+// The way out after the server has already closed the session.
+function signOutWithReason(reason) {
+    localStorage.removeItem('currentUser');
+    rememberSignOutReason(reason);
+    window.location.replace('Login.html');
 }
 
 function logout() {
     localStorage.removeItem('currentUser');
-    // tell the server to forget the session too, otherwise the cookie
-    // would still be accepted until it expires on its own
     if (navigator.sendBeacon) {
         navigator.sendBeacon('/api/logout', new Blob([], { type: 'application/json' }));
     } else {
@@ -184,8 +210,8 @@ function initializeSession() {
     const pageName = window.location.pathname.split('/').pop().toLowerCase();
 
     if (pageName === 'login.html' || pageName === '') {
-        // only worth telling the server to forget a session that exists
         if (currentUser) logout();
+        showRememberedSignOutReason();
         return;
     }
 
@@ -233,35 +259,21 @@ function initializeSession() {
     buildTopbarCorner();
     watchTablesForAlignment();
     applyCurrentUserToPage(currentUser);
+    applyAccessMarks(currentUser);
     startHeartbeat();
 
-    // one open connection per screen, so a change made on another machine
-    // reaches this one without anybody restoring a database by hand
     if (typeof startLiveSync === 'function') startLiveSync();
 }
 
-// ==========================================
-// THE HEARTBEAT
-//
-// The staff directory shows who is signed in right now, and the server works
-// that out from when it last heard from each session. A page left open makes
-// no requests at all, so somebody reading a report for ten minutes would drop
-// off the list while sitting right in front of it. This is the one call the
-// browser makes on its own: a few bytes, once a minute, saying the page is
-// still open.
-//
-// It stops while the tab is in the background, because a tab nobody is
-// looking at is not a person at a counter, and it fires once as soon as the
-// tab comes back so the list catches up without waiting out the interval.
-// ==========================================
+// The staff directory shows who is signed in from when the server last heard
+// from each session; a page left open makes no requests, so this pings once
+// a minute while the tab is visible.
 const HEARTBEAT_MS = 60 * 1000;
 let heartbeatTimer = null;
 
 function sendHeartbeat() {
     if (document.hidden) return;
 
-    // a failed heartbeat changes nothing on the screen: the next real request
-    // will report the session properly if it has actually ended
     fetch('/api/heartbeat', { method: 'POST', headers: apiHeaders() })
         .catch(function () { /* the server is not there; nothing to say about it */ });
 }
@@ -277,20 +289,8 @@ function startHeartbeat() {
     });
 }
 
-// ==========================================
-// ONE SPELLING OF A NAME, AND IT CARRIES THE MIDDLE INITIAL
-//
-// staff.full_name in the database is first name, middle initial, last name,
-// and that is the spelling every screen shows. This is the fallback for the
-// moment before /api/me has answered and the page is working from what was
-// stored at sign-in, so it has to spell a name the same way rather than
-// dropping the initial and giving the corner of the screen a different name
-// from the one in the directory.
-//
-// A middle name may be blank, in which case there is no initial to show and
-// the name is first and last -- that is a person with no middle name on file,
-// not a name being shortened.
-// ==========================================
+// Fallback spelling of a name before /api/me answers: first, middle initial,
+// last -- the same as staff.full_name.
 function staffName(user) {
     if (!user) return '';
     if (user.full_name) return user.full_name;
@@ -302,17 +302,38 @@ function staffName(user) {
         user.email || '';
 }
 
-// writes the signed-in person into every place the page shows them
+// Page-side half of access control: any element marked
+//   data-access="Manager,System Administrator"
+// is removed for other roles. It hides and never grants.
+function currentRole() {
+    const user = getCurrentUser();
+    return user ? String(user.role_name || '') : '';
+}
+
+function hasRole() {
+    const role = currentRole().toLowerCase();
+    return Array.prototype.some.call(arguments,
+        (name) => String(name).trim().toLowerCase() === role);
+}
+
+function applyAccessMarks(currentUser) {
+    const role = String((currentUser && currentUser.role_name) || '').toLowerCase();
+
+    document.querySelectorAll('[data-access]').forEach((element) => {
+        if (element.closest('.sidebar-nav')) return;
+
+        const allowed = String(element.getAttribute('data-access') || '')
+            .split(',').map((name) => name.trim().toLowerCase()).filter(Boolean);
+
+        if (allowed.length > 0 && allowed.indexOf(role) === -1) element.hidden = true;
+    });
+}
+
 function applyCurrentUserToPage(currentUser) {
     if (!currentUser) return;
 
     const fullName = staffName(currentUser) || currentUser.email;
 
-    // The chip in the corner and the plate in the menu used to show a bare
-    // first name. Two Cashier Users on the same shift then saw the same word
-    // in the same corner, which is the whole reason the middle initial is
-    // part of a name in this system: the name on the screen has to be the
-    // name in the directory.
     document.querySelectorAll('[data-current-user]').forEach((element) => {
         element.textContent = fullName;
     });

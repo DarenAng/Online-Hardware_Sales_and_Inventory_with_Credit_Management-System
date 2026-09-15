@@ -1,25 +1,12 @@
 /* ==========================================================================
-   RESPONSIVE
-   The same system on a phone, for every role.
-
+   RESPONSIVE -- the same system on a phone, for every role
    Load order: general-ui.css -> responsive.css -> modules/<role>.css
-   This file overrides the general layer; each module's own file overrides
-   this one and carries whatever else that role needs on a small screen.
 
-   Three sizes, three decisions:
+     up to 1024px   the menu slides in over the page, behind a shade
+     up to 640px    each table row becomes a card carrying its column names
+     up to 420px    the last of the horizontal padding goes
 
-     up to 1024px   the menu stops taking a quarter of the screen and slides
-                    in over the page instead, behind a shade.
-     up to 640px    a table stops being a table. Six columns cannot survive a
-                    380px screen, and a row that scrolls sideways hides the
-                    figure you opened the page for, so each row becomes a card
-                    and every value carries the name of its column.
-     up to 420px    the last of the horizontal padding goes.
-
-   The people using this on a phone are a clerk on a warehouse floor and a
-   driver in a truck cab, one-handed, often in a hurry. Everything they press
-   is at least 44px, fields are 16px so iOS stops zooming the page in on
-   focus, and nothing that matters hides behind the notch or the home bar.
+   Everything pressed is at least 44px; fields are 16px so iOS does not zoom.
    ========================================================================== */
 
 /* ==========================================================================
@@ -43,9 +30,7 @@
         box-shadow: 0 0 44px rgba(0, 0, 0, 0.45);
     }
 
-    /* The shade behind it: tapping it puts the menu away. It is present but
-       untouchable until the menu opens, so it never swallows a tap meant for
-       the page underneath. */
+    /* the shade behind the menu; untouchable until the menu opens */
     .sidebar-shade { display: block; }
     .sidebar-shade.visible { opacity: 1; pointer-events: auto; }
     body.sidebar-open { overflow: hidden; }
@@ -66,10 +51,6 @@
     .search-wrap { max-width: 100%; }
     .topbar-user span[data-current-user] { display: none; }
 
-    .subnav {
-        padding-left: max(8px, env(safe-area-inset-left));
-        padding-right: max(8px, env(safe-area-inset-right));
-    }
 }
 
 /* ==========================================================================
@@ -83,11 +64,18 @@
     .topbar { padding-top: 8px; padding-bottom: 8px; }
     .topbar-title { font-size: 17px; }
 
-    /* The top bar loses 4px of padding here, so the strip below it has to
-       come up by the same amount or a hairline of page shows between them
-       while scrolling. */
-    .subnav { top: 54px; }
-    .subnav-tab { padding: 11px 12px; letter-spacing: 0.07em; }
+    /* the row of tabs is wider than the screen and is meant to be swiped,
+       so it is given an edge that shows there is more of it */
+    .subnav {
+        gap: 18px;
+        margin-left: -14px;
+        margin-right: -14px;
+        padding-left: 14px;
+        padding-right: 14px;
+        -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+                mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+    }
+    .subnav-tab { font-size: 14px; }
 
     h1 { font-size: 27px; }
     h2 { font-size: 22px; }
@@ -116,26 +104,16 @@
     .filter-row, .track-legend { gap: 6px; }
 
     /* ======================================================================
-       A TABLE BECOMES A STACK OF CARDS
-
-       The column headings move into the rows. Every body cell already knows
-       the name of its column: labelTableCells() in tables.js stamps it on as
-       data-column when the table is filled in, so no render function had to
-       change and no heading had to be repeated in the markup.
-
-       The name of the record leads the card, the figures line up under it,
-       and the action sits at the bottom at full width.
-       ====================================================================== */
+           A TABLE BECOMES A STACK OF CARDS -- labelTableCells() in tables.js
+           stamps each cell with data-column; the name of the record leads
+           ====================================================================== */
     .table-responsive { overflow-x: visible; }
 
     table { display: block; margin-top: 0; }
     table thead { display: none; }
     table tbody { display: block; }
 
-    /* A column laid out by hand rather than by the source order: whatever
-       order the columns come in, the card leads with the name of the record,
-       puts its reference under that, and finishes with what you can do to
-       it. A card that opens with "#1004" is a card you have to read twice. */
+    /* the card leads with the name, then the reference, then the action */
     table tbody tr {
         display: flex;
         flex-direction: column;
@@ -161,6 +139,11 @@
         border-bottom: none;
         text-align: right;
     }
+    /* the unfolded line under a row is one cell with no column of its own */
+    table tbody tr.row-details td::before { display: none; }
+    .row-expandable td:first-child::after { display: none; }
+    .row-expandable td:first-child { padding-left: 13px; }
+
     table tbody td::before {
         content: attr(data-column);
         flex: 0 0 auto;
@@ -194,10 +177,7 @@
     }
     table tbody td.cell-name::before { display: none; }
 
-    /* What you can do to it, at the bottom, at full width. The desktop cell
-       is nowrap so a two-word button never breaks in half; here that same
-       rule would run a second button off the side of the screen, so the cell
-       is allowed to wrap and each button takes its own line. */
+    /* the action at the bottom, full width; here the cell may wrap */
     table tbody td.cell-action {
         order: 10;
         display: block;
@@ -247,10 +227,11 @@
         margin: 0;
         border-radius: var(--radius-lg) var(--radius-lg) 0 0;
         max-height: 94dvh;
-        display: flex;
-        flex-direction: column;
         animation: sheet-up 0.24s cubic-bezier(0.2, 0.7, 0.3, 1);
     }
+    /* the locked height comes from the phone's screen: the sheet rises from the bottom */
+    .modal-tabs + .modal-body,
+    .modal-steps + .modal-body { height: calc(94dvh - 220px); }
     @keyframes sheet-up {
         from { transform: translateY(28px); opacity: 0; }
         to   { transform: translateY(0); opacity: 1; }
@@ -261,23 +242,28 @@
     .modal-body {
         padding: 16px;
         flex: 1 1 auto;
-        overflow-y: auto;
-        overscroll-behavior: contain;
+        overflow: hidden;
     }
     .modal-foot {
         flex-direction: column-reverse;
         padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
     }
     .modal-foot .btn { width: 100%; }
-    /* Back, the page count and Next belong on one line even here: they are a
-       set of three and stacking them reads as three unrelated buttons */
-    .modal-pager { flex-direction: row; align-items: center; }
-    .modal-pager .btn { width: auto; flex: 0 0 auto; }
+    .modal-pager { margin-right: 0; justify-content: space-between; }
+    .modal-pager .btn { width: auto; }
     .avatar { width: 38px; height: 38px; font-size: 14px; }
 
     /* ---------- the corner ---------- */
     .account-chip-name, .account-caret { display: none; }
     .account-chip { padding: 4px; }
+    /* the chip keeps its figure and loses its word, the way the account
+       chip keeps its initials and loses its name */
+    .pending-chip-word { display: none; }
+    .pending-chip { padding: 0 8px; }
+    .pending-drop {
+        top: 64px; right: 10px; left: 10px;
+        width: auto;
+    }
     .account-drop {
         position: fixed;
         top: 64px; right: 10px; left: 10px;
@@ -310,24 +296,19 @@
 }
 
 /* ==========================================================================
-   A SHORT WINDOW
-   A laptop in a browser with three toolbars open is 500px tall. The menu is
-   its own scroller so its last item is still reachable, and the popup does
-   not grow past the window.
+   A SHORT WINDOW -- the menu scrolls itself and the popup does not grow
+   past the window
    ========================================================================== */
 @media (max-height: 560px) {
     .modal { padding: 10px; }
     .modal-box { max-height: calc(100dvh - 20px); display: flex; flex-direction: column; }
-    .modal-body { overflow-y: auto; }
+    .modal-body { overflow: hidden; }
 }
 
 /* ==========================================================================
-   POINTING WITH A FINGER
-   Hover states are meaningless on a touch screen and the lift on a card only
-   fires after the tap has already happened, so it is dropped there.
+   POINTING WITH A FINGER -- hover states are dropped on touch screens
    ========================================================================== */
 @media (hover: none) {
     .row-clickable:hover { background: transparent; }
     .row-clickable:hover td:first-child::before { transform: scaleX(0); }
-    .product-card:hover:not(:disabled) { transform: none; box-shadow: none; }
 }

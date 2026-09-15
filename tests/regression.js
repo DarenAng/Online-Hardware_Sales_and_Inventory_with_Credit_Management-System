@@ -1,24 +1,11 @@
-// The bugs that were found and fixed, each one held down by a check.
-//
-// smoke.js asks whether every route answers. This file asks whether the
-// answers are right, which is a different question and the one the following
-// six defects all got past:
-//
-//   A  the guard on the server's own source and the SQL folder was testing the
-//      raw text of the address bar while the file server was testing the
-//      decoded, collapsed path, so "//javascript/server.js" handed the
-//      database password to anybody who asked, signed in or not
-//   B  a sale validated stock line by line and deducted line by line, so one
-//      material on two lines sold twice the shelf and left the count negative
-//   C  the end-of-shift Collected figure summed what customers handed over
-//      rather than what stayed in the drawer, so a broken note read as takings
-//   D  a staff id in the address bar decided whose shift or whose round came
-//      back, so one cashier could read another's takings by editing a number
-//   E  report ranges were resolved against the UTC calendar while every SQL
-//      comparison used the machine's own, so "Today" meant yesterday until
-//      eight in the morning Philippine time
-//   F  the two routes acting on your own account, and the one that changes the
-//      shop's tax registration, wrote audit entries with no role and no address
+// The bugs that were found and fixed, each one held down by a check:
+//   A  the private-file guard tested the raw address while the file server
+//      tested the decoded path
+//   B  one material on two sale lines sold twice the shelf
+//   C  end-of-shift Collected summed what was handed over, not what stayed
+//   D  a staff id in the address bar decided whose figures came back
+//   E  report ranges used the UTC calendar while SQL used the machine's
+//   F  own-account and tax-registration audit entries had no role or address
 //
 // Expects a freshly loaded database (the two files in public/database/, in
 // order) and the server already listening on BASE.
@@ -59,8 +46,7 @@ async function call(cookie, method, path, payload) {
   return { status: response.status, body };
 }
 
-// Every demo account except the administrator has to pick a real password on
-// its first sign-in, so signing in is two steps rather than one.
+// every demo account except the administrator picks a real password on first sign-in
 async function signIn(email, demoPassword, chosenPassword) {
   let session = await login(email, demoPassword);
 
@@ -74,11 +60,6 @@ async function signIn(email, demoPassword, chosenPassword) {
 (async function main() {
   // ==========================================
   // A. THE FILES THAT ARE NOT FOR DOWNLOADING
-  //
-  // server.js carries the database password and public/database/ carries the
-  // whole schema. Both sit under the folder the pages are served from, so the
-  // only thing keeping them private is the guard, and a guard is only worth
-  // what its worst spelling is worth.
   // ==========================================
   console.log("== THE FILES THAT ARE NOT FOR DOWNLOADING ==");
 
@@ -119,25 +100,13 @@ async function signIn(email, demoPassword, chosenPassword) {
   const cashier  = await signIn("cashier@hardware.com",  "cashier123",  "cashierpass123");
   const driver   = await signIn("delivery@hardware.com", "delivery123", "driverpass123");
 
-  // The second cashier in the demo data, and a second driver of our own: the
-  // demo's other driver is deactivated on purpose and cannot sign in.
-  await call(admin.cookie, "POST", "/api/users/6/reset-password", { newPassword: "anapass1234" });
-  const otherCashier = await signIn("ana.reyes@hardware.com", "anapass1234", "anapass5678");
+  // the second cashier in the demo data; the server makes the reset password
+  const anaReset = await call(admin.cookie, "POST", "/api/users/6/reset-password", {});
+  const otherCashier = await signIn("ana.reyes@hardware.com", anaReset.body.password, "anapass5678");
 
-  // ==========================================
-  // A SECOND DRIVER, AND A PASSWORD NOBODY CHOSE
-  //
-  // Creating an account is two requests: the review works it out and makes
-  // the password, and the second one creates it from the draft. Nothing here
-  // gets to pick that password, so the reply is where it is read from -- the
-  // server hands it back when it could not email it, which is the case on any
-  // machine that has not filled in the SETUP block in mailer.js.
-  //
-  // This file is run repeatedly against the same database during development,
-  // so the account may already be there from the last run. Then the address
-  // is taken, the review says so, and the password is reset to something
-  // known instead.
-  // ==========================================
+  // A second driver of our own (the demo's other driver is deactivated). The
+  // account may already exist from an earlier run; then the password is reset
+  // to something known instead.
   const probeEmail = "probe.driver@hardware.com";
   let probePassword = null;
 
@@ -153,9 +122,9 @@ async function signIn(email, demoPassword, chosenPassword) {
     const directory = await call(admin.cookie, "GET", "/api/users");
     const existing = (directory.body || []).find((row) => row.email === probeEmail);
     if (existing) {
-      probePassword = "probedriver1";
-      await call(admin.cookie, "POST", `/api/users/${existing.staff_id}/reset-password`,
-        { newPassword: probePassword });
+      const reset = await call(admin.cookie, "POST",
+        `/api/users/${existing.staff_id}/reset-password`, {});
+      probePassword = reset.body && reset.body.password;
       await call(admin.cookie, `PATCH`, `/api/users/${existing.staff_id}/status`,
         { isActive: true });
     }
@@ -173,10 +142,6 @@ async function signIn(email, demoPassword, chosenPassword) {
 
   // ==========================================
   // B. ONE MATERIAL, TWO LINES, ONE SHELF
-  //
-  // The shelf a line is weighed against is the same shelf every other line
-  // naming that material is weighed against, so the question is what the whole
-  // receipt asks for and not what one line asks for.
   // ==========================================
   console.log("== ONE MATERIAL, TWO LINES, ONE SHELF ==");
 
@@ -211,10 +176,6 @@ async function signIn(email, demoPassword, chosenPassword) {
 
   // ==========================================
   // C. WHAT STAYED IN THE DRAWER
-  //
-  // A hundred thousand handed over against a bill of a hundred and twenty is a
-  // hundred and twenty collected. The card a drawer is balanced against has to
-  // agree with the manager's tally for the same cashier on the same day.
   // ==========================================
   console.log("== WHAT STAYED IN THE DRAWER ==");
 
@@ -234,9 +195,6 @@ async function signIn(email, demoPassword, chosenPassword) {
 
   // ==========================================
   // D. YOUR OWN FIGURES ARE YOUR OWN
-  //
-  // The staff id in the address bar is ignored on all three of these routes.
-  // The session decides, the same way it decides which alerts the bell shows.
   // ==========================================
   console.log("== YOUR OWN FIGURES ARE YOUR OWN ==");
 
@@ -268,10 +226,6 @@ async function signIn(email, demoPassword, chosenPassword) {
 
   // ==========================================
   // E. TODAY MEANS TODAY
-  //
-  // The report ranges are worked out in JavaScript; every figure they bound is
-  // worked out in SQL. Both have to mean the same calendar day, or the manager
-  // and the cashier are looking at different days on the same morning.
   // ==========================================
   console.log("== TODAY MEANS TODAY ==");
 
@@ -287,10 +241,6 @@ async function signIn(email, demoPassword, chosenPassword) {
 
   // ==========================================
   // F. AN ENTRY THAT CAN ANSWER FOR ITSELF
-  //
-  // An audit entry with no role and no address records that something happened
-  // without recording who was in a position to do it or where from, which is
-  // most of what an audit is opened for.
   // ==========================================
   console.log("== AN ENTRY THAT CAN ANSWER FOR ITSELF ==");
 
@@ -301,9 +251,12 @@ async function signIn(email, demoPassword, chosenPassword) {
   await call(manager.cookie, "PUT", "/api/me", {
     firstName: "Manager", middleName: "Mendoza", lastName: "User", phone: "09171234567"
   });
-  await call(manager.cookie, "POST", "/api/me/password", {
+  // a standard user no longer changes their own password; check the reset above
+  const ownChange = await call(manager.cookie, "POST", "/api/me/password", {
     currentPassword: "managerpass123", newPassword: "managerpass456"
   });
+  record("a standard user cannot change their own password from their screen",
+    ownChange.status === 403, `got ${ownChange.status}`);
 
   const trail = (await call(admin.cookie, "GET", "/api/audit-logs?limit=400")).body;
   const complete = (action) => {
@@ -318,9 +271,9 @@ async function signIn(email, demoPassword, chosenPassword) {
   record("editing your own details names the role and the machine",
     complete("UPDATE_OWN_PROFILE"),
     JSON.stringify(trail.find((row) => row.action === "UPDATE_OWN_PROFILE") || {}).slice(0, 140));
-  record("changing your own password names the role and the machine",
-    complete("CHANGE_OWN_PASSWORD"),
-    JSON.stringify(trail.find((row) => row.action === "CHANGE_OWN_PASSWORD") || {}).slice(0, 140));
+  record("resetting a password names the role and the machine",
+    complete("RESET_PASSWORD"),
+    JSON.stringify(trail.find((row) => row.action === "RESET_PASSWORD") || {}).slice(0, 140));
 
   // ==========================================
   console.log("");

@@ -1,10 +1,5 @@
-// detail-modal.js  --  PAGED DETAIL POPUP
+// detail-modal.js -- paged detail popup; tabs and arrow keys move between pages
 // Loaded by: all five dashboards
-// ------------------------------------------------------------------------
-// ==========================================
-// PAGED DETAIL POPUP
-// nothing scrolls, Next and Back move between pages
-// ==========================================
 let detailPages = [];
 let detailIndex = 0;
 
@@ -13,14 +8,10 @@ function detailField(label, value) {
            '</span><span class="detail-value">' + value + '</span></div>';
 }
 
-// The staff directory and the my-credentials page were each building the same
-// row with their own copy of this function under a second name. One of them
-// has gone; the name stays, because both screens ask for it by it.
+// second name kept because both the directory and my-credentials ask for it
 const detailRow = detailField;
 
-// numeric is the list of column positions holding figures. They are right
-// aligned, heading and all; everything else reads left, the same rule the
-// tables on the pages follow.
+// numeric: column positions holding figures, right aligned heading and all
 function detailTable(headers, rows, numeric) {
     if (rows.length === 0) return '<p class="detail-empty">Nothing to show here.</p>';
 
@@ -56,11 +47,6 @@ function renderDetailPage() {
         '" onclick="detailGoTo(' + i + ')">' + escapeHtml(p.label) + '</button>'
     ).join('');
 
-    document.getElementById('detail-counter').textContent =
-        'Page ' + (detailIndex + 1) + ' of ' + detailPages.length;
-
-    document.getElementById('detail-back').disabled = detailIndex === 0;
-    document.getElementById('detail-next').disabled = detailIndex === detailPages.length - 1;
 }
 
 function detailGoTo(index) {

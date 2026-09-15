@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="css/general-ui.css">
     <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/connected-systems.css">
     <link rel="stylesheet" href="css/modules/delivery-personnel.css">
 </head>
 
@@ -27,18 +28,28 @@
                 <span class="sidebar-eyebrow">Delivery Personnel</span>
                 <span data-current-user>User</span>
             </div>
+            <!-- data-feature names the screen an item opens; shared/features.js hides
+                 the ones switched off for this role and mirrors the counts -->
             <ul class="sidebar-nav">
-                <li>
-                    <a href="#runs" onclick="toggleDropdown('run-dropdown', event)" class="nav-parent">
+                <li data-sidebar-dropdown data-feature="delivery-runs">
+                    <a href="#runs" onclick="toggleRunsMenu(event)" class="nav-parent" id="runs-nav"
+                       aria-expanded="false" aria-controls="run-dropdown">
                         Delivery Runs <span class="nav-caret">&#9660;</span>
                     </a>
-                    <ul id="run-dropdown" class="nav-sub" style="display: block;">
-                        <li><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)">Pending</a></li>
+                    <ul id="run-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)">
+                            Pending <span class="nav-count" data-count-for="delivery-runs"></span></a></li>
                         <li><a href="#" data-panel-link="panel-active" onclick="showDeliveryActive(event)">Out for Delivery</a></li>
                         <li><a href="#" data-panel-link="panel-cod" onclick="showDeliveryCod(event)">Cash on Delivery</a></li>
                     </ul>
                 </li>
-                <li><a href="#" data-panel-link="panel-report" onclick="showDeliveryReports(event)">Reports</a></li>
+                <li data-feature="delivery-reports"><a href="#" data-panel-link="panel-report" onclick="showDeliveryReports(event)">Reports</a></li>
+                <!-- drawn by shared/delivery-schedule.js; hidden until features.js hears the role has it -->
+                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)">
+                    Delivery Schedule <span class="nav-count" data-count-for="delivery-schedule"></span></a></li>
+
+                <!-- hidden until shared/connected-systems.js hears the person holds a key -->
+                <li id="nav-systems" hidden><a href="#" data-panel-link="panel-systems" onclick="showConnectedSystems(event)">Connected Systems</a></li>
             </ul>
         </aside>
 
@@ -62,7 +73,6 @@
                     <div class="page-intro">
                         <span class="eyebrow">Today</span>
                         <h2>Pending Deliveries</h2>
-                        <p class="panel-sub">Orders waiting for a truck. Press Out for Delivery once the load leaves the warehouse.</p>
                     </div>
 
                     <div class="kpi-grid" id="del-kpis"></div>
@@ -72,17 +82,17 @@
                             <div>
                                 <span class="eyebrow">Queue</span>
                                 <h3>Waiting to Go Out</h3>
-                                <p class="panel-sub">Press the button to send a load out. Click the row instead when you need to record a delay, a failure, or a note for the office.</p>
                             </div>
-                            <div class="panel-actions">
-                                <span class="pill" id="dpend-count">0 deliveries</span>
-                                <button type="button" class="btn" onclick="loadDriverDeliveries()">Refresh</button>
-                            </div>
+                            <span class="pill" id="dpend-count">Not loaded</span>
                         </div>
-                        <div class="search-wrap">
-                            <input type="search" class="form-control search-input" id="dpend-search"
-                                   placeholder="Search by customer or destination"
-                                   oninput="dataPanelSearch('driver-pending', this.value)">
+                        <div class="panel-toolbar">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="dpend-search"
+                                       placeholder="Search by customer or destination"
+                                       onkeydown="dataPanelSearchKey('driver-pending', event)" title="Type, then press Enter to search">
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                            <button type="button" class="btn btn-accent" onclick="dataPanelOpen('driver-pending')">Load Data</button>
                         </div>
                         <div class="table-responsive grid-10">
                             <table id="dpend-table">
@@ -103,17 +113,17 @@
                             <div>
                                 <span class="eyebrow">On the Road</span>
                                 <h3>Out for Delivery</h3>
-                                <p class="panel-sub">Close each order at the door. Collect the balance first when it shows in red.</p>
                             </div>
-                            <div class="panel-actions">
-                                <span class="pill" id="dact-count">0 on the road</span>
-                                <button type="button" class="btn" onclick="loadDriverDeliveries()">Refresh</button>
-                            </div>
+                            <span class="pill" id="dact-count">Not loaded</span>
                         </div>
-                        <div class="search-wrap">
-                            <input type="search" class="form-control search-input" id="dact-search"
-                                   placeholder="Search by customer or destination"
-                                   oninput="dataPanelSearch('driver-active', this.value)">
+                        <div class="panel-toolbar">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="dact-search"
+                                       placeholder="Search by customer or destination"
+                                       onkeydown="dataPanelSearchKey('driver-active', event)" title="Type, then press Enter to search">
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                            <button type="button" class="btn btn-accent" onclick="dataPanelOpen('driver-active')">Load Data</button>
                         </div>
                         <div class="table-responsive grid-10">
                             <table id="dact-table">
@@ -134,7 +144,6 @@
                             <div>
                                 <span class="eyebrow">Collection</span>
                                 <h3>Receive Payment</h3>
-                                <p class="panel-sub">Only orders with a balance appear here. Picking one fills in the amount still owed.</p>
                             </div>
                         </div>
                         <form id="dcod-form" onsubmit="handleCodPayment(event)">
@@ -144,11 +153,11 @@
                                     <select name="deliveryId" class="form-control" id="dcod-select" onchange="onCodChange()" required></select>
                                 </div>
                                 <div class="form-group">
-                                    <label>Amount Received</label>
+                                    <label>Amount received</label>
                                     <input type="number" name="amount" class="form-control" min="0" step="0.01" required>
                                 </div>
                                 <div class="form-group">
-                                    <label>Payment Method</label>
+                                    <label>Payment method</label>
                                     <select name="paymentMethod" class="form-control" required>
                                         <option value="Cash">Cash</option>
                                         <option value="GCash">GCash</option>
@@ -158,7 +167,7 @@
                                     </select>
                                 </div>
                                 <div class="form-group">
-                                    <label>Reference No <span class="label-hint">optional</span></label>
+                                    <label>Reference no. <span class="label-hint">optional</span></label>
                                     <input type="text" name="referenceNo" class="form-control" placeholder="For non-cash payments">
                                 </div>
                             </div>
@@ -173,14 +182,22 @@
                             <div>
                                 <span class="eyebrow">Outstanding</span>
                                 <h3>Money to Collect</h3>
-                                <p class="panel-sub">Every order on your list with a balance left.</p>
                             </div>
-                            <span class="pill" id="dcod-count">0.00 to collect</span>
+                            <span class="pill" id="dcod-count">Not loaded</span>
+                        </div>
+                        <div class="panel-toolbar">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="dcod-search"
+                                       placeholder="Search by customer"
+                                       onkeydown="dataPanelSearchKey('driver-cod', event)" title="Type, then press Enter to search">
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                            <button type="button" class="btn btn-accent" onclick="dataPanelOpen('driver-cod')">Load Data</button>
                         </div>
                         <div class="table-responsive grid-10">
                             <table id="dcod-table">
                                 <thead>
-                                    <tr><th>ID</th><th>Customer</th><th>Method</th><th>Order Total</th><th>Balance</th><th>Status</th></tr>
+                                    <tr><th>ID</th><th>Customer</th><th data-secondary>Method</th><th>Order Total</th><th>Balance</th><th>Status</th></tr>
                                 </thead>
                                 <tbody></tbody>
                             </table>
@@ -194,9 +211,6 @@
                     <div class="page-intro">
                         <span class="eyebrow">Reporting</span>
                         <h2>Delivery Reports</h2>
-                        <p class="panel-sub">Your runs and your collections over any date range.
-                            Pick the dates first; nothing is read until you press
-                            <kbd>Load Report</kbd>.</p>
                     </div>
 
                     <div class="card">
@@ -205,11 +219,18 @@
                                 <span class="eyebrow">Range</span>
                                 <h3>Choose Dates</h3>
                             </div>
-                            <div class="panel-actions">
-                                <input type="date" class="form-control" id="drep-from" style="max-width: 175px;">
-                                <input type="date" class="form-control" id="drep-to" style="max-width: 175px;">
-                                <button type="button" class="btn btn-accent" onclick="loadDeliveryReport()">Load Report</button>
+                        </div>
+                        <div class="panel-toolbar">
+                            <div class="toolbar-field">
+                                <label for="drep-from">From</label>
+                                <input type="date" id="drep-from">
                             </div>
+                            <div class="toolbar-field">
+                                <label for="drep-to">To</label>
+                                <input type="date" id="drep-to">
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                            <button type="button" class="btn btn-accent" onclick="loadDeliveryReport()">Load Report</button>
                         </div>
                         <div class="kpi-grid" id="drep-kpis"></div>
                         <div class="track-legend" id="drep-legend"></div>
@@ -221,16 +242,17 @@
                                 <span class="eyebrow">Runs</span>
                                 <h3>Deliveries Handled</h3>
                             </div>
-                            <span class="pill" id="drep-count">0 deliveries</span>
+                            <span class="pill" id="drep-count">Not loaded</span>
                         </div>
-                        <div class="table-responsive">
+                        <div class="table-responsive grid-10">
                             <table id="drep-table">
                                 <thead>
-                                    <tr><th>ID</th><th>Date</th><th>Customer</th><th>Destination</th><th>Order Total</th><th>Balance</th><th>Status</th></tr>
+                                    <tr><th>ID</th><th>Date</th><th>Customer</th><th data-secondary>Destination</th><th>Order Total</th><th>Balance</th><th>Status</th></tr>
                                 </thead>
                                 <tbody></tbody>
                             </table>
                         </div>
+                        <div class="pager is-single" id="drep-pager"></div>
                     </div>
 
                     <div class="card">
@@ -239,16 +261,17 @@
                                 <span class="eyebrow">Cash</span>
                                 <h3>Payments Collected</h3>
                             </div>
-                            <span class="pill" id="drep-pay-count">0.00 collected</span>
+                            <span class="pill" id="drep-pay-count">Not loaded</span>
                         </div>
-                        <div class="table-responsive">
+                        <div class="table-responsive grid-10">
                             <table id="drep-pay-table">
                                 <thead>
-                                    <tr><th>Date</th><th>Sale</th><th>Customer</th><th>Method</th><th>Reference</th><th>Amount</th></tr>
+                                    <tr><th>Date</th><th>Sale</th><th>Customer</th><th>Method</th><th data-secondary>Reference</th><th>Amount</th></tr>
                                 </thead>
                                 <tbody></tbody>
                             </table>
                         </div>
+                        <div class="pager is-single" id="drep-pay-pager"></div>
                     </div>
                 </div>
 
@@ -276,10 +299,8 @@
                 <div id="detail-page"></div>
             </div>
 
-            <div class="modal-foot modal-pager">
-                <button type="button" class="btn btn-ghost" id="detail-back" onclick="detailBack()">&#8592; Back</button>
-                <span class="pager-count" id="detail-counter">Page 1 of 1</span>
-                <button type="button" class="btn btn-accent" id="detail-next" onclick="detailNext()">Next &#8594;</button>
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('detail-modal')">Close</button>
             </div>
         </div>
     </div>
@@ -287,6 +308,7 @@
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="javascript/modules/shared/helpers.js"></script>
     <script src="javascript/modules/shared/format.js"></script>
+    <script src="javascript/modules/shared/phone-picker.js"></script>
     <script src="javascript/modules/shared/ui-kit.js"></script>
     <script src="javascript/modules/shared/tables.js"></script>
     <script src="javascript/modules/shared/data-panel.js"></script>
@@ -298,7 +320,10 @@
     <script src="javascript/modules/shared/subnav.js"></script>
     <script src="javascript/modules/shared/my-account.js"></script>
     <script src="javascript/modules/shared/notifications.js"></script>
+    <script src="javascript/modules/shared/connected-systems.js"></script>
+    <script src="javascript/modules/shared/features.js"></script>
     <script src="javascript/modules/shared/deliveries.js"></script>
+    <script src="javascript/modules/shared/delivery-schedule.js"></script>
     <script src="javascript/modules/delivery-personnel.js"></script>
 </body>
 </html>

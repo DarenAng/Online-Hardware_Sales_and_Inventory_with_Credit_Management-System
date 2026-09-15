@@ -1,12 +1,4 @@
-// Drives Credit Management on both screens it lives on.
-//
-// The manager side: limits and standings edited together, the consequence of
-// the figure shown before it is saved, purchases beside payments, and an
-// extension decided in one move that also raises the limit.
-//
-// The cashier side: the account read before the sale rather than after the
-// till refuses it, a part payment split correctly between the counter and the
-// book, and a request raised without leaving the till.
+// Drives Credit Management on both the manager's and the cashier's screens.
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
@@ -34,10 +26,7 @@ async function signedInPage(context, role, fullName, staffId) {
   return context.newPage();
 }
 
-// A console line worth failing over is one this system caused. The font CDN
-// is deliberately non-blocking and simply does not load on a machine with no
-// internet, which is most machines this runs on; a favicon nobody added is a
-// favicon nobody needs. Neither says anything about whether the screens work.
+// only console lines this system caused: the font CDN and the favicon are noise
 function isOurProblem(text) {
   return !/fonts\.(googleapis|gstatic)\.com|favicon|ERR_TUNNEL_CONNECTION_FAILED|net::ERR_/.test(String(text));
 }
@@ -241,16 +230,8 @@ function isOurProblem(text) {
   check("items go into the cart",
     await cashier.locator("#cart-lines .cart-line").count() === 2);
 
-  // THE CUSTOMER PICKER IS NOT A DROPDOWN ANY MORE
-  //
-  // It was a <select> when this suite was written. It is now a type-ahead: a
-  // text box, a hidden id, and a suggestion list, because a shop with four
-  // hundred account customers cannot be scrolled. This suite kept driving the
-  // <select> and had been failing on it ever since, which is the whole reason
-  // a red suite is worse than no suite — nobody reads the second failure.
-  //
-  // pickCustomer(id) is the same call the suggestion list makes when somebody
-  // clicks a name, so driving it here exercises the real path.
+  // the customer picker is a type-ahead; pickCustomer(id) is the same call the
+  // suggestion list makes
   const directory = await cashier.evaluate("customerDirectory.length");
   check("the customer directory is loaded", directory > 1, `${directory} customers`);
 
@@ -335,11 +316,7 @@ function isOurProblem(text) {
 
   await cashier.click("#panel-customers button:has-text('Load Data')");
   await cashier.waitForTimeout(700);
-  // The till pages its tables eight at a time, not ten: CASHIER_ROWS_PER_PAGE
-  // overrides the system default because the order panel takes width off this
-  // side of the screen. This check used to name the number 10 and had been
-  // failing ever since that was set, so it asks the module what its own page
-  // size is rather than carrying a second copy of it that can drift again.
+  // the till pages at CASHIER_ROWS_PER_PAGE, read from the module rather than copied
   const pageSize = await cashier.evaluate("CASHIER_ROWS_PER_PAGE");
   const shown = await cashier.locator("#customers-table tbody tr").count();
   check("customers page at the till's own page size",

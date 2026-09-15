@@ -1,31 +1,9 @@
-// mailer.js  --  SENDING MAIL
+// mailer.js -- sending mail
 // Loaded by: server.js only. Never sent to a browser.
-// ------------------------------------------------------------------------
-// ==========================================
-// WHY THIS IS HAND-WRITTEN AND NOT A PACKAGE
 //
-// The system has one thing to say by email: here is the password for the
-// account somebody just made for you. One message, to one address, in plain
-// text, from one account. That is a few hundred lines of SMTP, and SMTP has
-// not changed in thirty years.
-//
-// A mail package brings templating, attachments, queues, half a dozen
-// transports and a dependency tree, all of which have to be installed on
-// every machine this project is set up on and none of which this system
-// uses. The passwords in here are already hashed with scrypt out of Node
-// itself rather than with bcrypt off npm, for the same reason: a capstone
-// that has to be handed to somebody and run should need npm install to
-// fetch as little as possible.
-//
-// So this speaks SMTP directly, over tls, both of which ship inside Node.
-//
-// WHAT IT DELIBERATELY DOES NOT DO
-// No queue, no retries, no bounce handling. A send either goes through
-// while the administrator is looking at the screen or it fails and says so,
-// and the screen then shows the password so the account is not stranded.
-// Retrying in the background would mean a password sitting in memory
-// waiting for a mail server, which is worse than telling somebody now.
-// ==========================================
+// Speaks SMTP directly over net/tls (both ship inside Node) so nothing has to
+// be installed. No queue, no retries: a send goes through or fails and says
+// so, and the screen then shows the password instead.
 const net = require("net");
 const tls = require("tls");
 const os = require("os");
@@ -35,32 +13,14 @@ const path = require("path");
 // ==========================================
 // SETUP - the mail account this system sends from
 //
-// MAIL_ENABLED is false out of the box, and with it false nothing here is
-// ever contacted: a new account's password is shown on the administrator's
-// screen to be handed over instead. Turn it on once the four lines under it
-// are filled in.
+// The password is read from mail-password.txt in this folder (gitignored),
+// one line, nothing else. No file or an empty one means mail is off and the
+// password is shown on screen instead.
 //
-// WHERE THE PASSWORD GOES
-// Not in this file. It is read from mail-password.txt, in this same folder,
-// which holds the password and nothing else, on one line. That file is
-// listed in .gitignore, so the password never lands in the repository the
-// way the address and the host do -- a file that is pushed to GitHub is
-// read by everybody the repository is ever shared with. With no such file,
-// or an empty one, mail is off and the fallback (the password shown on
-// screen) is used.
-//
-// FOR A GMAIL ACCOUNT
-// The password in that file is not the password you sign in to Gmail with.
-// Google refuses those over SMTP. Turn on 2-Step Verification on the
-// account, then make an App Password (16 letters) at
-// myaccount.google.com/apppasswords and put that in the file. Leave the
-// host and port as they are.
-//
-// FOR ANYTHING ELSE
-// Port 465 is TLS from the first byte, so MAIL_SECURE stays true. Port 587
-// starts in the clear and is upgraded with STARTTLS, so set MAIL_SECURE to
-// false for it. Both are handled below. Port 25 is not offered: it is
-// unencrypted, and this connection carries a password.
+// Gmail: turn on 2-Step Verification, make an App Password (16 letters) at
+// myaccount.google.com/apppasswords and put that in the file.
+// Port 465 is TLS from the first byte (MAIL_SECURE true); port 587 upgrades
+// with STARTTLS (MAIL_SECURE false). Port 25 is not offered.
 // ==========================================
 const MAIL_ENABLED = true;
 const MAIL_HOST = "smtp.gmail.com";
@@ -70,7 +30,6 @@ const MAIL_USER = "lucelyn.hardware.support@gmail.com";   // the full address, e
 const MAIL_PASSWORD = readPasswordFile();   // see WHERE THE PASSWORD GOES, above
 const MAIL_FROM_NAME = "Lucelyn Hardware Support";
 
-// the whole of mail-password.txt, trimmed; "" when there is no such file
 function readPasswordFile() {
   try {
     return fs.readFileSync(path.join(__dirname, "mail-password.txt"), "utf8").trim();
@@ -79,29 +38,22 @@ function readPasswordFile() {
   }
 }
 
-// A mail server that has stopped answering must not hold up the screen that
-// is waiting on it, so every step of the conversation is on a clock.
+// every step of the conversation is on a clock
 const MAIL_TIMEOUT_MS = 20000;
 
-// Whether there is anything to send with. Called before a send is attempted
-// so the screen can say "shown here because mail is not set up" rather than
-// "the mail server refused", which are different problems with different
-// fixes.
+// checked before a send so the screen can say "mail is not set up" rather
+// than "the mail server refused"
 function isMailConfigured() {
+  // the test harness sets this so passwords come back to it, not to an inbox
+  if (process.env.HARDWARE_MAIL_OFF === "1") return false;
+
   return MAIL_ENABLED === true &&
     typeof MAIL_USER === "string" && MAIL_USER.trim() !== "" &&
     typeof MAIL_PASSWORD === "string" && MAIL_PASSWORD.trim() !== "";
 }
 
-// ==========================================
-// ONE SMTP CONVERSATION
-//
-// SMTP is a sequence of lines: this end sends a command, that end answers
-// with a three digit code. A reply can run to several lines, and the way to
-// tell the last one is that the code is followed by a space rather than by a
-// hyphen -- which is why this buffers rather than treating every line that
-// arrives as an answer.
-// ==========================================
+// SMTP replies can run to several lines; the last line has a space after the
+// code ("250 text") where the earlier ones have a hyphen ("250-text").
 function openConversation(socket) {
   let buffer = "";
   let waiting = null;      // { resolve, reject, timer }
@@ -122,10 +74,6 @@ function openConversation(socket) {
   socket.on("data", (chunk) => {
     buffer += chunk;
 
-    // The last line of a reply is "250 text"; every earlier line of the same
-    // reply is "250-text". So the answer is complete once the buffer ends
-    // with a line whose code is followed by a space. Anything short of that
-    // is half an answer and is left in the buffer.
     if (!/(^|\n)\d{3} [^\n]*\r?\n$/.test(buffer)) return;
 
     const reply = buffer;
@@ -142,8 +90,7 @@ function openConversation(socket) {
   socket.on("error", (error) => fail(error));
   socket.on("close", () => fail(new Error("The mail server closed the connection.")));
 
-  // reads one reply. Passing no line just waits, which is what the greeting
-  // at the start of the conversation needs.
+  // reads one reply; no line just waits (for the greeting)
   function say(line) {
     if (closed) return Promise.reject(closed);
 
@@ -159,10 +106,7 @@ function openConversation(socket) {
     });
   }
 
-  // the same thing, but a code other than the one expected is an error
-  // carrying what the server actually said, because "535 Username and
-  // Password not accepted" is the whole diagnosis and a generic
-  // "mail failed" is none of it
+  // an unexpected code is an error carrying what the server actually said
   async function expect(line, ...codes) {
     const reply = await say(line);
     if (codes.indexOf(reply.code) === -1) {
@@ -187,7 +131,6 @@ function connect(host, port, secure) {
   });
 }
 
-// STARTTLS: the same socket, wrapped, once the server has agreed to it
 function upgrade(socket, host) {
   return new Promise((resolve, reject) => {
     const secure = tls.connect({ socket: socket, servername: host }, () => resolve(secure));
@@ -195,20 +138,12 @@ function upgrade(socket, host) {
   });
 }
 
-// ==========================================
-// ONE MESSAGE
-//
-// Encoded as base64 UTF-8 rather than written into the body as it stands.
-// That is not for the accents: it is because a line of a mail body that
-// begins with a full stop ends the message early unless it is escaped, and a
-// generated password can begin with anything. Base64 has no full stop in its
-// alphabet, so the problem cannot arise.
-// ==========================================
+// Body is base64 so a generated password beginning with "." cannot end the
+// message early.
 function headerText(value) {
   const text = String(value).replace(/[\r\n]+/g, " ").trim();
 
-  // a header outside plain ASCII has to be an encoded word, or it arrives
-  // as mojibake in half the mail clients in the world
+  // a non-ASCII header has to be an encoded word
   if (/^[\x20-\x7e]*$/.test(text)) return text;
   return "=?UTF-8?B?" + Buffer.from(text, "utf8").toString("base64") + "?=";
 }
@@ -232,13 +167,8 @@ function buildMessage(from, to, subject, body) {
   return headers.join("\r\n") + "\r\n\r\n" + encoded + "\r\n";
 }
 
-// ==========================================
-// SEND ONE
-//
-// Resolves when the server has accepted the message. Rejects with what the
-// server said, or with what went wrong reaching it. The caller decides what
-// to do about a rejection; nothing is retried here.
-// ==========================================
+// Resolves when the server has accepted the message; rejects with what it
+// said. Nothing is retried here.
 async function sendMail({ to, subject, body }) {
   if (!isMailConfigured()) {
     throw new Error("Mail is not set up on this server. " +
@@ -264,8 +194,7 @@ async function sendMail({ to, subject, body }) {
       await smtp.expect(`EHLO ${os.hostname()}`, 250);
     }
 
-    // AUTH LOGIN rather than AUTH PLAIN: every server that takes one takes
-    // the other, and this one is the one Gmail documents.
+    // AUTH LOGIN is the one Gmail documents
     await smtp.expect("AUTH LOGIN", 334);
     await smtp.expect(Buffer.from(MAIL_USER, "utf8").toString("base64"), 334);
     await smtp.expect(Buffer.from(MAIL_PASSWORD, "utf8").toString("base64"), 235);
@@ -275,7 +204,6 @@ async function sendMail({ to, subject, body }) {
     await smtp.expect("DATA", 354);
     await smtp.expect(buildMessage(MAIL_USER, address, subject, body) + ".", 250);
 
-    // the reply to QUIT is not worth waiting for: the message is accepted
     socket.write("QUIT\r\n");
     return true;
   } finally {
@@ -283,24 +211,15 @@ async function sendMail({ to, subject, body }) {
   }
 }
 
-// ==========================================
-// THE ONE MESSAGE THIS SYSTEM SENDS
-//
-// Kept here rather than in server.js so the wording of what a new member of
-// staff receives is in one place and reads as a letter rather than as string
-// concatenation in the middle of a route.
-//
-// It does not name the system's address, and it does not carry a link. A
-// mail with a password and a link in it is the shape of every phishing
-// message ever sent, and teaching staff that such a mail is normal is worse
-// than making them ask a colleague for the address once.
-// ==========================================
+// The one message this system sends. No address and no link on purpose: a
+// mail with a password and a link in it is the shape of phishing.
 function firstPasswordMessage({ name, email, roleName, password, storeName }) {
   const shop = storeName || "the hardware shop";
 
+  // the subject carries MAIL_FROM_NAME so it agrees with the sender line
   return {
     to: email,
-    subject: `Your ${shop} sign-in details`,
+    subject: `Your ${MAIL_FROM_NAME} sign-in details`,
     body:
       `Hello ${name},\n\n` +
       `An account has been created for you on the ${shop} sales and inventory ` +
@@ -315,7 +234,7 @@ function firstPasswordMessage({ name, email, roleName, password, storeName }) {
       `what a fake one looks like, so this system never sends one.\n\n` +
       `Nobody here will ever ask you for your password, by mail or otherwise.\n\n` +
       `-- \n` +
-      `${shop}\n` +
+      `${MAIL_FROM_NAME}\n` +
       `This message was sent automatically. There is nobody at this address to reply to.\n`
   };
 }

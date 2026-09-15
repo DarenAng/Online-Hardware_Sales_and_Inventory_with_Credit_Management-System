@@ -2,26 +2,169 @@
 -- 2-RUN-SECOND-stored-procedures.sql
 -- Hardware Sales & Inventory with Credit Management
 --
--- WHAT THIS IS
---   The 24 stored procedures the application calls. The tables have to exist
---   before these can be created, which is why this file runs second.
+-- The 3 views and the 30 stored procedures. Runs after 1-RUN-FIRST because
+-- the tables must exist. Safe to re-run at any time: it drops and recreates
+-- the views and procedures and touches no row. If the server starts with
+-- "PROCEDURE does not exist", this file is what fixes it.
 --
--- HOW TO RUN IT (MySQL Workbench)
---   Run 1-RUN-FIRST-database.sql first, then:
---   File > Open SQL Script... > pick this file > click the lightning bolt.
---
--- HOW TO RUN IT (command line)
 --   mysql -u root -p < public/database/2-RUN-SECOND-stored-procedures.sql
---
--- WHEN TO RUN IT AGAIN
---   Safe to re-run on its own at any time: it drops and recreates the
---   procedures and touches no table and no row. If the server starts with
---   "PROCEDURE does not exist", this file is what fixes it.
 -- ==========================================================================
 
 USE hardware_db;
 
 DELIMITER //
+
+-- ==========================================
+-- 0. VIEWS -- here rather than file 1 because this is the file safe to re-run
+-- ==========================================
+DROP VIEW IF EXISTS vw_customer_credit //
+DROP VIEW IF EXISTS vw_customer_credit_facts //
+DROP VIEW IF EXISTS vw_archives //
+
+-- Balances are derived from the sales, so they live here and cannot go stale.
+CREATE VIEW vw_customer_credit_facts AS
+SELECT
+    c.customer_id,
+    TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS customer_name,
+    c.phone,
+    c.address,
+    COALESCE(cc.credit_limit, 0.00) AS credit_limit,
+    COALESCE(cc.standing, 'Good') AS manual_standing,
+    cc.notes AS credit_notes,
+    cc.updated_at AS credit_updated_at,
+
+    COALESCE((SELECT SUM(s.final_amount)
+              FROM sales s
+              WHERE s.customer_id = c.customer_id
+                AND s.is_archived = FALSE), 0.00) AS total_purchase,
+
+    -- billed minus paid on any sale not yet marked Paid
+    COALESCE((SELECT SUM(s.final_amount - s.amount_paid)
+              FROM sales s
+              WHERE s.customer_id = c.customer_id
+                AND s.is_archived = FALSE
+                AND s.payment_status <> 'Paid'), 0.00) AS current_credit,
+
+    -- never negative: an account over its limit has nothing available
+    GREATEST(COALESCE(cc.credit_limit, 0.00) -
+             COALESCE((SELECT SUM(s.final_amount - s.amount_paid)
+                       FROM sales s
+                       WHERE s.customer_id = c.customer_id
+                         AND s.is_archived = FALSE
+                         AND s.payment_status <> 'Paid'), 0.00), 0.00) AS available_credit,
+
+    (SELECT COUNT(*) FROM sales s
+     WHERE s.customer_id = c.customer_id
+       AND s.is_archived = FALSE
+       AND s.payment_status <> 'Paid') AS open_sales,
+
+    -- how long the oldest unpaid sale has been sitting there
+    (SELECT DATEDIFF(CURDATE(), DATE(MIN(s.sale_date)))
+     FROM sales s
+     WHERE s.customer_id = c.customer_id
+       AND s.is_archived = FALSE
+       AND s.payment_status <> 'Paid') AS oldest_debt_days,
+
+    (SELECT MAX(s.sale_date) FROM sales s
+     WHERE s.customer_id = c.customer_id AND s.is_archived = FALSE) AS last_purchase,
+
+    (SELECT MAX(p.payment_date) FROM credit_payments p
+     WHERE p.customer_id = c.customer_id) AS last_payment
+
+FROM customers c
+LEFT JOIN customer_credits cc ON cc.customer_id = c.customer_id //
+
+-- ==========================================
+-- WHAT "STANDING" MEANS
+--
+--   HOLD   over the credit limit, oldest unpaid sale over 90 days, or a
+--          manager put the account on hold
+--   WATCH  oldest unpaid sale over 30 days, balance 75% or more of the
+--          limit, or a manager flagged the account
+--   GOOD   none of the above
+--
+-- The manager's word (customer_credits.standing) only makes it stricter;
+-- Good means "let the figures decide". The thresholds are written twice
+-- (tier and reason) in the same order, so the two cannot disagree.
+-- ==========================================
+CREATE VIEW vw_customer_credit AS
+SELECT
+    f.*,
+
+    -- the tier the figures alone would give, before the manager's word
+    CASE
+        WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN 'Hold'
+        WHEN f.oldest_debt_days > 90                                   THEN 'Hold'
+        WHEN f.oldest_debt_days > 30                                   THEN 'Watch'
+        WHEN f.credit_limit > 0 AND f.current_credit >= f.credit_limit * 0.75 THEN 'Watch'
+        ELSE 'Good'
+    END AS computed_standing,
+
+    -- the tier in force: the stricter of the figures and the manager's word
+    CASE
+        WHEN f.manual_standing = 'Hold'                                THEN 'Hold'
+        WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN 'Hold'
+        WHEN f.oldest_debt_days > 90                                   THEN 'Hold'
+        WHEN f.manual_standing = 'Watch'                               THEN 'Watch'
+        WHEN f.oldest_debt_days > 30                                   THEN 'Watch'
+        WHEN f.credit_limit > 0 AND f.current_credit >= f.credit_limit * 0.75 THEN 'Watch'
+        ELSE 'Good'
+    END AS standing,
+
+    -- why, in words, for the screen that shows the badge
+    CASE
+        WHEN f.manual_standing = 'Hold' THEN
+            CONCAT('Put on hold by a manager',
+                   IF(f.credit_notes IS NULL OR f.credit_notes = '', '', CONCAT(': ', f.credit_notes)))
+        WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN
+            CONCAT('Over the limit by ', FORMAT(f.current_credit - f.credit_limit, 2))
+        WHEN f.oldest_debt_days > 90 THEN
+            CONCAT('Oldest unpaid sale is ', f.oldest_debt_days, ' days old; the limit is 90')
+        WHEN f.manual_standing = 'Watch' THEN
+            CONCAT('Flagged by a manager',
+                   IF(f.credit_notes IS NULL OR f.credit_notes = '', '', CONCAT(': ', f.credit_notes)))
+        WHEN f.oldest_debt_days > 30 THEN
+            CONCAT('Oldest unpaid sale is ', f.oldest_debt_days, ' days old; watched past 30')
+        WHEN f.credit_limit > 0 AND f.current_credit >= f.credit_limit * 0.75 THEN
+            CONCAT('Owes ', ROUND(f.current_credit / f.credit_limit * 100), '% of the limit; watched from 75%')
+        WHEN f.current_credit > 0 THEN 'Owes within terms'
+        ELSE 'Nothing owed'
+    END AS standing_reason
+
+FROM vw_customer_credit_facts f //
+
+-- one row per archived record, whatever module it came from
+CREATE VIEW vw_archives AS
+SELECT 'Staff' AS module, s.staff_id AS record_id,
+       s.full_name AS record_name,
+       r.role_name AS detail, s.archived_at,
+       a.full_name AS archived_by
+FROM staff s
+JOIN roles r ON r.role_id = s.role_id
+LEFT JOIN staff a ON a.staff_id = s.archived_by_staff_id
+WHERE s.is_active = FALSE
+UNION ALL
+SELECT 'Inventory', p.product_id, p.product_name,
+       CONCAT('Stock ', COALESCE(i.quantity_in_stock, 0)), p.archived_at,
+       a.full_name
+FROM products p
+LEFT JOIN inventory i ON i.product_id = p.product_id
+LEFT JOIN staff a ON a.staff_id = p.archived_by_staff_id
+WHERE p.is_archived = TRUE
+UNION ALL
+SELECT 'Sales', sa.sale_id, CONCAT('Sale #', sa.sale_id),
+       CONCAT(sa.payment_method, ' ', FORMAT(sa.final_amount, 2)), sa.archived_at,
+       a.full_name
+FROM sales sa
+LEFT JOIN staff a ON a.staff_id = sa.archived_by_staff_id
+WHERE sa.is_archived = TRUE
+UNION ALL
+SELECT 'Delivery', d.delivery_id, CONCAT('Delivery #', d.delivery_id),
+       d.status, d.archived_at,
+       a.full_name
+FROM deliveries d
+LEFT JOIN staff a ON a.staff_id = d.archived_by_staff_id
+WHERE d.is_archived = TRUE //
 
 DROP PROCEDURE IF EXISTS sp_reset_user_password //
 DROP PROCEDURE IF EXISTS sp_create_sale_transaction //
@@ -50,6 +193,9 @@ DROP PROCEDURE IF EXISTS sp_decide_credit_request //
 DROP PROCEDURE IF EXISTS sp_create_customer //
 DROP PROCEDURE IF EXISTS sp_rename_unit //
 DROP PROCEDURE IF EXISTS sp_update_store_settings //
+DROP PROCEDURE IF EXISTS sp_sweep_archives //
+DROP PROCEDURE IF EXISTS sp_set_system_permission //
+DROP PROCEDURE IF EXISTS sp_save_connected_system //
 -- ==========================================
 -- 1. PASSWORD RESET
 -- ==========================================
@@ -338,7 +484,7 @@ CREATE PROCEDURE sp_raise_stock_alert (
 )
 PROC_BODY: BEGIN
     DECLARE v_name VARCHAR(150);
-    DECLARE v_stock INT DEFAULT 0;
+    DECLARE v_stock DECIMAL(12,3) DEFAULT 0;
     DECLARE v_point INT DEFAULT 0;
     DECLARE v_type VARCHAR(20);
     DECLARE v_title VARCHAR(150);
@@ -353,9 +499,7 @@ PROC_BODY: BEGIN
     LEFT JOIN inventory i ON i.product_id = p.product_id
     WHERE p.product_id = p_product_id AND p.is_archived = FALSE;
 
-    -- Stock is healthy again, so retire anything still warning about it.
-    -- Without this the bell keeps a solved problem on screen forever, and
-    -- people learn to ignore it.
+    -- stock is healthy again, so retire anything still warning about it
     IF v_name IS NOT NULL AND v_stock > v_point THEN
         UPDATE notifications
         SET is_read = TRUE
@@ -378,8 +522,7 @@ PROC_BODY: BEGIN
         SET v_message = CONCAT('Stock is ', v_stock, ', reorder point is ', v_point, '. Raise a purchase order.');
     END IF;
 
-    -- the other kind of warning no longer describes the situation, so a
-    -- product that has gone from empty to merely low stops saying "out of stock"
+    -- a product that has gone from empty to merely low stops saying "out of stock"
     UPDATE notifications
     SET is_read = TRUE
     WHERE product_id = p_product_id
@@ -407,20 +550,14 @@ END //
 -- ==========================================
 CREATE PROCEDURE sp_create_sale_transaction (
     IN p_customer_id INT,
-    -- The name of a buyer who has no account, taken at the counter. Ignored
-    -- entirely when p_customer_id is given: a named customer's name lives in
-    -- the customers table and copying it here would give the same sale two
-    -- names that can drift apart.
+    -- the name of a buyer with no account; ignored when p_customer_id is given
     IN p_walk_in_name VARCHAR(150),
     IN p_cashier_staff_id INT,
     IN p_discount DECIMAL(10,2),
     IN p_amount_paid DECIMAL(12,2),
     IN p_payment_method VARCHAR(30),
     IN p_items_json JSON,
-    -- How a down payment on a Credit sale was actually tendered. The sale's
-    -- own method says Credit, which is not a way of handing over money, so
-    -- the part that was handed over needs its own name or the payment
-    -- history cannot say how it arrived.
+    -- how a down payment on a Credit sale was actually tendered
     IN p_down_payment_method VARCHAR(30),
     OUT p_sale_id INT,
     OUT p_status_code INT,
@@ -430,11 +567,11 @@ PROC_BODY: BEGIN
     DECLARE v_i INT DEFAULT 0;
     DECLARE v_item_count INT DEFAULT 0;
     DECLARE v_product_id INT;
-    DECLARE v_quantity INT;
+    DECLARE v_quantity DECIMAL(12,3);
     DECLARE v_unit_price DECIMAL(10,2);
-    DECLARE v_stock INT;
+    DECLARE v_stock DECIMAL(12,3);
     -- what the whole basket asks of this material, not just the line in hand
-    DECLARE v_needed INT;
+    DECLARE v_needed DECIMAL(12,3);
 
     DECLARE v_discount DECIMAL(10,2) DEFAULT 0.00;
     DECLARE v_amount_paid DECIMAL(12,2) DEFAULT 0.00;
@@ -451,19 +588,9 @@ PROC_BODY: BEGIN
     DECLARE v_payment_status VARCHAR(10) DEFAULT 'Paid';
     DECLARE v_walk_in_name VARCHAR(150) DEFAULT NULL;
 
-    -- WHAT THE SALE IS MADE OF, FOR TAX
-    --
-    -- Philippine posted prices already include VAT, so the rate is extracted
-    -- from the total rather than added to it, and the customer pays the same
-    -- figure either way. The VAT is rounded first and the VATable sale is
-    -- what is left, so the two lines always add back to the total exactly;
-    -- dividing by 1.12 and rounding both can leave the invoice a centavo
-    -- short of itself.
-    --
-    -- The registration and the rate are copied onto the sale rather than
-    -- looked up when an invoice is reprinted. An invoice records what was
-    -- charged on the day it was issued, and a shop crossing the VAT threshold
-    -- later must not silently rewrite every invoice it has ever handed out.
+    -- Posted prices include VAT, so it is extracted from the total; VAT is
+    -- rounded first so the lines add back exactly. The registration and rate
+    -- are copied onto the sale so a later change does not rewrite invoices.
     DECLARE v_registration VARCHAR(10) DEFAULT 'VAT';
     DECLARE v_vat_rate DECIMAL(5,2) DEFAULT 12.00;
     DECLARE v_vat_amount DECIMAL(12,2) DEFAULT 0.00;
@@ -494,21 +621,13 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Credit and Cash on Delivery are both settled after the goods leave the
-    -- counter: on account for Credit, at the customer's door for COD.
-    --
-    -- They part company over a down payment. Half now and half on the book is
-    -- the commonest credit transaction a hardware shop does, so a Credit sale
-    -- accepts whatever is handed over at the counter and books only the rest.
-    -- COD takes nothing at the register by definition: the money is collected
-    -- at the door or it is not collected at all.
+    -- Credit accepts a down payment and books the rest; COD takes nothing at
+    -- the register.
     SET v_on_credit = (p_payment_method = 'Credit');
     SET v_on_account = (p_payment_method IN ('Credit', 'COD'));
     SET v_down_method = IFNULL(NULLIF(TRIM(IFNULL(p_down_payment_method, '')), ''), 'Cash');
 
-    -- A sale belongs to an account or to a name, never to both. Blank and
-    -- whitespace collapse to NULL so "we did not ask" stays distinguishable
-    -- from "the customer is called nothing".
+    -- a sale belongs to an account or to a name, never both; blank collapses to NULL
     IF p_customer_id IS NULL THEN
         SET v_walk_in_name = NULLIF(TRIM(IFNULL(p_walk_in_name, '')), '');
     ELSE
@@ -549,17 +668,8 @@ PROC_BODY: BEGIN
         WHERE product_id = v_product_id
         FOR UPDATE;
 
-        -- WHAT THE WHOLE BASKET ASKS FOR
-        --
-        -- Each line used to be weighed against stock on its own, and pass two
-        -- then deducted every line regardless. One material listed on two lines
-        -- therefore passed twice against the same shelf and was sold twice: 18
-        -- bags of cement on two lines of 18 was accepted, and the inventory
-        -- came out at minus 18. The count is signed, so nothing complained.
-        --
-        -- The question a line has to answer is not "is there enough for me" but
-        -- "is there enough for everything on this receipt", so the check adds up
-        -- every line naming this material before comparing.
+        -- The check adds up every line naming this material before comparing,
+        -- so one material on two lines cannot be sold twice against the same shelf.
         SET v_needed = (
             SELECT SUM(line.quantity)
             FROM JSON_TABLE(p_items_json, '$[*]' COLUMNS (
@@ -592,8 +702,7 @@ PROC_BODY: BEGIN
     END IF;
 
     IF v_on_credit THEN
-        -- A down payment cannot exceed the bill. Anything over it is change,
-        -- and there is no change on a sale that is going on the book.
+        -- a down payment cannot exceed the bill: there is no change on a sale going on the book
         IF v_amount_paid < 0 THEN
             SET v_amount_paid = 0.00;
         END IF;
@@ -609,10 +718,7 @@ PROC_BODY: BEGIN
         FROM vw_customer_credit
         WHERE customer_id = p_customer_id;
 
-        -- A stop on an account is a decision a manager made, and a limit with
-        -- room left in it is not permission to ignore it. Checked before the
-        -- limit, because "this account is on hold" is a more useful refusal
-        -- than "you are 300 pesos over".
+        -- checked before the limit: "on hold" is a more useful refusal than "300 over"
         IF v_standing = 'Hold' AND v_new_exposure > 0 THEN
             ROLLBACK;
             SET p_status_code = 403;
@@ -633,9 +739,7 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- Paid, part paid, or wholly on the book. Writing this down correctly
-        -- is what keeps receivables, the customer's balance and the driver's
-        -- collection list telling the same story.
+        -- paid, part paid, or wholly on the book
         IF v_amount_paid >= v_final_amount THEN
             SET v_payment_status = 'Paid';
         ELSEIF v_amount_paid > 0 THEN
@@ -658,8 +762,7 @@ PROC_BODY: BEGIN
         SET v_payment_status = 'Paid';
     END IF;
 
-    -- A shop with no settings row is a shop mid-install, not a shop that is
-    -- non-VAT, so the defaults stand rather than the sale being refused.
+    -- no settings row means mid-install, so the defaults stand
     SELECT registration_type, vat_rate
     INTO v_registration, v_vat_rate
     FROM store_settings
@@ -672,8 +775,7 @@ PROC_BODY: BEGIN
         SET v_vat_amount = ROUND(v_final_amount * v_vat_rate / (100 + v_vat_rate), 2);
         SET v_vatable_sale = v_final_amount - v_vat_amount;
     ELSE
-        -- A non-VAT shop charges no VAT at all. Zeroes here are the honest
-        -- answer, and its whole sale is subject to percentage tax instead.
+        -- a non-VAT shop charges no VAT at all
         SET v_vat_rate = 0.00;
         SET v_vat_amount = 0.00;
         SET v_vatable_sale = 0.00;
@@ -712,9 +814,7 @@ PROC_BODY: BEGIN
         SET v_i = v_i + 1;
     END WHILE;
 
-    -- A down payment is a payment, and it belongs in the payment history with
-    -- every other one. Without this row the customer's credit page would show
-    -- a balance that had moved with no record of what moved it.
+    -- a down payment is a payment and belongs in the payment history
     IF v_on_credit AND v_amount_paid > 0 THEN
         INSERT INTO credit_payments (customer_id, sale_id, amount, payment_method,
                                      reference_no, received_by_staff_id)
@@ -758,9 +858,14 @@ PROC_BODY: BEGIN
     DECLARE v_found INT DEFAULT 0;
     DECLARE v_admin_count INT DEFAULT 0;
     DECLARE v_role_id INT DEFAULT 0;
+    DECLARE v_stock DECIMAL(12,3) DEFAULT 0;
+    DECLARE v_sale_day DATE;
+    DECLARE v_delivery_status VARCHAR(20);
+    DECLARE v_payment_status VARCHAR(10);
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
+        ROLLBACK;
         SET p_status_code = 500;
         SET p_message = 'Unable to archive the record.';
     END;
@@ -799,11 +904,34 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
+        -- a material with stock on hand is still on a shelf; sell or write it off first
+        SELECT COALESCE(quantity_in_stock, 0) INTO v_stock
+        FROM inventory WHERE product_id = p_record_id;
+        IF v_stock > 0 THEN
+            SET p_status_code = 409;
+            SET p_message = CONCAT('This material still has ', v_stock, ' on hand. ',
+                                   'Sell it off or write it off before archiving it.');
+            LEAVE PROC_BODY;
+        END IF;
+
+        -- and one that is on its way from a supplier is not discontinued
+        SELECT COUNT(*) INTO v_found
+        FROM purchase_order_items poi
+        JOIN purchase_orders po ON po.po_id = poi.po_id
+        WHERE poi.product_id = p_record_id AND po.status = 'Pending';
+        IF v_found > 0 THEN
+            SET p_status_code = 409;
+            SET p_message = 'This material is on a purchase order that has not arrived. Receive or cancel the order first.';
+            LEAVE PROC_BODY;
+        END IF;
+
         UPDATE products
         SET is_archived = TRUE, status = 'Inactive', archived_at = NOW(), archived_by_staff_id = p_staff_id
         WHERE product_id = p_record_id;
 
     ELSEIF p_module = 'Sales' THEN
+        -- Archiving a sale is voiding it: same day only, goods not out for
+        -- delivery, and the stock goes back on the shelf with a movement in the log.
         SELECT COUNT(*) INTO v_found FROM sales WHERE sale_id = p_record_id AND is_archived = FALSE;
         IF v_found = 0 THEN
             SET p_status_code = 404;
@@ -811,15 +939,74 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
+        SELECT DATE(sale_date) INTO v_sale_day FROM sales WHERE sale_id = p_record_id;
+        IF v_sale_day <> CURDATE() THEN
+            SET p_status_code = 409;
+            SET p_message = 'A sale can only be voided on the day it was made. Correct an older one with a return or a refund.';
+            LEAVE PROC_BODY;
+        END IF;
+
+        SELECT COUNT(*) INTO v_found FROM deliveries
+        WHERE sale_id = p_record_id AND is_archived = FALSE
+          AND status IN ('Out for Delivery', 'Delivered');
+        IF v_found > 0 THEN
+            SET p_status_code = 409;
+            SET p_message = 'The goods on this sale are out for delivery or delivered. It cannot be voided from here.';
+            LEAVE PROC_BODY;
+        END IF;
+
+        START TRANSACTION;
+
+        -- every line goes back on the shelf, and the log says why
+        INSERT INTO stock_adjustments
+            (product_id, adjustment_type, quantity_before, quantity_change, quantity_after,
+             unit_name, reason, adjusted_by_staff_id)
+        SELECT si.product_id, 'Add', i.quantity_in_stock, si.quantity,
+               i.quantity_in_stock + si.quantity, u.unit_name,
+               CONCAT('Sale #', p_record_id, ' voided; stock returned'), p_staff_id
+        FROM sale_items si
+        JOIN inventory i ON i.product_id = si.product_id
+        LEFT JOIN products pr ON pr.product_id = si.product_id
+        LEFT JOIN units u ON u.unit_id = pr.unit_id
+        WHERE si.sale_id = p_record_id;
+
+        UPDATE inventory i
+        JOIN sale_items si ON si.product_id = i.product_id AND si.sale_id = p_record_id
+        SET i.quantity_in_stock = i.quantity_in_stock + si.quantity;
+
+        -- a delivery booked for it and not yet on the road is cancelled with it
+        UPDATE deliveries
+        SET is_archived = TRUE, archived_at = NOW(), archived_by_staff_id = p_staff_id
+        WHERE sale_id = p_record_id AND is_archived = FALSE;
+
         UPDATE sales
         SET is_archived = TRUE, archived_at = NOW(), archived_by_staff_id = p_staff_id
         WHERE sale_id = p_record_id;
 
+        COMMIT;
+
     ELSEIF p_module = 'Delivery' THEN
+        -- a delivery is archived once closed (Delivered and paid, or Failed); the
+        -- sweep does it after ninety days, a manager may do it sooner
         SELECT COUNT(*) INTO v_found FROM deliveries WHERE delivery_id = p_record_id AND is_archived = FALSE;
         IF v_found = 0 THEN
             SET p_status_code = 404;
             SET p_message = 'Active delivery record not found.';
+            LEAVE PROC_BODY;
+        END IF;
+
+        SELECT d.status, s.payment_status INTO v_delivery_status, v_payment_status
+        FROM deliveries d JOIN sales s ON s.sale_id = d.sale_id
+        WHERE d.delivery_id = p_record_id;
+
+        IF v_delivery_status NOT IN ('Delivered', 'Failed') THEN
+            SET p_status_code = 409;
+            SET p_message = CONCAT('This delivery is ', v_delivery_status, '. Only a Delivered or Failed delivery can be archived.');
+            LEAVE PROC_BODY;
+        END IF;
+        IF v_delivery_status = 'Delivered' AND v_payment_status <> 'Paid' THEN
+            SET p_status_code = 409;
+            SET p_message = 'The goods arrived but money is still owed on the sale. Record the payment first.';
             LEAVE PROC_BODY;
         END IF;
 
@@ -855,6 +1042,7 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
+        ROLLBACK;
         SET p_status_code = 500;
         SET p_message = 'Unable to restore the record.';
     END;
@@ -891,9 +1079,39 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
+        -- un-voiding takes the goods off the shelf again, and cannot if they were since sold
+        SELECT COUNT(*) INTO v_found
+        FROM sale_items si JOIN inventory i ON i.product_id = si.product_id
+        WHERE si.sale_id = p_record_id AND i.quantity_in_stock < si.quantity;
+        IF v_found > 0 THEN
+            SET p_status_code = 409;
+            SET p_message = 'The stock on this sale has been sold since it was voided. It cannot be restored.';
+            LEAVE PROC_BODY;
+        END IF;
+
+        START TRANSACTION;
+
+        INSERT INTO stock_adjustments
+            (product_id, adjustment_type, quantity_before, quantity_change, quantity_after,
+             unit_name, reason, adjusted_by_staff_id)
+        SELECT si.product_id, 'Remove', i.quantity_in_stock, -si.quantity,
+               i.quantity_in_stock - si.quantity, u.unit_name,
+               CONCAT('Sale #', p_record_id, ' restored; stock taken back off the shelf'), p_staff_id
+        FROM sale_items si
+        JOIN inventory i ON i.product_id = si.product_id
+        LEFT JOIN products pr ON pr.product_id = si.product_id
+        LEFT JOIN units u ON u.unit_id = pr.unit_id
+        WHERE si.sale_id = p_record_id;
+
+        UPDATE inventory i
+        JOIN sale_items si ON si.product_id = i.product_id AND si.sale_id = p_record_id
+        SET i.quantity_in_stock = i.quantity_in_stock - si.quantity;
+
         UPDATE sales
         SET is_archived = FALSE, archived_at = NULL, archived_by_staff_id = NULL
         WHERE sale_id = p_record_id;
+
+        COMMIT;
 
     ELSEIF p_module = 'Delivery' THEN
         SELECT COUNT(*) INTO v_found FROM deliveries WHERE delivery_id = p_record_id AND is_archived = TRUE;
@@ -950,18 +1168,8 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- ONE PAYMENT AT A TIME AGAINST ONE SALE
-    --
-    -- The balance was read, checked and written back outside any transaction,
-    -- so a cashier at the counter and a driver at the customer's door taking
-    -- the last two payments on the same order at the same moment both read the
-    -- same "already paid" figure, both passed the check, and the second write
-    -- overwrote the first. Two rows in the payment history, one of them missing
-    -- from the balance, and an order that reads as still owing money that is
-    -- sitting in the till.
-    --
-    -- Reading the sale row FOR UPDATE inside the transaction makes the second
-    -- one wait for the first to finish and then see its result.
+    -- The sale row is read FOR UPDATE inside the transaction, so two payments
+    -- on the same order at the same moment cannot both pass the balance check.
     START TRANSACTION;
 
     SET v_customer_id = NULL;
@@ -1013,19 +1221,9 @@ END //
 CREATE PROCEDURE sp_adjust_stock (
     IN p_product_id INT,
     IN p_adjustment_type VARCHAR(10),
-    IN p_quantity INT,
-    -- WHAT THE FIGURE IS COUNTED IN
-    --
-    -- A hardware shop counts almost nothing in the same unit twice, and a
-    -- bare "+20" against Portland Cement is twenty of something nobody can
-    -- name six months later. The clerk knows at the moment they type it, so
-    -- this is where that knowledge is kept.
-    --
-    -- A unit that does not exist yet is created rather than refused. The
-    -- alternative is a clerk holding a sack of nails and no way to say so,
-    -- and a list of units that only a DBA can grow is a list that stays
-    -- wrong. Passing NULL or an empty string keeps the material's current
-    -- unit, so a caller that does not care is not forced to have an opinion.
+    IN p_quantity DECIMAL(12,3),
+    -- What the figure is counted in. A unit that does not exist yet is created;
+    -- NULL or empty keeps the material's current unit.
     IN p_unit_name VARCHAR(20),
     IN p_reason VARCHAR(255),
     IN p_staff_id INT,
@@ -1033,9 +1231,9 @@ CREATE PROCEDURE sp_adjust_stock (
     OUT p_message VARCHAR(255)
 )
 PROC_BODY: BEGIN
-    DECLARE v_before INT;
-    DECLARE v_change INT DEFAULT 0;
-    DECLARE v_after INT DEFAULT 0;
+    DECLARE v_before DECIMAL(12,3);
+    DECLARE v_change DECIMAL(12,3) DEFAULT 0;
+    DECLARE v_after DECIMAL(12,3) DEFAULT 0;
     DECLARE v_unit VARCHAR(20) DEFAULT NULL;
     DECLARE v_unit_id INT DEFAULT NULL;
     DECLARE v_current_unit VARCHAR(20) DEFAULT NULL;
@@ -1103,9 +1301,7 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    -- A unit typed for the first time joins the list rather than being
-    -- refused. Matched case-insensitively so that "Bag" and "bag" do not
-    -- become two units meaning the same thing.
+    -- a unit typed for the first time joins the list; matched case-insensitively
     IF v_unit IS NOT NULL THEN
         SELECT unit_id INTO v_unit_id
         FROM units WHERE LOWER(unit_name) = LOWER(v_unit) LIMIT 1;
@@ -1195,20 +1391,9 @@ END //
 -- ==========================================
 -- 13. A SUPPLIER, FOUND OR MADE
 --
--- A hardware shop buys from whoever has the stock this week. The list of
--- suppliers is therefore never finished, and a purchase order screen that can
--- only pick from the finished list is a screen that cannot raise the order
--- the shop actually needs to raise today.
---
--- So the name is the input, not the id. A name already on file is matched and
--- reused, and anything else joins the list. Matching is on the trimmed name,
--- case-insensitively, because "Vista Steel" typed on a Tuesday and "vista
--- steel" typed on a Thursday are one company and two rows is how a supplier
--- ends up with half its orders.
---
--- No transaction control in here on purpose: it is called from inside
--- sp_create_purchase_order, which owns the transaction, and a COMMIT here
--- would break the order it is part of.
+-- The name is the input, not the id: a name on file is matched (trimmed,
+-- case-insensitive) and reused, anything else joins the list. No transaction
+-- control here: sp_create_purchase_order owns the transaction.
 -- ==========================================
 CREATE PROCEDURE sp_ensure_supplier (
     IN p_supplier_name VARCHAR(100),
@@ -1228,9 +1413,7 @@ BEGIN
     -- an id that is already good is the end of it
     IF p_supplier_id IS NOT NULL AND p_supplier_id > 0 THEN
         IF EXISTS (SELECT 1 FROM suppliers WHERE supplier_id = p_supplier_id) THEN
-            -- details typed alongside a known company fill in blanks; they
-            -- never overwrite something already recorded, because the person
-            -- raising an order is not the person who maintains the file
+            -- details typed alongside a known company fill in blanks, never overwrite
             UPDATE suppliers
             SET contact_person = COALESCE(NULLIF(contact_person, ''), NULLIF(TRIM(IFNULL(p_contact_person, '')), '')),
                 contact_number = COALESCE(NULLIF(contact_number, ''), NULLIF(TRIM(IFNULL(p_contact_number, '')), '')),
@@ -1269,24 +1452,10 @@ END //
 -- ==========================================
 -- 14. A MATERIAL, FOUND OR MADE
 --
--- The same argument as the supplier above, and the one the clerks actually
--- complain about: the picker suggests what is in the database, so the one
--- thing it will not let you do is take delivery of something new. A pallet of
--- something the shop has never stocked arrives, and the clerk cannot book it
--- in until somebody with a different login adds it first.
---
--- This is the way out. A name that matches a material already on the books
--- returns that material; a name that matches nothing creates it, with its
--- unit, category and brand created alongside it if those are new too, and an
--- inventory row at zero so the receiving that follows has something to add
--- to.
---
--- Deliberately NOT archived-aware in the lookup: if a material was archived
--- last year and turns up on a lorry today, the right answer is the material
--- that already exists with its history intact, not a second row with the same
--- name. Bringing it back out of the archive is the receiving step's job.
---
--- No transaction control here either. Its caller owns the transaction.
+-- A name matching a material on the books returns it (archived ones
+-- included, so a returning material keeps its history); a new name creates
+-- it with its unit, category and brand, and an inventory row at zero. No
+-- transaction control here: the caller owns it.
 -- ==========================================
 CREATE PROCEDURE sp_ensure_material (
     IN p_product_name VARCHAR(150),
@@ -1330,8 +1499,7 @@ BEGIN
     END IF;
 
     IF p_product_id IS NULL AND v_name <> '' THEN
-        -- the words the clerk typed join the shop's lists rather than being
-        -- refused; a unit typed for the first time is a new unit, not a typo
+        -- the words the clerk typed join the shop's lists rather than being refused
         IF v_brand <> '' THEN
             SELECT brand_id INTO v_brand_id FROM brands WHERE LOWER(brand_name) = LOWER(v_brand) LIMIT 1;
             IF v_brand_id IS NULL THEN
@@ -1373,12 +1541,8 @@ BEGIN
 END //
 
 -- ==========================================
--- 15. ADD A MATERIAL ON ITS OWN
---
--- The wrapper the "add a material" form calls when a clerk adds one straight
--- from a picker rather than in the middle of an order. Same rules, its own
--- transaction, and it says which of the two things happened so the screen can
--- tell the truth: made a new one, or found the one you already had.
+-- 15. ADD A MATERIAL ON ITS OWN -- same rules as 14, its own transaction,
+-- and says whether it made a new one or found the existing one
 -- ==========================================
 CREATE PROCEDURE sp_create_material (
     IN p_product_name VARCHAR(150),
@@ -1434,36 +1598,17 @@ END //
 -- ==========================================
 -- 16. CREATE A PURCHASE ORDER
 --
--- WHAT CHANGED, AND WHY
---
--- This used to take a supplier id and a list of product ids, which meant a
--- purchase order could only ever be raised for companies and materials that
--- were already in the database. That is the wrong way round: a purchase order
--- is how a shop buys something it does not have yet, frequently from somebody
--- it has not bought from before.
---
--- So the supplier arrives as a name, and a line arrives as either a product id
--- or a name with the few facts needed to open a record for it. Anything new is
--- created here, inside the same transaction as the order, so a failure half
--- way through leaves neither a half-written order nor an orphan material.
---
--- The item JSON is a list of objects; every line needs a quantity, and either
--- an id or a name:
+-- The supplier arrives as a name and a line as a product id or a name with
+-- the facts to open a record; anything new is created inside the order's
+-- transaction. Every line needs a quantity and either an id or a name:
 --
 --   { "product_id": 12, "quantity": 40, "unit_cost": 25.00 }
 --   { "new_name": "Roofing nail 3in", "unit_name": "kilogram",
 --     "category_name": "Fasteners", "brand_name": "Vista",
 --     "price": 180.00, "quantity": 20, "unit_cost": 120.00 }
 --
--- WHY EVERY READ IS WRAPPED IN NULLIF(..., 'null')
---
--- JSON_UNQUOTE turns a JSON null into the four-character string "null" rather
--- than into SQL NULL; only a key that is absent altogether comes back as NULL.
--- A browser sending {"product_id": null, "new_name": "Cement"} is doing the
--- ordinary thing, and without the guard that null lands in an INT variable as
--- the word "null", which under strict mode raises and rolls the whole order
--- back behind a message that says nothing about what actually went wrong.
--- Every read of caller-supplied JSON below is guarded for that reason.
+-- Every JSON read is wrapped in NULLIF(..., 'null') because JSON_UNQUOTE
+-- turns a JSON null into the string "null", which raises under strict mode.
 -- ==========================================
 CREATE PROCEDURE sp_create_purchase_order (
     IN p_supplier_id INT,
@@ -1484,7 +1629,7 @@ PROC_BODY: BEGIN
     DECLARE v_i INT DEFAULT 0;
     DECLARE v_count INT DEFAULT 0;
     DECLARE v_product_id INT;
-    DECLARE v_quantity INT;
+    DECLARE v_quantity DECIMAL(12,3);
     DECLARE v_cost DECIMAL(10,2);
     DECLARE v_new_name VARCHAR(150);
     DECLARE v_brand VARCHAR(100);
@@ -1595,9 +1740,10 @@ PROC_BODY: BEGIN
     INSERT INTO audit_logs (staff_id, action, action_type, details)
     VALUES (p_staff_id, 'PURCHASE_ORDER', 'CREATE', CONCAT('PO #', p_po_id, ' raised with ', v_count, ' line(s)'));
 
+    -- the clerk is told: a delivery is coming, and this is the order to count it against
     INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)
-    VALUES (2, 'Purchase Order', CONCAT('Purchase order #', p_po_id, ' raised'),
-            CONCAT(v_count, ' line(s) ordered, awaiting delivery.'), p_staff_id);
+    VALUES (3, 'Purchase Order', CONCAT('Purchase order #', p_po_id, ' raised'),
+            CONCAT(v_count, ' line(s) ordered, awaiting delivery. Check the goods against it when they arrive.'), p_staff_id);
 
     COMMIT;
 
@@ -1610,30 +1756,12 @@ END //
 -- ==========================================
 -- 17. RECEIVE A PURCHASE ORDER
 --
--- WHAT CHANGED, AND WHY
---
--- This used to read the order and add exactly what the order said, on the
--- assumption that what was ordered is what arrives. In a hardware shop it
--- routinely is not: a line comes up short, a line comes over, a substitution
--- turns up that nobody ordered at all. The clerk had two options, both wrong:
--- receive the order as written and correct the shelf afterwards with a stock
--- adjustment nobody can tie back to the delivery, or not receive it.
---
--- So receiving now takes a count sheet. p_received_json is what actually came
--- off the lorry:
---
+-- p_received_json is the count sheet, what actually came off the lorry:
 --   { "product_id": 12, "quantity": 38 }                      a short line
 --   { "new_name": "Anchor bolt M12", "unit_name": "pcs",
 --     "quantity": 24, "unit_cost": 30.00 }                    never ordered
---
--- A line on the order that is missing from the sheet is received in full, so
--- an unedited sheet behaves exactly as the old procedure did. A quantity of
--- zero is a line that did not arrive: the order still closes, and the shelf is
--- not touched.
---
--- The order's own lines are corrected to match what arrived, because a
--- purchase order that says forty when thirty-eight came is a document that
--- will be believed later and will be wrong.
+-- A line missing from the sheet is received in full; a quantity of zero did
+-- not arrive. The order's own lines are corrected to match what arrived.
 -- ==========================================
 CREATE PROCEDURE sp_receive_purchase_order (
     IN p_po_id INT,
@@ -1650,7 +1778,7 @@ PROC_BODY: BEGIN
     DECLARE v_product_id INT;
     DECLARE v_ordered INT;
     DECLARE v_arrived INT;
-    DECLARE v_before INT;
+    DECLARE v_before DECIMAL(12,3);
     DECLARE v_i INT DEFAULT 0;
     DECLARE v_count INT DEFAULT 0;
     DECLARE v_json_id INT;
@@ -1697,9 +1825,7 @@ PROC_BODY: BEGIN
     START TRANSACTION;
 
     -- ---- 1. anything on the sheet that was never on the order ----
-    -- Done first, so an extra material becomes a line of the order and is
-    -- then stocked by the same loop as everything else. One path into the
-    -- shelf, whatever arrived.
+    -- done first, so an extra material becomes a line and is stocked by the same loop
     SET v_count = IFNULL(JSON_LENGTH(p_received_json), 0);
 
     WHILE v_i < v_count DO
@@ -1731,8 +1857,7 @@ PROC_BODY: BEGIN
                                '" added while receiving purchase order #', p_po_id));
             END IF;
 
-            -- a material that had been archived is on a lorry again, so it
-            -- belongs back on the working list
+            -- an archived material on a lorry again belongs back on the working list
             UPDATE products
             SET is_archived = FALSE, archived_at = NULL, archived_by_staff_id = NULL
             WHERE product_id = v_json_id AND is_archived = TRUE;
@@ -1790,8 +1915,7 @@ PROC_BODY: BEGIN
     END LOOP;
     CLOSE cur;
 
-    -- a line that did not arrive at all is not left on the order pretending
-    -- it did; the order closes, and the record says nothing came
+    -- a line that did not arrive is not left on the order pretending it did
     DELETE FROM purchase_order_items WHERE po_id = p_po_id AND quantity <= 0;
 
     UPDATE purchase_orders SET status = 'Received' WHERE po_id = p_po_id;
@@ -1818,13 +1942,10 @@ CREATE PROCEDURE sp_file_return_report (
     IN p_product_id INT,
     IN p_sale_id INT,
     IN p_report_type VARCHAR(20),
-    IN p_quantity INT,
+    IN p_quantity DECIMAL(12,3),
     IN p_reason TEXT,
     IN p_refund_amount DECIMAL(12,2),
-    -- Where the goods go, in words. It used to be a true/false called
-    -- "restock", which is a question about a checkbox rather than about the
-    -- item in somebody's hand; restocked is now derived from this, so the
-    -- record of what was decided and the stock movement cannot disagree.
+    -- where the goods go, in words; restocked is derived from it
     IN p_disposition VARCHAR(20),
     IN p_staff_id INT,
     OUT p_report_id INT,
@@ -1833,8 +1954,8 @@ CREATE PROCEDURE sp_file_return_report (
 )
 PROC_BODY: BEGIN
     DECLARE v_name VARCHAR(150);
-    DECLARE v_before INT;
-    DECLARE v_change INT DEFAULT 0;
+    DECLARE v_before DECIMAL(12,3);
+    DECLARE v_change DECIMAL(12,3) DEFAULT 0;
     DECLARE v_notif VARCHAR(20);
     DECLARE v_restock BOOLEAN DEFAULT FALSE;
     DECLARE v_where VARCHAR(20);
@@ -1861,8 +1982,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- A reason of "damaged" explains nothing three months later when the
-    -- write-off is queried, so the bar is a sentence rather than a word.
+    -- the bar is a sentence rather than a word
     IF p_reason IS NULL OR CHAR_LENGTH(TRIM(p_reason)) < 10 THEN
         SET p_status_code = 400;
         SET p_message = CONCAT('Say what happened, in a sentence. ',
@@ -1894,16 +2014,8 @@ PROC_BODY: BEGIN
     SET v_before = 0;
     SELECT COALESCE(quantity_in_stock, 0) INTO v_before FROM inventory WHERE product_id = p_product_id;
 
-    -- Where the stock actually moves, and it is not symmetrical.
-    --
-    -- Return to Stock always adds: the goods are back on the shelf and
-    -- sellable, whether they came back from a customer or off the floor.
-    --
-    -- Write-Off only subtracts when the goods were still counted as stock.
-    -- Something a customer is handing back was deducted when it was sold, so
-    -- writing it off now takes nothing further off the shelf; the loss is the
-    -- refund, not the unit. Something found broken in the stockroom, with no
-    -- sale behind it, is still on the count and has to come off.
+    -- Return to Stock always adds. Write-Off subtracts only when the goods were
+    -- still counted as stock (a customer's return was deducted when sold).
     IF v_restock THEN
         SET v_change = p_quantity;
     ELSEIF p_sale_id IS NULL THEN
@@ -2003,18 +2115,13 @@ END //
 CREATE PROCEDURE sp_create_delivery (
     IN p_sale_id INT,
     IN p_address TEXT,
-    -- A slot rather than a day. A shop moving a delivery around a conflict
-    -- needs the hour, and "Tuesday" cannot be rescheduled to "Tuesday".
+    -- a slot rather than a day
     IN p_scheduled_date DATETIME,
     IN p_remarks TEXT,
-    -- Who the driver is looking for and what number to ring on arrival, as
-    -- written at the counter. Falls back to the sale's customer record when
-    -- the cashier left them blank, so a delivery for an account customer
-    -- still carries a name without anyone retyping it.
+    -- who the driver is looking for, as written at the counter; falls back to the customer record
     IN p_contact_name VARCHAR(150),
     IN p_contact_phone VARCHAR(30),
-    -- The day this was written up. Defaults to today when the caller does
-    -- not say, which is the honest answer for a delivery booked at the till.
+    -- defaults to today when the caller does not say
     IN p_booked_date DATE,
     IN p_staff_id INT,
     OUT p_delivery_id INT,
@@ -2064,9 +2171,7 @@ PROC_BODY: BEGIN
     SET v_contact_name  = NULLIF(TRIM(IFNULL(p_contact_name, '')), '');
     SET v_contact_phone = NULLIF(TRIM(IFNULL(p_contact_phone, '')), '');
 
-    -- Nothing typed at the counter means the sale already knows the answer:
-    -- the account customer's own name and number, or the walk-in name that
-    -- was taken when the sale was rung up.
+    -- nothing typed means the sale already knows: the account customer or the walk-in name
     IF v_contact_name IS NULL THEN
         SELECT COALESCE(NULLIF(TRIM(CONCAT(IFNULL(c.first_name, ''), ' ',
                                            IFNULL(c.last_name, ''))), ''),
@@ -2150,14 +2255,9 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- ------------------------------------------------------------------
-    -- WHO MAY MOVE A DELIVERY
-    -- Roles: 1 Administrator, 2 Manager, 3 Inventory Clerk,
-    --        4 Cashier, 5 Delivery Personnel
-    -- ------------------------------------------------------------------
+    -- Roles: 1 Administrator, 2 Manager, 3 Inventory Clerk, 4 Cashier, 5 Delivery Personnel
 
-    -- A delivered order is closed. Fixing a mistake means a new record with
-    -- a reason on it, not a quiet rewrite of what already happened.
+    -- a delivered order is closed; a mistake means a new record with a reason
     IF v_current = 'Delivered' THEN
         SET p_status_code = 409;
         SET p_message = CONCAT('Delivery #', p_delivery_id,
@@ -2172,8 +2272,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Every other move belongs to the driver, with the manager able to step in
-    -- when a run has to be reassigned or called off. Nobody else takes part.
+    -- every other move belongs to the driver, with the manager able to step in
     IF p_role_id NOT IN (2, 5) THEN
         SET p_status_code = 403;
         SET p_message = 'Your role cannot change a delivery status.';
@@ -2214,14 +2313,7 @@ END //
 -- ==========================================
 -- 22. SET A CREDIT LIMIT AND STANDING
 --
--- The manager's half of credit management. Limit and standing move together
--- because they are one decision: "this customer may owe us up to this much,
--- and here is how much I trust them at the moment."
---
--- Lowering a limit below what is already owed is allowed and is not a
--- mistake. It is how a shop stops an account growing without pretending the
--- existing debt is not there. The message says so, so nobody thinks the
--- figure failed to save.
+-- Lowering a limit below what is already owed is allowed; the message says so.
 -- ==========================================
 CREATE PROCEDURE sp_set_credit_limit (
     IN p_customer_id INT,
@@ -2271,8 +2363,7 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    -- a customer may have no credit row at all, so this creates one rather
-    -- than failing on an account nobody has set a limit for before
+    -- a customer may have no credit row yet
     INSERT INTO customer_credits (customer_id, credit_limit, standing, notes, updated_by_staff_id)
     VALUES (p_customer_id, p_credit_limit, p_standing,
             NULLIF(TRIM(IFNULL(p_notes, '')), ''), p_staff_id)
@@ -2302,14 +2393,7 @@ PROC_BODY: BEGIN
 END //
 
 -- ==========================================
--- 23. ASK FOR A HIGHER LIMIT
---
--- Raised at the counter by whoever is standing there when a sale will not
--- fit. It changes nothing on its own; it puts the question on the manager's
--- screen so the queue can move on.
---
--- One pending request per customer at a time. Three cashiers hitting the same
--- limit in one afternoon should produce one decision to make, not three.
+-- 23. ASK FOR A HIGHER LIMIT -- one pending request per customer at a time
 -- ==========================================
 CREATE PROCEDURE sp_request_credit_extension (
     IN p_customer_id INT,
@@ -2395,12 +2479,8 @@ PROC_BODY: BEGIN
 END //
 
 -- ==========================================
--- 24. DECIDE A CREDIT EXTENSION
---
--- Approving raises the limit in the same transaction that closes the request,
--- so there is never a moment where a request reads Approved and the limit has
--- not moved. Declining records why, because "no" without a reason is a
--- question the cashier will have to ask again tomorrow.
+-- 24. DECIDE A CREDIT EXTENSION -- approving raises the limit in the same
+-- transaction; declining records why
 -- ==========================================
 CREATE PROCEDURE sp_decide_credit_request (
     IN p_request_id INT,
@@ -2434,8 +2514,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- A decision already made stands. Reopening it would rewrite the reason
-    -- an extension was granted, which is the one thing an audit needs to keep.
+    -- a decision already made stands
     IF v_status <> 'Pending' THEN
         SET p_status_code = 409;
         SET p_message = CONCAT('This request was already ', LOWER(v_status),
@@ -2456,8 +2535,6 @@ PROC_BODY: BEGIN
     WHERE request_id = p_request_id;
 
     IF p_approve THEN
-        -- the limit moves in the same transaction that closes the request, so
-        -- there is no moment where one says yes and the other has not caught up
         INSERT INTO customer_credits (customer_id, credit_limit, updated_by_staff_id)
         VALUES (v_customer_id, v_requested, p_staff_id)
         ON DUPLICATE KEY UPDATE
@@ -2483,24 +2560,9 @@ END //
 -- ==========================================
 -- 25. OPEN AN ACCOUNT FROM THE COUNTER
 --
--- A regular who has been buying for months and has never been typed into the
--- customers table is invisible to every screen that matters: no purchase
--- history, no credit book entry, and a name the cashier retypes on every
--- sale. The counter is where that regular is standing, so the counter is
--- where the account gets opened.
---
--- What a cashier can do here is create the record. What they cannot do is
--- give it any credit: the limit is zero and the standing is Good, which
--- together mean "known customer, sells for cash", and only a manager moves
--- the limit off zero. Opening an account is therefore not a way to grant
--- credit to yourself, which is the reason it is safe to hand to a cashier.
---
--- The duplicate check is on name and phone together. Two Juan Cruzes with
--- different numbers are two people; the same name with the same number,
--- typed twice in a week, is one person and a queue. Rather than refuse, it
--- hands back the account that already exists, because the cashier's actual
--- goal is to have this sale attached to the right customer and a 409 in the
--- middle of a transaction does not achieve that.
+-- Creates the record with a zero limit and Good standing; only a manager
+-- moves the limit. The same name and phone hands back the existing account
+-- rather than refusing.
 -- ==========================================
 CREATE PROCEDURE sp_create_customer (
     IN p_first_name VARCHAR(100),
@@ -2539,9 +2601,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- One-word names are ordinary. Rather than refuse the sale over it, the
-    -- surname column takes an empty string, and CONCAT still produces a
-    -- readable name everywhere it is joined.
+    -- one-word names are ordinary: the surname takes an empty string
     IF v_last IS NULL THEN
         SET v_last = '';
     END IF;
@@ -2559,8 +2619,7 @@ PROC_BODY: BEGIN
         SET p_customer_id = v_existing;
         SET p_status_code = 200;
 
-        -- the name as the book already spells it, not as it was typed just
-        -- now, so the cashier sees which account they have landed on
+        -- the name as the book already spells it
         SELECT CONCAT(TRIM(CONCAT(first_name, ' ', IFNULL(last_name, ''))),
                       ' already has an account. This sale was attached to it.')
         INTO p_message
@@ -2576,8 +2635,7 @@ PROC_BODY: BEGIN
 
     SET p_customer_id = LAST_INSERT_ID();
 
-    -- Zero limit, Good standing: a known customer who buys for cash. Only a
-    -- manager moves that limit.
+    -- zero limit, Good standing: a known customer who buys for cash
     INSERT INTO customer_credits (customer_id, credit_limit, standing, updated_by_staff_id)
     VALUES (p_customer_id, 0.00, 'Good', p_staff_id);
 
@@ -2596,15 +2654,8 @@ END //
 -- ==========================================
 -- 26. WHO THE SHOP IS, AND HOW IT IS REGISTERED
 --
--- One row that decides what every invoice says about the seller. It is a
--- procedure rather than a plain UPDATE because changing a TIN or flipping a
--- shop between VAT and non-VAT is exactly the sort of change somebody will
--- want to trace later, and the audit entry records what it moved from as
--- well as to.
---
--- Changing the registration does not touch a single sale already rung up.
--- Those carry their own registration and rate, which is the point: an invoice
--- reprinted next year has to say what was charged on the day it was issued.
+-- A procedure rather than a plain UPDATE so the audit entry records what it
+-- moved from. Sales already rung up carry their own registration and rate.
 -- ==========================================
 CREATE PROCEDURE sp_update_store_settings (
     IN p_store_name VARCHAR(150),
@@ -2663,9 +2714,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- A VAT shop with a zero rate would print a VAT block full of zeroes,
-    -- which says the sale was taxed at nothing rather than that the shop is
-    -- not VAT-registered. Those are different claims and only one is true.
+    -- a VAT shop with a zero rate would print a VAT block full of zeroes
     IF v_type = 'VAT' AND (v_rate <= 0 OR v_rate > 100) THEN
         SET p_status_code = 400;
         SET p_message = 'A VAT-registered shop needs a rate above zero. The Philippine rate is 12.';
@@ -2715,21 +2764,9 @@ END //
 -- ==========================================
 -- 27. FIX A UNIT'S NAME
 --
--- Units grow by being typed on a stock adjustment, which is the right way for
--- a list nobody wants to maintain and the wrong way for a list nobody can
--- correct: one clerk types "kilogrms" once and the shop has a unit that will
--- sit there forever, splitting its nails across two names.
---
--- Renaming onto a name that already exists is a merge, not an error. That is
--- almost always what the person actually meant: they are looking at
--- "kilogrms" and "kilogram" side by side and want one of them gone. Every
--- product on the old unit is repointed at the surviving one and the duplicate
--- is deleted.
---
--- The adjustment log is deliberately left alone. It stores the unit as text
--- as at the time it was filed, so an entry that said kilogrms still says
--- kilogrms: that is what was written down, and history that edits itself to
--- look tidier is not history.
+-- Renaming onto a name that already exists is a merge: products move to the
+-- surviving unit and the duplicate is deleted. The adjustment log keeps the
+-- unit text as it was filed.
 -- ==========================================
 CREATE PROCEDURE sp_rename_unit (
     IN p_unit_id INT,
@@ -2795,8 +2832,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- A merge. Everything on the misspelt unit moves to the real one and the
-    -- misspelling goes, so the shop stops having its nails in two places.
+    -- a merge
     SELECT COUNT(*) INTO v_moved FROM products WHERE unit_id = p_unit_id;
 
     UPDATE products SET unit_id = v_clash_id WHERE unit_id = p_unit_id;
@@ -2814,6 +2850,303 @@ PROC_BODY: BEGIN
     SET p_message = CONCAT(v_new, ' already existed, so ', v_old_name, ' was merged into it. ',
                            v_moved, IF(v_moved = 1, ' material now uses ', ' materials now use '),
                            v_new, '.');
+END //
+
+-- ==========================================
+-- 28. THE ARCHIVE SWEEP -- called by the server at startup and once a day
+--
+--   DELIVERIES  Delivered and fully paid, or Failed, ninety days after close
+--   MATERIALS   nothing on the shelf and not sold, moved or ordered in 180 days
+--
+-- Nothing else is archived automatically. Each run that put something away
+-- writes one audit line with no staff id, so the screen shows "System".
+-- ==========================================
+CREATE PROCEDURE sp_sweep_archives (
+    OUT p_deliveries INT,
+    OUT p_materials INT
+)
+BEGIN
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET p_deliveries = -1;
+        SET p_materials = -1;
+    END;
+
+    START TRANSACTION;
+
+    UPDATE deliveries d
+    JOIN sales s ON s.sale_id = d.sale_id
+    SET d.is_archived = TRUE, d.archived_at = NOW(), d.archived_by_staff_id = NULL
+    WHERE d.is_archived = FALSE
+      AND (
+            (d.status = 'Delivered' AND s.payment_status = 'Paid'
+             AND d.delivered_at < DATE_SUB(NOW(), INTERVAL 90 DAY))
+         OR (d.status = 'Failed'
+             AND d.updated_at < DATE_SUB(NOW(), INTERVAL 90 DAY))
+      );
+    SET p_deliveries = ROW_COUNT();
+
+    UPDATE products p
+    JOIN inventory i ON i.product_id = p.product_id
+    SET p.is_archived = TRUE, p.status = 'Inactive', p.archived_at = NOW(), p.archived_by_staff_id = NULL
+    WHERE p.is_archived = FALSE
+      AND i.quantity_in_stock = 0
+      AND p.created_at < DATE_SUB(NOW(), INTERVAL 180 DAY)
+      AND NOT EXISTS (SELECT 1 FROM sale_items si JOIN sales s ON s.sale_id = si.sale_id
+                      WHERE si.product_id = p.product_id
+                        AND s.sale_date > DATE_SUB(NOW(), INTERVAL 180 DAY))
+      AND NOT EXISTS (SELECT 1 FROM stock_adjustments sa
+                      WHERE sa.product_id = p.product_id
+                        AND sa.created_at > DATE_SUB(NOW(), INTERVAL 180 DAY))
+      AND NOT EXISTS (SELECT 1 FROM purchase_order_items poi JOIN purchase_orders po ON po.po_id = poi.po_id
+                      WHERE poi.product_id = p.product_id AND po.status = 'Pending');
+    SET p_materials = ROW_COUNT();
+
+    IF p_deliveries > 0 OR p_materials > 0 THEN
+        INSERT INTO audit_logs (staff_id, action, action_type, details)
+        VALUES (NULL, 'ARCHIVE_SWEEP', 'DELETE',
+                CONCAT('Archived ', p_deliveries, ' closed deliveries older than 90 days and ',
+                       p_materials, ' materials with no stock and no movement in 180 days'));
+    END IF;
+
+    COMMIT;
+END //
+
+-- ==========================================
+-- 29. WHO MAY REACH A CONNECTED SYSTEM
+--
+-- One call sets the three levels and the note; all three FALSE removes the
+-- row. Manage and control force monitor. Refused for a person with no login,
+-- a deactivated account, or an administrator. The OUT values carry the
+-- levels as they stood before; p_changed says whether anything moved.
+-- ==========================================
+CREATE PROCEDURE sp_set_system_permission (
+    IN p_staff_id INT,
+    IN p_system_key VARCHAR(40),
+    IN p_can_monitor BOOLEAN,
+    IN p_can_manage BOOLEAN,
+    IN p_can_control BOOLEAN,
+    IN p_note VARCHAR(255),
+    IN p_granted_by_staff_id INT,
+    OUT p_status_code INT,
+    OUT p_message VARCHAR(255),
+    OUT p_was_monitor BOOLEAN,
+    OUT p_was_manage BOOLEAN,
+    OUT p_was_control BOOLEAN,
+    OUT p_changed BOOLEAN
+)
+PROC_BODY: BEGIN
+    DECLARE v_system_id INT DEFAULT NULL;
+    DECLARE v_system_name VARCHAR(100) DEFAULT NULL;
+    DECLARE v_staff_count INT DEFAULT 0;
+    DECLARE v_role_id INT DEFAULT 0;
+    DECLARE v_is_active BOOLEAN DEFAULT FALSE;
+    DECLARE v_has_login INT DEFAULT 0;
+    DECLARE v_staff_name VARCHAR(220) DEFAULT '';
+    DECLARE v_monitor BOOLEAN;
+    DECLARE v_manage BOOLEAN;
+    DECLARE v_control BOOLEAN;
+    DECLARE v_note VARCHAR(255);
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET p_status_code = 500;
+        SET p_message = 'Unable to change this permission. Nothing was saved.';
+    END;
+
+    SET p_was_monitor = FALSE;
+    SET p_was_manage = FALSE;
+    SET p_was_control = FALSE;
+    SET p_changed = FALSE;
+
+    -- manage and control both carry monitor with them
+    SET v_manage = IFNULL(p_can_manage, FALSE);
+    SET v_control = IFNULL(p_can_control, FALSE);
+    SET v_monitor = IFNULL(p_can_monitor, FALSE) OR v_manage OR v_control;
+    SET v_note = NULLIF(TRIM(IFNULL(p_note, '')), '');
+
+    SELECT system_id, system_name INTO v_system_id, v_system_name
+    FROM connected_systems WHERE system_key = p_system_key LIMIT 1;
+
+    IF v_system_id IS NULL THEN
+        SET p_status_code = 404;
+        SET p_message = 'No connected system is registered under that name.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    SELECT COUNT(*) INTO v_staff_count FROM staff WHERE staff_id = p_staff_id;
+    IF v_staff_count = 0 THEN
+        SET p_status_code = 404;
+        SET p_message = 'Staff record not found.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    SELECT s.role_id, s.is_active, s.full_name INTO v_role_id, v_is_active, v_staff_name
+    FROM staff s WHERE s.staff_id = p_staff_id;
+    SELECT COUNT(*) INTO v_has_login FROM users WHERE staff_id = p_staff_id;
+
+    IF v_role_id = 1 THEN
+        SET p_status_code = 400;
+        SET p_message = 'A System Administrator already holds every level on every system. There is nothing to grant.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    -- what stood before, for the audit entry
+    SELECT can_monitor, can_manage, can_control
+      INTO p_was_monitor, p_was_manage, p_was_control
+    FROM system_permissions
+    WHERE staff_id = p_staff_id AND system_id = v_system_id
+    LIMIT 1;
+
+    SET p_was_monitor = IFNULL(p_was_monitor, FALSE);
+    SET p_was_manage = IFNULL(p_was_manage, FALSE);
+    SET p_was_control = IFNULL(p_was_control, FALSE);
+
+    -- revoking is allowed on any account; granting only to one that can sign in
+    IF v_monitor AND (v_has_login = 0) THEN
+        SET p_status_code = 400;
+        SET p_message = CONCAT(v_staff_name, ' has no login account, so there is nobody to give access to. Create the login first.');
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF v_monitor AND (v_is_active = FALSE) THEN
+        SET p_status_code = 400;
+        SET p_message = CONCAT(v_staff_name, ' is deactivated. Restore the account before giving it access to anything.');
+        LEAVE PROC_BODY;
+    END IF;
+
+    START TRANSACTION;
+
+    IF v_monitor = FALSE THEN
+        DELETE FROM system_permissions
+        WHERE staff_id = p_staff_id AND system_id = v_system_id;
+
+        SET p_changed = (ROW_COUNT() > 0);
+        SET p_message = IF(p_changed,
+            CONCAT(v_staff_name, ' no longer has any access to ', v_system_name, '.'),
+            CONCAT(v_staff_name, ' already had no access to ', v_system_name, '.'));
+    ELSE
+        INSERT INTO system_permissions
+            (staff_id, system_id, can_monitor, can_manage, can_control, note, granted_by_staff_id)
+        VALUES
+            (p_staff_id, v_system_id, v_monitor, v_manage, v_control, v_note, p_granted_by_staff_id)
+        ON DUPLICATE KEY UPDATE
+            can_monitor = v_monitor,
+            can_manage = v_manage,
+            can_control = v_control,
+            note = v_note,
+            granted_by_staff_id = p_granted_by_staff_id;
+
+        SET p_changed = (p_was_monitor <> v_monitor OR p_was_manage <> v_manage
+                         OR p_was_control <> v_control);
+        SET p_message = CONCAT(v_staff_name, ' may now ',
+            CASE WHEN v_manage AND v_control THEN 'monitor, manage and control'
+                 WHEN v_manage THEN 'monitor and manage'
+                 WHEN v_control THEN 'monitor and control'
+                 ELSE 'monitor' END,
+            ' ', v_system_name, '.');
+    END IF;
+
+    COMMIT;
+
+    SET p_status_code = 200;
+END //
+
+-- ==========================================
+-- 30. REGISTERING A CONNECTED SYSTEM, OR CHANGING ONE
+--
+-- Told apart by whether the key is on the register. The key is never
+-- renamed. Internal systems are seeded by the server; anything registered
+-- from a screen is External and must have an address. Switching a system
+-- off keeps its row and its permissions.
+-- ==========================================
+CREATE PROCEDURE sp_save_connected_system (
+    IN p_system_key VARCHAR(40),
+    IN p_system_name VARCHAR(100),
+    IN p_description VARCHAR(255),
+    IN p_endpoint_url VARCHAR(255),
+    IN p_is_enabled BOOLEAN,
+    IN p_staff_id INT,
+    OUT p_status_code INT,
+    OUT p_message VARCHAR(255),
+    OUT p_system_id INT,
+    OUT p_created BOOLEAN
+)
+PROC_BODY: BEGIN
+    DECLARE v_key VARCHAR(40);
+    DECLARE v_name VARCHAR(100);
+    DECLARE v_url VARCHAR(255);
+    DECLARE v_kind VARCHAR(10) DEFAULT NULL;
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        SET p_status_code = 500;
+        SET p_message = 'Unable to save the connected system. Nothing was changed.';
+    END;
+
+    SET p_system_id = NULL;
+    SET p_created = FALSE;
+    SET v_key = LOWER(TRIM(IFNULL(p_system_key, '')));
+    SET v_name = NULLIF(TRIM(IFNULL(p_system_name, '')), '');
+    SET v_url = NULLIF(TRIM(IFNULL(p_endpoint_url, '')), '');
+
+    IF v_key = '' OR v_key NOT REGEXP '^[a-z0-9][a-z0-9-]{1,39}$' THEN
+        SET p_status_code = 400;
+        SET p_message = 'A system key is 2 to 40 characters of lower-case letters, digits and hyphens.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF v_name IS NULL THEN
+        SET p_status_code = 400;
+        SET p_message = 'The system needs a name.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    SELECT system_id, system_kind INTO p_system_id, v_kind
+    FROM connected_systems WHERE system_key = v_key LIMIT 1;
+
+    -- an internal system has no address to edit; an external one is nothing without one
+    IF v_kind = 'Internal' THEN
+        SET v_url = NULL;
+    ELSEIF v_url IS NULL THEN
+        SET p_status_code = 400;
+        SET p_message = 'An external system needs the address it answers at, starting http:// or https://.';
+        LEAVE PROC_BODY;
+    ELSEIF v_url NOT REGEXP '^https?://[^[:space:]/@]+(/[^[:space:]]*)?$' THEN
+        SET p_status_code = 400;
+        SET p_message = 'The address must start http:// or https:// and carry no username or password.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    START TRANSACTION;
+
+    IF p_system_id IS NULL THEN
+        INSERT INTO connected_systems
+            (system_key, system_name, system_kind, description, endpoint_url, is_enabled, created_by_staff_id)
+        VALUES
+            (v_key, v_name, 'External', NULLIF(TRIM(IFNULL(p_description, '')), ''),
+             v_url, IFNULL(p_is_enabled, TRUE), p_staff_id);
+
+        SET p_system_id = LAST_INSERT_ID();
+        SET p_created = TRUE;
+        SET p_message = CONCAT(v_name, ' is registered. Nobody but the administrator can reach it until access is granted.');
+    ELSE
+        UPDATE connected_systems
+        SET system_name = v_name,
+            description = NULLIF(TRIM(IFNULL(p_description, '')), ''),
+            endpoint_url = v_url,
+            is_enabled = IFNULL(p_is_enabled, is_enabled)
+        WHERE system_id = p_system_id;
+
+        SET p_message = CONCAT(v_name, ' was updated.');
+    END IF;
+
+    COMMIT;
+
+    SET p_status_code = 200;
 END //
 
 DELIMITER ;

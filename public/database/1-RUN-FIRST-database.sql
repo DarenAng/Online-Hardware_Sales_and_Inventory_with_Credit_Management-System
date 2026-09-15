@@ -2,25 +2,18 @@
 -- 1-RUN-FIRST-database.sql
 -- Hardware Sales & Inventory with Credit Management
 --
--- WHAT THIS IS
---   The whole database: 23 tables, 2 views, and the demo data.
---   This is the complete, current schema. There are no separate upgrade
---   files to apply on top of it any more; every past upgrade is already
---   folded in here.
+-- The whole database: 26 tables, the demo data, and six months of mock
+-- trading. The three views live at the top of 2-RUN-SECOND-stored-procedures.sql,
+-- the file that is safe to re-run on a database holding real work.
 --
--- HOW TO RUN IT (MySQL Workbench)
---   File > Open SQL Script... > pick this file > click the lightning bolt.
---   Then open 2-RUN-SECOND-stored-procedures.sql and run that.
---
--- HOW TO RUN IT (command line)
+-- MySQL Workbench: File > Open SQL Script... > this file > lightning bolt,
+-- then the same for 2-RUN-SECOND-stored-procedures.sql.
+-- Command line:
 --   mysql -u root -p < public/database/1-RUN-FIRST-database.sql
 --   mysql -u root -p < public/database/2-RUN-SECOND-stored-procedures.sql
 --
--- READ THIS BEFORE RUNNING
---   The first line below DROPS hardware_db. Every row in it is destroyed and
---   replaced with the demo data. On a machine that holds work you want to
---   keep, take a backup first (the System Administrator's Backup & Recovery
---   screen writes one into backups/).
+-- The first line below DROPS hardware_db. Take a backup first (Backup &
+-- Recovery on the System Administrator's screen writes one into backups/).
 -- ==========================================================================
 
 DROP DATABASE IF EXISTS hardware_db;
@@ -35,22 +28,7 @@ CREATE TABLE roles (
     role_name VARCHAR(50) NOT NULL UNIQUE
 );
 
--- WHY THE WHOLE MIDDLE NAME IS KEPT AND ONLY ITS FIRST LETTER IS SHOWN
---
--- The middle name separates two people who share a first and a last name,
--- and this column used to hold one letter because one letter is all the
--- screens ever print. That is the wrong way round. The letter is what a
--- reader needs; the name is what settles which of the two Juan Cruzes the
--- record belongs to when somebody is checking a person against a payslip or
--- a barangay ID, and a stored "S" cannot settle anything -- there are two of
--- those in any big enough shop as well.
---
--- So the name is stored in full, at the length a real middle name runs to,
--- and full_name below still prints the initial. The whole name is on the
--- person's record for anybody who opens it; the shortening is a display
--- rule and lives in exactly one place.
---
--- It stays optional, so older records and single-name staff remain valid.
+-- The middle name is stored in full; full_name below prints only the initial.
 CREATE TABLE staff (
     staff_id INT AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(100) NOT NULL,
@@ -62,10 +40,7 @@ CREATE TABLE staff (
     archived_at TIMESTAMP NULL,
     archived_by_staff_id INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    -- One definition of a staff name for the whole system, so the directory,
-    -- the receipt, the audit trail and every report spell it the same way:
-    -- first name, middle initial, last name. It is never first and last
-    -- alone, because that is the spelling that cannot tell two people apart.
+    -- one definition of a staff name for the whole system: first, initial, last
     full_name VARCHAR(220) AS (
         CONCAT(first_name,
                IF(middle_name IS NULL OR middle_name = '', '',
@@ -86,16 +61,9 @@ CREATE TABLE users (
     FOREIGN KEY (staff_id) REFERENCES staff(staff_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
--- An audit entry has to survive the questions an audit actually gets asked:
--- who did it, in which role, from which machine, what kind of action it was,
--- and what the values were before and after.
---
--- role_name is a snapshot, not a join. People move between roles, and reading
--- the role off the staff record today would quietly rewrite last month's
--- history the moment somebody is promoted.
---
--- metadata holds the before and after values as JSON, kept as TEXT so a
--- backup taken here restores on any MySQL 8 point release.
+-- role_name is a snapshot, not a join, so a promotion does not rewrite
+-- history. metadata holds the before and after values as JSON in TEXT.
+-- ACCESS and CONTROL are the kinds an audit of the connected systems asks for.
 CREATE TABLE audit_logs (
     log_id INT AUTO_INCREMENT PRIMARY KEY,
     staff_id INT NULL,
@@ -103,7 +71,8 @@ CREATE TABLE audit_logs (
     ip_address VARCHAR(45) NULL,
     action VARCHAR(100) NOT NULL,
     action_type ENUM('CREATE','UPDATE','DELETE','VOID','RESTORE','BACKUP',
-                     'LOGIN','LOGOUT','LOGIN_FAILURE','SECURITY','PAYMENT','OTHER')
+                     'LOGIN','LOGOUT','LOGIN_FAILURE','SECURITY','PAYMENT',
+                     'ACCESS','CONTROL','OTHER')
                 NOT NULL DEFAULT 'OTHER',
     details TEXT,
     metadata TEXT NULL,
@@ -111,6 +80,75 @@ CREATE TABLE audit_logs (
     INDEX idx_audit_when (created_at DESC),
     INDEX idx_audit_type (action_type),
     FOREIGN KEY (staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- ==========================================
+-- CONNECTED SYSTEMS, AND WHO MAY TOUCH THEM
+--
+-- Reaching a system is a permission, not a role. By default only the System
+-- Administrator holds any, handed out one person, one system, one level:
+--     monitor   read the system's state
+--     manage    change how it is set up
+--     control   run commands against it
+-- Manage and control imply monitor (sp_set_system_permission enforces it).
+-- ==========================================
+CREATE TABLE connected_systems (
+    system_id INT AUTO_INCREMENT PRIMARY KEY,
+    -- the handle the server and the URLs use; never changes once registered
+    system_key VARCHAR(40) NOT NULL UNIQUE,
+    system_name VARCHAR(100) NOT NULL,
+    system_kind ENUM('Internal','External') NOT NULL DEFAULT 'External',
+    description VARCHAR(255) NULL,
+    -- where an external system answers; NULL for the internal ones
+    endpoint_url VARCHAR(255) NULL,
+    is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by_staff_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- One row per person per system; taking every level away deletes the row.
+CREATE TABLE system_permissions (
+    permission_id INT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL,
+    system_id INT NOT NULL,
+    can_monitor BOOLEAN NOT NULL DEFAULT FALSE,
+    can_manage BOOLEAN NOT NULL DEFAULT FALSE,
+    can_control BOOLEAN NOT NULL DEFAULT FALSE,
+    -- why this person was given the keys, in the administrator's words
+    note VARCHAR(255) NULL,
+    granted_by_staff_id INT NULL,
+    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_system_permission (staff_id, system_id),
+    FOREIGN KEY (staff_id) REFERENCES staff(staff_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (system_id) REFERENCES connected_systems(system_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (granted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
+    -- a grant with nothing in it is a row that should not exist
+    CONSTRAINT chk_permission_grants_something
+        CHECK (can_monitor OR can_manage OR can_control)
+);
+
+-- ==========================================
+-- SCREENS BY ROLE -- only the administrator's overrides to each page's
+-- default menu; an empty table means every menu is what its page says.
+-- The catalogue of screens lives in server.js (FEATURES).
+-- ==========================================
+CREATE TABLE role_feature_permissions (
+    permission_id INT AUTO_INCREMENT PRIMARY KEY,
+    role_id INT NOT NULL,
+    -- the screen's key in the catalogue: lower case, letters, digits, hyphens
+    feature_key VARCHAR(40) NOT NULL,
+    -- TRUE grants a screen not held by default; FALSE takes away one that is
+    is_granted BOOLEAN NOT NULL DEFAULT TRUE,
+    note VARCHAR(255) NULL,
+    granted_by_staff_id INT NULL,
+    granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_role_feature (role_id, feature_key),
+    FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (granted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- ==========================================
@@ -149,13 +187,7 @@ CREATE TABLE customers (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- credit_limit and standing are real attributes; they are decisions somebody
--- made. Balances are derived from the sales, so they live in a view and
--- cannot go stale.
---
--- A limit alone is not a credit policy. A customer who always pays and one
--- who has owed for four months both fit under the same limit, and only one of
--- them should be sold to on account. Standing is what separates them:
+-- credit_limit and standing are decisions; balances are derived in a view.
 --   Good   sell on account as normal
 --   Watch  still allowed, but every screen says to look at this account
 --   Hold   no new credit at all until a manager lifts it
@@ -171,15 +203,8 @@ CREATE TABLE customer_credits (
     FOREIGN KEY (updated_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
--- Raised at the counter, decided by a manager.
---
--- A cashier standing with a regular customer who is over their limit has two
--- options otherwise: refuse the sale, or go and find the manager. The first
--- loses the sale and the second stops the queue.
---
--- previous_limit is recorded alongside the requested one so an approval read
--- a month later cannot be mistaken for approving a bigger jump than was
--- actually asked for.
+-- Raised at the counter, decided by a manager. previous_limit is recorded so
+-- an approval read later cannot be mistaken for a bigger jump than was asked.
 CREATE TABLE credit_requests (
     request_id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NOT NULL,
@@ -221,19 +246,12 @@ CREATE TABLE products (
     category_id INT,
     unit_id INT,
     price DECIMAL(10,2) NOT NULL,
-    -- The reorder point somebody typed. It is still what a Manual product
-    -- uses, and it is what a Dynamic product falls back to when there is not
-    -- enough sales history to calculate anything honest from.
+    -- the typed reorder point; a Dynamic product falls back to it without enough history
     reorder_point INT NOT NULL DEFAULT 10,
-    -- The two figures the formula needs that sales history cannot supply:
     --     ROP = (average daily sales x lead time) + safety stock
-    -- Average daily sales is already in sale_items. How long the supplier
-    -- takes, and how much cover the shop wants on top, are decisions.
     lead_time_days INT NOT NULL DEFAULT 7,
     safety_stock INT NOT NULL DEFAULT 0,
-    -- Per product on purpose. A fast-moving consumable earns its formula; a
-    -- slow item nobody has bought in a year would only get a reorder point of
-    -- zero out of one, which is worse than the number a person chose.
+    -- per product: a slow item would only get a reorder point of zero from the formula
     reorder_mode ENUM('Manual','Dynamic') NOT NULL DEFAULT 'Manual',
     status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
     supplier_id INT,
@@ -250,7 +268,8 @@ CREATE TABLE products (
 CREATE TABLE inventory (
     inventory_id INT AUTO_INCREMENT PRIMARY KEY,
     product_id INT NOT NULL UNIQUE,
-    quantity_in_stock INT NOT NULL DEFAULT 0,
+    -- a fraction: nails by the kilo, wire by the metre
+    quantity_in_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
@@ -282,17 +301,11 @@ CREATE TABLE stock_adjustments (
     adjustment_id INT AUTO_INCREMENT PRIMARY KEY,
     product_id INT NOT NULL,
     adjustment_type ENUM('Add', 'Remove', 'Recount') NOT NULL,
-    quantity_before INT NOT NULL,
-    quantity_change INT NOT NULL,
-    quantity_after INT NOT NULL,
-    -- What the figure was counted in, as text and as at the time it was
-    -- filed. A hardware shop counts almost nothing in the same unit twice,
-    -- and "+20" against Portland Cement is twenty of something nobody can
-    -- name six months later.
-    --
-    -- Text rather than a link to the units table on purpose: renaming a unit
-    -- next year must not rewrite what last year's entries say they counted.
-    -- A log that quietly changes its own history is worse than a terse one.
+    quantity_before DECIMAL(12,3) NOT NULL,
+    quantity_change DECIMAL(12,3) NOT NULL,
+    quantity_after DECIMAL(12,3) NOT NULL,
+    -- What the figure was counted in, as text at the time it was filed, so
+    -- renaming a unit next year does not rewrite last year's entries.
     unit_name VARCHAR(20) NULL,
     reason VARCHAR(255) NOT NULL,
     adjusted_by_staff_id INT NULL,
@@ -301,10 +314,7 @@ CREATE TABLE stock_adjustments (
     FOREIGN KEY (adjusted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
--- Low stock warnings and the rest of the alerts land here, one row per role
--- that needs to see it. created_by_staff_id is whose action raised the alert;
--- it stays NULL when the system raised it on its own, and the screen then
--- says "System" rather than pretending somebody did it.
+-- one row per role that needs to see it; created_by_staff_id NULL means the system raised it
 CREATE TABLE notifications (
     notification_id INT AUTO_INCREMENT PRIMARY KEY,
     target_role_id INT NULL,
@@ -323,28 +333,10 @@ CREATE TABLE notifications (
 -- ==========================================
 -- 5. SALES & FULFILLMENT
 -- ==========================================
--- ==========================================
--- WHO THE SHOP IS, AND HOW IT IS REGISTERED
---
--- The invoice used to print a shop name hard-coded into a JavaScript file, no
--- TIN, and no tax breakdown, which is not a document a Philippine shop can
--- hand a customer. RR 7-2024 wants the seller's registered name, address and
--- TIN on it, and a VAT-registered seller has to show the sale split into
--- VATable Sale, VAT, VAT-Exempt Sale and Zero-Rated Sale.
---
--- Registration is a setting because both kinds of hardware shop exist. Below
--- the 3,000,000 annual threshold a shop is non-VAT: it charges no VAT at all,
--- so a VAT block on its invoice would be a fiction, and it prints Sales
--- Subject to Percentage Tax instead.
---
--- One row, id 1, and a CHECK that keeps it that way. A settings table that
--- can hold two rows is one that eventually does, and then half the screens
--- read one row and half read the other.
---
--- The defaults are obvious placeholders on purpose: a shop that has not
--- filled this in should notice on its first invoice rather than hand a
--- customer somebody else's TIN.
--- ==========================================
+-- Who the shop is and how it is registered (RR 7-2024: registered name,
+-- address and TIN on the invoice). Below the 3,000,000 threshold a shop is
+-- non-VAT and prints Sales Subject to Percentage Tax instead. One row, id 1,
+-- and a CHECK that keeps it that way. The defaults are obvious placeholders.
 CREATE TABLE store_settings (
     setting_id INT PRIMARY KEY DEFAULT 1,
     store_name VARCHAR(150) NOT NULL DEFAULT 'Hardware Sales & Inventory',
@@ -364,13 +356,7 @@ CREATE TABLE store_settings (
 CREATE TABLE sales (
     sale_id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NULL,
-    -- The name of somebody who is not on the credit book. A sale recorded as
-    -- "Walk-in" and nothing else cannot be reprinted a week later for the
-    -- person who bought it, and a delivery booked against it has nobody's
-    -- name on the manifest. This is not an account and does not become one:
-    -- an account is created deliberately, from the counter, when the cashier
-    -- says so. NULL means nobody asked, which is a different fact from an
-    -- empty name.
+    -- the name of somebody not on the credit book; NULL means nobody asked
     walk_in_name VARCHAR(150) NULL,
     cashier_staff_id INT NOT NULL,
     total_amount DECIMAL(12,2) NOT NULL,
@@ -381,24 +367,12 @@ CREATE TABLE sales (
     payment_method ENUM('Cash','Cheque','GCash','PayMaya','PayPal','Bank Transfer','COD','Credit') NOT NULL,
     payment_status ENUM('Paid','Partial','Unpaid') NOT NULL DEFAULT 'Paid',
 
-    -- WHAT THIS SALE WAS MADE OF, FOR TAX
-    --
-    -- Philippine posted prices already include VAT, so the 12% is extracted
-    -- from the total rather than added to it:
-    --
+    -- Posted prices include VAT, so it is extracted from the total:
     --     vat_amount   = final_amount x rate/(100+rate)      -- 12/112
     --     vatable_sale = final_amount - vat_amount
-    --
-    -- The VAT is rounded first and the VATable sale is the remainder, so the
-    -- two lines always add back to the total exactly. Dividing by 1.12 and
-    -- rounding both can leave an invoice a centavo short of itself.
-    --
-    -- These are recorded on the sale rather than derived when an invoice is
-    -- reprinted. An invoice is a record of what was charged on the day it was
-    -- issued, and a shop that later crosses the VAT threshold, or a rate that
-    -- moves, must not silently rewrite every invoice already handed out.
-    -- A non-VAT shop stores zeroes here and its whole sale is subject to
-    -- percentage tax instead.
+    -- VAT is rounded first so the two lines add back exactly. Recorded on the
+    -- sale so a later change of rate or registration does not rewrite invoices.
+    -- A non-VAT shop stores zeroes here.
     tax_registration ENUM('VAT','NON-VAT') NOT NULL DEFAULT 'VAT',
     vat_rate DECIMAL(5,2) NOT NULL DEFAULT 12.00,
     vatable_sale DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -419,7 +393,8 @@ CREATE TABLE sale_items (
     sale_item_id INT AUTO_INCREMENT PRIMARY KEY,
     sale_id INT NOT NULL,
     product_id INT NOT NULL,
-    quantity INT NOT NULL,
+    -- 2.500 for two and a half kilos of nails; see inventory.quantity_in_stock
+    quantity DECIMAL(12,3) NOT NULL,
     unit_price DECIMAL(10,2) NOT NULL,
     subtotal DECIMAL(12,2) AS (quantity * unit_price) STORED,
     FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -431,23 +406,14 @@ CREATE TABLE deliveries (
     sale_id INT NOT NULL,
     delivery_staff_id INT NULL,
     delivery_address TEXT NOT NULL,
-    -- Who the driver is actually looking for, as written down when the
-    -- delivery was booked. Reading the name off the sale's customer row left
-    -- a walk-in delivery with no name and no number, which is an address and
-    -- nobody to ring on arrival. These win over the joined customer record
-    -- because the person who took the order is closer to the truth than a
-    -- customer row from six months ago.
+    -- who the driver is looking for, as written when booked; wins over the customer row
     contact_name VARCHAR(150) NULL,
     contact_phone VARCHAR(30) NULL,
     status ENUM('Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed') NOT NULL DEFAULT 'Pending',
     remarks TEXT,
-    -- The day it was written up, kept apart from the day it is meant to
-    -- arrive. Those answer different questions, and updated_at answers
-    -- neither once a driver has touched the row.
+    -- the day it was written up, kept apart from the day it is meant to arrive
     booked_date DATE NULL,
-    -- "Tuesday" is not a delivery slot. "Tuesday 2pm" is, and a shop moving a
-    -- delivery around a conflict needs the hour or the reschedule says
-    -- nothing.
+    -- "Tuesday 2pm", not "Tuesday": the hour matters when moving a delivery
     scheduled_date DATETIME NULL,
     delivered_at TIMESTAMP NULL,
     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
@@ -456,32 +422,19 @@ CREATE TABLE deliveries (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (delivery_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
-    -- A delivery that says it arrived has to say when. Reports group on this
-    -- date, so a Delivered row without one quietly reports under the wrong day.
+    -- a Delivered row without a timestamp would report under the wrong day
     CONSTRAINT chk_delivered_has_timestamp
         CHECK (status <> 'Delivered' OR delivered_at IS NOT NULL)
 );
 
--- A returned item has to answer two questions, and the second one was being
--- answered by a checkbox nobody read: where do the goods go?
---
--- disposition is that answer, written in words rather than as a true/false.
--- "Return to Stock" and "Write-Off" mean something to the person choosing;
--- restocked = 0 does not, and a return filed with it left the goods
--- unaccounted for on a shelf somebody would later count.
---
--- restocked is kept because it is what the stock movement is driven from, but
--- it is now derived from the disposition rather than set separately, so the
--- two can never disagree.
---
--- reason is NOT NULL here on purpose. A return with no reason is the return
--- that gets queried three months later and cannot be explained.
+-- disposition says in words where the goods go; restocked is derived from
+-- it so the two cannot disagree. reason is NOT NULL on purpose.
 CREATE TABLE returned_items (
     return_id INT AUTO_INCREMENT PRIMARY KEY,
     product_id INT NOT NULL,
     sale_id INT NULL,
     report_type ENUM('Return', 'Damaged', 'Refunded') NOT NULL DEFAULT 'Return',
-    quantity INT NOT NULL,
+    quantity DECIMAL(12,3) NOT NULL,
     reason TEXT NOT NULL,
     disposition ENUM('Return to Stock', 'Write-Off') NOT NULL DEFAULT 'Write-Off',
     refund_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -496,104 +449,13 @@ CREATE TABLE returned_items (
 
 -- ==========================================
 -- 6. VIEWS
+-- Defined in 2-RUN-SECOND-stored-procedures.sql; see the note at the top.
 -- ==========================================
-CREATE OR REPLACE VIEW vw_customer_credit AS
-SELECT
-    c.customer_id,
-    -- A one-word name is ordinary, and the empty surname beside it must not
-    -- leave a trailing space on every screen that prints the name.
-    TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS customer_name,
-    c.phone,
-    c.address,
-    COALESCE(cc.credit_limit, 0.00) AS credit_limit,
-    COALESCE(cc.standing, 'Good') AS standing,
-    cc.notes AS credit_notes,
-    cc.updated_at AS credit_updated_at,
-
-    COALESCE((SELECT SUM(s.final_amount)
-              FROM sales s
-              WHERE s.customer_id = c.customer_id
-                AND s.is_archived = FALSE), 0.00) AS total_purchase,
-
-    -- outstanding money is billed minus paid on any sale not yet marked Paid.
-    -- payments already sit in sales.amount_paid, so they are not subtracted twice
-    COALESCE((SELECT SUM(s.final_amount - s.amount_paid)
-              FROM sales s
-              WHERE s.customer_id = c.customer_id
-                AND s.is_archived = FALSE
-                AND s.payment_status <> 'Paid'), 0.00) AS current_credit,
-
-    -- What is left to spend. Never negative: an account already over its limit
-    -- has nothing available, and a negative figure on that line reads as a
-    -- credit balance, which is the opposite of what it means.
-    GREATEST(COALESCE(cc.credit_limit, 0.00) -
-             COALESCE((SELECT SUM(s.final_amount - s.amount_paid)
-                       FROM sales s
-                       WHERE s.customer_id = c.customer_id
-                         AND s.is_archived = FALSE
-                         AND s.payment_status <> 'Paid'), 0.00), 0.00) AS available_credit,
-
-    (SELECT COUNT(*) FROM sales s
-     WHERE s.customer_id = c.customer_id
-       AND s.is_archived = FALSE
-       AND s.payment_status <> 'Paid') AS open_sales,
-
-    -- how long the oldest unpaid sale has been sitting there, which is the
-    -- figure that actually tells a slow payer from a bad one
-    (SELECT DATEDIFF(CURDATE(), DATE(MIN(s.sale_date)))
-     FROM sales s
-     WHERE s.customer_id = c.customer_id
-       AND s.is_archived = FALSE
-       AND s.payment_status <> 'Paid') AS oldest_debt_days,
-
-    (SELECT MAX(s.sale_date) FROM sales s
-     WHERE s.customer_id = c.customer_id AND s.is_archived = FALSE) AS last_purchase,
-
-    (SELECT MAX(p.payment_date) FROM credit_payments p
-     WHERE p.customer_id = c.customer_id) AS last_payment
-
-FROM customers c
-LEFT JOIN customer_credits cc ON cc.customer_id = c.customer_id;
-
--- one row per archived record, whatever module it came from
-CREATE OR REPLACE VIEW vw_archives AS
-SELECT 'Staff' AS module, s.staff_id AS record_id,
-       s.full_name AS record_name,
-       r.role_name AS detail, s.archived_at,
-       a.full_name AS archived_by
-FROM staff s
-JOIN roles r ON r.role_id = s.role_id
-LEFT JOIN staff a ON a.staff_id = s.archived_by_staff_id
-WHERE s.is_active = FALSE
-UNION ALL
-SELECT 'Inventory', p.product_id, p.product_name,
-       CONCAT('Stock ', COALESCE(i.quantity_in_stock, 0)), p.archived_at,
-       a.full_name
-FROM products p
-LEFT JOIN inventory i ON i.product_id = p.product_id
-LEFT JOIN staff a ON a.staff_id = p.archived_by_staff_id
-WHERE p.is_archived = TRUE
-UNION ALL
-SELECT 'Sales', sa.sale_id, CONCAT('Sale #', sa.sale_id),
-       CONCAT(sa.payment_method, ' ', FORMAT(sa.final_amount, 2)), sa.archived_at,
-       a.full_name
-FROM sales sa
-LEFT JOIN staff a ON a.staff_id = sa.archived_by_staff_id
-WHERE sa.is_archived = TRUE
-UNION ALL
-SELECT 'Delivery', d.delivery_id, CONCAT('Delivery #', d.delivery_id),
-       d.status, d.archived_at,
-       a.full_name
-FROM deliveries d
-LEFT JOIN staff a ON a.staff_id = d.archived_by_staff_id
-WHERE d.is_archived = TRUE;
 
 -- ==========================================
 -- 7. SEED DATA
 -- ==========================================
--- The one settings row. Its defaults are deliberately obvious placeholders:
--- a shop that has not filled this in should notice on its first invoice
--- rather than hand a customer somebody else's TIN.
+-- the one settings row; its defaults are obvious placeholders
 INSERT INTO store_settings (setting_id) VALUES (1);
 
 INSERT INTO roles (role_id, role_name) VALUES
@@ -619,15 +481,22 @@ INSERT INTO users (staff_id, email, password, must_change_password) VALUES
 (5, 'delivery@hardware.com', 'delivery123', TRUE),
 (6, 'ana.reyes@hardware.com', 'ana12345', TRUE);
 
+-- The internal systems server.js answers for (INTERNAL_SYSTEMS); it re-seeds
+-- any that are missing at startup.
+INSERT INTO connected_systems (system_key, system_name, system_kind, description, endpoint_url) VALUES
+('database',      'MySQL Database',       'Internal', 'The hardware_db schema every screen reads and every procedure writes.', NULL),
+('backup',        'Automatic Backup',     'Internal', 'The rolling backup the server takes on its own and the folder it writes to.', NULL),
+('archive-sweep', 'Archive Sweep',        'Internal', 'The nightly pass that puts away closed deliveries and dead stock.', NULL),
+('live-sync',     'Live Sync Channel',    'Internal', 'The open connection every signed-in browser holds, and what has been announced over it.', NULL),
+('mail',          'Mail Relay',           'Internal', 'The SMTP account first passwords are sent from.', NULL);
+
 INSERT INTO categories (category_name) VALUES
 ('Hand Tools'), ('Power Tools'), ('Plumbing'), ('Electrical'), ('Construction Materials');
 
 INSERT INTO brands (brand_name) VALUES
 ('Makita'), ('DeWalt'), ('Stanley'), ('Boysen'), ('Pioneer');
 
--- A hardware shop counts nails by the kilo, wire by the roll and sand by the
--- sack. The list is not fixed: a unit typed on a stock adjustment that is not
--- here yet gets added, so it grows from what the shop actually sells.
+-- the list grows: a unit typed on a stock adjustment gets added
 INSERT INTO units (unit_name) VALUES
 ('pcs'), ('bag'), ('liter'), ('meter'), ('box'),
 ('kilogram'), ('gram'), ('sack'), ('roll'), ('set'),
@@ -643,17 +512,14 @@ INSERT INTO customers (first_name, last_name, phone, address) VALUES
 ('Rosa', 'Villamor', '0917-555-1212', 'Caloocan City, Metro Manila'),
 ('Mark', 'Aguilar', '0918-444-3131', 'Taguig City, Metro Manila');
 
--- One of each standing, so the credit screen has something to show on a
--- fresh database: a good account, one being watched, and one on hold.
+-- one of each standing, so the credit screen has something to show
 INSERT INTO customer_credits (customer_id, credit_limit, standing, notes, updated_by_staff_id) VALUES
 (1, 50000.00, 'Good',  NULL, NULL),
 (2, 20000.00, 'Watch', 'Two sales past 30 days. Chase before extending further.', 2),
 (3, 30000.00, 'Good',  NULL, NULL),
 (4, 15000.00, 'Hold',  'Cheque bounced in August. No new credit until it clears.', 2);
 
--- Two products start on the dynamic reorder point so the Stocks screen has
--- something real to show on a fresh database: the cement and the pipe are the
--- two that actually move here.
+-- two products start on the dynamic reorder point so the Stocks screen has something to show
 INSERT INTO products (product_name, brand_id, category_id, unit_id, price,
                       reorder_point, lead_time_days, safety_stock, reorder_mode,
                       status, supplier_id, is_archived) VALUES
@@ -716,6 +582,7 @@ INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, status, re
 (8, 5, 'Pasig City, Metro Manila',   'Delivered',        'COD collected in full',                   '2026-08-30', '2026-08-30 15:05:00'),
 (10, 5,'Taguig City, Metro Manila',  'Delayed',          'Heavy rain, rescheduled',                 '2026-09-03', NULL);
 
+-- archived by hand; the sweep would do it after ninety days
 INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, status, remarks, scheduled_date, delivered_at, is_archived, archived_at, archived_by_staff_id) VALUES
 (3, 5, 'Quezon City, Metro Manila', 'Delivered', 'Old route, closed out', '2026-08-25', '2026-08-25 16:20:00', TRUE, '2026-08-26 08:00:00', 2);
 
@@ -741,3 +608,791 @@ INSERT INTO notifications (target_role_id, notif_type, title, message, product_i
 (2, 'Damage Report','Damage filed for Cordless Drill 18V', '1 unit reported damaged: defective battery pack.',  1, 3, FALSE, '2026-08-22 11:00:00'),
 (5, 'Delivery',     'Delivery #3 booked',           'Sale #4 needs delivering to Caloocan City, Metro Manila.', NULL, 4, FALSE, '2026-08-28 09:20:00'),
 (2, 'Purchase Order','Purchase order #3 raised',    '2 line(s) ordered, awaiting delivery.',                    NULL, 3, TRUE,  '2026-08-29 08:05:00');
+
+-- ==========================================
+-- 8. MOCK DATA
+--
+-- Six months of trading for a hardware shop in Nasugbu, Batangas, generated
+-- by a script with a fixed seed so it is the same on every machine. The
+-- credit book holds one account of each standing, worked out by the rules
+-- in vw_customer_credit. Ids continue from the demo data above.
+-- ==========================================
+INSERT INTO staff (staff_id, first_name, middle_name, last_name, phone, role_id, is_active) VALUES
+(8, 'Liza', 'Marie', 'Gonzales', '+639171000008', 4, TRUE),
+(9, 'Ramon', 'Ortega', 'Villanueva', '+639171000009', 5, TRUE),
+(10, 'Teresa', 'Andrada', 'Ocampo', '+639171000010', 3, TRUE),
+(11, 'Carlo', 'Mateo', 'Dizon', '+639171000011', 2, TRUE),
+(12, 'Noel', 'Santos', 'Bautista', '+639171000012', 4, FALSE),
+(13, 'Grace', 'Uy', 'Lim', '+639171000013', 4, TRUE),
+(14, 'Efren', NULL, 'Magbanua', '+639171000014', 5, TRUE);
+UPDATE staff SET created_at = '2026-02-03 08:00:00' WHERE staff_id BETWEEN 8 AND 14;
+UPDATE staff SET archived_at = '2026-06-30 17:30:00', archived_by_staff_id = 1 WHERE staff_id = 12;
+
+INSERT INTO users (staff_id, email, password, must_change_password, last_login) VALUES
+(8, 'liza.gonzales@hardware.com', 'liza12345', TRUE, '2026-09-12 17:15:58'),
+(9, 'ramon.villanueva@hardware.com', 'ramon12345', TRUE, '2026-09-11 13:30:26'),
+(10, 'teresa.ocampo@hardware.com', 'teresa12345', TRUE, '2026-09-10 08:25:25'),
+(11, 'carlo.dizon@hardware.com', 'carlo12345', TRUE, '2026-09-06 11:40:44'),
+(12, 'noel.bautista@hardware.com', 'noel12345', TRUE, NULL),
+(13, 'grace.lim@hardware.com', 'grace12345', TRUE, '2026-09-11 10:55:03'),
+(14, 'efren.magbanua@hardware.com', 'efren12345', TRUE, '2026-09-09 15:10:58');
+
+-- two people hold keys outside their role, both given by the administrator
+INSERT INTO system_permissions (staff_id, system_id, can_monitor, can_manage, can_control, note, granted_by_staff_id, granted_at, updated_at) VALUES
+(2,  (SELECT system_id FROM connected_systems WHERE system_key = 'backup'),   TRUE, FALSE, TRUE,  'Takes a backup before the month-end stock count.', 1, '2026-05-02 09:15:00', '2026-05-02 09:15:00'),
+(10, (SELECT system_id FROM connected_systems WHERE system_key = 'database'), TRUE, FALSE, FALSE, 'Checks the database is up before opening the stockroom.', 1, '2026-06-11 08:40:00', '2026-06-11 08:40:00');
+
+INSERT INTO customers (first_name, last_name, phone, address, created_at) VALUES
+('Maria Luisa', 'Santos', '0966-602-8036', 'Brgy. Wawa, Nasugbu, Batangas', '2026-02-10 12:55:52'),
+('Ernesto', 'Ramos', '0925-784-6117', 'Brgy. Bucana, Nasugbu, Batangas', '2026-04-15 16:15:29'),
+('Jocelyn', 'Dela Cruz', '0941-735-9689', 'Poblacion, Nasugbu, Batangas', '2026-05-21 17:00:46'),
+('Rodrigo', 'Mendoza', '0952-982-6717', 'Brgy. Lumbangan, Nasugbu, Batangas', '2026-05-06 15:35:21'),
+('Cristina', 'Bautista', '0920-968-9684', 'Brgy. Tumalim, Nasugbu, Batangas', '2026-02-25 12:55:46'),
+('Alfredo', 'Garcia', '0916-550-9078', 'Brgy. Balaytigui, Nasugbu, Batangas', '2026-02-15 13:00:41'),
+('Nenita', 'Reyes', '0992-324-6743', 'Brgy. Aga, Nasugbu, Batangas', '2026-01-30 08:45:08'),
+('Dominador', 'Torres', '0953-425-3552', 'Brgy. Kaylaway, Nasugbu, Batangas', '2026-05-21 14:00:48'),
+('Evelyn', 'Flores', '0952-992-5182', 'Brgy. Munting Indan, Nasugbu, Batangas', '2026-05-24 09:55:57'),
+('Renato', 'Castillo', '0987-116-4477', 'Brgy. Bilaran, Nasugbu, Batangas', '2026-02-04 16:00:26'),
+('Lorna', 'Villanueva', '0974-678-2903', 'Brgy. Pantalan, Nasugbu, Batangas', '2026-02-12 08:05:25'),
+('Benjamin', 'Aquino', '0963-554-2964', 'Brgy. Banilad, Nasugbu, Batangas', '2026-03-11 15:00:19'),
+('Marites', 'Navarro', '0950-142-5423', 'Brgy. Cogunan, Nasugbu, Batangas', '2026-01-11 09:40:12'),
+('Ricardo', 'Pascual', '0990-218-9562', 'Brgy. Papaya, Nasugbu, Batangas', '2026-03-12 10:00:06'),
+('Divina', 'Mercado', '0993-149-8408', 'Brgy. Looc, Nasugbu, Batangas', '2026-04-17 11:40:59'),
+('Arturo', 'Salazar', '0922-619-3416', 'Brgy. Bunducan, Nasugbu, Batangas', '2026-05-05 17:00:18'),
+('Imelda', 'Fernandez', '0985-840-9273', 'Brgy. Utod, Nasugbu, Batangas', '2026-04-12 16:50:48'),
+('Danilo', 'Manalo', '0986-871-8097', 'Brgy. Calayo, Nasugbu, Batangas', '2026-02-10 11:40:44'),
+('JR Construction', '', '0941-241-9001', 'Brgy. Bulihan, Nasugbu, Batangas', '2026-02-19 16:35:53'),
+('Sta. Rosa Builders', '', '0971-541-5405', 'Lian, Batangas', '2026-02-19 08:25:23'),
+('Fely', 'Trinidad', '0995-663-7642', 'Brgy. Catandaan, Nasugbu, Batangas', '2026-05-29 10:55:01'),
+('Gerardo', 'Lumbao', '0938-866-1295', 'Brgy. Dayap, Nasugbu, Batangas', '2026-04-13 14:10:04'),
+('Susan', 'Macaraig', '0967-672-3652', 'Tuy, Batangas', '2026-04-15 08:20:35'),
+('Wilfredo', 'Panganiban', '0978-910-3504', 'Brgy. Malapad na Bato, Nasugbu, Batangas', '2026-03-26 11:20:47'),
+('Aurora', 'Marasigan', '0979-471-7270', 'Brgy. Natipuan, Nasugbu, Batangas', '2026-04-14 08:15:14'),
+('Teodoro', 'Ilagan', '0973-863-8042', 'Brgy. Reparo, Nasugbu, Batangas', '2026-02-19 13:40:14');
+
+INSERT INTO customer_credits (customer_id, credit_limit, standing, notes, updated_by_staff_id, updated_at) VALUES
+(5, 40000.00, 'Good', NULL, 2, '2026-05-24 17:45:54'),
+(6, 25000.00, 'Good', NULL, 11, '2026-05-31 10:00:36'),
+(7, 15000.00, 'Good', NULL, 11, '2026-04-09 15:25:31'),
+(8, 60000.00, 'Good', NULL, 2, '2026-04-18 15:30:58'),
+(9, 10000.00, 'Good', NULL, 2, '2026-04-28 08:20:08'),
+(10, 30000.00, 'Watch', 'Paid late twice in May. Watch before extending.', 2, '2026-04-28 12:40:18'),
+(11, 20000.00, 'Good', NULL, 11, '2026-04-07 14:10:39'),
+(12, 50000.00, 'Good', NULL, 11, '2026-04-03 08:40:26'),
+(13, 12000.00, 'Good', NULL, 11, '2026-04-04 16:15:22'),
+(14, 35000.00, 'Good', NULL, 11, '2026-05-22 10:30:04'),
+(15, 18000.00, 'Good', NULL, 2, '2026-06-07 11:25:19'),
+(16, 25000.00, 'Hold', 'Cheque returned in July. On hold until the balance is cleared.', 11, '2026-06-04 16:15:25'),
+(17, 8000.00, 'Good', NULL, 2, '2026-04-07 13:05:27'),
+(18, 45000.00, 'Good', NULL, 2, '2026-03-14 09:35:16'),
+(19, 0.00, 'Good', NULL, 11, '2026-05-25 11:35:07'),
+(20, 22000.00, 'Good', NULL, 2, '2026-05-07 13:55:49'),
+(23, 150000.00, 'Good', 'Contractor account, settles monthly.', 11, '2026-05-09 15:50:54'),
+(24, 120000.00, 'Good', 'Site account, PO-backed.', 2, '2026-04-20 13:10:28'),
+(26, 16000.00, 'Good', NULL, 11, '2026-04-26 11:10:34'),
+(27, 9000.00, 'Good', NULL, 2, '2026-05-04 15:50:01');
+
+INSERT INTO suppliers (supplier_name, contact_person, contact_number, email, address) VALUES
+('Batangas Builders Depot', 'Ricky Alonzo', '0917-201-4455', 'orders@bbdepot.ph', 'Diversion Road, Balayan, Batangas'),
+('Southern Tagalog Paints', 'Mila Cortez', '0918-334-9021', 'sales@stpaints.com.ph', 'Lipa City, Batangas'),
+('Luzon Electrical Supply', 'Arnel Jacinto', '0920-777-1010', 'arnel@luzonelectrical.ph', 'Calamba, Laguna'),
+('Metro Fasteners Inc.', 'Grace Tan', '0915-606-2020', 'grace.tan@metrofasteners.com', 'Valenzuela City, Metro Manila');
+INSERT INTO brands (brand_name) VALUES ('Bosch'), ('3M'), ('Rain or Shine'), ('Davies'), ('Omni'), ('Firefly'), ('Tolsen'), ('Ingco'), ('Republic');
+INSERT INTO categories (category_name) VALUES ('Paint & Finishes'), ('Fasteners'), ('Safety & Workwear');
+
+INSERT INTO products (product_name, brand_id, category_id, unit_id, price, reorder_point, lead_time_days, safety_stock, reorder_mode, status, supplier_id, is_archived, created_at) VALUES
+('Angle Grinder 4"', 6, 2, 1, 3250.00, 4, 14, 2, 'Manual', 'Active', 2, FALSE, '2026-01-25 15:40:02'),
+('Circular Saw 7-1/4"', 1, 2, 1, 6800.00, 3, 14, 1, 'Manual', 'Active', 2, FALSE, '2026-02-17 16:35:44'),
+('Impact Driver 18V', 2, 2, 1, 7900.00, 3, 14, 1, 'Manual', 'Active', 2, FALSE, '2026-02-01 09:05:31'),
+('Jigsaw 600W', 6, 2, 1, 4100.00, 3, 14, 1, 'Manual', 'Active', 2, FALSE, '2026-01-17 14:05:23'),
+('Heat Gun 2000W', 13, 2, 1, 1450.00, 3, 10, 1, 'Manual', 'Active', 2, FALSE, '2026-01-16 17:00:39'),
+('Screwdriver Set 6pc', 3, 1, 10, 680.00, 10, 7, 3, 'Manual', 'Active', 3, FALSE, '2026-02-01 11:15:48'),
+('Adjustable Wrench 10"', 12, 1, 1, 320.00, 12, 7, 4, 'Manual', 'Active', 3, FALSE, '2026-02-18 13:25:25'),
+('Measuring Tape 5m', 3, 1, 1, 180.00, 25, 7, 8, 'Dynamic', 'Active', 3, FALSE, '2026-02-12 09:45:25'),
+('Spirit Level 24"', 3, 1, 1, 540.00, 8, 7, 2, 'Manual', 'Active', 3, FALSE, '2026-02-02 08:05:03'),
+('Hacksaw Frame', 12, 1, 1, 260.00, 10, 7, 3, 'Manual', 'Active', 3, FALSE, '2026-01-21 10:40:47'),
+('Pliers Combination 8"', 13, 1, 1, 295.00, 15, 7, 5, 'Manual', 'Active', 3, FALSE, '2026-02-22 10:00:11'),
+('Chisel Set 4pc', 3, 1, 10, 890.00, 5, 7, 2, 'Manual', 'Active', 3, FALSE, '2026-01-17 13:15:12'),
+('Trowel Plastering', 12, 1, 1, 210.00, 15, 7, 5, 'Manual', 'Active', 3, FALSE, '2026-01-21 13:10:52'),
+('PVC Pipe 1"', NULL, 3, 4, 185.00, 40, 5, 15, 'Dynamic', 'Active', 1, FALSE, '2026-02-02 13:30:50'),
+('PVC Elbow 1/2"', NULL, 3, 1, 12.00, 100, 5, 40, 'Dynamic', 'Active', 1, FALSE, '2026-02-17 17:35:06'),
+('PVC Solvent Cement 200cc', NULL, 3, 1, 95.00, 20, 5, 8, 'Manual', 'Active', 1, FALSE, '2026-01-22 11:35:41'),
+('Teflon Tape', 7, 3, 9, 18.00, 60, 5, 20, 'Dynamic', 'Active', 1, FALSE, '2026-02-05 16:15:08'),
+('Faucet Brass 1/2"', NULL, 3, 1, 420.00, 10, 7, 3, 'Manual', 'Active', 1, FALSE, '2026-02-10 12:05:10'),
+('Water Closet Set', NULL, 3, 10, 4200.00, 2, 14, 1, 'Manual', 'Active', 1, FALSE, '2026-01-16 11:30:37'),
+('THHN Wire 2.0mm 75m', NULL, 4, 9, 2350.00, 6, 10, 2, 'Manual', 'Active', 5, FALSE, '2026-02-22 12:50:13'),
+('THHN Wire 3.5mm 75m', NULL, 4, 9, 3900.00, 4, 10, 2, 'Manual', 'Active', 5, FALSE, '2026-02-03 08:45:03'),
+('LED Bulb 9W', 11, 4, 1, 120.00, 40, 5, 15, 'Dynamic', 'Active', 5, FALSE, '2026-01-23 11:40:50'),
+('Outlet Duplex', 10, 4, 1, 85.00, 30, 5, 10, 'Manual', 'Active', 5, FALSE, '2026-01-29 08:00:18'),
+('Switch 1-Gang', 10, 4, 1, 75.00, 30, 5, 10, 'Manual', 'Active', 5, FALSE, '2026-01-19 09:00:55'),
+('Electrical Tape', 7, 4, 9, 45.00, 40, 5, 15, 'Dynamic', 'Active', 5, FALSE, '2026-02-04 09:00:43'),
+('Extension Cord 5m', 11, 4, 1, 380.00, 8, 7, 3, 'Manual', 'Active', 5, FALSE, '2026-02-03 09:10:21'),
+('Deformed Bar 10mm x 6m', NULL, 5, 1, 245.00, 100, 7, 40, 'Dynamic', 'Active', 3, FALSE, '2026-02-15 13:15:39'),
+('Hollow Block 4"', NULL, 5, 1, 14.00, 500, 5, 200, 'Dynamic', 'Active', 3, FALSE, '2026-01-26 15:50:34'),
+-- Sand and gravel are archived: six months of sales lines still point at them.
+('Sand Washed', NULL, 5, 8, 180.00, 30, 5, 10, 'Manual', 'Inactive', 3, TRUE, '2026-02-20 10:15:13'),
+('Gravel 3/4"', NULL, 5, 8, 210.00, 30, 5, 10, 'Manual', 'Inactive', 3, TRUE, '2026-01-31 09:20:43'),
+('Plywood 1/2" 4x8', NULL, 5, 13, 780.00, 20, 7, 8, 'Manual', 'Active', 3, FALSE, '2026-01-29 11:25:42'),
+('GI Sheet Corrugated 8ft', NULL, 5, 13, 460.00, 25, 7, 10, 'Manual', 'Active', 3, FALSE, '2026-02-12 09:45:33'),
+('Elastomeric Roof Paint 4L', 8, 6, 12, 1450.00, 6, 10, 2, 'Manual', 'Active', 4, FALSE, '2026-02-15 16:00:08'),
+('Enamel Paint Gloss 1L', 4, 6, 3, 320.00, 15, 10, 5, 'Manual', 'Active', 4, FALSE, '2026-02-14 14:10:38'),
+('Primer Flat 4L', 9, 6, 12, 890.00, 8, 10, 3, 'Manual', 'Active', 4, FALSE, '2026-01-31 14:40:07'),
+('Paint Roller 7"', NULL, 6, 1, 110.00, 20, 7, 8, 'Manual', 'Active', 4, FALSE, '2026-02-05 12:10:12'),
+('Common Wire Nails 2"', 14, 7, 6, 78.00, 50, 7, 20, 'Dynamic', 'Active', 6, FALSE, '2026-02-18 15:30:59'),
+('Concrete Nails 3"', 14, 7, 6, 95.00, 30, 7, 10, 'Dynamic', 'Active', 6, FALSE, '2026-01-19 16:40:33'),
+('Tox Screw Set 100pc', NULL, 7, 11, 150.00, 15, 7, 5, 'Manual', 'Active', 6, FALSE, '2026-01-19 14:30:09'),
+('Work Gloves Rubberised', 12, 8, 11, 65.00, 30, 7, 10, 'Manual', 'Active', 6, FALSE, '2026-02-05 17:05:12'),
+('Safety Helmet', 12, 8, 1, 260.00, 10, 7, 3, 'Manual', 'Inactive', 6, TRUE, '2026-02-03 09:45:10'),
+('Old Model Sander', 1, 2, 1, 2200.00, 2, 14, 0, 'Manual', 'Inactive', 2, TRUE, '2026-02-06 10:35:54'),
+('Discontinued Enamel Ivory', 4, 6, 3, 290.00, 5, 10, 0, 'Manual', 'Active', 4, FALSE, '2026-02-07 14:00:59');
+UPDATE products SET archived_at = '2026-05-12 10:15:00', archived_by_staff_id = 3 WHERE product_id = 49;
+UPDATE products SET archived_at = '2026-07-03 15:40:00', archived_by_staff_id = 10 WHERE product_id = 50;
+UPDATE products SET archived_at = '2026-09-15 09:00:00', archived_by_staff_id = 3
+WHERE product_name IN ('Sand Washed', 'Gravel 3/4"');
+
+INSERT INTO inventory (product_id, quantity_in_stock) VALUES
+(9, 7),
+(10, 3),
+(11, 5),
+(12, 2),
+(13, 6),
+(14, 22),
+(15, 30),
+(16, 41),
+(17, 11),
+(18, 16),
+(19, 27),
+(20, 6),
+(21, 9),
+(22, 120),
+(23, 310),
+(24, 34),
+(25, 145),
+(26, 14),
+(27, 3),
+(28, 9),
+(29, 2),
+(30, 96),
+(31, 58),
+(32, 47),
+(33, 71),
+(34, 12),
+(35, 260),
+(36, 1850),
+(37, 44),
+(38, 38),
+(39, 26),
+(40, 33),
+(41, 8),
+(42, 21),
+(43, 5),
+(44, 29),
+(45, 120),
+(46, 18),
+(47, 24),
+(48, 40),
+(49, 13),
+(50, 0),
+(51, 0);
+
+INSERT INTO purchase_orders (supplier_id, order_date, status) VALUES
+(4, '2026-03-18 16:05:32', 'Received'),
+(6, '2026-04-02 17:50:24', 'Received'),
+(6, '2026-04-22 08:45:07', 'Received'),
+(5, '2026-05-09 17:20:11', 'Cancelled'),
+(4, '2026-05-27 08:10:25', 'Received'),
+(2, '2026-06-15 17:35:07', 'Received'),
+(1, '2026-07-06 15:05:23', 'Received'),
+(5, '2026-07-28 16:40:54', 'Received'),
+(2, '2026-08-19 17:15:59', 'Received'),
+(6, '2026-09-08 12:30:56', 'Pending'),
+(2, '2026-09-11 13:50:55', 'Pending');
+INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_cost) VALUES
+(4, 42, 20, 232.80),
+(4, 44, 50, 71.45),
+(4, 51, 100, 205.50),
+(4, 43, 3, 642.76),
+(5, 46, 50, 70.95),
+(5, 47, 30, 98.96),
+(5, 45, 20, 59.89),
+(6, 48, 20, 43.38),
+(6, 47, 20, 98.96),
+(7, 33, 100, 28.95),
+(7, 28, 10, 1845.26),
+(7, 29, 10, 2605.99),
+(7, 30, 50, 85.63),
+(8, 42, 10, 232.80),
+(8, 41, 10, 899.81),
+(8, 51, 20, 205.50),
+(9, 13, 3, 994.88),
+(9, 7, 5, 393.31),
+(9, 5, 20, 123.80),
+(10, 26, 30, 268.54),
+(10, 6, 30, 207.24),
+(11, 29, 6, 2605.99),
+(11, 31, 30, 57.10),
+(11, 32, 10, 51.49),
+(11, 34, 20, 275.65),
+(12, 11, 6, 5730.16),
+(12, 13, 3, 994.88),
+(13, 45, 10, 59.89),
+(13, 48, 20, 43.38),
+(13, 46, 50, 70.95),
+(14, 5, 100, 123.80),
+(14, 13, 10, 994.88),
+(14, 10, 10, 4846.65),
+(14, 11, 2, 5730.16);
+
+INSERT INTO sales (sale_id, customer_id, walk_in_name, cashier_staff_id, total_amount, discount, amount_paid, payment_method, payment_status, reference_no, sale_date, tax_registration, vat_rate, vatable_sale, vat_amount) VALUES
+(11, 9, NULL, 6, 5440.00, 50.00, 5390.00, 'Cash', 'Paid', NULL, '2026-03-22 17:40:28', 'VAT', 12.00, 4812.50, 577.50),
+(12, 8, NULL, 6, 15485.00, 0.00, 15485.00, 'Cash', 'Paid', NULL, '2026-03-22 10:05:38', 'VAT', 12.00, 13825.89, 1659.11),
+(13, 20, NULL, 8, 4890.00, 50.00, 4840.00, 'COD', 'Paid', NULL, '2026-03-24 13:35:31', 'VAT', 12.00, 4321.43, 518.57),
+(14, 19, NULL, 4, 17750.00, 0.00, 17800.00, 'Cash', 'Paid', NULL, '2026-03-26 08:15:11', 'VAT', 12.00, 15848.21, 1901.79),
+(15, NULL, NULL, 4, 6800.00, 0.00, 6900.00, 'Cash', 'Paid', NULL, '2026-03-27 11:35:49', 'VAT', 12.00, 6071.43, 728.57),
+(16, 14, NULL, 13, 2160.00, 0.00, 2160.00, 'Credit', 'Paid', NULL, '2026-03-28 14:15:01', 'VAT', 12.00, 1928.57, 231.43),
+(17, 3, NULL, 8, 8130.00, 200.00, 8000.00, 'Cash', 'Paid', NULL, '2026-03-28 12:00:35', 'VAT', 12.00, 7080.36, 849.64),
+(18, NULL, 'Tricycle driver', 8, 7800.00, 50.00, 7750.00, 'Cheque', 'Paid', 'CHQ-319464', '2026-03-29 10:10:34', 'VAT', 12.00, 6919.64, 830.36),
+(19, 26, NULL, 13, 7405.00, 200.00, 7300.00, 'Cash', 'Paid', NULL, '2026-03-31 13:45:58', 'VAT', 12.00, 6433.04, 771.96),
+(20, 18, NULL, 4, 7900.00, 0.00, 7900.00, 'PayMaya', 'Paid', 'PM-402162', '2026-04-03 12:55:03', 'VAT', 12.00, 7053.57, 846.43),
+(21, 12, NULL, 8, 4810.00, 200.00, 0.00, 'COD', 'Unpaid', NULL, '2026-04-04 15:20:57', 'VAT', 12.00, 4116.07, 493.93),
+(22, 20, NULL, 4, 3670.00, 100.00, 3570.00, 'Credit', 'Paid', NULL, '2026-04-05 14:05:47', 'VAT', 12.00, 3187.50, 382.50),
+(23, 18, NULL, 6, 840.00, 0.00, 840.00, 'PayMaya', 'Paid', 'PM-536400', '2026-04-05 17:25:43', 'VAT', 12.00, 750.00, 90.00),
+(24, 11, NULL, 12, 580.00, 0.00, 580.00, 'Credit', 'Paid', NULL, '2026-04-06 09:50:11', 'VAT', 12.00, 517.86, 62.14),
+(25, 5, NULL, 6, 12425.00, 0.00, 12425.00, 'GCash', 'Paid', 'GC-633066', '2026-04-06 13:45:31', 'VAT', 12.00, 11093.75, 1331.25),
+(26, 20, NULL, 4, 8920.00, 150.00, 8770.00, 'Credit', 'Paid', NULL, '2026-04-11 11:10:05', 'VAT', 12.00, 7830.36, 939.64),
+(27, 3, NULL, 12, 6342.00, 0.00, 6342.00, 'Bank Transfer', 'Paid', 'BT-691689', '2026-04-21 09:15:27', 'VAT', 12.00, 5662.50, 679.50),
+(28, NULL, 'Mang Tonyo', 13, 6120.00, 50.00, 6100.00, 'Cash', 'Paid', NULL, '2026-04-27 09:50:29', 'VAT', 12.00, 5419.64, 650.36),
+(29, 29, NULL, 12, 5380.00, 0.00, 5380.00, 'COD', 'Paid', NULL, '2026-04-28 15:20:11', 'VAT', 12.00, 4803.57, 576.43),
+(30, 22, NULL, 12, 9365.00, 0.00, 9365.00, 'Bank Transfer', 'Paid', 'BT-494181', '2026-04-29 14:10:57', 'VAT', 12.00, 8361.61, 1003.39),
+(31, NULL, 'Ate Baby', 6, 18180.00, 50.00, 18130.00, 'Bank Transfer', 'Paid', 'BT-732987', '2026-05-06 13:40:35', 'VAT', 12.00, 16187.50, 1942.50),
+(32, 28, NULL, 4, 5600.00, 0.00, 5600.00, 'COD', 'Paid', NULL, '2026-05-07 12:05:35', 'VAT', 12.00, 5000.00, 600.00),
+(33, 7, NULL, 12, 6000.00, 0.00, 6000.00, 'Cash', 'Paid', NULL, '2026-05-08 10:10:55', 'VAT', 12.00, 5357.14, 642.86),
+(34, 19, NULL, 8, 7980.00, 150.00, 7830.00, 'GCash', 'Paid', 'GC-304441', '2026-05-11 15:30:59', 'VAT', 12.00, 6991.07, 838.93),
+(35, 27, NULL, 12, 240.00, 0.00, 240.00, 'Credit', 'Paid', NULL, '2026-05-11 16:30:52', 'VAT', 12.00, 214.29, 25.71),
+(36, 11, NULL, 13, 8910.00, 150.00, 8760.00, 'Credit', 'Paid', NULL, '2026-05-12 15:05:17', 'VAT', 12.00, 7821.43, 938.57),
+(37, 19, NULL, 12, 180.00, 0.00, 180.00, 'Credit', 'Paid', NULL, '2026-05-13 12:00:42', 'VAT', 12.00, 160.71, 19.29),
+(38, 22, NULL, 4, 9838.00, 0.00, 9838.00, 'Cheque', 'Paid', 'CHQ-294267', '2026-05-14 14:35:06', 'VAT', 12.00, 8783.93, 1054.07),
+(39, NULL, NULL, 6, 2842.00, 100.00, 2742.00, 'GCash', 'Paid', 'GC-917467', '2026-05-16 17:55:13', 'VAT', 12.00, 2448.21, 293.79),
+(40, 10, NULL, 13, 780.00, 0.00, 780.00, 'Cash', 'Paid', NULL, '2026-05-16 16:10:44', 'VAT', 12.00, 696.43, 83.57),
+(41, 16, NULL, 8, 2390.00, 0.00, 0.00, 'Credit', 'Unpaid', NULL, '2026-05-17 14:20:57', 'VAT', 12.00, 2133.93, 256.07),
+(42, 3, NULL, 4, 6875.00, 0.00, 6875.00, 'Cash', 'Paid', NULL, '2026-05-17 12:55:47', 'VAT', 12.00, 6138.39, 736.61),
+(43, NULL, 'Mang Tonyo', 8, 20530.00, 200.00, 20330.00, 'COD', 'Paid', NULL, '2026-05-17 15:25:10', 'VAT', 12.00, 18151.79, 2178.21),
+(44, 13, NULL, 12, 1125.00, 0.00, 1125.00, 'Cash', 'Paid', NULL, '2026-05-18 11:20:20', 'VAT', 12.00, 1004.46, 120.54),
+(45, 3, NULL, 4, 4861.00, 0.00, 4861.00, 'Cash', 'Paid', NULL, '2026-05-18 16:45:13', 'VAT', 12.00, 4340.18, 520.82),
+(46, 22, NULL, 6, 8340.00, 0.00, 8340.00, 'COD', 'Paid', NULL, '2026-05-20 11:15:06', 'VAT', 12.00, 7446.43, 893.57),
+(47, 17, NULL, 4, 3780.00, 150.00, 3630.00, 'Credit', 'Paid', NULL, '2026-05-20 15:20:03', 'VAT', 12.00, 3241.07, 388.93),
+(48, NULL, 'Mang Tonyo', 12, 12580.00, 0.00, 12580.00, 'COD', 'Paid', NULL, '2026-05-21 08:00:02', 'VAT', 12.00, 11232.14, 1347.86),
+(49, 12, NULL, 8, 6610.00, 100.00, 6510.00, 'Cash', 'Paid', NULL, '2026-05-24 14:00:54', 'VAT', 12.00, 5812.50, 697.50),
+(50, 22, NULL, 12, 6700.00, 0.00, 6700.00, 'COD', 'Paid', NULL, '2026-05-24 16:15:48', 'VAT', 12.00, 5982.14, 717.86),
+(51, 15, NULL, 13, 1010.00, 0.00, 1100.00, 'Cash', 'Paid', NULL, '2026-05-25 17:55:59', 'VAT', 12.00, 901.79, 108.21),
+(52, 9, NULL, 6, 260.00, 0.00, 260.00, 'Bank Transfer', 'Paid', 'BT-536807', '2026-05-27 10:50:55', 'VAT', 12.00, 232.14, 27.86),
+(53, 8, NULL, 4, 3260.00, 50.00, 3210.00, 'Cash', 'Paid', NULL, '2026-05-27 11:20:41', 'VAT', 12.00, 2866.07, 343.93),
+(54, 17, NULL, 6, 3560.00, 0.00, 3560.00, 'GCash', 'Paid', 'GC-974536', '2026-05-29 12:00:03', 'VAT', 12.00, 3178.57, 381.43),
+(55, 27, NULL, 6, 4350.00, 0.00, 4350.00, 'Credit', 'Paid', NULL, '2026-05-30 12:45:27', 'VAT', 12.00, 3883.93, 466.07),
+(56, 9, NULL, 13, 1485.00, 150.00, 1335.00, 'GCash', 'Paid', 'GC-956130', '2026-06-02 15:25:33', 'VAT', 12.00, 1191.96, 143.04),
+(57, 3, NULL, 6, 2050.00, 0.00, 2050.00, 'COD', 'Paid', NULL, '2026-06-03 15:40:47', 'VAT', 12.00, 1830.36, 219.64),
+(58, 18, NULL, 4, 360.00, 0.00, 306.00, 'Credit', 'Partial', NULL, '2026-06-08 15:40:28', 'VAT', 12.00, 321.43, 38.57),
+(59, 14, NULL, 13, 7279.00, 0.00, 7279.00, 'Cash', 'Paid', NULL, '2026-06-08 13:35:31', 'VAT', 12.00, 6499.11, 779.89),
+(60, NULL, NULL, 13, 10914.00, 0.00, 10914.00, 'GCash', 'Paid', 'GC-712760', '2026-06-08 17:35:01', 'VAT', 12.00, 9744.64, 1169.36),
+(61, 22, NULL, 6, 8804.00, 0.00, 8804.00, 'COD', 'Paid', NULL, '2026-06-12 10:35:33', 'VAT', 12.00, 7860.71, 943.29),
+(62, 24, NULL, 13, 2520.00, 0.00, 2520.00, 'Cash', 'Paid', NULL, '2026-06-13 15:40:29', 'VAT', 12.00, 2250.00, 270.00),
+(63, 7, NULL, 13, 3320.00, 0.00, 3320.00, 'GCash', 'Paid', 'GC-344932', '2026-06-14 14:10:37', 'VAT', 12.00, 2964.29, 355.71),
+(64, 26, NULL, 12, 6800.00, 100.00, 6700.00, 'Credit', 'Paid', NULL, '2026-06-17 10:15:06', 'VAT', 12.00, 5982.14, 717.86),
+(65, 3, NULL, 8, 3735.00, 0.00, 3735.00, 'PayMaya', 'Paid', 'PM-781304', '2026-06-19 10:55:43', 'VAT', 12.00, 3334.82, 400.18),
+(66, 17, NULL, 6, 520.00, 0.00, 520.00, 'Credit', 'Paid', NULL, '2026-06-20 09:50:50', 'VAT', 12.00, 464.29, 55.71),
+(67, 17, NULL, 12, 5400.00, 0.00, 5400.00, 'GCash', 'Paid', 'GC-859189', '2026-06-25 15:05:54', 'VAT', 12.00, 4821.43, 578.57),
+(68, 14, NULL, 13, 16520.00, 0.00, 16520.00, 'Cash', 'Paid', NULL, '2026-06-26 14:45:06', 'VAT', 12.00, 14750.00, 1770.00),
+(69, 20, NULL, 13, 1290.00, 50.00, 1240.00, 'PayMaya', 'Paid', 'PM-772067', '2026-06-27 17:55:18', 'VAT', 12.00, 1107.14, 132.86),
+(70, 8, NULL, 4, 13270.00, 200.00, 13070.00, 'GCash', 'Paid', 'GC-663814', '2026-06-28 14:40:45', 'VAT', 12.00, 11669.64, 1400.36),
+(71, NULL, NULL, 4, 2100.00, 150.00, 1950.00, 'Cash', 'Paid', NULL, '2026-06-28 10:00:25', 'VAT', 12.00, 1741.07, 208.93),
+(72, 1, NULL, 6, 960.00, 0.00, 960.00, 'Cheque', 'Paid', 'CHQ-769581', '2026-06-29 12:15:23', 'VAT', 12.00, 857.14, 102.86),
+(73, NULL, 'Ate Baby', 13, 312.00, 0.00, 312.00, 'Cash', 'Paid', NULL, '2026-07-01 16:25:55', 'VAT', 12.00, 278.57, 33.43),
+(74, 25, NULL, 13, 1470.00, 0.00, 1470.00, 'GCash', 'Paid', 'GC-550053', '2026-07-02 09:30:58', 'VAT', 12.00, 1312.50, 157.50),
+(75, 11, NULL, 6, 5790.00, 200.00, 5590.00, 'Credit', 'Paid', NULL, '2026-07-03 16:10:36', 'VAT', 12.00, 4991.07, 598.93),
+(76, 12, NULL, 8, 7260.00, 0.00, 7260.00, 'Credit', 'Paid', NULL, '2026-07-09 10:30:53', 'VAT', 12.00, 6482.14, 777.86),
+(77, 26, NULL, 6, 21700.00, 100.00, 21600.00, 'COD', 'Paid', NULL, '2026-07-10 12:10:56', 'VAT', 12.00, 19285.71, 2314.29),
+(78, 24, NULL, 4, 6080.00, 0.00, 3648.00, 'Credit', 'Partial', NULL, '2026-07-12 11:05:01', 'VAT', 12.00, 5428.57, 651.43),
+(79, 21, NULL, 13, 24025.00, 0.00, 24025.00, 'GCash', 'Paid', 'GC-801851', '2026-07-14 14:40:38', 'VAT', 12.00, 21450.89, 2574.11),
+(80, 24, NULL, 4, 644.00, 0.00, 644.00, 'GCash', 'Paid', 'GC-426479', '2026-07-18 08:35:54', 'VAT', 12.00, 575.00, 69.00),
+(81, 15, NULL, 13, 5420.00, 0.00, 5420.00, 'Credit', 'Paid', NULL, '2026-07-19 16:00:01', 'VAT', 12.00, 4839.29, 580.71),
+(82, 29, NULL, 6, 914.00, 0.00, 914.00, 'COD', 'Paid', NULL, '2026-07-20 17:55:25', 'VAT', 12.00, 816.07, 97.93),
+(83, 21, NULL, 6, 5970.00, 0.00, 6000.00, 'Cash', 'Paid', NULL, '2026-07-20 12:15:17', 'VAT', 12.00, 5330.36, 639.64),
+(84, 1, NULL, 6, 1080.00, 100.00, 980.00, 'COD', 'Paid', NULL, '2026-07-23 12:45:49', 'VAT', 12.00, 875.00, 105.00),
+(85, 14, NULL, 13, 630.00, 0.00, 630.00, 'Cash', 'Paid', NULL, '2026-07-23 15:50:19', 'VAT', 12.00, 562.50, 67.50),
+(86, 1, NULL, 8, 240.00, 0.00, 240.00, 'Bank Transfer', 'Paid', 'BT-613794', '2026-07-26 13:55:19', 'VAT', 12.00, 214.29, 25.71),
+(87, 11, NULL, 13, 31105.00, 150.00, 30955.00, 'COD', 'Paid', NULL, '2026-07-26 14:10:26', 'VAT', 12.00, 27638.39, 3316.61),
+(88, 10, NULL, 6, 750.00, 0.00, 225.00, 'Credit', 'Partial', NULL, '2026-07-27 10:55:14', 'VAT', 12.00, 669.64, 80.36),
+(89, 9, NULL, 13, 12526.00, 0.00, 12600.00, 'Cash', 'Paid', NULL, '2026-07-27 17:40:07', 'VAT', 12.00, 11183.93, 1342.07),
+(90, NULL, NULL, 13, 13900.00, 150.00, 13750.00, 'Cash', 'Paid', NULL, '2026-07-30 12:45:49', 'VAT', 12.00, 12276.79, 1473.21),
+(91, 7, NULL, 4, 2660.00, 0.00, 2700.00, 'Cash', 'Paid', NULL, '2026-07-31 09:30:14', 'VAT', 12.00, 2375.00, 285.00),
+(92, 21, NULL, 13, 928.00, 0.00, 928.00, 'Cheque', 'Paid', 'CHQ-168842', '2026-08-03 11:25:55', 'VAT', 12.00, 828.57, 99.43),
+(93, 14, NULL, 4, 16980.00, 0.00, 16980.00, 'Credit', 'Paid', NULL, '2026-08-03 13:00:34', 'VAT', 12.00, 15160.71, 1819.29),
+(94, NULL, NULL, 6, 1260.00, 0.00, 1300.00, 'Cash', 'Paid', NULL, '2026-08-04 12:35:55', 'VAT', 12.00, 1125.00, 135.00),
+(95, 4, NULL, 6, 23300.00, 0.00, 23300.00, 'COD', 'Paid', NULL, '2026-08-06 15:50:20', 'VAT', 12.00, 20803.57, 2496.43),
+(96, 5, NULL, 4, 5652.00, 200.00, 5452.00, 'Cash', 'Paid', NULL, '2026-08-08 16:05:57', 'VAT', 12.00, 4867.86, 584.14),
+(97, 12, NULL, 13, 4350.00, 0.00, 4350.00, 'COD', 'Paid', NULL, '2026-08-12 08:15:32', 'VAT', 12.00, 3883.93, 466.07),
+(98, 9, NULL, 13, 384.00, 0.00, 384.00, 'Cheque', 'Paid', 'CHQ-839553', '2026-08-13 13:15:14', 'VAT', 12.00, 342.86, 41.14),
+(99, 9, NULL, 8, 8450.00, 0.00, 8500.00, 'Cash', 'Paid', NULL, '2026-08-14 14:30:51', 'VAT', 12.00, 7544.64, 905.36),
+(100, NULL, 'Aling Nena', 4, 10690.00, 0.00, 10690.00, 'Cash', 'Paid', NULL, '2026-08-18 14:40:45', 'VAT', 12.00, 9544.64, 1145.36),
+(101, 22, NULL, 13, 9750.00, 0.00, 9750.00, 'Bank Transfer', 'Paid', 'BT-459817', '2026-08-18 11:55:38', 'VAT', 12.00, 8705.36, 1044.64),
+(102, 7, NULL, 8, 26980.00, 0.00, 27000.00, 'Cash', 'Paid', NULL, '2026-08-18 14:40:09', 'VAT', 12.00, 24089.29, 2890.71),
+(103, 23, NULL, 8, 51300.00, 0.00, 0.00, 'Credit', 'Unpaid', NULL, '2026-08-22 12:10:20', 'VAT', 12.00, 45803.57, 5496.43),
+(104, 6, NULL, 13, 6050.00, 0.00, 6050.00, 'GCash', 'Paid', 'GC-107771', '2026-08-26 10:45:49', 'VAT', 12.00, 5401.79, 648.21),
+(105, NULL, 'Mang Tonyo', 6, 10319.00, 0.00, 10319.00, 'Cash', 'Paid', NULL, '2026-08-27 09:15:15', 'VAT', 12.00, 9213.39, 1105.61),
+(106, 13, NULL, 4, 13200.00, 0.00, 0.00, 'Credit', 'Unpaid', NULL, '2026-08-31 15:10:11', 'VAT', 12.00, 11785.71, 1414.29),
+(107, 3, NULL, 13, 380.00, 0.00, 380.00, 'COD', 'Paid', NULL, '2026-09-01 15:55:46', 'VAT', 12.00, 339.29, 40.71),
+(108, 8, NULL, 6, 13215.00, 0.00, 6607.50, 'Credit', 'Partial', NULL, '2026-09-03 09:40:17', 'VAT', 12.00, 11799.11, 1415.89),
+(109, 29, NULL, 8, 25815.00, 0.00, 25815.00, 'Cash', 'Paid', NULL, '2026-09-03 14:05:06', 'VAT', 12.00, 23049.11, 2765.89),
+(110, 7, NULL, 8, 11500.00, 50.00, 0.00, 'Credit', 'Unpaid', NULL, '2026-09-04 15:50:35', 'VAT', 12.00, 10223.21, 1226.79),
+(111, 13, NULL, 13, 2670.00, 0.00, 2670.00, 'Cash', 'Paid', NULL, '2026-09-04 17:30:21', 'VAT', 12.00, 2383.93, 286.07),
+(112, 6, NULL, 8, 4515.00, 150.00, 0.00, 'Credit', 'Unpaid', NULL, '2026-09-05 12:05:04', 'VAT', 12.00, 3897.32, 467.68),
+(113, 5, NULL, 6, 1374.00, 0.00, 0.00, 'Credit', 'Unpaid', NULL, '2026-09-08 14:20:29', 'VAT', 12.00, 1226.79, 147.21),
+(114, NULL, 'Tricycle driver', 4, 495.00, 0.00, 495.00, 'GCash', 'Paid', 'GC-976658', '2026-09-08 15:15:46', 'VAT', 12.00, 441.96, 53.04),
+(115, 6, NULL, 13, 9750.00, 0.00, 4875.00, 'Credit', 'Partial', NULL, '2026-09-09 10:10:31', 'VAT', 12.00, 8705.36, 1044.64);
+INSERT INTO sale_items (sale_id, product_id, quantity, unit_price) VALUES
+(11, 14, 8, 680.00),
+(12, 10, 2, 6800.00),
+(12, 48, 29, 65.00),
+(13, 47, 7, 150.00),
+(13, 42, 12, 320.00),
+(14, 29, 2, 3900.00),
+(14, 1, 1, 8500.00),
+(14, 41, 1, 1450.00),
+(15, 10, 1, 6800.00),
+(16, 17, 4, 540.00),
+(17, 5, 6, 180.00),
+(17, 28, 3, 2350.00),
+(18, 39, 10, 780.00),
+(19, 33, 50, 45.00),
+(19, 35, 11, 245.00),
+(19, 51, 6, 290.00),
+(19, 30, 6, 120.00),
+(20, 11, 1, 7900.00),
+(21, 13, 3, 1450.00),
+(21, 40, 1, 460.00),
+(22, 26, 3, 420.00),
+(22, 51, 7, 290.00),
+(22, 34, 1, 380.00),
+(23, 3, 7, 120.00),
+(24, 51, 2, 290.00),
+(25, 39, 10, 780.00),
+(25, 26, 1, 420.00),
+(25, 38, 1, 210.00),
+(25, 31, 47, 85.00),
+(26, 39, 9, 780.00),
+(26, 34, 5, 380.00),
+(27, 25, 49, 18.00),
+(27, 39, 7, 780.00),
+(28, 14, 9, 680.00),
+(29, 12, 1, 4100.00),
+(29, 15, 4, 320.00),
+(30, 41, 2, 1450.00),
+(30, 18, 6, 260.00),
+(30, 22, 3, 185.00),
+(30, 32, 58, 75.00),
+(31, 19, 4, 295.00),
+(31, 1, 2, 8500.00),
+(32, 9, 1, 3250.00),
+(32, 28, 1, 2350.00),
+(33, 4, 8, 750.00),
+(34, 37, 11, 180.00),
+(34, 34, 4, 380.00),
+(34, 51, 8, 290.00),
+(34, 17, 4, 540.00),
+(35, 30, 2, 120.00),
+(36, 17, 8, 540.00),
+(36, 20, 3, 890.00),
+(36, 15, 6, 320.00),
+(37, 37, 1, 180.00),
+(38, 23, 9, 12.00),
+(38, 27, 1, 4200.00),
+(38, 14, 6, 680.00),
+(38, 51, 5, 290.00),
+(39, 38, 3, 210.00),
+(39, 36, 38, 14.00),
+(39, 26, 4, 420.00),
+(40, 18, 3, 260.00),
+(41, 43, 1, 890.00),
+(41, 4, 2, 750.00),
+(42, 7, 10, 620.00),
+(42, 33, 15, 45.00),
+(43, 9, 3, 3250.00),
+(43, 13, 3, 1450.00),
+(43, 51, 11, 290.00),
+(43, 17, 6, 540.00),
+(44, 32, 15, 75.00),
+(45, 25, 57, 18.00),
+(45, 38, 12, 210.00),
+(45, 51, 2, 290.00),
+(45, 35, 3, 245.00),
+(46, 16, 12, 180.00),
+(46, 3, 6, 120.00),
+(46, 46, 42, 95.00),
+(46, 35, 6, 245.00),
+(47, 34, 9, 380.00),
+(47, 3, 3, 120.00),
+(48, 20, 12, 890.00),
+(48, 34, 5, 380.00),
+(49, 17, 8, 540.00),
+(49, 38, 4, 210.00),
+(49, 41, 1, 1450.00),
+(50, 27, 1, 4200.00),
+(50, 47, 8, 150.00),
+(50, 6, 5, 260.00),
+(51, 16, 5, 180.00),
+(51, 44, 1, 110.00),
+(52, 6, 1, 260.00),
+(53, 30, 12, 120.00),
+(53, 6, 7, 260.00),
+(54, 43, 4, 890.00),
+(55, 13, 3, 1450.00),
+(56, 5, 4, 180.00),
+(56, 33, 17, 45.00),
+(57, 47, 4, 150.00),
+(57, 41, 1, 1450.00),
+(58, 5, 2, 180.00),
+(59, 24, 48, 95.00),
+(59, 23, 12, 12.00),
+(59, 16, 3, 180.00),
+(59, 22, 11, 185.00),
+(60, 36, 7, 14.00),
+(60, 25, 57, 18.00),
+(60, 43, 11, 890.00),
+(61, 30, 3, 120.00),
+(61, 43, 1, 890.00),
+(61, 28, 3, 2350.00),
+(61, 25, 28, 18.00),
+(62, 26, 6, 420.00),
+(63, 6, 4, 260.00),
+(63, 34, 6, 380.00),
+(64, 10, 1, 6800.00),
+(65, 5, 10, 180.00),
+(65, 33, 43, 45.00),
+(66, 48, 8, 65.00),
+(67, 2, 12, 450.00),
+(68, 48, 32, 65.00),
+(68, 4, 10, 750.00),
+(68, 7, 8, 620.00),
+(68, 16, 11, 180.00),
+(69, 4, 1, 750.00),
+(69, 16, 3, 180.00),
+(70, 24, 46, 95.00),
+(70, 43, 2, 890.00),
+(70, 20, 8, 890.00),
+(71, 38, 2, 210.00),
+(71, 21, 8, 210.00),
+(72, 42, 3, 320.00),
+(73, 23, 26, 12.00),
+(74, 21, 7, 210.00),
+(75, 41, 3, 1450.00),
+(75, 30, 12, 120.00),
+(76, 28, 3, 2350.00),
+(76, 38, 1, 210.00),
+(77, 1, 2, 8500.00),
+(77, 28, 2, 2350.00),
+(78, 26, 2, 420.00),
+(78, 51, 4, 290.00),
+(78, 14, 6, 680.00),
+(79, 35, 7, 245.00),
+(79, 51, 9, 290.00),
+(79, 11, 2, 7900.00),
+(79, 45, 50, 78.00),
+(80, 36, 46, 14.00),
+(81, 18, 5, 260.00),
+(81, 2, 1, 450.00),
+(81, 3, 11, 120.00),
+(81, 28, 1, 2350.00),
+(82, 25, 33, 18.00),
+(82, 42, 1, 320.00),
+(83, 48, 25, 65.00),
+(83, 51, 11, 290.00),
+(83, 35, 3, 245.00),
+(83, 21, 2, 210.00),
+(84, 30, 9, 120.00),
+(85, 2, 1, 450.00),
+(85, 37, 1, 180.00),
+(86, 30, 2, 120.00),
+(87, 10, 3, 6800.00),
+(87, 38, 1, 210.00),
+(87, 29, 2, 3900.00),
+(87, 35, 11, 245.00),
+(88, 47, 5, 150.00),
+(89, 29, 3, 3900.00),
+(89, 36, 59, 14.00),
+(90, 47, 2, 150.00),
+(90, 10, 2, 6800.00),
+(91, 21, 9, 210.00),
+(91, 44, 7, 110.00),
+(92, 25, 16, 18.00),
+(92, 15, 2, 320.00),
+(93, 17, 6, 540.00),
+(93, 5, 8, 180.00),
+(93, 12, 3, 4100.00),
+(94, 38, 6, 210.00),
+(95, 10, 3, 6800.00),
+(95, 41, 2, 1450.00),
+(96, 16, 8, 180.00),
+(96, 45, 54, 78.00),
+(97, 41, 3, 1450.00),
+(98, 23, 32, 12.00),
+(99, 9, 2, 3250.00),
+(99, 14, 2, 680.00),
+(99, 19, 2, 295.00),
+(100, 41, 1, 1450.00),
+(100, 4, 6, 750.00),
+(100, 42, 12, 320.00),
+(100, 5, 5, 180.00),
+(101, 9, 3, 3250.00),
+(102, 1, 3, 8500.00),
+(102, 22, 8, 185.00),
+(103, 35, 100, 245.00),
+(103, 36, 800, 14.00),
+(103, 6, 60, 260.00),
+(104, 33, 50, 45.00),
+(104, 34, 10, 380.00),
+(105, 22, 3, 185.00),
+(105, 25, 48, 18.00),
+(105, 20, 10, 890.00),
+(106, 1, 1, 8500.00),
+(106, 32, 2, 2350.00),
+(107, 34, 1, 380.00),
+(108, 27, 1, 4200.00),
+(108, 32, 37, 75.00),
+(108, 21, 9, 210.00),
+(108, 13, 3, 1450.00),
+(109, 10, 2, 6800.00),
+(109, 20, 10, 890.00),
+(109, 48, 51, 65.00),
+(110, 1, 1, 8500.00),
+(110, 4, 4, 750.00),
+(111, 43, 3, 890.00),
+(112, 35, 11, 245.00),
+(112, 18, 7, 260.00),
+(113, 25, 53, 18.00),
+(113, 21, 2, 210.00),
+(114, 33, 11, 45.00),
+(115, 9, 3, 3250.00);
+INSERT INTO credit_payments (customer_id, sale_id, amount, payment_method, reference_no, received_by_staff_id, payment_date) VALUES
+(20, 13, 4840.00, 'Cash', NULL, 5, '2026-03-27 14:18:17'),
+(14, 16, 2160.00, 'Bank Transfer', NULL, 13, '2026-04-22 14:15:01'),
+(20, 22, 3570.00, 'Bank Transfer', NULL, 4, '2026-04-20 14:05:47'),
+(11, 24, 580.00, 'GCash', NULL, 12, '2026-04-16 09:50:11'),
+(20, 26, 8770.00, 'Bank Transfer', NULL, 4, '2026-04-26 11:10:05'),
+(29, 29, 5380.00, 'Cash', NULL, 9, '2026-05-01 15:17:57'),
+(28, 32, 5600.00, 'Cash', NULL, 14, '2026-05-09 16:02:06'),
+(27, 35, 240.00, 'Bank Transfer', NULL, 12, '2026-05-17 16:30:52'),
+(11, 36, 8760.00, 'Bank Transfer', NULL, 13, '2026-05-23 15:05:17'),
+(19, 37, 180.00, 'Cash', NULL, 12, '2026-06-02 12:00:42'),
+(NULL, 43, 20330.00, 'Cash', NULL, 9, '2026-05-18 15:03:23'),
+(22, 46, 8340.00, 'Cash', NULL, 5, '2026-05-22 13:12:01'),
+(17, 47, 3630.00, 'GCash', NULL, 4, '2026-06-02 15:20:03'),
+(NULL, 48, 12580.00, 'Cash', NULL, 5, '2026-05-24 14:48:52'),
+(22, 50, 6700.00, 'Cash', NULL, 5, '2026-05-26 16:07:38'),
+(27, 55, 4350.00, 'GCash', NULL, 6, '2026-06-04 12:45:27'),
+(3, 57, 2050.00, 'Cash', NULL, 9, '2026-06-06 15:03:45'),
+(18, 58, 306.00, 'Cash', NULL, 4, '2026-06-08 15:40:28'),
+(22, 61, 8804.00, 'Cash', NULL, 5, '2026-06-14 10:14:06'),
+(26, 64, 6700.00, 'GCash', NULL, 12, '2026-06-22 10:15:06'),
+(17, 66, 520.00, 'Cash', NULL, 6, '2026-07-10 09:50:50'),
+(11, 75, 5590.00, 'GCash', NULL, 6, '2026-07-22 16:10:36'),
+(12, 76, 7260.00, 'GCash', NULL, 8, '2026-07-21 10:30:53'),
+(26, 77, 21600.00, 'Cash', NULL, 9, '2026-07-11 10:13:36'),
+(24, 78, 3648.00, 'Cash', NULL, 4, '2026-07-12 11:05:01'),
+(15, 81, 5420.00, 'GCash', NULL, 13, '2026-07-26 16:00:01'),
+(29, 82, 914.00, 'Cash', NULL, 9, '2026-07-21 12:00:00'),
+(1, 84, 980.00, 'Cash', NULL, 9, '2026-07-24 12:09:15'),
+(11, 87, 30955.00, 'Cash', NULL, 9, '2026-07-29 17:26:00'),
+(10, 88, 225.00, 'Cash', NULL, 6, '2026-07-27 10:55:14'),
+(14, 93, 16980.00, 'Bank Transfer', NULL, 4, '2026-08-23 13:00:34'),
+(4, 95, 23300.00, 'Cash', NULL, 9, '2026-08-08 11:29:36'),
+(12, 97, 4350.00, 'Cash', NULL, 5, '2026-08-13 17:04:40'),
+(3, 107, 380.00, 'Cash', NULL, 5, '2026-09-04 13:23:07'),
+(8, 108, 6607.50, 'Cash', NULL, 6, '2026-09-03 09:40:17'),
+(6, 115, 4875.00, 'Cash', NULL, 13, '2026-09-09 10:10:31');
+
+UPDATE sales SET is_archived = TRUE, archived_at = DATE_ADD(sale_date, INTERVAL 40 MINUTE), archived_by_staff_id = 2 WHERE sale_id IN (62, 68);
+
+INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, contact_name, contact_phone, status, remarks, booked_date, scheduled_date, delivered_at, is_archived, archived_at, archived_by_staff_id) VALUES
+(13, 5, 'Brgy. Bunducan, Nasugbu, Batangas', 'Arturo Salazar', '0978-574-6318', 'Delivered', 'Rescheduled by customer', '2026-03-24', '2026-03-27 13:00:17', '2026-03-27 14:18:17', TRUE, '2026-09-12 02:00:00', NULL),
+(19, 14, 'Brgy. Dayap, Nasugbu, Batangas', 'Gerardo Lumbao', '0931-216-7099', 'Delivered', NULL, '2026-03-31', '2026-04-02 09:00:44', '2026-04-02 10:10:44', TRUE, '2026-09-12 02:00:00', NULL),
+(21, 14, 'Brgy. Kaylaway, Nasugbu, Batangas', 'Dominador Torres', '0995-376-8737', 'Failed', 'Deliver before noon', '2026-04-04', '2026-04-07 10:00:58', NULL, FALSE, NULL, NULL),
+(29, 9, 'Brgy. Natipuan, Nasugbu, Batangas', 'Aurora Marasigan', '0924-564-7329', 'Delivered', 'Truck breakdown, moved to next day', '2026-04-28', '2026-05-01 13:00:57', '2026-05-01 15:17:57', TRUE, '2026-09-12 02:00:00', NULL),
+(32, 14, 'Brgy. Malapad na Bato, Nasugbu, Batangas', 'Wilfredo Panganiban', '0957-639-9653', 'Delivered', NULL, '2026-05-07', '2026-05-09 14:00:06', '2026-05-09 16:02:06', TRUE, '2026-09-12 02:00:00', NULL),
+(39, 5, 'Poblacion, Nasugbu, Batangas', 'Customer', '0936-629-5110', 'Delivered', NULL, '2026-05-16', '2026-05-18 10:00:10', '2026-05-18 11:28:10', TRUE, '2026-09-12 02:00:00', NULL),
+(43, 9, 'Caloocan City, Metro Manila', 'Mang Tonyo', '0989-158-8397', 'Delivered', 'Call on arrival', '2026-05-17', '2026-05-18 13:00:23', '2026-05-18 15:03:23', TRUE, '2026-09-12 02:00:00', NULL),
+(41, 5, 'Brgy. Banilad, Nasugbu, Batangas', 'Benjamin Aquino', '0947-778-6092', 'Delivered', NULL, '2026-05-17', '2026-05-18 09:00:38', '2026-05-18 10:18:38', FALSE, NULL, NULL),
+(44, 14, 'Brgy. Munting Indan, Nasugbu, Batangas', 'Evelyn Flores', '0961-762-9463', 'Delivered', NULL, '2026-05-18', '2026-05-19 10:00:53', '2026-05-19 11:15:53', TRUE, '2026-09-12 02:00:00', NULL),
+(46, 5, 'Brgy. Calayo, Nasugbu, Batangas', 'Danilo Manalo', '0968-745-1340', 'Delivered', 'Second floor, no lift', '2026-05-20', '2026-05-22 13:00:01', '2026-05-22 13:12:01', TRUE, '2026-09-12 02:00:00', NULL),
+(48, 5, 'Poblacion, Nasugbu, Batangas', 'Mang Tonyo', '0930-596-3858', 'Delivered', 'Truck breakdown, moved to next day', '2026-05-21', '2026-05-24 13:00:52', '2026-05-24 14:48:52', TRUE, '2026-09-12 02:00:00', NULL),
+(50, 5, 'Brgy. Calayo, Nasugbu, Batangas', 'Danilo Manalo', '0933-950-5641', 'Delivered', 'Call on arrival', '2026-05-24', '2026-05-26 15:00:38', '2026-05-26 16:07:38', TRUE, '2026-09-12 02:00:00', NULL),
+(51, 9, 'Brgy. Pantalan, Nasugbu, Batangas', 'Lorna Villanueva', '0988-634-7426', 'Delivered', NULL, '2026-05-25', '2026-05-26 09:00:35', '2026-05-26 10:10:35', TRUE, '2026-09-12 02:00:00', NULL),
+(57, 9, 'Caloocan City, Metro Manila', 'Customer', '0977-985-3498', 'Delivered', NULL, '2026-06-03', '2026-06-06 15:00:45', '2026-06-06 15:03:45', TRUE, '2026-09-12 02:00:00', NULL),
+(60, 14, 'Poblacion, Nasugbu, Batangas', 'Customer', '0968-900-3246', 'Delivered', NULL, '2026-06-08', '2026-06-10 10:00:24', '2026-06-10 11:33:24', TRUE, '2026-09-12 02:00:00', NULL),
+(61, 5, 'Brgy. Calayo, Nasugbu, Batangas', 'Danilo Manalo', '0972-603-4490', 'Delivered', 'Deliver before noon', '2026-06-12', '2026-06-14 10:00:06', '2026-06-14 10:14:06', FALSE, NULL, NULL),
+(77, 9, 'Brgy. Dayap, Nasugbu, Batangas', 'Gerardo Lumbao', '0938-355-6235', 'Delivered', 'Nobody home, retry tomorrow', '2026-07-10', '2026-07-11 10:00:36', '2026-07-11 10:13:36', FALSE, NULL, NULL),
+(78, 9, 'Lian, Batangas', 'Sta. Rosa Builders', '0925-414-5330', 'Delivered', NULL, '2026-07-12', '2026-07-13 09:00:12', '2026-07-13 10:13:12', FALSE, NULL, NULL),
+(82, 9, 'Brgy. Natipuan, Nasugbu, Batangas', 'Aurora Marasigan', '0919-300-8531', 'Delivered', 'Nobody home, retry tomorrow', '2026-07-20', '2026-07-21 10:00:00', '2026-07-21 12:00:00', FALSE, NULL, NULL),
+(84, 9, 'Poblacion, Nasugbu, Batangas', 'Customer', '0940-374-1401', 'Delivered', 'Rescheduled by customer', '2026-07-23', '2026-07-24 09:00:15', '2026-07-24 12:09:15', FALSE, NULL, NULL),
+(87, 9, 'Brgy. Aga, Nasugbu, Batangas', 'Nenita Reyes', '0942-833-3216', 'Delivered', 'Nobody home, retry tomorrow', '2026-07-26', '2026-07-29 15:00:00', '2026-07-29 17:26:00', FALSE, NULL, NULL),
+(93, 14, 'Brgy. Bilaran, Nasugbu, Batangas', 'Renato Castillo', '0953-138-9589', 'Delivered', NULL, '2026-08-03', '2026-08-05 09:00:20', '2026-08-05 10:03:20', FALSE, NULL, NULL),
+(95, 9, 'Poblacion, Nasugbu, Batangas', 'Customer', '0960-386-2066', 'Delivered', 'Truck breakdown, moved to next day', '2026-08-06', '2026-08-08 09:00:36', '2026-08-08 11:29:36', FALSE, NULL, NULL),
+(97, 5, 'Brgy. Kaylaway, Nasugbu, Batangas', 'Dominador Torres', '0916-452-7592', 'Delivered', 'Deliver before noon', '2026-08-12', '2026-08-13 14:00:40', '2026-08-13 17:04:40', FALSE, NULL, NULL),
+(102, 5, 'Poblacion, Nasugbu, Batangas', 'Jocelyn Dela Cruz', '0944-650-9906', 'Delivered', NULL, '2026-08-18', '2026-08-19 14:00:10', '2026-08-19 15:06:10', FALSE, NULL, NULL),
+(106, 9, 'Brgy. Munting Indan, Nasugbu, Batangas', 'Evelyn Flores', '0924-867-7979', 'Delivered', NULL, '2026-08-31', '2026-09-01 10:00:37', '2026-09-01 11:33:37', FALSE, NULL, NULL),
+(107, 5, 'Pasig City, Metro Manila', 'Customer', '0924-671-4228', 'Delivered', 'Rescheduled by customer', '2026-09-01', '2026-09-04 10:00:07', '2026-09-04 13:23:07', FALSE, NULL, NULL);
+
+INSERT INTO returned_items (product_id, sale_id, report_type, quantity, reason, disposition, refund_amount, restocked, status, reported_by_staff_id, return_date) VALUES
+(22, NULL, 'Damaged', 2, 'Two bulbs arrived with cracked bases in the supplier carton; cannot be sold.', 'Write-Off', 0.00, FALSE, 'Resolved', 3, '2026-04-05 16:25:03'),
+(16, 46, 'Refunded', 1, 'Customer bought the wrong pipe size, returned unopened the same afternoon.', 'Return to Stock', 185.00, TRUE, 'Resolved', 4, '2026-04-18 13:45:54'),
+(34, NULL, 'Damaged', 1, 'Tin dented and leaking after a fall from the top shelf during restocking.', 'Write-Off', 0.00, FALSE, 'Resolved', 10, '2026-05-01 10:55:47'),
+(2, 67, 'Return', 1, 'Handle came loose on first use; supplier replacement requested.', 'Write-Off', 0.00, FALSE, 'Resolved', 3, '2026-05-14 12:55:53'),
+(24, 59, 'Refunded', 3, 'Outlets refunded, customer changed the wiring plan.', 'Return to Stock', 255.00, TRUE, 'Resolved', 8, '2026-05-27 12:55:41'),
+(45, 79, 'Refunded', 10, 'Screw set returned, customer needed a larger gauge.', 'Return to Stock', 1500.00, TRUE, 'Resolved', 13, '2026-06-09 12:40:12'),
+(9, NULL, 'Damaged', 1, 'Grinder guard cracked in transit from the supplier.', 'Write-Off', 0.00, FALSE, 'Resolved', 10, '2026-06-22 17:25:19'),
+(30, 19, 'Return', 2, 'Roof paint returned, colour did not match the sample.', 'Return to Stock', 0.00, TRUE, 'Resolved', 3, '2026-07-05 15:30:18'),
+(39, NULL, 'Damaged', 6, 'Plywood sheets warped after rain came through the stockroom door.', 'Write-Off', 0.00, FALSE, 'Resolved', 10, '2026-07-18 17:00:46'),
+(6, 50, 'Refunded', 5, 'Five bags of cement refunded; customer cancelled the job.', 'Return to Stock', 1300.00, TRUE, 'Open', 6, '2026-07-31 14:45:44'),
+(48, 12, 'Return', 2, 'Helmets returned, wrong size ordered by site.', 'Return to Stock', 0.00, TRUE, 'Open', 3, '2026-08-13 14:50:54'),
+(17, NULL, 'Damaged', 15, 'A box of elbows crushed under a pallet in the stockroom.', 'Write-Off', 0.00, FALSE, 'Open', 10, '2026-08-26 10:50:59');
+
+INSERT INTO stock_adjustments (product_id, adjustment_type, quantity_before, quantity_change, quantity_after, unit_name, reason, adjusted_by_staff_id, created_at) VALUES
+(29, 'Add', 116, 44, 160, 'roll', 'Returned goods put back on the shelf', 3, '2026-03-20 13:00:53'),
+(45, 'Recount', 104, -3, 101, 'kilogram', 'Monthly physical count corrected the figure', 3, '2026-03-27 11:15:45'),
+(4, 'Add', 61, 27, 88, 'liter', 'Returned goods put back on the shelf', 10, '2026-04-03 11:00:22'),
+(46, 'Recount', 27, -3, 24, 'kilogram', 'Quarter-end count', 10, '2026-04-10 10:55:07'),
+(6, 'Recount', 50, -2, 48, 'bag', 'Monthly physical count corrected the figure', 3, '2026-04-17 17:55:09'),
+(1, 'Add', 52, 22, 74, 'pcs', 'Found in the back store during count', 3, '2026-04-24 11:15:27'),
+(27, 'Recount', 31, 2, 33, 'set', 'Recount after a shelf move', 10, '2026-05-01 09:50:50'),
+(40, 'Recount', 64, -3, 61, 'sheet', 'Recount after a shelf move', 10, '2026-05-08 14:00:42'),
+(33, 'Add', 111, 43, 154, 'roll', 'Supplier replacement stock booked in', 3, '2026-05-15 08:00:20'),
+(38, 'Recount', 47, -1, 46, 'sack', 'Monthly physical count corrected the figure', 10, '2026-05-22 12:45:55'),
+(21, 'Recount', 103, -2, 101, 'pcs', 'Quarter-end count', 3, '2026-05-29 08:40:49'),
+(3, 'Recount', 63, -3, 60, 'meter', 'Monthly physical count corrected the figure', 3, '2026-06-05 08:45:47'),
+(22, 'Add', 104, 48, 152, 'meter', 'Supplier replacement stock booked in', 10, '2026-06-12 13:05:48'),
+(11, 'Recount', 27, -2, 25, 'pcs', 'Monthly physical count corrected the figure', 10, '2026-06-19 15:35:59'),
+(2, 'Recount', 10, -1, 9, 'pcs', 'Recount after a shelf move', 3, '2026-06-26 09:20:43'),
+(51, 'Add', 8, 15, 23, 'liter', 'Delivery received against purchase order', 10, '2026-07-03 08:00:56'),
+(9, 'Remove', 52, -5, 47, 'pcs', 'Used for shop repairs', 10, '2026-07-10 11:00:22'),
+(21, 'Recount', 24, 4, 28, 'pcs', 'Recount after a shelf move', 10, '2026-07-17 12:20:32'),
+(16, 'Recount', 25, -2, 23, 'pcs', 'Monthly physical count corrected the figure', 10, '2026-07-24 08:00:48'),
+(4, 'Recount', 103, 2, 105, 'liter', 'Monthly physical count corrected the figure', 10, '2026-07-31 12:25:40'),
+(33, 'Recount', 79, 1, 80, 'roll', 'Monthly physical count corrected the figure', 10, '2026-08-07 12:25:14'),
+(46, 'Recount', 56, -3, 53, 'kilogram', 'Recount after a shelf move', 3, '2026-08-14 13:45:08'),
+(3, 'Add', 92, 44, 136, 'meter', 'Supplier replacement stock booked in', 10, '2026-08-21 09:10:02'),
+(39, 'Add', 14, 18, 32, 'sheet', 'Found in the back store during count', 3, '2026-08-28 10:25:30'),
+(1, 'Add', 72, 51, 123, 'pcs', 'Delivery received against purchase order', 10, '2026-09-04 11:30:10'),
+(34, 'Add', 20, 45, 65, 'pcs', 'Found in the back store during count', 10, '2026-09-11 08:45:44');
+
+INSERT INTO credit_requests (customer_id, previous_limit, requested_limit, reason, status, requested_by_staff_id, decided_by_staff_id, decision_note, decided_at, created_at) VALUES
+(23, 100000.00, 150000.00, 'Contractor taking on the school extension, needs room for rebar and cement.', 'Approved', 4, 2, 'Settles monthly without fail. Approved.', '2026-08-12 15:25:04', '2026-08-11 13:25:04'),
+(10, 30000.00, 45000.00, 'Wants to take the whole roofing order on account.', 'Declined', 8, 11, 'Two late payments in May. Not until the balance is clear.', '2026-08-02 18:10:14', '2026-08-01 16:10:14'),
+(24, 80000.00, 120000.00, 'Site account, purchase order from the developer attached.', 'Approved', 13, 2, 'PO-backed. Approved.', '2026-07-18 10:45:35', '2026-07-17 08:45:35'),
+(8, 40000.00, 60000.00, 'Regular since 2024, buying for a second house.', 'Approved', 4, 2, 'Good history. Approved.', '2026-07-03 17:55:39', '2026-07-02 15:55:39'),
+(16, 25000.00, 35000.00, 'Asked at the counter, wants to add a water closet set.', 'Declined', 6, 11, 'Cheque returned in July. On hold.', '2026-08-22 19:15:02', '2026-08-21 17:15:02'),
+(5, 40000.00, 50000.00, 'Buying materials for a boarding house build.', 'Pending', 8, NULL, NULL, NULL, '2026-09-07 13:15:42'),
+(13, 12000.00, 18000.00, 'Over the limit on the drill and wire, wants the rest on account.', 'Pending', 4, NULL, NULL, NULL, '2026-09-08 17:45:05'),
+(14, 35000.00, 35000.00, 'Asked about terms, no increase needed in the end.', 'Declined', 13, 11, 'Same figure as the current limit; nothing to raise.', '2026-06-18 15:50:38', '2026-06-17 13:50:38');
+
+INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id, is_read, created_at) VALUES
+(2, 'Low Stock', 'Circular Saw 7-1/4" is low', 'Stock is 3, reorder point is 3. Raise a purchase order.', 10, NULL, FALSE, '2026-09-06 16:50:48'),
+(3, 'Low Stock', 'Circular Saw 7-1/4" is low', 'Stock is 3, reorder point is 3. Raise a purchase order.', 10, NULL, TRUE, '2026-09-08 14:00:25'),
+(2, 'Low Stock', 'Jigsaw 600W is low', 'Stock is 2, reorder point is 3. Raise a purchase order.', 12, NULL, FALSE, '2026-09-05 13:35:29'),
+(3, 'Low Stock', 'Jigsaw 600W is low', 'Stock is 2, reorder point is 3. Raise a purchase order.', 12, NULL, FALSE, '2026-09-10 14:30:09'),
+(2, 'Low Stock', 'Trowel Plastering is low', 'Stock is 9, reorder point is 15. Raise a purchase order.', 21, NULL, FALSE, '2026-09-07 09:40:58'),
+(3, 'Low Stock', 'Trowel Plastering is low', 'Stock is 9, reorder point is 15. Raise a purchase order.', 21, NULL, FALSE, '2026-09-05 12:35:20'),
+(2, 'Low Stock', 'THHN Wire 3.5mm 75m is low', 'Stock is 2, reorder point is 4. Raise a purchase order.', 29, NULL, FALSE, '2026-09-05 12:30:43'),
+(3, 'Low Stock', 'THHN Wire 3.5mm 75m is low', 'Stock is 2, reorder point is 4. Raise a purchase order.', 29, NULL, FALSE, '2026-09-04 10:50:10'),
+(2, 'Low Stock', 'Primer Flat 4L is low', 'Stock is 5, reorder point is 8. Raise a purchase order.', 43, NULL, FALSE, '2026-09-10 09:55:07'),
+(3, 'Low Stock', 'Primer Flat 4L is low', 'Stock is 5, reorder point is 8. Raise a purchase order.', 43, NULL, TRUE, '2026-09-03 09:15:53'),
+(2, 'Low Stock', 'Concrete Nails 3" is low', 'Stock is 18, reorder point is 30. Raise a purchase order.', 46, NULL, TRUE, '2026-09-04 12:50:28'),
+(3, 'Low Stock', 'Concrete Nails 3" is low', 'Stock is 18, reorder point is 30. Raise a purchase order.', 46, NULL, TRUE, '2026-09-11 17:55:02'),
+(2, 'Out of Stock', 'Discontinued Enamel Ivory is out of stock', 'Nothing left on the shelf. The register will not sell it until it is restocked.', 51, NULL, FALSE, '2026-09-11 08:15:21'),
+(3, 'Out of Stock', 'Discontinued Enamel Ivory is out of stock', 'Nothing left on the shelf. The register will not sell it until it is restocked.', 51, NULL, FALSE, '2026-09-09 13:45:53'),
+(2, 'Damage Report', 'Damage filed for Plywood 1/2" 4x8', '6 sheets reported damaged: warped after rain came through the stockroom door.', 39, 10, FALSE, '2026-09-07 16:05:23'),
+(2, 'Refund Report', 'Refund filed for Tox Screw Set 100pc', '10 packs refunded at the counter: customer needed a larger gauge.', 45, 13, TRUE, '2026-09-01 10:30:35'),
+(3, 'Purchase Order', 'Purchase order #13 raised', '3 line(s) ordered from Luzon Electrical Supply, awaiting delivery.', NULL, 2, FALSE, '2026-09-11 12:40:52'),
+(3, 'Purchase Order', 'Purchase order #12 raised', '2 line(s) ordered from Batangas Builders Depot, awaiting delivery.', NULL, 11, TRUE, '2026-09-08 13:05:30'),
+(5, 'Delivery', 'Delivery booked for Brgy. Wawa, Nasugbu', 'A COD order needs a driver tomorrow morning.', NULL, 8, FALSE, '2026-09-11 13:15:15'),
+(5, 'Delivery', 'Delivery booked for Poblacion, Nasugbu', 'Cement and hollow blocks, two stops.', NULL, 4, TRUE, '2026-09-09 14:15:26'),
+(2, 'Stock Adjustment', 'Recount on Hollow Block 4"', 'The monthly count corrected the figure by -3.', 36, 10, TRUE, '2026-09-04 12:30:14');
+
+INSERT INTO audit_logs (staff_id, role_name, ip_address, action, action_type, details, metadata, created_at) VALUES
+(12, 'Cashier', '192.168.1.22', 'LOGIN', 'LOGIN', 'noel.bautista@hardware.com signed in', NULL, '2026-03-16 13:40:21'),
+(3, 'Inventory Clerk', '192.168.1.13', 'FILE_RETURN', 'CREATE', 'Return report filed', NULL, '2026-03-18 17:45:27'),
+(6, 'Cashier', '192.168.1.16', 'LOGIN', 'LOGIN', 'ana.reyes@hardware.com signed in', NULL, '2026-03-21 14:25:54'),
+(14, 'Delivery Personnel', '192.168.1.24', 'RECORD_PAYMENT', 'PAYMENT', 'Payment of 6000.00 recorded on sale #90', NULL, '2026-03-23 13:40:01'),
+(3, 'Inventory Clerk', '192.168.1.13', 'LOGIN', 'LOGIN', 'clerk@hardware.com signed in', NULL, '2026-03-26 08:35:42'),
+(9, 'Delivery Personnel', '192.168.1.19', 'LOGIN', 'LOGIN', 'ramon.villanueva@hardware.com signed in', NULL, '2026-03-29 16:10:53'),
+(2, 'Manager', '192.168.1.12', 'LOGIN', 'LOGIN', 'manager@hardware.com signed in', NULL, '2026-03-31 16:30:34'),
+(14, 'Delivery Personnel', '192.168.1.24', 'LOGIN', 'LOGIN', 'efren.magbanua@hardware.com signed in', NULL, '2026-04-03 11:45:42'),
+(12, 'Cashier', '192.168.1.22', 'LOGIN_FAILURE', 'LOGIN_FAILURE', 'Sign-in refused for noel.bautista@hardware.com: wrong password', '{"email":"noel.bautista@hardware.com","reason":"wrong_password"}', '2026-04-05 15:35:33'),
+(3, 'Inventory Clerk', '192.168.1.13', 'ADJUST_STOCK', 'UPDATE', 'Stock adjusted on product #5', NULL, '2026-04-08 09:45:10'),
+(5, 'Delivery Personnel', '192.168.1.15', 'LOGIN', 'LOGIN', 'delivery@hardware.com signed in', NULL, '2026-04-11 09:35:27'),
+(13, 'Cashier', '192.168.1.23', 'FILE_RETURN', 'CREATE', 'Return report filed', NULL, '2026-04-13 11:20:18'),
+(5, 'Delivery Personnel', '192.168.1.15', 'LOGIN', 'LOGIN', 'delivery@hardware.com signed in', NULL, '2026-04-16 12:00:18'),
+(9, 'Delivery Personnel', '192.168.1.19', 'LOGIN', 'LOGIN', 'ramon.villanueva@hardware.com signed in', NULL, '2026-04-18 15:00:55'),
+(6, 'Cashier', '192.168.1.16', 'LOGIN', 'LOGIN', 'ana.reyes@hardware.com signed in', NULL, '2026-04-21 13:50:40'),
+(8, 'Cashier', '192.168.1.18', 'LOGIN_FAILURE', 'LOGIN_FAILURE', 'Sign-in refused for liza.gonzales@hardware.com: wrong password', '{"email":"liza.gonzales@hardware.com","reason":"wrong_password"}', '2026-04-24 11:30:26'),
+(3, 'Inventory Clerk', '192.168.1.13', 'ADJUST_STOCK', 'UPDATE', 'Stock adjusted on product #9', NULL, '2026-04-26 09:35:17'),
+(1, 'System Administrator', '192.168.1.11', 'LOGIN', 'LOGIN', 'admin@hardware.com signed in', NULL, '2026-04-29 13:00:55'),
+(14, 'Delivery Personnel', '192.168.1.24', 'LOGIN_FAILURE', 'LOGIN_FAILURE', 'Sign-in refused for efren.magbanua@hardware.com: wrong password', '{"email":"efren.magbanua@hardware.com","reason":"wrong_password"}', '2026-05-01 10:35:37'),
+(1, 'System Administrator', '192.168.1.11', 'GRANT_SYSTEM_ACCESS', 'ACCESS', 'Manager M. User may now monitor and control Automatic Backup', '{"staff_id":2,"system_key":"backup","changes":{"can_monitor":{"before":false,"after":true},"can_control":{"before":false,"after":true}},"note":"Takes a backup before the month-end stock count."}', '2026-05-02 09:15:00'),
+(10, 'Inventory Clerk', '192.168.1.20', 'LOGIN', 'LOGIN', 'teresa.ocampo@hardware.com signed in', NULL, '2026-05-04 16:40:13'),
+(4, 'Cashier', '192.168.1.14', 'LOGIN_FAILURE', 'LOGIN_FAILURE', 'Sign-in refused for cashier@hardware.com: wrong password', '{"email":"cashier@hardware.com","reason":"wrong_password"}', '2026-05-07 13:00:06'),
+(2, 'Manager', '192.168.1.12', 'LOGIN_FAILURE', 'LOGIN_FAILURE', 'Sign-in refused for manager@hardware.com: wrong password', '{"email":"manager@hardware.com","reason":"wrong_password"}', '2026-05-09 15:35:14'),
+(3, 'Inventory Clerk', '192.168.1.13', 'ARCHIVE', 'DELETE', 'Inventory record #49', NULL, '2026-05-12 10:15:00'),
+(4, 'Cashier', '192.168.1.14', 'LOGIN', 'LOGIN', 'cashier@hardware.com signed in', NULL, '2026-05-12 12:50:01'),
+(6, 'Cashier', '192.168.1.16', 'FILE_RETURN', 'CREATE', 'Return report filed', NULL, '2026-05-14 09:05:51'),
+(3, 'Inventory Clerk', '192.168.1.13', 'FILE_RETURN', 'CREATE', 'Return report filed', NULL, '2026-05-17 14:55:30'),
+(11, 'Manager', '192.168.1.21', 'LOGOUT', 'LOGOUT', 'carlo.dizon@hardware.com signed out', NULL, '2026-05-20 12:55:48'),
+(6, 'Cashier', '192.168.1.16', 'LOGIN', 'LOGIN', 'ana.reyes@hardware.com signed in', NULL, '2026-05-22 17:05:40'),
+(14, 'Delivery Personnel', '192.168.1.24', 'LOGIN', 'LOGIN', 'efren.magbanua@hardware.com signed in', NULL, '2026-05-25 17:35:10'),
+(6, 'Cashier', '192.168.1.16', 'LOGIN', 'LOGIN', 'ana.reyes@hardware.com signed in', NULL, '2026-05-27 14:30:55'),
+(8, 'Cashier', '192.168.1.18', 'LOGIN', 'LOGIN', 'liza.gonzales@hardware.com signed in', NULL, '2026-05-30 10:35:54'),
+(4, 'Cashier', '192.168.1.14', 'LOGIN', 'LOGIN', 'cashier@hardware.com signed in', NULL, '2026-06-02 14:40:34'),
+(2, 'Manager', '192.168.1.12', 'LOGIN', 'LOGIN', 'manager@hardware.com signed in', NULL, '2026-06-04 14:05:49'),
+(5, 'Delivery Personnel', '192.168.1.15', 'RECORD_PAYMENT', 'PAYMENT', 'Payment of 2500.00 recorded on sale #109', NULL, '2026-06-07 17:40:26'),
+(1, 'System Administrator', '192.168.1.11', 'LOGIN', 'LOGIN', 'admin@hardware.com signed in', NULL, '2026-06-09 08:55:46'),
+(1, 'System Administrator', '192.168.1.11', 'GRANT_SYSTEM_ACCESS', 'ACCESS', 'Teresa A. Ocampo may now monitor MySQL Database', '{"staff_id":10,"system_key":"database","changes":{"can_monitor":{"before":false,"after":true}},"note":"Checks the database is up before opening the stockroom."}', '2026-06-11 08:40:00'),
+(2, 'Manager', '192.168.1.12', 'CREATE_PURCHASE_ORDER', 'CREATE', 'Purchase order #10 raised', NULL, '2026-06-12 17:15:57'),
+(2, 'Manager', '192.168.1.12', 'UPDATE_CREDIT_LIMIT', 'UPDATE', 'Credit limit set for customer #11', '{"changes":{"credit_limit":{"before":"20000.00","after":"25000.00"}}}', '2026-06-15 08:10:06'),
+(14, 'Delivery Personnel', '192.168.1.24', 'LOGIN', 'LOGIN', 'efren.magbanua@hardware.com signed in', NULL, '2026-06-17 17:10:58'),
+(2, 'Manager', '192.168.1.12', 'VOID_SALE', 'VOID', 'Sale #62 voided: rung up twice by mistake', NULL, '2026-06-20 11:00:00'),
+(2, 'Manager', '192.168.1.12', 'VOID_SALE', 'VOID', 'Sale #68 voided: rung up twice by mistake', NULL, '2026-06-20 11:00:00'),
+(4, 'Cashier', '192.168.1.14', 'LOGOUT', 'LOGOUT', 'cashier@hardware.com signed out', NULL, '2026-06-20 13:25:36'),
+(9, 'Delivery Personnel', '192.168.1.19', 'LOGIN', 'LOGIN', 'ramon.villanueva@hardware.com signed in', NULL, '2026-06-22 09:25:42'),
+(10, 'Inventory Clerk', '192.168.1.20', 'LOGIN', 'LOGIN', 'teresa.ocampo@hardware.com signed in', NULL, '2026-06-25 09:35:36'),
+(2, 'Manager', '192.168.1.12', 'LOGIN', 'LOGIN', 'manager@hardware.com signed in', NULL, '2026-06-28 12:40:16'),
+(3, 'Inventory Clerk', '192.168.1.13', 'LOGIN', 'LOGIN', 'clerk@hardware.com signed in', NULL, '2026-06-30 15:05:36'),
+(1, 'System Administrator', '192.168.1.11', 'ARCHIVE', 'DELETE', 'Staff record #12', NULL, '2026-06-30 17:30:00'),
+(2, 'Manager', '192.168.1.12', 'SYSTEM_ACTION', 'CONTROL', 'Ran "Run a backup now" on Automatic Backup: Backup saved as hardware_db_backup_2026-06-30_1745.sql.', '{"system_key":"backup","action":"run-now","ok":true}', '2026-06-30 17:45:12'),
+(6, 'Cashier', '192.168.1.16', 'LOGIN', 'LOGIN', 'ana.reyes@hardware.com signed in', NULL, '2026-07-03 14:40:02'),
+(10, 'Inventory Clerk', '192.168.1.20', 'ARCHIVE', 'DELETE', 'Inventory record #50', NULL, '2026-07-03 15:40:00'),
+(13, 'Cashier', '192.168.1.23', 'LOGIN', 'LOGIN', 'grace.lim@hardware.com signed in', NULL, '2026-07-05 11:30:02'),
+(10, 'Inventory Clerk', '192.168.1.20', 'RECORD_PAYMENT', 'PAYMENT', 'Payment of 2500.00 recorded on sale #49', NULL, '2026-07-08 13:40:20'),
+(6, 'Cashier', '192.168.1.16', 'RECORD_PAYMENT', 'PAYMENT', 'Payment of 6000.00 recorded on sale #44', NULL, '2026-07-11 08:00:54'),
+(8, 'Cashier', '192.168.1.18', 'LOGOUT', 'LOGOUT', 'liza.gonzales@hardware.com signed out', NULL, '2026-07-13 15:10:55'),
+(11, 'Manager', '192.168.1.21', 'CREATE_PURCHASE_ORDER', 'CREATE', 'Purchase order #4 raised', NULL, '2026-07-16 16:35:22'),
+(14, 'Delivery Personnel', '192.168.1.24', 'RECORD_PAYMENT', 'PAYMENT', 'Payment of 6000.00 recorded on sale #108', NULL, '2026-07-18 16:40:20'),
+(2, 'Manager', '192.168.1.12', 'LOGIN', 'LOGIN', 'manager@hardware.com signed in', NULL, '2026-07-21 16:45:44'),
+(5, 'Delivery Personnel', '192.168.1.15', 'LOGIN_FAILURE', 'LOGIN_FAILURE', 'Sign-in refused for delivery@hardware.com: wrong password', '{"email":"delivery@hardware.com","reason":"wrong_password"}', '2026-07-24 10:55:27'),
+(6, 'Cashier', '192.168.1.16', 'LOGIN', 'LOGIN', 'ana.reyes@hardware.com signed in', NULL, '2026-07-26 10:25:56'),
+(14, 'Delivery Personnel', '192.168.1.24', 'LOGIN', 'LOGIN', 'efren.magbanua@hardware.com signed in', NULL, '2026-07-29 14:05:27'),
+(1, 'System Administrator', '192.168.1.11', 'LOGIN', 'LOGIN', 'admin@hardware.com signed in', NULL, '2026-07-31 13:00:08'),
+(13, 'Cashier', '192.168.1.23', 'LOGIN', 'LOGIN', 'grace.lim@hardware.com signed in', NULL, '2026-08-03 08:40:52'),
+(13, 'Cashier', '192.168.1.23', 'LOGIN', 'LOGIN', 'grace.lim@hardware.com signed in', NULL, '2026-08-06 14:30:50'),
+(14, 'Delivery Personnel', '192.168.1.24', 'LOGIN', 'LOGIN', 'efren.magbanua@hardware.com signed in', NULL, '2026-08-08 14:10:48'),
+(1, 'System Administrator', '192.168.1.11', 'LOGIN', 'LOGIN', 'admin@hardware.com signed in', NULL, '2026-08-11 14:35:33'),
+(9, 'Delivery Personnel', '192.168.1.19', 'UPDATE_DELIVERY_STATUS', 'UPDATE', 'Delivery #17 marked Delivered', '{"changes":{"status":{"before":"Out for Delivery","after":"Delivered"}}}', '2026-08-13 08:30:27'),
+(12, 'Cashier', '192.168.1.22', 'LOGIN_FAILURE', 'LOGIN_FAILURE', 'Sign-in refused for noel.bautista@hardware.com: wrong password', '{"email":"noel.bautista@hardware.com","reason":"wrong_password"}', '2026-08-16 09:05:18'),
+(3, 'Inventory Clerk', '192.168.1.13', 'LOGIN', 'LOGIN', 'clerk@hardware.com signed in', NULL, '2026-08-19 10:55:27'),
+(5, 'Delivery Personnel', '192.168.1.15', 'LOGIN', 'LOGIN', 'delivery@hardware.com signed in', NULL, '2026-08-21 09:10:14'),
+(14, 'Delivery Personnel', '192.168.1.24', 'LOGIN', 'LOGIN', 'efren.magbanua@hardware.com signed in', NULL, '2026-08-24 11:10:36'),
+(5, 'Delivery Personnel', '192.168.1.15', 'LOGIN', 'LOGIN', 'delivery@hardware.com signed in', NULL, '2026-08-26 10:45:13'),
+(4, 'Cashier', '192.168.1.14', 'LOGIN', 'LOGIN', 'cashier@hardware.com signed in', NULL, '2026-08-29 08:40:11'),
+(13, 'Cashier', '192.168.1.23', 'CREATE_SALE', 'CREATE', 'Sale #102 completed', NULL, '2026-09-01 12:50:44'),
+(5, 'Delivery Personnel', '192.168.1.15', 'LOGIN', 'LOGIN', 'delivery@hardware.com signed in', NULL, '2026-09-03 14:40:23'),
+(5, 'Delivery Personnel', '192.168.1.15', 'LOGIN', 'LOGIN', 'delivery@hardware.com signed in', NULL, '2026-09-06 16:00:24'),
+(2, 'Manager', '192.168.1.12', 'LOGIN_FAILURE', 'LOGIN_FAILURE', 'Sign-in refused for manager@hardware.com: wrong password', '{"email":"manager@hardware.com","reason":"wrong_password"}', '2026-09-08 12:25:35'),
+(4, 'Cashier', '192.168.1.14', 'FILE_RETURN', 'CREATE', 'Return report filed', NULL, '2026-09-11 08:10:32'),
+(NULL, NULL, NULL, 'ARCHIVE_SWEEP', 'DELETE', 'Archived 13 closed deliveries older than 90 days', NULL, '2026-09-12 02:00:00');

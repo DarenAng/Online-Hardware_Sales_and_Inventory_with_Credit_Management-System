@@ -1,10 +1,5 @@
-// Drives the rebuilt return form.
-//
-// The two things the brief asks for are both refusals, so they are tested as
-// refusals: a return cannot be filed without a sentence explaining it, and it
-// cannot be filed without saying where the goods physically go. Neither
-// disposition is preselected, because a default here is answered by not being
-// read, and the wrong answer loses stock.
+// Drives the return form: a return cannot be filed without a sentence of
+// reason or without a disposition, and neither disposition is preselected.
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
@@ -20,10 +15,7 @@ function check(name, passed, note) {
   console.log(`${passed ? "  ok  " : " FAIL "} ${name}${passed || !note ? "" : "  -- " + note}`);
 }
 
-// A console line worth failing over is one this system caused. The font CDN
-// is deliberately non-blocking and simply does not load on a machine with no
-// internet, which is most machines this runs on; a favicon nobody added is a
-// favicon nobody needs. Neither says anything about whether the screens work.
+// only console lines this system caused: the font CDN and the favicon are noise
 function isOurProblem(text) {
   return !/fonts\.(googleapis|gstatic)\.com|favicon|ERR_TUNNEL_CONNECTION_FAILED|net::ERR_/.test(String(text));
 }
@@ -90,9 +82,7 @@ function isOurProblem(text) {
     (await page.getAttribute("#reason-counter", "class")).includes("is-good"));
 
   // ---------- filing with no disposition is refused ----------
-  // The product picker on this form is a type-ahead now, not a <select>:
-  // pickRefundProduct(id) is what the suggestion list calls when a name is
-  // clicked, so the test goes in the same way a cashier does.
+  // pickRefundProduct(id) is what the suggestion list calls
   const productId = await page.evaluate(
     "fetch('/api/inventory/products').then(r => r.json()).then(rows => rows[2].product_id)");
   await page.evaluate(`pickRefundProduct(${productId})`);
@@ -117,9 +107,7 @@ function isOurProblem(text) {
     /Stock goes up/.test(await page.textContent("#disposition-verdict")));
   await shot("04-return-to-stock");
 
-  // The box carries minlength as well, so the browser refuses the submit
-  // before the handler is even reached. Both guards are wanted: the native one
-  // is instant, and the handler still checks in case the attribute is stripped.
+  // minlength makes the browser refuse first; the handler still checks
   await page.fill("#return-reason", "broken");
   await page.waitForTimeout(200);
   await page.evaluate("clearCards()");

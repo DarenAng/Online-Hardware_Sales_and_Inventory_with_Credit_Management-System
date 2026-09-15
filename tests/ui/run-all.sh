@@ -1,23 +1,10 @@
 #!/bin/sh
-# ==========================================================================
-# Drives every screen in a real browser, with no database anywhere.
-#
+# Drives every screen in a real browser against the stub in tests/ui/stub.js,
+# with no database anywhere:
 #     sh tests/ui/run-all.sh
-#
-# It starts the stub in tests/ui/stub.js, which serves the project's own
-# public/ folder and answers the API with invented rows, then walks each
-# module the way somebody would: loading tables, paging them, filtering them,
-# opening records, and pressing the buttons that ask before they act.
-#
-# What it is for is the half of the system that is tedious to check by hand.
-# It proves nothing about MySQL — tests/smoke.js does that, against the real
-# database — but it will catch a table that stopped paging, a filter wired to
-# nothing, a confirmation that vanished, or a screen that throws on load.
-#
 # Needs Playwright, the same as tests/shots.js:
 #     npm install --no-save playwright
 #     npx playwright install chromium
-#
 # Screenshots of every step land in shots/ui/.
 # ==========================================================================
 set -e

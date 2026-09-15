@@ -1,8 +1,6 @@
 #!/bin/sh
 # Rebuilds the database from the two SQL files, restarts the server, then runs
-# the API checks, the fixed-bug checks and the screen tour. Each suite starts
-# from the same known state, so a failure means a real change and not leftovers
-# from last time.
+# the API checks, the fixed-bug checks and the screen tour from a known state.
 set -e
 
 cd "$(dirname "$0")/.."
@@ -19,15 +17,14 @@ reset_everything() {
     kill "$(cat /tmp/hardware-server.pid)" 2>/dev/null || true
     sleep 1
   fi
-
-  nohup node public/javascript/server.js > /tmp/hardware-server.log 2>&1 &
+# mail off, so the passwords the server makes come back in its replies
+  # rather than going to an inbox the checks cannot read
+  HARDWARE_MAIL_OFF=1 nohup node public/javascript/server.js > /tmp/hardware-server.log 2>&1 &
   echo $! > /tmp/hardware-server.pid
   sleep 4
   cat /tmp/hardware-server.log
 }
-
-# First, and without touching the database or the server: the SMTP client
-# talks to a fake mail server of its own, so it is the one suite that says
+# the SMTP client talks to a fake mail server, so it needs neither MySQL nor the server
 # nothing about whether MySQL is up.
 echo "== sending mail =="
 node tests/mailer.js

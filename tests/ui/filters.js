@@ -1,24 +1,9 @@
-// ==========================================================================
-// THE TABLE HAS TO AGREE WITH THE CONTROLS ABOVE IT
-//
-// Several panels send their filters to the server, so changing a filter means
-// a round trip. Changing two filters in a row — which is simply how anybody
-// uses a pair of dropdowns — starts a second load while the first is still
-// out, and that used to go wrong in two silent ways.
-//
-// The panel returned early if a load was already running, so the second
-// change was discarded rather than queued: the dropdowns said one thing and
-// the table went on showing another, with nothing on screen admitting it.
-// And even once that was fixed, two answers can arrive in the wrong order on
-// a shop network, letting the slower, older one overwrite the newer rows.
-//
-// Neither failure announces itself. The table looks perfectly normal; it is
-// just answering a question nobody asked any more. That is the worst kind of
-// defect to have in a screen somebody makes decisions from, so it is checked
-// here by doing the thing that provokes it, several times over.
+// Two filter changes in a row start a second load while the first is out.
+// The panel used to drop the second (dropdowns said one thing, the table
+// another) and a late answer could overwrite newer rows. Both are silent,
+// so they are provoked here several times over.
 //
 // Run through tests/ui/run-all.sh, which starts the stub first.
-// ==========================================================================
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
@@ -65,9 +50,7 @@ async function signedInPage(context, role, fullName, staffId) {
   check("the sales table loads", await page.locator("#sales-table tbody tr").count() > 0);
 
   // ---------- two filter changes with no pause between them ----------
-  //
-  // Six runs rather than one: the old behaviour was a race, and a race that
-  // only shows up sometimes is exactly what a single run lets through.
+  // six runs: a race that only shows up sometimes slips past a single run
   let disagreed = 0;
 
   for (let run = 1; run <= 6; run += 1) {

@@ -1,12 +1,5 @@
-// manager.js  --  MANAGER
+// manager.js -- manager
 // Loaded by: manager-dashboard.html
-// ------------------------------------------------------------------------
-// Nine screens. Every table on them is a data panel: closed until it is
-// asked for, ten rows to a page. What is particular to this module is the
-// reading: what a figure on the dashboard leads to, how a reorder point is
-// worked out, and the difference between a delivery that has arrived and one
-// that has been paid for.
-// ==========================================
 
 let recordType = 'supplier';
 let archiveFilter = 'All';
@@ -24,9 +17,8 @@ function showManagerPanel(panelId, title, event) {
         panel.style.display = panel.id === panelId ? 'block' : 'none';
     });
 
-    document.querySelectorAll('[data-panel-link]').forEach((link) => {
-        link.classList.toggle('active', link.dataset.panelLink === panelId);
-    });
+    markPanelLinks(panelId);
+    unfoldMenuFor(panelId);
 
     const heading = document.getElementById('manager-page-title');
     if (heading) heading.textContent = title;
@@ -40,43 +32,56 @@ function showManagerPanel(panelId, title, event) {
     window.scrollTo(0, 0);
 }
 
+// Every folding heading starts folded and opens when its heading is pressed
+// or a screen listed in it opens. The list is found from the menu itself.
+function unfoldMenuFor(panelId) {
+    const link = document.querySelector(
+        '.sidebar-nav li[data-sidebar-dropdown] > .nav-sub a[data-panel-link="' + panelId + '"]');
+    if (!link) return;
+
+    const item = link.closest('li[data-sidebar-dropdown]');
+    const heading = item.querySelector(':scope > .nav-parent');
+    const list = item.querySelector(':scope > .nav-sub');
+    if (heading && list) toggleSidebarMenu(heading.id, list.id, null, true);
+}
+
+// A link that names a view inside a screen (an income table) is marked only
+// when the screen is showing that view.
+function markPanelLinks(panelId) {
+    const panel = document.getElementById(panelId);
+    const view = panel ? panel.dataset.view : undefined;
+
+    document.querySelectorAll('[data-panel-link]').forEach((link) => {
+        const wanted = link.dataset.panelView;
+        link.classList.toggle('active',
+            link.dataset.panelLink === panelId && (!wanted || wanted === view));
+    });
+}
+
 function showManagerHome(event) {
     showManagerPanel('panel-home', 'Manager Dashboard', event);
     document.querySelectorAll('[data-panel-link]').forEach((link) => link.classList.remove('active'));
     loadManagerSummary();
 }
 
-// The dashboard is the one screen that still fetches on arrival, and it
-// should: five figures is one query, it is the reason the page was opened, and
-// there is nothing on it to filter first.
-function showIncome(event)        { showManagerPanel('panel-income', 'Income', event); }
-function showReports(event)       { showManagerPanel('panel-reports', 'Reports', event); }
+// the dashboard is the one screen that fetches on arrival: five figures, one query
+function showIncome(event)        { showIncomeTable(incomeTable, event); }
+function showReports(event)       { showReport(reportView, event); }
 function showSales(event)         { showManagerPanel('panel-sales', 'Sales', event); }
 function showReorderAlerts(event) { showManagerPanel('panel-reorder', 'Reorder Alerts', event); }
 function showStockReport(event)   { showManagerPanel('panel-stock-report', 'Stock Report', event); }
-function showDeliveries(event)    { showManagerPanel('panel-deliveries', 'Deliveries', event); }
+function showDeliveries(event)    { showManagerPanel('panel-deliveries', 'Delivery Tracking', event); }
 function showCredit(event)         { showManagerPanel('panel-credit', 'Customer Credit', event); }
 function showCreditRequests(event) { showManagerPanel('panel-credit-requests', 'Extension Requests', event); }
-function showRecords(event)       { showManagerPanel('panel-records', 'Records', event); }
+function showRecords(event)       { showRecordType(recordType, event); }
 function showArchives(event)      { showManagerPanel('panel-archives', 'Archives', event); }
 
-// kept so an old link, a bookmark or the screenshot tour still lands somewhere
 function showStocks(event) { showReorderAlerts(event); }
 
-// ==========================================
-// THE DASHBOARD
-//
-// A number on a dashboard that cannot be opened is a number you then have to
-// go and look up somewhere else, so every card here leads to the screen that
-// explains it.
-//
-// quiet is set when live-sync is the one asking: the figures are already on
-// screen and correct enough to look at, so blanking them to "Loading" would
-// be a flicker that costs more than it explains.
-// ==========================================
+// The dashboard. Every card leads to the screen that explains it. quiet is
+// set when live-sync asks: the figures stay on screen instead of "Loading".
 let kpiRefreshTimer = null;
 
-// ==========================================
 async function loadManagerSummary(quiet) {
     const grid = document.getElementById('kpi-grid');
     if (!grid) return;
@@ -89,10 +94,8 @@ async function loadManagerSummary(quiet) {
     try {
         const s = await getJson('/api/manager/summary');
 
-        // Billed, collected and outstanding are one equation, not three facts:
-        // gross - collected IS the balance owed. Three cards asked a manager to
-        // do that subtraction in their head, so the outstanding card carries
-        // the billed figure as its own context instead.
+        // gross - collected is the balance owed, so the outstanding card carries the
+        // billed figure as context
         const billed = Number(s.grossSales) || 0;
         const collected = Number(s.totalIncome) || 0;
         const owed = Number(s.pendingCredits) || 0;
@@ -148,9 +151,7 @@ async function loadManagerSummary(quiet) {
             '</button>'
         ).join('');
     } catch (error) {
-        // A quiet refresh that fails leaves the last good figures where they
-        // are. Replacing readable numbers with "--" because one background
-        // poll missed is a downgrade, and the Live badge already says Offline.
+        // a quiet refresh that fails leaves the last good figures where they are
         if (quiet) return;
 
         grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Offline</span>' +
@@ -159,16 +160,12 @@ async function loadManagerSummary(quiet) {
     }
 }
 
-// the Income card opens the breakdown and fills it, because a card that opens
-// an empty screen has not answered the question it was clicked for
 async function openIncomeFromCard() {
     showIncome();
     await loadIncome();
 }
 
-// The Outstanding card counts accounts, so it opens the per-customer credit
-// book filtered to those who owe -- not the per-sale receivables list, which
-// answers a different question than the one the card was clicked for.
+// the Outstanding card counts accounts, so it opens the credit book filtered to who owes
 async function openCreditAccounts() {
     showCredit();
 
@@ -181,13 +178,8 @@ async function openCreditAccounts() {
     if (panel && panel.state === 'closed') await panel.open();
 }
 
-// ==========================================
-// THE INCOME BREAKDOWN
-//
-// Seven named periods and a custom pair. The named ones count back from
-// today rather than snapping to a calendar month, because "this month" on the
-// third of the month is four days of trading and reads as a collapse.
-// ==========================================
+// Income breakdown. Named periods count back from today rather than snapping
+// to a calendar month.
 const INCOME_RANGES = [
     ['daily', 'Today'],
     ['weekly', '7 days'],
@@ -211,8 +203,6 @@ function renderIncomeRanges() {
 async function pickIncomeRange(name) {
     incomeRange = { name: name, from: null, to: null };
 
-    // picking a named period clears the two date boxes, so the screen never
-    // shows a range it is not actually reporting on
     const from = document.getElementById('income-from');
     const to = document.getElementById('income-to');
     if (from) from.value = '';
@@ -257,8 +247,6 @@ async function loadIncome() {
         incomeData = await getJson('/api/reports/income' + incomeQuery());
         renderIncome();
 
-        // the three tables under the chart read from what has already arrived,
-        // so opening them costs nothing further
         ['mgr-income-methods', 'mgr-income-products', 'mgr-income-staff']
             .forEach((key) => {
                 const panel = getDataPanel(key);
@@ -276,8 +264,7 @@ function renderIncome() {
 
     const note = document.getElementById('income-range-note');
     if (note) {
-        note.textContent = data.range.label + ' — ' + data.range.from + ' to ' + data.range.to +
-            '. Collected is money actually in hand; billed is what was rung up, paid or not.';
+        note.textContent = data.range.label + ' — ' + data.range.from + ' to ' + data.range.to;
     }
 
     setPill('income-pill', data.totals.saleCount +
@@ -306,17 +293,8 @@ function renderIncome() {
     renderIncomeChart(data);
 }
 
-// ==========================================
-// THE CHART
-//
-// Drawn with two divs and a height, not a charting library. There is no
-// internet on the machine this runs on, the shape of the question is "is this
-// week bigger than last week", and a library would be 300KB to answer it.
-//
-// Two bars to a period, one behind the other: billed sets the outline and
-// collected fills it, so the gap between them is the money that has not
-// arrived, which is the whole point of looking.
-// ==========================================
+// The chart is two divs and a height: billed sets the outline, collected
+// fills it, and the gap is the money that has not arrived.
 function renderIncomeChart(data) {
     const block = document.getElementById('income-chart-block');
     const chart = document.getElementById('income-chart');
@@ -337,10 +315,7 @@ function renderIncomeChart(data) {
 
     const peak = Math.max(...data.series.map((point) => Number(point.billed) || 0), 1);
 
-    // Ninety days of dates printed under ninety bars run into each other and
-    // stop being dates. Every column keeps its hover text; only about a dozen
-    // of them print a label, and the last one always does, because the end of
-    // the range is the date somebody is actually looking for.
+    // about a dozen labels; the last one always prints
     const step = Math.max(1, Math.ceil(data.series.length / 12));
     const last = data.series.length - 1;
 
@@ -374,13 +349,10 @@ function chartLabel(value, bucket) {
     return date.toLocaleDateString('en-PH', { day: 'numeric', month: 'short' });
 }
 
-// ==========================================
-// TAKING A REPORT AWAY
-//
-// Export is a plain navigation, so the browser saves what the server sends.
-// The server refuses anybody but a manager, which is what actually enforces
-// the rule; hiding the button only keeps a screen honest about what it offers.
-// ==========================================
+// Every table can leave the page as a CSV of every filtered row, or through
+// the browser's print dialogue with the table unpaged. Both buttons are dead
+// until the table holds rows and follow it via 'datapanel:change'. The
+// income breakdown is exported by the server (audited, manager only).
 function canExportReports() {
     const user = getCurrentUser();
     return Boolean(user && user.role_name === 'Manager');
@@ -394,10 +366,32 @@ function applyExportPermissions() {
     });
 }
 
-function exportReport(name) {
+function printKeys(keys) {
+    return String(keys || '').split(',').map((key) => key.trim()).filter(Boolean);
+}
+
+function panelHasRows(key) {
+    const panel = getDataPanel(key);
+    return Boolean(panel && panel.state === 'ready' && panel.visible.length > 0);
+}
+
+// called whenever any table changes shape, and after a Reports tab switch
+function syncExportButtons() {
+    document.querySelectorAll('[data-print-for]').forEach((button) => {
+        const ready = printKeys(button.dataset.printFor).some(panelHasRows);
+        button.disabled = !ready;
+        button.title = ready
+            ? (button.dataset.printKind === 'sheet'
+                ? 'Save every row shown as a spreadsheet'
+                : 'Print every row shown, or save it as a PDF')
+            : 'Load data first';
+    });
+}
+
+// the income breakdown as one file, for the period on the screen
+function exportIncomeSpreadsheet() {
     if (!canExportReports()) {
-        notifyWarning('Only a manager can take a report off this screen. ' +
-            'Your daily tally is on the screen and can be read from here.', 'Not allowed');
+        notifyWarning('Only a manager can take a report off this screen.', 'Not allowed');
         return;
     }
 
@@ -407,27 +401,218 @@ function exportReport(name) {
         return;
     }
 
-    window.location.href = '/api/reports/export?report=' + encodeURIComponent(name) +
-        '&' + incomeQuery().slice(1);
+    window.location.href = '/api/reports/export?report=income-breakdown&' + incomeQuery().slice(1);
 
     notifyInfo('The file is being saved to your downloads folder. It opens in Excel, ' +
-        'LibreOffice or Google Sheets.', 'Exporting ' + name);
+        'LibreOffice or Google Sheets.', 'Exporting the income breakdown');
 }
 
-// The browser's own print dialogue over the print stylesheet. What a manager
-// wants on paper is the page they are already looking at, not a second
-// rendering of it that drifts from the screen.
-function printReport() {
+// ---------- a spreadsheet of what the table shows ----------
+// rows are read back as drawn, so the file and the page cannot disagree
+function panelSheet(key) {
+    const panel = getDataPanel(key);
+    if (!panel || panel.state !== 'ready' || panel.visible.length === 0) return null;
+
+    const table = document.getElementById(panel.config.tableId);
+    if (!table) return null;
+
+    const heads = [...table.querySelectorAll('thead th')];
+    const keep = heads.map((th) => th.textContent.trim() !== '');   // an unnamed column is buttons
+    const headers = heads.filter((th, i) => keep[i]).map((th) => th.textContent.trim());
+
+    const scratch = document.createElement('table');
+    scratch.innerHTML = '<tbody>' +
+        panel.visible.map((row, index) => panel.config.renderRow(row, index)).join('') +
+        '</tbody>';
+
+    const rows = [...scratch.querySelectorAll('tbody tr')].map((tr) =>
+        [...tr.children].filter((td, i) => keep[i]).map((td) => sheetCell(td)));
+
+    const caption = table.closest('.income-table, .tab-content, .card');
+    const name = caption
+        ? (caption.querySelector('.income-table-caption, h3') || {}).textContent || key
+        : key;
+
+    return { name: String(name).trim(), headers: headers, rows: rows };
+}
+
+// money and count cells go in as numbers; anything with words as it reads
+function sheetCell(td) {
+    const text = td.textContent.replace(/\s+/g, ' ').trim();
+    if (td.classList.contains('cell-num') || td.classList.contains('cell-id')) {
+        const bare = text.replace(/^#/, '').replace(/^-?\u20B1/, (sign) => sign.replace('\u20B1', '')).replace(/,/g, '');
+        if (/^-?\d+(\.\d+)?$/.test(bare)) return bare;
+    }
+    return text;
+}
+
+function csvLine(cells) {
+    return cells.map((value) => {
+        const text = String(value === null || value === undefined ? '' : value);
+        return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+    }).join(',');
+}
+
+function exportPanelSpreadsheet(keys, title) {
+    if (!canExportReports()) {
+        notifyWarning('Only a manager can take a report off this screen.', 'Not allowed');
+        return;
+    }
+
+    const sheets = printKeys(keys).map(panelSheet).filter(Boolean);
+    if (sheets.length === 0) {
+        notifyWarning('Load the table first, so the file matches what you are looking at.',
+            'Nothing to export yet');
+        return;
+    }
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    const lines = [];
+
+    sheets.forEach((sheet, index) => {
+        if (index > 0) lines.push('');
+        if (sheets.length > 1) lines.push(csvLine([sheet.name]));
+        lines.push(csvLine(sheet.headers));
+        sheet.rows.forEach((row) => lines.push(csvLine(row)));
+    });
+
+    // BOM so Excel on Windows reads UTF-8
+    const csv = '﻿' + lines.join('\r\n') + '\r\n';
+    const file = (title || sheets[0].name || 'report').replace(/[^\w.-]+/g, '-').replace(/^-|-$/g, '') +
+        '_' + stamp + '.csv';
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = file;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+
+    const total = sheets.reduce((sum, sheet) => sum + sheet.rows.length, 0);
+    notifyInfo(total + (total === 1 ? ' row' : ' rows') + ' saved as ' + file +
+        '. It opens in Excel, LibreOffice or Google Sheets.', 'Spreadsheet saved');
+}
+
+// ---------- paper ----------
+// the browser's own print dialogue; the named tables are unpaged while it is open
+let printRestore = null;
+
+function printReport(keys) {
     if (!canExportReports()) {
         notifyWarning('Printing a report is a manager action.', 'Not allowed');
         return;
     }
+
+    const panels = printKeys(keys).map(getDataPanel).filter(Boolean);
+    if (panels.length > 0 && !panels.some((p) => p.state === 'ready' && p.visible.length > 0)) {
+        notifyWarning('Load the table first. There is nothing on this screen to print yet.',
+            'Nothing to print');
+        return;
+    }
+
+    const saved = panels.map((panel) => ({ panel: panel, pageSize: panel.pageSize, page: panel.page }));
+    panels.forEach((panel) => {
+        if (panel.state !== 'ready') return;
+        panel.pageSize = Math.max(1, panel.visible.length);
+        panel.page = 1;
+        panel.render();
+    });
+
+    document.body.classList.add('is-printing');
+
+    // afterprint is the reliable signal; the timer covers a browser that never sends it
+    printRestore = () => {
+        if (!printRestore) return;
+        printRestore = null;
+        document.body.classList.remove('is-printing');
+        saved.forEach((entry) => {
+            entry.panel.pageSize = entry.pageSize;
+            if (entry.panel.state === 'ready') {
+                entry.panel.page = entry.page;
+                entry.panel.render();
+            }
+        });
+    };
+
+    window.addEventListener('afterprint', function once() {
+        window.removeEventListener('afterprint', once);
+        if (printRestore) printRestore();
+    });
+
     window.print();
+    window.setTimeout(() => { if (printRestore) printRestore(); }, 1500);
 }
 
-// ==========================================
-// INCOME TABLES
-// ==========================================
+// the one pair of buttons over four reports follows whichever is open
+const REPORT_TAB_PANELS = {
+    'report-methods': ['mgr-methods', 'Payment Methods'],
+    'report-unpaid':  ['mgr-unpaid', 'Receivables'],
+    'report-loyal':   ['mgr-loyal', 'Repeat Customers'],
+    'report-staff':   ['mgr-staff', 'Staff Performance']
+};
+
+function activeReport() {
+    return REPORT_TAB_PANELS[reportView] || REPORT_TAB_PANELS['report-methods'];
+}
+
+function exportActiveReport() {
+    const report = activeReport();
+    exportPanelSpreadsheet(report[0], report[1]);
+}
+
+function printActiveReport() {
+    printReport(activeReport()[0]);
+}
+
+// Three income tables in one card, chosen from the Income entry in the menu.
+const INCOME_TABLES = [
+    { name: 'methods',  label: 'Payment Method',
+      note: 'Where the money came from, and what is still owed on each method.' },
+    { name: 'products', label: 'Best Sellers',
+      note: 'The ten products that brought in the most over this period.' },
+    { name: 'staff',    label: 'Who Sold It',
+      note: 'Sales handled by each member of staff over this period.' }
+];
+
+let incomeTable = 'methods';
+
+// Income folds its list rather than opening a screen; fold is toggleSidebarMenu
+function toggleIncomeMenu(event, force)  { toggleSidebarMenu('income-nav', 'income-dropdown', event, force); }
+function toggleReportsMenu(event, force) { toggleSidebarMenu('reports-nav', 'reports-dropdown', event, force); }
+function toggleRecordsMenu(event, force) { toggleSidebarMenu('records-nav', 'records-dropdown', event, force); }
+function toggleStocksMenu(event, force)  { toggleSidebarMenu('stocks-nav', 'stocks-dropdown', event, force); }
+function togglePurchasingMenu(event, force) { toggleSidebarMenu('po-nav', 'po-dropdown', event, force); }
+function toggleCreditMenu(event, force)  { toggleSidebarMenu('credit-nav', 'credit-dropdown', event, force); }
+function toggleDeliveriesMenu(event, force) { toggleSidebarMenu('deliveries-nav', 'deliveries-dropdown', event, force); }
+
+function showIncomeTable(name, event) {
+    showManagerPanel('panel-income', 'Income', event);
+    pickIncomeTable(name);
+    toggleIncomeMenu(null, true);
+}
+
+function pickIncomeTable(name) {
+    const table = INCOME_TABLES.find((entry) => entry.name === name);
+    if (!table) return;
+
+    incomeTable = name;
+
+    document.querySelectorAll('#income-tables .income-table').forEach((wrap) => {
+        wrap.hidden = wrap.dataset.incomeTable !== name;
+    });
+
+    const title = document.getElementById('income-table-title');
+    if (title) title.textContent = table.label;
+
+
+    const panel = document.getElementById('panel-income');
+    if (panel) panel.dataset.view = name;
+
+    markPanelLinks('panel-income');
+}
+
 function buildIncomePanels() {
     createDataPanel({
         key: 'mgr-income-methods',
@@ -483,30 +668,40 @@ function buildIncomePanels() {
     });
 }
 
-// ==========================================
-// REPORTS, ONE AT A TIME
-//
-// These four were stacked down one page, so the fourth sat three screens
-// below the first and the third pushed it further every time it loaded. Each
-// is now behind a tab, loads on request, and pages on its own.
-// ==========================================
-function showReportTab(tabId, event) {
+// Four reports share one panel; data-view says which is showing.
+let reportView = 'report-methods';
+
+// the menu's way in
+function showReport(tabId, event) {
+    showManagerPanel('panel-reports', 'Reports', event);
+    showReportTab(tabId);
+    toggleReportsMenu(null, true);
+}
+
+function showReportTab(tabId) {
+    if (!REPORT_TAB_PANELS[tabId]) tabId = 'report-methods';
+    reportView = tabId;
+
     document.querySelectorAll('#panel-reports .tab-content')
         .forEach((tab) => tab.classList.toggle('active', tab.id === tabId));
 
-    document.querySelectorAll('#panel-reports .tab-btn')
-        .forEach((button) => button.classList.remove('active'));
+    const report = REPORT_TAB_PANELS[tabId];
 
-    if (event && event.currentTarget) {
-        event.currentTarget.classList.add('active');
-    } else {
-        const button = document.getElementById('tab-btn-' + tabId.replace('report-', ''));
-        if (button) button.classList.add('active');
-    }
+    const title = document.getElementById('reports-title');
+    if (title) title.textContent = report[1];
+
+    document.querySelectorAll('#panel-reports [data-print-for]').forEach((button) => {
+        button.dataset.printFor = report[0];
+    });
+
+    const panel = document.getElementById('panel-reports');
+    if (panel) panel.dataset.view = tabId;
+    markPanelLinks('panel-reports');
+
+    syncExportButtons();
 }
 
-// The four reports come from one route, so the first tab opened pays for all
-// four and the other three are free. It is fetched once and shared.
+// the four reports come from one route, fetched once and shared
 let reportsCache = null;
 
 async function reportsOverview(force) {
@@ -550,9 +745,9 @@ function buildReportPanels() {
             button: 'Load Data'
         },
         load: async () => (await reportsOverview()).unpaid,
-        match: (row, query) =>
-            (row.customer_name + ' ' + row.payment_method + ' #' + row.sale_id)
-                .toLowerCase().indexOf(query) !== -1,
+        match: (row, query) => prefixMatch([
+            row.customer_name, row.payment_method, row.sale_id, '#' + row.sale_id
+        ], query),
         renderRow: (u, index) =>
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openSaleDetail(' + u.sale_id + ')">' +
@@ -577,7 +772,7 @@ function buildReportPanels() {
             button: 'Load Data'
         },
         load: async () => (await reportsOverview()).loyal,
-        match: (row, query) => row.customer_name.toLowerCase().indexOf(query) !== -1,
+        match: (row, query) => prefixMatch([row.customer_name], query),
         renderRow: (c, index) =>
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openCustomerDetail(' + c.customer_id + ')">' +
@@ -601,8 +796,7 @@ function buildReportPanels() {
             button: 'Load Data'
         },
         load: async () => (await reportsOverview()).staffPerf,
-        // a leaver keeps their sales history, marked so the row is not mistaken
-        // for somebody still on the floor
+        // a leaver keeps their sales history, marked
         renderRow: (s) =>
             '<tr><td class="cell-name">' + escapeHtml(s.staff_name) +
                 (s.is_active ? '' : ' <span class="badge badge-neutral">No longer active</span>') + '</td>' +
@@ -612,12 +806,7 @@ function buildReportPanels() {
     });
 }
 
-// ==========================================
-// SALES
-//
-// The two filters go back to the server, because both are computed there and
-// a copy of that arithmetic in the browser is a copy that goes wrong.
-// ==========================================
+// Sales. Both filters go back to the server, where the figures are computed.
 const SALE_STATUS_TONE = {
     'Completed': 'badge-success',
     'Pending Delivery': 'badge-warning',
@@ -661,9 +850,9 @@ function buildSalesPanel() {
             button: 'Load Data'
         },
         load: () => getJson('/api/sales' + salesQuery()),
-        match: (s, query) =>
-            (s.customer_name + ' ' + s.cashier_name + ' ' + s.payment_method + ' #' + s.sale_id)
-                .toLowerCase().indexOf(query) !== -1,
+        match: (s, query) => prefixMatch([
+            s.customer_name, s.cashier_name, s.payment_method, s.sale_id, '#' + s.sale_id
+        ], query),
         renderRow: (s, index) => {
             const tone = SALE_STATUS_TONE[s.transaction_status] || 'badge-neutral';
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -680,13 +869,7 @@ function buildSalesPanel() {
     });
 }
 
-// ==========================================
-// STOCKS
-//
-// One fetch behind two screens. Reorder Alerts is the subset that needs
-// acting on; the Stock Report is all of it. Fetching twice would let the two
-// screens disagree about the same product.
-// ==========================================
+// Stocks: one fetch behind Reorder Alerts and the Stock Report.
 let stocksCache = null;
 
 async function stockRows(force) {
@@ -699,6 +882,48 @@ function modeBadge(row) {
     return row.reorder_mode === 'Dynamic'
         ? '<span class="badge badge-success">Dynamic</span>'
         : '<span class="badge badge-neutral">Manual</span>';
+}
+
+// Quantity gets a filter of its own; stock status only says whether a product
+// is under its reorder point. The bands are round numbers on purpose.
+function stockLevelMatches(p, level) {
+    const onHand = Number(p.quantity_in_stock) || 0;
+    const rop = Number(p.effective_rop) || 0;
+
+    switch (level) {
+        case 'all':       return true;
+        case 'none':      return onHand <= 0;
+        case 'under-rop': return onHand < rop;
+        case 'near-rop':  return onHand >= rop && onHand <= rop * 1.25;
+        case '1-10':      return onHand >= 1 && onHand <= 10;
+        case '11-50':     return onHand >= 11 && onHand <= 50;
+        case '51-200':    return onHand >= 51 && onHand <= 200;
+        case '200+':      return onHand > 200;
+        default:          return true;
+    }
+}
+
+// a product nobody sells has no days of cover, so it sorts last
+function sortStockRows(rows, order) {
+    const num = (value) => Number(value) || 0;
+    const byName = (a, b) => String(a.product_name).localeCompare(String(b.product_name));
+
+    const compare = {
+        'name':       byName,
+        'stock-asc':  (a, b) => num(a.quantity_in_stock) - num(b.quantity_in_stock) || byName(a, b),
+        'stock-desc': (a, b) => num(b.quantity_in_stock) - num(a.quantity_in_stock) || byName(a, b),
+        'gap':        (a, b) => (num(a.quantity_in_stock) - num(a.effective_rop)) -
+                                (num(b.quantity_in_stock) - num(b.effective_rop)) || byName(a, b),
+        'value-desc': (a, b) => num(b.stock_value) - num(a.stock_value) || byName(a, b),
+        'value-asc':  (a, b) => num(a.stock_value) - num(b.stock_value) || byName(a, b),
+        'cover':      (a, b) => {
+            const left = a.days_of_cover === null || a.days_of_cover === undefined ? Infinity : num(a.days_of_cover);
+            const right = b.days_of_cover === null || b.days_of_cover === undefined ? Infinity : num(b.days_of_cover);
+            return (left - right) || byName(a, b);
+        }
+    }[order] || byName;
+
+    return rows.sort(compare);
 }
 
 function buildStockPanels() {
@@ -716,8 +941,7 @@ function buildStockPanels() {
             button: 'Load Data'
         },
         load: async () => (await stockRows(true)).filter((p) => p.stock_status !== 'In Stock'),
-        match: (p, query) =>
-            (p.product_name + ' ' + (p.supplier_name || '')).toLowerCase().indexOf(query) !== -1,
+        match: (p, query) => prefixMatch([p.product_name, p.supplier_name], query),
         filter: (p, filters) => filters.mode === 'all' || p.reorder_mode === filters.mode,
         renderRow: (p, index) =>
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -740,17 +964,18 @@ function buildStockPanels() {
         columns: 7,
         pagerId: 'stocks-pager',
         idField: 'product_id',
-        filters: { status: 'all' },
+        filters: { status: 'all', level: 'all', sort: 'name' },
         gate: {
             title: 'The stock report is not loaded',
-            text: 'Search for a product, pick a status, or press Load Data for the whole inventory.',
+            text: 'Search for a product, pick a status or a quantity, or press Load Data for the whole inventory.',
             button: 'Load Data'
         },
         load: () => stockRows(true),
-        match: (p, query) =>
-            (p.product_name + ' ' + (p.category_name || '') + ' ' + (p.supplier_name || ''))
-                .toLowerCase().indexOf(query) !== -1,
-        filter: (p, filters) => filters.status === 'all' || p.stock_status === filters.status,
+        match: (p, query) => prefixMatch([p.product_name, p.category_name, p.supplier_name], query),
+        filter: (p, filters) =>
+            (filters.status === 'all' || p.stock_status === filters.status) &&
+            stockLevelMatches(p, filters.level),
+        sort: (rows, filters) => sortStockRows(rows, filters.sort),
         onLoaded: (rows) => {
             const total = rows.reduce((sum, p) => sum + Number(p.stock_value || 0), 0);
             setPill('stock-value', peso(total) + ' total value');
@@ -801,8 +1026,7 @@ function openReorderPolicy(productId) {
     showModal('policy-modal');
 }
 
-// The arithmetic, shown as it is typed. A formula somebody cannot see the
-// result of before saving is a formula they will not switch on.
+// the arithmetic, shown as it is typed
 function previewReorderPoint() {
     if (!policyProduct) return;
 
@@ -844,8 +1068,6 @@ async function saveReorderPolicy(event) {
         reorderPoint: parseInt(form.elements.reorderPoint.value, 10)
     };
 
-    // switching a product to Dynamic changes when it gets ordered, which is a
-    // change worth reading before it is made
     if (body.reorderMode === 'Dynamic' && policyProduct.reorder_mode !== 'Dynamic') {
         const calculated = Math.ceil((Number(policyProduct.avg_daily_sales) || 0) * body.leadTimeDays) +
             body.safetyStock;
@@ -883,7 +1105,6 @@ async function saveReorderPolicy(event) {
         notifySuccess(result.message, 'Reorder policy saved');
         closeModal('policy-modal');
 
-        // both stock screens read one cache, so both are refreshed at once
         stocksCache = null;
         for (const key of ['mgr-reorder', 'mgr-stocks']) {
             const panel = getDataPanel(key);
@@ -895,34 +1116,51 @@ async function saveReorderPolicy(event) {
 }
 
 
-// ==========================================
-// CREDIT MANAGEMENT
-//
-// A credit limit on its own is not a policy. A customer who always pays and
-// one who has owed for four months both fit under the same limit, and only
-// one of them should be sold to on account. So a limit and a standing are
-// edited together, on one card, with what the customer actually owes printed
-// above them.
-// ==========================================
+// Purchase orders: the form, history, print and count-in sheets all come from
+// shared/purchase-orders.js. This is the page with the form.
+function buildManagerPurchaseOrderPanel() {
+    configurePurchaseOrders({
+        key: 'mgr-po',
+        canCreate: true,
+        canReceive: true,
+        showPanel: (panelId, title) => showManagerPanel(panelId, title),
+        historyPanelId: 'panel-po-history',
+        historyTitle: 'Order History',
+        gateText: 'Press Load Data for every order raised, or filter to the ones still pending.',
+        // a delivery counted in moves stock
+        afterChange: async () => {
+            stocksCache = null;
+            for (const key of ['mgr-reorder', 'mgr-stocks']) {
+                const panel = getDataPanel(key);
+                if (panel && panel.state === 'ready') await panel.refresh();
+            }
+            loadManagerSummary(true);
+        }
+    });
+    buildPurchaseOrderPanel();
+}
+
+// Credit management: a limit and a standing are edited together, with what
+// the customer owes printed above them.
 const STANDING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
 const STANDING_WORD = { Good: 'Good', Watch: 'Watch', Hold: 'On hold' };
 
 let creditCustomer = null;
 let creditRequest = null;
 
-function standingBadge(standing) {
-    return '<span class="badge ' + (STANDING_TONE[standing] || 'badge-neutral') + '">' +
+// reason is the view's standing_reason: the first rule that fired
+function standingBadge(standing, reason) {
+    return '<span class="badge ' + (STANDING_TONE[standing] || 'badge-neutral') + '"' +
+           (reason ? ' title="' + escapeHtml(reason) + '"' : '') + '>' +
            escapeHtml(STANDING_WORD[standing] || standing) + '</span>';
 }
 
-// how long money has been owed, in words rather than a raw day count
 function debtAge(days) {
     if (days === null || days === undefined) return '<span class="muted">Nothing owed</span>';
 
     const count = Number(days);
     const text = count === 0 ? 'Today' : count === 1 ? '1 day' : count + ' days';
 
-    // thirty days is where a slow payer starts becoming a bad one
     if (count > 60) return '<span class="cell-due">' + text + '</span>';
     if (count > 30) return '<span class="text-warn">' + text + '</span>';
     return text;
@@ -946,8 +1184,7 @@ function buildCreditPanels() {
 
         load: () => getJson('/api/credit/customers'),
 
-        match: (row, query) =>
-            (row.customer_name + ' ' + (row.phone || '')).toLowerCase().indexOf(query) !== -1,
+        match: (row, query) => prefixMatch([row.customer_name, row.phone], query),
 
         filter: (row, filters) => {
             if (filters.standing !== 'all' && row.standing !== filters.standing) return false;
@@ -984,7 +1221,7 @@ function buildCreditPanels() {
                     : peso(row.available_credit)) + '</td>' +
                 '<td class="cell-num">' + row.open_sales + '</td>' +
                 '<td class="cell-num">' + debtAge(row.oldest_debt_days) + '</td>' +
-                '<td>' + standingBadge(row.standing) + '</td></tr>';
+                '<td>' + standingBadge(row.standing, row.standing_reason) + '</td></tr>';
         }
     });
 
@@ -1008,8 +1245,7 @@ function buildCreditPanels() {
             return getJson('/api/credit/requests' + (value === 'all' ? '' : '?status=' + value));
         },
 
-        match: (row, query) =>
-            (row.customer_name + ' ' + (row.requested_by || '')).toLowerCase().indexOf(query) !== -1,
+        match: (row, query) => prefixMatch([row.customer_name, row.requested_by], query),
 
         onLoaded: (rows) => {
             markPendingRequests(rows.filter((row) => row.status === 'Pending').length);
@@ -1033,8 +1269,6 @@ function buildCreditPanels() {
     });
 }
 
-// The menu carries the count, because a request nobody sees is a queue at the
-// till nobody knows about.
 function markPendingRequests(count) {
     const badge = document.getElementById('credit-request-count');
     if (!badge) return;
@@ -1079,21 +1313,24 @@ async function openCreditAccount(customerId) {
             detailField('Last Payment', c.last_payment
                 ? escapeHtml(String(c.last_payment).slice(0, 16))
                 : '<span class="muted">None recorded</span>') +
-            detailField('Standing', standingBadge(c.standing)) +
-            detailField('Set By', c.credit_updated_at
+            detailField('Standing', standingBadge(c.standing, c.standing_reason)) +
+            detailField('Why', escapeHtml(c.standing_reason || '')) +
+            detailField('Manager\'s Word', c.manual_standing === 'Good'
+                ? '<span class="muted">None &mdash; the figures decide</span>'
+                : escapeHtml(STANDING_WORD[c.manual_standing] || c.manual_standing)) +
+            detailField('Last Changed', c.credit_updated_at
                 ? escapeHtml(String(c.credit_updated_at).slice(0, 16))
-                : '<span class="muted">Never changed</span>');
+                : '<span class="muted">Never</span>');
 
         const form = document.getElementById('credit-form');
         form.elements.creditLimit.value = Number(c.credit_limit).toFixed(2);
-        form.elements.standing.value = c.standing || 'Good';
+        form.elements.standing.value = c.manual_standing || 'Good';
         form.elements.notes.value = c.credit_notes || '';
 
         previewCreditLimit();
         showCreditTab('account');
         showModal('credit-modal');
 
-        // the history half is fetched only when it is opened
         creditHistory = null;
     } catch (error) {
         notifyError('That credit account could not be opened.', 'Nothing to show');
@@ -1111,9 +1348,7 @@ function showCreditTab(tab) {
     if (history) loadCreditHistory();
 }
 
-// The consequence of the figure being typed, in words, before it is saved.
-// "50000" means nothing on its own; "they can take another 12,400 today"
-// is the sentence somebody is actually deciding.
+// the consequence of the typed figure, in words, before it is saved
 function previewCreditLimit() {
     if (!creditCustomer) return;
 
@@ -1127,17 +1362,32 @@ function previewCreditLimit() {
     const room = limit - owed;
     const name = creditCustomer.customer_name;
 
+    const days = Number(creditCustomer.oldest_debt_days) || 0;
+    const overLimit = limit > 0 && owed > limit;
+    const nearLimit = limit > 0 && owed >= limit * 0.75;
+
     let verdict;
     if (standing === 'Hold') {
         verdict = name + ' can take no new credit at all until the hold is lifted, ' +
             'whatever the limit says.';
-    } else if (room > 0) {
-        verdict = name + ' can take another <strong>' + peso(room) + '</strong> on account today.';
+    } else if (overLimit) {
+        verdict = name + ' already owes <strong>' + peso(-room) + '</strong> more than this limit, ' +
+            'so the account reads <strong>Hold</strong> and no further credit can be taken until ' +
+            'it is paid down. The existing debt stands.';
+    } else if (days > 90) {
+        verdict = name + '\'s oldest unpaid sale is ' + days + ' days old, so the account reads ' +
+            '<strong>Hold</strong> whatever the limit is set to. Chase the payment first.';
     } else if (room === 0) {
         verdict = name + ' is exactly at the limit and can take no more until something is paid.';
+    } else if (standing === 'Watch' || days > 30 || nearLimit) {
+        verdict = name + ' can take another <strong>' + peso(room) + '</strong> on account today, ' +
+            'and the account reads <strong>Watch</strong>: ' +
+            (standing === 'Watch' ? 'you have flagged it.'
+                : days > 30 ? 'the oldest unpaid sale is ' + days + ' days old.'
+                : 'they owe ' + Math.round(owed / limit * 100) + '% of this limit.');
     } else {
-        verdict = name + ' already owes <strong>' + peso(-room) + '</strong> more than this limit, ' +
-            'so no further credit can be taken until it is paid down. The existing debt stands.';
+        verdict = name + ' can take another <strong>' + peso(room) + '</strong> on account today, ' +
+            'in good standing.';
     }
 
     preview.innerHTML =
@@ -1146,8 +1396,8 @@ function previewCreditLimit() {
         '</strong></span>' +
         '<span class="formula-verdict">' + verdict + '</span>';
 
-    preview.classList.toggle('is-dynamic', standing !== 'Hold' && room > 0);
-    preview.classList.toggle('is-stop', standing === 'Hold' || room < 0);
+    preview.classList.toggle('is-dynamic', standing !== 'Hold' && room > 0 && days <= 90);
+    preview.classList.toggle('is-stop', standing === 'Hold' || overLimit || days > 90);
 }
 
 async function saveCreditLimit(event) {
@@ -1160,9 +1410,7 @@ async function saveCreditLimit(event) {
     const owed = Number(creditCustomer.current_credit) || 0;
     const name = creditCustomer.customer_name;
 
-    // Two changes are worth stopping for: putting a stop on an account, and
-    // setting a limit under what is already owed. Both are legitimate; both
-    // are things somebody should mean to do.
+    // two changes worth stopping for: a Hold, and a limit under what is owed
     if (standing === 'Hold' && creditCustomer.standing !== 'Hold') {
         const yes = await askDanger(name + ' will not be able to take anything on account.', {
             title: 'Put this account on hold?',
@@ -1235,10 +1483,7 @@ async function loadCreditHistory() {
     }
 }
 
-// Two columns, side by side, on purpose. A purchase history says how good a
-// customer somebody is and a payment history says how good a payer, and the
-// shop needs to read both before extending anything. Stacked, the second one
-// is below the fold and never gets read.
+// purchases beside payments, so both get read before extending anything
 function renderCreditHistory(data) {
     const box = document.getElementById('credit-history');
     if (!box) return;
@@ -1318,7 +1563,7 @@ function openCreditRequest(requestId) {
         detailField('Asked For', '<strong>' + peso(r.requested_limit) + '</strong>') +
         detailField('Currently Owed', '<span class="' +
             (Number(r.current_credit) > 0 ? 'cell-due' : '') + '">' + peso(r.current_credit) + '</span>') +
-        detailField('Standing', standingBadge(r.standing || 'Good')) +
+        detailField('Standing', standingBadge(r.standing || 'Good', r.standing_reason)) +
         detailField('Status', escapeHtml(r.status)) +
         detailField('Decided', r.decided_at
             ? escapeHtml(String(r.decided_at).slice(0, 16))
@@ -1333,8 +1578,7 @@ function openCreditRequest(requestId) {
     note.value = r.decision_note || '';
     note.disabled = decided;
 
-    // A decision already made stands. Reopening it would rewrite the reason an
-    // extension was granted, which is the one thing an audit needs to keep.
+    // a decision already made stands; the reason is what an audit keeps
     document.getElementById('decide-actions').innerHTML = decided
         ? '<button type="button" class="btn btn-ghost" onclick="closeModal(\'decide-modal\')">Close</button>'
         : '<button type="button" class="btn btn-ghost" onclick="closeModal(\'decide-modal\')">Cancel</button>' +
@@ -1351,8 +1595,7 @@ async function decideCreditRequest(approve) {
     const r = creditRequest;
     const note = document.getElementById('decide-note').value.trim();
 
-    // A refusal with no reason is a question the cashier has to ask again
-    // tomorrow, so declining says why or it does not happen.
+    // declining says why or it does not happen
     if (!approve && note === '') {
         notifyWarning('Say why, so whoever raised it knows what to tell the customer.',
             'A declined request needs a reason');
@@ -1439,9 +1682,7 @@ function buildDeliveryPanel() {
             button: 'Load Data'
         },
         load: () => getJson('/api/deliveries'),
-        match: (d, query) =>
-            (d.customer_name + ' ' + d.driver_name + ' ' + d.delivery_address)
-                .toLowerCase().indexOf(query) !== -1,
+        match: (d, query) => prefixMatch([d.customer_name, d.driver_name, d.delivery_address], query),
         filter: (d, filters) => filters.state === 'all' || d.fulfilment_state === filters.state,
         onLoaded: (rows) => renderTrackLegend(rows),
         renderRow: (d, index) => {
@@ -1461,8 +1702,7 @@ function buildDeliveryPanel() {
     });
 }
 
-// The stage counts above the table: a legend and a summary at once. Cash
-// collection leads, because it is the one state that costs money to ignore.
+// stage counts above the table; cash collection leads
 function renderTrackLegend(rows) {
     const legend = document.getElementById('track-legend');
     if (!legend) return;
@@ -1499,22 +1739,34 @@ const RECORD_COLUMNS = {
 };
 const MONEY_FIELDS = ['price', 'credit_limit', 'current_credit', 'total_purchase', 'stock_value'];
 
+const RECORD_TITLES = {
+    supplier: 'Suppliers', customer: 'Customers', product: 'Products',
+    category: 'Categories', unit: 'Units'
+};
+
+// the kind of record is a screen in the strip
 function showRecordType(type, event) {
-    if (event) event.preventDefault();
+    if (!RECORD_COLUMNS[type]) type = 'supplier';
+    const changed = type !== recordType;
     recordType = type;
 
-    document.querySelectorAll('[data-record-tab]').forEach((button) => {
-        button.classList.toggle('active', button.dataset.recordTab === type);
-    });
+    showManagerPanel('panel-records', 'Records', event);
+    toggleRecordsMenu(null, true);
+
+    const title = document.getElementById('records-title');
+    if (title) title.textContent = RECORD_TITLES[type];
+
+
+    const card = document.getElementById('panel-records');
+    if (card) card.dataset.view = type;
+    markPanelLinks('panel-records');
 
     writeRecordHeaders();
 
     const panel = getDataPanel('mgr-records');
-    if (!panel) return;
+    if (!panel || !changed) return;
 
-    // changing tab on a table already open loads the new kind straight away;
-    // on a closed one it stays closed, because the tab was not a request for
-    // data, it was a request to change what Load Data would fetch
+    // a table already open loads the new kind at once; a closed one stays closed
     if (panel.state === 'ready') panel.open();
     else panel.reset();
 }
@@ -1544,8 +1796,7 @@ function buildRecordsPanel() {
             button: 'Load Data'
         },
         load: () => getJson('/api/records/' + recordType),
-        match: (row, query) =>
-            Object.values(row).join(' ').toLowerCase().indexOf(query) !== -1,
+        match: (row, query) => prefixMatch(Object.values(row), query),
         renderRow: (row, index) => {
             const columns = RECORD_COLUMNS[recordType];
 
@@ -1582,8 +1833,7 @@ function buildArchivePanel() {
             button: 'Load Data'
         },
         load: () => getJson('/api/archives'),
-        match: (a, query) =>
-            (a.record_name + ' ' + (a.detail || '') + ' ' + a.module).toLowerCase().indexOf(query) !== -1,
+        match: (a, query) => prefixMatch([a.record_name, a.detail, a.module], query),
         filter: (a, filters) => filters.module === 'All' || a.module === filters.module,
         onLoaded: (rows) => renderArchiveFilters(rows),
         renderRow: (a, index) =>
@@ -1623,8 +1873,7 @@ function setArchiveFilter(module) {
     dataPanelFilter('mgr-archives', 'module', module);
 }
 
-// Restoring puts a record back into circulation, so the row opens it first.
-// It used to be a button on every row of a table where every row looks alike.
+// restoring puts a record back into circulation, so the row opens it first
 function openArchiveEntry(index) {
     const panel = getDataPanel('mgr-archives');
     const entry = panel ? panel.visible[index] : null;
@@ -1705,7 +1954,11 @@ async function openSaleDetail(saleId) {
             '</div>';
 
         const balance = Number(s.final_amount) - Number(s.amount_paid);
+        const units = data.items.reduce((sum, it) =>
+            sum + (isMeasuredUnit(it.unit_name) ? 1 : (Number(it.quantity) || 0)), 0);
         const totals = '<div class="detail-grid">' +
+            detailField('Items Purchased', units + (data.items.length !== units
+                ? ' (' + data.items.length + (data.items.length === 1 ? ' line)' : ' lines)') : '')) +
             detailField('Gross Total', peso(s.total_amount)) +
             detailField('Discount', peso(s.discount)) +
             detailField('Amount Due', peso(s.final_amount)) +
@@ -1717,7 +1970,7 @@ async function openSaleDetail(saleId) {
         const items = detailTable(['Product', 'Qty', 'Unit Price', 'Subtotal'],
             data.items.map((it) => [
                 escapeHtml(it.product_name),
-                it.quantity + ' ' + escapeHtml(it.unit_name || ''),
+                escapeHtml(qtyText(it.quantity, it.unit_name)),
                 peso(it.unit_price),
                 peso(it.subtotal)
             ]), [1, 2, 3]);
@@ -1731,8 +1984,24 @@ async function openSaleDetail(saleId) {
                 escapeHtml(p.received_by || 'Unknown')
             ]), [1]);
 
+        // a sale can be voided on the day it was made; the machine's own calendar, not UTC
+        const now = new Date();
+        const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') +
+            '-' + String(now.getDate()).padStart(2, '0');
+        const saleDay = String(s.sale_date).slice(0, 10);
+        const voidBlock = s.is_archived
+            ? '<p class="detail-note detail-warn">This sale was voided' +
+              (s.archived_at ? ' on ' + escapeHtml(String(s.archived_at).slice(0, 16)) : '') +
+              '. It counts for nothing, and its stock went back on the shelf.</p>'
+            : saleDay === today
+            ? '<div class="detail-actions">' +
+              '<button type="button" class="btn btn-danger" onclick="voidSale(' + s.sale_id + ')">Void this sale</button>' +
+              '</div>'
+            : '<p class="detail-note">A sale can only be voided on the day it was made. ' +
+              'Correct this one with a return or a refund.</p>';
+
         const pages = [
-            { label: 'Summary', body: summary },
+            { label: 'Summary', body: summary + voidBlock },
             { label: 'Totals', body: totals },
             { label: 'Items (' + data.items.length + ')', body: items },
             { label: 'Payments (' + data.payments.length + ')', body: payments }
@@ -1768,6 +2037,68 @@ async function openSaleDetail(saleId) {
     }
 }
 
+// Voiding a sale archives it; the database holds the rules (same day, goods
+// not out for delivery, stock returned).
+async function voidSale(saleId) {
+    const yes = await askDanger(
+        'Sale #' + saleId + ' is struck off as if it had not happened.',
+        {
+            title: 'Void this sale?',
+            eyebrow: 'Sales',
+            confirmLabel: 'Void the sale',
+            detail: [
+                'It reads Voided everywhere and counts for nothing.',
+                'Every item on it goes back on the shelf, with a line in the stock log.',
+                'A delivery booked for it and not yet on the road is cancelled with it.',
+                'Money already taken is not refunded by this; hand it back at the counter.'
+            ]
+        });
+
+    if (!yes) return;
+
+    const result = await postJson('/api/archives/archive', { module: 'Sales', recordId: saleId });
+    if (!result) return;
+
+    closeModal('detail-modal');
+    notifySuccess('Sale #' + saleId + ' is voided and its stock is back on the shelf.', 'Sale voided');
+
+    for (const key of ['mgr-sales', 'mgr-archives', 'mgr-deliveries']) {
+        const panel = getDataPanel(key);
+        if (panel && panel.state === 'ready') await panel.refresh();
+    }
+    loadManagerSummary(true);
+}
+
+// A closed delivery can be put away before the ninety-day sweep; the
+// database refuses a live one.
+async function archiveDelivery(deliveryId) {
+    const yes = await askConfirm(
+        'Delivery #' + deliveryId + ' leaves the tracking list and goes to the Archives screen.',
+        {
+            title: 'Archive this delivery?',
+            eyebrow: 'Deliveries',
+            confirmLabel: 'Archive it',
+            detail: [
+                'It can be restored from Archives.',
+                'The sale it belongs to is not touched.',
+                'The sweep would archive it on its own ninety days after it closed.'
+            ]
+        });
+
+    if (!yes) return;
+
+    const result = await postJson('/api/archives/archive', { module: 'Delivery', recordId: deliveryId });
+    if (!result) return;
+
+    closeModal('detail-modal');
+    notifySuccess('Delivery #' + deliveryId + ' is archived.', 'Delivery archived');
+
+    for (const key of ['mgr-deliveries', 'mgr-archives']) {
+        const panel = getDataPanel(key);
+        if (panel && panel.state === 'ready') await panel.refresh();
+    }
+}
+
 function openStockDetail(productId) {
     const p = (stocksCache || []).find((item) => item.product_id === productId);
     if (!p) return;
@@ -1781,8 +2112,7 @@ function openStockDetail(productId) {
         detailField('Suggested Order', p.suggested_order + ' ' + escapeHtml(p.unit_name || '')) +
         '</div>';
 
-    // the formula written out for this one product, so the number in the
-    // Reorder At column can be checked rather than taken on trust
+    // the formula written out for this product
     const daily = Number(p.avg_daily_sales) || 0;
     const reorder = '<div class="detail-grid">' +
         detailField('Sold Recently', p.units_sold_window + ' ' + escapeHtml(p.unit_name || '') +
@@ -1829,10 +2159,9 @@ function openStockDetail(productId) {
 
 function openDeliveryDetail(deliveryId) {
     const panel = getDataPanel('mgr-deliveries');
-    showDeliveryRecord(panel ? panel.find(deliveryId, 'delivery_id') : null, true);
+    showDeliveryRecord(panel ? panel.find(deliveryId, 'delivery_id') : null, true, true);
 }
 
-// the records popup pages its fields six at a time, so nothing has to scroll
 function openRecordDetail(index) {
     const panel = getDataPanel('mgr-records');
     const row = panel ? panel.visible[index] : null;
@@ -1860,8 +2189,7 @@ function openRecordDetail(index) {
     openDetailModal(row.name, prettyLabel(recordType) + ' record', initialsOf(row.name), pages);
 }
 
-// reached from the Repeat Customers report, which knows a customer id and
-// nothing else about them
+// reached from the Repeat Customers report, which only knows a customer id
 async function openCustomerDetail(customerId) {
     try {
         const rows = await getJson('/api/records/customer');
@@ -1894,20 +2222,33 @@ if (window.location.pathname.toLowerCase().endsWith('manager-dashboard.html')) {
         buildSalesPanel();
         buildStockPanels();
         buildDeliveryPanel();
+        buildManagerPurchaseOrderPanel();
         buildCreditPanels();
         buildRecordsPanel();
         buildArchivePanel();
 
+        // for a manager the administrator has handed a key to a connected system
+        configureConnectedSystems({ showPanel: (panelId, title) => showManagerPanel(panelId, title) });
+        buildConnectedSystemsPanel();
+
+        // the schedule follows what the administrator switched on for managers
+        configureDeliverySchedule({ showPanel: (panelId, title) => showManagerPanel(panelId, title) });
+        buildDeliverySchedulePanel();
+        configureFeatures({ home: () => showManagerHome() });
+
         writeRecordHeaders();
         renderIncomeRanges();
+        pickIncomeTable(incomeTable);
+        showReportTab(reportView);
         applyExportPermissions();
+
+        document.addEventListener('datapanel:change', syncExportButtons);
+        syncExportButtons();
 
         showManagerHome();
         loadNotifications();
 
-        // The Live badge sits directly above these tiles, so the tiles have to
-        // honour it -- until now they loaded once and never moved again. One
-        // sale fires several scopes at once, hence the debounce.
+        // the KPI tiles follow the Live badge; one sale fires several scopes, hence the debounce
         onLiveChange(['sales', 'credit', 'inventory', 'deliveries', 'returns'], function () {
             clearTimeout(kpiRefreshTimer);
             kpiRefreshTimer = setTimeout(function () {
@@ -1915,8 +2256,6 @@ if (window.location.pathname.toLowerCase().endsWith('manager-dashboard.html')) {
                 if (!home || home.style.display === 'none') return;
                 if (document.querySelector('.modal.open, .drawer.open')) return;
 
-                // redrawing the grid under a pointer loses the tile that was
-                // about to be clicked
                 const active = document.activeElement;
                 if (active && active.closest && active.closest('.kpi-card')) return;
 

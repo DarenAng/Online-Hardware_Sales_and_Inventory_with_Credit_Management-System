@@ -47,12 +47,7 @@
     color: var(--steel-soft);
 }
 
-.login-card h2 { margin-bottom: 6px; }
-.login-lead {
-    font-size: 14px; color: var(--steel); line-height: 1.6;
-    margin-bottom: 22px;
-    max-width: 44ch;
-}
+.login-card h2 { margin-bottom: 22px; }
 
 /* A refused sign-in, said at the form rather than in the corner of a wide
    monitor. It carries the system's meaning rule down its left edge — the same
