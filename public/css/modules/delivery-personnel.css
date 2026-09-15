@@ -1,18 +1,11 @@
 /* ==========================================================================
-   DELIVERY PERSONNEL
-   delivery.html
-
+   DELIVERY PERSONNEL -- delivery.html
    Loads after general-ui.css and responsive.css, so anything here wins.
-
-   The only role that is never at a desk. This screen is read in a truck cab,
-   one-handed, often in sunlight, and everything on it is either a place to
-   go or an amount to collect. So this file does one thing above all others:
-   it makes the driver's targets big.
+   Read in a truck cab, one-handed: the targets are big.
    ========================================================================== */
 
 /* ==========================================================================
    THE DAY, IN FOUR FIGURES
-   Waiting, on the road, delivered, still to collect.
    ========================================================================== */
 #del-kpis, #drep-kpis { margin-bottom: 16px; }
 
@@ -26,20 +19,13 @@
 }
 
 /* ==========================================================================
-   MOVING A DELIVERY ON
-   The action in each row is a stage, not a menu: Out for delivery, then
-   Delivered. One press, one stage, and the button says which. A row that
-   needs a note instead is opened rather than pressed, which is why the row
-   is clickable and the button is not the only way through.
+   MOVING A DELIVERY ON -- one press, one stage; a row that needs a note is opened
    ========================================================================== */
 #dpend-table td.cell-action .btn,
 #dact-table td.cell-action .btn { min-width: 132px; }
 
 /* ==========================================================================
-   COLLECTING THE MONEY
-   Choosing the delivery fills in the exact balance, so the amount field is
-   already right before it is touched. It is set as a figure for the same
-   reason a till display is.
+   COLLECTING THE MONEY -- the amount is set as a figure
    ========================================================================== */
 #dcod-form input[name="amount"] {
     font-family: var(--font-figure);
@@ -51,11 +37,8 @@
 }
 
 /* ==========================================================================
-   THE REPORT
-   Two date fields and everything between them. On a phone the two dates sit
-   side by side, because they are one control in two halves.
+   THE REPORT -- two date fields, side by side on a phone
    ========================================================================== */
-#panel-report .panel-actions { gap: 8px; }
 #drep-from, #drep-to {
     font-family: var(--font-figure);
     font-variant-numeric: tabular-nums;
@@ -63,29 +46,27 @@
 
 /* ==========================================================================
    ON A PHONE
-   This is the role most likely to be on one, so it gets the most room.
    ========================================================================== */
 @media (max-width: 640px) {
     /* four figures, two by two, still readable at arm's length */
     #del-kpis, #drep-kpis { grid-template-columns: 1fr 1fr; gap: 10px; }
     #del-kpis .kpi-value, #drep-kpis .kpi-value { font-size: clamp(26px, 8vw, 34px); }
 
-    /* the stage button is the whole width of the card: in a moving vehicle
-       a small target is a mis-press, and a mis-press here closes out a
-       delivery that has not happened */
+    /* the stage button is the whole width of the card: a small target is a mis-press */
     #dpend-table td.cell-action .btn,
     #dact-table td.cell-action .btn { min-width: 0; min-height: 48px; font-size: 15.5px; }
 
     #dcod-form input[name="amount"] { font-size: 20px; min-height: 52px; }
 
     /* the two dates stay on one line: they are a range, not two questions */
-    #panel-report .panel-actions {
+    #panel-report .panel-toolbar {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 8px;
     }
-    #drep-from, #drep-to { max-width: none !important; }
-    #panel-report .panel-actions .btn { grid-column: 1 / -1; }
+    #panel-report .toolbar-field input { min-width: 0; width: 100%; }
+    #panel-report .toolbar-spacer { display: none; }
+    #panel-report .panel-toolbar .btn { grid-column: 1 / -1; }
 }
 
 @media (max-width: 420px) {

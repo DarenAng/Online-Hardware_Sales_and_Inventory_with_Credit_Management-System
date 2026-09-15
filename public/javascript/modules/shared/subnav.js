@@ -1,46 +1,12 @@
-// subnav.js  --  THE SUBMODULE STRIP
+// subnav.js -- the submodule tab strip
 // Loaded by: all five dashboards
-// ------------------------------------------------------------------------
-// ==========================================
-// TWO LEVELS, EACH WITH ONE JOB
 //
-// The menu on the left is how a person gets anywhere in the system. It holds
-// the modules -- Inventory Management, Credit, Point of Sale -- and it is the
-// same list all day, so it can be learned once and then used without reading.
-//
-// The strip across the top holds the screens inside whichever module is open,
-// and nothing else. It changes as you move, and on a module that has only one
-// screen it is not there at all.
-//
-// Before this, both levels held both things: every screen was listed in the
-// menu under its module, and the top bar held only a title. That is one list
-// doing two jobs, and it grows until the menu is the length of the page.
-//
-// WHERE THE TABS COME FROM
-//
-// Not from a second list written out in each dashboard. They are read from
-// the menu that is already in the page: a module is an <li> in .sidebar-nav,
-// and its screens are the links in the .nav-sub underneath it. One source,
-// so the two levels cannot drift apart, and a screen added to the menu gets
-// its tab for free.
-//
-// It also means access is handled in one place rather than two. A screen a
-// role cannot open is not written into that role's menu, so no tab for it is
-// ever built -- the strip is generated from what the person can actually
-// reach rather than filtered afterwards, which is the version that cannot
-// leak. A module can also be marked in the markup:
-//
-//     <li data-access="Manager,Inventory Clerk">
-//
-// and it is dropped, from the menu and the strip both, for anybody else.
-//
-// IF THIS FILE DOES NOT RUN
-//
-// The menu keeps its sub-lists and the system works exactly as it did. The
-// sub-lists are only folded away once the strip has actually been built, by
-// a class this file puts on <body>, so a script that fails to load costs a
-// tab strip rather than the ability to navigate.
-// ==========================================
+// The left menu holds modules; the strip holds the screens inside the open
+// module. Tabs are read from the menu itself (.sidebar-nav > li > .nav-sub),
+// so a screen a role cannot reach never gets a tab. A module marked
+//   <li data-access="Manager,Inventory Clerk">  is dropped for other roles
+//   <li data-sidebar-dropdown>                  stays a dropdown, no strip
+// If this file does not run the menu keeps its sub-lists and still works.
 
 let subnavModules = [];
 let subnavBuilt = false;
@@ -72,6 +38,8 @@ function readSubnavModules() {
             return;
         }
 
+        if (item.hasAttribute('data-sidebar-dropdown')) return;
+
         const parent = item.querySelector(':scope > a');
         if (!parent) return;
 
@@ -88,12 +56,13 @@ function readSubnavModules() {
         modules.push({
             item: item,
             link: parent,
-            // a module with a sub-list is named by its parent link; a module
-            // that is one screen is named by that screen
+            // a module with a sub-list is named by its parent link
             name: subnavLabel(parent),
             screens: screens.map((link) => ({
                 link: link,
                 panelId: link.getAttribute('data-panel-link'),
+                // one panel can hold several views (the four reports); see data-view
+                view: link.getAttribute('data-panel-view'),
                 name: subnavLabel(link),
                 countSource: link.querySelector('.nav-count')
             })),
@@ -104,7 +73,7 @@ function readSubnavModules() {
     return modules;
 }
 
-// The link's own words, without the caret glyph or the count riding on it.
+// The link's own words, without the caret or the count.
 function subnavLabel(link) {
     const copy = link.cloneNode(true);
     copy.querySelectorAll('.nav-caret, .nav-count').forEach((node) => node.remove());
@@ -131,30 +100,28 @@ function buildSubnav() {
     subnavBuilt = true;
     document.body.classList.add('has-subnav');
 
-    // A module heading in the menu now opens its first screen rather than
-    // folding a list nobody can see any more.
+    // A module heading opens its current (or first) screen; a heading that
+    // kept its list (data-sidebar-dropdown) keeps its own click.
     document.addEventListener('click', function (event) {
         const parent = event.target.closest('.sidebar-nav .nav-parent');
         if (parent && document.body.classList.contains('has-subnav')) {
             const module = subnavModules.find((m) => m.link === parent);
-            if (module && module.screens.length > 0) {
+            const screens = module ? offeredScreens(module) : [];
+            if (module && screens.length > 0) {
                 event.preventDefault();
-                module.screens[0].link.click();
+                const current = screens.find((s) => s.link.classList.contains('active'));
+                (current || screens[0]).link.click();
                 return;
             }
         }
 
-        // any navigation at all, from either level, re-reads where we are
         if (event.target.closest('.sidebar-nav a, .subnav-tab, .sidebar-brand')) {
             window.setTimeout(syncSubnav, 0);
         }
     });
 
-    // A screen can also be opened by a script rather than by a click -- a
-    // finished purchase order opens its own printed copy, for one -- and the
-    // strip has to follow that too. Watching the panels themselves catches
-    // every route into a screen, including the ones added later, where
-    // watching for clicks only catches the two routes that exist today.
+    // Screens can also be opened by script (a finished purchase order opens its
+    // print copy), so the panels themselves are watched.
     if (typeof MutationObserver === 'function') {
         const panels = document.querySelectorAll('[data-panel]');
         if (panels.length > 0) {
@@ -164,13 +131,12 @@ function buildSubnav() {
                 pending = window.setTimeout(syncSubnav, 0);
             });
             panels.forEach((panel) => watcher.observe(panel, {
-                attributes: true, attributeFilter: ['style', 'hidden', 'class']
+                attributes: true, attributeFilter: ['style', 'hidden', 'class', 'data-view']
             }));
         }
     }
 
-    // counts are written into the menu by each module's own script; the tab
-    // carries the same figure rather than a second copy of the logic
+    // counts are written into the menu by each module; the tab copies them
     const counts = subnavModules
         .flatMap((m) => m.screens)
         .map((s) => s.countSource)
@@ -186,19 +152,39 @@ function buildSubnav() {
     syncSubnav();
 }
 
+// features.js may hide screens in the menu after the strip has read it, so
+// the strip reads the menu as it stands now.
+function offeredScreens(module) {
+    return module.screens.filter((screen) => {
+        const item = screen.link.closest('li');
+        return !(item && item.hidden);
+    });
+}
+
 // ---------- which screen is open ----------
-// A screen opened from inside another one -- a printed order, a count sheet --
-// has no tab of its own and should not blank the strip while it is open. It
-// says which screen it belongs to with data-panel-of, and the strip goes on
-// showing that one as current.
-function visiblePanelId() {
+// A screen opened from inside another (a printed order) has no tab; it says
+// which screen it belongs to with data-panel-of.
+function visiblePanel() {
     const panels = document.querySelectorAll('[data-panel]');
     for (const panel of panels) {
-        if (window.getComputedStyle(panel).display !== 'none') {
-            return panel.getAttribute('data-panel-of') || panel.id;
-        }
+        if (window.getComputedStyle(panel).display !== 'none') return panel;
     }
     return null;
+}
+
+function visiblePanelId() {
+    const panel = visiblePanel();
+    return panel ? (panel.getAttribute('data-panel-of') || panel.id) : null;
+}
+
+function visiblePanelView() {
+    const panel = visiblePanel();
+    return panel ? panel.getAttribute('data-view') : null;
+}
+
+function screenIsCurrent(screen, openPanelId, openView) {
+    if (screen.panelId !== openPanelId) return false;
+    return !screen.view || screen.view === openView;
 }
 
 function syncSubnav() {
@@ -210,18 +196,14 @@ function syncSubnav() {
     let module = subnavModules.find((m) =>
         m.screens.some((screen) => screen.panelId === open));
 
-    // The module scripts mark the open screen's own link, which is inside a
-    // sub-list nobody can see any more. So the module heading takes the mark
-    // instead: the menu says which module, the strip says which screen.
+    // the module heading takes the current mark; the strip says which screen
     subnavModules.forEach((entry) => {
         if (entry.screens.length > 0) {
             entry.link.classList.toggle('active', entry === module);
         }
     });
 
-    // A module that is a single screen has no strip of its own, and neither
-    // does a screen that belongs to no module at all.
-    if (!module || module.screens.length < 2) {
+    if (!module || offeredScreens(module).length < 2) {
         strip.hidden = true;
         strip.innerHTML = '';
         return;
@@ -234,10 +216,12 @@ function renderSubnav(module, openPanelId) {
     const strip = subnavRoot();
     if (!strip) return;
 
-    strip.innerHTML = module.screens.map((screen, index) =>
+    const openView = visiblePanelView();
+
+    strip.innerHTML = offeredScreens(module).map((screen, index) =>
         '<button type="button" class="subnav-tab' +
-        (screen.panelId === openPanelId ? ' is-current' : '') + '"' +
-        (screen.panelId === openPanelId ? ' aria-current="page"' : '') +
+        (screenIsCurrent(screen, openPanelId, openView) ? ' is-current' : '') + '"' +
+        (screenIsCurrent(screen, openPanelId, openView) ? ' aria-current="page"' : '') +
         ' data-subnav-panel="' + escapeHtml(screen.panelId) + '"' +
         ' onclick="openSubnavScreen(' + index + ')">' +
         escapeHtml(screen.name) +
@@ -247,13 +231,28 @@ function renderSubnav(module, openPanelId) {
 
     strip.hidden = false;
     strip.dataset.module = module.name;
+    placeSubnav(strip);
     syncSubnavCounts();
 
-    // On a phone the strip scrolls, and the tab you just took can be off the
-    // right-hand edge of it. Nothing else moves; only the strip scrolls.
+    // on a phone the strip scrolls; keep the current tab in view
     const current = strip.querySelector('.subnav-tab.is-current');
     if (current && typeof current.scrollIntoView === 'function') {
         current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+    }
+}
+
+// One element, moved into the card of the open screen under its heading.
+function placeSubnav(strip) {
+    const panel = visiblePanel();
+    if (!panel) return;
+
+    const card = panel.matches('.card') ? panel : (panel.querySelector('.card') || panel);
+    const head = card.querySelector(':scope > .panel-head');
+
+    if (head) {
+        if (head.nextElementSibling !== strip) head.insertAdjacentElement('afterend', strip);
+    } else if (card.firstElementChild !== strip) {
+        card.insertAdjacentElement('afterbegin', strip);
     }
 }
 
@@ -280,16 +279,14 @@ function openSubnavScreen(index) {
     const module = subnavModules.find((m) =>
         m.screens.some((screen) => screen.panelId === open));
 
-    if (!module || !module.screens[index]) return;
+    const screens = module ? offeredScreens(module) : [];
+    if (!screens[index]) return;
 
-    // the tab presses the menu item, so there is exactly one route into a
-    // screen and nothing to keep in step
-    module.screens[index].link.click();
+    screens[index].link.click();
     window.setTimeout(syncSubnav, 0);
 }
 
-// The strip is built after the session has been checked, so a page that
-// bounces to the sign-in screen never builds one.
+// built after the session check, so a page bouncing to sign-in never builds one
 document.addEventListener('DOMContentLoaded', function () {
     window.setTimeout(buildSubnav, 0);
 });

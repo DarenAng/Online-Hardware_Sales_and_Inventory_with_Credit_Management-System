@@ -1,9 +1,5 @@
-// delivery-personnel.js  --  DELIVERY PERSONNEL
+// delivery-personnel.js -- delivery personnel
 // Loaded by: delivery.html
-// ------------------------------------------------------------------------
-// ==========================================
-// DELIVERY PERSONNEL MODULE
-// ==========================================
 let driverDeliveries = [];
 
 const DRIVER_STAGES = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed'];
@@ -41,56 +37,85 @@ function showDeliveryPanel(panelId, title, event) {
     if (sidebar && window.innerWidth <= 768) sidebar.classList.remove('active');
 }
 
-// the default screen, and where the logo brings you back to
+// the default screen; Load Data on any of the three lists fills all three
 function showDeliveryHome(event) {
     showDeliveryPanel('panel-pending', 'Pending Deliveries', event);
-    loadDriverDeliveries();
+    if (event) toggleRunsMenu(null, true);
 }
 function showDeliveryActive(event) {
     showDeliveryPanel('panel-active', 'Out for Delivery', event);
-    loadDriverDeliveries();
+    if (event) toggleRunsMenu(null, true);
 }
 function showDeliveryCod(event) {
     showDeliveryPanel('panel-cod', 'Cash on Delivery', event);
-    loadDriverDeliveries();
+    if (event) toggleRunsMenu(null, true);
 }
-// The one screen here that waits to be asked: it is read rather than worked
-// from, and it covers a date range somebody chooses rather than today's run.
+
+// Delivery Runs folds under its heading via shared/helpers.js's toggleSidebarMenu
+function toggleRunsMenu(event, force) { toggleSidebarMenu('runs-nav', 'run-dropdown', event, force); }
 function showDeliveryReports(event) {
     showDeliveryPanel('panel-report', 'Delivery Reports', event);
 }
 
-// ==========================================
-// ONE FETCH FILLS THE DRIVER'S THREE LISTS
-//
-// This screen deliberately does not wait to be asked, unlike every other
-// table in the system. A driver opening it at the start of a shift wants
-// their run, and their run is one query scoped to them — not the whole
-// delivery book. Making them press Load Data to see their own work would be
-// ceremony rather than restraint.
-//
-// The three lists do page, because a busy day is longer than a screen. The
-// reports screen, which is the heavy one and is read rather than worked
-// from, is the one that waits.
-// ==========================================
-async function loadDriverDeliveries() {
+// One query scoped to the driver; the three lists are three views of it,
+// read when the driver asks and re-read after a change.
+async function fetchDriverDeliveries() {
     const user = getCurrentUser();
-    if (!user || !document.getElementById('dpend-table')) return;
+    if (!user) throw new Error('not signed in');
 
-    tableMessage('dpend-table', 6, 'Loading deliveries...');
-    tableMessage('dact-table', 6, 'Loading deliveries...');
-    tableMessage('dcod-table', 6, 'Loading deliveries...');
+    driverDeliveries = await getJson('/api/delivery/list?staffId=' + user.staff_id);
+    renderDriverKpis();
+    fillCodSelect();
+    return driverDeliveries;
+}
+
+// one panel's load() fetches; sibling panels redraw from the same rows
+const DRIVER_LISTS = ['driver-pending', 'driver-active', 'driver-cod'];
+
+async function driverRows(key, pick) {
+    const panel = getDataPanel(key);
+
+    if (panel && panel.fromRun) {
+        panel.fromRun = false;
+    } else {
+        await fetchDriverDeliveries();
+
+        for (const other of DRIVER_LISTS) {
+            const sibling = getDataPanel(other);
+            if (!sibling || other === key || sibling.state !== 'ready') continue;
+            sibling.fromRun = true;
+            sibling.open();
+        }
+    }
+
+    return driverDeliveries.filter(pick);
+}
+
+// Re-reads the run for whichever lists are open.
+async function loadDriverDeliveries() {
+    if (!document.getElementById('dpend-table')) return;
 
     try {
-        driverDeliveries = await getJson('/api/delivery/list?staffId=' + user.staff_id);
-        renderDriverKpis();
-        renderDriverLists();
-        fillCodSelect();
+        await fetchDriverDeliveries();
+        for (const key of DRIVER_LISTS) {
+            const panel = getDataPanel(key);
+            if (!panel) continue;
+
+            const table = document.getElementById(panel.config.tableId);
+            const screen = table ? table.closest('[data-panel]') : null;
+            const onScreen = screen && screen.style.display !== 'none';
+
+            if (panel.state === 'ready') {
+                panel.fromRun = true;
+                await panel.refresh();
+            } else if (onScreen) {
+                panel.fromRun = true;
+                await panel.open();
+            }
+        }
     } catch (error) {
         setPill('dpend-count', 'Offline');
-        tableMessage('dpend-table', 6, 'Cannot reach the server.');
-        tableMessage('dact-table', 6, 'Cannot reach the server.');
-        tableMessage('dcod-table', 6, 'Cannot reach the server.');
+        notifyOffline();
     }
 }
 
@@ -119,8 +144,6 @@ function renderDriverKpis() {
         '<span class="kpi-note">' + escapeHtml(c[2]) + '</span></div>').join('');
 }
 
-// The driver's three lists, each a data panel over rows that are already in
-// memory: one fetch fills all three, and each pages on its own.
 function buildDriverPanels() {
     createDataPanel({
         key: 'driver-pending',
@@ -129,13 +152,14 @@ function buildDriverPanels() {
         pagerId: 'dpend-pager',
         countPillId: 'dpend-count',
         idField: 'delivery_id',
-        gate: { title: 'Not loaded', text: 'Your run loads on its own.', button: 'Load' },
+        gate: { title: 'Your run is not loaded',
+                text: 'Press Load Data to read the deliveries waiting on you, or type a customer and press Enter.',
+                button: 'Load Data' },
 
-        load: () => driverDeliveries.filter((d) =>
+        load: () => driverRows('driver-pending', (d) =>
             d.status === 'Pending' || d.status === 'In Transit' || d.status === 'Delayed'),
 
-        match: (d, query) =>
-            (d.customer_name + ' ' + d.delivery_address).toLowerCase().indexOf(query) !== -1,
+        match: (d, query) => prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query),
 
         renderRow: (d, index) =>
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -158,12 +182,13 @@ function buildDriverPanels() {
         pagerId: 'dact-pager',
         countPillId: 'dact-count',
         idField: 'delivery_id',
-        gate: { title: 'Not loaded', text: 'Your run loads on its own.', button: 'Load' },
+        gate: { title: 'Your run is not loaded',
+                text: 'Press Load Data to read what is out on the road with you, or type a customer and press Enter.',
+                button: 'Load Data' },
 
-        load: () => driverDeliveries.filter((d) => d.status === 'Out for Delivery'),
+        load: () => driverRows('driver-active', (d) => d.status === 'Out for Delivery'),
 
-        match: (d, query) =>
-            (d.customer_name + ' ' + d.delivery_address).toLowerCase().indexOf(query) !== -1,
+        match: (d, query) => prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query),
 
         renderRow: (d, index) =>
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -175,8 +200,6 @@ function buildDriverPanels() {
                 peso(d.balance_due) + '</td>' +
             '<td>' + statusBadge(d.status) + '</td>' +
             '<td class="cell-action" onclick="event.stopPropagation();">' +
-            // green, yellow, red: the three ways this delivery can end, in the
-            // colours the rest of the system already uses for them
             '<button type="button" class="btn btn-sm btn-success" ' +
                 'onclick="markDelivery(' + d.delivery_id + ', \'Delivered\')">Delivered</button> ' +
             '<button type="button" class="btn btn-sm btn-gold" ' +
@@ -192,12 +215,15 @@ function buildDriverPanels() {
         columns: 6,
         pagerId: 'dcod-pager',
         idField: 'delivery_id',
-        gate: { title: 'Not loaded', text: 'Your run loads on its own.', button: 'Load' },
+        gate: { title: 'Your run is not loaded',
+                text: 'Press Load Data to read the orders you still have to collect on, or type a customer and press Enter.',
+                button: 'Load Data' },
 
-        load: () => driverDeliveries.filter((d) => Number(d.balance_due) > 0),
+        load: () => driverRows('driver-cod', (d) => Number(d.balance_due) > 0),
 
-        match: (d, query) => d.customer_name.toLowerCase().indexOf(query) !== -1,
+        match: (d, query) => prefixMatch([d.customer_name, '#' + d.delivery_id], query),
 
+        // the pill carries the money rather than the row count
         onLoaded: (rows) => {
             const total = rows.reduce((sum, d) => sum + Number(d.balance_due), 0);
             setPill('dcod-count', peso(total) + ' to collect');
@@ -215,14 +241,6 @@ function buildDriverPanels() {
     });
 }
 
-// one fetch has landed; all three lists redraw from it
-function renderDriverLists() {
-    for (const key of ['driver-pending', 'driver-active', 'driver-cod']) {
-        const panel = getDataPanel(key);
-        if (panel) panel.open();
-    }
-}
-
 function fillCodSelect() {
     const select = document.getElementById('dcod-select');
     if (!select) return;
@@ -237,7 +255,6 @@ function fillCodSelect() {
     onCodChange();
 }
 
-// picking a delivery fills in the exact balance
 function onCodChange() {
     const select = document.getElementById('dcod-select');
     const form = document.getElementById('dcod-form');
@@ -308,80 +325,166 @@ function openDriverDetail(deliveryId) {
     showDeliveryRecord(driverDeliveries.find((x) => x.delivery_id === deliveryId), true);
 }
 
-// ---------- reports ----------
-async function loadDeliveryReport() {
-    const user = getCurrentUser();
-    const grid = document.getElementById('drep-kpis');
-    if (!user || !grid) return;
+// The report: one fetch for the range, two data panels reading from it.
+let driverReport = null;
+const DRIVER_REPORT_PANELS = ['driver-report', 'driver-report-pay'];
 
+function reportRange() {
     const fromBox = document.getElementById('drep-from');
     const toBox = document.getElementById('drep-to');
 
     if (fromBox && !fromBox.value) fromBox.value = monthStartText();
     if (toBox && !toBox.value) toBox.value = todayText();
 
-    grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Loading</span><span class="kpi-value">...</span></div>';
-    tableMessage('drep-table', 7, 'Loading report...');
-    tableMessage('drep-pay-table', 6, 'Loading payments...');
+    return { from: fromBox ? fromBox.value : '', to: toBox ? toBox.value : '' };
+}
+
+function renderReportFigures(data) {
+    const grid = document.getElementById('drep-kpis');
+    if (!grid) return;
+
+    if (!data) {
+        grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Offline</span>' +
+            '<span class="kpi-value">--</span><span class="kpi-note">Cannot reach the server</span></div>';
+        return;
+    }
+
+    const rows = data.deliveries;
+    const collected = data.payments.reduce((sum, p) => sum + Number(p.amount), 0);
+    const delivered = rows.filter((d) => d.status === 'Delivered').length;
+    const problem = rows.filter((d) => d.status === 'Delayed' || d.status === 'Failed').length;
+
+    const cards = [
+        ['Deliveries', rows.length, 'in the chosen range', ''],
+        ['Delivered', delivered, 'closed out', ''],
+        ['Problems', problem, 'delayed or failed', problem > 0 ? 'kpi-danger' : ''],
+        ['Collected', peso(collected), data.payments.length + ' payments taken', ''],
+        ['Still to Collect', peso(data.codDue), data.codCount + ' unpaid orders',
+         Number(data.codDue) > 0 ? 'kpi-warn' : '']
+    ];
+
+    grid.innerHTML = cards.map((c) =>
+        '<div class="kpi-card ' + c[3] + '"><span class="kpi-label">' + c[0] + '</span>' +
+        '<span class="kpi-value">' + escapeHtml(c[1]) + '</span>' +
+        '<span class="kpi-note">' + escapeHtml(c[2]) + '</span></div>').join('');
+
+    const legend = document.getElementById('drep-legend');
+    if (legend) {
+        legend.innerHTML = DRIVER_STAGES.map((stage) => {
+            const count = rows.filter((d) => d.status === stage).length;
+            return '<span class="track-chip"><span class="track-count">' + count + '</span>' + stage + '</span>';
+        }).join('');
+    }
+}
+
+// one panel's load() fetches the report; the other reads what arrived
+async function reportRows(key, pick) {
+    const panel = getDataPanel(key);
+
+    if (panel && panel.fromReport) {
+        panel.fromReport = false;
+    } else {
+        await fetchDeliveryReport();
+
+        for (const other of DRIVER_REPORT_PANELS) {
+            const sibling = getDataPanel(other);
+            if (!sibling || other === key || sibling.state !== 'ready') continue;
+            sibling.fromReport = true;
+            sibling.open();
+        }
+    }
+
+    return pick(driverReport);
+}
+
+async function fetchDeliveryReport() {
+    const user = getCurrentUser();
+    if (!user) throw new Error('not signed in');
+
+    const range = reportRange();
+    const grid = document.getElementById('drep-kpis');
+    if (grid) {
+        grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Loading</span>' +
+            '<span class="kpi-value">&hellip;</span></div>';
+    }
 
     try {
-        const data = await getJson('/api/delivery/summary?staffId=' + user.staff_id +
-            '&from=' + fromBox.value + '&to=' + toBox.value);
-
-        const rows = data.deliveries;
-        const collected = data.payments.reduce((sum, p) => sum + Number(p.amount), 0);
-        const delivered = rows.filter((d) => d.status === 'Delivered').length;
-        const problem = rows.filter((d) => d.status === 'Delayed' || d.status === 'Failed').length;
-
-        const cards = [
-            ['Deliveries', rows.length, 'in the chosen range', ''],
-            ['Delivered', delivered, 'closed out', ''],
-            ['Problems', problem, 'delayed or failed', problem > 0 ? 'kpi-danger' : ''],
-            ['Collected', peso(collected), data.payments.length + ' payments taken', ''],
-            ['Still to Collect', peso(data.codDue), data.codCount + ' unpaid orders',
-             Number(data.codDue) > 0 ? 'kpi-warn' : '']
-        ];
-
-        grid.innerHTML = cards.map((c) =>
-            '<div class="kpi-card ' + c[3] + '"><span class="kpi-label">' + c[0] + '</span>' +
-            '<span class="kpi-value">' + escapeHtml(c[1]) + '</span>' +
-            '<span class="kpi-note">' + escapeHtml(c[2]) + '</span></div>').join('');
-
-        const legend = document.getElementById('drep-legend');
-        if (legend) {
-            legend.innerHTML = DRIVER_STAGES.map((stage) => {
-                const count = rows.filter((d) => d.status === stage).length;
-                return '<span class="track-chip"><span class="track-count">' + count + '</span>' + stage + '</span>';
-            }).join('');
-        }
-
-        setPill('drep-count', rows.length + (rows.length === 1 ? ' delivery' : ' deliveries'));
-        document.querySelector('#drep-table tbody').innerHTML = rows.length === 0
-            ? '<tr><td colspan="7" class="table-empty">No delivery falls inside this range.</td></tr>'
-            : rows.map((d, i) =>
-                '<tr class="row-reveal" style="animation-delay:' + Math.min(i, 12) * 28 + 'ms">' +
-                '<td class="cell-id">#' + d.delivery_id + '</td>' +
-                '<td class="cell-id">' + escapeHtml(String(d.delivered_at || d.scheduled_date || '').slice(0, 10) || 'Not set') + '</td>' +
-                '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
-                '<td>' + escapeHtml(d.delivery_address) + '</td>' +
-                '<td class="cell-num">' + peso(d.final_amount) + '</td>' +
-                '<td class="cell-num' + (Number(d.balance_due) > 0 ? ' cell-due' : '') + '">' + peso(d.balance_due) + '</td>' +
-                '<td>' + statusBadge(d.status) + '</td></tr>').join('');
-
-        setPill('drep-pay-count', peso(collected) + ' collected');
-        document.querySelector('#drep-pay-table tbody').innerHTML = data.payments.length === 0
-            ? '<tr><td colspan="6" class="table-empty">You collected nothing in this range.</td></tr>'
-            : data.payments.map((p) =>
-                '<tr><td class="cell-id">' + escapeHtml(String(p.payment_date).slice(0, 16)) + '</td>' +
-                '<td class="cell-id">#' + p.sale_id + '</td>' +
-                '<td class="cell-name">' + escapeHtml(p.customer_name) + '</td>' +
-                '<td>' + escapeHtml(p.payment_method) + '</td>' +
-                '<td>' + (p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>') + '</td>' +
-                '<td class="cell-num">' + peso(p.amount) + '</td></tr>').join('');
+        driverReport = await getJson('/api/delivery/summary?staffId=' + user.staff_id +
+            '&from=' + range.from + '&to=' + range.to);
     } catch (error) {
-        grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Offline</span><span class="kpi-value">--</span><span class="kpi-note">Cannot reach the server</span></div>';
-        tableMessage('drep-table', 7, 'Cannot reach the server.');
-        tableMessage('drep-pay-table', 6, 'Cannot reach the server.');
+        driverReport = null;
+        renderReportFigures(null);
+        throw error;
+    }
+
+    renderReportFigures(driverReport);
+    return driverReport;
+}
+
+function buildReportPanels() {
+    createDataPanel({
+        key: 'driver-report',
+        tableId: 'drep-table',
+        columns: 7,
+        pagerId: 'drep-pager',
+        countPillId: 'drep-count',
+        idField: 'delivery_id',
+        gate: { title: 'The report is not loaded',
+                text: 'Pick the dates above and press Load Report. Nothing is read until you do.',
+                button: 'Load Data' },
+
+        load: () => reportRows('driver-report', (data) => data.deliveries),
+
+        renderRow: (d, index) =>
+            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
+            '<td class="cell-id">#' + d.delivery_id + '</td>' +
+            '<td class="cell-id">' + escapeHtml(String(d.delivered_at || d.scheduled_date || '').slice(0, 10) || 'Not set') + '</td>' +
+            '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
+            '<td>' + escapeHtml(d.delivery_address) + '</td>' +
+            '<td class="cell-num">' + peso(d.final_amount) + '</td>' +
+            '<td class="cell-num' + (Number(d.balance_due) > 0 ? ' cell-due' : '') + '">' + peso(d.balance_due) + '</td>' +
+            '<td>' + statusBadge(d.status) + '</td></tr>'
+    });
+
+    createDataPanel({
+        key: 'driver-report-pay',
+        tableId: 'drep-pay-table',
+        columns: 6,
+        pagerId: 'drep-pay-pager',
+        idField: 'payment_id',
+        gate: { title: 'The report is not loaded',
+                text: 'Pick the dates above and press Load Report. Nothing is read until you do.',
+                button: 'Load Data' },
+
+        load: () => reportRows('driver-report-pay', (data) => data.payments),
+
+        onLoaded: (rows) => {
+            const collected = rows.reduce((sum, p) => sum + Number(p.amount), 0);
+            setPill('drep-pay-count', peso(collected) + ' collected');
+        },
+
+        renderRow: (p, index) =>
+            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
+            '<td class="cell-id">' + escapeHtml(String(p.payment_date).slice(0, 16)) + '</td>' +
+            '<td class="cell-id">#' + p.sale_id + '</td>' +
+            '<td class="cell-name">' + escapeHtml(p.customer_name) + '</td>' +
+            '<td>' + escapeHtml(p.payment_method) + '</td>' +
+            '<td>' + (p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>') + '</td>' +
+            '<td class="cell-num">' + peso(p.amount) + '</td></tr>'
+    });
+}
+
+async function loadDeliveryReport() {
+    const first = getDataPanel('driver-report');
+    if (!first) return;
+
+    // a fresh read: the dates may have changed
+    await first.open();
+
+    const second = getDataPanel('driver-report-pay');
+    if (second && driverReport) {
+        second.fromReport = true;
+        await second.open();
     }
 }
 
@@ -391,6 +494,17 @@ async function loadDeliveryReport() {
 if (window.location.pathname.toLowerCase().endsWith('delivery.html')) {
     document.addEventListener('DOMContentLoaded', function () {
         buildDriverPanels();
+        buildReportPanels();
+
+        // offered only to a driver holding a key to a connected system
+        configureConnectedSystems({ showPanel: (panelId, title) => showDeliveryPanel(panelId, title) });
+        buildConnectedSystemsPanel();
+
+        // the schedule follows what the administrator switched on for this role
+        configureDeliverySchedule({ showPanel: (panelId, title) => showDeliveryPanel(panelId, title) });
+        buildDeliverySchedulePanel();
+        configureFeatures({ home: () => showDeliveryHome() });
+
         showDeliveryHome();
         loadNotifications();
     });

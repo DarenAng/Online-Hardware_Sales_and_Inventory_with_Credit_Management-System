@@ -4,8 +4,8 @@ Two files. Run them in the order the names give.
 
 | File | What it is | When you run it |
 |---|---|---|
-| `1-RUN-FIRST-database.sql` | The whole schema — 23 tables, 2 views, demo data | Setting up a new machine, or resetting one back to demo data |
-| `2-RUN-SECOND-stored-procedures.sql` | The 24 stored procedures the app calls | Straight after file 1, and again any time a procedure changes |
+| `1-RUN-FIRST-database.sql` | The whole schema — 26 tables, the demo data, and six months of mock trading | Setting up a new machine, or resetting one back to the demo and mock data |
+| `2-RUN-SECOND-stored-procedures.sql` | The 3 views and the 30 stored procedures the app uses | Straight after file 1, and again any time a view or a procedure changes |
 
 ## In MySQL Workbench
 
@@ -31,8 +31,8 @@ whatever is in `hardware_db` and puts the demo data back. On a machine
 holding work you want to keep, take a backup first — the System
 Administrator's **Backup & Recovery** screen writes one into `backups/`.
 
-File 2 is different: it only drops and recreates procedures, so it is always
-safe to re-run on its own. If the server starts up complaining that a
+File 2 is different: it only drops and recreates the views and procedures,
+so it is always safe to re-run on its own. If the server starts up complaining that a
 `PROCEDURE does not exist`, running file 2 again is the fix.
 
 ## Where the upgrade files went

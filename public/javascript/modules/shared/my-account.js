@@ -1,14 +1,6 @@
-// my-account.js  --  MY CREDENTIALS
+// my-account.js -- my credentials: details, edit form, password form
 // Loaded by: all five dashboards
-// ------------------------------------------------------------------------
-// ==========================================
-// MY CREDENTIALS
-//
-// The same three pages for every role: what the system holds about you, the
-// form that changes it, and the password form. The server only ever applies
-// these to the signed-in account, so no role can reach another person's
-// details from here.
-// ==========================================
+// The server only ever applies these to the signed-in account.
 let myAccount = null;
 
 function buildAccountModal() {
@@ -40,41 +32,57 @@ function buildAccountModal() {
             </div>
 
             <div class="modal-body">
+                <p class="cred-note" id="account-admin-note" style="display: none;">As the System
+                    Administrator, your name, phone and email are changed by another administrator
+                    from the staff directory, not from here. Your password is still yours to change.</p>
+                <!-- WHAT A STANDARD USER MAY NOT CHANGE
+                     The sign-in email, the password and the role are credentials,
+                     and none of them is changed by its own holder from here. A
+                     screen left signed in at a counter is otherwise a screen on
+                     which anybody can set a new password and own the account.
+                     A new password is asked for from the administrator, who
+                     sends one to the address on file. -->
+                <p class="cred-note" id="account-staff-note" style="display: none;">Your sign-in
+                    email, your password and your role are set by the System Administrator. To
+                    change your password, ask the administrator to reset it: a new one is sent to
+                    your email and you choose your own the next time you sign in. Your name and
+                    phone number are yours to change under Edit Details.</p>
                 <div class="detail-grid" id="account-view"></div>
 
                 <div id="account-edit" style="display: none;">
-                    <p class="cred-note">Your role is set by the system administrator, so it is not
-                        editable here. Everything else on this page is yours to change.</p>
+                    <p class="cred-note">Your name and phone number. Your role and your sign-in
+                        email are set by the system administrator and are shown here for checking.</p>
                     <form id="account-form" onsubmit="handleSaveMyProfile(event)">
                         <div class="grid-2">
                             <div class="form-group">
-                                <label for="me-first">First Name</label>
+                                <label for="me-first">First name</label>
                                 <input type="text" id="me-first" name="firstName" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label for="me-middle">Middle Name <span class="label-hint">optional</span></label>
+                                <label for="me-middle">Middle name <span class="label-hint">optional</span></label>
                                 <input type="text" id="me-middle" name="middleName"
                                        class="form-control" maxlength="100" placeholder="Dela Cruz">
                             </div>
                             <div class="form-group">
-                                <label for="me-last">Last Name</label>
+                                <label for="me-last">Last name</label>
                                 <input type="text" id="me-last" name="lastName" class="form-control" required>
                             </div>
                             <div class="form-group">
                                 <label for="me-phone">Phone <span class="label-hint">optional</span></label>
                                 <div class="phone-field">
-                                    <span class="phone-prefix">+63</span>
+                                    <span class="phone-prefix">+</span>
                                     <input type="text" id="me-phone" name="phone" class="form-control"
-                                           inputmode="numeric" autocomplete="tel-national"
-                                           maxlength="10" placeholder="9XXXXXXXXX"
+                                           inputmode="numeric" autocomplete="tel"
+                                           maxlength="20" placeholder="9XXXXXXXXX"
                                            oninput="onPhoneInput(this)">
                                 </div>
-                                <span class="label-hint">Ten digits, starting with 9</span>
+                                <span class="label-hint">Pick the country, then the number as dialled there &mdash; or paste it whole with its +</span>
                             </div>
                         </div>
                         <div class="form-group">
-                            <label for="me-email">Email <span class="label-hint">this is your username</span></label>
-                            <input type="email" id="me-email" name="email" class="form-control">
+                            <label for="me-email">Email <span class="label-hint">your username, changed by the administrator</span></label>
+                            <input type="email" id="me-email" name="email" class="form-control" readonly
+                                   title="Your sign-in email is changed by the System Administrator">
                         </div>
                         <div class="form-footer">
                             <button type="submit" class="btn btn-success">Save Changes</button>
@@ -88,20 +96,29 @@ function buildAccountModal() {
                         screen cannot be used to lock you out of your own account.</p>
                     <form id="account-password-form" onsubmit="handleChangeMyPassword(event)">
                         <div class="form-group">
-                            <label for="me-current">Current Password</label>
-                            <input type="password" id="me-current" name="currentPassword"
-                                   class="form-control" required autocomplete="current-password">
+                            <label for="me-current">Current password</label>
+                            <div class="password-field">
+                                <input type="password" id="me-current" name="currentPassword"
+                                       class="form-control" required autocomplete="current-password">
+                                <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                            </div>
                         </div>
                         <div class="grid-2">
                             <div class="form-group">
-                                <label for="me-new">New Password</label>
-                                <input type="password" id="me-new" name="newPassword" class="form-control"
-                                       minlength="8" required autocomplete="new-password">
+                                <label for="me-new">New password <span class="label-hint">at least 8 characters, not the current one</span></label>
+                                <div class="password-field">
+                                    <input type="password" id="me-new" name="newPassword" class="form-control"
+                                           minlength="8" required autocomplete="new-password">
+                                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                                </div>
                             </div>
                             <div class="form-group">
-                                <label for="me-confirm">Confirm New Password</label>
-                                <input type="password" id="me-confirm" name="confirmPassword"
-                                       class="form-control" minlength="8" required autocomplete="new-password">
+                                <label for="me-confirm">Confirm new password</label>
+                                <div class="password-field">
+                                    <input type="password" id="me-confirm" name="confirmPassword"
+                                           class="form-control" minlength="8" required autocomplete="new-password">
+                                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                                </div>
                             </div>
                         </div>
                         <div class="form-footer">
@@ -113,13 +130,38 @@ function buildAccountModal() {
             </div>
         </div>`;
     document.body.appendChild(modal);
+}
 
-    modal.addEventListener('click', function (event) {
-        if (event.target === modal) closeModal('account-modal');
-    });
+// The server refuses PUT /api/me for System Administrator (notOwnDetailsIfAdmin
+// in server.js), so the Edit Details tab is not offered to that role.
+function canEditOwnDetails() {
+    const me = getCurrentUser();
+    return !me || me.role_name !== 'System Administrator';
+}
+
+// A standard user does not change their own password (notOwnCredentials in
+// server.js); the administrator keeps it.
+function canChangeOwnPassword() {
+    const me = getCurrentUser();
+    return !!me && me.role_name === 'System Administrator';
 }
 
 function showAccountTab(tab) {
+    if (tab === 'edit' && !canEditOwnDetails()) tab = 'view';
+    if (tab === 'password' && !canChangeOwnPassword()) tab = 'view';
+
+    const editTab = document.getElementById('account-tab-edit');
+    if (editTab) editTab.style.display = canEditOwnDetails() ? '' : 'none';
+
+    const passwordTab = document.getElementById('account-tab-password');
+    if (passwordTab) passwordTab.style.display = canChangeOwnPassword() ? '' : 'none';
+
+    const note = document.getElementById('account-admin-note');
+    if (note) note.style.display = canEditOwnDetails() ? 'none' : 'block';
+
+    const staffNote = document.getElementById('account-staff-note');
+    if (staffNote) staffNote.style.display = canChangeOwnPassword() ? 'none' : 'block';
+
     ['view', 'edit', 'password'].forEach((name) => {
         const panel = document.getElementById('account-' + name);
         const button = document.getElementById('account-tab-' + name);
@@ -191,7 +233,7 @@ function renderMyAccount() {
     form.elements.firstName.value = me.first_name || '';
     form.elements.middleName.value = me.middle_name || '';
     form.elements.lastName.value = me.last_name || '';
-    form.elements.phone.value = phoneToInput(me.phone);
+    phoneFill(form.elements.phone, me.phone);
     form.elements.email.value = me.email || '';
 }
 
@@ -199,12 +241,17 @@ async function handleSaveMyProfile(event) {
     event.preventDefault();
     const form = event.target;
 
+    if (!canEditOwnDetails()) {
+        notifyWarning('An administrator\'s details are changed by another administrator.', 'Not allowed');
+        return;
+    }
+
+    // the email is shown for checking and never sent
     const data = {
         firstName: form.elements.firstName.value.trim(),
         middleName: form.elements.middleName.value.trim(),
         lastName: form.elements.lastName.value.trim(),
-        phone: phoneToStore(form.elements.phone.value),
-        email: form.elements.email.value.trim()
+        phone: phoneToStore(form.elements.phone)
     };
 
     if (data.firstName === '' || data.lastName === '') {
@@ -249,6 +296,11 @@ async function handleChangeMyPassword(event) {
         notifyWarning('A password needs at least 8 characters.', 'Password not changed');
         return;
     }
+    // the server refuses this too; this saves the round trip
+    if (newPassword === currentPassword) {
+        notifyWarning('The new password must be different from your current password.', 'Password not changed');
+        return;
+    }
 
     try {
         const response = await fetch('/api/me/password', {
@@ -263,14 +315,15 @@ async function handleChangeMyPassword(event) {
         }
 
         form.reset();
-        showAccountTab('view');
-        notifySuccess('Your password was changed. Use it the next time you sign in.', 'Password changed');
+        closeModal('account-modal');
+
+        // every session on the old password is over, this one included
+        signOutWithReason('Your password was changed. Sign in again with the new one.');
     } catch (error) {
         notifyOffline();
     }
 }
 
-// keeps the copy the screens draw from in step with what was just saved
 function rememberCurrentUser(user) {
     const current = getCurrentUser();
     if (!current || !user) return;

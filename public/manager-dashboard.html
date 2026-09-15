@@ -10,6 +10,8 @@
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="css/general-ui.css">
     <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/purchase-orders.css">
+    <link rel="stylesheet" href="css/connected-systems.css">
     <link rel="stylesheet" href="css/modules/manager.css">
 </head>
 
@@ -27,41 +29,114 @@
                 <span class="sidebar-eyebrow">Manager</span>
                 <span data-current-user>User</span>
             </div>
+            <!-- data-feature names the screen an item opens; shared/features.js hides
+                 the ones switched off for this role and mirrors the counts -->
             <ul class="sidebar-nav">
-                <li><a href="#" data-panel-link="panel-income" onclick="showIncome(event)">Income</a></li>
-                <li><a href="#" data-panel-link="panel-reports" onclick="showReports(event)">Reports</a></li>
-                <li><a href="#" data-panel-link="panel-sales" onclick="showSales(event)">Sales</a></li>
+                <!-- Income stays a dropdown in the menu (data-sidebar-dropdown): one screen, three tables -->
+                <li data-sidebar-dropdown data-feature="income">
+                    <a href="#income" onclick="toggleIncomeMenu(event)" class="nav-parent" id="income-nav"
+                       data-panel-link="panel-income" aria-expanded="false" aria-controls="income-dropdown">
+                        Income <span class="nav-caret">&#9660;</span>
+                    </a>
+                    <ul id="income-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-income" data-panel-view="methods"
+                               onclick="showIncomeTable('methods', event)">Payment Method</a></li>
+                        <li><a href="#" data-panel-link="panel-income" data-panel-view="products"
+                               onclick="showIncomeTable('products', event)">Best Sellers</a></li>
+                        <li><a href="#" data-panel-link="panel-income" data-panel-view="staff"
+                               onclick="showIncomeTable('staff', event)">Who Sold It</a></li>
+                    </ul>
+                </li>
+                <li data-sidebar-dropdown data-feature="reports">
+                    <a href="#reports" onclick="toggleReportsMenu(event)" class="nav-parent" id="reports-nav"
+                       data-panel-link="panel-reports" aria-expanded="false" aria-controls="reports-dropdown">
+                        Reports <span class="nav-caret">&#9660;</span>
+                    </a>
+                    <ul id="reports-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-reports" data-panel-view="report-methods"
+                               onclick="showReport('report-methods', event)">Payment Methods</a></li>
+                        <li><a href="#" data-panel-link="panel-reports" data-panel-view="report-unpaid"
+                               onclick="showReport('report-unpaid', event)">Receivables</a></li>
+                        <li><a href="#" data-panel-link="panel-reports" data-panel-view="report-loyal"
+                               onclick="showReport('report-loyal', event)">Repeat Customers</a></li>
+                        <li><a href="#" data-panel-link="panel-reports" data-panel-view="report-staff"
+                               onclick="showReport('report-staff', event)">Staff Performance</a></li>
+                    </ul>
+                </li>
+                <li data-feature="sales"><a href="#" data-panel-link="panel-sales" onclick="showSales(event)">Sales</a></li>
 
-                <!-- Stocks is two screens, not one. Reorder Alerts is a list of
-                     things to act on today; Stock Reports is the whole
-                     inventory to read. They were stacked on one page and the
-                     second one pushed the first off the top of the screen. -->
-                <li>
-                    <a href="#stocks" onclick="toggleDropdown('stocks-dropdown', event)" class="nav-parent">
+                <!-- Reorder Alerts is the to-do list; Stock Reports is the whole inventory -->
+                <li data-sidebar-dropdown>
+                    <a href="#stocks" onclick="toggleStocksMenu(event)" class="nav-parent" id="stocks-nav"
+                       aria-expanded="false" aria-controls="stocks-dropdown">
                         Stocks <span class="nav-caret">&#9660;</span>
                     </a>
-                    <ul id="stocks-dropdown" class="nav-sub" style="display: block;">
-                        <li><a href="#" data-panel-link="panel-reorder" onclick="showReorderAlerts(event)">Reorder Alerts</a></li>
-                        <li><a href="#" data-panel-link="panel-stock-report" onclick="showStockReport(event)">Stock Reports</a></li>
+                    <ul id="stocks-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="reorder-alerts"><a href="#" data-panel-link="panel-reorder" onclick="showReorderAlerts(event)">
+                            Reorder Alerts <span class="nav-count" data-count-for="reorder-alerts"></span></a></li>
+                        <li data-feature="stock-reports"><a href="#" data-panel-link="panel-stock-report" onclick="showStockReport(event)">Stock Reports</a></li>
                     </ul>
                 </li>
 
-                <!-- Credit is two screens for the same reason Stocks is: a list of
-                     accounts to read, and a queue of decisions to make. -->
-                <li>
-                    <a href="#credit" onclick="toggleDropdown('credit-dropdown', event)" class="nav-parent">
+                <!-- only this page has the order form; the clerk's page reads the history -->
+                <li data-sidebar-dropdown data-feature="purchase-orders">
+                    <a href="#purchasing" onclick="togglePurchasingMenu(event)" class="nav-parent" id="po-nav"
+                       aria-expanded="false" aria-controls="po-dropdown">
+                        Purchase Orders <span class="nav-caret">&#9660;</span>
+                    </a>
+                    <ul id="po-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-po" onclick="showPurchaseOrders(event)">New Order</a></li>
+                        <li><a href="#" data-panel-link="panel-po-history" onclick="showPurchaseOrderHistory(event)">Order History</a></li>
+                    </ul>
+                </li>
+
+                <li data-sidebar-dropdown>
+                    <a href="#credit" onclick="toggleCreditMenu(event)" class="nav-parent" id="credit-nav"
+                       aria-expanded="false" aria-controls="credit-dropdown">
                         Credit <span class="nav-caret">&#9660;</span>
                     </a>
-                    <ul id="credit-dropdown" class="nav-sub" style="display: block;">
-                        <li><a href="#" data-panel-link="panel-credit" onclick="showCredit(event)">Customer Credit</a></li>
-                        <li><a href="#" data-panel-link="panel-credit-requests" onclick="showCreditRequests(event)">
-                            Extension Requests <span class="nav-count" id="credit-request-count"></span></a></li>
+                    <ul id="credit-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="credit"><a href="#" data-panel-link="panel-credit" onclick="showCredit(event)">Customer Credit</a></li>
+                        <li data-feature="credit-requests"><a href="#" data-panel-link="panel-credit-requests" onclick="showCreditRequests(event)">
+                            Extension Requests <span class="nav-count" id="credit-request-count" data-count-for="credit-requests"></span></a></li>
                     </ul>
                 </li>
 
-                <li><a href="#" data-panel-link="panel-deliveries" onclick="showDeliveries(event)">Deliveries</a></li>
-                <li><a href="#" data-panel-link="panel-records" onclick="showRecords(event)">Records</a></li>
-                <li><a href="#" data-panel-link="panel-archives" onclick="showArchives(event)">Archives</a></li>
+                <!-- The schedule is drawn by shared/delivery-schedule.js; the manager holds
+                     it by role, so its item starts shown here -->
+                <li data-sidebar-dropdown>
+                    <a href="#deliveries" onclick="toggleDeliveriesMenu(event)" class="nav-parent" id="deliveries-nav"
+                       aria-expanded="false" aria-controls="deliveries-dropdown">
+                        Deliveries <span class="nav-caret">&#9660;</span>
+                    </a>
+                    <ul id="deliveries-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="deliveries"><a href="#" data-panel-link="panel-deliveries" onclick="showDeliveries(event)">
+                            Delivery Tracking <span class="nav-count" data-count-for="deliveries"></span></a></li>
+                        <li data-feature="delivery-schedule"><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)">
+                            Delivery Schedule <span class="nav-count" data-count-for="delivery-schedule"></span></a></li>
+                    </ul>
+                </li>
+                <li data-sidebar-dropdown data-feature="records">
+                    <a href="#records" onclick="toggleRecordsMenu(event)" class="nav-parent" id="records-nav"
+                       data-panel-link="panel-records" aria-expanded="false" aria-controls="records-dropdown">
+                        Records <span class="nav-caret">&#9660;</span>
+                    </a>
+                    <ul id="records-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="supplier"
+                               onclick="showRecordType('supplier', event)">Suppliers</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="customer"
+                               onclick="showRecordType('customer', event)">Customers</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="product"
+                               onclick="showRecordType('product', event)">Products</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="category"
+                               onclick="showRecordType('category', event)">Categories</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="unit"
+                               onclick="showRecordType('unit', event)">Units</a></li>
+                    </ul>
+                </li>
+                <li data-feature="archives"><a href="#" data-panel-link="panel-archives" onclick="showArchives(event)">Archives</a></li>
+                <!-- hidden until shared/connected-systems.js hears the person holds a key -->
+                <li id="nav-systems" hidden><a href="#" data-panel-link="panel-systems" onclick="showConnectedSystems(event)">Connected Systems</a></li>
             </ul>
         </aside>
 
@@ -80,44 +155,37 @@
 
             <div class="content-area">
                 <!-- ============================================================
-                     DASHBOARD HOME
-                     Five figures that lead somewhere. A number on a dashboard
-                     that cannot be opened is a number you have to go and look
-                     up somewhere else, so every tile is the door to the screen
-                     that explains it -- which is also why there is no grid of
-                     link cards under them any more: the sidebar already lists
-                     every destination, and the tiles are already the shortcut.
+                     DASHBOARD HOME -- five figures, each the door to the screen that explains it
                      ============================================================ -->
                 <div id="panel-home" data-panel>
                     <div class="page-intro">
                         <span class="eyebrow">Overview</span>
                         <h2>Manager Dashboard</h2>
-                        <p class="panel-sub">Every figure below opens the screen behind it. Live
-                            across sales, stock, deliveries and receivables.</p>
                     </div>
 
                     <div class="kpi-grid" id="kpi-grid"></div>
                 </div>
 
                 <!-- ============================================================
-                     INCOME BREAKDOWN
-                     Opened by the Collected card. One question asked over
-                     any period, answered four ways, because "how much did we
-                     make" means four different figures to four different
-                     people and a screen showing one of them gets argued with.
+                     INCOME BREAKDOWN -- opened by the Collected card
                      ============================================================ -->
-                <div id="panel-income" data-panel style="display: none;">
+                <div id="panel-income" data-panel data-view="methods" style="display: none;">
                     <div class="card">
                         <div class="panel-head">
                             <div>
                                 <span class="eyebrow">Income</span>
                                 <h3 id="income-title">Income Breakdown</h3>
-                                <p class="panel-sub" id="income-range-note">Pick a period. Collected is money
-                                    actually in hand; billed is what was rung up, paid or not.</p>
+                                <p class="panel-sub" id="income-range-note">Pick a period.</p>
                             </div>
                             <div class="panel-actions no-print">
                                 <span class="pill" id="income-pill">Not loaded</span>
-                                <button type="button" class="btn" onclick="printReport()">Print / PDF</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="mgr-income-methods,mgr-income-products,mgr-income-staff"
+                                        onclick="exportIncomeSpreadsheet()" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="mgr-income-methods,mgr-income-products,mgr-income-staff"
+                                        onclick="printReport('mgr-income-methods,mgr-income-products,mgr-income-staff')"
+                                        disabled>Print / PDF</button>
                             </div>
                         </div>
 
@@ -151,109 +219,76 @@
                         </div>
                     </div>
 
-                    <div class="card">
+                    <!-- one card holding whichever table the Income menu chose; all three print -->
+                    <div class="card" id="income-tables">
                         <div class="panel-head">
                             <div>
-                                <h3>By Payment Method</h3>
-                                <p class="panel-sub">Where the money came from, and what is still owed on each method.</p>
-                            </div>
-                            <div class="panel-actions no-print">
-                                <button type="button" class="btn btn-sm" data-export
-                                        onclick="exportReport('payment-methods')">Export CSV</button>
+                                <h3 id="income-table-title">Payment Method</h3>
                             </div>
                         </div>
-                        <div class="table-responsive grid-5">
-                            <table id="income-methods-table">
-                                <thead>
-                                    <tr><th>Method</th><th>Sales</th><th>Billed</th><th>Collected</th><th>Outstanding</th></tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                        <div class="pager is-single" id="income-methods-pager"></div>
-                    </div>
 
-                    <div class="card">
-                        <div class="panel-head">
-                            <div>
-                                <h3>Best Sellers</h3>
-                                <p class="panel-sub">The ten products that brought in the most over this period.</p>
+                        <div class="income-table" data-income-table="methods">
+                            <h4 class="income-table-caption">Payment Method</h4>
+                            <div class="table-responsive grid-5">
+                                <table id="income-methods-table">
+                                    <thead>
+                                        <tr><th>Method</th><th>Sales</th><th>Billed</th><th>Collected</th><th>Outstanding</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
                             </div>
-                            <div class="panel-actions no-print">
-                                <button type="button" class="btn btn-sm" data-export
-                                        onclick="exportReport('top-products')">Export CSV</button>
-                            </div>
+                            <div class="pager is-single" id="income-methods-pager"></div>
                         </div>
-                        <div class="table-responsive grid-5">
-                            <table id="income-products-table">
-                                <thead>
-                                    <tr><th>Product</th><th>Units Sold</th><th>Revenue</th><th>Share</th></tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                        <div class="pager is-single" id="income-products-pager"></div>
-                    </div>
 
-                    <div class="card">
-                        <div class="panel-head">
-                            <div>
-                                <h3>Who Sold It</h3>
-                                <p class="panel-sub">Sales handled by each member of staff over this period.</p>
+                        <div class="income-table" data-income-table="products" hidden>
+                            <h4 class="income-table-caption">Best Sellers</h4>
+                            <div class="table-responsive grid-5">
+                                <table id="income-products-table">
+                                    <thead>
+                                        <tr><th>Product</th><th>Units Sold</th><th>Revenue</th><th>Share</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
                             </div>
-                            <div class="panel-actions no-print">
-                                <button type="button" class="btn btn-sm" data-export
-                                        onclick="exportReport('staff-sales')">Export CSV</button>
+                            <div class="pager is-single" id="income-products-pager"></div>
+                        </div>
+
+                        <div class="income-table" data-income-table="staff" hidden>
+                            <h4 class="income-table-caption">Who Sold It</h4>
+                            <div class="table-responsive grid-5">
+                                <table id="income-staff-table">
+                                    <thead>
+                                        <tr><th>Staff</th><th>Sales</th><th>Billed</th><th>Collected</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
                             </div>
+                            <div class="pager is-single" id="income-staff-pager"></div>
                         </div>
-                        <div class="table-responsive grid-5">
-                            <table id="income-staff-table">
-                                <thead>
-                                    <tr><th>Staff</th><th>Sales</th><th>Billed</th><th>Collected</th></tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                        <div class="pager is-single" id="income-staff-pager"></div>
                     </div>
                 </div>
 
                 <!-- ============================================================
-                     REPORTS
-                     Four tables that used to be stacked down one page, so the
-                     fourth was three screens below the first and the third
-                     pushed it further every time it loaded. One at a time now,
-                     behind tabs, each paging on its own.
+                     REPORTS -- one at a time; data-view says which is showing
                      ============================================================ -->
-                <div id="panel-reports" data-panel style="display: none;">
+                <div id="panel-reports" data-panel data-view="report-methods" style="display: none;">
                     <div class="card">
                         <div class="panel-head">
                             <div>
                                 <span class="eyebrow">Reporting</span>
-                                <h3>Reports</h3>
-                                <p class="panel-sub">One report at a time. Each loads only when you open it,
-                                    and pages ten rows at a time so nothing pushes anything else off the screen.</p>
+                                <h3 id="reports-title">Payment Methods</h3>
                             </div>
                             <div class="panel-actions no-print">
-                                <button type="button" class="btn" onclick="printReport()">Print / PDF</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="mgr-methods" onclick="exportActiveReport()" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="mgr-methods" onclick="printActiveReport()" disabled>Print / PDF</button>
                             </div>
-                        </div>
-
-                        <div class="tab-header no-print">
-                            <button class="tab-btn active" id="tab-btn-methods"
-                                    onclick="showReportTab('report-methods', event)">Payment Methods</button>
-                            <button class="tab-btn" id="tab-btn-unpaid"
-                                    onclick="showReportTab('report-unpaid', event)">Receivables</button>
-                            <button class="tab-btn" id="tab-btn-loyal"
-                                    onclick="showReportTab('report-loyal', event)">Repeat Customers</button>
-                            <button class="tab-btn" id="tab-btn-staff"
-                                    onclick="showReportTab('report-staff', event)">Staff Performance</button>
                         </div>
 
                         <!-- PAYMENT METHODS -->
                         <div class="tab-content active" id="report-methods">
                             <div class="panel-toolbar no-print">
-                                <p class="panel-sub">How customers are paying, and what is still owed on each method.</p>
                                 <div class="toolbar-spacer"></div>
                                 <span class="pill" id="methods-count">Not loaded</span>
                                 <button type="button" class="btn btn-accent"
@@ -276,7 +311,7 @@
                                 <div class="search-wrap">
                                     <input type="search" class="form-control search-input" id="unpaid-search"
                                            placeholder="Search by customer or method"
-                                           oninput="dataPanelSearch('mgr-unpaid', this.value)">
+                                           onkeydown="dataPanelSearchKey('mgr-unpaid', event)" title="Type, then press Enter to search">
                                 </div>
                                 <div class="toolbar-spacer"></div>
                                 <span class="pill" id="unpaid-count">Not loaded</span>
@@ -286,7 +321,7 @@
                             <div class="table-responsive grid-10">
                                 <table id="unpaid-table">
                                     <thead>
-                                        <tr><th>Sale</th><th>Customer</th><th>Method</th><th>Status</th><th>Balance Due</th><th>Date</th></tr>
+                                        <tr><th>Sale</th><th>Customer</th><th data-secondary>Method</th><th>Status</th><th>Balance Due</th><th>Date</th></tr>
                                     </thead>
                                     <tbody></tbody>
                                 </table>
@@ -300,7 +335,7 @@
                                 <div class="search-wrap">
                                     <input type="search" class="form-control search-input" id="loyal-search"
                                            placeholder="Search by customer"
-                                           oninput="dataPanelSearch('mgr-loyal', this.value)">
+                                           onkeydown="dataPanelSearchKey('mgr-loyal', event)" title="Type, then press Enter to search">
                                 </div>
                                 <div class="toolbar-spacer"></div>
                                 <span class="pill" id="loyal-count">Not loaded</span>
@@ -321,7 +356,6 @@
                         <!-- STAFF PERFORMANCE -->
                         <div class="tab-content" id="report-staff">
                             <div class="panel-toolbar no-print">
-                                <p class="panel-sub">Sales handled by each member of staff, including people who have left.</p>
                                 <div class="toolbar-spacer"></div>
                                 <span class="pill" id="staff-count">Not loaded</span>
                                 <button type="button" class="btn btn-accent"
@@ -346,13 +380,15 @@
                 <div class="card" id="panel-sales" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Sales</span>
                             <h3>Sales Transactions</h3>
-                            <p class="panel-sub">Status here is not payment status: a sale can be paid in full
-                                and still on a truck. Click a row for the receipt, line items and payment history.</p>
                         </div>
                         <div class="panel-actions no-print">
                             <span class="pill" id="sales-count">Not loaded</span>
-                            <button type="button" class="btn" onclick="printReport()">Print / PDF</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-sales" onclick="exportPanelSpreadsheet('mgr-sales', 'Sales Transactions')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-sales" onclick="printReport('mgr-sales')" disabled>Print / PDF</button>
                         </div>
                     </div>
 
@@ -360,7 +396,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="sales-search"
                                    placeholder="Search by customer, cashier, or sale number"
-                                   oninput="dataPanelSearch('mgr-sales', this.value)">
+                                   onkeydown="dataPanelSearchKey('mgr-sales', event)" title="Type, then press Enter to search">
                         </div>
 
                         <div class="toolbar-field">
@@ -401,7 +437,7 @@
                     <div class="table-responsive grid-10">
                         <table id="sales-table">
                             <thead>
-                                <tr><th>Sale</th><th>Date</th><th>Customer</th><th>Method</th><th>Status</th><th>Total</th></tr>
+                                <tr><th>Sale</th><th>Date</th><th>Customer</th><th data-secondary>Method</th><th>Status</th><th>Total</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -411,21 +447,19 @@
 
                 <!-- ============================================================
                      REORDER ALERTS
-                     Its own screen, because it is a list of things to do today
-                     rather than a report to read.
                      ============================================================ -->
                 <div class="card" id="panel-reorder" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
                             <span class="eyebrow">Stocks</span>
                             <h3>Reorder Alerts</h3>
-                            <p class="panel-sub">Items at or below their reorder point. A product set to
-                                <strong>Dynamic</strong> works its own reorder point out from what it
-                                actually sells; the rest use the number somebody typed.</p>
                         </div>
                         <div class="panel-actions no-print">
                             <span class="pill" id="reorder-count">Not loaded</span>
-                            <button type="button" class="btn" onclick="printReport()">Print / PDF</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-reorder" onclick="exportPanelSpreadsheet('mgr-reorder', 'Reorder Alerts')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-reorder" onclick="printReport('mgr-reorder')" disabled>Print / PDF</button>
                         </div>
                     </div>
 
@@ -437,7 +471,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="reorder-search"
                                    placeholder="Search by product or supplier"
-                                   oninput="dataPanelSearch('mgr-reorder', this.value)">
+                                   onkeydown="dataPanelSearchKey('mgr-reorder', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-field">
                             <label for="reorder-mode-filter">Reorder point</label>
@@ -455,8 +489,8 @@
                     <div class="table-responsive grid-10">
                         <table id="reorder-table">
                             <thead>
-                                <tr><th>Product</th><th>On Hand</th><th>Reorder At</th><th>Daily Sales</th>
-                                    <th>Cover</th><th>Suggested Order</th><th>Supplier</th><th>Status</th></tr>
+                                <tr><th>Product</th><th>On Hand</th><th>Reorder At</th><th data-secondary>Daily Sales</th>
+                                    <th data-secondary>Cover</th><th>Suggested Order</th><th data-secondary>Supplier</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -472,12 +506,13 @@
                         <div>
                             <span class="eyebrow">Stocks</span>
                             <h3>Stock Report</h3>
-                            <p class="panel-sub">The full inventory with its valuation. Click a row to read
-                                the product, or to change how its reorder point is worked out.</p>
                         </div>
                         <div class="panel-actions no-print">
                             <span class="pill" id="stock-value">Not loaded</span>
-                            <button type="button" class="btn" onclick="printReport()">Print / PDF</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-stocks" onclick="exportPanelSpreadsheet('mgr-stocks', 'Stock Report')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-stocks" onclick="printReport('mgr-stocks')" disabled>Print / PDF</button>
                         </div>
                     </div>
 
@@ -485,7 +520,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="stocks-search"
                                    placeholder="Search by product, category, or supplier"
-                                   oninput="dataPanelSearch('mgr-stocks', this.value)">
+                                   onkeydown="dataPanelSearchKey('mgr-stocks', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-field">
                             <label for="stocks-status">Stock status</label>
@@ -497,6 +532,35 @@
                                 <option value="Out of Stock">Out of stock</option>
                             </select>
                         </div>
+
+                        <!-- quantity has its own filter; status only says whether a product is under its reorder point -->
+                        <div class="toolbar-field">
+                            <label for="stocks-level">On hand</label>
+                            <select id="stocks-level"
+                                    onchange="dataPanelFilter('mgr-stocks', 'level', this.value)">
+                                <option value="all">Any quantity</option>
+                                <option value="none">Nothing on hand</option>
+                                <option value="under-rop">Below reorder point</option>
+                                <option value="near-rop">Within 25% above reorder point</option>
+                                <option value="1-10">1 to 10</option>
+                                <option value="11-50">11 to 50</option>
+                                <option value="51-200">51 to 200</option>
+                                <option value="200+">More than 200</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="stocks-sort">Sort by</label>
+                            <select id="stocks-sort"
+                                    onchange="dataPanelFilter('mgr-stocks', 'sort', this.value)">
+                                <option value="name">Product name, A to Z</option>
+                                <option value="stock-asc">On hand, lowest first</option>
+                                <option value="stock-desc">On hand, highest first</option>
+                                <option value="gap">Furthest below reorder point first</option>
+                                <option value="value-desc">Stock value, highest first</option>
+                                <option value="value-asc">Stock value, lowest first</option>
+                                <option value="cover">Days of cover, shortest first</option>
+                            </select>
+                        </div>
                         <div class="toolbar-spacer"></div>
                         <button type="button" class="btn btn-accent" onclick="dataPanelOpen('mgr-stocks')">Load Data</button>
                     </div>
@@ -504,8 +568,8 @@
                     <div class="table-responsive grid-10">
                         <table id="stocks-table">
                             <thead>
-                                <tr><th>Product</th><th>Category</th><th>On Hand</th><th>Reorder At</th>
-                                    <th>Unit Price</th><th>Stock Value</th><th>Status</th></tr>
+                                <tr><th>Product</th><th data-secondary>Category</th><th>On Hand</th><th>Reorder At</th>
+                                    <th data-secondary>Unit Price</th><th>Stock Value</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -515,24 +579,177 @@
 
 
                 <!-- ============================================================
-                     CUSTOMER CREDIT
-                     The shop's credit book. A limit alone is not a policy: an
-                     account that always pays and one that has owed for four
-                     months both fit under the same limit, and only one of them
-                     should be sold to on account.
+                     NEW PURCHASE ORDER -- supplier and materials are typed, not picked;
+                     the code is shared with the clerk's page (shared/purchase-orders.js)
+                     ============================================================ -->
+                <div class="card" id="panel-po" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <span class="eyebrow">Purchasing</span>
+                            <h3>New Purchase Order</h3>
+                        </div>
+                        <span class="pill" id="po-line-count">1 line</span>
+                    </div>
+
+                    <form id="po-form" onsubmit="handleCreatePurchaseOrder(event)" autocomplete="off">
+
+                        <!-- any company name; a new one opens for the details that go on the printed order -->
+                        <div class="form-group">
+                            <label for="po-supplier">Supplier company</label>
+                            <div class="suggest-wrap">
+                                <input type="text" id="po-supplier" class="form-control"
+                                       autocomplete="off" maxlength="100"
+                                       placeholder="Type the company name"
+                                       role="combobox" aria-expanded="false"
+                                       aria-controls="po-supplier-list" aria-autocomplete="list"
+                                       oninput="onSupplierInput(this.value)"
+                                       onfocus="onSupplierInput(this.value)"
+                                       onkeydown="onSupplierKey(event)" required>
+                                <ul class="suggest-list" id="po-supplier-list" role="listbox" hidden></ul>
+                            </div>
+
+                            <div class="supplier-known" id="po-supplier-known" hidden></div>
+
+                            <div class="supplier-card" id="po-supplier-new" hidden>
+                                <h4>A company the shop has not bought from</h4>
+                                <p class="make-card-sub" id="po-supplier-new-sub">
+                                    These go on the printed order and are saved with the company.</p>
+                                <div class="make-grid">
+                                    <div class="form-group">
+                                        <label for="po-supplier-contact">Contact person</label>
+                                        <input type="text" id="po-supplier-contact" class="form-control" maxlength="100">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="po-supplier-number">Contact number</label>
+                                        <input type="text" id="po-supplier-number" class="form-control" maxlength="20">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="po-supplier-email">Email <span class="label-hint">optional</span></label>
+                                        <input type="email" id="po-supplier-email" class="form-control" maxlength="100">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="po-supplier-address">Address</label>
+                                        <input type="text" id="po-supplier-address" class="form-control">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="po-lines"></div>
+
+                        <div class="po-sum">
+                            <span class="po-sum-label">What this order comes to</span>
+                            <span class="po-sum-value" id="po-total">0.00</span>
+                        </div>
+
+                        <div class="form-footer">
+                            <button type="button" class="btn btn-ghost" onclick="addPurchaseLine()">Add line</button>
+                            <button type="submit" class="btn btn-success">Send the order</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- ============================================================
+                     ORDER HISTORY
+                     ============================================================ -->
+                <div class="card" id="panel-po-history" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <span class="eyebrow">Purchasing</span>
+                            <h3>Order History</h3>
+                        </div>
+                        <div class="panel-actions no-print">
+                            <span class="pill" id="po-count">Not loaded</span>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-po" onclick="exportPanelSpreadsheet('mgr-po', 'Purchase Orders')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-po" onclick="printReport('mgr-po')" disabled>Print / PDF</button>
+                        </div>
+                    </div>
+                    <div class="panel-toolbar no-print">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="po-search"
+                                   placeholder="Search by supplier or order number"
+                                   onkeydown="dataPanelSearchKey('mgr-po', event)" title="Type, then press Enter to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="po-status">Status</label>
+                            <select id="po-status"
+                                    onchange="dataPanelFilter('mgr-po', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Received">Received</option>
+                                <option value="Cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <button type="button" class="btn btn-accent" onclick="dataPanelOpen('mgr-po')">Load Data</button>
+                    </div>
+                    <div class="table-responsive grid-10">
+                        <table id="po-table">
+                            <thead>
+                                <tr><th>PO</th><th>Supplier</th><th>Ordered</th><th data-secondary>Lines</th>
+                                    <th>Total Cost</th><th>Status</th><th></th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="po-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     THE ORDER AS A DOCUMENT -- data-panel-of keeps the tab strip on Order History
+                     ============================================================ -->
+                <div id="panel-po-doc" data-panel data-panel-of="panel-po-history" style="display: none;">
+                    <div id="po-doc"></div>
+                </div>
+
+                <!-- ============================================================
+                     RECEIVING A DELIVERY -- a count sheet: ordered on the left, arrived on the right
+                     ============================================================ -->
+                <div class="card" id="panel-po-receive" data-panel data-panel-of="panel-po-history" style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <span class="eyebrow">Receiving</span>
+                            <h3>Count in the delivery</h3>
+                            <p class="panel-sub" id="recv-heading">Purchase Order</p>
+                        </div>
+                    </div>
+
+
+                    <div id="recv-lines"></div>
+
+                    <div class="panel-head recv-extras-head">
+                        <div>
+                            <h4>Arrived but never ordered</h4>
+                        </div>
+                    </div>
+
+                    <div id="recv-extras"></div>
+
+                    <div class="form-footer">
+                        <button type="button" class="btn btn-ghost" onclick="addReceiveExtra()">Add something that arrived</button>
+                        <button type="button" class="btn btn-success" onclick="submitReceiveOrder()">Receive this delivery</button>
+                        <button type="button" class="btn btn-ghost" onclick="showPurchaseOrderHistory(event)">Cancel</button>
+                    </div>
+                </div>
+
+
+                <!-- ============================================================
+                     CUSTOMER CREDIT -- the shop's credit book
                      ============================================================ -->
                 <div class="card" id="panel-credit" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
                             <span class="eyebrow">Credit</span>
                             <h3>Customer Credit</h3>
-                            <p class="panel-sub">What each customer may owe, what they do owe, and how much
-                                is left. Click a row to change the limit, move the standing, or read the
-                                whole account.</p>
                         </div>
                         <div class="panel-actions no-print">
                             <span class="pill" id="credit-count">Not loaded</span>
-                            <button type="button" class="btn" onclick="printReport()">Print / PDF</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-credit" onclick="exportPanelSpreadsheet('mgr-credit', 'Customer Credit')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-credit" onclick="printReport('mgr-credit')" disabled>Print / PDF</button>
                         </div>
                     </div>
 
@@ -540,7 +757,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="credit-search"
                                    placeholder="Search by customer or phone"
-                                   oninput="dataPanelSearch('mgr-credit', this.value)">
+                                   onkeydown="dataPanelSearchKey('mgr-credit', event)" title="Type, then press Enter to search">
                         </div>
 
                         <div class="toolbar-field">
@@ -572,7 +789,7 @@
                         <table id="credit-table">
                             <thead>
                                 <tr><th>Customer</th><th>Limit</th><th>Owed</th><th>Available</th>
-                                    <th>Open Sales</th><th>Oldest Debt</th><th>Standing</th></tr>
+                                    <th data-secondary>Open Sales</th><th data-secondary>Oldest Debt</th><th>Standing</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -581,17 +798,13 @@
                 </div>
 
                 <!-- ============================================================
-                     EXTENSION REQUESTS
-                     Raised at the counter, decided here, so the queue at the
-                     till does not have to wait for somebody to find a manager.
+                     EXTENSION REQUESTS -- raised at the counter, decided here
                      ============================================================ -->
                 <div class="card" id="panel-credit-requests" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
                             <span class="eyebrow">Credit</span>
                             <h3>Extension Requests</h3>
-                            <p class="panel-sub">A cashier raises one when a regular customer will not fit
-                                under their limit. Approving raises the limit in the same move.</p>
                         </div>
                         <div class="panel-actions no-print">
                             <span class="pill" id="requests-count">Not loaded</span>
@@ -602,7 +815,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="requests-search"
                                    placeholder="Search by customer or who asked"
-                                   oninput="dataPanelSearch('mgr-requests', this.value)">
+                                   onkeydown="dataPanelSearchKey('mgr-requests', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-field">
                             <label for="requests-status">Status</label>
@@ -620,8 +833,8 @@
                     <div class="table-responsive grid-10">
                         <table id="requests-table">
                             <thead>
-                                <tr><th>Asked</th><th>Customer</th><th>Now Owes</th><th>Current Limit</th>
-                                    <th>Asked For</th><th>Raised By</th><th>Status</th></tr>
+                                <tr><th>Asked</th><th>Customer</th><th>Now Owes</th><th data-secondary>Current Limit</th>
+                                    <th>Asked For</th><th data-secondary>Raised By</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -635,14 +848,15 @@
                 <div class="card" id="panel-deliveries" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Deliveries</span>
                             <h3>Delivery Tracking</h3>
-                            <p class="panel-sub">A delivered order is not finished until it has been paid for.
-                                One with money still owed sits at <strong>Pending Cash Collection</strong> and
-                                turns to Completed by itself the moment the payment is recorded.</p>
                         </div>
                         <div class="panel-actions no-print">
                             <span class="pill" id="deliveries-count">Not loaded</span>
-                            <button type="button" class="btn" onclick="printReport()">Print / PDF</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-deliveries" onclick="exportPanelSpreadsheet('mgr-deliveries', 'Delivery Tracking')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-deliveries" onclick="printReport('mgr-deliveries')" disabled>Print / PDF</button>
                         </div>
                     </div>
 
@@ -652,7 +866,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="deliveries-search"
                                    placeholder="Search by customer, driver, or destination"
-                                   oninput="dataPanelSearch('mgr-deliveries', this.value)">
+                                   onkeydown="dataPanelSearchKey('mgr-deliveries', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-field">
                             <label for="deliveries-state">Fulfilment</label>
@@ -675,8 +889,8 @@
                     <div class="table-responsive grid-10">
                         <table id="deliveries-table">
                             <thead>
-                                <tr><th>Delivery</th><th>Customer</th><th>Destination</th><th>Driver</th>
-                                    <th>Scheduled</th><th>Balance Due</th><th>Fulfilment</th></tr>
+                                <tr><th>Delivery</th><th>Customer</th><th data-secondary>Destination</th><th>Driver</th>
+                                    <th>Scheduled</th><th data-secondary>Balance Due</th><th>Fulfilment</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -687,28 +901,20 @@
                 <!-- ============================================================
                      RECORDS
                      ============================================================ -->
-                <div class="card" id="panel-records" data-panel style="display: none;">
+                <div class="card" id="panel-records" data-panel data-view="supplier" style="display: none;">
                     <div class="panel-head">
                         <div>
-                            <h3>Master Records</h3>
-                            <p class="panel-sub">Click any row to open its full record in a popup.</p>
+                            <span class="eyebrow">Master Records</span>
+                            <h3 id="records-title">Suppliers</h3>
                         </div>
                         <span class="pill" id="records-count">Not loaded</span>
-                    </div>
-
-                    <div class="tab-header no-print">
-                        <button class="tab-btn active" data-record-tab="supplier" onclick="showRecordType('supplier', event)">Suppliers</button>
-                        <button class="tab-btn" data-record-tab="customer" onclick="showRecordType('customer', event)">Customers</button>
-                        <button class="tab-btn" data-record-tab="product" onclick="showRecordType('product', event)">Products</button>
-                        <button class="tab-btn" data-record-tab="category" onclick="showRecordType('category', event)">Categories</button>
-                        <button class="tab-btn" data-record-tab="unit" onclick="showRecordType('unit', event)">Units</button>
                     </div>
 
                     <div class="panel-toolbar no-print">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="records-search"
                                    placeholder="Search these records"
-                                   oninput="dataPanelSearch('mgr-records', this.value)">
+                                   onkeydown="dataPanelSearchKey('mgr-records', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-spacer"></div>
                         <button type="button" class="btn btn-accent" onclick="dataPanelOpen('mgr-records')">Load Data</button>
@@ -729,9 +935,8 @@
                 <div class="card" id="panel-archives" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Archives</span>
                             <h3>Archived Records</h3>
-                            <p class="panel-sub">Staff, inventory, sales and delivery records that were archived.
-                                Click a row to read it before putting it back.</p>
                         </div>
                         <div class="panel-actions no-print">
                             <span class="pill" id="archives-count">Not loaded</span>
@@ -744,7 +949,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="archives-search"
                                    placeholder="Search archived records"
-                                   oninput="dataPanelSearch('mgr-archives', this.value)">
+                                   onkeydown="dataPanelSearchKey('mgr-archives', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-spacer"></div>
                         <button type="button" class="btn btn-accent" onclick="dataPanelOpen('mgr-archives')">Load Data</button>
@@ -785,18 +990,13 @@
                 <div id="detail-page"></div>
             </div>
 
-            <div class="modal-foot modal-pager">
-                <button type="button" class="btn btn-ghost" id="detail-back" onclick="detailBack()">&#8592; Back</button>
-                <span class="pager-count" id="detail-counter">Page 1 of 1</span>
-                <button type="button" class="btn btn-accent" id="detail-next" onclick="detailNext()">Next &#8594;</button>
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('detail-modal')">Close</button>
             </div>
         </div>
     </div>
 
-    <!-- REORDER POLICY
-         The two figures the formula needs that sales history cannot supply,
-         with the arithmetic shown as it is typed so the number is understood
-         before it is saved. -->
+    <!-- REORDER POLICY -- lead time and safety stock, with the arithmetic shown as typed -->
     <div class="modal" id="policy-modal" onclick="closeModalOnBackdrop(event, 'policy-modal')">
         <div class="modal-box">
             <div class="modal-head">
@@ -851,9 +1051,7 @@
     </div>
 
 
-    <!-- ONE CREDIT ACCOUNT
-         The limit and the standing are one decision, so they are edited on one
-         card, with what the customer actually owes printed above them. -->
+    <!-- ONE CREDIT ACCOUNT -- limit and standing edited together -->
     <div class="modal" id="credit-modal" onclick="closeModalOnBackdrop(event, 'credit-modal')">
         <div class="modal-box">
             <div class="modal-head">
@@ -887,12 +1085,13 @@
                                        oninput="previewCreditLimit()">
                             </div>
                             <div class="form-group">
-                                <label for="credit-standing-input">Standing</label>
+                                <label for="credit-standing-input">Standing override
+                                    <span class="label-hint">the figures decide unless you say otherwise</span></label>
                                 <select id="credit-standing-input" name="standing" class="form-control"
                                         onchange="previewCreditLimit()">
-                                    <option value="Good">Good &mdash; sell on account as normal</option>
-                                    <option value="Watch">Watch &mdash; allowed, but flag the account</option>
-                                    <option value="Hold">Hold &mdash; no new credit at all</option>
+                                    <option value="Good">None &mdash; let the figures decide</option>
+                                    <option value="Watch">Watch &mdash; flag it whatever the figures say</option>
+                                    <option value="Hold">Hold &mdash; no new credit whatever the figures say</option>
                                 </select>
                             </div>
                         </div>
@@ -955,6 +1154,7 @@
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="javascript/modules/shared/helpers.js"></script>
     <script src="javascript/modules/shared/format.js"></script>
+    <script src="javascript/modules/shared/phone-picker.js"></script>
     <script src="javascript/modules/shared/ui-kit.js"></script>
     <script src="javascript/modules/shared/tables.js"></script>
     <script src="javascript/modules/shared/data-panel.js"></script>
@@ -966,7 +1166,11 @@
     <script src="javascript/modules/shared/subnav.js"></script>
     <script src="javascript/modules/shared/my-account.js"></script>
     <script src="javascript/modules/shared/notifications.js"></script>
+    <script src="javascript/modules/shared/connected-systems.js"></script>
+    <script src="javascript/modules/shared/features.js"></script>
     <script src="javascript/modules/shared/deliveries.js"></script>
+    <script src="javascript/modules/shared/delivery-schedule.js"></script>
+    <script src="javascript/modules/shared/purchase-orders.js"></script>
     <script src="javascript/modules/manager.js"></script>
 </body>
 </html>

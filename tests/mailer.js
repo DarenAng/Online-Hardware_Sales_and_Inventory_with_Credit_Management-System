@@ -1,22 +1,8 @@
-// Checks public/javascript/mailer.js against a fake SMTP server that speaks
-// the same dialogue Gmail does. It needs no database, no running application
-// server and no internet, which is the point: the one thing in this system
-// that talks to a machine outside the shop is also the one thing that cannot
-// be tested by using the shop's own screens.
-//
+// Checks public/javascript/mailer.js against a fake SMTP server. No database,
+// no application server, no internet:
 //     node tests/mailer.js
-//
-// The four things worth checking here are the four that break silently:
-//
-//   1. A multi-line reply. A server answers EHLO with several lines and only
-//      the last one carries a space after the code. A parser that treats
-//      every line as a reply of its own runs the rest of the conversation one
-//      answer behind and hangs.
-//   2. AUTH LOGIN. Two base64 lines, in order, each waiting for its 334.
-//   3. A password that begins with a full stop. A line of a mail body that
-//      begins with one ends the message early. The body is base64 so it
-//      cannot happen; this is the test that says so.
-//   4. What the letter actually says. It must carry the password and no link.
+// Covers: a multi-line reply, AUTH LOGIN, a password beginning with a full
+// stop (the body is base64), and that the letter carries the password and no link.
 const net = require("net");
 const fs = require("fs");
 const os = require("os");
@@ -30,12 +16,7 @@ function ok(name, passed, note) {
   if (!passed) failures.push(name);
 }
 
-// ==========================================
-// A FAKE SMTP SERVER
-//
-// Answers the way a real one does, and keeps the transcript so the test can
-// say what was actually said rather than only that something worked.
-// ==========================================
+// A fake SMTP server that keeps the transcript.
 const transcript = [];
 let dataMode = false;
 let message = "";
@@ -94,28 +75,19 @@ const server = net.createServer((socket) => {
   });
 });
 
-// ==========================================
-// THE MAILER, POINTED AT THE FAKE
-//
-// The SETUP block at the top of mailer.js is edited in a copy rather than in
-// the project's own file. A test that rewrites the file it is testing is a
-// test that leaves a mail password in the repository the first time it fails
-// halfway through.
-//
-// STARTTLS is taken out of the copy with it, because the fake server speaks
-// no TLS. That leaves the second EHLO the upgrade is followed by, which is
-// why the expected transcript below has two of them.
-// ==========================================
+// The SETUP block of mailer.js is edited in a copy, never in the project's
+// file. STARTTLS is taken out because the fake speaks no TLS, which is why
+// the expected transcript has two EHLOs.
 function mailerPointedAt(port) {
   const source = fs.readFileSync(MAILER, "utf8")
-    // matched by name rather than by value, so the test is the same whether
-    // the machine it runs on has mail set up or not
+    // matched by name, so the test is the same whether the machine has mail set up
     .replace(/^const MAIL_ENABLED = .*$/m, "const MAIL_ENABLED = true;")
     .replace(/^const MAIL_HOST = .*$/m, 'const MAIL_HOST = "127.0.0.1";')
     .replace(/^const MAIL_PORT = .*$/m, `const MAIL_PORT = ${port};`)
     .replace(/^const MAIL_SECURE = .*$/m, "const MAIL_SECURE = false;")
     .replace(/^const MAIL_USER = .*$/m, 'const MAIL_USER = "shop@example.com";')
     .replace(/^const MAIL_PASSWORD = .*$/m, 'const MAIL_PASSWORD = "apppassword";')
+    .replace(/^const MAIL_FROM_NAME = .*$/m, 'const MAIL_FROM_NAME = "Hardware Sales & Inventory";')
     .replace('      await smtp.expect("STARTTLS", 220);\n' +
              "      socket = await upgrade(socket, MAIL_HOST);\n" +
              "      smtp = openConversation(socket);                    " +
@@ -163,8 +135,8 @@ server.listen(0, "127.0.0.1", async () => {
     JSON.stringify(transcript));
 
   const [headers, encoded] = message.split("\n\n");
-  ok("the subject names the shop",
-    /Subject: Your Lucelyn Hardware sign-in details/.test(headers), headers);
+  ok("the subject carries the name the mail is sent as",
+    /Subject: Your Hardware Sales & Inventory sign-in details/.test(headers), headers);
   ok("the message declares itself base64 UTF-8 text",
     /Content-Transfer-Encoding: base64/.test(headers) && /charset=UTF-8/.test(headers),
     headers);

@@ -1,52 +1,32 @@
-// data-panel.js  --  LAZY DATA PANELS AND PAGINATION
+// data-panel.js -- lazy data panels and pagination
 // Loaded by: all five dashboards
-// ------------------------------------------------------------------------
-// ==========================================
-// WHY THIS FILE EXISTS
 //
-// Every table in this system used to fetch itself the moment its page opened.
-// Five dashboards doing that at once is a burst of queries nobody asked for,
-// and the person who opened the page to look up one customer waited for all
-// of it. So a table now starts closed: it shows a search bar and a Load Data
-// button, and it queries the database when it is told to and not before.
-//
-// The second job is paging. A grid that grows with the data pushes the rest
-// of the page off the screen and turns the browser scrollbar into the only
-// way back. Ten rows to a page, Previous and Next, and the panel is the same
-// height whether it holds two rows or two hundred.
-//
-// One controller does both, because a table that loads on demand and a table
-// that pages are the same table in two states, and thirty copies of this
-// logic across five modules is thirty places for it to drift.
-//
-// USING IT
+// A table starts closed (search bar + Load Data button), loads on demand and
+// pages ten rows at a time. Usage:
 //
 //   const panel = createDataPanel({
 //       key: 'admin-users',            // unique, used by the inline handlers
-//       tableId: 'accounts-table',     // the <table> it fills
-//       columns: 5,                    // colspan for message rows; must match
-//                                      // the number of <th> in that table
-//       pagerId: 'accounts-pager',     // where Previous / Next are drawn
-//       countPillId: 'accounts-count', // optional .pill showing the count
+//       tableId: 'accounts-table',
+//       columns: 5,                    // colspan for message rows
+//       pagerId: 'accounts-pager',
+//       countPillId: 'accounts-count', // optional
 //       load: async () => [...],       // returns every row, once
 //       match: (row, query) => true,   // optional free-text search
 //       filter: (row, filters) => true,// optional dropdown filters
+//       sort: (rows, filters) => rows, // optional
 //       renderRow: (row, index) => '<tr>...</tr>',
 //       gate: { title, text, button },  // what the closed state says
-//       loadOnFilter: false            // optional; see dataPanelFilter below
+//       loadOnFilter: false            // optional; see dataPanelFilter
 //   });
+//   panel.open(); panel.reset(); panel.search('pedro');
+//   panel.setFilter('status', 'inactive'); panel.refresh();
 //
-//   panel.open();          // run load() and show page 1
-//   panel.reset();         // back to the closed state, data forgotten
-//   panel.search('pedro'); // free-text, re-pages from 1
-//   panel.setFilter('status', 'inactive');
-//   panel.refresh();       // re-run load(), keep the query and the filters
-// ==========================================
+// Every state change fires a 'datapanel:change' event on the document with
+// the key, so Print/Export buttons can follow the table.
 
 const DATA_PANEL_ROWS_PER_PAGE = 10;
 
-// every panel on the page, by key, so the buttons this file writes into the
-// table can find their own panel from an inline handler
+// every panel on the page, by key, for the inline handlers
 const dataPanels = new Map();
 
 function createDataPanel(config) {
@@ -74,7 +54,6 @@ function getDataPanel(key) {
 }
 
 const dataPanelMethods = {
-    // ---------- the parts of the page this panel owns ----------
     body() {
         const table = document.getElementById(this.config.tableId);
         return table ? table.querySelector('tbody') : null;
@@ -85,8 +64,6 @@ const dataPanelMethods = {
     },
 
     // ---------- states ----------
-    // A closed table is an invitation, not a blank box: it says what it holds
-    // and which button fills it.
     renderClosed() {
         const tbody = this.body();
         if (!tbody) return;
@@ -118,6 +95,8 @@ const dataPanelMethods = {
                     escapeHtml(gate.button || 'Load Data') +
                 '</button>' +
             '</div></td></tr>';
+
+        this.announce();
     },
 
     renderLoading() {
@@ -129,6 +108,8 @@ const dataPanelMethods = {
         this.clearPager();
         tbody.innerHTML = '<tr><td colspan="' + this.config.columns +
             '" class="table-empty">Reading the database...</td></tr>';
+
+        this.announce();
     },
 
     renderError(message) {
@@ -153,6 +134,8 @@ const dataPanelMethods = {
                 '<button type="button" class="btn btn-accent" ' +
                         'onclick="dataPanelOpen(\'' + this.key + '\')">Try again</button>' +
             '</div></td></tr>';
+
+        this.announce();
     },
 
     renderNoMatches() {
@@ -179,31 +162,20 @@ const dataPanelMethods = {
                 '<h4>No match found</h4>' +
                 '<p>' + what + ' Check the spelling, or widen the filters.</p>' +
             '</div></td></tr>';
+
+        this.announce();
     },
 
-    // ==========================================
-    // LOADING, AND THE TWO WAYS IT USED TO LIE
-    //
-    // Several of these panels send their filters to the server, so changing a
-    // filter means another round trip. Somebody changing two filters in a row —
-    // which is the ordinary way anybody uses a pair of dropdowns — starts a
-    // second load while the first is still out. That produced two different
-    // wrong answers, both of them silent:
-    //
-    // A DROPPED LOAD. This method used to return immediately if one was
-    // already running. The second change was not queued, it was discarded, so
-    // the dropdowns ended up saying "Pending Delivery" over a table still
-    // showing everything. Nothing on the screen admitted it, and the reader's
-    // next move is to trust the table.
-    //
-    // A LATE ANSWER. Even without the early return, two requests can come back
-    // in the wrong order on a shop network, and the slower first one would
-    // overwrite the newer rows it knew nothing about.
-    //
-    // So a load asked for during a load is remembered and run when the current
-    // one lands, and every load carries a ticket number: an answer that is no
-    // longer the newest is read and thrown away rather than drawn.
-    // ==========================================
+    announce() {
+        if (typeof CustomEvent !== 'function') return;
+        document.dispatchEvent(new CustomEvent('datapanel:change', {
+            detail: { key: this.key, state: this.state, rows: this.visible.length }
+        }));
+    },
+
+    // A load asked for during a load is remembered and run when the current one
+    // lands, and every load carries a ticket so a late answer is thrown away
+    // rather than drawn over newer rows.
     async open() {
         if (this.state === 'loading') {
             this.reloadWanted = true;   // whoever asked gets their answer below
@@ -218,7 +190,6 @@ const dataPanelMethods = {
         try {
             const rows = await this.config.load();
 
-            // a newer load overtook this one; its answer is the current one
             if (ticket !== this.loadTicket) return;
 
             this.rows = Array.isArray(rows) ? rows : [];
@@ -233,9 +204,6 @@ const dataPanelMethods = {
             if (ticket !== this.loadTicket) return;
             this.renderError(error && error.handled ? error.message : null);
         } finally {
-            // Anything asked for while this was in flight is answered now, with
-            // whatever the filters say at this moment rather than what they said
-            // when it was asked. That is the answer the reader is waiting for.
             if (ticket === this.loadTicket && this.reloadWanted) {
                 this.reloadWanted = false;
                 await this.open();
@@ -243,7 +211,6 @@ const dataPanelMethods = {
         }
     },
 
-    // re-reads from the server but keeps the search box and the filters
     async refresh() {
         if (this.state === 'closed') return;
         const page = this.page;
@@ -258,8 +225,7 @@ const dataPanelMethods = {
     },
 
     // ---------- searching and filtering ----------
-    // The search box is also a way in: typing into a closed table loads it,
-    // so nobody has to press Load Data first just to look one name up.
+    // Enter on a closed table also loads it.
     async search(text) {
         this.query = String(text || '').trim();
 
@@ -279,7 +245,6 @@ const dataPanelMethods = {
         if (this.state === 'ready') this.apply();
     },
 
-    // works out what is visible, then draws the current page of it
     apply() {
         const query = this.query.toLowerCase();
         const match = this.config.match;
@@ -290,6 +255,12 @@ const dataPanelMethods = {
             if (query === '') return true;
             return match ? match(row, query) : true;
         });
+
+        // sort is applied to the filtered copy; loaded rows keep server order
+        if (typeof this.config.sort === 'function') {
+            const sorted = this.config.sort(this.visible.slice(), this.filters);
+            if (Array.isArray(sorted)) this.visible = sorted;
+        }
 
         const pages = Math.max(1, Math.ceil(this.visible.length / this.pageSize));
         if (this.page > pages) this.page = pages;
@@ -318,6 +289,7 @@ const dataPanelMethods = {
             (this.visible.length === 1 ? ' record' : ' records'));
 
         this.renderPager(start, slice.length);
+        this.announce();
     },
 
     renderPager(start, shown) {
@@ -327,7 +299,6 @@ const dataPanelMethods = {
         const total = this.visible.length;
         const pages = Math.max(1, Math.ceil(total / this.pageSize));
 
-        // one page of results does not need Previous and Next at all
         if (pages === 1) {
             mount.innerHTML = '<span class="pager-info">' +
                 'Showing all ' + total + (total === 1 ? ' record' : ' records') + '</span>';
@@ -370,8 +341,6 @@ const dataPanelMethods = {
         this.page = Math.min(Math.max(1, page), pages);
         this.render();
 
-        // a page change that scrolls the reader back to the top of the grid,
-        // rather than leaving them halfway down the previous page's rows
         const table = document.getElementById(this.config.tableId);
         if (table && typeof table.scrollIntoView === 'function') {
             const box = table.getBoundingClientRect();
@@ -382,7 +351,6 @@ const dataPanelMethods = {
     next() { this.goTo(this.page + 1); },
     prev() { this.goTo(this.page - 1); },
 
-    // the row behind a click, found by whatever the module calls its id
     find(id, idField) {
         const key = idField || this.config.idField || 'id';
         return this.rows.find((row) => String(row[key]) === String(id)) || null;
@@ -394,45 +362,58 @@ function dataPanelOpen(key) { const p = getDataPanel(key); if (p) p.open(); }
 function dataPanelNext(key) { const p = getDataPanel(key); if (p) p.next(); }
 function dataPanelPrev(key) { const p = getDataPanel(key); if (p) p.prev(); }
 
-// ==========================================
-// THE SEARCH BOX, DEBOUNCED
-//
-// A search box wired straight to a filter runs it once per keystroke. That is
-// free while the rows are already in memory and not free at all when the first
-// keystroke is what fetches them, so the call is held back until the typing
-// stops.
-// ==========================================
-const dataPanelTimers = new Map();
+// Search runs on Enter, not on every key: on a closed table the first
+// keystroke would fetch the whole directory. Enter on an empty box clears
+// the search; Escape empties and clears too.
+function dataPanelSearchKey(key, event) {
+    if (!event) return;
 
-function dataPanelSearch(key, text, wait) {
-    const existing = dataPanelTimers.get(key);
-    if (existing) clearTimeout(existing);
+    if (event.key === 'Escape' && event.target && event.target.value !== '') {
+        event.target.value = '';
+        event.preventDefault();
+        dataPanelSearch(key, '');
+        return;
+    }
 
-    dataPanelTimers.set(key, setTimeout(() => {
-        dataPanelTimers.delete(key);
-        const panel = getDataPanel(key);
-        if (panel) panel.search(text);
-    }, wait === undefined ? 220 : wait));
+    if (event.key !== 'Enter') return;
+
+    event.preventDefault();
+    dataPanelSearch(key, event.target ? event.target.value : '');
 }
 
-// ==========================================
-// PICKING A FILTER
-//
-// On a table that is already open this narrows what has arrived, which is the
-// whole of it.
-//
-// On a CLOSED table there are two defensible answers and the panel says which
-// one it wants. By default, picking a filter fills the table: on most screens
-// somebody reaching for a dropdown on an empty table is asking to see the
-// thing they just narrowed to, and making them press Load Data afterwards is
-// a second step for no reason.
-//
-// A panel that sets loadOnFilter: false takes the other answer -- the value is
-// remembered and nothing is read until Load Data or the search box asks. The
-// staff directory does that, because it is the one screen where the filters
-// are also how somebody sets up a query before running it, and a dropdown that
-// fetches on the way past turns three deliberate choices into three queries.
-// ==========================================
+// runs the search now
+function dataPanelSearch(key, text) {
+    const panel = getDataPanel(key);
+    if (panel) panel.search(text);
+}
+
+// A field has to begin with the text, matching the server's LIKE 'input%'.
+// The query arrives already lower-cased and trimmed.
+function prefixMatch(fields, query) {
+    if (!query) return true;
+
+    for (const field of fields) {
+        if (field === null || field === undefined) continue;
+        if (String(field).trim().toLowerCase().startsWith(query)) return true;
+    }
+    return false;
+}
+
+// Substring match for the product catalog at the till: "ad" finds Shade,
+// Adapter and Thread.
+function substringMatch(fields, query) {
+    if (!query) return true;
+
+    for (const field of fields) {
+        if (field === null || field === undefined) continue;
+        if (String(field).toLowerCase().indexOf(query) !== -1) return true;
+    }
+    return false;
+}
+
+// On an open table this narrows what has arrived. On a closed table it loads
+// the table by default; a panel with loadOnFilter: false only remembers the
+// value until Load Data or the search box asks (the staff directory).
 function dataPanelFilter(key, name, value) {
     const panel = getDataPanel(key);
     if (!panel) return;

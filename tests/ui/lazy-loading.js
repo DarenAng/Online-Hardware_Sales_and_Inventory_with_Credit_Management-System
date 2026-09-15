@@ -1,6 +1,5 @@
-// Checks that the "closed until asked, ten rows a page" rule now holds on the
-// two modules it had not reached yet, and that the one deliberate exception —
-// the driver's own run — is exactly that: still loaded on arrival, but paged.
+// Checks the "closed until asked, ten rows a page" rule on the clerk and
+// driver modules; the driver's own run is still loaded on arrival, but paged.
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
@@ -34,10 +33,7 @@ async function pageFor(browser, role, fullName, staffId, problems) {
   return { context, page };
 }
 
-// A console line worth failing over is one this system caused. The font CDN
-// is deliberately non-blocking and simply does not load on a machine with no
-// internet, which is most machines this runs on; a favicon nobody added is a
-// favicon nobody needs. Neither says anything about whether the screens work.
+// only console lines this system caused: the font CDN and the favicon are noise
 function isOurProblem(text) {
   return !/fonts\.(googleapis|gstatic)\.com|favicon|ERR_TUNNEL_CONNECTION_FAILED|net::ERR_/.test(String(text));
 }
@@ -93,7 +89,7 @@ function isOurProblem(text) {
   const screens = [
     ["showAdjust", "clerk-adjustments", "adjust-table", "the adjustment log"],
     ["showReorder", "clerk-reorder", "reorder-table", "reorder settings"],
-    ["showPurchaseOrders", "clerk-po", "po-table", "purchase orders"],
+    ["showPurchaseOrderHistory", "clerk-po", "po-table", "purchase orders"],
     ["showReturns", "clerk-returns", "returns-table", "returned items"],
     ["showInventoryArchive", "clerk-archive", "arch-table", "the material archive"]
   ];
@@ -112,6 +108,27 @@ function isOurProblem(text) {
     check(`${label} loads and pages`, rows > 0 && rows <= 10, `saw ${rows}`);
   }
   await shot(clerk.page, "03-clerk-returns");
+
+  // the clerk reads purchase orders only: no form to raise, no button to receive
+  await clerk.page.evaluate("showPurchaseOrderHistory()");
+  await clerk.page.waitForTimeout(300);
+  check("the clerk has no purchase order form",
+    await clerk.page.locator("#po-form").count() === 0 &&
+    await clerk.page.locator("a[data-panel-link='panel-po']").count() === 0);
+  check("and no way to receive one",
+    await clerk.page.locator("#po-table tbody button:has-text('Receive')").count() === 0 &&
+    await clerk.page.locator("#panel-po-receive").count() === 0);
+  check("but can still open an order to read it",
+    await clerk.page.locator("#po-table tbody button:has-text('Open order')").count() > 0);
+
+  await clerk.page.click("#po-table tbody button:has-text('Open order')");
+  await clerk.page.waitForTimeout(600);
+  check("the printed order opens, with nothing on it to press but Print and Back",
+    await clerk.page.locator("#po-doc .po-doc").count() === 1 &&
+    await clerk.page.locator("#po-doc button:has-text('Receive')").count() === 0);
+  await shot(clerk.page, "03b-clerk-order-reference");
+  await clerk.page.evaluate("showPurchaseOrderHistory()");
+  await clerk.page.waitForTimeout(200);
 
   // the returns list now says where the goods went
   await clerk.page.evaluate("showReturns()");
@@ -137,29 +154,41 @@ function isOurProblem(text) {
   await driver.page.goto(`${BASE}/delivery.html`, { waitUntil: "domcontentloaded" });
   await driver.page.waitForTimeout(1000);
 
-  // the deliberate exception: a driver's own run does not wait to be asked
+  // the driver's run waits to be asked, like every other table
+  check("the driver's run starts closed",
+    /not loaded/i.test(await driver.page.textContent("#dpend-table tbody")));
+  await driver.page.click("#dpend-table tbody button:has-text('Load Data')");
+  await driver.page.waitForTimeout(800);
   const pending = await driver.page.locator("#dpend-table tbody tr").count();
-  check("the driver's run loads on arrival", pending > 0, `saw ${pending}`);
-  check("but it still pages ten at a time", pending <= 10, `saw ${pending}`);
-  check("the shift figures are drawn",
+  check("Load Data reads the driver's run", pending > 0, `saw ${pending}`);
+  check("and it pages ten at a time", pending <= 10, `saw ${pending}`);
+  check("the shift figures are drawn from the same read",
     await driver.page.locator("#del-kpis .kpi-card").count() === 5);
   await shot(driver.page, "05-driver-pending");
 
   await driver.page.fill("#dpend-search", "zzzz");
+  await driver.page.press("#dpend-search", "Enter");
   await driver.page.waitForTimeout(500);
   check("the driver can search their own run",
     /No match found/i.test(await driver.page.textContent("#dpend-table tbody")));
   await driver.page.fill("#dpend-search", "");
+  await driver.page.press("#dpend-search", "Enter");
   await driver.page.waitForTimeout(500);
 
   await driver.page.evaluate("showDeliveryActive()");
   await driver.page.waitForTimeout(400);
-  check("the out-for-delivery list is filled too",
+  check("the out-for-delivery list waits to be asked as well",
+    /not loaded/i.test(await driver.page.textContent("#dact-table tbody")));
+  await driver.page.click("#dact-table tbody button:has-text('Load Data')");
+  await driver.page.waitForTimeout(800);
+  check("and fills when it is",
     await driver.page.locator("#dact-table tbody tr").count() > 0);
 
   await driver.page.evaluate("showDeliveryCod()");
   await driver.page.waitForTimeout(400);
-  check("so is the money to collect",
+  await driver.page.click("#dcod-table tbody button:has-text('Load Data')");
+  await driver.page.waitForTimeout(800);
+  check("so does the money to collect",
     await driver.page.locator("#dcod-table tbody tr").count() > 0 &&
     /to collect/.test(await driver.page.textContent("#dcod-count")));
   await shot(driver.page, "06-driver-cod");

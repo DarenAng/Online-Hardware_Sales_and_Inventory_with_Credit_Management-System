@@ -1,9 +1,44 @@
-// format.js  --  FORMATTING AND FETCHING
+// format.js -- formatting and fetching
 // Loaded by: all five dashboards
-// ------------------------------------------------------------------------
+// Money is always printed with the peso sign as a text prefix; sheetCell in
+// manager.js strips it again for the spreadsheet export.
+const CURRENCY_SIGN = '\u20B1';       // the peso sign
+
 function peso(value) {
     const number = Number(value || 0);
-    return number.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const text = Math.abs(number).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (number < 0 ? '-' : '') + CURRENCY_SIGN + text;
+}
+
+// Measured units (kg, m) accept decimals and step by a half; anything not
+// listed here is counted and steps by one.
+const MEASURED_UNITS = {
+    kilogram: { short: 'kg', step: 0.5 },
+    kg:       { short: 'kg', step: 0.5 },
+    gram:     { short: 'g',  step: 50 },
+    meter:    { short: 'm',  step: 0.5 },
+    metre:    { short: 'm',  step: 0.5 },
+    liter:    { short: 'L',  step: 0.5 },
+    litre:    { short: 'L',  step: 0.5 },
+    foot:     { short: 'ft', step: 0.5 },
+    gallon:   { short: 'gal', step: 0.5 }
+};
+
+function measuredUnit(unit) {
+    return MEASURED_UNITS[String(unit || '').trim().toLowerCase()] || null;
+}
+
+function isMeasuredUnit(unit) {
+    return measuredUnit(unit) !== null;
+}
+
+function qtyText(value, unit) {
+    const number = Number(value) || 0;
+    const measure = measuredUnit(unit);
+    const figure = Number.isInteger(number) ? String(number)
+        : String(Number(number.toFixed(3))).replace(/\.?0+$/, '');
+    const name = measure ? measure.short : String(unit || '').trim();
+    return name ? figure + ' ' + name : figure;
 }
 
 function statusBadge(text) {
@@ -40,25 +75,9 @@ async function getJson(url) {
     return response.json();
 }
 
-// ==========================================
-// A WRITE, AND WHAT COMES BACK FROM IT
-//
-// The same shape as getJson for the other direction. It returns the body on
-// success and null when the server refused, having already put the server's
-// own sentence on the screen -- so a caller reads:
-//
-//     const result = await postJson(url, data);
-//     if (!result) return;
-//
-// and never has to decide how to word a refusal it does not understand. A
-// server that cannot be reached at all throws, because that is not a refusal
-// and the caller's catch is where notifyOffline() belongs.
-//
-// It returns null rather than throwing on a refusal on purpose: a refused
-// request is an ordinary outcome of a form, and a flow made of several
-// requests would otherwise have to tell a refusal apart from a dropped
-// connection inside one catch block.
-// ==========================================
+// Returns the body on success and null on a refusal (the server's own
+// sentence is already on screen). Throws only when the server is unreachable,
+// so the caller's catch is where notifyOffline() belongs.
 async function postJson(url, data, method) {
     const response = await fetch(url, {
         method: method || 'POST',
@@ -79,11 +98,7 @@ async function postJson(url, data, method) {
     return body || {};
 }
 
-// The bell needs this and so does a popup card, and a popup card can appear
-// on the sign-in screen where the bell does not exist, so it lives here with
-// the rest of the formatting rather than with the alerts.
-// "4 Sep 2026, 16:45" plus how long ago that was, because a date alone does
-// not tell you whether this is today's problem or last month's
+// "4 Sep 2026, 16:45" plus how long ago that was
 function whenText(stamp) {
     if (!stamp) return 'Time not recorded';
 
@@ -108,101 +123,147 @@ function whenText(stamp) {
     return shown;
 }
 
-// ==========================================
-// PHILIPPINE PHONE NUMBERS
-//
-// One spelling of a number, and it is +63 followed by ten digits.
-//
-// The box these functions sit behind used to be a plain text field, so it
-// took anything: letters, spaces, brackets, "n/a", and the same number
-// written as 09171234567, +639171234567, 639171234567 and 0917 123 4567 by
-// four different people on four different afternoons. Four spellings of one
-// number is a column that cannot be searched, cannot be compared, and cannot
-// be dialled from without being read by a human first.
-//
-// So the country code is not typed at all -- it is printed beside the box as
-// fixed furniture -- and what is typed is the ten national digits, with
-// everything that is not a digit dropped as the keys are pressed rather than
-// complained about afterwards. A rule that refuses a keystroke teaches the
-// rule in the moment; a rule that refuses the form at the end teaches
-// nothing and loses the other nine fields.
-//
-// The stored form is +639171234567. The server is the one that decides that,
-// not this file: these functions are the box's manners, and the same rule is
-// enforced again in server.js, because a check that only exists in a browser
-// is a check anybody can skip with curl.
-// ==========================================
+// Phone numbers are stored as + country code + digits (+639171234567). The
+// box is a country button (phone-picker.js) beside a digits-only field; a
+// number pasted with its + is read for its country. Under +63 a number must
+// be ten digits starting with 9; under any other code only length is checked.
+// The same rule is enforced again in server.js.
 
-// Ten digits, and the first is 9. Philippine mobile numbers are 09XXXXXXXXX
-// nationally, which is +63 9XXXXXXXXX with the trunk 0 dropped -- the 0 and
-// the +63 are the same thing and never both appear.
-const PHONE_NATIONAL_DIGITS = 10;
+// E.164 limits
+const PHONE_MAX_DIGITS = 15;
+const PHONE_MIN_DIGITS = 7;
 
-// Everything that is not a digit, gone. Leading zeros go too: somebody typing
-// the number as they know it, 0917..., means +63 917..., and a stored
-// +630917... is a number that does not dial.
-function phoneDigits(value) {
+const PH_CODE = '63';
+const PH_NATIONAL_DIGITS = 10;
+
+// every digit as one string: a trunk 0 becomes 63, a 0 after +63 goes
+function phoneDigitsAll(value) {
     return String(value === null || value === undefined ? '' : value)
         .replace(/\D/g, '')
-        .replace(/^63/, '')          // pasted with the country code in it
-        .replace(/^0+/, '')          // typed with the national trunk zero
-        .slice(0, PHONE_NATIONAL_DIGITS);
+        .replace(/^0+/, PH_CODE)                       // 0917... is +63 917...
+        .replace(new RegExp('^' + PH_CODE + '0+'), PH_CODE);   // +63 0917... too
 }
 
-// Wired to oninput on every phone box in the system. It rewrites the box
-// rather than blocking the key, which is what makes a pasted number work as
-// well as a typed one.
+function phoneDigits(value) {
+    return phoneDigitsAll(value).slice(0, PHONE_MAX_DIGITS);
+}
+
+// Takes a phone box or a string; returns every digit with the code in front,
+// and the code on its own.
+function phoneParts(boxOrValue) {
+    const isBox = !!(boxOrValue && boxOrValue.nodeType === 1);
+    if (isBox && boxOrValue.dataset.dialCode) {
+        const code = boxOrValue.dataset.dialCode;
+        const national = phoneNationalDigits(boxOrValue.value, boxOrValue.dataset.country);
+        return { code, digits: national === '' ? '' : code + national };
+    }
+    const digits = phoneDigitsAll(isBox ? boxOrValue.value : boxOrValue);
+    const country = typeof phoneCountryForDigits === 'function' ? phoneCountryForDigits(digits) : null;
+    return { code: country ? country.code : (digits.indexOf(PH_CODE) === 0 ? PH_CODE : ''), digits };
+}
+
+// digits inside a country: no trunk 0, unless the country keeps it
+function phoneNationalDigits(value, iso) {
+    const keepsZero = typeof PHONE_KEEPS_TRUNK_ZERO !== 'undefined' && PHONE_KEEPS_TRUNK_ZERO.indexOf(iso) !== -1;
+    let digits = String(value === null || value === undefined ? '' : value).replace(/\D/g, '');
+    if (!keepsZero) digits = digits.replace(/^0+/, '');
+    return digits;
+}
+
+// oninput on every phone box; rewrites rather than blocks so paste works too
 function onPhoneInput(input) {
     if (!input) return;
+    if (typeof setupPhoneField === 'function') setupPhoneField(input);
 
-    const cleaned = phoneDigits(input.value);
+    const raw = String(input.value);
+    const withCode = /^\s*(\+|00)\s*\d/.test(raw);
+
+    if (withCode && typeof phoneCountryForDigits === 'function') {
+        const digits = raw.replace(/^\s*(\+|00)/, '').replace(/\D/g, '');
+        const country = phoneCountryForDigits(digits);
+        if (country) {
+            setPhoneCountry(input, country.iso);
+            input.value = digits.slice(country.code.length);
+        } else {
+            input.value = digits;
+        }
+        input.dataset.foreign = country ? '' : '1';
+    } else {
+        input.dataset.foreign = '';
+    }
+
+    const room = PHONE_MAX_DIGITS - String(input.dataset.dialCode || '').length;
+    const cleaned = phoneNationalDigits(input.value, input.dataset.country).slice(0, room);
     if (cleaned !== input.value) {
-        // putting the caret back at the end is right here: the only edit this
-        // makes is removing characters that were never valid
         input.value = cleaned;
     }
 
-    // The box says whether it is happy as it is being filled in, and says
-    // nothing at all while it is empty, because the number is optional and an
-    // empty optional box is not a mistake.
     input.classList.toggle('is-bad',
-        cleaned !== '' && phoneComplaint(cleaned) !== null);
+        cleaned !== '' && phoneComplaint(input) !== null);
 }
 
-// The one sentence said about a bad number, or null when there is nothing to
-// say. Returned rather than shown, so the caller decides where it goes.
-function phoneComplaint(value) {
-    const digits = phoneDigits(value);
+// The sentence said about a bad number, or null. Returned, not shown.
+function phoneComplaint(boxOrValue) {
+    if (boxOrValue && boxOrValue.nodeType === 1 && boxOrValue.dataset.foreign === '1' &&
+        String(boxOrValue.value).trim() !== '') {
+        return 'Only Philippine numbers are accepted: 09XX XXX XXXX, or +63 9XX XXX XXXX.';
+    }
+
+    const parts = phoneParts(boxOrValue);
+    const code = parts.code;
+    const digits = parts.digits;
 
     if (digits === '') return null;                 // optional, and left empty
-    if (digits.length !== PHONE_NATIONAL_DIGITS) {
-        return `A phone number is ${PHONE_NATIONAL_DIGITS} digits after +63. ` +
-               `That one has ${digits.length}.`;
+
+    if (code !== PH_CODE) {
+        return 'Only Philippine numbers are accepted: 09XX XXX XXXX, or +63 9XX XXX XXXX.';
     }
-    if (digits[0] !== '9') {
-        return 'After +63 a Philippine mobile number starts with 9.';
+
+    const national = digits.slice(PH_CODE.length);
+    if (national.length !== PH_NATIONAL_DIGITS) {
+        return 'A Philippine mobile number is ' + PH_NATIONAL_DIGITS + ' digits after +63 ' +
+               '(09XX XXX XXXX). That one has ' + national.length + '.';
+    }
+    if (national[0] !== '9') {
+        return 'A Philippine mobile number starts with 09 (or +63 9).';
     }
     return null;
 }
 
-// what goes to the server, and what is stored: +639171234567, or nothing
-function phoneToStore(value) {
-    const digits = phoneDigits(value);
-    return digits === '' ? '' : '+63' + digits;
+// what goes to the server: +639171234567, or nothing
+function phoneToStore(boxOrValue) {
+    const digits = phoneParts(boxOrValue).digits.slice(0, PHONE_MAX_DIGITS);
+    return digits === '' ? '' : '+' + digits;
 }
 
-// the ten digits out of a stored number, to put back into the box beside the
-// printed +63. A number stored before this rule existed still loads: the
-// digits are pulled out of whatever spelling it was saved in.
+// a stored number put back into a box; older spellings still load
+function phoneFill(input, stored) {
+    if (!input) return;
+    if (typeof setupPhoneField === 'function') setupPhoneField(input);
+
+    const digits = phoneDigits(stored);
+    const country = digits !== '' && typeof phoneCountryForDigits === 'function'
+        ? phoneCountryForDigits(digits) : null;
+
+    if (typeof setPhoneCountry === 'function') {
+        setPhoneCountry(input, country ? country.iso : PHONE_DEFAULT_COUNTRY);
+    }
+    input.value = country ? digits.slice(country.code.length) : digits;
+    input.classList.remove('is-bad');
+}
+
 function phoneToInput(stored) {
     return phoneDigits(stored);
 }
 
-// how a stored number reads on a record card: +63 917 123 4567
+// +63 917 123 4567 for Philippine mobiles; any other number as stored
 function phoneForDisplay(stored) {
     const digits = phoneDigits(stored);
     if (digits === '') return '';
-    if (digits.length !== PHONE_NATIONAL_DIGITS) return '+63' + digits;
 
-    return `+63 ${digits.slice(0, 3)} ${digits.slice(3, 6)} ${digits.slice(6)}`;
+    const national = digits.slice(PH_CODE.length);
+    if (digits.indexOf(PH_CODE) === 0 && national.length === PH_NATIONAL_DIGITS) {
+        return '+63 ' + national.slice(0, 3) + ' ' + national.slice(3, 6) + ' ' + national.slice(6);
+    }
+    return '+' + digits;
 }

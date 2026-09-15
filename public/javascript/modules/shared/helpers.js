@@ -1,17 +1,8 @@
-// helpers.js  --  SHARED HELPERS
+// helpers.js -- shared helpers
 // Loaded by: every page
-// ------------------------------------------------------------------------
-// ==========================================
-// THE MENU ON A SMALL SCREEN
-//
-// On a desktop the menu is simply always there. On a phone it slides in over
-// the page, and anything that slides over the page has to be dismissable
-// without hunting for the button that opened it: the shade behind it closes
-// it, Escape closes it, and choosing something from it closes it, because on
-// a phone the screen you asked for is behind the menu you are still looking
-// at. The page underneath is held still while the menu is open so a thumb
-// scrolls the menu rather than the page behind it.
-// ==========================================
+
+// On a phone the menu slides over the page: the shade, Escape and choosing an
+// item all close it, and the page is held still while it is open.
 function toggleSidebar(force) {
     const sidebar = document.getElementById('sidebar');
     if (!sidebar) return;
@@ -31,14 +22,44 @@ function closeSidebar() { toggleSidebar(false); }
 
 document.addEventListener('click', function (event) {
     if (event.target.closest('#sidebar-shade')) { closeSidebar(); return; }
-    // a parent item only unfolds its own sub-menu; the page has not changed,
-    // so the menu stays open
+    // a parent item only unfolds its own sub-menu
     const link = event.target.closest('.sidebar-nav a');
     if (link && !link.classList.contains('nav-parent')) closeSidebar();
 });
 
 document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeSidebar();
+});
+
+// Show/Hide password buttons:
+//   <div class="password-field"><input type="password"...>
+//       <button type="button" class="password-toggle" aria-pressed="false">Show</button></div>
+// or one button naming several boxes:
+//   <button class="password-toggle" data-password-for="new-password,confirm-password">
+document.addEventListener('click', function (event) {
+    const toggle = event.target.closest('.password-toggle');
+    if (!toggle) return;
+
+    const named = toggle.getAttribute('data-password-for');
+    const field = toggle.closest('.password-field');
+    const inputs = named
+        ? named.split(',').map((id) => document.getElementById(id.trim())).filter(Boolean)
+        : (field ? [field.querySelector('input')].filter(Boolean) : []);
+    if (inputs.length === 0) return;
+
+    const showing = inputs[0].type === 'text';
+    inputs.forEach((input) => { input.type = showing ? 'password' : 'text'; });
+
+    const word = showing ? 'Show' : 'Hide';
+    const noun = inputs.length > 1 ? 'passwords' : 'password';
+    toggle.textContent = named ? word + ' ' + noun : word;
+    toggle.setAttribute('aria-pressed', String(!showing));
+    toggle.setAttribute('aria-label', word + ' ' + noun);
+
+    const back = inputs.find((input) => input.value === '') || inputs[inputs.length - 1];
+    back.focus();
+    const end = back.value.length;
+    try { back.setSelectionRange(end, end); } catch (error) { /* not every type allows it */ }
 });
 
 function switchTab(tabId, event) {
@@ -68,27 +89,21 @@ function escapeHtml(value) {
         .replace(/"/g, '&quot;');
 }
 
-// Identity travels in the httpOnly session cookie the browser attaches on its
-// own. There is deliberately no staff id here: the server decides who we are.
-//
-// X-Client-ID is not identity and is not trusted for anything. It is a label
-// for this browser tab, so that when the server announces a change to every
-// other screen, the screen that caused it can recognise its own work and not
-// refresh twice.
+// Identity travels in the httpOnly session cookie. X-Client-ID is only a
+// label for this tab so it can recognise its own writes on the live channel.
 function apiHeaders() {
     const headers = { 'Content-Type': 'application/json' };
     if (typeof CLIENT_ID === 'string') headers['X-Client-ID'] = CLIENT_ID;
     return headers;
 }
 
-// One place to notice that the session has lapsed, so every screen reacts the
-// same way instead of showing an empty table and no explanation. The server
-// explains a refusal better than a generic line can, so pass the parsed body
-// when there is one and its message wins.
+// One place to notice a lapsed session; the server's message wins when given.
 function handleAuthFailure(response, result) {
     if (response.status === 401) {
         localStorage.removeItem('currentUser');
-        notifyWarning('Your session has ended. Please sign in again.', 'Signed out');
+        if (typeof rememberSignOutReason === 'function') {
+            rememberSignOutReason((result && result.error) || 'Your session has ended. Please sign in again.');
+        }
         window.location.replace('Login.html');
         return true;
     }
@@ -104,4 +119,33 @@ function toggleDropdown(id, event) {
     const element = document.getElementById(id);
     if (!element) return;
     element.style.display = element.style.display === 'block' ? 'none' : 'block';
+}
+
+// A module heading marked data-sidebar-dropdown folds its list; only one
+// list is open at a time. Each page's toggleXMenu hands its ids here.
+function toggleSidebarMenu(navId, listId, event, force) {
+    if (event) event.preventDefault();
+
+    const heading = document.getElementById(navId);
+    const list = document.getElementById(listId);
+    if (!heading || !list) return;
+
+    const open = force === undefined ? list.style.display !== 'block' : force;
+
+    if (open) {
+        document.querySelectorAll('.sidebar-nav li[data-sidebar-dropdown]').forEach((item) => {
+            const otherList = item.querySelector(':scope > .nav-sub');
+            const otherHeading = item.querySelector(':scope > .nav-parent');
+            if (!otherList || otherList === list) return;
+            otherList.style.display = 'none';
+            if (otherHeading) {
+                otherHeading.classList.remove('is-open');
+                otherHeading.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
+
+    list.style.display = open ? 'block' : 'none';
+    heading.classList.toggle('is-open', open);
+    heading.setAttribute('aria-expanded', String(open));
 }

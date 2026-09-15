@@ -1,7 +1,6 @@
 // Expects a freshly loaded database (the two files in public/database/, in order).
 // Signs in as every role, walks every screen, and saves a screenshot of each.
-// Console errors and failed requests are reported, because a screen that looks
-// right while the console is full of errors is not right.
+// Console errors and failed requests are reported.
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
@@ -13,14 +12,16 @@ const TOURS = {
   admin: {
     email: "admin@hardware.com", password: "admin123", page: "system.html",
     steps: [
-      // Every table on this page now starts closed, so each screen is worth
-      // two shots: what it looks like before anybody asks for data, and what
-      // it looks like after.
+      // every table starts closed, so each screen gets a before and an after shot
       ["accounts-closed", "showAccountsList()"],
       ["accounts", "showAllUsers()"],
       ["create", "showCreateAccount()"],
       ["archive-closed", "showArchiveModule()"],
       ["archive", "dataPanelOpen('admin-archive')"],
+      ["access-closed", "showAccessControl()"],
+      ["access", "dataPanelOpen('admin-access')"],
+      ["systems-closed", "showConnectedSystems()"],
+      ["systems", "loadConnectedSystems()"],
       ["logs-closed", "showAuditLogs()"],
       ["logs", "dataPanelOpen('admin-logs')"],
       ["backup-closed", "showMaintenance()"],
@@ -117,8 +118,7 @@ const TOURS = {
     await page.click('button[type="submit"]');
     await page.waitForTimeout(1200);
 
-    // every demo account except the administrator has to pick a real password
-    // on its first sign-in, so the tour goes through that screen too
+    // every demo account except the administrator picks a password on first sign-in
     if (page.url().includes("change-password.html")) {
       if (role === "manager") {
         await page.screenshot({ path: path.join(OUT, "00-change-password.png") });
@@ -126,6 +126,15 @@ const TOURS = {
       const fresh = `${role}pass123`;
       await page.fill('input[name="newPassword"]', fresh);
       await page.fill('input[name="confirmPassword"]', fresh);
+      await page.click('button[type="submit"]');
+      await page.waitForTimeout(1200);
+
+      // choosing a password ends the session; sign in again with the new one
+      if (!page.url().includes("Login.html")) {
+        problems.push(`[${role}] choosing a password did not return to the sign-in page, stopped at ${page.url()}`);
+      }
+      await page.fill('input[name="email"]', tour.email);
+      await page.fill('input[name="password"]', fresh);
       await page.click('button[type="submit"]');
       await page.waitForTimeout(1200);
     }
@@ -140,12 +149,8 @@ const TOURS = {
     let index = 1;
     for (const [label, call] of tour.steps) {
       try {
-        // A step is an expression, and several of them take arguments now, so
-        // it is evaluated as written rather than having "()" peeled off the
-        // end of it. The result is wrapped in a resolved promise, so a step
-        // that loads a table is actually waited for instead of being
-        // photographed halfway through, and .then() hands Playwright a value
-        // it can serialise either way.
+        // a step is an expression, evaluated as written and awaited so a loading
+        // table is not photographed halfway through
         await page.evaluate(`Promise.resolve(${call}).then(function () {})`);
       } catch (error) {
         problems.push(`[${role}] ${label}: ${error.message}`);
@@ -158,8 +163,7 @@ const TOURS = {
       index += 1;
     }
 
-    // the pieces that are the same on every module are captured once, on the
-    // manager screen, because they are built by the same code everywhere
+    // the shared pieces are captured once, on the manager screen
     if (role === "manager") {
       await page.evaluate("showManagerHome()");
       await page.waitForTimeout(500);
@@ -207,8 +211,6 @@ const TOURS = {
       await page.waitForTimeout(700);
       await page.screenshot({ path: path.join(OUT, "shared-07-notification-cards.png") });
 
-      // a long page, scrolled to the bottom: the menu and the top bar have to
-      // still be there
       await page.evaluate("clearCards(); showReports();");
       await page.waitForTimeout(1200);
       await page.evaluate("window.scrollTo(0, document.body.scrollHeight)");

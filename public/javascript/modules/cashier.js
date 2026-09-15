@@ -1,9 +1,5 @@
-// cashier.js  --  CASHIER
+// cashier.js -- cashier
 // Loaded by: cashier-dashboard.html
-// ------------------------------------------------------------------------
-// ==========================================
-// CASHIER MODULE
-// ==========================================
 let catalog = [];
 let catalogLoaded = false;
 let catalogMode = 'idle';     // 'idle' keeps the grid clean, 'all' shows everything
@@ -12,31 +8,20 @@ let cashierSales = [];
 let salesScope = 'Mine';
 let lastReceipt = null;
 
-// EIGHT ROWS
-//
-// Every table on this screen pages at eight. The number is not arbitrary: the
-// register runs on the shop's counter machine, and eight rows is what fits
-// above the fold there without the panel pushing the order summary off the
-// side. A table that grows with the data turns the browser scrollbar into the
-// only way back to the top of it.
+// eight rows is what fits above the fold on the counter machine
 const CASHIER_ROWS_PER_PAGE = 8;
 
-// The refunds log pages at twelve. It is read back through rather than worked
-// down, so the shorter page that suits the other tables only makes it longer.
+// the refunds log is read back through, so it pages longer
 const REFUND_ROWS_PER_PAGE = 12;
 
-// The customer book, read once and searched in memory. A dropdown of every
-// customer was the wrong control for a counter; the list behind the typing
-// box is the same data doing a more useful job.
+// the customer book, read once and searched in memory behind the typing box
 let customerDirectory = [];
 let customerDirectoryLoaded = false;
 let suggestHighlight = -1;
 
-// A delivery filled in beside the order and written the moment the sale
-// exists. Null until the cashier makes one.
+// a delivery filled in beside the order; written the moment the sale exists
 let pendingDelivery = null;
 
-// today's figures, kept so the refund card can open without asking again
 let dailySummary = null;
 
 function showCashierPanel(panelId, title, event) {
@@ -49,6 +34,9 @@ function showCashierPanel(panelId, title, event) {
         link.classList.toggle('active', link.dataset.panelLink === panelId);
     });
 
+    // a screen listed under Point of Sale unfolds the list when a person opened it
+    if (event && POS_PANELS.indexOf(panelId) !== -1) togglePosMenu(null, true);
+
     const heading = document.getElementById('cash-page-title');
     if (heading) heading.textContent = title;
 
@@ -56,7 +44,11 @@ function showCashierPanel(panelId, title, event) {
     if (sidebar && window.innerWidth <= 768) sidebar.classList.remove('active');
 }
 
-// the sidebar entry: opens a clean register and stays highlighted
+// Point of Sale folds its list open and shut
+const POS_PANELS = ['panel-pos', 'panel-delivery', 'panel-refund'];
+
+function togglePosMenu(event, force) { toggleSidebarMenu('pos-nav', 'pos-dropdown', event, force); }
+
 function showRegister(event) {
     showCashierPanel('panel-pos', 'Point of Sale', event);
 
@@ -68,30 +60,26 @@ function showRegister(event) {
     renderCart();
 }
 
-// the logo: same screen, but it is not a menu choice, so nothing stays lit
 function showCashierHome(event) {
     showRegister(event);
     document.querySelectorAll('[data-panel-link]').forEach((link) => link.classList.remove('active'));
 }
 
-// Tracking only, and deliberately empty until it is asked for. Reading every
-// delivery in the shop to answer a question about one of them is a query
-// nobody wanted; typing into the search box or pressing Load Data is the ask.
+// tracking only; empty until the search box or Load Data asks
 function showCashierDeliveries(event) {
     showCashierPanel('panel-delivery', 'Delivery Tracking', event);
 }
 
+// the refund form's product box needs the catalogue; the list waits to be asked
 function showRefunds(event) {
     showCashierPanel('panel-refund', 'Refunds', event);
     loadCatalogOptions();
-    dataPanelOpen('cash-refunds');
 }
 
 function showCustomers(event) { showCashierPanel('panel-customers', 'Customers & Credit', event); }
 
 function showSalesReport(event) {
     showCashierPanel('panel-salesreport', 'Sales Report', event);
-    dataPanelOpen('cash-sales');
 }
 
 function showDailySummary(event) {
@@ -146,9 +134,58 @@ function renderCatalogNoMatch(keyword) {
                 </svg>
             </div>
             <h4>No match found</h4>
-            <p>Nothing matches <kbd>${escapeHtml(keyword)}</kbd>. Archived products never appear here.</p>
+            <p>${keyword ? "Nothing matches <kbd>" + escapeHtml(keyword) + "</kbd>" : "Nothing is left"}${
+                catalogFilters.category !== "all" || catalogFilters.stock !== "all"
+                    ? " with the filters above set the way they are" : ""}. Archived products never appear here.</p>
             <button type="button" class="btn btn-accent" onclick="loadCatalogAll(event)">View All Products</button>
         </div>`;
+}
+
+// The catalog is a table, not a grid of cards. Only the Add button at the
+// end of a row adds; pressing the row anywhere else opens the product.
+const catalogFilters = { category: 'all', stock: 'all' };
+
+function setCatalogFilter(name, value) {
+    catalogFilters[name] = value;
+    // a filter is an ask, like the search
+    if (!catalogLoaded || catalogMode === 'idle') {
+        catalogMode = 'all';
+        loadCatalogAll();
+        return;
+    }
+    applyCatalogView();
+}
+
+function catalogMatchesFilters(p) {
+    if (catalogFilters.category !== 'all' && String(p.category_name || 'Uncategorised') !== catalogFilters.category) return false;
+    const out = Number(p.quantity_in_stock) <= 0;
+    if (catalogFilters.stock === 'in' && out) return false;
+    if (catalogFilters.stock === 'out' && !out) return false;
+    return true;
+}
+
+function fillCatalogCategories() {
+    const select = document.getElementById('catalog-category');
+    if (!select) return;
+
+    const names = [...new Set(catalog.map((p) => String(p.category_name || 'Uncategorised')))].sort();
+    const current = select.value;
+    select.innerHTML = '<option value="all">Every category</option>' +
+        names.map((name) => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join('');
+    select.value = names.indexOf(current) !== -1 ? current : 'all';
+    catalogFilters.category = select.value;
+}
+
+function applyCatalogView() {
+    const box = document.getElementById('catalog-search');
+    const text = box ? box.value.trim().toLowerCase() : '';
+
+    if (text === '' && catalogMode !== 'all') { renderCatalogEmpty(); return; }
+
+    const rows = catalog.filter((p) =>
+        catalogMatchesFilters(p) &&
+        (text === '' || substringMatch([p.product_name, p.category_name, p.brand_name], text)));
+    renderCatalog(rows, text);
 }
 
 function renderCatalog(rows, keyword) {
@@ -157,36 +194,70 @@ function renderCatalog(rows, keyword) {
 
     if (rows.length === 0) { renderCatalogNoMatch(keyword || ''); return; }
 
-    // ==========================================
-    // WHAT A CARD AT THE TILL SAYS
-    //
-    // Not the stock count. A running figure on every card is a number the
-    // cashier cannot act on: they are not ordering stock, they are serving the
-    // person in front of them, and the count only invites arithmetic about the
-    // stockroom over a customer's head. It also puts the shop's inventory
-    // position on the one screen that faces the shop floor. The clerk's and
-    // the manager's screens are where that figure belongs and it is still on
-    // both of them, unchanged.
-    //
-    // The one stock fact a card does have to carry is whether this can be sold
-    // at all, because that changes what the cashier does next. A card greyed
-    // out and unclickable with no reason given is a card somebody presses four
-    // times and then reports as broken, so a product with none left says so in
-    // words on the card itself rather than in a tooltip nobody hovers over at
-    // a counter. Every other card says nothing about stock.
-    // ==========================================
+    // No stock count on a card at the till; the one stock fact it carries is
+    // whether the product can be sold at all, said in words on the card.
     setPill('catalog-count', rows.length + (rows.length === 1 ? ' product' : ' products'));
-    grid.innerHTML = '<div class="product-grid">' + rows.map((p, i) => {
-        const out = p.quantity_in_stock <= 0;
-        return '<button type="button" class="product-card row-reveal' + (out ? ' is-out' : '') + '"' +
-            ' style="animation-delay:' + Math.min(i, 12) * 26 + 'ms"' +
-            (out ? ' disabled' : ' onclick="addToCart(' + p.product_id + ')"') + '>' +
-            '<span class="prod-name">' + escapeHtml(p.product_name) + '</span>' +
-            '<span class="prod-meta">' + escapeHtml(p.category_name || 'Uncategorised') + '</span>' +
-            '<span class="prod-price">' + peso(p.price) + '</span>' +
-            (out ? '<span class="prod-stock stock-out">Out of stock</span>' : '') +
-            '</button>';
-    }).join('') + '</div>';
+    grid.innerHTML =
+        '<table class="catalog-table" id="catalog-table">' +
+        '<thead><tr><th>Product</th><th>Category</th><th>Brand</th><th>Price</th><th>Availability</th><th></th></tr></thead>' +
+        '<tbody>' + rows.map((p, i) => {
+            const out = Number(p.quantity_in_stock) <= 0;
+            return '<tr class="row-reveal row-clickable' + (out ? ' is-out' : '') + '"' +
+                ' style="animation-delay:' + Math.min(i, 12) * 26 + 'ms"' +
+                ' onclick="openCatalogProduct(' + p.product_id + ')" title="Press to see the product">' +
+                '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
+                '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
+                '<td>' + escapeHtml(p.brand_name || '\u2014') + '</td>' +
+                '<td class="cell-num catalog-price">' + peso(p.price) + '</td>' +
+                '<td>' + (out ? '<span class="badge badge-danger">Out of stock</span>'
+                              : '<span class="badge badge-success">In stock</span>') + '</td>' +
+                '<td class="cell-action">' +
+                    '<button type="button" class="btn btn-sm' + (out ? '' : ' btn-accent') + '"' +
+                    (out ? ' disabled' : ' onclick="event.stopPropagation(); addToCart(' + p.product_id + ')"') + '>' +
+                    (out ? 'None left' : 'Add') + '</button></td>' +
+            '</tr>';
+        }).join('') + '</tbody></table>';
+}
+
+// ---------- one product, on a card ----------
+function openCatalogProduct(productId) {
+    const p = catalog.find((x) => x.product_id === productId);
+    if (!p) return;
+
+    const out = Number(p.quantity_in_stock) <= 0;
+    const inCart = cart.find((l) => l.product_id === productId);
+
+    const facts = '<div class="detail-grid">' +
+        detailField('Product', escapeHtml(p.product_name)) +
+        detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
+        detailField('Brand', p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>') +
+        detailField('Sold By', p.unit_name
+            ? escapeHtml(p.unit_name) + (isMeasuredUnit(p.unit_name)
+                ? ' <span class="muted">\u00b7 by measure, any amount</span>' : '')
+            : '<span class="muted">Not set</span>') +
+        detailField('Price', peso(p.price)) +
+        detailField('Availability', out
+            ? '<span class="badge badge-danger">Out of stock</span>'
+            : '<span class="badge badge-success">In stock</span>') +
+        (p.supplier_name ? detailField('Supplier', escapeHtml(p.supplier_name)) : '') +
+        detailField('Product ID', '#' + p.product_id) +
+        '</div>' +
+        (inCart
+            ? '<p class="detail-note">Already on the order: ' + escapeHtml(qtyText(inCart.quantity, p.unit_name)) +
+              (isMeasuredUnit(p.unit_name) ? '. Adding asks for the amount to put on.' : '. Adding puts one more on.') + '</p>' : '') +
+        '<div class="detail-actions">' +
+        (out
+            ? '<p class="detail-note detail-warn">None left to sell. The clerk is told when it is restocked.</p>'
+            : '<button type="button" class="btn btn-accent" onclick="addFromProductCard(' + p.product_id + ')">Add to order</button>') +
+        '</div>';
+
+    openDetailModal(p.product_name, (p.category_name || 'Uncategorised') + ' \u00b7 ' + peso(p.price),
+        initialsOf(p.product_name), [{ label: 'Product', body: facts }]);
+}
+
+function addFromProductCard(productId) {
+    closeModal('detail-modal');
+    addToCart(productId);
 }
 
 async function loadCatalogAll(event) {
@@ -207,15 +278,31 @@ async function loadCatalogAll(event) {
         if (grid) grid.innerHTML = '<p class="table-empty">Cannot reach the server.</p>';
         return;
     }
-    renderCatalog(catalog);
+    fillCatalogCategories();
+    applyCatalogView();
     loadCustomerOptions();
+}
+
+// Enter searches; Escape clears
+function onCatalogSearchKey(event) {
+    if (!event || !event.target) return;
+
+    if (event.key === 'Escape') {
+        event.target.value = '';
+        filterCatalog('');
+        return;
+    }
+    if (event.key !== 'Enter') return;
+
+    event.preventDefault();
+    filterCatalog(event.target.value);
 }
 
 async function filterCatalog(keyword) {
     const text = keyword.trim().toLowerCase();
 
     if (text === '') {
-        if (catalogMode === 'all') renderCatalog(catalog);
+        if (catalogMode === 'all') applyCatalogView();
         else renderCatalogEmpty();
         return;
     }
@@ -231,41 +318,20 @@ async function filterCatalog(keyword) {
         const box = document.getElementById('catalog-search');
         const latest = box ? box.value.trim().toLowerCase() : text;
         if (latest !== text) return;
+        fillCatalogCategories();
         loadCustomerOptions();
     }
 
-    renderCatalog(catalog.filter((p) =>
-        (p.product_name + ' ' + (p.category_name || '') + ' ' + (p.brand_name || ''))
-            .toLowerCase().indexOf(text) !== -1
-    ), keyword.trim());
+    applyCatalogView();
 }
 
-// ==========================================
-// THE PRODUCT ON A REFUND, TYPED RATHER THAN PICKED
-//
-// This was a <select> holding the whole catalogue. Finding one item in six
-// hundred by scrolling, with a customer standing at the counter holding the
-// thing they want to return, is slower than typing three letters of its name.
-//
-// It shares its shape with the customer box deliberately: same suggestion
-// list, same arrow keys, same clear button, so a cashier who has learned one
-// has learned the other. What it does not share is what happens to text that
-// matches nothing. A customer typed and not found is a walk-in, which is a
-// real answer. A product typed and not found is not a product, and a refund
-// with no product has nowhere to move the stock to. So this field carries a
-// second job: making "nothing chosen yet" impossible to read as "chosen".
-// Until a product is picked there is no strip under the box, the strip is the
-// only thing that says a choice was made, and the form refuses to send.
-//
-// The strip also carries the price, and picking a product fills the refund
-// amount in from it. That is the practical reason to abandon the dropdown:
-// the amount stops being a figure somebody types from memory.
-// ==========================================
+// The refund product is typed, not picked, and shares the customer box's
+// shape. Until a product is picked there is no strip under the box and the
+// form refuses to send. Picking one fills the refund amount in.
 let refundProduct = null;
 let refundSuggestHighlight = -1;
 
-// What the amount box last had put into it by this code. Anything else in
-// there was typed by a person, and a person's figure is never overwritten.
+// what the amount box last had put into it by this code; a typed figure is never overwritten
 let refundAmountSuggested = null;
 
 function refundProductBox() { return document.getElementById('refund-product'); }
@@ -275,9 +341,7 @@ function refundProductIdBox() {
     return form ? form.elements.productId : null;
 }
 
-// Kept under its old name because showRefunds calls it: the refund screen
-// still needs the catalogue in memory, it just no longer builds options out
-// of it.
+// kept under its old name because showRefunds calls it
 async function loadCatalogOptions() {
     if (!document.getElementById('refund-product')) return;
     await ensureCatalogLoaded(false);
@@ -289,12 +353,9 @@ async function onRefundProductInput(value) {
 
     if (clear) clear.hidden = text === '';
 
-    // the catalogue is fetched the first time somebody types, not on page load
     if (!catalogLoaded && text !== '') await ensureCatalogLoaded(false);
 
-    // Typing after a choice unmakes the choice. Leaving the old product
-    // selected while different text sits in the box is how a refund gets
-    // filed against something nobody chose.
+    // typing after a choice unmakes the choice
     if (refundProduct && String(refundProduct.product_name).trim() !== text) {
         setRefundProduct(null);
     }
@@ -319,15 +380,12 @@ function renderRefundSuggestions(text) {
 
     if (query.length < 1 || catalog.length === 0) { hide(); return; }
 
-    // A product already chosen is not a search in progress.
     if (refundProduct && String(refundProduct.product_name).trim().toLowerCase() === query) {
         hide();
         return;
     }
 
-    // Name matches first and matches that start with what was typed above the
-    // ones that merely contain it, because the first three letters of a
-    // product name is how anybody actually looks for one.
+    // names that start with the text come before ones that merely contain it
     const starts = [];
     const contains = [];
     const other = [];
@@ -346,11 +404,7 @@ function renderRefundSuggestions(text) {
     if (found.length === 0) { hide(); return; }
 
     list.innerHTML = found.map((p, i) => {
-        // Brand and category are what separate two products whose names read
-        // almost the same on a shelf label.
-        // Brand and category and nothing else. What is on the shelf is not the
-        // till's business here either: a refund is decided by what the customer
-        // brought back, not by what is left in the stockroom.
+        // brand and category separate two products whose names read almost the same
         const meta = [p.category_name, p.brand_name].filter(Boolean).map(escapeHtml);
 
         return '<li class="suggest-item" role="option" id="refund-suggest-' + i + '" ' +
@@ -433,8 +487,7 @@ function clearRefundProduct() {
     if (box) box.focus();
 }
 
-// One place that decides what is chosen, so the hidden field, the strip, the
-// verdict line and the suggested amount can never disagree about it.
+// one place decides what is chosen so the field, strip, verdict and amount agree
 function setRefundProduct(product) {
     refundProduct = product || null;
 
@@ -446,9 +499,7 @@ function setRefundProduct(product) {
     suggestRefundAmount();
 }
 
-// The strip is the whole answer to "have I chosen something yet". It borrows
-// the credit strip's shape on purpose: same left rule, same label-and-figure
-// rows, so it reads as the same kind of statement.
+// the strip is the whole answer to "have I chosen something yet"
 function renderRefundProductStrip() {
     const strip = document.getElementById('refund-product-strip');
     if (!strip) return;
@@ -486,13 +537,8 @@ function renderRefundProductVerdict() {
     box.textContent = 'No product chosen yet. A refund moves stock, so it has to name a real product.';
 }
 
-// WHERE THE FIGURE COMES FROM
-//
-// The amount used to be typed from memory, which is where a 4,500 refund on
-// a 450 hammer comes from. Choosing the product and saying how many fills it
-// in instead. It stays editable, because what a customer paid and what the
-// shelf label says today are not always the same figure, and the note under
-// the box says which of the two is currently in it.
+// Choosing the product and saying how many fills the amount in. It stays
+// editable; the note under the box says which figure is in it.
 function suggestRefundAmount() {
     const form = document.getElementById('refund-form');
     const note = document.getElementById('refund-amount-source');
@@ -506,13 +552,12 @@ function suggestRefundAmount() {
         return;
     }
 
-    const quantity = parseInt(form.elements.quantity.value, 10) || 0;
+    const quantity = Number(form.elements.quantity.value) || 0;
     const suggested = Math.round(Number(refundProduct.price) * Math.max(quantity, 0) * 100) / 100;
 
     const current = parseFloat(field.value);
     const untouched = !field.value || current === 0 || current === refundAmountSuggested;
 
-    // A figure a person typed is never overwritten, however wrong it looks.
     if (untouched) {
         field.value = suggested.toFixed(2);
         refundAmountSuggested = suggested;
@@ -539,35 +584,14 @@ function onRefundAmountInput() {
 
     const typed = parseFloat(form.elements.refundAmount.value);
 
-    // Typing the suggested figure back in by hand is still the suggested
-    // figure, so the note should not accuse them of overriding it.
+    // typing the suggested figure back in by hand is still the suggested figure
     if (typed !== refundAmountSuggested) refundAmountSuggested = null;
     suggestRefundAmount();
 }
 
-// ==========================================
-// THE CUSTOMER, TYPED RATHER THAN PICKED
-//
-// A dropdown of every customer in the book is the wrong control for a
-// counter. The commonest case is somebody who is not in the book at all, and
-// the second commonest is a regular whose name the cashier already knows how
-// to spell, so scrolling a list is the slowest way to answer either. It is a
-// box you type into now, and the book sits behind it as suggestions.
-//
-// Three outcomes, and the screen says which one is in force before the sale
-// is completed rather than after:
-//
-//   A name picked from the suggestions is an account. The sale is booked
-//   against it and the credit strip appears, because a credit decision made
-//   after the total is rung up is made too late.
-//
-//   A name typed that matches nobody is a walk-in with a name. It goes on the
-//   sale so the receipt can be reprinted next week for the person who bought
-//   it, and the cashier is asked once, at checkout, whether to open an
-//   account for them.
-//
-//   Nothing typed is a walk-in, as before.
-// ==========================================
+// The customer is typed, not picked. A name picked from the suggestions is
+// an account (the credit strip appears); a name matching nobody is a walk-in
+// with a name; nothing typed is a walk-in.
 async function loadCustomerDirectory(force) {
     if (customerDirectoryLoaded && !force) return true;
 
@@ -576,9 +600,7 @@ async function loadCustomerDirectory(force) {
         customerDirectoryLoaded = true;
         return true;
     } catch (error) {
-        // Not fatal. A cash sale to a walk-in needs none of this, and
-        // refusing to sell because the customer list did not load would stop
-        // the queue over something that does not matter to it.
+        // not fatal: a cash sale to a walk-in needs none of this
         customerDirectoryLoaded = false;
         return false;
     }
@@ -595,17 +617,13 @@ function selectedCustomerId() {
     return box && box.value ? parseInt(box.value, 10) : null;
 }
 
-// Trimmed at both ends and collapsed in the middle. "Maria  Santos" and
-// "Maria Santos" are the same customer, and a stray double space is how the
-// same person ends up in the book twice.
+// trimmed and collapsed: "Maria  Santos" and "Maria Santos" are one customer
 function typedCustomerName() {
     const box = customerNameBox();
     return box ? box.value.trim().replace(/\s+/g, ' ') : '';
 }
 
-// The account whose name is in the box, if the text is still exactly one of
-// them. Typing on after picking somebody is how a sale gets booked against
-// the wrong account, so the id is dropped the moment the text stops matching.
+// the account whose name is in the box, only while the text still matches exactly
 function customerMatchingTypedName() {
     const text = typedCustomerName().toLowerCase();
     if (text === '') return null;
@@ -619,13 +637,11 @@ async function onCustomerInput(value) {
 
     if (clear) clear.hidden = text === '';
 
-    // the list is fetched the first time somebody types, not on page load
     if (!customerDirectoryLoaded && text !== '') await loadCustomerDirectory(false);
 
     const exact = customerMatchingTypedName();
 
-    // An id that no longer agrees with the text is worse than no id: it books
-    // the sale against somebody whose name is not on the screen.
+    // an id that no longer agrees with the text books the sale against the wrong account
     if (idBox) {
         const nextId = exact ? String(exact.id) : '';
         if (idBox.value !== nextId) {
@@ -653,9 +669,7 @@ function renderCustomerSuggestions(text) {
         return;
     }
 
-    // Best first: a name that starts with what was typed is more likely to be
-    // the one meant than a name that merely contains it. Six is what fits
-    // under the box without covering the payment fields.
+    // names that start with the text first; six fits under the box
     const starts = [];
     const contains = [];
 
@@ -679,9 +693,7 @@ function renderCustomerSuggestions(text) {
         const owed = Number(c.current_credit) || 0;
         const bought = Number(c.purchase_count) || 0;
 
-        // Why this suggestion is worth taking: a regular is a regular, and an
-        // account that already owes money is the one fact a cashier wants
-        // before the sale rather than after it.
+        // a regular, or an account that already owes, is worth knowing before the sale
         const notes = [];
         if (bought > 0) notes.push(bought + (bought === 1 ? ' purchase' : ' purchases'));
         if (owed > 0) notes.push('owes ' + peso(owed));
@@ -709,8 +721,7 @@ function hideCustomerSuggestions() {
     suggestHighlight = -1;
 }
 
-// Arrow keys and Enter, because a cashier's hands are on the keyboard and
-// reaching for the mouse to take the first suggestion is the slow path.
+// arrow keys and Enter: a cashier's hands are on the keyboard
 function onCustomerKey(event) {
     const list = document.getElementById('customer-suggest');
     if (!list || list.hidden) {
@@ -756,8 +767,7 @@ async function pickCustomer(customerId) {
     await onCustomerChange(String(found.id));
     renderCustomerVerdict();
 
-    // A delivery already filled in for the previous customer should follow
-    // the change rather than quietly keep the old name on the manifest.
+    // a delivery already filled in for the previous customer follows the change
     if (pendingDelivery && !pendingDelivery.edited) fillDeliveryFromCustomer();
 }
 
@@ -777,9 +787,7 @@ async function clearCustomer() {
     if (nameBox) nameBox.focus();
 }
 
-// One line under the box saying which of the three outcomes is in force. It
-// is there so the answer arrives before the sale is completed rather than as
-// a refusal afterwards.
+// one line under the box saying which outcome is in force
 function renderCustomerVerdict() {
     const box = document.getElementById('customer-verdict');
     if (!box) return;
@@ -804,43 +812,78 @@ function renderCustomerVerdict() {
         + 'asked whether to open an account.';
 }
 
-// Kept under the old name because the boot sequence and the catalog loader
-// both call it, and there is nothing gained by making them say something new.
+// kept under the old name because the boot sequence and the catalog loader call it
 async function loadCustomerOptions() {
     await loadCustomerDirectory(false);
 }
 
 // ---------- the cart ----------
-function addToCart(productId) {
+// A measured product (nails by the kilo) asks for the amount in a card first,
+// with what is on the shelf as the ceiling; a counted one adds one at a time.
+async function askMeasure(product, current) {
+    const measure = measuredUnit(product.unit_name);
+    const onHand = Number(product.quantity_in_stock);
+    const answer = await askInput({
+        title: 'How much ' + product.product_name + '?',
+        eyebrow: 'By the ' + String(product.unit_name || '').toLowerCase(),
+        message: peso(product.price) + ' per ' + String(product.unit_name || '') +
+            '. Up to ' + qtyText(onHand, product.unit_name) + ' can be sold today.',
+        label: 'Amount in ' + (measure ? measure.short : product.unit_name),
+        value: current !== undefined ? String(current) : '',
+        placeholder: measure ? 'e.g. 2.5' : '',
+        confirmLabel: 'Put it on the order',
+        check: (value) => {
+            const amount = Number(String(value).replace(/,/g, '').trim());
+            if (!Number.isFinite(amount) || amount <= 0) return 'Type the amount as a number, like 2.5.';
+            if (amount > onHand) return 'Only ' + qtyText(onHand, product.unit_name) + ' can be sold today.';
+            if (Math.round(amount * 1000) !== amount * 1000) return 'Three decimal places at most.';
+            return null;
+        }
+    });
+    if (answer === null || answer === undefined) return null;
+    return Number(String(answer).replace(/,/g, '').trim());
+}
+
+async function addToCart(productId, quantity) {
     const p = catalog.find((x) => x.product_id === productId);
     if (!p) return;
 
     const line = cart.find((l) => l.product_id === productId);
     const onHand = Number(p.quantity_in_stock);
 
-    // THE BLOCK STILL HOLDS, IT JUST STOPS QUOTING THE STOCKROOM
-    //
-    // The cart is capped at what exists exactly as before. What changed is
-    // what the cashier is told when they reach the cap: that the order already
-    // has everything available, rather than a figure off the inventory. The
-    // number is not lost — the line in the cart is showing it, because at the
-    // moment the cap is hit the quantity on that line is what is on the shelf.
+    // the answer replaces what the line had: "how much" is a total, not a step
+    if (isMeasuredUnit(p.unit_name) && quantity === undefined) {
+        if (onHand <= 0) {
+            notifyWarning(p.product_name + ' is out of stock, so it cannot go on this sale.', 'Nothing to sell');
+            return;
+        }
+        const amount = await askMeasure(p, line ? line.quantity : undefined);
+        if (amount === null) return;
+        if (line) line.quantity = amount;
+        else cart.push({ product_id: p.product_id, name: p.product_name, price: Number(p.price),
+                         unit: p.unit_name || '', quantity: amount, on_hand: onHand });
+        renderCart();
+        return;
+    }
+    const step = quantity === undefined ? 1 : Number(quantity);
+
+    // capped at what exists; the cashier is told the order already has everything available
     if (line) {
-        if (line.quantity + 1 > onHand) {
+        if (line.quantity + step > onHand) {
             notifyWarning('The order already has every ' + escapeHtml(p.product_name) +
                 ' we can sell today. Take the rest off a delivery or a new order.',
                 'That is all of it');
             return;
         }
-        line.quantity += 1;
+        line.quantity = Number((line.quantity + step).toFixed(3));
     } else {
-        if (onHand < 1) {
+        if (onHand < step) {
             notifyWarning(p.product_name + ' is out of stock, so it cannot go on this sale.',
                 'Nothing to sell');
             return;
         }
         cart.push({ product_id: p.product_id, name: p.product_name, price: Number(p.price),
-                    unit: p.unit_name || '', quantity: 1, on_hand: onHand });
+                    unit: p.unit_name || '', quantity: step, on_hand: onHand });
     }
     renderCart();
 }
@@ -849,7 +892,8 @@ function changeCartQty(productId, delta) {
     const line = cart.find((l) => l.product_id === productId);
     if (!line) return;
 
-    const next = line.quantity + delta;
+    const measure = measuredUnit(line.unit);
+    const next = Number((line.quantity + delta * (measure ? measure.step : 1)).toFixed(3));
     if (next <= 0) { removeCartLine(productId); return; }
     if (next > line.on_hand) {
         notifyWarning('The order already has every ' + line.name + ' we can sell today. ' +
@@ -857,6 +901,17 @@ function changeCartQty(productId, delta) {
         return;
     }
     line.quantity = next;
+    renderCart();
+}
+
+async function retypeCartQty(productId) {
+    const line = cart.find((l) => l.product_id === productId);
+    const p = catalog.find((x) => x.product_id === productId);
+    if (!line || !p) return;
+
+    const amount = await askMeasure(p, line.quantity);
+    if (amount === null) return;
+    line.quantity = amount;
     renderCart();
 }
 
@@ -881,26 +936,16 @@ async function clearCart() {
         if (form.elements.downPayment) form.elements.downPayment.value = '0';
     }
 
-    // Clearing the order clears the whole order. A delivery left attached to
-    // an emptied cart is a booking waiting to be made for goods nobody chose.
+    // a delivery left attached to an emptied cart is a booking for goods nobody chose
     pendingDelivery = null;
     renderDeliveryAttached();
     await clearCustomer();
     renderCart();
 }
 
-// NO DISCOUNT BOX
-//
-// A free-text discount field beside the total is an amount anybody at the
-// counter can take off any sale, with nothing recorded about why, and it
-// prints on the receipt as though it were policy. Prices are what the shop
-// charges; a genuine markdown belongs on the product, where a manager sets it
-// once and every till charges the same figure.
-//
-// discount stays in these totals as a fixed zero rather than being torn out.
-// The sales table, the receipt and every report still carry the column, older
-// sales still hold real figures in it, and a manager screen that offers
-// discounts later has the arithmetic already in place.
+// No discount box: a markdown belongs on the product, set by a manager.
+// discount stays in these totals as a fixed zero because the sales table, the
+// receipt and the reports still carry the column.
 function cartTotals() {
     const form = document.getElementById('checkout-form');
     const gross = cart.reduce((sum, l) => sum + (l.price * l.quantity), 0);
@@ -912,9 +957,7 @@ function cartTotals() {
     const onCredit = method === 'Credit';
     const onAccount = onCredit || method === 'COD';
 
-    // Half now and half on the book. Capped at the bill, because there is no
-    // change on a sale that is going on the book: anything over the total is
-    // a typing slip, not a tip.
+    // half now and half on the book; capped at the bill because there is no change
     const rawDown = form && form.elements.downPayment
         ? (parseFloat(form.elements.downPayment.value) || 0) : 0;
     const down = onCredit ? Math.max(0, Math.min(rawDown, due)) : 0;
@@ -941,11 +984,15 @@ function renderCart() {
             '<div class="cart-line">' +
             '<div class="cart-line-main">' +
             '<span class="cart-name">' + escapeHtml(l.name) + '</span>' +
-            '<span class="cart-unit">' + peso(l.price) + ' each</span>' +
+            '<span class="cart-unit">' + peso(l.price) + (isMeasuredUnit(l.unit)
+                ? ' per ' + escapeHtml(measuredUnit(l.unit).short) : ' each') + '</span>' +
             '</div>' +
             '<div class="cart-qty">' +
             '<button type="button" class="qty-btn" onclick="changeCartQty(' + l.product_id + ', -1)" aria-label="Less">&minus;</button>' +
-            '<span class="qty-value">' + l.quantity + '</span>' +
+            (isMeasuredUnit(l.unit)
+                ? '<button type="button" class="qty-value qty-typed" onclick="retypeCartQty(' + l.product_id + ')" ' +
+                  'title="Press to type the amount">' + escapeHtml(qtyText(l.quantity, l.unit)) + '</button>'
+                : '<span class="qty-value">' + l.quantity + '</span>') +
             '<button type="button" class="qty-btn" onclick="changeCartQty(' + l.product_id + ', 1)" aria-label="More">+</button>' +
             '</div>' +
             '<span class="cart-sub">' + peso(l.price * l.quantity) + '</span>' +
@@ -987,22 +1034,15 @@ function onPaymentMethodChange(method) {
     const onCredit = method === 'Credit';
     const onAccount = onCredit || method === 'COD';
 
-    // A tender box and a down payment box on screen at once are two places to
-    // type the same money into, so only one of them is ever shown.
+    // only one of the tender box and the down payment box is ever shown
     if (tender) tender.style.display = onAccount ? 'none' : 'block';
     if (down) down.style.display = onCredit ? 'block' : 'none';
 
     renderCart();
 }
 
-// ==========================================
-// CREDIT AT THE COUNTER
-//
-// A cashier finding out about a credit limit when the till refuses the sale
-// is a cashier finding out too late, with a customer watching. So the account
-// is read when the customer is picked, and what it says is printed above the
-// payment fields rather than raised as an error after the fact.
-// ==========================================
+// Credit at the counter: the account is read when the customer is picked and
+// printed above the payment fields rather than raised as an error after.
 let selectedCustomerCredit = null;
 
 async function onCustomerChange(customerId) {
@@ -1056,12 +1096,13 @@ function renderCreditStrip() {
                 (c.standing === 'Hold' ? 'Nothing &mdash; on hold' : peso(available)) +
             '</span>' +
         '</div>' +
-        (c.credit_notes
+        (c.standing !== 'Good' && c.standing_reason
+            ? '<p class="credit-strip-note">' + escapeHtml(c.standing_reason) + '</p>'
+            : c.credit_notes
             ? '<p class="credit-strip-note">' + escapeHtml(c.credit_notes) + '</p>' : '');
 }
 
-// What will happen if this sale is completed as it stands, in words, before
-// the button is pressed rather than as a refusal after it.
+// what will happen if this sale is completed as it stands, before the button
 function renderCreditVerdict(totals) {
     const box = document.getElementById('credit-verdict');
     if (!box) return;
@@ -1107,7 +1148,6 @@ function renderCreditVerdict(totals) {
         peso(available - t.onBook) + ' of their limit.';
 }
 
-// the quick-fill buttons under the down payment field
 function fillDownPayment(share) {
     const form = document.getElementById('checkout-form');
     if (!form || !form.elements.downPayment) return;
@@ -1129,9 +1169,7 @@ async function handleCheckout(event) {
     const t = cartTotals();
     const typedName = typedCustomerName();
 
-    // A settled-later sale needs an account, not a name. "Cruz" written on a
-    // receipt is not something a collection can be chased against, so the
-    // cashier is pointed at the account rather than allowed to proceed.
+    // a settled-later sale needs an account, not a name
     if (t.onAccount && !form.elements.customerId.value) {
         notifyWarning(
             typedName === ''
@@ -1150,14 +1188,8 @@ async function handleCheckout(event) {
         return;
     }
 
-    // OPENING AN ACCOUNT, ASKED ONCE
-    //
-    // A name typed at the counter is either a one-off or a regular, and only
-    // the person at the counter knows which. Creating an account for every
-    // typed name fills the customer book with duplicates and typos; creating
-    // none of them means the regular is still being retyped in six months.
-    // So it is a question, asked at the moment the answer is known, and No is
-    // a real answer: the name still goes on the sale either way.
+    // A typed name is asked about once at checkout: open an account or not.
+    // No is a real answer; the name still goes on the sale.
     let customerId = form.elements.customerId.value
         ? parseInt(form.elements.customerId.value, 10) : null;
 
@@ -1183,10 +1215,7 @@ async function handleCheckout(event) {
         }
     }
 
-    // A part-paid credit sale leaves money on the customer's account, and the
-    // person pressing the button should have said that out loud before the
-    // receipt prints. The server checks the limit and the standing again
-    // whatever is answered here; this is so nobody is surprised by it.
+    // a part-paid credit sale leaves money on the account; the server checks the limit again
     if (t.onCredit && t.onBook > 0) {
         const name = selectedCustomerCredit
             ? selectedCustomerCredit.customer_name : 'this customer';
@@ -1209,9 +1238,7 @@ async function handleCheckout(event) {
 
     const data = {
         customerId: customerId,
-        // Kept only when there is no account, because a named customer's name
-        // already lives in the customers table and a second copy on the sale
-        // is a copy that can drift.
+        // kept only when there is no account; a named customer already lives in customers
         walkInName: customerId ? null : (typedName || null),
         discount: t.discount,
         amountPaid: t.onCredit ? t.down : (t.onAccount ? 0 : t.tendered),
@@ -1228,10 +1255,8 @@ async function handleCheckout(event) {
         const result = await response.json();
         if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
 
-        // The delivery is written against the sale that now exists. It is
-        // done before the till is cleared, so that a delivery that fails to
-        // book is reported while the details are still on screen rather than
-        // discovered by a customer waiting at home.
+        // the delivery is written against the sale before the till is cleared, so a
+        // failure is reported while the details are still on screen
         const booked = await bookAttachedDelivery(result.saleId);
 
         cart = [];
@@ -1240,7 +1265,6 @@ async function handleCheckout(event) {
 
         if (booked) { pendingDelivery = null; renderDeliveryAttached(); }
 
-        // the account has moved, so the strip above the form is now out of date
         if (customerId) {
             customerDirectoryLoaded = false;
             await loadCustomerDirectory(true);
@@ -1260,13 +1284,9 @@ async function handleCheckout(event) {
     }
 }
 
-// The counter's half of opening an account: the record, and nothing else. The
-// server sets the limit to zero, so this cannot be used to lend money to
-// anybody, which is why it is safe to put behind a Yes/No at the till.
-//
-// Returns the customer id on success, null when the cashier's answer produced
-// no account, and false when the server refused, which stops the sale rather
-// than quietly ringing it up as a walk-in.
+// The counter's half of opening an account: the record only, limit zero.
+// Returns the customer id, null when no account was made, or false when the
+// server refused (which stops the sale).
 async function createCustomerFromCounter(fullName) {
     const parts = String(fullName).trim().split(/\s+/);
     const firstName = parts.shift();
@@ -1283,8 +1303,7 @@ async function createCustomerFromCounter(fullName) {
         confirmLabel: 'Save the customer'
     });
 
-    // Cancelling the phone question cancels opening the account, not the
-    // sale: the name still goes on the receipt as a walk-in.
+    // cancelling the phone question cancels the account, not the sale
     if (phone === false || phone === null) return null;
 
     try {
@@ -1323,32 +1342,11 @@ async function createCustomerFromCounter(fullName) {
 }
 
 // ---------- receipt ----------
-// ==========================================
-// THE INVOICE
-//
-// Not "Official Receipt" any more. Under RR 7-2024 the primary document for a
-// sale of goods is an Invoice, and an Official Receipt stopped being one on
-// 1 July 2024. The OR- numbering stays, because the number is this system's
-// own reference and renumbering would only break every record already filed
-// under it.
-//
-// Three things had to change beyond the word. The shop's name was written
-// into this file, which meant every installation printed the same shop. There
-// was no TIN. And there was no tax breakdown at all, which is the part a BIR
-// invoice exists to carry.
-//
-// THE VAT
-//
-// Philippine posted prices already include VAT. It is not added to the total,
-// it is extracted from it, so a 213.50 sale is 190.62 of goods and 22.88 of
-// VAT rather than 213.50 plus 25.62. The split is read off the sale rather
-// than recalculated here, because the sale recorded what was actually charged
-// on the day, and an invoice reprinted next year has to still say that.
-//
-// A non-VAT shop prints no VAT block. It charges no VAT, so a block of
-// zeroes would be claiming the sale was taxed at nothing rather than that
-// the shop is not VAT-registered, and those are different claims.
-// ==========================================
+// The invoice (RR 7-2024: an Official Receipt is no longer the primary
+// document for goods). The OR- numbering stays as this system's reference.
+// Posted prices include VAT, so it is extracted from the total, and the split
+// is read off the sale as recorded on the day. A non-VAT shop prints no VAT
+// block.
 let storeSettings = null;
 
 async function loadStoreSettings(force) {
@@ -1357,24 +1355,19 @@ async function loadStoreSettings(force) {
     try {
         storeSettings = await getJson('/api/store-settings');
     } catch (error) {
-        // Not fatal, and not a reason to refuse to print. A placeholder header
-        // on an invoice is visibly wrong, which is better than no invoice.
+        // not fatal: a placeholder header is better than no invoice
         storeSettings = null;
     }
 
     return storeSettings;
 }
 
-// The tax block at the foot of the invoice, in the shape the shop's own
-// registration calls for.
 function receiptTaxBlock(sale) {
     const registration = sale.tax_registration || 'VAT';
     const rate = Number(sale.vat_rate) || 0;
 
     if (registration !== 'VAT') {
-        // Percentage tax is paid by the shop out of its own sales; it is not
-        // charged to this customer and no figure for it belongs on their
-        // invoice. What belongs is the base the shop will pay it on.
+        // percentage tax is paid by the shop, not charged to the customer; only the base is shown
         return '<div class="rc-tax">' +
             '<div><span>Sales Subject to Percentage Tax</span><span>' +
                 peso(Number(sale.final_amount) - Number(sale.vat_exempt_sale || 0)) + '</span></div>' +
@@ -1388,6 +1381,16 @@ function receiptTaxBlock(sale) {
         '<div><span>VAT-Exempt Sale</span><span>' + peso(sale.vat_exempt_sale) + '</span></div>' +
         '<div><span>Zero-Rated Sale</span><span>' + peso(sale.zero_rated_sale) + '</span></div>' +
         '</div>';
+}
+
+// "3" or "3 (2 lines)"; a measured line counts as one item
+function receiptItemCount(items) {
+    const list = Array.isArray(items) ? items : [];
+    const units = list.reduce((sum, it) =>
+        sum + (isMeasuredUnit(it.unit_name) ? 1 : (Number(it.quantity) || 0)), 0);
+    const lines = list.length;
+    const count = Number.isInteger(units) ? String(units) : units.toFixed(2);
+    return count + (lines > 0 && lines !== units ? ' (' + lines + (lines === 1 ? ' line)' : ' lines)') : '');
 }
 
 async function openReceipt(saleId) {
@@ -1404,9 +1407,7 @@ async function openReceipt(saleId) {
     const s = data.sale;
     const receiptNo = 'OR-' + String(s.sale_id).padStart(6, '0');
 
-    // The header comes from the settings row so that one installation is one
-    // shop. The label in front of the TIN is the shop's actual claim about
-    // itself and has to agree with the tax block below.
+    // the header comes from the settings row so one installation is one shop
     const shop = storeSettings || {};
     const tinLabel = (s.tax_registration || 'VAT') === 'VAT' ? 'VAT REG TIN' : 'NON-VAT REG TIN';
 
@@ -1430,16 +1431,15 @@ async function openReceipt(saleId) {
         '<table class="rc-items"><tbody>' +
         data.items.map((it) =>
             '<tr><td>' + escapeHtml(it.product_name) + '<br><span class="rc-qty">' +
-            it.quantity + ' ' + escapeHtml(it.unit_name || '') + ' x ' + peso(it.unit_price) + '</span></td>' +
+            escapeHtml(qtyText(it.quantity, it.unit_name)) + ' x ' + peso(it.unit_price) +
+            (isMeasuredUnit(it.unit_name) ? '/' + escapeHtml(measuredUnit(it.unit_name).short) : '') + '</span></td>' +
             '<td class="rc-amt">' + peso(it.subtotal) + '</td></tr>').join('') +
         '</tbody></table>' +
         '<div class="rc-rule"></div>' +
         '<div class="rc-totals">' +
+        '<div><span>Total Items Purchased</span><span>' + receiptItemCount(data.items) + '</span></div>' +
         '<div><span>Subtotal</span><span>' + peso(s.total_amount) + '</span></div>' +
-        // Only when there was one. Sales rung up before the discount box was
-        // taken off the till still carry real figures here, and a receipt
-        // that prints "Discount 0.00" on every sale trains everybody to stop
-        // reading the line that matters.
+        // only when there was one; older sales still carry real figures
         (Number(s.discount) > 0
             ? '<div><span>Discount</span><span>' + peso(s.discount) + '</span></div>' : '') +
         '<div class="rc-due"><span>Total Due</span><span>' + peso(s.final_amount) + '</span></div>' +
@@ -1463,24 +1463,10 @@ function printReceipt() {
     setTimeout(function () { document.body.classList.remove('printing-receipt'); }, 400);
 }
 
-// ==========================================
-// MAKE A DELIVERY
-//
-// Booking a delivery used to be a second screen with a dropdown of every sale
-// that had none yet. That meant finishing the sale, walking to another page,
-// and finding the right receipt number again from a list of sixty, with the
-// customer already gone. The delivery belongs to the order, so it is filled
-// in beside the order and written the moment the sale exists.
-//
-// Nothing is sent while the cart is still open: there is no sale to attach a
-// delivery to until the sale is rung up. What the form produces is a pending
-// delivery held on this screen, shown above the buttons so it cannot be
-// forgotten, and posted by handleCheckout the instant a sale id comes back.
-// ==========================================
+// Make a delivery: filled in beside the order, held as pendingDelivery on
+// this screen, and posted by handleCheckout once a sale id comes back.
 function todayIso() {
-    // Local date, not the UTC slice off an ISO string. In Manila those are a
-    // different day for eight hours out of every twenty-four, which would
-    // book an evening delivery under tomorrow.
+    // local date, not the UTC slice: Manila is a different day for eight hours
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     return now.getFullYear() + '-' + pad(now.getMonth() + 1) + '-' + pad(now.getDate());
@@ -1491,8 +1477,7 @@ function deliveryFormFields() {
     return form ? form.elements : null;
 }
 
-// What the customer box and the customer's record already know, so the
-// cashier is not retyping a name that is on the screen above.
+// what the customer box and record already know
 function fillDeliveryFromCustomer() {
     const fields = deliveryFormFields();
     if (!fields) return;
@@ -1565,9 +1550,7 @@ function saveDeliveryForm(event) {
     if (address === '') { complain('A delivery needs somewhere to go.'); fields.address.focus(); return; }
     if (!bookedDate) { complain('Say which day this order was taken.'); fields.bookedDate.focus(); return; }
 
-    // A slot already in the past is almost always a typing slip in the year
-    // or the month, and it is cheaper to query it here than to leave a driver
-    // with a manifest dated last March.
+    // a slot in the past is almost always a typing slip in the year or month
     if (scheduledDate && new Date(scheduledDate).getTime() < Date.now() - 60000) {
         complain('That slot has already passed. Check the date and time before attaching it.');
         fields.scheduledDate.focus();
@@ -1589,17 +1572,8 @@ function saveDeliveryForm(event) {
     notifyInfo('It will be booked when you complete this sale.', 'Delivery attached');
 }
 
-// CANCEL DELIVERY
-//
-// The way back to the transaction, and the only one besides attaching. The
-// form no longer closes on a stray click behind it or on Escape, because both
-// of those threw away an address and a phone number that existed nowhere else
-// and gave nothing back.
-//
-// It leaves whatever was already attached alone. Opening the form to change a
-// booked slot and thinking better of it should not cancel the delivery: that
-// is what Remove Delivery is for, and it only appears when there is something
-// to remove.
+// Cancel closes the form and leaves whatever was already attached alone;
+// Remove Delivery is what removes it.
 function cancelDeliveryForm() {
     closeModal('delivery-modal');
 
@@ -1613,8 +1587,7 @@ function dropDeliveryForm() {
     renderDeliveryAttached();
 }
 
-// The strip above the buttons. A delivery the cashier cannot see is a
-// delivery the cashier forgets they attached.
+// the strip above the buttons
 function renderDeliveryAttached() {
     const strip = document.getElementById('delivery-attached');
     const button = document.getElementById('make-delivery-btn');
@@ -1644,9 +1617,7 @@ function renderDeliveryAttached() {
         '</p>';
 }
 
-// Posted once the sale exists. A failure here does not undo the sale, which
-// has already taken money and moved stock, so it is reported as the thing it
-// is: goods sold, delivery not booked, book it from the customer's record.
+// posted once the sale exists; a failure here does not undo the sale
 async function bookAttachedDelivery(saleId) {
     if (!pendingDelivery) return true;
 
@@ -1687,15 +1658,7 @@ async function bookAttachedDelivery(saleId) {
     }
 }
 
-// ==========================================
-// DELIVERY TRACKING
-//
-// Read only, and empty until asked. Booking happens at the till now, so the
-// only question this screen answers is "where is the one I booked", and
-// reading every delivery in the shop to answer it is a query nobody wanted.
-// Typing in the search box or pressing Load Data is the ask; Clear puts it
-// back to empty.
-// ==========================================
+// Delivery tracking: read only, empty until the search box or Load Data asks.
 function buildDeliveryPanel() {
     createDataPanel({
         key: 'cash-deliveries',
@@ -1715,11 +1678,10 @@ function buildDeliveryPanel() {
 
         load: () => getJson('/api/deliveries'),
 
-        match: (row, query) =>
-            (String(row.customer_name || '') + ' ' +
-             String(row.delivery_address || '') + ' ' +
-             String(row.status || '') + ' ' +
-             '#' + row.sale_id + ' #' + row.delivery_id).toLowerCase().indexOf(query) !== -1,
+        match: (row, query) => prefixMatch([
+            row.customer_name, row.delivery_address, row.status,
+            row.sale_id, '#' + row.sale_id, row.delivery_id, '#' + row.delivery_id
+        ], query),
 
         filter: (row, filters) => filters.status === 'all' || row.status === filters.status,
 
@@ -1737,9 +1699,7 @@ function buildDeliveryPanel() {
     });
 }
 
-// "2026-09-05 14:30:00" is a database value, not a delivery slot a person
-// reads. Midnight is what a date-only schedule became when the column was
-// widened, so it is shown as a plain day rather than as "12:00 am".
+// midnight is what a date-only schedule became, so it is shown as a plain day
 function scheduleText(stamp) {
     if (!stamp) return 'Not set';
 
@@ -1782,23 +1742,8 @@ function openCashierDeliveryDetail(deliveryId) {
     if (panel) showDeliveryRecord(panel.find(deliveryId));
 }
 // ---------- refunds ----------
-// ==========================================
-// RETURNS AND REFUNDS
-//
-// Two things are compulsory here and neither used to be.
-//
-// THE REMARKS. Not a word: a sentence. "Damaged" explains nothing three
-// months later when somebody queries a write-off, and a stock count that
-// disagrees with the system by two bags of cement is settled by reading
-// these lines. The counter below the box says so while it is being typed
-// rather than after the form is submitted.
-//
-// THE DISPOSITION. Where the goods actually go. It was a dropdown called
-// "Goods Resalable" with a default already chosen, which meant it was
-// answered by not being read, and a return filed with the wrong answer left
-// the item unaccounted for: not on the shelf, not written off, still in a
-// box behind the counter. Neither option is preselected now, on purpose.
-// ==========================================
+// The remarks (a sentence, not a word) and the disposition (where the goods
+// go) are both compulsory, and neither is preselected.
 const MINIMUM_RETURN_REASON = 10;
 
 function returnDisposition() {
@@ -1806,7 +1751,6 @@ function returnDisposition() {
     return picked ? picked.value : null;
 }
 
-// what this choice does to the stock count, said before the form is sent
 function onDispositionChange() {
     const box = document.getElementById('disposition-verdict');
     const choice = document.getElementById('disposition-choice');
@@ -1828,8 +1772,7 @@ function onDispositionChange() {
     }
 }
 
-// Counts up to the minimum rather than down from a maximum: the question is
-// "have you said enough yet", not "how much room is left".
+// counts up to the minimum: "have you said enough yet"
 function onReturnReasonInput() {
     const field = document.getElementById('return-reason');
     const counter = document.getElementById('reason-counter');
@@ -1858,9 +1801,7 @@ async function handleIssueRefund(event) {
     const where = returnDisposition();
     const reason = form.elements.reason.value.trim();
 
-    // The product box is free text, so the check is on what was actually
-    // chosen rather than on what is typed in it. A name half-typed and never
-    // picked from the list is not a product.
+    // the check is on what was chosen, not what is typed
     if (!refundProduct || !form.elements.productId.value) {
         notifyWarning('Type a few letters of the product and choose it from the list. ' +
             'A refund moves stock, so it has to name a real product.', 'No product chosen');
@@ -1874,7 +1815,7 @@ async function handleIssueRefund(event) {
         productId: parseInt(form.elements.productId.value, 10),
         saleId: form.elements.saleId.value ? parseInt(form.elements.saleId.value, 10) : null,
         reportType: 'Refunded',
-        quantity: parseInt(form.elements.quantity.value, 10),
+        quantity: Number(form.elements.quantity.value),
         reason: reason,
         refundAmount: parseFloat(form.elements.refundAmount.value) || 0,
         disposition: where
@@ -1909,8 +1850,7 @@ async function handleIssueRefund(event) {
         return;
     }
 
-    // Writing stock off is not reversible from this screen, and the quantity
-    // is the figure that gets typed wrong, so it is read back before it goes.
+    // writing stock off is not reversible from here, so it is read back first
     if (where === 'Write-Off') {
         const name = refundProduct ? refundProduct.product_name : 'this product';
 
@@ -1944,9 +1884,7 @@ async function handleIssueRefund(event) {
             'Refund issued');
 
         form.reset();
-        // form.reset() puts the visible boxes back but knows nothing about the
-        // hidden id, the strip or the suggested figure, and a stale strip over
-        // an empty form is the next refund filed against the last one's product.
+        // form.reset() knows nothing about the hidden id, the strip or the suggested figure
         clearRefundProduct();
         refundAmountSuggested = null;
         onDispositionChange();
@@ -1958,9 +1896,7 @@ async function handleIssueRefund(event) {
     }
 }
 
-// Where the goods went, shown as a badge rather than a Yes/No under a column
-// headed "Restocked", which reads as a question about the record instead of
-// an answer about the goods.
+// where the goods went, as a badge
 function dispositionBadge(row) {
     const where = row.disposition || (row.restocked ? 'Return to Stock' : 'Write-Off');
     return where === 'Return to Stock'
@@ -1968,22 +1904,13 @@ function dispositionBadge(row) {
         : '<span class="badge badge-danger">Written off</span>';
 }
 
-// ==========================================
-// REFUNDS ISSUED
-//
-// Paged at eight like every other table here, and clearable, because the
-// history under the form is context rather than the task: a cashier filing a
-// refund wants the form, and the list is there to check the one they filed
-// ten minutes ago.
-// ==========================================
+// Refunds issued: clearable, because the history is context rather than the task.
 function buildRefundPanel() {
     createDataPanel({
         key: 'cash-refunds',
         tableId: 'refund-table',
-        columns: 8,
-        // The one table that pages at twelve rather than eight. It is a log
-        // rather than a worklist: a cashier reading it is looking back through
-        // what they filed today, and eight rows made that four pages.
+        columns: 7,
+        // a log rather than a worklist, so it pages longer
         pageSize: REFUND_ROWS_PER_PAGE,
         pagerId: 'refund-pager',
         countPillId: 'refund-count',
@@ -1996,18 +1923,15 @@ function buildRefundPanel() {
             button: 'Load Data'
         },
 
-        // Damage reports filed by the stockroom are a clerk's business. This
-        // list is refunds, which is what this screen issues.
+        // damage reports from the stockroom are a clerk's business; this is refunds
         load: async () => {
             const all = await getJson('/api/returns');
             return all.filter((r) => r.report_type === 'Refunded');
         },
 
-        match: (row, query) =>
-            (String(row.product_name || '') + ' ' +
-             String(row.reason || '') + ' ' +
-             String(row.status || '') + ' ' +
-             '#' + row.return_id).toLowerCase().indexOf(query) !== -1,
+        match: (row, query) => prefixMatch([
+            row.product_name, row.reason, row.status, row.return_id, '#' + row.return_id
+        ], query),
 
         filter: (row, filters) => {
             if (filters.disposition === 'all') return true;
@@ -2015,28 +1939,16 @@ function buildRefundPanel() {
             return where === filters.disposition;
         },
 
-        // The whole row still opens the report, because that is the fast way
-        // once you know it. The button is there because a row that only
-        // responds to a click nobody told you about is a row nobody clicks.
         renderRow: (row, index) =>
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 12) * 24 + 'ms" ' +
             'onclick="openRefundDetail(' + row.return_id + ')">' +
             '<td class="cell-id">#' + row.return_id + '</td>' +
             '<td class="cell-name">' + escapeHtml(row.product_name) + '</td>' +
-            '<td class="cell-num">' + row.quantity + ' ' + escapeHtml(row.unit_name || '') + '</td>' +
+            '<td class="cell-num">' + escapeHtml(qtyText(row.quantity, row.unit_name)) + '</td>' +
             '<td class="cell-num cell-due">' + peso(row.refund_amount) + '</td>' +
             '<td>' + dispositionBadge(row) + '</td>' +
             '<td class="cell-id">' + escapeHtml(String(row.return_date).slice(0, 10)) + '</td>' +
-            '<td>' + statusBadge(row.status) + '</td>' +
-            // Outlined, not filled. Twelve solid buttons down the right of a
-            // table is a black column competing with the figures the table
-            // exists to show; the button only has to be findable, and the
-            // amounts are what should carry the weight.
-            '<td class="cell-action">' +
-                '<button type="button" class="btn btn-sm btn-ghost" ' +
-                        'onclick="event.stopPropagation(); openRefundDetail(' + row.return_id + ')">' +
-                    'View</button>' +
-            '</td></tr>'
+            '<td>' + statusBadge(row.status) + '</td></tr>'
     });
 }
 
@@ -2051,7 +1963,6 @@ function clearRefundPanel() {
     if (where) where.value = 'all';
 }
 
-// kept under its old name: the refund form calls it after filing one
 async function loadRefunds() {
     const panel = getDataPanel('cash-refunds');
     if (!panel) return;
@@ -2067,7 +1978,7 @@ function openRefundDetail(returnId) {
     const body = '<div class="detail-grid">' +
         detailField('Refund ID', '#' + r.return_id) +
         detailField('Product', escapeHtml(r.product_name)) +
-        detailField('Quantity', r.quantity + ' ' + escapeHtml(r.unit_name || '')) +
+        detailField('Quantity', escapeHtml(qtyText(r.quantity, r.unit_name))) +
         detailField('Amount', peso(r.refund_amount)) +
         detailField('Goods Went', dispositionBadge(r)) +
         detailField('Status', statusBadge(r.status)) +
@@ -2087,13 +1998,7 @@ function openRefundDetail(returnId) {
     ]);
 }
 
-// ==========================================
-// SALES REPORT
-//
-// Searchable, filterable, paged at eight, and clearable. "Mine" and "All" are
-// a filter like the other two rather than a separate code path, so the search
-// box and the dropdowns keep working whichever is chosen.
-// ==========================================
+// Sales report. "Mine" and "All" are a filter like the other two.
 function buildSalesPanel() {
     createDataPanel({
         key: 'cash-sales',
@@ -2118,13 +2023,10 @@ function buildSalesPanel() {
 
         onLoaded: () => renderSalesScope(),
 
-        match: (row, query) =>
-            (String(row.customer_name || '') + ' ' +
-             String(row.payment_method || '') + ' ' +
-             String(row.payment_status || '') + ' ' +
-             String(row.transaction_status || '') + ' ' +
-             row.sale_id + ' OR-' + String(row.sale_id).padStart(6, '0'))
-                .toLowerCase().indexOf(query) !== -1,
+        match: (row, query) => prefixMatch([
+            row.customer_name, row.payment_method, row.payment_status, row.transaction_status,
+            row.sale_id, '#' + row.sale_id, 'OR-' + String(row.sale_id).padStart(6, '0')
+        ], query),
 
         filter: (row, filters) => {
             if (!saleIsInScope(row, filters.scope)) return false;
@@ -2145,8 +2047,7 @@ function buildSalesPanel() {
     });
 }
 
-// "Mine" is decided by staff id, not by matching a printed name. Two people
-// can share a name; nobody shares an id.
+// decided by staff id, not by name: two people can share a name
 function saleIsInScope(row, scope) {
     if (scope === 'All') return true;
     const user = getCurrentUser();
@@ -2192,7 +2093,6 @@ function clearSalesPanel() {
     if (scope) scope.innerHTML = '';
 }
 
-// kept under its old name for the places that ask for a plain refresh
 async function loadCashierSales() {
     const panel = getDataPanel('cash-sales');
     if (!panel) return;
@@ -2200,25 +2100,8 @@ async function loadCashierSales() {
     else await panel.refresh();
 }
 
-// ==========================================
-// DAILY SUMMARY
-//
-// Today, and only today. A cashier reading this is standing in the shift it
-// describes, so there is no day to choose and no picker to leave on the wrong
-// date: every figure is bounded by this date at the server, which is what
-// makes "gross sales" mean the shift rather than the year.
-//
-// Cash in drawer and change given are gone. Both were arithmetic on the same
-// two columns the other cards already show, and a card that restates a figure
-// is a card that competes with it for the reader's attention at exactly the
-// moment they are counting money.
-//
-// Refunds opens. A total says money left the till; it does not say which item
-// went back, and the item is the part that has to be accounted for.
-// ==========================================
-// The figures and the breakdown come from one call, so the panel is what
-// fetches and the cards are drawn from what it got. Asking twice would let
-// the four cards and the table below them disagree about the same minute.
+// Daily summary: today only, bounded at the server. The figures and the
+// breakdown come from one call so the cards and the table cannot disagree.
 async function loadDailySummary() {
     const grid = document.getElementById('summary-kpis');
     if (!grid) return;
@@ -2234,8 +2117,7 @@ async function loadDailySummary() {
     if (panel.state === 'closed' || panel.state === 'error') await panel.open();
     else await panel.refresh();
 
-    // The panel reports its own failure inside the table; the cards have to
-    // say so themselves rather than sit on figures from an earlier minute.
+    // the cards have to say so themselves rather than sit on old figures
     if (!dailySummary) {
         grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Offline</span>' +
             '<span class="kpi-value">--</span>' +
@@ -2270,8 +2152,7 @@ function renderDailySummary() {
             '<span class="kpi-value">' + peso(s.collected) + '</span>' +
             '<span class="kpi-note">taken at the counter today</span></div>',
 
-        // A button rather than a card, because it opens. The count is on the
-        // face so the card still answers the question without being pressed.
+        // a button rather than a card, because it opens
         '<button type="button" class="kpi-card' + (refundCount > 0 ? ' kpi-warn' : '') + '" ' +
                 'onclick="openRefundsToday()">' +
             '<span class="kpi-go">Open</span>' +
@@ -2299,8 +2180,7 @@ function summaryDayText(day) {
     });
 }
 
-// The breakdown table, paged at eight like the rest. It reads from the
-// summary already fetched rather than asking the server a second time.
+// the breakdown table reads from the summary already fetched
 function buildSummaryPanel() {
     createDataPanel({
         key: 'cash-summary',
@@ -2313,7 +2193,7 @@ function buildSummaryPanel() {
 
         gate: {
             title: 'Nothing loaded yet',
-            text: 'Press Refresh above to read today\'s takings.',
+            text: 'Press Load Today to read today\'s takings.',
             button: 'Load Today'
         },
 
@@ -2321,8 +2201,7 @@ function buildSummaryPanel() {
             const user = getCurrentUser();
             if (!user) return [];
 
-            // Dropped first, so a failed read leaves no figures behind for
-            // the cards to keep showing as though they were current.
+            // dropped first, so a failed read leaves no stale figures for the cards
             dailySummary = null;
             dailySummary = await getJson('/api/cashier/summary?staffId=' + user.staff_id);
             renderDailySummary();
@@ -2336,7 +2215,6 @@ function buildSummaryPanel() {
     });
 }
 
-// WHAT WENT BACK TODAY, ITEM BY ITEM
 function openRefundsToday() {
     const s = dailySummary;
     if (!s) return;
@@ -2384,15 +2262,46 @@ function openRefundsToday() {
     showModal('refunds-today-modal');
 }
 
-// ==========================================
-// CUSTOMERS AND CREDIT
-//
-// The cashier's half of credit management. It changes nothing on its own: a
-// cashier can read an account and ask a manager for more room, and that is
-// the whole of it. Setting a limit is a manager's decision and the server
-// refuses it here whatever this screen offers.
-// ==========================================
+// Customers and credit: the cashier can read an account and ask a manager
+// for more room. Setting a limit is refused by the server here.
 const CASH_STANDING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
+
+// The cashier's book reads by due date: oldest unpaid sale plus thirty days,
+// the same thirty after which the standing turns to Watch (vw_customer_credit).
+const CREDIT_TERM_DAYS = 30;
+
+function creditDueDate(row) {
+    if (row.oldest_debt_days === null || row.oldest_debt_days === undefined) return null;
+    if (!(Number(row.current_credit) > 0)) return null;
+    const now = new Date();
+    const due = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    due.setDate(due.getDate() - Number(row.oldest_debt_days) + CREDIT_TERM_DAYS);
+    return due;
+}
+
+function creditDaysLeft(row) {
+    const due = creditDueDate(row);
+    if (!due) return null;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((due - today) / 86400000);
+}
+
+function creditDueCell(row) {
+    const due = creditDueDate(row);
+    if (!due) return '<span class="muted">Nothing owed</span>';
+
+    const left = creditDaysLeft(row);
+    const date = due.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' });
+    const tone = left < 0 ? 'badge-danger' : left <= 7 ? 'badge-warning' : 'badge-neutral';
+    const word = left < 0 ? (-left) + (left === -1 ? ' day' : ' days') + ' overdue'
+        : left === 0 ? 'due today'
+        : 'due in ' + left + (left === 1 ? ' day' : ' days');
+
+    return '<span class="due-date">' + escapeHtml(date) + '</span> ' +
+        '<span class="badge ' + tone + '" title="' + escapeHtml(row.standing_reason || '') + '">' +
+        escapeHtml(word) + '</span>';
+}
 const CASH_STANDING_WORD = { Good: 'Good', Watch: 'Watch', Hold: 'On hold' };
 
 let openCustomer = null;
@@ -2406,7 +2315,7 @@ function buildCustomerPanel() {
         pagerId: 'customers-pager',
         countPillId: 'customers-count',
         idField: 'customer_id',
-        filters: { standing: 'all' },
+        filters: { due: 'all' },
 
         gate: {
             title: 'No customers loaded',
@@ -2416,14 +2325,22 @@ function buildCustomerPanel() {
 
         load: () => getJson('/api/credit/customers'),
 
-        match: (row, query) =>
-            (row.customer_name + ' ' + (row.phone || '')).toLowerCase().indexOf(query) !== -1,
+        match: (row, query) => prefixMatch([row.customer_name, row.phone], query),
 
-        filter: (row, filters) => filters.standing === 'all' || row.standing === filters.standing,
+        filter: (row, filters) => {
+            const owed = Number(row.current_credit) || 0;
+            const left = creditDaysLeft(row);
+            switch (filters.due) {
+                case 'overdue': return left !== null && left < 0;
+                case 'week':    return left !== null && left >= 0 && left <= 7;
+                case 'owing':   return owed > 0;
+                case 'clear':   return owed <= 0;
+                default:        return true;
+            }
+        },
 
         renderRow: (row, index) => {
             const owed = Number(row.current_credit) || 0;
-            const tone = CASH_STANDING_TONE[row.standing] || 'badge-neutral';
 
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openCustomerCredit(' + row.customer_id + ')">' +
@@ -2432,16 +2349,13 @@ function buildCustomerPanel() {
                 '<td class="cell-num">' + peso(row.credit_limit) + '</td>' +
                 '<td class="cell-num' + (owed > 0 ? ' cell-due' : '') + '">' + peso(owed) + '</td>' +
                 '<td class="cell-num">' + peso(row.available_credit) + '</td>' +
-                '<td><span class="badge ' + tone + '">' +
-                    escapeHtml(CASH_STANDING_WORD[row.standing] || row.standing) + '</span></td></tr>';
+                '<td class="cell-due-date">' + creditDueCell(row) + '</td></tr>';
         }
     });
 }
 
-// Clear puts the table back to its closed state: the rows are forgotten and
-// the gate returns. It is the counterpart to Load Data, and it exists because
-// a credit table left open on a shared counter machine is somebody's balance
-// on display to the next customer in the queue.
+// Clear forgets the rows: a credit table left open on a shared counter is
+// somebody's balance on display to the next customer
 function clearCreditPanel() {
     const panel = getDataPanel('cash-credit');
     if (panel) panel.reset();
@@ -2449,8 +2363,8 @@ function clearCreditPanel() {
     const search = document.getElementById('customers-search');
     if (search) search.value = '';
 
-    const standing = document.getElementById('customers-standing');
-    if (standing) standing.value = 'all';
+    const due = document.getElementById('customers-due');
+    if (due) due.value = 'all';
 }
 
 async function openCustomerCredit(customerId) {
@@ -2473,9 +2387,11 @@ async function openCustomerCredit(customerId) {
             detailField('Can Take Today', c.standing === 'Hold'
                 ? '<span class="cell-due">Nothing, on hold</span>'
                 : peso(c.available_credit)) +
+            detailField('Due Date', creditDueCell(c)) +
             detailField('Standing', '<span class="badge ' +
                 (CASH_STANDING_TONE[c.standing] || 'badge-neutral') + '">' +
                 escapeHtml(CASH_STANDING_WORD[c.standing] || c.standing) + '</span>') +
+            detailField('Why', escapeHtml(c.standing_reason || '')) +
             detailField('Open Sales', String(c.open_sales)) +
             detailField('Lifetime Purchases', peso(c.total_purchase)) +
             (c.credit_notes
@@ -2489,8 +2405,7 @@ async function openCustomerCredit(customerId) {
     }
 }
 
-// Purchases beside payments. One says how good a customer they are, the other
-// how good a payer, and neither answers the question on its own.
+// purchases beside payments
 function renderCustomerHistory(data) {
     const box = document.getElementById('customer-history');
     if (!box) return;
@@ -2533,8 +2448,7 @@ function renderCustomerHistory(data) {
         '</div>';
 }
 
-// The one thing a cashier can do about a limit: ask. It changes nothing until
-// a manager decides it, which is the point: the queue moves on either way.
+// the one thing a cashier can do about a limit: ask
 async function askForExtension() {
     if (!openCustomer) return;
 
@@ -2611,27 +2525,34 @@ async function askForExtension() {
 // ==========================================
 if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
     document.addEventListener('DOMContentLoaded', function () {
-        // Every table on this screen is one of these, so they are all built
-        // before anything is shown. Building a panel only draws its closed
-        // state; none of them queries the database until it is asked to.
+        // building a panel only draws its closed state; none queries until asked
         buildCustomerPanel();
         buildDeliveryPanel();
         buildSalesPanel();
         buildRefundPanel();
         buildSummaryPanel();
 
+        // offered only to a cashier holding a key to a connected system
+        configureConnectedSystems({ showPanel: (panelId, title) => showCashierPanel(panelId, title) });
+        buildConnectedSystemsPanel();
+
+        // the schedule follows what the administrator switched on for this role
+        configureDeliverySchedule({ showPanel: (panelId, title) => showCashierPanel(panelId, title) });
+        buildDeliverySchedulePanel();
+        configureFeatures({ home: () => showCashierHome() });
+
         onReturnReasonInput();
         renderCustomerVerdict();
         renderRefundProductVerdict();
         renderDeliveryAttached();
         showCashierHome();
-        loadCustomerDirectory(false);
+        // the customer book is fetched the first time somebody types; the store
+        // details are read on arrival because they head every receipt
         loadStoreSettings(false);
         loadNotifications();
     });
 
-    // A click anywhere else closes the suggestion list. Without this it stays
-    // open over the payment fields after the cashier has moved on.
+    // a click anywhere else closes the suggestion list
     document.addEventListener('click', function (event) {
         if (event.target.closest('.suggest-wrap')) return;
         hideCustomerSuggestions();

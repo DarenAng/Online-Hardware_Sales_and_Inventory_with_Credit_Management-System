@@ -1,0 +1,159 @@
+/* ==========================================================================
+   CONNECTED SYSTEMS -- every dashboard
+   Loads after general-ui.css and responsive.css, so anything here wins.
+   The same screen on all five pages, so the rules live here.
+   ========================================================================== */
+
+/* ==========================================================================
+   ONE CARD PER SYSTEM -- the left rule carries the state; a switched-off
+   system is drawn faded
+   ========================================================================== */
+.systems-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 14px;
+}
+.systems-grid .systems-empty { grid-column: 1 / -1; padding: 44px 16px; }
+
+.system-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--steel-soft);
+    border-radius: var(--radius);
+    min-width: 0;
+}
+.system-card.is-ok   { border-left-color: var(--ok); }
+.system-card.is-warn { border-left-color: var(--signal-hi); }
+.system-card.is-bad  { border-left-color: var(--stop); background: var(--stop-dim); }
+.system-card.is-off  { border-left-color: var(--steel-soft); }
+.system-card.is-disabled { opacity: 0.72; }
+
+.system-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+.system-title { min-width: 0; }
+.system-title h4 {
+    margin: 2px 0 2px;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+}
+.system-kind {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--steel-soft);
+}
+.system-key {
+    display: block;
+    font-family: var(--font-figure);
+    font-size: 12px;
+    color: var(--steel-soft);
+}
+
+/* the state, as a word: the colour is never the only carrier */
+.system-state {
+    flex: none;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--steel);
+    white-space: nowrap;
+}
+.system-card.is-ok .system-state   { border-color: rgba(14, 122, 95, 0.35);  background: var(--ok-dim);     color: var(--ok-ink); }
+.system-card.is-warn .system-state { border-color: rgba(245, 179, 1, 0.5);   background: var(--signal-dim); color: var(--signal-ink); }
+.system-card.is-bad .system-state  { border-color: rgba(158, 27, 50, 0.4);   background: var(--surface);    color: var(--stop-hi); }
+
+.system-desc {
+    margin: 0;
+    font-size: 13px;
+    color: var(--steel-soft);
+}
+.system-summary {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ink);
+}
+
+/* the facts behind the sentence, set as a small two-column list */
+.system-facts {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.system-fact {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 7px 11px;
+    background: var(--surface);
+    font-size: 12.5px;
+    min-width: 0;
+}
+.system-fact-label { color: var(--steel-soft); flex: none; }
+.system-fact.is-long { flex-direction: column; gap: 2px; }
+.system-fact.is-long .system-fact-value { text-align: left; }
+.system-fact-value {
+    font-family: var(--font-figure);
+    font-size: 12px;
+    color: var(--ink);
+    text-align: right;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+}
+
+.system-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: auto;
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
+}
+.system-access {
+    font-size: 12px;
+    color: var(--steel);
+}
+.system-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+}
+
+/* the register form's key and address are read character by character */
+#systems-register-form .mono,
+#system-form .mono { font-family: var(--font-figure); font-size: 14px; }
+
+/* ==========================================================================
+   ON A PHONE
+   ========================================================================== */
+@media (max-width: 640px) {
+    .systems-grid { grid-template-columns: 1fr; }
+    .system-fact { flex-direction: column; gap: 2px; }
+    .system-fact-value { text-align: left; }
+    .system-actions { width: 100%; justify-content: stretch; }
+    .system-actions .btn { flex: 1 1 auto; }
+}

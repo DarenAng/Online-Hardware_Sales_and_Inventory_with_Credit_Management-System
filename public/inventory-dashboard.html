@@ -10,6 +10,8 @@
     <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
     <link rel="stylesheet" href="css/general-ui.css">
     <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/purchase-orders.css">
+    <link rel="stylesheet" href="css/connected-systems.css">
     <link rel="stylesheet" href="css/modules/inventory-clerk.css">
 </head>
 
@@ -27,23 +29,33 @@
                 <span class="sidebar-eyebrow">Inventory Clerk</span>
                 <span data-current-user>User</span>
             </div>
+            <!-- data-feature names the screen an item opens; shared/features.js hides
+                 the ones switched off for this role and mirrors the counts -->
             <ul class="sidebar-nav">
-                <li>
-                    <a href="#inventory" onclick="toggleDropdown('inventory-dropdown', event)" class="nav-parent">
+                <li data-sidebar-dropdown>
+                    <a href="#inventory" onclick="toggleInventoryMenu(event)" class="nav-parent" id="inventory-nav"
+                       aria-expanded="false" aria-controls="inventory-dropdown">
                         Inventory Management <span class="nav-caret">&#9660;</span>
                     </a>
-                    <ul id="inventory-dropdown" class="nav-sub" style="display: block;">
-                        <li><a href="#" data-panel-link="panel-inventory" onclick="loadInventoryAll(event)">Material List</a></li>
-                        <li><a href="#" data-panel-link="panel-adjust" onclick="showAdjust(event)">Stock Adjustment</a></li>
-                        <li><a href="#" data-panel-link="panel-adjust-log" onclick="showAdjustmentHistory(event)">Adjustment History</a></li>
-                        <li><a href="#" data-panel-link="panel-reorder" onclick="showReorder(event)">Reorder Points</a></li>
-                        <li><a href="#" data-panel-link="panel-po" onclick="showPurchaseOrders(event)">New Purchase Order</a></li>
-                        <li><a href="#" data-panel-link="panel-po-history" onclick="showPurchaseOrderHistory(event)">Order History</a></li>
-                        <li><a href="#" data-panel-link="panel-returns" onclick="showReturns(event)">Returned Items</a></li>
+                    <ul id="inventory-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="material-list"><a href="#" data-panel-link="panel-inventory" onclick="loadInventoryAll(event)">Material List</a></li>
+                        <li data-feature="stock-adjustment"><a href="#" data-panel-link="panel-adjust" onclick="showAdjust(event)">Stock Adjustment</a></li>
+                        <li data-feature="adjustment-history"><a href="#" data-panel-link="panel-adjust-log" onclick="showAdjustmentHistory(event)">Adjustment History</a></li>
+                        <li data-feature="reorder-points"><a href="#" data-panel-link="panel-reorder" onclick="showReorder(event)">
+                            Reorder Points <span class="nav-count" data-count-for="reorder-points"></span></a></li>
+                        <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-po-history" onclick="showPurchaseOrderHistory(event)">Purchase Orders</a></li>
+                        <li data-feature="returns"><a href="#" data-panel-link="panel-returns" onclick="showReturns(event)">
+                            Returned Items <span class="nav-count" data-count-for="returns"></span></a></li>
                     </ul>
                 </li>
-                <li><a href="#" data-panel-link="panel-report" onclick="showDamageReport(event)">Make a Report</a></li>
-                <li><a href="#" data-panel-link="panel-archive" onclick="showInventoryArchive(event)">Archive</a></li>
+                <li data-feature="damage-report"><a href="#" data-panel-link="panel-report" onclick="showDamageReport(event)">Make a Report</a></li>
+                <li data-feature="archives"><a href="#" data-panel-link="panel-archive" onclick="showInventoryArchive(event)">Archive</a></li>
+                <!-- drawn by shared/delivery-schedule.js; hidden until features.js hears the role has it -->
+                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)">
+                    Delivery Schedule <span class="nav-count" data-count-for="delivery-schedule"></span></a></li>
+
+                <!-- hidden until shared/connected-systems.js hears the person holds a key -->
+                <li id="nav-systems" hidden><a href="#" data-panel-link="panel-systems" onclick="showConnectedSystems(event)">Connected Systems</a></li>
             </ul>
         </aside>
 
@@ -69,8 +81,8 @@
                 <div class="card" id="panel-inventory" data-panel>
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Inventory Management</span>
                             <h3>Material List</h3>
-                            <p class="panel-sub">Nothing is read from the database until you ask for it. Search for a material, pick a stock status, or press <kbd>Load Data</kbd> for the whole list. Archived materials stay out of this table.</p>
                         </div>
                         <span class="pill" id="inv-count">Not loaded</span>
                     </div>
@@ -79,7 +91,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="inv-search"
                                    placeholder="Search by material, category, or supplier"
-                                   oninput="dataPanelSearch('clerk-materials', this.value)">
+                                   onkeydown="dataPanelSearchKey('clerk-materials', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-field">
                             <label for="inv-status">Stock status</label>
@@ -98,7 +110,7 @@
                     <div class="table-responsive grid-10">
                         <table id="inv-table">
                             <thead>
-                                <tr><th>ID</th><th>Material</th><th>Category</th><th>On Hand</th><th>Reorder At</th><th>Status</th></tr>
+                                <tr><th>ID</th><th>Material</th><th data-secondary>Category</th><th>On Hand</th><th>Reorder At</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -108,30 +120,19 @@
 
                 <!-- STOCK ADJUSTMENT -->
                 <!-- ============================================================
-                     STOCK ADJUSTMENT
-                     The form on its own. The log used to sit underneath it,
-                     which meant the clerk who came to correct one figure
-                     scrolled past a hundred rows of history they had not
-                     asked for to reach the button. History is its own screen
-                     now, one click away in the menu.
+                     STOCK ADJUSTMENT -- the form on its own; history is its own screen
                      ============================================================ -->
                 <div class="card" id="panel-adjust" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Inventory Management</span>
                             <h3>Stock Adjustment</h3>
-                            <p class="panel-sub">Add stock, remove stock, or correct the figure after a
-                                physical count. Every change is logged with its reason.</p>
                         </div>
                     </div>
 
                     <form id="adjust-form" onsubmit="handleAdjustStock(event)" autocomplete="off">
-                        <!-- WHICH MATERIAL
-                             A dropdown of the whole catalogue is the wrong control
-                             for a stockroom: finding one item in six hundred by
-                             scrolling is slower than typing three letters of it.
-                             Text that matches nothing is not an answer here, so
-                             the strip below is the only thing that says a choice
-                             was made, and the form will not send without one. -->
+                        <!-- WHICH MATERIAL -- typed; the strip below is the only thing that says a
+                             choice was made, and the form will not send without one -->
                         <div class="form-group">
                             <label for="adjust-material">Material</label>
                             <div class="suggest-wrap">
@@ -154,7 +155,7 @@
 
                         <div class="grid-2">
                             <div class="form-group">
-                                <label for="adjust-type">Adjustment Type</label>
+                                <label for="adjust-type">Adjustment type</label>
                                 <select id="adjust-type" name="adjustmentType" class="form-control"
                                         onchange="renderAdjustPreview()" required>
                                     <option value="Add">Add to stock</option>
@@ -163,15 +164,9 @@
                                 </select>
                             </div>
 
-                            <!-- COUNTED IN WHAT
-                                 Cement in bags, pipe in metres, nails by the kilo.
-                                 The list suggests what the shop already uses and
-                                 accepts anything it does not: a unit typed for the
-                                 first time joins the list rather than being
-                                 refused, because a clerk holding a sack should not
-                                 have to wait for somebody to open the database. -->
+                            <!-- COUNTED IN WHAT -- suggests what the shop uses and accepts a new word -->
                             <div class="form-group">
-                                <label for="adjust-unit">Counted In</label>
+                                <label for="adjust-unit">Counted in</label>
                                 <div class="suggest-wrap">
                                     <input type="text" id="adjust-unit" name="unitName" class="form-control"
                                            autocomplete="off" placeholder="pcs, bag, kilogram, box"
@@ -199,10 +194,7 @@
                             </div>
                         </div>
 
-                        <!-- What this will do to the figure on the shelf, before
-                             the button is pressed rather than as a refusal after
-                             it. A Remove that would take stock below zero is the
-                             mistake this catches. -->
+                        <!-- what this will do to the shelf, before the button -->
                         <p class="adjust-preview" id="adjust-preview"></p>
 
                         <div class="form-footer">
@@ -214,15 +206,12 @@
 
                 <!-- ============================================================
                      ADJUSTMENT HISTORY
-                     Its own screen, because it is history rather than a working
-                     list: nobody scrolls it on the way to doing something else.
                      ============================================================ -->
                 <div class="card" id="panel-adjust-log" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
                             <span class="eyebrow">History</span>
                             <h3>Adjustment History</h3>
-                            <p class="panel-sub">Every stock movement on record, newest first.</p>
                         </div>
                         <span class="pill" id="adjust-count">Not loaded</span>
                     </div>
@@ -231,7 +220,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="adjust-search"
                                    placeholder="Search by material, reason, or who adjusted it"
-                                   oninput="dataPanelSearch('clerk-adjustments', this.value)">
+                                   onkeydown="dataPanelSearchKey('clerk-adjustments', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-field">
                             <label for="adjust-type-filter">Type</label>
@@ -251,8 +240,8 @@
                     <div class="table-responsive grid-10">
                         <table id="adjust-table">
                             <thead>
-                                <tr><th>When</th><th>Material</th><th>Type</th><th>Before</th>
-                                    <th>Change</th><th>After</th><th>By</th><th></th></tr>
+                                <tr><th>When</th><th>Material</th><th data-secondary>Type</th><th>Before</th>
+                                    <th>Change</th><th>After</th><th data-secondary>By</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -264,8 +253,8 @@
                 <div class="card" id="panel-reorder" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Inventory Management</span>
                             <h3>Reorder Point Settings</h3>
-                            <p class="panel-sub">Set the level at which each material raises a warning. Saving re-checks stock straight away.</p>
                         </div>
                         <span class="pill" id="reorder-count">Not loaded</span>
                     </div>
@@ -273,7 +262,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="reorder-search"
                                    placeholder="Search by material"
-                                   oninput="dataPanelSearch('clerk-reorder', this.value)">
+                                   onkeydown="dataPanelSearchKey('clerk-reorder', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-field">
                             <label for="reorder-status">Stock status</label>
@@ -300,105 +289,13 @@
                 </div>
 
                 <!-- ============================================================
-                     NEW PURCHASE ORDER
-
-                     The form on its own. Every order the shop has ever raised
-                     used to sit in a second card underneath it, which meant
-                     the clerk raising one scrolled the whole history to reach
-                     the button that sends it. History is its own screen now,
-                     one tab away, exactly as Adjustment History is.
-
-                     The supplier is typed rather than picked, and so is the
-                     material on each line, because a purchase order is how a
-                     shop buys something it does not have yet -- frequently
-                     from a company it has not bought from before.
-                     ============================================================ -->
-                <div class="card" id="panel-po" data-panel style="display: none;">
-                    <div class="panel-head">
-                        <div>
-                            <h3>New Purchase Order</h3>
-                            <p class="panel-sub">Name the company, list what you are buying from them, and
-                                send it. The order prints as a document the supplier can read, because
-                                they have no login to this system.</p>
-                        </div>
-                        <span class="pill" id="po-line-count">1 line</span>
-                    </div>
-
-                    <form id="po-form" onsubmit="handleCreatePurchaseOrder(event)" autocomplete="off">
-
-                        <!-- THE COMPANY
-                             Any name is a valid answer here. One already on
-                             file is matched as it is typed; anything else
-                             opens for the details that go on the printed
-                             order, and joins the supplier list when the
-                             order is sent. -->
-                        <div class="form-group">
-                            <label for="po-supplier">Supplier company</label>
-                            <div class="suggest-wrap">
-                                <input type="text" id="po-supplier" class="form-control"
-                                       autocomplete="off" maxlength="100"
-                                       placeholder="Type the company name"
-                                       role="combobox" aria-expanded="false"
-                                       aria-controls="po-supplier-list" aria-autocomplete="list"
-                                       oninput="onSupplierInput(this.value)"
-                                       onfocus="onSupplierInput(this.value)"
-                                       onkeydown="onSupplierKey(event)" required>
-                                <ul class="suggest-list" id="po-supplier-list" role="listbox" hidden></ul>
-                            </div>
-
-                            <div class="supplier-known" id="po-supplier-known" hidden></div>
-
-                            <div class="supplier-card" id="po-supplier-new" hidden>
-                                <h4>A company the shop has not bought from</h4>
-                                <p class="make-card-sub" id="po-supplier-new-sub">
-                                    These go on the printed order and are saved with the company.</p>
-                                <div class="make-grid">
-                                    <div class="form-group">
-                                        <label for="po-supplier-contact">Contact person</label>
-                                        <input type="text" id="po-supplier-contact" class="form-control" maxlength="100">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="po-supplier-number">Contact number</label>
-                                        <input type="text" id="po-supplier-number" class="form-control" maxlength="20">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="po-supplier-email">Email <span class="label-hint">optional</span></label>
-                                        <input type="email" id="po-supplier-email" class="form-control" maxlength="100">
-                                    </div>
-                                    <div class="form-group">
-                                        <label for="po-supplier-address">Address</label>
-                                        <input type="text" id="po-supplier-address" class="form-control">
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div id="po-lines"></div>
-
-                        <div class="po-sum">
-                            <span class="po-sum-label">What this order comes to</span>
-                            <span class="po-sum-value" id="po-total">0.00</span>
-                        </div>
-
-                        <div class="form-footer">
-                            <button type="button" class="btn btn-ghost" onclick="addPurchaseLine()">Add line</button>
-                            <button type="submit" class="btn btn-success">Send the order</button>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- ============================================================
-                     ORDER HISTORY
-                     Reference rather than work: nobody reads it on the way to
-                     doing something else, so it is not in the way of anything.
+                     PURCHASE ORDERS -- reference only; the manager raises and receives them
                      ============================================================ -->
                 <div class="card" id="panel-po-history" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
-                            <span class="eyebrow">History</span>
-                            <h3>Order History</h3>
-                            <p class="panel-sub">Every order raised, and what became of it. Open one to print it
-                                for the supplier, or count in a delivery against it.</p>
+                            <span class="eyebrow">Reference</span>
+                            <h3>Purchase Orders</h3>
                         </div>
                         <span class="pill" id="po-count">Not loaded</span>
                     </div>
@@ -406,14 +303,14 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="po-search"
                                    placeholder="Search by supplier or order number"
-                                   oninput="dataPanelSearch('clerk-po', this.value)">
+                                   onkeydown="dataPanelSearchKey('clerk-po', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-field">
                             <label for="po-status">Status</label>
                             <select id="po-status"
                                     onchange="dataPanelFilter('clerk-po', 'status', this.value)">
                                 <option value="all">Every status</option>
-                                <option value="Pending">Pending</option>
+                                <option value="Pending">Waiting for delivery</option>
                                 <option value="Received">Received</option>
                                 <option value="Cancelled">Cancelled</option>
                             </select>
@@ -424,7 +321,7 @@
                     <div class="table-responsive grid-10">
                         <table id="po-table">
                             <thead>
-                                <tr><th>PO</th><th>Supplier</th><th>Ordered</th><th>Lines</th>
+                                <tr><th>PO</th><th>Supplier</th><th>Ordered</th><th data-secondary>Lines</th>
                                     <th>Total Cost</th><th>Status</th><th></th></tr>
                             </thead>
                             <tbody></tbody>
@@ -434,61 +331,18 @@
                 </div>
 
                 <!-- ============================================================
-                     THE ORDER AS A DOCUMENT
-
-                     Opened from the history, and the only screen in the system
-                     built to be printed. data-panel-of keeps the tab strip
-                     showing Order History while it is open, because that is
-                     where this was opened from and where Back goes.
+                     THE ORDER AS A DOCUMENT -- data-panel-of keeps the tab strip on Purchase Orders
                      ============================================================ -->
                 <div id="panel-po-doc" data-panel data-panel-of="panel-po-history" style="display: none;">
                     <div id="po-doc"></div>
-                </div>
-
-                <!-- ============================================================
-                     RECEIVING A DELIVERY
-
-                     A count sheet rather than a button. What was ordered on the
-                     left, what came off the lorry typed on the right, and a way
-                     to book in something that was never ordered at all.
-                     ============================================================ -->
-                <div class="card" id="panel-po-receive" data-panel data-panel-of="panel-po-history" style="display: none;">
-                    <div class="panel-head">
-                        <div>
-                            <span class="eyebrow">Receiving</span>
-                            <h3>Count in the delivery</h3>
-                            <p class="panel-sub" id="recv-heading">Purchase Order</p>
-                        </div>
-                    </div>
-
-                    <p class="panel-sub">Each line starts at what was ordered. Change the figure where the
-                        delivery does not match, and the order is corrected to say what actually arrived.</p>
-
-                    <div id="recv-lines"></div>
-
-                    <div class="panel-head" style="margin-top: 18px;">
-                        <div>
-                            <h4>Arrived but never ordered</h4>
-                            <p class="panel-sub">A substitution, or something the lorry brought anyway. A
-                                material the shop has never stocked can be added here and booked straight in.</p>
-                        </div>
-                    </div>
-
-                    <div id="recv-extras"></div>
-
-                    <div class="form-footer">
-                        <button type="button" class="btn btn-ghost" onclick="addReceiveExtra()">Add something that arrived</button>
-                        <button type="button" class="btn btn-success" onclick="submitReceiveOrder()">Receive this delivery</button>
-                        <button type="button" class="btn btn-ghost" onclick="showPurchaseOrderHistory(event)">Cancel</button>
-                    </div>
                 </div>
 
                 <!-- RETURNED ITEMS -->
                 <div class="card" id="panel-returns" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Inventory Management</span>
                             <h3>Returned Items</h3>
-                            <p class="panel-sub">Every return, damage, and refund on record. Click a row for the full report.</p>
                         </div>
                         <div class="panel-actions">
                             <span class="pill" id="returns-count">Not loaded</span>
@@ -499,7 +353,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="returns-search"
                                    placeholder="Search by material or reason"
-                                   oninput="dataPanelSearch('clerk-returns', this.value)">
+                                   onkeydown="dataPanelSearchKey('clerk-returns', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-field">
                             <label for="returns-where">Goods went</label>
@@ -516,7 +370,7 @@
                     <div class="table-responsive grid-10">
                         <table id="returns-table">
                             <thead>
-                                <tr><th>ID</th><th>Type</th><th>Material</th><th>Qty</th><th>Goods Went</th><th>Filed</th><th>Status</th></tr>
+                                <tr><th>ID</th><th>Type</th><th>Material</th><th>Qty</th><th data-secondary>Goods Went</th><th data-secondary>Filed</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -530,13 +384,12 @@
                         <div>
                             <span class="eyebrow">Reporting</span>
                             <h3>Make a Report</h3>
-                            <p class="panel-sub">File a damaged or refunded item. Damaged stock comes off the shelf, refunded stock goes back on if it is resalable. The manager is notified either way.</p>
                         </div>
                     </div>
                     <form id="report-form" onsubmit="handleFileReport(event)">
                         <div class="grid-2">
                             <div class="form-group">
-                                <label>Report Type</label>
+                                <label>Report type</label>
                                 <select name="reportType" class="form-control" onchange="onReportTypeChange(this.value)" required>
                                     <option value="Damaged">Damaged item</option>
                                     <option value="Refunded">Refunded item</option>
@@ -556,11 +409,11 @@
                                 <input type="number" name="saleId" class="form-control" min="1" placeholder="Leave blank if not from a sale">
                             </div>
                             <div class="form-group" id="refund-field">
-                                <label>Refund Amount</label>
+                                <label>Refund amount</label>
                                 <input type="number" name="refundAmount" class="form-control" min="0" step="0.01" value="0">
                             </div>
                             <div class="form-group">
-                                <label>Put Back on the Shelf</label>
+                                <label>Put back on the shelf</label>
                                 <select name="restock" class="form-control">
                                     <option value="false">No, keep it off stock</option>
                                     <option value="true">Yes, item is resalable</option>
@@ -582,8 +435,8 @@
                 <div class="card" id="panel-archive" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
+                            <span class="eyebrow">Archive</span>
                             <h3>Archived Materials</h3>
-                            <p class="panel-sub">Discontinued or out-of-stock materials live here and stay out of the material list. Restore brings one back.</p>
                         </div>
                         <div class="panel-actions">
                             <span class="pill" id="arch-count">Not loaded</span>
@@ -593,7 +446,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="arch-search"
                                    placeholder="Search archived materials"
-                                   oninput="dataPanelSearch('clerk-archive', this.value)">
+                                   onkeydown="dataPanelSearchKey('clerk-archive', event)" title="Type, then press Enter to search">
                         </div>
                         <div class="toolbar-spacer"></div>
                         <button type="button" class="btn btn-accent" onclick="dataPanelOpen('clerk-archive')">Load Data</button>
@@ -601,7 +454,7 @@
                     <div class="table-responsive grid-10">
                         <table id="arch-table">
                             <thead>
-                                <tr><th>ID</th><th>Material</th><th>Category</th><th>On Hand</th><th>Archived On</th><th>Action</th></tr>
+                                <tr><th>ID</th><th>Material</th><th data-secondary>Category</th><th>On Hand</th><th>Archived On</th><th>Action</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -633,10 +486,8 @@
                 <div id="detail-page"></div>
             </div>
 
-            <div class="modal-foot modal-pager">
-                <button type="button" class="btn btn-ghost" id="detail-back" onclick="detailBack()">&#8592; Back</button>
-                <span class="pager-count" id="detail-counter">Page 1 of 1</span>
-                <button type="button" class="btn btn-accent" id="detail-next" onclick="detailNext()">Next &#8594;</button>
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('detail-modal')">Close</button>
             </div>
         </div>
     </div>
@@ -644,6 +495,7 @@
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="javascript/modules/shared/helpers.js"></script>
     <script src="javascript/modules/shared/format.js"></script>
+    <script src="javascript/modules/shared/phone-picker.js"></script>
     <script src="javascript/modules/shared/ui-kit.js"></script>
     <script src="javascript/modules/shared/tables.js"></script>
     <script src="javascript/modules/shared/data-panel.js"></script>
@@ -655,6 +507,11 @@
     <script src="javascript/modules/shared/subnav.js"></script>
     <script src="javascript/modules/shared/my-account.js"></script>
     <script src="javascript/modules/shared/notifications.js"></script>
+    <script src="javascript/modules/shared/connected-systems.js"></script>
+    <script src="javascript/modules/shared/features.js"></script>
+    <script src="javascript/modules/shared/deliveries.js"></script>
+    <script src="javascript/modules/shared/delivery-schedule.js"></script>
+    <script src="javascript/modules/shared/purchase-orders.js"></script>
     <script src="javascript/modules/inventory-clerk.js"></script>
 </body>
 </html>

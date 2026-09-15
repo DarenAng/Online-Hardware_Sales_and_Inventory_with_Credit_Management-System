@@ -1,36 +1,9 @@
-// live-sync.js  --  LIVE SYNC ACROSS DESKTOPS
+// live-sync.js -- one open server connection per browser; a change event names a
+// scope ("inventory moved"), and any panel reading that scope re-reads through
+// its normal route. Tables are never redrawn while somebody is reading them.
 // Loaded by: all five dashboards
-// ------------------------------------------------------------------------
-// ==========================================
-// WHY THIS FILE EXISTS
-//
-// The shop runs on more than one machine. A clerk adjusts stock on the
-// stockroom PC and the cashier at the till is still looking at the figure
-// from before the adjustment, which is how two people sell the same last bag
-// of cement. Until now the only fix was restoring the database by hand, which
-// is not a fix.
-//
-// So every signed-in browser holds one open connection to the server and is
-// told when something moves. What arrives is deliberately not the data: a
-// change says "inventory moved, version 412" and nothing else. This file
-// works out whether anything on the screen is affected and re-reads it
-// through the normal routes, with the normal access checks.
-//
-// WHAT IT WILL NOT DO
-//
-// It will not redraw a table somebody is reading. Rows moving under a
-// pointer is worse than a figure being a few seconds old: it loses the row
-// that was about to be clicked. So a panel is only refreshed silently when
-// nothing is in the way — no popup open, nothing focused inside it, and the
-// reader on the first page. Otherwise it says so and waits to be asked.
-//
-// It also ignores changes this browser caused. Every write carries a client
-// id, and a change stamped with our own id has already been dealt with by
-// whichever screen made it.
-// ==========================================
 
-// This browser, for this page. Regenerated on every load on purpose: two tabs
-// on one machine are two screens and should hear about each other.
+// regenerated on every load: two tabs on one machine are two screens
 const CLIENT_ID = (function () {
     try {
         if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
@@ -38,27 +11,14 @@ const CLIENT_ID = (function () {
     return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 })();
 
-// ==========================================
-// WHICH PANELS CARE ABOUT WHAT
-//
-// Kept in one table rather than scattered across five modules, so the whole
-// answer to "what refreshes when a sale is rung up" is readable in one place.
-// A panel can still override it with a scopes option of its own.
-//
-// The audit trail is deliberately absent. It is history that only ever grows:
-// a new entry appearing at the top while somebody reads the third page is
-// noise, and nothing in it goes stale in a way that matters.
-//
-// The adjustment log used to be listed here for the same reason, and that was
-// wrong. It is not only history: it is the screen a clerk checks straight
-// after filing something, so it is refreshed on an inventory change, and
-// safeToRefresh below still keeps it still while anybody is reading.
-// ==========================================
+// Which panels refresh on which scope. A panel can override with its own
+// scopes option. The audit trail is absent on purpose: it only ever grows.
 const PANEL_SCOPES = {
     // system administrator
     'admin-users':        ['staff'],
     'admin-archive':      ['staff'],
     'admin-backups':      ['system'],
+    'admin-access':       ['access', 'staff', 'systems'],
 
     // manager
     'mgr-sales':          ['sales', 'deliveries'],
@@ -69,6 +29,7 @@ const PANEL_SCOPES = {
     'mgr-requests':       ['credit'],
     'mgr-archives':       ['archives', 'staff', 'inventory', 'sales', 'deliveries'],
     'mgr-records':        ['inventory', 'credit'],
+    'mgr-po':             ['inventory'],
     'mgr-unpaid':         ['sales', 'credit'],
     'mgr-methods':        ['sales'],
     'mgr-loyal':          ['sales', 'credit'],
@@ -107,8 +68,6 @@ function startLiveSync() {
     buildLiveIndicator();
     openLiveStream();
 
-    // A tab that has been in the background for a long time may have been
-    // disconnected without noticing. Coming back is a good moment to check.
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden && !liveConnected) openLiveStream();
     });
@@ -134,7 +93,6 @@ function openLiveStream() {
         liveConnected = true;
         setLiveIndicator('live', 'Live');
 
-        // anything that moved while this browser was away
         if (Array.isArray(data.scopes) && data.scopes.length > 0) {
             data.scopes.forEach((scope) => noticeChange(scope, null));
         }
@@ -146,16 +104,13 @@ function openLiveStream() {
 
         liveVersion = Math.max(liveVersion, data.version || 0);
 
-        // our own writes have already been dealt with by whichever screen
-        // made them; hearing about them again would refresh twice
+        // our own writes have already been handled by the screen that made them
         if (data.origin && data.origin === CLIENT_ID) return;
 
         noticeChange(data.scope, data);
     });
 
-    // The server lost track of how far behind this browser is, which happens
-    // only after a long disconnection. Guessing would show a half-updated
-    // screen, so it says so and offers the one thing that is certainly right.
+    // server lost track of how far behind this browser is (long disconnection)
     liveSource.addEventListener('resync', function () {
         notifyWarning('This screen was disconnected long enough to fall behind. ' +
             'Reload the page to be sure of what you are looking at.',
@@ -163,11 +118,24 @@ function openLiveStream() {
         setLiveIndicator('stale', 'Behind');
     });
 
+    // One person holds one session; signed in elsewhere means this one ends.
+    // Close by hand first or EventSource keeps reconnecting and being refused.
+    liveSource.addEventListener('evicted', function (event) {
+        const data = readLiveEvent(event) || {};
+
+        try { liveSource.close(); } catch (error) { /* already closed */ }
+        liveSource = null;
+        liveConnected = false;
+
+        localStorage.removeItem('currentUser');
+
+        rememberSignOutReason(data.reason || 'This screen was signed out.');
+        window.location.replace('Login.html');
+    });
+
     liveSource.addEventListener('error', function () {
         liveConnected = false;
         setLiveIndicator('down', 'Offline');
-        // EventSource reconnects on its own; the retry interval comes from
-        // the server, so there is nothing to schedule here
     });
 }
 
@@ -179,19 +147,7 @@ function readLiveEvent(event) {
     }
 }
 
-// ==========================================
-// WHAT TO DO ABOUT A CHANGE
-// ==========================================
-
-// ==========================================
-// SUBSCRIBERS THAT ARE NOT TABLES
-//
-// A data panel refreshes itself because live-sync knows its key. Dashboard KPI
-// tiles are not a table and have no key, but they read the same rows -- and a
-// "Live" badge sitting above figures that only ever load once is making a
-// claim the page does not honour. This is how anything that is not a table
-// asks to hear about the same scopes.
-// ==========================================
+// Widgets that are not tables (KPI tiles) subscribe to scopes here.
 const liveListeners = [];
 
 function onLiveChange(scopes, handler) {
@@ -202,7 +158,6 @@ function onLiveChange(scopes, handler) {
 function runLiveListeners(scope) {
     liveListeners.forEach((entry) => {
         if (entry.scopes.indexOf(scope) === -1) return;
-        // one widget throwing must not stop the rest of the page updating
         try { entry.handler(scope); } catch (error) { console.error(error); }
     });
 }
@@ -212,7 +167,6 @@ function noticeChange(scope, change) {
 
     runLiveListeners(scope);
 
-    // the bell is cheap and nobody is reading it as a table
     if (scope === 'notifications') {
         if (typeof loadNotifications === 'function') loadNotifications();
         return;
@@ -232,21 +186,16 @@ function noticeChange(scope, change) {
         else markPanelStale(panel, scope);
     });
 
-    // the bell should also catch up when the thing that changed was one of
-    // the things it reports on
     if (touched > 0 && typeof loadNotifications === 'function' &&
         (scope === 'inventory' || scope === 'returns' || scope === 'deliveries')) {
         loadNotifications();
     }
 }
 
-// Rows moving under a pointer lose the row that was about to be clicked, so
-// three things have to be true before a table redraws itself.
+// Rows moving under a pointer lose the row about to be clicked.
 function safeToRefresh(panel) {
-    // a popup over the page is a person mid-task
     if (document.querySelector('.modal.open, .drawer.open')) return false;
 
-    // somebody typing into this panel's own search or filters
     const active = document.activeElement;
     if (active && active !== document.body) {
         const tag = active.tagName;
@@ -257,8 +206,6 @@ function safeToRefresh(panel) {
         }
     }
 
-    // Past page one, a refresh can renumber everything under a reader. On
-    // page one the newest rows are what they are looking at anyway.
     if (panel.page !== 1) return false;
 
     return true;
@@ -269,8 +216,7 @@ async function refreshQuietly(panel) {
     flashPanel(panel, 'Updated just now');
 }
 
-// A quiet mark beside the count, not a popup card. A popup for every change
-// on a busy afternoon is a screen nobody can work on.
+// A quiet mark beside the count, not a popup card.
 function flashPanel(panel, text) {
     if (!panel.config.countPillId) return;
 
@@ -282,7 +228,6 @@ function flashPanel(panel, text) {
     setTimeout(() => pill.classList.remove('is-fresh'), 2200);
 }
 
-// The reader is busy, so the table says what happened and waits.
 function markPanelStale(panel, scope) {
     const mount = panel.pager();
     if (!mount) return;
@@ -309,42 +254,10 @@ async function refreshStalePanel(key) {
     flashPanel(panel, 'Updated just now');
 }
 
-// ==========================================
-// THERE IS NO INDICATOR ANY MORE
-//
-// There was a dot in the top bar, beside the page title, and it reported the
-// browser's connection to this server: green while changes were arriving,
-// crimson while they were not, amber when the screen had fallen behind. It
-// went in stages -- first it lost the word beside it, then the dot itself --
-// and both stages were the same decision.
-//
-// It described the plumbing. A shop cannot act on "the change channel is
-// reconnecting": there is no button for it, no procedure, and nothing the
-// person at the counter is expected to do differently. What the shop can act
-// on is what the screen in front of them says, and that is still handled --
-// and handled better -- by the two things that survive:
-//
-//   - A table that has quietly gone out of date says so, in its own footer,
-//     in words, and waits to be asked. That is a message about the rows
-//     somebody is reading rather than about a socket.
-//   - A screen that has fallen far enough behind to be untrustworthy is told
-//     to reload, as a card. That one is worth interrupting for.
-//
-// So the state is still tracked, still drives both of those, and is no longer
-// drawn. These two functions are kept as no-ops rather than deleted, because
-// they are called from four places in the reconnection logic below and a
-// silent indicator is a smaller change than four conditionals.
-//
-// To put it back: build the element here and write the state onto it. The
-// state names have not changed -- live, down, stale.
-// ==========================================
-function buildLiveIndicator() { /* deliberately nothing; see above */ }
+// The connection indicator dot was removed; the state is still tracked (it
+// drives the stale footer and the reload card) and these stay as no-ops.
+function buildLiveIndicator() {}
 
-// Nothing is drawn, but the state is still recorded. A connection state that
-// is not written down anywhere cannot be read by anything -- not by a check
-// driving two browsers against each other, not by somebody typing liveState
-// into a console to find out why a screen has gone quiet. The dot was the
-// only place it was written down, so with the dot gone it is written here.
 let liveState = 'connecting';
 
 function setLiveIndicator(state, word) {

@@ -1,7 +1,4 @@
-// Drives the rebuilt System Administrator page in a real browser against the
-// stub, checking the things a screenshot alone would not: that a table starts
-// closed, that it pages ten rows at a time, that the filters narrow it, and
-// that the modals and the drawer open with the record they were clicked on.
+// Drives the System Administrator page in a real browser against the stub.
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
@@ -17,10 +14,7 @@ function check(name, passed, note) {
   console.log(`${passed ? "  ok  " : " FAIL "} ${name}${passed || !note ? "" : "  -- " + note}`);
 }
 
-// A console line worth failing over is one this system caused. The font CDN
-// is deliberately non-blocking and simply does not load on a machine with no
-// internet, which is most machines this runs on; a favicon nobody added is a
-// favicon nobody needs. Neither says anything about whether the screens work.
+// only console lines this system caused: the font CDN and the favicon are noise
 function isOurProblem(text) {
   return !/fonts\.(googleapis|gstatic)\.com|favicon|ERR_TUNNEL_CONNECTION_FAILED|net::ERR_/.test(String(text));
 }
@@ -56,8 +50,7 @@ function isOurProblem(text) {
 
   const shot = (name) => page.screenshot({ path: path.join(OUT, name + ".png"), fullPage: true });
 
-  // the headings a reader can see, which is not the same as the headings in
-  // the markup once a filter has taken one off the grid
+  // the headings a reader can see, after a filter has taken one off the grid
   const shownHeaders = (table) => page.evaluate((id) =>
     [...document.querySelectorAll("#" + id + " thead th")]
       .filter((th) => getComputedStyle(th).display !== "none")
@@ -160,22 +153,38 @@ function isOurProblem(text) {
   await page.selectOption("#accounts-role", "all");
   await page.waitForTimeout(300);
 
-  // ---------- 5. search ----------
+  // ---------- 5. search: Enter runs it, and it matches the start of a field ----------
+  const rowsBefore = await page.locator("#accounts-table tbody tr").count();
   await page.fill("#accounts-search", "rosa");
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(400);
+  check("typing alone does not search",
+    await page.locator("#accounts-table tbody tr").count() === rowsBefore);
+
+  await page.press("#accounts-search", "Enter");
+  await page.waitForTimeout(400);
   const found = await page.locator("#accounts-table tbody tr").count();
-  check("search narrows to one person", found === 1, `saw ${found}`);
+  check("Enter narrows to one person", found === 1, `saw ${found}`);
   await shot("05-accounts-search");
 
+  // "osa" is inside Rosa but no field starts with it
+  await page.fill("#accounts-search", "osa");
+  await page.press("#accounts-search", "Enter");
+  await page.waitForTimeout(400);
+  check("a search matches the start of a field, not the middle",
+    /No match found/i.test(await page.textContent("#accounts-table tbody")));
+
   await page.fill("#accounts-search", "zzzzz");
-  await page.waitForTimeout(600);
+  await page.press("#accounts-search", "Enter");
+  await page.waitForTimeout(400);
   check("a search with no match says so",
     /No match found/i.test(await page.textContent("#accounts-table tbody")));
   await page.fill("#accounts-search", "");
-  await page.waitForTimeout(600);
+  await page.press("#accounts-search", "Enter");
+  await page.waitForTimeout(400);
 
   // ---------- 6. the user card ----------
-  await page.click("#accounts-table tbody tr:first-child");
+  // the second row: the first is the signed-in administrator, whose card has no Edit tab
+  await page.click("#accounts-table tbody tr:nth-child(2)");
   await page.waitForTimeout(400);
   check("clicking a row opens the user card",
     await page.locator("#user-modal.open").count() === 1);
@@ -204,6 +213,28 @@ function isOurProblem(text) {
 
   await page.click("#user-modal .modal-close");
   await page.waitForTimeout(300);
+
+  // the signed-in administrator is staff #1 in the stub
+  await page.evaluate("openUserModal(1)");
+  await page.waitForTimeout(300);
+  check("the administrator's own card says it cannot be edited here",
+    await page.locator("#modal-own-note").isVisible());
+  check("the Edit tab is not offered on their own card",
+    !(await page.locator("#modal-edit-tab").isVisible()));
+  check("Deactivate and Reset Password are off on their own card",
+    await page.locator("#modal-status-btn").isDisabled() &&
+    await page.locator("#modal-reset-btn").isDisabled());
+  await shot("06d-own-card");
+  await page.evaluate("closeModal('user-modal')");
+  await page.waitForTimeout(200);
+
+  await page.evaluate("openUserModal(2)");
+  await page.waitForTimeout(300);
+  check("somebody else's card still offers Edit",
+    await page.locator("#modal-edit-tab").isVisible() &&
+    await page.locator("#modal-status-btn").isEnabled());
+  await page.evaluate("closeModal('user-modal')");
+  await page.waitForTimeout(200);
 
   // ---------- 6b. cancelling the create form empties it ----------
   await page.evaluate("showCreateAccount()");
@@ -291,6 +322,11 @@ function isOurProblem(text) {
   check("the type filter narrows the trail",
     await page.locator("#logs-table tbody .badge:has-text('Failed sign-in')").count() ===
     await page.locator("#logs-table tbody tr").count());
+  check("the Receipt Maintenance screen is named in the menu",
+    await page.locator(".sidebar-nav a", { hasText: "Receipt Maintenance" }).count() === 1);
+  check("the create form's button says Create",
+    (await page.textContent("#create-user-form button[type='submit']")).trim() === "Create");
+
   check("the type filter takes the Action Type column off the grid",
     !(await shownHeaders("logs-table")).includes("Action Type") &&
     (await shownHeaders("logs-table")).includes("Timestamp"),
@@ -400,12 +436,161 @@ function isOurProblem(text) {
     await page.locator("#store-save-btn").isDisabled());
   await shot("18-store-saved");
 
-  // ---------- 10. the toast clock ----------
+  // ---------- 10. access control: who holds the keys ----------
+  await page.evaluate("showAccessControl()");
+  await page.waitForTimeout(400);
+  check("the access list starts closed",
+    /read yet/i.test(await page.textContent("#access-table tbody")));
+  await shot("19-access-closed");
+
+  await page.click("#panel-access .panel-toolbar button:has-text('Load Data')");
+  await page.waitForTimeout(600);
+  const holders = await page.locator("#access-table tbody tr").count();
+  check("the list holds every non-administrator with a login, ten to a page",
+    holders === 10, `saw ${holders}`);
+  check("a person holding nothing says Nothing",
+    await page.locator("#access-table tbody tr", { hasText: "Nothing" }).count() > 0);
+  check("a person holding control is marked",
+    await page.locator("#access-table .access-chip.has-control").count() >= 1);
+  await shot("20-access-list");
+
+  await page.selectOption("#access-holding", "some");
+  await page.waitForTimeout(300);
+  const holdingSome = await page.locator("#access-table tbody tr").count();
+  check("the holding filter narrows to the people who hold something",
+    holdingSome === 2 && await page.locator("#access-table tbody tr", { hasText: "Nothing" }).count() === 0,
+    `saw ${holdingSome}`);
+  await page.selectOption("#access-holding", "all");
+  await page.waitForTimeout(300);
+
+  // Rosa (staff 3) holds nothing yet
+  await page.click("#access-table tbody tr:has-text('Rosa')");
+  await page.waitForTimeout(400);
+  check("the matrix opens on the person clicked",
+    await page.locator("#access-modal.open").count() === 1 &&
+    /Rosa/.test(await page.textContent("#access-name")));
+  const matrixRows = await page.locator("#access-matrix tbody tr[data-system-row]").count();
+  check("one line per registered system", matrixRows === 6, `saw ${matrixRows}`);
+  check("Save Access is off until a box changes",
+    await page.locator("#access-save-btn").isDisabled());
+
+  await page.check("#access-matrix input[data-system='backup'][data-level='control']");
+  await page.waitForTimeout(200);
+  check("ticking control ticks monitor with it",
+    await page.isChecked("#access-matrix input[data-system='backup'][data-level='monitor']"));
+  check("Save Access wakes up once something changed",
+    !(await page.locator("#access-save-btn").isDisabled()));
+
+  await page.uncheck("#access-matrix input[data-system='backup'][data-level='monitor']");
+  await page.waitForTimeout(200);
+  check("clearing monitor clears control with it",
+    !(await page.isChecked("#access-matrix input[data-system='backup'][data-level='control']")));
+  check("and Save goes back off, because the boxes are back where they were",
+    await page.locator("#access-save-btn").isDisabled());
+
+  await page.check("#access-matrix input[data-system='backup'][data-level='control']");
+  await page.fill("#access-matrix input.access-note[data-system='backup']", "Takes a backup before the count");
+  await page.waitForTimeout(200);
+  await shot("21-access-matrix");
+
+  await page.click("#access-save-btn");
+  await page.waitForTimeout(400);
+  check("saving reads the change back first",
+    await page.locator("#ask-modal.open").count() === 1 &&
+    /Grant control/.test(await page.textContent("#ask-title")));
+  check("and the card is crimson because control is being handed out",
+    await page.locator("#ask-ok.btn-danger").count() === 1);
+  check("the card names the system and the levels",
+    /Automatic Backup/.test(await page.textContent("#ask-detail")) &&
+    /control/.test(await page.textContent("#ask-detail")));
+  await shot("22-access-confirm");
+
+  await page.click("#ask-ok");
+  await page.waitForTimeout(700);
+  check("the matrix closes once saved",
+    await page.locator("#access-modal.open").count() === 0);
+  check("the row now says what was granted",
+    await page.locator("#access-table tbody tr:has-text('Rosa') .access-chip.has-control").count() === 1);
+  await shot("23-access-saved");
+
+  // ---------- 11. the connected systems ----------
+  await page.evaluate("showConnectedSystems()");
+  await page.waitForTimeout(400);
+  check("the systems screen starts closed",
+    /asked yet/i.test(await page.textContent("#systems-grid")));
+  check("the register form is offered to the administrator",
+    await page.locator("#systems-register-card").isVisible());
+  await shot("24-systems-closed");
+
+  await page.click("#systems-load-btn");
+  await page.waitForTimeout(600);
+  const cards = await page.locator("#systems-grid .system-card").count();
+  check("one card per system", cards === 6, `saw ${cards}`);
+  check("a healthy system says so in a word",
+    await page.locator(".system-card.is-ok .system-state", { hasText: "Healthy" }).count() >= 1);
+  check("a system that cannot be reached reads as a problem, not an error",
+    await page.locator(".system-card.is-bad .system-state", { hasText: "Problem" }).count() === 1);
+  check("a switched-off system offers no live commands",
+    await page.locator(".system-card.is-disabled .system-actions .btn:not([disabled])", { hasText: "sweep" }).count() === 0);
+  await shot("25-systems-loaded");
+
+  await page.click(".system-card:has-text('Automatic Backup') button:has-text('Run a backup now')");
+  await page.waitForTimeout(400);
+  check("a command asks first",
+    await page.locator("#ask-modal.open").count() === 1 &&
+    /Run a backup now/.test(await page.textContent("#ask-title")));
+  check("and says it will be written to the trail in the person's name",
+    /Recorded as/.test(await page.textContent("#ask-detail")));
+  await shot("26-systems-command-ask");
+  await page.click("#ask-ok");
+  await page.waitForTimeout(700);
+  check("the command reports back",
+    await page.locator(".toast-card", { hasText: "Done on Automatic Backup" }).count() === 1);
+
+  await page.click(".system-card:has-text('Automatic Backup') button:has-text('Pause')");
+  await page.waitForTimeout(300);
+  check("a dangerous command asks in crimson",
+    await page.locator("#ask-ok.btn-danger").count() === 1);
+  await page.click("#ask-cancel");
+  await page.waitForTimeout(300);
+
+  await page.click(".system-card:has-text('Archive Sweep') button:has-text('Settings')");
+  await page.waitForTimeout(300);
+  check("Settings opens the system's card",
+    await page.locator("#system-modal.open").count() === 1 &&
+    /Archive Sweep/.test(await page.textContent("#system-modal-name")));
+  check("an internal system has no address to edit",
+    !(await page.locator("#system-form-url-group").isVisible()));
+  await page.selectOption("#system-form-enabled", "true");
+  await page.click("#system-form button[type='submit']");
+  await page.waitForTimeout(700);
+  check("switching it on brings its commands back",
+    await page.locator(".system-card:has-text('Archive Sweep') button:has-text('Run the sweep now'):not([disabled])").count() === 1);
+  await shot("27-systems-switched-on");
+
+  await page.fill("#sys-key", "Second Branch!");
+  check("the key box keeps only what a key may hold",
+    (await page.inputValue("#sys-key")) === "secondbranch", await page.inputValue("#sys-key"));
+  await page.fill("#sys-key", "second-branch");
+  await page.fill("#sys-name", "Second Branch");
+  await page.fill("#sys-url", "https://branch.example.com/health");
+  await page.click("#systems-register-form button[type='submit']");
+  await page.waitForTimeout(400);
+  check("registering reads the system back first",
+    await page.locator("#ask-modal.open").count() === 1 &&
+    /second-branch/.test(await page.textContent("#ask-detail")));
+  await page.click("#ask-ok");
+  await page.waitForTimeout(700);
+  check("the new system gets a card",
+    await page.locator("#systems-grid .system-card", { hasText: "Second Branch" }).count() === 1);
+  await shot("28-systems-registered");
+
+  // ---------- 12. the toast clock ----------
   const life = await page.evaluate("JSON.stringify(TOAST_LIFE)");
   check("an error card stays at least four seconds",
     JSON.parse(life).danger >= 4000, life);
 
-  // ---------- 11. nothing loaded that was not asked for ----------
+  // ---------- 13. nothing loaded that was not asked for ----------
   const autoLoaded = requested.filter((url) =>
     /\/api\/(users|audit-logs|backups)/.test(url));
   check("the page made no table request before it was told to",

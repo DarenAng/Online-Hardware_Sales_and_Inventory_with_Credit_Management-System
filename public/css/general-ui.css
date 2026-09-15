@@ -2,79 +2,26 @@
    GENERAL UI
    Hardware Sales & Inventory with Credit Management
 
-   Everything two or more roles share: the colours and type, the shell every
-   dashboard sits in, and the components that look the same whoever is signed
-   in. Anything only one role ever sees lives in css/modules/ instead, and the
-   phone layout lives in css/responsive.css.
-
-   Load order on every page:
+   Everything two or more roles share. Role-only styles live in css/modules/,
+   the phone layout in css/responsive.css. Load order on every page:
        general-ui.css  ->  responsive.css  ->  modules/<role>.css
 
-   WHAT THE COLOURS MEAN
-   Four meanings, learned once, holding on every screen:
+   Colour meanings, held on every screen:
+     ORANGE  press this (buttons, the menu item you are on, the tab, the brand)
+     GREEN   fine, nothing to do (Paid, Delivered, In Stock, saved)
+     AMBER   look at this; nothing is broken yet
+     CRIMSON this stops something, or money is owed
+   Everything else is grey. Orange and crimson are separated by weight, not
+   hue, and colour is never the only carrier. Text clears 4.5:1, edges 3:1.
 
-     ORANGE  press this. It is the shop's own orange, and in here it is
-             reserved for things a person does: primary buttons, the menu
-             item you are on, the tab you are reading, the brand corner.
-     GREEN   this is fine, nothing to do. Paid, Delivered, In Stock, saved.
-     AMBER   look at this. Nothing is broken yet.
-             Unread alerts, low stock, part payments, delays, counts.
-     CRIMSON this stops something, or money is owed.
-             Delete, deactivate, restore-over-everything, Unpaid, Failed.
-
-   Anything that is none of those four is grey, so the coloured things stay
-   worth noticing.
-
-   WHY ACTIONS AND STATES ARE DIFFERENT COLOURS
-   The earlier palette gave one colour both jobs: the same blue meant "press
-   this" and "this is fine". It reads well on a button and badly in a table,
-   where a column of blue badges and a blue button in the corner compete for
-   the same glance. Splitting them means a table's badges are never the same
-   colour as the thing you press on that screen. The orange belongs to the
-   shop, so the shop's colour is the one you act with.
-
-   WHERE THE ORANGE AND THE AMBER COME FROM
-   The orange is the store's own, taken from the sign over the door and the
-   logo on the vans. The amber did not move when the system was repainted: it
-   was already a safety yellow rather than a decorative gold, and it already
-   means on a low-stock row exactly what it means on a hard hat.
-
-   THE ORANGE AND THE CRIMSON ARE KEPT APART ON PURPOSE
-   Two warm colours a hue apart is how somebody deletes a cashier account on
-   a Friday afternoon while meaning to save one. So they are separated by
-   weight rather than by hue: the orange is bright and the crimson is dark,
-   twice its depth, and no destructive button is ever the brightest thing on
-   its screen. Colour is never the only carrier either — every badge, button
-   and banner says its own word — so the system reads the same to somebody
-   who cannot tell the orange from the crimson.
-
-   Every pair here was measured rather than eyeballed: text clears 4.5:1 on
-   its own ground and every meaningful edge clears 3:1.
-
-   TWO STRUCTURAL DEVICES, AND NO MORE
-   Meaning is carried by a 3px rule down the left edge. It marks KPI cards,
-   warning banners, alerts, popup cards, notes and the menu item you are on.
-   Every other separation in the system is a hairline.
-
-   The second is the hazard stripe, and it appears in exactly two places: on
-   a purchase order, which is the one screen printed and handed to somebody
-   outside the shop, and on the callout that says a material is not on the
-   books yet. Both are moments where the screen is telling you it has left
-   the ordinary run of things. Keeping both devices rare is what keeps them
-   readable.
+   Two structural devices only: a 3px rule down the left edge for meaning,
+   and the hazard stripe on a purchase order and the new-material callout.
    ========================================================================== */
 
-/* The two families are pulled in by each page with a non-blocking <link>, so
-   a machine with no internet still paints straight away on the fallback
-   stacks named in --font-ui and --font-figure. */
+/* fonts are non-blocking; the fallback stacks paint straight away offline */
 
 :root {
-    /* ---- ink and ground ----
-       The greys are the greys of the trade: poured concrete underfoot and
-       galvanised steel on the racking. They are very slightly cool, which is
-       what keeps the orange warm rather than muddy, and they are neutral
-       enough that a page of mostly text reads as paper rather than as a
-       tinted sheet. */
+    /* ---- ink and ground: slightly cool greys, so the orange stays warm ---- */
     --ink:         #14181d;   /* body text */
     --chrome:      #1b1f24;   /* menu, table heads, popup heads */
     --chrome-2:    #2b323a;
@@ -85,10 +32,7 @@
     --surface:     #ffffff;   /* cards, rows, fields */
     --line:        #d5d8dd;   /* every hairline in the system */
 
-    /* ---- the four meanings ----
-       Each pair is measured rather than eyeballed: text on its own ground
-       clears 4.5:1 and every meaningful edge clears 3:1, checked before it
-       was used. The ratio is written beside anything that was close. */
+    /* ---- the four meanings; the ratio is written beside anything that was close ---- */
 
     /* The sign over the door. Bright enough to be the shop's colour, so it
        is kept for edges, marks and the 3px rule where 3:1 is the bar. */
@@ -101,9 +45,7 @@
     --go-dim:      rgba(208, 64, 15, 0.10);
     --go-ink:      #a83309;   /* orange as small text, 5.9:1 on --go-dim */
 
-    /* Nothing to do here. Deep enough to sit in a table all day without
-       shouting, and far enough from the orange that a glance tells them
-       apart at badge size. */
+    /* nothing to do here; far enough from the orange to tell apart at badge size */
     --ok:          #0e7a5f;   /* white on it, 5.3:1 */
     --ok-hi:       #0b6650;
     --ok-dim:      rgba(14, 122, 95, 0.10);
@@ -120,8 +62,7 @@
     --stop-hi:     #7d1327;
     --stop-dim:    rgba(158, 27, 50, 0.09);
 
-    /* Each role tints the rule under its own menu brand, so a glance at the
-       top left corner says which system you are in. Modules override it. */
+    /* the rule under the menu brand and along the top of the bar; same on every role */
     --role-tint:   var(--brand);
 
     /* The second structural device, mixed once here and used twice: on a
@@ -137,17 +78,11 @@
     --rule:        3px;       /* the meaning rule */
     --sidebar-w:   252px;
 
-    /* Only things that float above the page carry a shadow: popups, the
-       menus that hang off the top bar, and the alert cards. Cards on the
-       page are separated by a hairline and nothing else. */
+    /* only things that float above the page carry a shadow */
     --lift:        0 14px 34px rgba(20, 24, 29, 0.16);
     --lift-high:   0 24px 60px rgba(20, 24, 29, 0.32);
 
-    /* ---- type ----
-       Archivo is signage type: drawn for road signs and newspaper headlines,
-       which is the right voice for a counter, a warehouse and a truck cab.
-       It runs the whole interface. The mono is kept for figures, reference
-       numbers, timestamps and file paths only, never for labels. */
+    /* ---- type: Archivo for the interface, mono for figures and references only ---- */
     --font-ui:     'Archivo', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --font-figure: 'IBM Plex Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
 
@@ -163,9 +98,7 @@
     --border: var(--line);
     --danger: var(--stop);
     --danger-dim: var(--stop-dim);
-    /* --success used to be the same token as --go. It is the green now: the
-       places that reach for it are saying "this went through", not "press
-       this". Anything that wanted the button colour asks for --go. */
+    /* --success is the green ("this went through"); the button colour is --go */
     --success: var(--ok);
     --graphite: var(--chrome);
     --graphite-2: var(--chrome-2);
@@ -194,12 +127,7 @@ body {
 }
 
 /* ==========================================================================
-   TYPOGRAPHY
-
-   One family, four sizes, three weights. Headings are set tight because they
-   are short; body text is set open because it is read. Sentence case
-   throughout: the only uppercase in the system is the brand mark and the
-   role plate in the menu, where it is signage rather than a label.
+   TYPOGRAPHY -- one family, four sizes, three weights, sentence case
    ========================================================================== */
 h1, h2, h3, h4 {
     font-family: var(--font-ui);
@@ -259,9 +187,7 @@ h4 { font-size: 17px; }
 .btn:hover  { background: var(--chrome-2); }
 .btn:active { transform: translateY(1px); }
 
-/* Blue is the button you are meant to press. btn-accent and btn-success are
-   deliberately identical: the pages use both names for the same idea, and two
-   near-identical blues only make people wonder what the difference is. */
+/* btn-accent and btn-success are deliberately identical: one orange to press */
 .btn-accent,
 .btn-success       { background: var(--go); }
 .btn-accent:hover,
@@ -269,23 +195,8 @@ h4 { font-size: 17px; }
 
 /* ==========================================================================
    A BUTTON THAT CANNOT BE PRESSED
-
-   Two things were wrong here and the repaint is what made them visible.
-
-   Bootstrap ships its own .btn.disabled, .btn:disabled rule, and two classes
-   outrank the one class in .btn-success. So every disabled button in the
-   system was being painted by Bootstrap rather than by this file. It went
-   unnoticed for as long as it did because Bootstrap's success green and this
-   system's old green were near enough to pass for each other; the moment the
-   system turned blue, Complete Sale went green while everything around it
-   went blue. The selector below matches Bootstrap's weight so this file wins
-   again, and one !important-free rule now covers every variant.
-
-   The second thing is what disabled should look like at all. Full colour at
-   40% opacity reads as "this is loading, wait" — people hover it and press it
-   again. Flat grey with a grey edge reads as what it is: not yet. A till
-   whose Complete Sale button is grey until there is something to sell is
-   telling the cashier where they are in the job.
+   The selector matches Bootstrap's .btn.disabled weight so this file wins.
+   Flat grey reads as "not yet"; full colour at 40% reads as "loading".
    ========================================================================== */
 .btn:disabled,
 .btn.disabled,
@@ -317,11 +228,7 @@ h4 { font-size: 17px; }
 .btn:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
 /* ==========================================================================
-   FORMS
-
-   Field names are sentence case at a size a person can actually read. They
-   used to be 10.5px tracked-out uppercase, which is a caption pretending to
-   be a label, and it is the first thing that fails on a phone.
+   FORMS -- field names are sentence case at a readable size
    ========================================================================== */
 .form-group { margin-bottom: 15px; }
 .form-group label {
@@ -364,17 +271,8 @@ textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
 .inline-select { padding: 6px 9px; min-height: 34px; font-size: 14px; min-width: 132px; width: auto; }
 
 /* ==========================================================================
-   A PHONE NUMBER
-
-   The +63 is printed, not typed. It reads as part of the field and behaves
-   as part of the field -- focus draws the ring around both halves -- but it
-   is a label, so there is no box for anybody to put a second country code
-   into and no spelling of the number for the database to have to reconcile.
-
-   The digits are set in the figure face. A phone number is a figure: it gets
-   read back one character at a time down a telephone line, and tabular
-   numerals are what keeps a 1 the same width as a 7 while somebody does
-   that.
+   A PHONE NUMBER -- the prefix is printed, not typed; the digits are set in
+   the figure face so a 1 is the same width as a 7
    ========================================================================== */
 .phone-field {
     display: flex;
@@ -412,14 +310,130 @@ textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
     box-shadow: 0 0 0 3px var(--go-dim);
 }
 
-/* Ten digits typed, nine so far. Said while the box is being filled in
-   rather than after the form is submitted, and never while it is empty,
-   because the number is optional. */
+/* ---------- the country beside the box (phone-picker.js) ----------
+   The list it opens is a layer at the foot of the page, above every card. */
+.phone-country {
+    gap: 7px;
+    cursor: pointer;
+    font-family: var(--font-figure);
+    font-size: 13.5px;
+    color: var(--ink);
+    border: none;
+    border-right: 1px solid var(--line);
+    transition: background-color 0.15s;
+}
+.phone-country:hover { background: #e6e8eb; }
+/* the prefix when there is one country to choose from: printed, not pressed */
+.phone-country.is-fixed { cursor: default; }
+.phone-country.is-fixed:hover { background: inherit; }
+.phone-country:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
+.phone-iso {
+    font-family: var(--font-ui);
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em;
+    padding: 2px 5px;
+    border: 1px solid var(--line);
+    border-radius: 3px;
+    background: var(--surface);
+    color: var(--steel);
+}
+.phone-caret {
+    width: 0; height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid var(--steel-soft);
+}
+.phone-menu {
+    position: fixed; z-index: 3000;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 8px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--lift-high);
+}
+.phone-menu-search { flex: none; }
+.phone-menu-list {
+    list-style: none; margin: 0; padding: 0;
+    flex: 1 1 auto; min-height: 0;
+    max-height: 260px; overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.phone-menu-list li {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 7px 9px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 13.5px;
+    color: var(--ink);
+}
+.phone-menu-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.phone-menu-list li.active, .phone-menu-list li:hover { background: var(--paper); }
+.phone-menu-list li.selected { color: var(--go); font-weight: 600; }
+.phone-menu-list li.selected .phone-iso { border-color: var(--go); color: var(--go); }
+.phone-menu-code { font-family: var(--font-figure); color: var(--steel); flex: none; }
+.phone-menu-empty { justify-content: center; color: var(--steel-soft); cursor: default; }
+
+/* said while the box is being filled in, never while it is empty */
 .phone-field:has(.form-control.is-bad) { border-color: var(--signal-hi); }
 .phone-field:has(.form-control.is-bad):focus-within {
     border-color: var(--signal-hi);
     box-shadow: 0 0 0 3px var(--signal-dim);
 }
+
+/* ==========================================================================
+   A PASSWORD -- Show/Hide is a button inside the box, with aria-pressed
+   ========================================================================== */
+.password-field {
+    display: flex;
+    align-items: stretch;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.password-field .form-control {
+    border: none;
+    border-radius: var(--radius) 0 0 var(--radius);
+    background: none;
+    min-width: 0;
+}
+.password-field .form-control:focus { box-shadow: none; }
+.password-field:focus-within {
+    border-color: var(--go);
+    box-shadow: 0 0 0 3px var(--go-dim);
+}
+.password-toggle {
+    flex: none;
+    padding: 0 12px;
+    border: none;
+    border-left: 1px solid var(--line);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: var(--paper);
+    font-family: var(--font-ui);
+    font-size: 13px; font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--steel);
+    cursor: pointer;
+    user-select: none;
+}
+.password-toggle:hover { color: var(--ink); }
+.password-toggle:focus-visible { outline: 2px solid var(--go); outline-offset: -3px; }
+.password-toggle[aria-pressed="true"] { color: var(--go-ink); }
+
+/* the one button for several boxes stands under them, on the right */
+.password-reveal {
+    display: flex;
+    justify-content: flex-end;
+    margin: -8px 0 14px;
+}
+.password-reveal .password-toggle {
+    border: none;
+    border-radius: var(--radius);
+    background: none;
+    padding: 6px 8px;
+    min-height: 32px;
+}
+.password-reveal .password-toggle:hover { background: var(--paper); }
 
 .form-footer {
     display: flex;
@@ -430,8 +444,7 @@ textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
 }
 
 /* ==========================================================================
-   THE SHELL
-   A menu that stays put, a bar that stays put, and the workspace between.
+   THE SHELL -- a menu that stays put, a bar that stays put, the workspace between
    ========================================================================== */
 .wrapper { display: flex; min-height: 100vh; align-items: flex-start; }
 
@@ -563,13 +576,21 @@ textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
     color: rgba(255, 255, 255, 0.6);
 }
 
-/* Once the strip at the top is carrying a module's screens, the menu stops
-   carrying them too: one list, one job. The class is put on <body> by
-   subnav.js only after a strip has actually been built, so if that script
-   never runs the menu keeps its sub-lists and nothing is unreachable. */
-body.has-subnav .sidebar-nav .nav-sub { display: none !important; }
-body.has-subnav .sidebar-nav .nav-caret { display: none; }
-body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
+/* once the strip carries a module's screens the menu stops carrying them;
+   the class is put on <body> by subnav.js only after a strip is built */
+body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-sub { display: none !important; }
+body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) .nav-caret { display: none; }
+body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { justify-content: flex-start; }
+
+/* a module that stays a dropdown keeps its caret; flex here outranks the block rule above */
+.sidebar-nav li[data-sidebar-dropdown] > .nav-parent {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+}
+.sidebar-nav li[data-sidebar-dropdown] .nav-caret { flex-shrink: 0; transition: transform 0.16s ease; }
+.sidebar-nav li[data-sidebar-dropdown] .nav-parent.is-open .nav-caret { transform: rotate(180deg); }
 
 /* The shade that appears behind the menu once it slides over the page. It is
    inert on a desktop; responsive.css gives it a size. */
@@ -577,9 +598,7 @@ body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
     display: none;
     position: fixed;
     inset: 0;
-    /* above the top bar, which sticks at 500: dimming the page but leaving
-       the bell and the account chip lit made the corner look like it was
-       still live while the menu was over everything else */
+    /* above the top bar, which sticks at 500 */
     z-index: 900;
     background: rgba(20, 24, 29, 0.55);
     opacity: 0;
@@ -596,23 +615,10 @@ body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
     background: var(--paper);
 }
 
-/* Solid on purpose: rows scrolling under a translucent bar made the top of
-   the page look smudged. The z-index puts the account menu hanging off it in
-   front of the cards rather than behind them.
-
-   WHY IT IS NOT PLAIN WHITE ANY MORE
-   The bar was --surface on a --paper page, which is the same white as every
-   card sitting under it. On a wide monitor that made the one strip holding
-   the title, the bell and the way out read as the top of the first card,
-   and people went looking for the account menu in the menu instead. So it
-   is separated three ways at once: a tinted band along its top edge, a
-   ground a shade off the cards below it, and a soft shadow that puts it in
-   front of the page rather than in it.
-
-   All three are drawn rather than added: the tint is an inset shadow and the
-   shadow spills outside the box, so the bar is exactly the height it always
-   was. The strip below it is sticky at top: 58px, and that arithmetic must
-   keep holding. */
+/* Solid on purpose: rows scrolling under a translucent bar looked smudged.
+   Separated from the cards by a tinted top edge (inset shadow), a ground a
+   shade off, and a soft shadow, all drawn so the bar stays exactly 58px:
+   the strip below is sticky at top: 58px. */
 .topbar {
     position: sticky;
     top: 0;
@@ -635,10 +641,7 @@ body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
     color: var(--ink);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* The bar is no longer plain white, so the two controls standing on it get a
-   hairline one step darker than the one they use elsewhere. Without it a
-   white chip on an off-white bar has no edge at all, which is the opposite
-   of the problem this section is solving. */
+/* a white chip on an off-white bar needs a darker hairline to have an edge */
 .topbar .bell,
 .topbar .account-chip { border-color: #c2c6cd; }
 
@@ -665,72 +668,52 @@ body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
 
 /* ==========================================================================
    THE SUBMODULE STRIP
-
-   The menu on the left is how you get anywhere in the system: it holds the
-   modules, and it is the same on every screen. This strip holds one module's
-   screens and nothing else, so it changes as you move and it disappears
-   entirely on a module that has only one screen. Two levels, each with one
-   job, and neither repeating the other.
-
-   It is built by subnav.js from the menu that is already in the page, so a
-   screen a role cannot reach never has a tab here: the strip is generated
-   from what the person can actually open, not filtered afterwards.
-
-   Set in caps because it is signage rather than prose -- it is the only
-   place in the system that is, apart from the role plate in the menu -- and
-   the hairlines between tabs are the same hairlines as everywhere else.
+   One module's screens, built by subnav.js from the menu already in the page.
+   Set in caps because it is signage.
    ========================================================================== */
+/* sits inside the card, under the card's heading, as a row of tabs */
 .subnav {
-    position: sticky;
-    top: 58px;
-    z-index: 490;
     display: flex;
-    align-items: stretch;
-    gap: 0;
-    padding: 0 20px;
-    background: var(--surface);
+    gap: 22px;
+    margin: -2px 0 16px;
     border-bottom: 1px solid var(--line);
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
     scrollbar-width: thin;
 }
 .subnav[hidden] { display: none; }
 .subnav::-webkit-scrollbar { height: 0; }
 
-/* Sized so that a module of seven screens still fits a laptop without
-   scrolling: a tab you have to find by dragging is a tab nobody presses. */
 .subnav-tab {
     position: relative;
     display: inline-flex;
     align-items: center;
-    padding: 12px 13px;
+    padding: 10px 2px;
     min-height: 44px;
     border: 0;
-    border-right: 1px solid var(--line);
     background: none;
     color: var(--steel);
     font-family: var(--font-ui);
-    font-size: 11.5px;
+    font-size: 15px;
     font-weight: 600;
-    letter-spacing: 0.055em;
-    text-transform: uppercase;
+    letter-spacing: -0.01em;
     white-space: nowrap;
     cursor: pointer;
-    transition: color 0.15s, background 0.15s;
+    transition: color 0.15s;
 }
-.subnav-tab:first-child { border-left: 1px solid var(--line); }
-.subnav-tab:hover { color: var(--ink); background: var(--paper); }
+.subnav-tab:hover { color: var(--ink); }
 
-/* the meaning rule, laid on its side: this is the screen you are on */
+/* the rule under the tab you are on */
 .subnav-tab::after {
     content: '';
     position: absolute; left: 0; right: 0; bottom: -1px;
-    height: var(--rule);
-    background: var(--brand);
+    height: 2px;
+    background: var(--go);
     transform: scaleX(0);
     transition: transform 0.16s ease;
 }
-.subnav-tab.is-current { color: var(--ink); }
+.subnav-tab.is-current { color: var(--go); }
 .subnav-tab.is-current::after { transform: scaleX(1); }
 .subnav-tab:focus-visible { outline: 2px solid var(--go); outline-offset: -3px; }
 
@@ -811,16 +794,8 @@ body.has-subnav .sidebar-nav .nav-parent { justify-content: flex-start; }
 .search-input { padding-left: 36px; }
 
 /* ==========================================================================
-   TABLES
-
-   Column headings are sentence case at a readable size. They used to be 10px
-   uppercase tracked out to 0.14em, which is a decorative treatment applied to
-   the one piece of text that tells you what a figure means.
-
-   Figures are set in the mono face and aligned right, headings and all, so a
-   column of amounts reads as a column. alignTableColumns() in tables.js puts
-   the col-* classes on the headers by reading the row underneath, so a table
-   never has to repeat itself.
+   TABLES -- figures are mono and right aligned, headings included;
+   alignTableColumns() in tables.js puts the col-* classes on the headers
    ========================================================================== */
 .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
@@ -856,13 +831,45 @@ table th.col-action,
 table td.cell-action { text-align: right; white-space: nowrap; }
 table td.cell-action .btn + .btn { margin-left: 6px; }
 
-/* A column a filter has made redundant: pick "Cashier" in the role filter
-   and the Role column says Cashier on every row. hideFilteredColumns() in
-   tables.js marks the heading and every cell under it; the selectors are
-   weighted to beat the phone layout in responsive.css, which turns each
-   cell into a flex line and would otherwise draw it anyway. */
+/* a column a filter has made redundant (hideFilteredColumns in tables.js);
+   weighted to beat the phone layout in responsive.css */
 table thead tr th.col-hidden,
 table tbody tr td.col-hidden { display: none; }
+
+/* a column marked th data-secondary is off the grid until asked for (tables.js);
+   on paper every column is drawn */
+table thead tr th.col-secondary,
+table tbody tr td.col-secondary { display: none; }
+
+.columns-bar { display: flex; justify-content: flex-end; margin: 6px 0 2px; }
+.columns-toggle { font-size: 12.5px; }
+
+/* a row with no popup of its own unfolds in place when pressed */
+.row-expandable { cursor: pointer; transition: background 0.14s; }
+.row-expandable:hover { background: var(--paper); }
+.row-expandable td:first-child { padding-left: 26px; position: relative; }
+.row-expandable td:first-child::after {
+    content: '';
+    position: absolute; left: 11px; top: 50%;
+    width: 6px; height: 6px;
+    border-right: 1.5px solid var(--steel-soft);
+    border-bottom: 1.5px solid var(--steel-soft);
+    transform: translateY(-60%) rotate(-45deg);
+    transition: transform 0.16s ease;
+}
+.row-expandable.is-expanded td:first-child::after { transform: translateY(-70%) rotate(45deg); }
+.row-expandable:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
+
+table tbody tr.row-details td {
+    background: var(--paper);
+    border-left: var(--rule) solid var(--steel-soft);
+    padding: 10px 14px 12px;
+}
+table tbody tr.row-details:nth-child(even) td { background: var(--paper); }
+.row-details-list { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; }
+.row-details-item { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.row-details-item dt { font-size: 12px; font-weight: 500; color: var(--steel-soft); white-space: nowrap; }
+.row-details-item dd { margin: 0; font-size: 13.5px; }
 
 .cell-id {
     font-family: var(--font-figure);
@@ -910,9 +917,7 @@ table tbody tr td.col-hidden { display: none; }
 }
 
 /* ==========================================================================
-   EMPTY STATE
-   A screen with nothing on it is an invitation, not a dead end, so it says
-   what to press.
+   EMPTY STATE -- says what to press
    ========================================================================== */
 .empty-state { text-align: center; padding: 44px 20px 40px; }
 .empty-mark {
@@ -932,10 +937,7 @@ table tbody tr td.col-hidden { display: none; }
     margin: 0 auto 18px;
     line-height: 1.6;
 }
-/* A screen naming a menu item you have to open names it like this. It was
-   styled inside the empty state only, so the same key printed in a panel's
-   opening line fell through to Bootstrap's black chip and looked like a
-   different thing entirely. */
+/* a menu item named in a sentence; styled here so it does not fall through to Bootstrap */
 kbd {
     font-family: var(--font-ui);
     font-size: 0.94em;
@@ -950,9 +952,7 @@ kbd {
 }
 
 /* ==========================================================================
-   BADGES
-   The state of one record. A badge reports; it is never something you press,
-   so a badge is never the action orange.
+   BADGES -- a badge reports; it is never the action orange
    ========================================================================== */
 .badge {
     display: inline-flex;
@@ -979,10 +979,7 @@ kbd {
 .badge-neutral { background: rgba(20, 24, 29, 0.06); color: var(--steel); border-color: rgba(20, 24, 29, 0.14); }
 
 /* ==========================================================================
-   THE FIGURES
-   The largest type in the system, because counting is what this system does.
-   The rule on the left says whether the number is fine, worth a look, or a
-   problem.
+   THE FIGURES -- the rule on the left says whether the number is fine
    ========================================================================== */
 .kpi-grid {
     display: grid;
@@ -1003,18 +1000,22 @@ kbd {
 .kpi-card.kpi-danger { border-left-color: var(--stop); }
 .kpi-label { font-size: 13px; font-weight: 500; color: var(--steel); }
 .kpi-value {
-    font-size: clamp(28px, 3.2vw, 38px);
+    font-size: clamp(26px, 2.6vw, 36px);
     font-weight: 700;
     letter-spacing: -0.03em;
     line-height: 1.05;
     color: var(--ink);
     font-variant-numeric: tabular-nums;
+    /* a figure never breaks in half: the peso sign made the long ones a
+       character wider, and half a number on each line reads as two numbers */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 .kpi-note { font-size: 12.5px; color: var(--steel-soft); }
 
 /* ==========================================================================
    COUNTERS AND FILTERS
-   The stage counts above a delivery table, and the chips that narrow a list.
    ========================================================================== */
 .track-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
 .track-chip {
@@ -1099,15 +1100,26 @@ kbd {
 }
 .modal.open { display: flex; align-items: flex-start; justify-content: center; }
 
+/* ==========================================================================
+   A CARD THAT HOLDS ITS SHAPE
+   The box is a column (head, tabs, body, foot) and only the body flexes; the
+   body has a floor on paged popups and a ceiling from the window; the box
+   hangs from a fixed distance below the top, so a change of height moves
+   the bottom edge only. Nothing inside can widen it.
+   ========================================================================== */
 .modal-box {
     background: var(--surface);
     border-radius: var(--radius-lg);
     width: 100%; max-width: 660px;
-    margin: auto;
+    margin: 4vh auto auto;
+    max-height: calc(100vh - 52px - 4vh);
+    display: flex;
+    flex-direction: column;
     box-shadow: var(--lift-high);
     animation: modal-rise 0.2s cubic-bezier(0.2, 0.7, 0.3, 1);
     overflow: hidden;
 }
+.modal-head, .modal-tabs, .modal-steps, .modal-foot { flex: none; }
 @keyframes modal-rise {
     from { opacity: 0; transform: translateY(14px) scale(0.986); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1171,7 +1183,60 @@ kbd {
 .modal-tab:hover { color: var(--ink); }
 .modal-tab.active { color: var(--go); border-bottom-color: var(--go); }
 
-.modal-body { padding: 18px 22px; flex: none; }
+.modal-body {
+    padding: 18px 22px;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* a card does not scroll: what does not fit goes onto a second page (modals.js) */
+.modal,
+.modal-tabs,
+.modal-steps {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.modal::-webkit-scrollbar,
+.modal-tabs::-webkit-scrollbar,
+.modal-steps::-webkit-scrollbar { display: none; }
+
+/* The pages: the wrapper is the body's height and one column wide; overflow
+   lays into further columns to the right and the wrapper slides sideways. */
+.modal-pages {
+    column-count: 1;
+    column-fill: auto;
+    will-change: transform;
+}
+.modal-pages .detail-item,
+.modal-pages .form-group,
+.modal-pages .form-footer,
+.modal-pages .detail-note,
+.modal-pages .detail-actions,
+.modal-pages .detail-empty,
+.modal-pages .timeline li,
+.modal-pages tr,
+.modal-pages thead,
+.modal-pages p,
+.modal-pages li,
+.modal-pages .row > * { break-inside: avoid; }
+.modal-pages thead { break-after: avoid; }
+.modal-pages .table-responsive { overflow: visible; }
+.modal-pages .detail-grid { overflow: clip; }
+
+.modal-pager {
+    display: flex; align-items: center; gap: 8px;
+    margin-right: auto;
+}
+.modal-pager .btn[disabled] { opacity: 0.4; cursor: default; }
+
+/* The locked height, only on popups that page or tab. 540px holds the
+   longest ordinary page; on a short window the height comes from the window. */
+.modal-tabs + .modal-body,
+.modal-steps + .modal-body {
+    flex: 0 0 auto;
+    height: min(540px, calc(100vh - 270px));
+}
 
 .modal-foot {
     display: flex; justify-content: flex-end; gap: 9px;
@@ -1179,19 +1244,12 @@ kbd {
     background: var(--paper);
     border-top: 1px solid var(--line);
 }
-.modal-pager { justify-content: space-between; align-items: center; }
-.pager-count {
-    font-family: var(--font-figure);
-    font-size: 12px;
-    color: var(--steel);
-}
-.modal-pager .btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.modal-pager .btn:disabled:hover { background: transparent; }
-.modal-pager .btn-accent:disabled:hover { background: var(--go); }
 
-/* ---------- what a record says ---------- */
+/* ---------- what a record says ----------
+   every row of the grid is the same height, so two pages line up cell for cell */
 .detail-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+    grid-auto-rows: minmax(60px, auto);
     background: var(--line);
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -1200,10 +1258,17 @@ kbd {
 .detail-item {
     display: flex; flex-direction: column; gap: 2px;
     padding: 10px 13px;
+    min-width: 0;
     background: var(--surface);
 }
 .detail-label { font-size: 12.5px; color: var(--steel-soft); }
-.detail-value { font-size: 14.5px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
+.detail-value {
+    font-size: 14.5px; font-weight: 500; color: var(--ink);
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+/* a badge in a narrow cell wraps its words rather than the cell's edge */
+.detail-value .badge { white-space: normal; }
 
 .mini-table { margin-top: 0; }
 .mini-table th { font-size: 12px; padding: 8px 10px; }
@@ -1274,8 +1339,8 @@ kbd {
     background: var(--surface);
 }
 .timeline li.done { color: var(--ink); font-weight: 500; }
-.timeline li.done .timeline-dot { border-color: var(--go); background: var(--go); }
-.timeline li.done::before { background: var(--go); }
+.timeline li.done .timeline-dot { border-color: var(--ok); background: var(--ok); }
+.timeline li.done::before { background: var(--ok); }
 
 /* ---------- the question card ---------- */
 .ask-box { max-width: 460px; }
@@ -1350,9 +1415,7 @@ kbd {
 .notif-head .eyebrow { margin-bottom: 0; font-weight: 600; color: var(--ink); }
 .notif-list { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
 
-/* An alert says what happened, who caused it, and when. Without the last two
-   it is a sentence floating in space and nobody can tell whether it is this
-   morning's problem or last month's. */
+/* an alert says what happened, who caused it, and when */
 .notif-item {
     display: grid; gap: 3px;
     width: 100%; text-align: left;
@@ -1403,10 +1466,75 @@ kbd {
     color: var(--steel-soft);
 }
 
+/* one alert on its own, laid out like an opened mail */
+.notif-modal-box { max-width: 560px; }
+
+/* what the alert is for, over the subject: the one word that says which
+   part of the shop it came from, in the alert's own colour */
+.notif-modal-kind {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.6);
+}
+.notif-modal-kind.is-danger  { color: #ff8a9a; }
+.notif-modal-kind.is-warning { color: var(--signal); }
+.notif-modal-kind.is-info    { color: rgba(255, 255, 255, 0.72); }
+.notif-modal-box .modal-role { display: block; margin-top: 3px; }
+
+.avatar-danger  { background: var(--stop); }
+.avatar-warning { background: var(--signal); color: var(--ink); }
+.avatar-info    { background: var(--steel); }
+
+.mail-head {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    gap: 14px; flex-wrap: wrap;
+    padding-bottom: 14px;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--line);
+}
+.mail-from { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; }
+.mail-from-name { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.mail-from-role { font-size: 12.5px; color: var(--steel-soft); }
+.mail-when {
+    display: flex; flex-direction: column; align-items: flex-end;
+    font-size: 12.5px; color: var(--steel);
+    white-space: nowrap;
+}
+.mail-when-exact {
+    font-family: var(--font-figure);
+    font-size: 11px;
+    color: var(--steel-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+.mail-body { min-height: 96px; }
+.mail-body p {
+    margin: 0 0 12px;
+    font-size: 16px;
+    line-height: 1.65;
+    color: var(--ink);
+}
+.mail-body p:last-child { margin-bottom: 0; }
+
+.mail-about {
+    margin-top: 20px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--line);
+    font-size: 12.5px;
+    color: var(--steel);
+}
+.mail-about strong { color: var(--ink); font-weight: 600; }
+
+@media (max-width: 640px) {
+    .mail-when { align-items: flex-start; }
+}
+
 /* ==========================================================================
-   THE ACCOUNT MENU
-   The chip in the top right corner: your own credentials, and the way out.
-   It is the only way out, so it is in one place rather than two.
+   THE ACCOUNT MENU -- the chip in the top right corner, and the only way out
    ========================================================================== */
 .account-menu { position: relative; }
 .account-chip {
@@ -1483,11 +1611,8 @@ kbd {
 .account-action.is-logout .account-action-mark { color: var(--stop); }
 
 /* ==========================================================================
-   ALERT CARDS
-   Every message the system used to put in a browser alert box arrives here
-   instead: a card that names itself, says what happened, and steps out of the
-   way on its own. Bottom right, clear of the bell and the account menu, which
-   both open downwards from the opposite corner. Newest nearest the corner.
+   ALERT CARDS -- bottom right, clear of the bell and account menu; newest
+   nearest the corner
    ========================================================================== */
 .toast-deck {
     position: fixed; bottom: 20px; right: 20px;
@@ -1563,22 +1688,16 @@ kbd {
 .toast-card.toast-info    .toast-mark   { background: rgba(20, 24, 29, 0.07); color: var(--steel); }
 
 /* ==========================================================================
-   BOOTSTRAP COMPATIBILITY
-   Bootstrap is loaded before this file so these rules win. It still brings a
-   few properties this stylesheet never sets, and those would quietly reshape
-   components that share a class name. They are put back here, once, instead
-   of being chased around the pages.
+   BOOTSTRAP COMPATIBILITY -- properties Bootstrap sets that this file
+   never does, put back once
    ========================================================================== */
 .card { display: block; }
 .badge { font-weight: 600; }
-.modal-body { flex: none; }
+.modal-body { flex: 1 1 auto; }
 .btn { --bs-btn-padding-x: initial; }
 
 /* ==========================================================================
    KEYBOARD AND MOTION
-   Everything reachable by keyboard shows where the focus is, and anyone who
-   has asked their computer to stop animating things gets a system that holds
-   still.
    ========================================================================== */
 :where(a, button, input, select, textarea):focus-visible {
     outline: 2px solid var(--signal);
@@ -1595,13 +1714,7 @@ kbd {
 }
 
 /* ==========================================================================
-   THE DATA PANEL
-   A table that loads when it is asked to, and pages ten rows at a time.
-
-   Three parts, in the order they appear down the page: the toolbar that says
-   what to load, the grid itself at a height that does not change, and the
-   pager under it. Nothing here is decorative; the fixed height is what stops
-   the page jumping every time a filter narrows the results.
+   THE DATA PANEL -- toolbar, grid at a fixed height, pager
    ========================================================================== */
 
 /* ---- the toolbar above a grid ---- */
@@ -1639,21 +1752,25 @@ kbd {
 .toolbar-field select:focus,
 .toolbar-field input:focus { border-color: var(--go); outline: none; }
 
-/* The one action that runs a query. It is green because it is the way
-   forward on a screen that is deliberately empty until it is pressed. */
+/* pushes Load Data to the right-hand end of the toolbar */
 .toolbar-spacer { flex: 1 1 auto; }
 
 /* ---- the grid, at a height that does not move ----
-   Ten rows plus the heading. A page holding three rows is the same height as
-   a page holding ten, so the pager under it never walks up and down the
-   screen while somebody reads. */
+   heading plus 42px per row; ten on most screens, eight on the cashier's,
+   twelve on the refund log, five under the income chart */
+.grid-12 { min-height: 582px; }
 .grid-10 { min-height: 498px; }
+.grid-8  { min-height: 414px; }
 .grid-5  { min-height: 288px; }
+.grid-12 > table,
 .grid-10 > table,
+.grid-8  > table,
 .grid-5  > table { margin-top: 0; }
 
 /* the closed and empty states fill the grid rather than sitting at the top */
+.grid-12 .empty-state,
 .grid-10 .empty-state,
+.grid-8 .empty-state,
 .grid-5 .empty-state { padding-top: 60px; }
 
 /* ---- the pager ---- */
@@ -1688,20 +1805,14 @@ kbd {
     min-width: 92px;
     text-align: center;
 }
-.pager-controls .btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.pager-controls .btn:disabled:hover { background: var(--surface); color: var(--steel); }
 
 /* the "that did not load" mark wears the colour that means it stopped */
 .empty-mark-bad { border-color: rgba(158, 27, 50, 0.4); }
 .empty-mark-bad svg { stroke: var(--stop); }
 
 /* ==========================================================================
-   PRESENCE
-   Two different facts sit in the same column and must not be confused: an
-   account can be Active and its owner still be nowhere near a screen. So the
-   account state keeps the badge it always had, and being signed in right now
-   is a small dot beside it, filled when the person is there and hollow when
-   they are not.
+   PRESENCE -- a small dot beside the account-state badge, filled when the
+   person is at a screen right now
    ========================================================================== */
 .presence {
     display: inline-flex;
@@ -1718,21 +1829,18 @@ kbd {
     background: transparent;
     flex: none;
 }
-.presence.is-online { color: var(--go-hi); font-weight: 600; }
+.presence.is-online { color: var(--ok-ink); font-weight: 600; }
 .presence.is-online .presence-dot {
-    border-color: var(--go);
-    background: var(--go);
-    box-shadow: 0 0 0 3px var(--go-dim);
+    border-color: var(--ok);
+    background: var(--ok);
+    box-shadow: 0 0 0 3px var(--ok-dim);
 }
 
 /* both facts in one cell, stacked, so the column stays one column */
 .status-stack { display: inline-flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 
 /* ==========================================================================
-   THE SIDE DRAWER
-   Some rows carry more actions than a table cell can hold without turning
-   every row into a row of buttons. Those rows open a drawer from the right
-   instead: the record on its own, with everything that can be done to it.
+   THE SIDE DRAWER -- a record on its own, with everything that can be done to it
    ========================================================================== */
 .drawer-shade {
     position: fixed; inset: 0;
@@ -1797,7 +1905,7 @@ kbd {
 
 @media (max-width: 640px) {
     .drawer { width: 100%; }
-    .grid-10, .grid-5 { min-height: 0; }
+    .grid-12, .grid-10, .grid-8, .grid-5 { min-height: 0; }
     .pager { flex-direction: column; align-items: stretch; }
     .pager-controls { justify-content: space-between; }
     .pager-controls .btn { flex: 1; }
@@ -1829,10 +1937,7 @@ kbd {
     background: var(--stop);
 }
 
-/* Crimson is for the cards that destroy something. A card listing the details
-   of an account about to be created is not one of those, and spending the
-   system's one "this stops something" colour on it is how the colour stops
-   being noticed on the card that needs it. */
+/* crimson is only for the cards that destroy something */
 .ask-detail.is-plain {
     background: var(--paper);
     border-left-color: var(--steel-soft);
@@ -1840,17 +1945,8 @@ kbd {
 .ask-detail.is-plain li::before { background: var(--steel-soft); }
 
 /* ==========================================================================
-   A DETAIL LINE THAT IS A RECORD RATHER THAN A CONSEQUENCE
-
-   "Label: value" is set as two columns. The card that lists an account about
-   to be created is not warning about three things, it is showing a record to
-   be checked, and a reader checking a record reads down the values -- which
-   needs the labels to line up and stop competing with them.
-
-   The value half is the figure face: on these cards it is an email address, a
-   phone number and a password, all three of which get checked one character
-   at a time. It wraps rather than overflowing, because a long address must
-   not be the thing that hides a password under it.
+   "Label: value" lines set as two columns, the value in the figure face,
+   for cards showing a record to be checked
    ========================================================================== */
 .ask-detail li.ask-pair {
     display: grid;
@@ -1873,9 +1969,7 @@ kbd {
     .ask-pair-label { font-size: 12px; }
 }
 
-/* Recorded metadata, exactly as it was written. It is machine text and is set
-   as machine text: mono, small, scrolling inside its own box rather than
-   stretching the card it sits in. */
+/* recorded metadata, as machine text: mono, small, scrolling in its own box */
 .audit-json {
     font-family: var(--font-figure);
     font-size: 11.5px;
@@ -1894,15 +1988,9 @@ kbd {
 }
 
 /* ==========================================================================
-   A FIGURE THAT LEADS SOMEWHERE
-   A number on a dashboard that cannot be opened is a number you then have to
-   go and look up somewhere else. These are buttons, and they say so quietly:
-   the rule down the left edge fills in, and the word Open appears, only when
-   the pointer is on them.
+   A FIGURE THAT LEADS SOMEWHERE -- KPI cards that are buttons
    ========================================================================== */
-/* The hover does not move the card. This stylesheet's own rule is that the
-   only motion is motion answering a click, and a figure that lifts a pixel
-   under the pointer is harder to read rather than easier. */
+/* the hover does not move the card: the only motion is motion answering a click */
 button.kpi-card {
     width: 100%;
     text-align: left;
@@ -1933,13 +2021,8 @@ button.kpi-card:hover .kpi-go,
 button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 
 /* ==========================================================================
-   THE CHART
-   Two divs and a height. There is no internet on the machine this runs on,
-   the question is "is this week bigger than last week", and a charting
-   library would be three hundred kilobytes to answer it.
-
-   Billed sets the outline, collected fills it, and the gap between them is
-   the money that has not arrived, which is the whole point of looking.
+   THE CHART -- two divs and a height; billed sets the outline, collected
+   fills it, and the gap is the money that has not arrived
    ========================================================================== */
 .chart-block {
     margin-top: 18px;
@@ -2015,9 +2098,7 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 }
 
 /* ==========================================================================
-   THE REORDER FORMULA
-   Written out wherever the number it produces is shown, because a figure the
-   system worked out for itself has to be checkable or it will not be trusted.
+   THE REORDER FORMULA -- written out wherever its number is shown
    ========================================================================== */
 .formula-note {
     font-family: var(--font-figure);
@@ -2042,7 +2123,8 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     padding: 13px 15px;
     margin: 4px 0 16px;
 }
-.formula-preview.is-dynamic { border-left-color: var(--go); background: var(--go-dim); }
+.formula-preview.is-dynamic,
+.formula-preview.is-good { border-left-color: var(--ok); background: var(--ok-dim); }
 .formula-line {
     font-family: var(--font-figure);
     font-size: 13px;
@@ -2061,11 +2143,8 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 }
 
 /* ==========================================================================
-   ON PAPER
-   A manager exporting a PDF wants the page they are already looking at, so
-   printing is the browser's own dialogue over this. Everything that only
-   works by being clicked comes off, the panel that is open stays, and a table
-   is allowed its full height rather than the ten rows the screen shows.
+   ON PAPER -- the browser's print dialogue; controls come off, the open
+   panel stays, and tables get their full height
    ========================================================================== */
 @media print {
     .sidebar, .sidebar-shade, .topbar, .subnav, .toast-deck,
@@ -2087,7 +2166,7 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 
     /* the fixed grid height exists to stop the page jumping while somebody
        reads; on paper there is nothing to jump */
-    .grid-10, .grid-5 { min-height: 0 !important; }
+    .grid-12, .grid-10, .grid-8, .grid-5 { min-height: 0 !important; }
     .table-responsive { overflow: visible !important; }
 
     table { font-size: 10.5px; }
@@ -2101,17 +2180,19 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
     tr { break-inside: avoid; page-break-inside: avoid; }
 
     .badge, .pill { border: 1px solid #999; color: #000 !important; }
+    /* every column, and none of the unfolded lines, on paper */
+    table thead tr th.col-secondary,
+    table tbody tr td.col-secondary { display: table-cell; }
+    .columns-bar, table tbody tr.row-details { display: none !important; }
+    .row-expandable td:first-child { padding-left: 13px; }
+    .row-expandable td:first-child::after { display: none; }
     .kpi-card { border: 1px solid #ccc; break-inside: avoid; }
     .kpi-go { display: none; }
     .chart-bar-collected { background: #444 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 
 /* ==========================================================================
-   CREDIT
-   A purchase history and a payment history side by side. Neither means much
-   alone: one says how good a customer somebody is, the other how good a
-   payer, and the shop needs both before extending anything. Stacked, the
-   second is below the fold and never gets read.
+   CREDIT -- purchase history and payment history side by side
    ========================================================================== */
 .history-split {
     display: grid;
@@ -2172,20 +2253,158 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 }
 .nav-count.is-waiting { display: inline-block; }
 
-/* ==========================================================================
-   LIVE SYNC
+/* the count mirrored onto the folded heading by shared/features.js; it steps
+   aside while the list is open and the item's own badge is in view */
+.sidebar-nav li[data-sidebar-dropdown] > .nav-parent.is-open .nav-count-parent { display: none; }
+.nav-parent .nav-count-parent { margin-left: 8px; }
+/* the heading's words, its count and its caret, in that order; the caret
+   keeps the right-hand edge */
+.sidebar-nav li[data-sidebar-dropdown] > .nav-parent { justify-content: flex-start; }
+.sidebar-nav li[data-sidebar-dropdown] .nav-caret { margin-left: auto; }
 
-   A screen that has quietly stopped hearing about changes looks exactly like
-   a screen where nothing has changed, and the difference matters when the
-   figure is stock on hand. Saying so used to be the job of a dot in the top
-   bar; that dot is gone, and the note in the footer of the table it is
-   actually about does the job instead. The reasoning is at the top of the
-   LIVE SYNC section in javascript/modules/shared/live-sync.js.
+/* ==========================================================================
+   WAITING FOR YOU -- one amber chip in the top bar adding up every count on
+   the menu, drawn by shared/features.js
+   ========================================================================== */
+.pending-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 40px; padding: 0 12px 0 8px;
+    background: var(--signal-dim);
+    border: 1px solid rgba(245, 179, 1, 0.55);
+    border-radius: var(--radius);
+    color: var(--signal-ink);
+    font-family: var(--font-ui);
+    font-size: 13px; font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.pending-chip:hover { border-color: var(--signal-hi); background: rgba(245, 179, 1, 0.24); }
+.pending-chip:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.pending-chip[aria-expanded="true"] { border-color: var(--signal-hi); }
+.pending-chip-count {
+    min-width: 22px; height: 22px; padding: 0 6px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--signal); color: #5a4200;
+    border-radius: 999px;
+    font-family: var(--font-figure);
+    font-size: 12px; font-weight: 600;
+}
+
+.pending-drop {
+    position: fixed; right: 20px; top: 66px; z-index: 950;
+    width: 300px; max-width: calc(100vw - 32px);
+    display: flex; flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--lift);
+    overflow: hidden;
+}
+.pending-drop-head {
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--paper);
+}
+.pending-drop-list { display: flex; flex-direction: column; }
+.pending-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    width: 100%; min-height: 44px; padding: 10px 14px;
+    background: var(--surface);
+    border: none; border-bottom: 1px solid var(--line);
+    border-left: var(--rule) solid var(--signal);
+    color: var(--ink);
+    font-family: var(--font-ui); font-size: 14px; font-weight: 500;
+    text-align: left;
+    cursor: pointer;
+}
+.pending-row:last-child { border-bottom: none; }
+.pending-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pending-row-meaning { font-size: 12px; font-weight: 400; color: var(--steel); }
+.pending-drop-hint { display: block; margin-top: 2px; font-size: 12px; color: var(--steel-soft); }
+.pending-row:hover { background: var(--paper); }
+.pending-row:focus-visible { outline: 2px solid var(--signal); outline-offset: -3px; }
+.pending-row-count {
+    min-width: 22px; padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--signal); color: #5a4200;
+    font-family: var(--font-figure);
+    font-size: 12px; font-weight: 600;
+    text-align: center;
+}
+
+/* ==========================================================================
+   THE DELIVERY SCHEDULE -- drawn by shared/delivery-schedule.js; overdue
+   carries the crimson rule, today the amber
+   ========================================================================== */
+.schedule-group { margin-bottom: 22px; }
+.schedule-group:last-child { margin-bottom: 0; }
+.schedule-group-head {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px;
+    padding-bottom: 8px; margin-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+}
+.schedule-group-head h4 {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0;
+    font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+}
+.schedule-group-count {
+    min-width: 22px; padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--paper-2); color: var(--steel);
+    font-family: var(--font-figure);
+    font-size: 12px; font-weight: 600;
+    text-align: center;
+}
+.schedule-group.is-overdue .schedule-group-count { background: var(--stop); color: #fff; }
+.schedule-group.is-today .schedule-group-count { background: var(--signal); color: #5a4200; }
+.schedule-group-note { font-size: 12.5px; color: var(--steel-soft); }
+
+.schedule-list { list-style: none; margin: 0; padding: 0; }
+.schedule-row {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr) 150px auto;
+    align-items: center; gap: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+    margin-bottom: 6px;
+}
+.schedule-group.is-overdue .schedule-row { border-left-color: var(--stop); }
+.schedule-group.is-today .schedule-row { border-left-color: var(--signal); }
+.schedule-row.row-clickable { cursor: pointer; }
+.schedule-row.row-clickable:hover { background: var(--paper); }
+.schedule-when { display: flex; flex-direction: column; min-width: 0; }
+.schedule-day { font-size: 13.5px; font-weight: 600; }
+.schedule-time {
+    font-family: var(--font-figure);
+    font-size: 12px; color: var(--steel);
+}
+.schedule-who { display: flex; flex-direction: column; min-width: 0; }
+.schedule-who strong { font-size: 14px; font-weight: 600; }
+.schedule-where {
+    font-size: 12.5px; color: var(--steel);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.schedule-driver { font-size: 13px; color: var(--steel); }
+.schedule-status { justify-self: end; }
+
+@media (max-width: 760px) {
+    .schedule-row { grid-template-columns: 1fr auto; }
+    .schedule-when { grid-column: 1; }
+    .schedule-status { grid-column: 2; grid-row: 1; }
+    .schedule-who { grid-column: 1 / -1; }
+    .schedule-driver { grid-column: 1 / -1; }
+    .schedule-where { white-space: normal; }
+}
+
+/* ==========================================================================
+   LIVE SYNC -- a stale table says so in its own footer (see live-sync.js)
    ========================================================================== */
 
-/* A table nobody is reading refreshes itself; the count flashes rather than
-   throwing a popup card, because a card for every change on a busy afternoon
-   is a screen nobody can work on. */
+/* a table nobody is reading refreshes itself; the count flashes */
 .pill.is-fresh {
     animation: pill-fresh 2.2s ease-out;
 }
@@ -2195,9 +2414,7 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
     100% { background: var(--signal-dim); border-color: rgba(245, 179, 1, 0.45); color: var(--signal-ink); }
 }
 
-/* A table somebody IS reading is not redrawn under them: rows moving under a
-   pointer lose the row that was about to be clicked. It says what happened
-   and waits to be asked. */
+/* a table somebody IS reading is not redrawn under them; it says so and waits */
 .stale-note {
     display: flex;
     align-items: center;
@@ -2226,15 +2443,8 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 
 
 /* ==========================================================================
-   THE SALES INVOICE
-   Lives here rather than with the cashier because it is no longer only the
-   cashier's: the administrator previews it on the Store & Tax screen while
-   setting the shop's name, TIN and registration, and a preview drawn in
-   different type from the document it previews is not a preview.
-
-   A receipt is not a screen. It is set in the figure face at receipt widths
-   with dashed rules, because that is what comes off the printer and the two
-   should not disagree.
+   THE SALES INVOICE -- shared by the cashier and the administrator's preview;
+   set in the figure face at receipt widths, as it comes off the printer
    ========================================================================== */
 .receipt-box { max-width: 420px; }
 .receipt-paper {
@@ -2253,9 +2463,7 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
     letter-spacing: 0.02em;
     text-transform: uppercase;
 }
-/* The registered address and TIN, under the shop name. Small, because
-   nobody reads them on purpose, but present, because an invoice without a
-   TIN is not an invoice. */
+/* the registered address and TIN, small but present */
 .rc-addr {
     display: block;
     font-size: 10.5px;
@@ -2295,11 +2503,7 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 .rc-totals span:last-child { font-variant-numeric: tabular-nums; }
 .rc-due { font-weight: 700; font-size: 14px !important; padding: 5px 0 !important; }
 
-/* THE TAX BLOCK
-   The part a BIR invoice exists to carry. It is set apart from the money
-   above it because it is not more money: the total has already been paid and
-   this only says what that total was made of. Same tabular figures as the
-   totals so the two columns line up down the paper. */
+/* THE TAX BLOCK -- set apart from the money above it; same tabular figures */
 .rc-tax div {
     display: flex;
     justify-content: space-between;
@@ -2336,19 +2540,8 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 
 
 /* ==========================================================================
-   THE TYPED PICKER
-   Lives here rather than with either module because both use it now: the
-   cashier picks a customer and a refunded product with it, the clerk picks a
-   material and a unit. A dropdown of six hundred rows is the wrong control
-   for a counter or a stockroom - typing three letters beats scrolling - and
-   the second copy of these rules was the moment to stop duplicating them.
-
-   A dropdown of every customer in the book was the wrong control for a
-   counter: the commonest case is somebody who is not in it. This is a box you
-   type into, with the book behind it as suggestions. The list overlays the
-   payment fields below rather than pushing them down the panel, because a
-   form that reflows while somebody is halfway through it loses the field they
-   were about to reach for.
+   THE TYPED PICKER -- customers, refunded products, materials and units.
+   The list overlays the fields below rather than pushing them down.
    ========================================================================== */
 .suggest-wrap { position: relative; }
 
@@ -2415,16 +2608,8 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 }
 
 /* ==========================================================================
-   WHAT WAS CHOSEN
-   The customer box may legitimately hold a name that matches nothing: that is
-   a walk-in. The product box may not, because a refund moves stock and stock
-   has to move against a real product. So this strip is not decoration around
-   the choice, it IS the choice: no strip means nothing is selected, and the
-   form says so and refuses.
-
-   It takes the credit strip's shape deliberately - same left rule, same
-   label-over-figure rows - so it reads as the same kind of statement rather
-   than as a new component to learn.
+   WHAT WAS CHOSEN -- the strip IS the choice: no strip means nothing is
+   selected. Same shape as the credit strip.
    ========================================================================== */
 .pick-strip {
     margin-top: 8px;
@@ -2467,10 +2652,7 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
     font-variant-numeric: tabular-nums;
 }
 
-/* A suggestion carrying a figure. The customer list is two lines of prose;
-   the product list is a name against a price, so the price sits on the right
-   in the figure face like every other amount in the system and the eye can
-   run straight down the column of them. */
+/* a suggestion carrying a figure: the price sits on the right in the figure face */
 .suggest-line {
     display: flex;
     align-items: baseline;
@@ -2496,17 +2678,11 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 }
 .pick-verdict:empty { display: none; }
 .pick-verdict.is-stop { color: var(--stop); font-weight: 500; }
-.pick-verdict.is-new  { color: var(--go-ink); font-weight: 500; }
+.pick-verdict.is-new  { color: var(--signal-ink); font-weight: 500; }
 
 /* ==========================================================================
-   THE MATERIAL THAT IS NOT ON THE BOOKS YET
-
-   A picker that only offers what is already in the database is a picker that
-   cannot be used the one time it matters: a lorry is at the door with a
-   pallet of something nobody has typed into the system yet, and the clerk is
-   holding it. So the last row of the list is always the way out of the list.
-   It looks unlike a suggestion on purpose -- suggestions are things that
-   exist, and this is not one of them.
+   THE MATERIAL THAT IS NOT ON THE BOOKS YET -- the last row of the list is
+   the way out of it, and looks unlike a suggestion on purpose
    ========================================================================== */
 .suggest-item.is-make {
     flex-direction: row;
@@ -2536,10 +2712,7 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 }
 .suggest-item.is-make .make-quoted { color: var(--ink); }
 
-/* The form that opens under the box once that row is taken. The hazard
-   stripe along its head is the second of the system's two structural
-   devices, and this is one of its two uses: you are about to add something
-   to the shop's books, which is not an ordinary edit. */
+/* the form that opens under the box; the hazard stripe marks an addition to the books */
 .make-card {
     margin-top: 10px;
     border: 1px solid var(--line);

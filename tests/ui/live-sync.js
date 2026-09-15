@@ -1,10 +1,6 @@
-// Two browsers, one server, the case the whole feature exists for: a change
-// made on one machine reaching the other without anybody restoring a database
-// by hand.
-//
-// It also checks the restraint, which matters more than the refresh: a table
-// somebody is reading is NOT redrawn under them, and a browser ignores the
-// change it caused itself.
+// Two browsers, one server: a change made on one machine reaching the other.
+// Also checks that a table being read is NOT redrawn, and that a browser
+// ignores the change it caused itself.
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
@@ -33,17 +29,13 @@ async function screenFor(browser, role, fullName, staffId, page, problems) {
   tab.on("console", (m) => { if (m.type() === "error") if (isOurProblem(m.text())) problems.push(`[${role}] ` + m.text()); });
   tab.on("pageerror", (e) => problems.push(`[${role}] page error: ` + e.message));
 
-  // not networkidle: the live channel is an open connection that never goes
-  // idle, which is the whole point of it
+  // not networkidle: the live channel never goes idle
   await tab.goto(`${BASE}/${page}`, { waitUntil: "domcontentloaded" });
   await tab.waitForTimeout(1400);
   return { context, tab };
 }
 
-// A console line worth failing over is one this system caused. The font CDN
-// is deliberately non-blocking and simply does not load on a machine with no
-// internet, which is most machines this runs on; a favicon nobody added is a
-// favicon nobody needs. Neither says anything about whether the screens work.
+// only console lines this system caused: the font CDN and the favicon are noise
 function isOurProblem(text) {
   return !/fonts\.(googleapis|gstatic)\.com|favicon|ERR_TUNNEL_CONNECTION_FAILED|net::ERR_/.test(String(text));
 }
@@ -62,13 +54,8 @@ function isOurProblem(text) {
   const one = await screenFor(browser, "Manager", "Manager M. User", 2,
     "manager-dashboard.html", problems);
 
-  // THE CONNECTION IS NOT DRAWN ANY MORE
-  //
-  // There used to be a dot in the top bar reporting it, and these checks read
-  // the word out of that dot. It has been removed on purpose -- it described
-  // the plumbing, which is not a thing the shop can act on -- so the state is
-  // read from where it now lives: the client's own variable, and the server's
-  // count of open connections. Both were the truth behind the dot all along.
+  // the connection dot was removed; the state is read from liveState and the
+  // server's count of open connections
   check("the screen is hearing about changes",
     (await one.tab.evaluate("liveState")) === "live",
     String(await one.tab.evaluate("liveState")));
@@ -89,9 +76,7 @@ function isOurProblem(text) {
     (await one.tab.locator("#stocks-table tbody tr").count()) === 10 &&
     Number(await one.tab.evaluate("getDataPanel('mgr-stocks').page")) === 1);
 
-  // Counting refreshes rather than comparing a row: whether the figures
-  // happen to differ depends on what the other desktop wrote, and what is
-  // being tested here is that this screen went and looked again.
+  // counting refreshes rather than comparing a row: the test is that this screen looked again
   await one.tab.evaluate(`(function () {
       window.__managerRefreshes = 0;
       const panel = getDataPanel('mgr-stocks');
@@ -206,10 +191,6 @@ function isOurProblem(text) {
   await one.tab.evaluate("closeModal('detail-modal')");
 
   // ---------- a lost connection ----------
-  //
-  // What a reader is told about it is the note in the footer of the table it
-  // affects, checked further up. All that is asserted here is that the client
-  // notices, because a client that does not notice cannot put the note there.
   await one.tab.evaluate("liveSource.close(); setLiveIndicator('down', 'Offline');");
   await one.tab.waitForTimeout(400);
   check("a lost connection is noticed",
