@@ -1,0 +1,74 @@
+/* ==========================================================================
+   MANAGER -- manager.html
+   Loads after general-ui.css and responsive.css, so anything here wins.
+   ========================================================================== */
+
+/* ==========================================================================
+   SALES SUMMARY -- a period, four figures, then the two breakdowns side by side
+   ========================================================================== */
+#report-summary .kpi-grid { margin-top: 16px; }
+@media (min-width: 900px) {
+    /* total sales, transactions, units sold and average sale in one row */
+    #report-summary .kpi-grid { grid-template-columns: repeat(4, 1fr); }
+}
+
+/* Total Purchases: the four figures sit between the filters and the orders */
+#po-totals-kpis:not(:empty) { margin-bottom: 16px; }
+
+#income-period { min-width: 210px; }
+
+.summary-tables {
+    display: grid;
+    /* the payment table has five figures, the best sellers three */
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    gap: 16px;
+}
+.summary-tables .card { margin-bottom: 0; }
+#report-summary > .card { margin-bottom: 16px; }
+@media (max-width: 1300px) {
+    .summary-tables { grid-template-columns: 1fr; }
+}
+
+/* ==========================================================================
+   STOCKS -- the counts over the overview are legend and filter
+   ========================================================================== */
+#stock-legend:empty { display: none; }
+/* the longest option would otherwise set the width and push Clear to a second line */
+#stock-overview .panel-toolbar select { max-width: 200px; }
+#stock-overview .panel-toolbar .search-wrap { flex-basis: 200px; }
+#stock-reorder .cell-due { font-weight: 600; }
+#reorder-table .badge, #stocks-table .badge { margin-left: 6px; }
+
+/* Money owed is the only figure in the reports that is a problem rather than
+   a fact, so it is the only one that carries a colour. */
+#income-methods-table .cell-due,
+#unpaid-table .cell-due,
+#loyal-table .cell-due { font-weight: 600; }
+
+/* ==========================================================================
+   DELIVERY TRACKING -- the stage counts above the table are legend and summary
+   ========================================================================== */
+#panel-deliveries .track-legend { margin-bottom: 16px; }
+/* the balance still owed is the figure this screen is read for */
+#deliveries-table .cell-due { font-weight: 600; }
+
+/* ==========================================================================
+   MASTER RECORDS -- one table that changes shape; nothing here assumes a column count
+   ========================================================================== */
+#records-table th { text-transform: none; }
+
+/* ==========================================================================
+   ARCHIVES
+   ========================================================================== */
+#panel-archives .filter-row { margin-bottom: 16px; }
+
+/* ==========================================================================
+   ON PAPER -- the table is unpaged; the Sales Summary prints both tables
+   ========================================================================== */
+@media print {
+    .summary-tables { grid-template-columns: 1fr; }
+
+    /* the views share a screen; Print on one sends that view alone
+       (printReport marks it) */
+    body.is-printing .panel-view:not(.is-print-target) { display: none !important; }
+}

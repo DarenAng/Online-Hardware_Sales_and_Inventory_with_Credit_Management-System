@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- the address carries the supplier's code: it is not handed to other sites
+         (the font server) and the page is kept out of search engines -->
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Purchase Order &middot; Lucelyn Hardware</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
+    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/general-ui.css">
+    <link rel="stylesheet" href="css/modules/supplier-order.css">
+</head>
+
+<body class="so-body">
+    <div class="so-stripe" aria-hidden="true"></div>
+    <header class="so-head">
+        <div class="so-head-inner">
+            <div class="so-brand">
+                <span class="brand-mark">LH</span>
+                <span>
+                    <span class="so-shop" id="so-shop">Lucelyn Hardware</span>
+                    <span class="so-shop-line" id="so-shop-line">Purchase order for our supplier</span>
+                </span>
+            </div>
+            <div class="so-kind">
+                <span class="so-kind-title">Purchase Order</span>
+                <span class="so-ref" id="so-ref"></span>
+            </div>
+        </div>
+    </header>
+
+    <!-- the buttons carry their own icons (data-no-icon keeps icons.js from adding more) -->
+    <main class="so-main" id="so-main" data-no-icon>
+        <p class="so-loading">Opening the order&hellip;</p>
+    </main>
+
+    <footer class="so-foot">
+        This page belongs to the purchase order sent to you. Keep the order's QR code and
+        link to yourself: anyone who has them can answer for your company.
+    </footer>
+
+    <script src="modules/shared/icons.js"></script>
+    <script src="modules/supplier-order.js"></script>
+</body>
+</html>

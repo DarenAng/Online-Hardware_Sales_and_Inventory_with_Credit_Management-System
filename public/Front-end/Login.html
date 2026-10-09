@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in &middot; Lucelyn Hardware</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/general-ui.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/modules/login.css">
+</head>
+
+<body class="login-body">
+    <main class="login-card" id="sign-in-card">
+        <div class="login-brand">
+            <span class="brand-mark">LH</span>
+            <span class="brand-text">
+                <span class="brand-name">Lucelyn Hardware</span>
+                <span class="brand-sub">Sales &amp; Inventory</span>
+            </span>
+        </div>
+
+        <h2>Sign in</h2>
+        <form onsubmit="handleLogin(event)">
+            <!-- A refused sign-in is answered here, beside the two boxes it is
+                 about, rather than in a card in the corner of the screen.
+                 role="alert" so a screen reader announces it the moment it is
+                 filled in, and aria-describedby ties it to the password box so
+                 it is read out again when the cursor lands back there. It stays
+                 until the next attempt: nothing on this screen is competing
+                 with it for the space. -->
+            <p class="login-alert" id="login-alert" role="alert" hidden></p>
+
+            <div class="form-group">
+                <label for="login-email">Email address</label>
+                <div class="icon-field">
+                    <i class="bi bi-envelope field-icon" aria-hidden="true"></i>
+                    <input id="login-email" type="email" name="email" class="form-control"
+                           autocomplete="username" required placeholder="name@hardware.com">
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="login-password">Password</label>
+                <div class="password-field">
+                    <i class="bi bi-lock field-icon" aria-hidden="true"></i>
+                    <input id="login-password" type="password" name="password" class="form-control"
+                           autocomplete="current-password" required placeholder="Your password"
+                           aria-describedby="login-alert">
+                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-accent login-submit">Sign in</button>
+        </form>
+
+        <p class="login-foot">
+            <button type="button" class="login-link" id="forgot-link" onclick="openPasswordReset()">Forgot your password?</button>
+        </p>
+    </main>
+
+    <!-- FORGOT YOUR PASSWORD? -- the second card: the email address, then the
+         six-digit code from the mail and the new password. Drawn by
+         shared/password-reset.js; only one of the two cards shows at a time. -->
+    <main class="login-card" id="reset-card" hidden>
+        <div class="login-brand">
+            <span class="brand-mark">LH</span>
+            <span class="brand-text">
+                <span class="brand-name">Lucelyn Hardware</span>
+                <span class="brand-sub">Sales &amp; Inventory</span>
+            </span>
+        </div>
+
+        <h2>Set a new password</h2>
+        <p class="login-lead" id="reset-lead">Type the email address you sign in with. A six-digit
+            code is sent to it; the code and a new password are all this takes.</p>
+
+        <p class="login-alert" id="reset-alert" role="alert" hidden></p>
+
+        <!-- step 1: where to send the code -->
+        <form id="reset-request-form" onsubmit="handleResetRequest(event)">
+            <div class="form-group">
+                <label for="reset-email">Email address</label>
+                <div class="icon-field">
+                    <i class="bi bi-envelope field-icon" aria-hidden="true"></i>
+                    <input id="reset-email" type="email" name="email" class="form-control"
+                           autocomplete="username" required placeholder="name@hardware.com">
+                </div>
+            </div>
+            <button type="submit" class="btn btn-accent login-submit" id="reset-request-btn">Send Code</button>
+        </form>
+
+        <!-- step 2: the code and the new password -->
+        <form id="reset-confirm-form" onsubmit="handleResetConfirm(event)" hidden>
+            <div class="form-group">
+                <label for="reset-code">Code from the email <span class="label-hint">six digits</span></label>
+                <input id="reset-code" type="text" name="code" class="form-control reset-code"
+                       inputmode="numeric" autocomplete="one-time-code" maxlength="7"
+                       required placeholder="000000">
+            </div>
+            <div class="form-group">
+                <label for="reset-new-password">New password <span class="label-hint">at least 8 characters</span></label>
+                <div class="icon-field">
+                    <i class="bi bi-lock field-icon" aria-hidden="true"></i>
+                    <input id="reset-new-password" type="password" name="newPassword" class="form-control"
+                           autocomplete="new-password" minlength="8" required>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="reset-confirm-password">Type it again</label>
+                <div class="icon-field">
+                    <i class="bi bi-lock field-icon" aria-hidden="true"></i>
+                    <input id="reset-confirm-password" type="password" name="confirmPassword" class="form-control"
+                           autocomplete="new-password" minlength="8" required>
+                </div>
+            </div>
+            <div class="password-reveal">
+                <button type="button" class="password-toggle"
+                        data-password-for="reset-new-password,reset-confirm-password"
+                        aria-pressed="false" aria-controls="reset-new-password reset-confirm-password">Show passwords</button>
+            </div>
+            <button type="submit" class="btn btn-accent login-submit" id="reset-confirm-btn">Save the new password</button>
+        </form>
+
+        <p class="login-foot">
+            <button type="button" class="login-link" onclick="closePasswordReset()">Back to sign in</button>
+            <button type="button" class="login-link" id="reset-again-link" onclick="showResetRequest()" hidden>Send another code</button>
+        </p>
+    </main>
+
+    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="modules/shared/icons.js"></script>
+    <script src="modules/shared/helpers.js"></script>
+    <script src="modules/shared/format.js"></script>
+    <script src="connections/shared-connection.js"></script>
+    <script src="modules/shared/ui-kit.js"></script>
+    <script src="modules/shared/tables.js"></script>
+    <script src="modules/shared/modals.js"></script>
+    <script src="modules/shared/detail-modal.js"></script>
+    <script src="modules/shared/session.js"></script>
+    <script src="modules/shared/topbar.js"></script>
+    <script src="modules/shared/my-account.js"></script>
+    <script src="modules/shared/notifications.js"></script>
+    <script src="modules/shared/password-reset.js"></script>
+</body>
+</html>

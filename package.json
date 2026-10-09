@@ -1,17 +1,22 @@
 {
   "name": "capstone-project2",
   "version": "1.0.0",
-  "description": "Online hardware sales and inventory with credit management",
-  "main": "public/javascript/server.js",
+  "description": "Lucelyn Hardware - online sales and inventory with credit management",
+  "main": "public/Back-end/server.js",
   "scripts": {
-    "start": "node public/javascript/server.js"
+    "start": "node public/Back-end/server.js",
+    "recover-password": "node public/Back-end/recover-password.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "dotenv": "^18.0.0",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
-    "mysql2": "^3.23.0"
+    "mysql2": "^3.23.0",
+    "pdfkit": "^0.20.2",
+    "qrcode": "^1.5.4"
   }
 }

@@ -24,7 +24,7 @@ sleep 2
 
 FAILED=0
 
-for SUITE in admin manager credit returns filters lazy-loading live-sync; do
+for SUITE in admin manager credit payments passwords returns filters lazy-loading live-sync alignment; do
   echo ""
   echo "=================================================="
   echo "  $SUITE"

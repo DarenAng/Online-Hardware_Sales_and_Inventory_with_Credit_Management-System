@@ -52,7 +52,7 @@ function isOurProblem(text) {
 
   // ---------- desktop one: the manager, watching the stock report ----------
   const one = await screenFor(browser, "Manager", "Manager M. User", 2,
-    "manager-dashboard.html", problems);
+    "manager.html", problems);
 
   // the connection dot was removed; the state is read from liveState and the
   // server's count of open connections
@@ -69,11 +69,11 @@ function isOurProblem(text) {
 
   await one.tab.evaluate("showStockReport()");
   await one.tab.waitForTimeout(300);
-  await one.tab.click("#panel-stock-report button:has-text('Load Data')");
+  await one.tab.click("#stock-overview button:has-text('Load Data')");
   await one.tab.waitForTimeout(700);
 
   check("the stock report is loaded and on page one",
-    (await one.tab.locator("#stocks-table tbody tr").count()) === 10 &&
+    (await one.tab.locator("#stocks-table tbody tr:not(.row-filler)").count()) === 10 &&
     Number(await one.tab.evaluate("getDataPanel('mgr-stocks').page")) === 1);
 
   // counting refreshes rather than comparing a row: the test is that this screen looked again

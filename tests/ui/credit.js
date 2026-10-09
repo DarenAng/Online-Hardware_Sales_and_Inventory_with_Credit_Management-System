@@ -55,7 +55,7 @@ function isOurProblem(text) {
   const shot = (page, name) =>
     page.screenshot({ path: path.join(OUT, name + ".png"), fullPage: true });
 
-  await manager.goto(`${BASE}/manager-dashboard.html`, { waitUntil: "domcontentloaded" });
+  await manager.goto(`${BASE}/manager.html`, { waitUntil: "domcontentloaded" });
   await manager.waitForTimeout(700);
 
   check("the menu carries a Credit section",
@@ -69,7 +69,7 @@ function isOurProblem(text) {
   await manager.click("#panel-credit button:has-text('Load Data')");
   await manager.waitForTimeout(700);
 
-  const creditRows = await manager.locator("#credit-table tbody tr").count();
+  const creditRows = await manager.locator("#credit-table tbody tr:not(.row-filler)").count();
   check("credit accounts page ten at a time", creditRows === 10, `saw ${creditRows}`);
   check("standing is shown on every row",
     await manager.locator("#credit-table tbody .badge").count() >= creditRows);
@@ -79,7 +79,7 @@ function isOurProblem(text) {
 
   await manager.selectOption("#credit-standing", "Hold");
   await manager.waitForTimeout(400);
-  const held = await manager.locator("#credit-table tbody tr").count();
+  const held = await manager.locator("#credit-table tbody tr:not(.row-filler)").count();
   check("the standing filter narrows the book",
     held > 0 && await manager.locator("#credit-table tbody .badge:text-is('On hold')").count() === held,
     `saw ${held}`);
@@ -100,8 +100,9 @@ function isOurProblem(text) {
     await manager.locator("#credit-modal.open").count() === 1);
 
   const facts = await manager.textContent("#credit-facts");
-  check("the card shows limit, owed and available",
-    facts.includes("Credit Limit") && facts.includes("Currently Owed") && facts.includes("Still Available"));
+  check("the card shows the credit limit, the balance and the available balance",
+    facts.includes("Credit Limit") && facts.includes("Balance") && facts.includes("Available Balance") &&
+    !facts.includes("Owed"));
   check("it says how old the oldest debt is", facts.includes("Oldest Debt"));
 
   // the preview has to follow the figure being typed
@@ -127,7 +128,7 @@ function isOurProblem(text) {
     /no new credit at all/i.test(await manager.textContent("#credit-preview")));
 
   await manager.fill("#credit-limit-input", String(owed + 5000));
-  await manager.click("#credit-form button[type=submit]");
+  await manager.click("button[type=submit][form=credit-form]");
   await manager.waitForTimeout(500);
   check("putting an account on hold asks first",
     await manager.locator("#ask-modal.open #ask-ok.btn-danger").count() === 1);
@@ -149,6 +150,13 @@ function isOurProblem(text) {
   const columns = await manager.evaluate(
     "getComputedStyle(document.getElementById('credit-history')).gridTemplateColumns.split(' ').length");
   check("they really are two columns, not stacked", columns === 2, `${columns} column(s)`);
+  check("each history table pages with Previous and Next rather than scrolling",
+    (await manager.locator("#credit-history .paged-pager").count()) === 2 &&
+    (await manager.locator("#credit-modal .modal-pager").count()) === 0);
+  await manager.click("#paged-mgr-purchases .paged-pager button:has-text('Next')");
+  await manager.waitForTimeout(200);
+  check("Next turns the purchases table to its second page",
+    /Page 2 of/.test(await manager.textContent("#paged-mgr-purchases .paged-pager")));
   await shot(manager, "05-history-split");
 
   await manager.evaluate("closeModal('credit-modal')");
@@ -160,16 +168,15 @@ function isOurProblem(text) {
   await manager.click("#panel-credit-requests button:has-text('Load Data')");
   await manager.waitForTimeout(700);
 
-  const pending = await manager.locator("#requests-table tbody tr").count();
+  const pending = await manager.locator("#requests-table tbody tr:not(.row-filler)").count();
   check("pending requests are what the screen opens on", pending >= 1, `saw ${pending}`);
-  check("the menu shows how many are waiting",
-    (await manager.textContent("#credit-request-count")).trim() !== "");
   await shot(manager, "06-requests");
 
   await manager.click("#requests-table tbody tr:first-child");
   await manager.waitForTimeout(500);
   check("a request opens with both limits and the reason",
-    (await manager.textContent("#decide-facts")).includes("Asked For") &&
+    (await manager.textContent("#decide-facts")).includes("Requested Limit") &&
+    (await manager.textContent("#decide-facts")).includes("Current Credit Limit") &&
     (await manager.textContent("#decide-reason")).includes("Reason given"));
   check("a pending request offers both decisions",
     await manager.locator("#decide-actions button").count() === 3);
@@ -216,8 +223,8 @@ function isOurProblem(text) {
   await cashier.goto(`${BASE}/cashier-dashboard.html`, { waitUntil: "domcontentloaded" });
   await cashier.waitForTimeout(800);
 
-  check("the till has a Customers & Credit screen",
-    await cashier.locator("a:has-text('Customers & Credit')").count() === 1);
+  check("the till has a Customers Record screen",
+    await cashier.locator("a:has-text('Customers Record')").count() === 1);
 
   // ---------- the account, read before the sale ----------
   await cashier.evaluate("showRegister()");
@@ -247,7 +254,7 @@ function isOurProblem(text) {
   await cashier.waitForTimeout(600);
   check("picking a customer shows their credit before the sale",
     await cashier.locator("#credit-strip").isVisible() &&
-    (await cashier.textContent("#credit-strip")).includes("Can take on account"));
+    (await cashier.textContent("#credit-strip")).includes("Available Balance"));
   await shot(cashier, "10-credit-strip");
 
   // ---------- the part payment ----------
@@ -272,15 +279,40 @@ function isOurProblem(text) {
     totalsPanel.includes("Paid now") && totalsPanel.includes("On account"), totalsPanel);
   check("the verdict says what goes on the account",
     /goes on .* account/.test(await cashier.textContent("#credit-verdict")));
+  check("the part-payment method is labelled Payment method",
+    (await cashier.textContent("label[for=pay-down-method]")).trim() === "Payment method");
+  check("part paid, the button says it takes part and charges the rest",
+    (await cashier.textContent("#checkout-btn")).trim() === "Take Part Payment & Charge the Rest",
+    await cashier.textContent("#checkout-btn"));
   await shot(cashier, "11-part-payment");
 
   await cashier.click("button:has-text('All of it')");
   await cashier.waitForTimeout(300);
   check("paying it all leaves nothing on the account",
     /Nothing goes on/.test(await cashier.textContent("#credit-verdict")));
+  check("paid in full on a credit sale, the button says Complete Sale",
+    (await cashier.textContent("#checkout-btn")).trim() === "Complete Sale");
 
   await cashier.click("button:has-text('Nothing')");
   await cashier.waitForTimeout(300);
+  check("nothing paid now, the button says Charge to Account",
+    (await cashier.textContent("#checkout-btn")).trim() === "Charge to Account");
+
+  // a part payment by transfer shows where to send it and asks for its reference
+  await cashier.click("button:has-text('Half')");
+  await cashier.selectOption("[name=downPaymentMethod]", "Bank Transfer");
+  await cashier.waitForTimeout(300);
+  check("a transfer shows the shop's bank account at the till",
+    await cashier.locator("#sale-bank-box").isVisible() &&
+    (await cashier.textContent("#sale-bank-box")).includes("Account number"));
+  check("a transfer asks for its reference",
+    await cashier.locator("#sale-reference-field").isVisible() &&
+    /required/i.test(await cashier.textContent("#sale-reference-field label")));
+  await cashier.selectOption("[name=downPaymentMethod]", "Cash");
+  await cashier.click("button:has-text('Nothing')");
+  await cashier.waitForTimeout(300);
+  check("cash hides the reference box again",
+    !(await cashier.locator("#sale-reference-field").isVisible()));
 
   // an account on hold has to say so at the counter, not at the server
   await cashier.evaluate(`pickCustomer(${holdId})`);
@@ -318,7 +350,7 @@ function isOurProblem(text) {
   await cashier.waitForTimeout(700);
   // the till pages at CASHIER_ROWS_PER_PAGE, read from the module rather than copied
   const pageSize = await cashier.evaluate("CASHIER_ROWS_PER_PAGE");
-  const shown = await cashier.locator("#customers-table tbody tr").count();
+  const shown = await cashier.locator("#customers-table tbody tr:not(.row-filler)").count();
   check("customers page at the till's own page size",
     shown === pageSize, `${shown} rows, page size is ${pageSize}`);
 
@@ -327,6 +359,11 @@ function isOurProblem(text) {
   check("a customer opens with purchases beside payments",
     await cashier.locator("#customer-modal.open").count() === 1 &&
     await cashier.locator("#customer-history .history-column").count() === 2);
+  await cashier.click("#customer-tab-history");
+  await cashier.waitForTimeout(400);
+  check("the till's copy pages the history the same way",
+    (await cashier.locator("#customer-history .paged-pager").count()) === 2 &&
+    (await cashier.locator("#customer-modal .modal-pager").count()) === 0);
   await shot(cashier, "14-customer-history");
 
   // ---------- asking for more room ----------

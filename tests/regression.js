@@ -64,13 +64,29 @@ async function signIn(email, demoPassword, chosenPassword) {
   console.log("== THE FILES THAT ARE NOT FOR DOWNLOADING ==");
 
   const spellings = [
-    "/javascript/server.js",
-    "//javascript/server.js",
-    "///javascript/server.js",
-    "/javascript//server.js",
-    "/javascript/%73erver.js",
-    "/javascript%2fserver.js",
-    "/javascript/../javascript/server.js",
+    "/backend/server.js",
+    "//backend/server.js",
+    "///backend/server.js",
+    "/backend//server.js",
+    "/backend/%73erver.js",
+    "/backend%2fserver.js",
+    "/backend/../backend/server.js",
+    "/backend/mailer.js",
+    "/backend/mail-password.txt",
+    "/Back-end/server.js",
+    "/back-end/mailer.js",
+    "/Back-end/Connections/login.js",
+    "/modules/../server.js",
+    "/modules/..%2fserver.js",
+    "/connections/admin.js",
+    "/connections/login.js",
+    "/connections/database.js",
+    "/connections/admin-connection.js/../admin.js",
+    "/connections/admin-connection.js%2f..%2fadmin.js",
+    "/connections/%61dmin.js",
+    "/connections/ADMIN.JS",
+    "/connections/admin.js.",
+    "/connections/admin.js::$DATA",
     "/database/1-RUN-FIRST-database.sql",
     "//database/1-RUN-FIRST-database.sql",
     "/%64atabase/1-RUN-FIRST-database.sql",
@@ -80,14 +96,15 @@ async function signIn(email, demoPassword, chosenPassword) {
   for (const spelling of spellings) {
     const response = await fetch(BASE + spelling);
     const text = await response.text();
-    const leaked = text.includes("DB_PASSWORD") || text.includes("CREATE TABLE") ||
-                   text.includes("CREATE PROCEDURE");
+    const leaked = text.includes("DB_PASSWORD") || text.includes("MAIL_PASSWORD") ||
+                   text.includes("CREATE TABLE") || text.includes("CREATE PROCEDURE");
     record(`refused ${spelling}`, response.status === 404 && !leaked,
       leaked ? `${response.status}, and it handed over the file` : `got ${response.status}`);
   }
 
-  for (const wanted of ["/Login.html", "/javascript/app.js", "/css/style.css",
-                        "/javascript/modules/shared/session.js", "/favicon.ico"]) {
+  for (const wanted of ["/Login.html", "/modules/shared/format.js", "/css/general-ui.css",
+                        "/modules/shared/session.js", "/connections/shared-connection.js",
+                        "/connections/inventory-clerk-connection.js", "/favicon.ico"]) {
     const response = await fetch(BASE + wanted);
     record(`still served ${wanted}`, response.status === 200, `got ${response.status}`);
   }
@@ -100,41 +117,41 @@ async function signIn(email, demoPassword, chosenPassword) {
   const cashier  = await signIn("cashier@hardware.com",  "cashier123",  "cashierpass123");
   const driver   = await signIn("delivery@hardware.com", "delivery123", "driverpass123");
 
-  // the second cashier in the demo data; the server makes the reset password
-  const anaReset = await call(admin.cookie, "POST", "/api/users/6/reset-password", {});
-  const otherCashier = await signIn("ana.reyes@hardware.com", anaReset.body.password, "anapass5678");
+  // The database ships with one account per role, so a second cashier and a
+  // second driver are made here (or found, from an earlier run). Either way
+  // the password is then reset, so it is known and the reset is on the trail.
+  async function makeProbe(firstName, lastName, roleId, email) {
+    let password = null;
+    const review = await call(admin.cookie, "POST", "/api/users/draft",
+      { firstName, lastName, roleId, email, phone: "0917" + String(roleId).padStart(7, "5") });
 
-  // A second driver of our own (the demo's other driver is deactivated). The
-  // account may already exist from an earlier run; then the password is reset
-  // to something known instead.
-  const probeEmail = "probe.driver@hardware.com";
-  let probePassword = null;
+    if (review.status === 200) {
+      await call(admin.cookie, "POST", "/api/users", { draftId: review.body.draftId });
+    }
 
-  const probeReview = await call(admin.cookie, "POST", "/api/users/draft", {
-    firstName: "Probe", lastName: "Driver", roleId: 5, email: probeEmail
-  });
-
-  if (probeReview.status === 200) {
-    const made = await call(admin.cookie, "POST", "/api/users",
-      { draftId: probeReview.body.draftId });
-    probePassword = made.body && made.body.password;
-  } else {
     const directory = await call(admin.cookie, "GET", "/api/users");
-    const existing = (directory.body || []).find((row) => row.email === probeEmail);
+    const existing = (directory.body || []).find((row) => row.email === email);
     if (existing) {
       const reset = await call(admin.cookie, "POST",
         `/api/users/${existing.staff_id}/reset-password`, {});
-      probePassword = reset.body && reset.body.password;
+      password = reset.body && reset.body.password;
       await call(admin.cookie, `PATCH`, `/api/users/${existing.staff_id}/status`,
         { isActive: true });
     }
+
+    record(`the second ${lastName.toLowerCase()}'s password came from the server, not from this file`,
+      typeof password === "string" && password.length >= 8,
+      `${review.status} ${JSON.stringify(review.body).slice(0, 120)}`);
+    return password;
   }
 
-  record("the second driver's password came from the server, not from this file",
-    typeof probePassword === "string" && probePassword.length >= 8,
-    `${probeReview.status} ${JSON.stringify(probeReview.body).slice(0, 120)}`);
+  const cashierEmail = "probe.cashier@hardware.com";
+  const otherCashier = await signIn(cashierEmail,
+    await makeProbe("Probe", "Cashier", 4, cashierEmail), "probecashier2");
 
-  const otherDriver = await signIn(probeEmail, probePassword, "probedriver2");
+  const probeEmail = "probe.driver@hardware.com";
+  const otherDriver = await signIn(probeEmail,
+    await makeProbe("Probe", "Driver", 5, probeEmail), "probedriver2");
 
   record("every account used by this file signed in",
     [admin, manager, cashier, driver, otherCashier, otherDriver].every((s) => s.cookie),
@@ -246,7 +263,8 @@ async function signIn(email, demoPassword, chosenPassword) {
 
   await call(admin.cookie, "PUT", "/api/store-settings", {
     storeName: "Regression Hardware", address: "1 Probe Street",
-    tin: "111-222-333-00000", registrationType: "VAT", vatRate: 12, invoiceNote: "probe"
+    tin: "111-222-333-00000", registrationType: "VAT", vatRate: 12, invoiceNote: "probe",
+    bankName: "Probe Bank", bankAccountName: "Regression Hardware", bankAccountNumber: "0012 3456 7890"
   });
   await call(manager.cookie, "PUT", "/api/me", {
     firstName: "Manager", middleName: "Mendoza", lastName: "User", phone: "09171234567"

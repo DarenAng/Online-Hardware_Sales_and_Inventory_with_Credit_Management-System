@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Delivery &middot; Lucelyn Hardware</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/general-ui.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/modules/delivery-personnel.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <a href="#" class="sidebar-brand" onclick="showDeliveryHome(event)" title="Back to pending deliveries">
+                <span class="brand-mark">LH</span>
+                <span class="brand-text">
+                    <span class="brand-name">Lucelyn Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
+            </a>
+            <div class="sidebar-user">
+                <span class="sidebar-eyebrow">Delivery Personnel</span>
+                <span data-current-user>User</span>
+            </div>
+            <!-- data-feature names the screen an item opens; shared/features.js hides
+                 the ones switched off for this role and mirrors the counts -->
+            <ul class="sidebar-nav">
+                <!-- A folding heading does two things (shared/helpers.js sidebarHeading): its
+                     words open the module's first screen, its caret alone folds the list -->
+                <li data-sidebar-dropdown data-feature="delivery-runs">
+                    <a href="#runs" onclick="sidebarHeading(event, 'runs-nav', 'run-dropdown', showDeliveryHome)" class="nav-parent" id="runs-nav"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>
+                        Delivery Runs <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="run-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)"><i class="bi bi-hourglass-split nav-icon" aria-hidden="true"></i>
+                            Pending</a></li>
+                        <li><a href="#" data-panel-link="panel-cod" onclick="showDeliveryCod(event)"><i class="bi bi-cash-coin nav-icon" aria-hidden="true"></i>Cash on Delivery</a></li>
+                    </ul>
+                </li>
+                <li data-feature="delivery-reports"><a href="#" data-panel-link="panel-report" onclick="showDeliveryReports(event)"><i class="bi bi-bar-chart-line nav-icon" aria-hidden="true"></i>Reports</a></li>
+                <!-- drawn by shared/delivery-schedule.js; hidden until features.js hears the role has it -->
+                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
+                    Delivery Schedule</a></li>
+
+            </ul>
+        </aside>
+
+        <!-- the shade behind the menu once it slides over the page -->
+        <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
+
+        <main class="main-content">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="menu-toggle" type="button" onclick="toggleSidebar()"
+                            aria-controls="sidebar" aria-expanded="false"
+                            aria-label="Menu">&#9776;</button>
+                    <span class="topbar-title" id="del-page-title">Pending Deliveries</span>
+                </div>
+            </header>
+
+            <div class="content-area">
+
+                <!-- DEFAULT: PENDING DELIVERIES -->
+                <div id="panel-pending" data-panel>
+                    <div class="page-intro">
+                        <h2>Pending Deliveries</h2>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <h3 id="dpend-heading">Waiting to Go Out</h3>
+                            </div>
+                            <div>
+                                <button type="button" class="btn btn-sm btn-accent" id="dpend-show-all" hidden
+                                        onclick="clearDeliveryFocus()">Show All Deliveries</button>
+                            </div>
+                        </div>
+                        <div class="panel-toolbar">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="dpend-search"
+                                       placeholder="Search by customer or destination"
+                                       oninput="dataPanelSearchInput('driver-pending', event)" onkeydown="dataPanelSearchKey('driver-pending', event)" title="Type at least two letters to search">
+                            </div>
+                        </div>
+                        <div class="table-responsive grid-10">
+                            <table id="dpend-table">
+                                <thead>
+                                    <tr><th>ID</th><th>Customer</th><th>Destination</th><th>Scheduled</th><th>Status</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="dpend-pager"></div>
+                    </div>
+                </div>
+
+                <!-- CASH ON DELIVERY -->
+                <div id="panel-cod" data-panel style="display: none;">
+                    <!-- the form on the left, the list beside it: both on one screen -->
+                    <div class="pair-layout form-left">
+                        <div class="card pair-form">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Receive Payment</h3>
+                                </div>
+                            </div>
+                            <form id="dcod-form" class="form-sheet" onsubmit="handleCodPayment(event)">
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="dcod-select">Delivery</label>
+                                        <select name="deliveryId" class="form-control" id="dcod-select" onchange="onCodChange()" required></select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="dcod-amount">Amount received</label>
+                                        <input type="number" id="dcod-amount" name="amount" class="form-control" min="0" step="0.01" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="dcod-method">Payment method</label>
+                                        <select id="dcod-method" name="paymentMethod" class="form-control" required>
+                                            <option value="Cash">Cash</option>
+                                            <option value="GCash">GCash</option>
+                                            <option value="PayMaya">PayMaya</option>
+                                            <option value="Cheque">Cheque</option>
+                                            <option value="Bank Transfer">Bank Transfer</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="dcod-ref">Reference no. <span class="label-hint">optional</span></label>
+                                        <input type="text" id="dcod-ref" name="referenceNo" class="form-control" placeholder="For non-cash payments">
+                                    </div>
+                                </div>
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-success">Record Payment</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>My Deliveries</h3>
+                                </div>
+                            </div>
+                            <div class="panel-toolbar">
+                                <div class="search-wrap">
+                                    <input type="search" class="form-control search-input" id="dcod-search"
+                                           placeholder="Search by customer"
+                                           oninput="dataPanelSearchInput('driver-cod', event)" onkeydown="dataPanelSearchKey('driver-cod', event)" title="Type at least two letters to search">
+                                </div>
+                            </div>
+                            <div class="table-responsive grid-10">
+                                <table id="dcod-table">
+                                    <thead>
+                                        <tr><th>ID</th><th>Customer</th><th>Method</th><th>Order Total</th><th>Balance</th><th>Status</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pager is-single" id="dcod-pager"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- REPORTS -->
+                <div id="panel-report" data-panel style="display: none;">
+                    <div class="page-intro">
+                        <h2>Delivery Reports</h2>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Choose Dates</h3>
+                            </div>
+                        </div>
+                        <div class="panel-toolbar">
+                            <div class="toolbar-field">
+                                <label for="drep-from">From</label>
+                                <input type="date" id="drep-from" onchange="deliveryDatesPicked()">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="drep-to">To</label>
+                                <input type="date" id="drep-to" onchange="deliveryDatesPicked()">
+                            </div>
+                        </div>
+                        <div class="track-legend" id="drep-legend"></div>
+                    </div>
+
+                    <!-- one date range feeds both tables; the tabs pick which one shows -->
+                    <nav class="view-nav" aria-label="Report">
+                        <div class="view-nav-group">
+                            <div class="view-nav-tabs" role="tablist">
+                                <button type="button" class="view-tab is-current" role="tab" aria-selected="true"
+                                        data-view-tab="drep-view-deliveries"
+                                        onclick="showDriverReportView('drep-view-deliveries')">Deliveries Handled</button>
+                                <button type="button" class="view-tab" role="tab" aria-selected="false"
+                                        data-view-tab="drep-view-payments"
+                                        onclick="showDriverReportView('drep-view-payments')">Payments Collected</button>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <section class="panel-view" id="drep-view-deliveries">
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Deliveries Handled</h3>
+                                </div>
+                            </div>
+                            <div class="table-responsive grid-10">
+                                <table id="drep-table">
+                                    <thead>
+                                        <tr><th>ID</th><th>Date</th><th>Customer</th><th>Destination</th><th>Order Total</th><th>Balance</th><th>Status</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pager is-single" id="drep-pager"></div>
+                        </div>
+                    </section>
+
+                    <section class="panel-view" id="drep-view-payments" hidden>
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Payments Collected</h3>
+                                </div>
+                            </div>
+                            <div class="table-responsive grid-10">
+                                <table id="drep-pay-table">
+                                    <thead>
+                                        <tr><th>Date</th><th>Sale</th><th>Customer</th><th>Method</th><th>Reference</th><th>Amount</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pager is-single" id="drep-pay-pager"></div>
+                        </div>
+                    </section>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- PAGED DETAIL POPUP -->
+    <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="detail-avatar">--</div>
+                    <div>
+                        <h3 id="detail-title">Record</h3>
+                        <span class="modal-role" id="detail-subtitle">Detail</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('detail-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-steps" id="detail-steps"></div>
+
+            <div class="modal-body">
+                <div id="detail-page"></div>
+            </div>
+
+            <div class="modal-foot" hidden></div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="modules/shared/icons.js"></script>
+    <script src="modules/shared/helpers.js"></script>
+    <script src="modules/shared/format.js"></script>
+    <script src="connections/shared-connection.js"></script>
+    <script src="modules/shared/ui-kit.js"></script>
+    <script src="modules/shared/tables.js"></script>
+    <script src="modules/shared/data-panel.js"></script>
+    <script src="modules/shared/live-sync.js"></script>
+    <script src="modules/shared/modals.js"></script>
+    <script src="modules/shared/detail-modal.js"></script>
+    <script src="modules/shared/session.js"></script>
+    <script src="modules/shared/topbar.js"></script>
+    <script src="modules/shared/subnav.js"></script>
+    <script src="modules/shared/my-account.js"></script>
+    <script src="modules/shared/notifications.js"></script>
+    <script src="modules/shared/features.js"></script>
+    <script src="modules/shared/deliveries.js"></script>
+    <script src="modules/shared/delivery-schedule.js"></script>
+    <script src="connections/delivery-connection.js"></script>
+    <script src="modules/delivery-personnel.js"></script>
+</body>
+</html>

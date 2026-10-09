@@ -79,7 +79,7 @@ function expect(role, label, response, allowed) {
   record("admin", "bad password refused", bad.status === 401, `got ${bad.status}`);
 
   console.log("== ADMIN ==");
-  const admin = sessions.admin.cookie;
+  let admin = sessions.admin.cookie;
   expect("admin", "GET roles",       await call(admin, "GET", "/api/roles"), [200]);
   expect("admin", "GET users",       await call(admin, "GET", "/api/users"), [200]);
   expect("admin", "GET users/1",     await call(admin, "GET", "/api/users/1"), [200]);
@@ -101,6 +101,15 @@ function expect(role, label, response, allowed) {
     Array.isArray(activeOnly.body) && activeOnly.body.length > 0 &&
     activeOnly.body.every((row) => Boolean(row.is_active)),
     "an inactive account came back from the active filter");
+
+  // the database ships with five active accounts, so the archived one is made here
+  const archived = await createAccount(admin, {
+    firstName: "Former", lastName: "Clerk", roleId: 3, email: "former.clerk@hardware.com"
+  });
+  if (archived.status === 200) {
+    await call(admin, "PATCH", `/api/users/${archived.body.staffId || archived.body.staff_id}/status`,
+      { isActive: false });
+  }
 
   const inactiveOnly = await call(admin, "GET", "/api/users?status=inactive");
   record("admin", "status=inactive filters",
@@ -145,7 +154,9 @@ function expect(role, label, response, allowed) {
   // the automatic backup: the list has to say which kind each file is
   record("admin", "the backup list says whether the system backs itself up",
     listed.body && listed.body.auto && typeof listed.body.auto.enabled === "boolean" &&
-    listed.body.auto.everySeconds > 0 && listed.body.auto.keep > 0,
+    listed.body.auto.schedule === "daily" && Number.isInteger(listed.body.auto.hour) &&
+    listed.body.auto.keep > 0 && listed.body.limits && listed.body.limits.manual > 0 &&
+    listed.body.folder === undefined,
     JSON.stringify(listed.body && listed.body.auto));
   record("admin", "every backup says which kind it is",
     listed.body && listed.body.files.every((f) => typeof f.automatic === "boolean"), "");
@@ -493,6 +504,48 @@ function expect(role, label, response, allowed) {
     Array.isArray(book.body) &&
     book.body.every((c) => ["Good", "Watch", "Hold"].includes(c.standing)),
     "an account came back with no standing");
+  record("manager", "every account carries its late-payment rate and penalties owed",
+    Array.isArray(book.body) &&
+    book.body.every((c) => Number.isFinite(Number(c.penalty_rate)) && c.penalties_owed !== undefined),
+    "an account came back without penalty_rate or penalties_owed");
+
+  // the late-payment policy: the manager sets it, the cashier only reads it
+  const policy = await call(manager, "GET", "/api/credit/policy");
+  expect("manager", "GET credit/policy", policy, [200]);
+  record("manager", "the policy carries a rate of 1 to 3 percent a month",
+    policy.body && Number(policy.body.penalty_rate) >= 1 && Number(policy.body.penalty_rate) <= 3,
+    JSON.stringify(policy.body).slice(0, 120));
+  expect("cashier", "GET credit/policy", await call(cashierCookieForCredit(sessions), "GET", "/api/credit/policy"), [200]);
+  expect("cashier", "a cashier cannot set the late-payment rate",
+    await call(cashierCookieForCredit(sessions), "PUT", "/api/credit/policy", { penaltyRate: 2 }), [403]);
+  expect("manager", "a rate over 3 a month is refused",
+    await call(manager, "PUT", "/api/credit/policy", { penaltyRate: 3.5 }), [400]);
+  expect("manager", "a rate under 1 a month is refused",
+    await call(manager, "PUT", "/api/credit/policy", { penaltyRate: 0.5 }), [400]);
+  expect("manager", "PUT credit/policy", await call(manager, "PUT", "/api/credit/policy", { penaltyRate: 2.5 }), [200]);
+  const changed = await call(manager, "GET", "/api/credit/policy");
+  record("manager", "the new rate is what is read back",
+    changed.body && Number(changed.body.penalty_rate) === 2.5, JSON.stringify(changed.body).slice(0, 80));
+  // back to the default, so the sweep behaves as documented after this run
+  expect("manager", "PUT credit/policy back to 3",
+    await call(manager, "PUT", "/api/credit/policy", { penaltyRate: 3 }), [200]);
+
+  // every open balance is measured against the bill with any penalty on it
+  const open = await call(cashierCookieForCredit(sessions), "GET", "/api/credit/open-sales");
+  expect("cashier", "GET credit/open-sales", open, [200]);
+  record("cashier", "balance due = amount due (sale + penalty) - paid, on every open sale",
+    Array.isArray(open.body) && open.body.every((s) =>
+      Math.abs(Number(s.balance_due) -
+        Math.max(Number(s.final_amount) + Number(s.penalty_amount) - Number(s.amount_paid), 0)) < 0.005 &&
+      Math.abs(Number(s.amount_due) - (Number(s.final_amount) + Number(s.penalty_amount))) < 0.005),
+    "an open sale's balance did not include its penalty");
+  record("cashier", "a sale still inside its 30 days carries no penalty",
+    Array.isArray(open.body) && open.body.every((s) => Number(s.days_old) > 30 || Number(s.penalty_amount) === 0),
+    "a sale not yet due was charged a penalty");
+  record("cashier", "a penalised sale has been charged one month for every 30 days (or part) past due",
+    Array.isArray(open.body) && open.body.every((s) => Number(s.penalty_amount) === 0 ||
+      Number(s.penalty_months) === Math.ceil((Number(s.days_old) - 30) / 30)),
+    "a sale's penalty_months did not match its days past due");
 
   const creditCustomer = book.body[0];
   expect("manager", "GET one credit account",
@@ -511,6 +564,24 @@ function expect(role, label, response, allowed) {
   expect("manager", "PUT a credit limit", await call(manager, "PUT",
     `/api/credit/customers/${owing.customer_id}/limit`,
     { creditLimit: 99999, standing: "Good", notes: "Smoke test" }), [200]);
+  expect("manager", "PUT a credit limit with the account's own late-payment rate", await call(manager, "PUT",
+    `/api/credit/customers/${owing.customer_id}/limit`,
+    { creditLimit: 99999, standing: "Good", penaltyRate: 1, notes: "Smoke test" }), [200]);
+  const ownRate = await call(manager, "GET", `/api/credit/customers/${owing.customer_id}`);
+  record("manager", "the account reads back its own rate",
+    ownRate.body && ownRate.body.credit && Number(ownRate.body.credit.penalty_rate) === 1 &&
+      Number(ownRate.body.credit.penalty_rate_override) === 1,
+    JSON.stringify(ownRate.body && ownRate.body.credit && ownRate.body.credit.penalty_rate));
+  expect("manager", "a rate over 3 a month on an account is refused", await call(manager, "PUT",
+    `/api/credit/customers/${owing.customer_id}/limit`,
+    { creditLimit: 99999, standing: "Good", penaltyRate: 4 }), [400]);
+  expect("manager", "blank puts the account back on the shop's rate", await call(manager, "PUT",
+    `/api/credit/customers/${owing.customer_id}/limit`,
+    { creditLimit: 99999, standing: "Good", penaltyRate: "", notes: "Smoke test" }), [200]);
+  const shopRate = await call(manager, "GET", `/api/credit/customers/${owing.customer_id}`);
+  record("manager", "the override is gone and the shop's rate reads through",
+    shopRate.body && shopRate.body.credit && shopRate.body.credit.penalty_rate_override === null,
+    JSON.stringify(shopRate.body && shopRate.body.credit && shopRate.body.credit.penalty_rate_override));
   expect("manager", "a negative limit is refused", await call(manager, "PUT",
     `/api/credit/customers/${owing.customer_id}/limit`,
     { creditLimit: -1, standing: "Good" }), [400]);
@@ -659,7 +730,7 @@ function expect(role, label, response, allowed) {
   expect("manager", "GET daily-tally", await call(manager, "GET", "/api/reports/daily-tally"), [200]);
 
   console.log("== CLERK ==");
-  const clerk = sessions.clerk.cookie;
+  let clerk = sessions.clerk.cookie;
   expect("clerk", "GET inventory/summary",     await call(clerk, "GET", "/api/inventory/summary"), [200]);
   expect("clerk", "GET inventory/products",    await call(clerk, "GET", "/api/inventory/products?archived=false"), [200]);
   expect("clerk", "GET inventory/products arch", await call(clerk, "GET", "/api/inventory/products?archived=true"), [200]);
@@ -672,26 +743,49 @@ function expect(role, label, response, allowed) {
   }), [200]);
   expect("clerk", "PUT reorder/2",             await call(clerk, "PUT", "/api/inventory/reorder/2", { reorderPoint: 20 }), [200]);
 
-  console.log("== PURCHASE ORDERS: THE MANAGER'S, READ BY THE CLERK ==");
-  // a clerk can read every order and nothing else
-  expect("clerk", "a clerk cannot raise an order", await call(clerk, "POST", "/api/purchase-orders", {
+  console.log("== PURCHASE ORDERS: RAISED AND RECEIVED BY THE CLERK, CONFIRMED BY THE MANAGER ==");
+  // the clerk raises an order; only the manager confirms it
+  expect("manager", "a manager cannot raise an order", await call(manager, "POST", "/api/purchase-orders", {
     supplierId: 1, items: [{ product_id: 2, quantity: 5, unit_cost: 300 }]
   }), [403]);
-  const po = await call(manager, "POST", "/api/purchase-orders", {
+  const po = await call(clerk, "POST", "/api/purchase-orders", {
     supplierId: 1, items: [{ product_id: 2, quantity: 5, unit_cost: 300 }]
   });
-  expect("manager", "POST purchase-orders", po, [200]);
-  expect("manager", "GET purchase-orders", await call(manager, "GET", "/api/purchase-orders"), [200]);
+  expect("clerk", "POST purchase-orders", po, [200]);
+  expect("clerk", "GET purchase-orders", await call(clerk, "GET", "/api/purchase-orders"), [200]);
   if (po.body && po.body.poId) {
     expect("manager", "GET purchase-orders/:id/items",
       await call(manager, "GET", `/api/purchase-orders/${po.body.poId}/items`), [200]);
     expect("clerk", "GET purchase-orders/:id/document",
       await call(clerk, "GET", `/api/purchase-orders/${po.body.poId}/document`), [200]);
-    expect("clerk", "a clerk cannot receive an order",
-      await call(clerk, "POST", `/api/purchase-orders/${po.body.poId}/receive`), [403]);
-    expect("manager", "POST receive PO",
-      await call(manager, "POST", `/api/purchase-orders/${po.body.poId}/receive`), [200]);
+    expect("clerk", "a clerk cannot confirm an order",
+      await call(clerk, "POST", `/api/purchase-orders/${po.body.poId}/decide`, { approve: true }), [403]);
+    expect("clerk", "an order not yet confirmed cannot be received",
+      await call(clerk, "POST", `/api/purchase-orders/${po.body.poId}/receive`), [400]);
+    expect("manager", "POST decide PO",
+      await call(manager, "POST", `/api/purchase-orders/${po.body.poId}/decide`, { approve: true }), [200]);
+    expect("manager", "a manager cannot receive an order, only check it",
+      await call(manager, "POST", `/api/purchase-orders/${po.body.poId}/receive`), [403]);
+    expect("clerk", "POST receive PO, once the manager has confirmed it",
+      await call(clerk, "POST", `/api/purchase-orders/${po.body.poId}/receive`), [200]);
+    expect("clerk", "an order already received cannot be received again",
+      await call(clerk, "POST", `/api/purchase-orders/${po.body.poId}/receive`), [400]);
   }
+  // suppliers, categories and units are the manager's to add; the clerk picks from what is on file
+  expect("clerk", "a clerk cannot add a supplier",
+    await call(clerk, "POST", "/api/suppliers", { name: "Smoke Supplier" }), [403]);
+  expect("clerk", "an order to a supplier not on file is refused",
+    await call(clerk, "POST", "/api/purchase-orders", {
+      supplierName: "Nobody On File Trading", items: [{ product_id: 2, quantity: 1, unit_cost: 300 }]
+    }), [400]);
+  expect("clerk", "a material in a category not on file is refused",
+    await call(clerk, "POST", "/api/materials", { name: "Smoke Widget", categoryName: "No Such Category Here", unitName: "pcs" }), [400]);
+  expect("manager", "the staff password screen is gone",
+    await call(manager, "GET", "/api/staff/passwords"), [403, 404]);
+  expect("manager", "a table saves as a spreadsheet",
+    await call(manager, "POST", "/api/reports/spreadsheet", {
+      title: "Smoke", sheets: [{ name: "Smoke", headers: ["A", "B"], rows: [["x", 1]] }]
+    }), [200]);
   console.log("== RETURNS: REMARKS AND WHERE THE GOODS GO ==");
 
   expect("clerk", "a one-word reason is refused", await call(clerk, "POST", "/api/returns", {
@@ -763,10 +857,11 @@ function expect(role, label, response, allowed) {
     JSON.stringify(legacy.body).slice(0, 120));
 
   const listed2 = await call(clerk, "GET", "/api/returns");
-  record("clerk", "every return record says where the goods went",
+  record("clerk", "every return record says where the goods went, unless the stockroom still has it",
     Array.isArray(listed2.body) && listed2.body.length > 0 &&
-    listed2.body.every((r) => ["Return to Stock", "Write-Off"].includes(r.disposition)),
-    "a return came back with no disposition");
+    listed2.body.every((r) => ["Return to Stock", "Write-Off"].includes(r.disposition) ||
+      (r.status === "Open" && r.disposition === null && Number(r.awaiting_inspection) === 1)),
+    "a return came back with no disposition and is not awaiting inspection");
   record("clerk", "and every one carries its remarks",
     Array.isArray(listed2.body) &&
     listed2.body.every((r) => typeof r.reason === "string" && r.reason.trim().length > 0),
@@ -775,6 +870,45 @@ function expect(role, label, response, allowed) {
   const report = writeOff;
   if (report.body && report.body.reportId) {
     expect("clerk", "POST resolve return", await call(clerk, "POST", `/api/returns/${report.body.reportId}/resolve`), [200]);
+  }
+
+  // A refund from the counter is the clerk's to judge: the cashier files it
+  // with nowhere for the goods to go, nothing moves, and the clerk's verdict
+  // puts it back on the shelf or writes it off.
+  const counterCookie = cashierCookieForCredit(sessions);
+  const beforeRefund = await stockOf(2);
+  const refund = await call(counterCookie, "POST", "/api/returns", {
+    productId: 2, saleId: 1, reportType: "Refunded", quantity: 1,
+    reason: "Customer brought it back unopened, wrong size for the job.",
+    refundAmount: 250, disposition: "Return to Stock"   // the counter's word is ignored
+  });
+  expect("cashier", "POST a refund from the counter", refund, [200]);
+  record("cashier", "the refund waits for inspection whatever the counter said",
+    refund.body && refund.body.disposition === null && refund.body.awaitingInspection === true,
+    JSON.stringify(refund.body).slice(0, 120));
+  record("cashier", "nothing moves on the shelf until the clerk has looked",
+    (await stockOf(2)) === beforeRefund, `${beforeRefund} -> ${await stockOf(2)}`);
+
+  if (refund.body && refund.body.reportId) {
+    const id = refund.body.reportId;
+    expect("cashier", "a cashier cannot give the verdict",
+      await call(counterCookie, "POST", `/api/returns/${id}/resolve`, { disposition: "Return to Stock" }), [403]);
+    expect("clerk", "a verdict is required on a refund from the counter",
+      await call(clerk, "POST", `/api/returns/${id}/resolve`, {}), [400]);
+    expect("clerk", "an invented verdict is refused",
+      await call(clerk, "POST", `/api/returns/${id}/resolve`, { disposition: "Maybe" }), [400]);
+    const verdict = await call(clerk, "POST", `/api/returns/${id}/resolve`,
+      { disposition: "Return to Stock", note: "Box unopened, seals intact." });
+    expect("clerk", "POST the inspection verdict", verdict, [200]);
+    record("clerk", "sellable goods go back on the count",
+      (await stockOf(2)) === beforeRefund + 1, `${beforeRefund} -> ${await stockOf(2)}`);
+    const after = (await call(clerk, "GET", "/api/returns")).body.find((r) => r.return_id === id);
+    record("clerk", "the report records who inspected it and what they found",
+      after && after.status === "Resolved" && after.disposition === "Return to Stock" &&
+        after.inspected_by && after.inspection_note === "Box unopened, seals intact.",
+      JSON.stringify(after).slice(0, 160));
+    expect("clerk", "a verdict cannot be given twice",
+      await call(clerk, "POST", `/api/returns/${id}/resolve`, { disposition: "Write-Off" }), [400]);
   }
 
   console.log("== CASHIER ==");
@@ -806,7 +940,8 @@ function expect(role, label, response, allowed) {
   if (sale.body && sale.body.saleId) {
     expect("cashier", "GET sale detail", await call(cashier, "GET", `/api/sales/${sale.body.saleId}`), [200]);
     const del = await call(cashier, "POST", "/api/deliveries", {
-      saleId: sale.body.saleId, address: "Smoke test address", scheduledDate: null, remarks: null
+      saleId: sale.body.saleId, address: "Smoke test address", scheduledDate: null, remarks: null,
+      contactPhone: "09171234567"
     });
     expect("cashier", "POST deliveries", del, [200]);
     global.smokeDeliveryId = del.body && del.body.deliveryId;
@@ -841,11 +976,12 @@ function expect(role, label, response, allowed) {
   const summary = await call(sessions.manager.cookie, "GET", "/api/manager/summary");
   record("manager", "pending credits count the unpaid sales",
     Number(summary.body.pendingCredits) > 0, `pendingCredits=${summary.body.pendingCredits}`);
-  // billed, collected and outstanding are one equation
-  record("manager", "billed minus collected equals what is outstanding",
-    Math.round((Number(summary.body.grossSales) - Number(summary.body.totalIncome)) * 100)
+  // billed, collected, late penalties and outstanding are one equation
+  record("manager", "billed minus collected, plus late penalties, equals what is outstanding",
+    Math.round((Number(summary.body.grossSales) - Number(summary.body.totalIncome) +
+                Number(summary.body.pendingPenalties)) * 100)
       === Math.round(Number(summary.body.pendingCredits) * 100),
-    `${summary.body.grossSales} - ${summary.body.totalIncome} vs ${summary.body.pendingCredits}`);
+    `${summary.body.grossSales} - ${summary.body.totalIncome} + ${summary.body.pendingPenalties} vs ${summary.body.pendingCredits}`);
 
   expect("cashier", "oversell refused", await call(cashier, "POST", "/api/sales", {
     customerId: null, discount: 0, amountPaid: 999999, paymentMethod: "Cash",
@@ -861,6 +997,24 @@ function expect(role, label, response, allowed) {
   expect("delivery", "GET delivery/summary", await call(driver, "GET",
     `/api/delivery/summary?staffId=${driverUser.staff_id}`), [200]);
   if (global.smokeDeliveryId) {
+    expect("delivery", "PATCH before taking it refused", await call(driver, "PATCH",
+      `/api/deliveries/${global.smokeDeliveryId}/status`, { status: "Out for Delivery" }), [409]);
+    const before = await call(driver, "GET", "/api/delivery/list");
+    const unclaimed = Array.isArray(before.body) &&
+      before.body.find((d) => d.delivery_id === global.smokeDeliveryId);
+    record("delivery", "a delivery nobody has taken is on the driver's list",
+      Boolean(unclaimed) && unclaimed.delivery_staff_id === null,
+      unclaimed ? `delivery_staff_id=${unclaimed.delivery_staff_id}` : "not listed");
+    expect("delivery", "POST claim", await call(driver, "POST",
+      `/api/delivery/${global.smokeDeliveryId}/claim`, {}), [200]);
+    const after = await call(driver, "GET", "/api/delivery/list");
+    const taken = Array.isArray(after.body) &&
+      after.body.find((d) => d.delivery_id === global.smokeDeliveryId);
+    record("delivery", "a taken delivery stays on the list as the driver's own",
+      Boolean(taken) && Number(taken.delivery_staff_id) === Number(driverUser.staff_id),
+      taken ? `delivery_staff_id=${taken.delivery_staff_id}` : "gone from the list");
+    expect("delivery", "taking it again is harmless", await call(driver, "POST",
+      `/api/delivery/${global.smokeDeliveryId}/claim`, {}), [200]);
     expect("delivery", "PATCH out for delivery", await call(driver, "PATCH",
       `/api/deliveries/${global.smokeDeliveryId}/status`, { status: "Out for Delivery" }), [200]);
     expect("delivery", "PATCH delivered", await call(driver, "PATCH",
@@ -930,12 +1084,16 @@ function expect(role, label, response, allowed) {
   const stillAdmin = await login("admin@hardware.com", "admin123");
   record("admin", "and the current one still signs in afterwards", stillAdmin.ok,
     `got ${stillAdmin.status}`);
+  // an account holds one session at a time, so that sign-in ended the first one
+  admin = stillAdmin.cookie;
 
   const clerkReset = await call(admin, "POST", "/api/users/3/reset-password", {});
   expect("admin", "POST reset-password for the clerk", clerkReset, [200]);
   const clerkPassword = clerkReset.body && clerkReset.body.password;
   const reLogin = await login("clerk@hardware.com", clerkPassword || "");
   record("clerk", "the reset password signs in", reLogin.ok, `got ${reLogin.status}`);
+  // an account holds one session at a time, so that sign-in ended the clerk's first one
+  if (reLogin.cookie) clerk = reLogin.cookie;
   record("clerk", "and has to be changed on that sign-in",
     reLogin.body && reLogin.body.user && reLogin.body.user.must_change_password === 1 ||
     reLogin.body && reLogin.body.user && reLogin.body.user.must_change_password === true,
@@ -953,226 +1111,12 @@ function expect(role, label, response, allowed) {
     stillTemporary.ok && stillTemporary.body.user &&
     (stillTemporary.body.user.must_change_password === 1 || stillTemporary.body.user.must_change_password === true),
     `got ${stillTemporary.status}`);
-
-  // The connected systems: a permission, not a role. Every grant is checked
-  // on the cashier's own cookie straight afterwards, and everything lands in
-  // the trail.
-  console.log("== CONNECTED SYSTEMS: A PERMISSION, NOT A ROLE ==");
-  const cashierId = sessions.cashier.user.staff_id;
-
-  const allSystems = expect("admin", "GET systems", await call(admin, "GET", "/api/systems"), [200]);
-  record("admin", "the five internal systems are registered",
-    Array.isArray(allSystems.body) &&
-    ["database", "backup", "archive-sweep", "live-sync", "mail"]
-      .every((key) => allSystems.body.some((s) => s.key === key)),
-    JSON.stringify((allSystems.body || []).map((s) => s.key)));
-  record("admin", "the administrator holds every level and reads every status",
-    Array.isArray(allSystems.body) && allSystems.body.every((s) =>
-      s.access && s.access.monitor && s.access.manage && s.access.control && s.status && s.status.state),
-    "");
-  record("admin", "the database reports itself healthy",
-    Array.isArray(allSystems.body) &&
-    allSystems.body.some((s) => s.key === "database" && s.status.state === "ok"),
-    JSON.stringify((allSystems.body || []).find((s) => s.key === "database")).slice(0, 200));
-
-  // nothing by default
-  const cashierSystems = expect("cashier", "GET systems answers", await call(cashier, "GET", "/api/systems"), [200]);
-  record("cashier", "holds no system by default",
-    Array.isArray(cashierSystems.body) && cashierSystems.body.length === 0,
-    JSON.stringify(cashierSystems.body).slice(0, 120));
-  expect("cashier", "monitor refused without a grant",
-    await call(cashier, "GET", "/api/systems/backup/status"), [403]);
-  expect("cashier", "control refused without a grant",
-    await call(cashier, "POST", "/api/systems/backup/actions/run-now", {}), [403]);
-  expect("cashier", "manage refused without a grant",
-    await call(cashier, "PUT", "/api/systems/backup", { enabled: true }), [403]);
-  expect("cashier", "cannot grant anybody anything",
-    await call(cashier, "PUT", `/api/access/users/${cashierId}/systems/backup`, { control: true }), [403]);
-  expect("cashier", "cannot read who holds what",
-    await call(cashier, "GET", "/api/access/permissions"), [403]);
-  expect("manager", "a manager cannot grant either",
-    await call(manager, "PUT", `/api/access/users/${cashierId}/systems/backup`, { monitor: true }), [403]);
-  expect("cashier", "cannot register a system",
-    await call(cashier, "POST", "/api/systems", { key: "x", name: "x", endpointUrl: "http://x" }), [403]);
-
-  const me0 = await call(cashier, "GET", "/api/me/access");
-  record("cashier", "me/access says the screen is not offered",
-    me0.body && me0.body.canReachSystems === false && Array.isArray(me0.body.systems) && me0.body.systems.length === 0,
-    JSON.stringify(me0.body).slice(0, 160));
-
-  // the refusal is on the trail
-  const denied = await call(admin, "GET", "/api/audit-logs?actionType=ACCESS");
-  record("admin", "a refused attempt is written to the trail",
-    Array.isArray(denied.body) && denied.body.some((row) =>
-      row.action === "SYSTEM_ACCESS_DENIED" && row.staff_id === cashierId),
-    JSON.stringify((denied.body || []).slice(0, 2)).slice(0, 200));
-
-  // the administrator cannot grant to themselves, nor to another administrator
-  expect("admin", "cannot grant to their own account",
-    await call(admin, "PUT", `/api/access/users/${sessions.admin.user.staff_id}/systems/backup`, { monitor: true }), [403]);
-  expect("admin", "a grant to a person with no login is refused",
-    await call(admin, "PUT", "/api/access/users/7/systems/backup", { monitor: true }), [400]);
-  expect("admin", "a grant on an unknown system is refused",
-    await call(admin, "PUT", `/api/access/users/${cashierId}/systems/not-a-system`, { monitor: true }), [404]);
-
-  // monitor
-  const granted = expect("admin", "PUT grant monitor on backup",
-    await call(admin, "PUT", `/api/access/users/${cashierId}/systems/backup`,
-      { monitor: true, note: "Watches the folder while the disk is swapped" }), [200]);
-  record("admin", "the grant says what it did",
-    granted.body && granted.body.changed === true && granted.body.grant &&
-    granted.body.grant.monitor === true && granted.body.grant.control === false,
-    JSON.stringify(granted.body).slice(0, 200));
-
-  expect("cashier", "monitor allowed once granted",
-    await call(cashier, "GET", "/api/systems/backup/status"), [200]);
-  expect("cashier", "control still refused with monitor only",
-    await call(cashier, "POST", "/api/systems/backup/actions/run-now", {}), [403]);
-  expect("cashier", "another system still refused",
-    await call(cashier, "GET", "/api/systems/database/status"), [403]);
-
-  const me1 = await call(cashier, "GET", "/api/me/access");
-  record("cashier", "me/access now offers the screen",
-    me1.body && me1.body.canReachSystems === true &&
-    me1.body.systems.some((s) => s.key === "backup" && s.monitor && !s.control),
-    JSON.stringify(me1.body && me1.body.systems));
-
-  const mine = await call(cashier, "GET", "/api/systems");
-  record("cashier", "the list holds exactly the granted system, with no commands",
-    Array.isArray(mine.body) && mine.body.length === 1 && mine.body[0].key === "backup" &&
-    mine.body[0].actions.length === 0 && mine.body[0].status && mine.body[0].status.state,
-    JSON.stringify(mine.body).slice(0, 200));
-
-  // the same three boxes again writes nothing
-  const same = await call(admin, "PUT", `/api/access/users/${cashierId}/systems/backup`,
-    { monitor: true, note: "Watches the folder while the disk is swapped" });
-  record("admin", "saving the levels already held changes nothing",
-    same.status === 200 && same.body.changed === false, JSON.stringify(same.body).slice(0, 120));
-
-  // control
-  const control = expect("admin", "PUT grant control on backup",
-    await call(admin, "PUT", `/api/access/users/${cashierId}/systems/backup`,
-      { control: true, note: "Takes a backup before the count" }), [200]);
-  record("admin", "control carries monitor with it",
-    control.body && control.body.grant && control.body.grant.monitor && control.body.grant.control,
-    JSON.stringify(control.body && control.body.grant));
-
-  const withControl = await call(cashier, "GET", "/api/systems");
-  record("cashier", "commands appear once control is held",
-    Array.isArray(withControl.body) && withControl.body[0] &&
-    withControl.body[0].actions.some((a) => a.key === "run-now"),
-    JSON.stringify(withControl.body && withControl.body[0] && withControl.body[0].actions));
-
-  const ran = expect("cashier", "POST run-now allowed with control",
-    await call(cashier, "POST", "/api/systems/backup/actions/run-now", {}), [200]);
-  record("cashier", "the command reports what it did",
-    ran.body && ran.body.ok === true && /hardware_db_backup_/.test(ran.body.fileName || ""),
-    JSON.stringify(ran.body).slice(0, 160));
-  expect("cashier", "a command the system does not have is refused",
-    await call(cashier, "POST", "/api/systems/backup/actions/self-destruct", {}), [404]);
-  expect("cashier", "manage still refused with control only",
-    await call(cashier, "PUT", "/api/systems/backup", { enabled: false }), [403]);
-
-  // pause and resume, the two commands that change the timer
-  const paused = expect("cashier", "POST pause", await call(cashier, "POST", "/api/systems/backup/actions/pause", {}), [200]);
-  const pausedList = await call(admin, "GET", "/api/backups");
-  record("admin", "the backup screen says it is paused and by whom",
-    pausedList.body && pausedList.body.auto && pausedList.body.auto.paused === true &&
-    pausedList.body.auto.pausedBy === "cashier@hardware.com",
-    JSON.stringify(pausedList.body && pausedList.body.auto).slice(0, 160));
-  expect("cashier", "POST resume", await call(cashier, "POST", "/api/systems/backup/actions/resume", {}), [200]);
-  const resumed = await call(admin, "GET", "/api/backups");
-  record("admin", "resumed", resumed.body && resumed.body.auto && resumed.body.auto.paused === false, "");
-
-  // every command is on the trail, in the cashier's name
-  const commands = await call(admin, "GET", "/api/audit-logs?actionType=CONTROL");
-  record("admin", "the cashier's commands are on the trail as CONTROL entries",
-    Array.isArray(commands.body) && ["run-now", "pause", "resume"].every((action) =>
-      commands.body.some((row) => row.staff_id === cashierId && row.action === "SYSTEM_ACTION" &&
-        row.metadata && row.metadata.includes(`"action":"${action}"`))),
-    JSON.stringify((commands.body || []).slice(0, 3)).slice(0, 300));
-  record("admin", "a command entry names the role and the machine",
-    Array.isArray(commands.body) && commands.body.length > 0 &&
-    Boolean(commands.body[0].ip_address) && commands.body[0].role_name === "Cashier",
-    JSON.stringify(commands.body && commands.body[0]).slice(0, 200));
-
-  // the grant entries carry what moved
-  const grants = await call(admin, "GET", "/api/audit-logs?actionType=ACCESS");
-  const grantRow = Array.isArray(grants.body)
-    ? grants.body.find((row) => row.action === "GRANT_SYSTEM_ACCESS" && row.details.includes("control")) : null;
-  record("admin", "the grant is on the trail with before and after",
-    Boolean(grantRow) && grantRow.staff_id === sessions.admin.user.staff_id &&
-    /"can_control":\{"before":false,"after":true\}/.test(grantRow.metadata || ""),
-    JSON.stringify(grantRow).slice(0, 240));
-
-  // manage: switching a system off refuses commands, and the switch is audited
-  expect("admin", "PUT manage: switch the sweep off",
-    await call(admin, "PUT", "/api/systems/archive-sweep", { enabled: false }), [200]);
-  expect("admin", "a switched-off system takes no commands",
-    await call(admin, "POST", "/api/systems/archive-sweep/actions/run-now", {}), [409]);
-  expect("admin", "PUT manage: switch the sweep back on",
-    await call(admin, "PUT", "/api/systems/archive-sweep", { enabled: true }), [200]);
-  expect("admin", "POST run the sweep now",
-    await call(admin, "POST", "/api/systems/archive-sweep/actions/run-now", {}), [200]);
-
-  // an external system: registered by the administrator, reached over HTTP
-  const echoUrl = `${BASE}/favicon.ico`;
-  expect("admin", "a bad address is refused",
-    await call(admin, "POST", "/api/systems", { key: "bad-one", name: "Bad", endpointUrl: "ftp://user:pw@x" }), [400]);
-  expect("admin", "a bad key is refused",
-    await call(admin, "POST", "/api/systems", { key: "Bad Key!", name: "Bad", endpointUrl: echoUrl }), [400]);
-  const registered = expect("admin", "POST register an external system",
-    await call(admin, "POST", "/api/systems",
-      { key: "smoke-echo", name: "Smoke Echo", description: "this server, answering itself", endpointUrl: echoUrl }), [200]);
-  record("admin", "its status is read over HTTP",
-    registered.body && registered.body.system && registered.body.system.status &&
-    registered.body.system.status.state === "ok",
-    JSON.stringify(registered.body && registered.body.system && registered.body.system.status).slice(0, 200));
-  expect("admin", "the same key twice is refused",
-    await call(admin, "POST", "/api/systems", { key: "smoke-echo", name: "Again", endpointUrl: echoUrl }), [409]);
-
-  const pinged = expect("admin", "POST ping the external system",
-    await call(admin, "POST", "/api/systems/smoke-echo/actions/ping", {}), [200]);
-  record("admin", "the ping reports the HTTP status and the time",
-    pinged.body && pinged.body.ok === true && pinged.body.httpStatus === 200 && pinged.body.ms >= 0,
-    JSON.stringify(pinged.body).slice(0, 160));
-  expect("admin", "a message with nothing in it is refused",
-    await call(admin, "POST", "/api/systems/smoke-echo/actions/send", { message: "" }), [502]);
-
-  const unreachable = expect("admin", "an address that does not answer is a status, not an error",
-    await call(admin, "PUT", "/api/systems/smoke-echo", { endpointUrl: "http://127.0.0.1:9/nothing" }), [200]);
-  record("admin", "and the card says so",
-    unreachable.body && unreachable.body.system && unreachable.body.system.status.state === "bad",
-    JSON.stringify(unreachable.body && unreachable.body.system && unreachable.body.system.status).slice(0, 160));
-
-  // the manager's seeded key works, and the manager's other doors stay shut
-  expect("manager", "the seeded grant reads the backup",
-    await call(manager, "GET", "/api/systems/backup/status"), [200]);
-  expect("manager", "but not the database", await call(manager, "GET", "/api/systems/database/status"), [403]);
-
-  // revoke: gone on the next request, not the next sign-in
-  const revoked = expect("admin", "PUT revoke everything on backup",
-    await call(admin, "PUT", `/api/access/users/${cashierId}/systems/backup`,
-      { monitor: false, manage: false, control: false }), [200]);
-  record("admin", "the revocation removes the row",
-    revoked.body && revoked.body.changed === true && revoked.body.grant === null,
-    JSON.stringify(revoked.body).slice(0, 160));
-  expect("cashier", "monitor refused again on the same session",
-    await call(cashier, "GET", "/api/systems/backup/status"), [403]);
-  expect("cashier", "control refused again on the same session",
-    await call(cashier, "POST", "/api/systems/backup/actions/run-now", {}), [403]);
-  const revokedTrail = await call(admin, "GET", "/api/audit-logs?actionType=ACCESS");
-  record("admin", "the revocation is on the trail",
-    Array.isArray(revokedTrail.body) &&
-    revokedTrail.body.some((row) => row.action === "REVOKE_SYSTEM_ACCESS" && row.details.includes("Cashier")),
-    JSON.stringify((revokedTrail.body || []).slice(0, 2)).slice(0, 200));
-
-  const holders = expect("admin", "GET who holds what", await call(admin, "GET", "/api/access/permissions"), [200]);
-  record("admin", "the list is every non-administrator with a login, holding or not",
-    Array.isArray(holders.body) && holders.body.every((p) => p.role_name !== "System Administrator" && p.user_id) &&
-    holders.body.some((p) => p.grants.length === 0) &&
-    holders.body.some((p) => p.staff_id === 2 && p.grants.some((g) => g.key === "backup" && g.control)),
-    JSON.stringify((holders.body || []).map((p) => [p.staff_id, p.grants.length])));
+  // settle the clerk on a password of their own and sign in with it, so the
+  // checks below have a clerk session that is past the first-sign-in screen
+  await call(stillTemporary.cookie, "POST", "/api/change-password", { newPassword: "clerkpass456" });
+  const clerkSettled = await login("clerk@hardware.com", "clerkpass456");
+  record("clerk", "the chosen password signs in", clerkSettled.ok, `got ${clerkSettled.status}`);
+  clerk = clerkSettled.cookie;
 
   // Screens by role: a grant widens only the screen's own routes.
   console.log("== SCREENS BY ROLE ==");
@@ -1192,9 +1136,6 @@ function expect(role, label, response, allowed) {
     managerMenu.body.held.includes("delivery-schedule") &&
     managerMenu.body.features.find((f) => f.key === "delivery-schedule").byDefault === true,
     JSON.stringify(managerMenu.body.held));
-  const managerCounts = expect("manager", "GET me/counts", await call(manager, "GET", "/api/me/counts"), [200]);
-  record("manager", "the counts name the extension requests",
-    typeof managerCounts.body["credit-requests"] === "number", JSON.stringify(managerCounts.body));
 
   const clerkMenu = await call(clerk, "GET", "/api/me/features");
   record("clerk", "does not hold the schedule to begin with",
@@ -1206,7 +1147,7 @@ function expect(role, label, response, allowed) {
       { granted: true, note: "Packs for the van" }), [200]);
   record("admin", "the grant answers with the cell as it now stands",
     screenGranted.body.changed === true && screenGranted.body.cell && screenGranted.body.cell.held === true && screenGranted.body.cell.overridden === true,
-    JSON.stringify(granted.body).slice(0, 200));
+    JSON.stringify(screenGranted.body).slice(0, 200));
   const sameSwitch = await call(admin, "PUT", `/api/features/delivery-schedule/roles/${roleIdOf("Inventory Clerk")}`,
     { granted: true, note: "Packs for the van" });
   record("admin", "the same switch again changes nothing", sameSwitch.status === 200 && sameSwitch.body.changed === false, JSON.stringify(sameSwitch.body));
@@ -1219,9 +1160,6 @@ function expect(role, label, response, allowed) {
   expect("clerk", "GET deliveries now allowed", await call(clerk, "GET", "/api/deliveries"), [200]);
   expect("clerk", "PATCH a delivery still refused: the grant widens only the screen's own routes",
     await call(clerk, "PATCH", "/api/deliveries/1/status", { status: "In Transit" }), [403]);
-  const clerkCounts = await call(clerk, "GET", "/api/me/counts");
-  record("clerk", "the schedule's count arrives with the grant",
-    clerkCounts.status === 200 && typeof clerkCounts.body["delivery-schedule"] === "number", JSON.stringify(clerkCounts.body));
 
   const takenBack = expect("admin", "PUT take the schedule back from clerks",
     await call(admin, "PUT", `/api/features/delivery-schedule/roles/${roleIdOf("Inventory Clerk")}`, { granted: false }), [200]);
@@ -1257,13 +1195,53 @@ function expect(role, label, response, allowed) {
     screenTrail.body.some((row) => row.action === "REVOKE_SCREEN" && row.details.includes("Cashier")),
     JSON.stringify((screenTrail.body || []).slice(0, 2)).slice(0, 200));
 
+  // Three wrong passwords in a row and the account is held; the right one is
+  // refused while it is; an administrator's reset releases it at once.
+  console.log("== THE SIGN-IN HOLD ==");
+  const first = await login("delivery@hardware.com", "not-it-1");
+  record("delivery", "first wrong password is a plain refusal", first.status === 401 && !first.body.warning,
+    `${first.status} ${JSON.stringify(first.body).slice(0, 120)}`);
+  const second = await login("delivery@hardware.com", "not-it-2");
+  record("delivery", "the second warns that the next one holds the account",
+    second.status === 401 && /One more wrong password/.test(second.body.warning || ""),
+    `${second.status} ${JSON.stringify(second.body).slice(0, 120)}`);
+  const third = await login("delivery@hardware.com", "not-it-3");
+  record("delivery", "the third holds the account", third.status === 423 && /held/.test(third.body.error),
+    `${third.status} ${JSON.stringify(third.body).slice(0, 120)}`);
+  const rightButHeld = await login("delivery@hardware.com", "delivery123");
+  record("delivery", "the right password is refused while held",
+    rightButHeld.status === 423 && /minute/.test(rightButHeld.body.error),
+    `${rightButHeld.status} ${JSON.stringify(rightButHeld.body).slice(0, 120)}`);
+
+  const heldRow = await call(admin, "GET", "/api/users/5");
+  record("admin", "the directory shows when the hold ends",
+    heldRow.status === 200 && typeof heldRow.body.held_until === "string",
+    JSON.stringify(heldRow.body && heldRow.body.held_until));
+  const heldTrail = await call(admin, "GET", "/api/audit-logs?actionType=SECURITY");
+  record("admin", "the hold is on the trail as a SECURITY entry",
+    Array.isArray(heldTrail.body) && heldTrail.body.some((row) => row.action === "ACCOUNT_HELD"),
+    JSON.stringify((heldTrail.body || []).slice(0, 2)).slice(0, 160));
+
+  const release = expect("admin", "POST reset-password releases the hold",
+    await call(admin, "POST", "/api/users/5/reset-password", {}), [200]);
+  const released = await login("delivery@hardware.com", release.body.password || "");
+  record("delivery", "and the new password signs in straight away", released.ok, `got ${released.status}`);
+  const releasedRow = await call(admin, "GET", "/api/users/5");
+  record("admin", "the hold is gone from the directory",
+    releasedRow.status === 200 && releasedRow.body.held_until === null &&
+    Number(releasedRow.body.failed_attempts) === 0,
+    JSON.stringify({ held: releasedRow.body.held_until, attempts: releasedRow.body.failed_attempts }));
+
   console.log("== PRIVATE FILES ==");
-  for (const file of ["/javascript/server.js", "/database/1-RUN-FIRST-database.sql",
+  for (const file of ["/backend/server.js", "/backend/mailer.js", "/backend/mail-password.txt",
+                      "/Back-end/server.js", "/Back-end/mail-password.txt", "/Back-end/Connections/database.js",
+                      "/connections/admin.js", "/connections/database.js",
+                      "/database/1-RUN-FIRST-database.sql",
                       "/database/2-RUN-SECOND-stored-procedures.sql", "/database/0-READ-ME-FIRST.md"]) {
     const page = await fetch(BASE + file);
     record("anon", `${file} not downloadable`, page.status === 404, `got ${page.status}`);
   }
-  for (const file of ["/Login.html", "/css/style.css", "/javascript/app.js",
+  for (const file of ["/Login.html", "/css/general-ui.css", "/modules/shared/format.js", "/connections/shared-connection.js",
                       "/vendor/bootstrap/bootstrap.min.css", "/vendor/bootstrap/bootstrap.bundle.min.js"]) {
     const page = await fetch(BASE + file);
     record("anon", `${file} served`, page.status === 200, `got ${page.status}`);

@@ -1,4 +1,4 @@
-// Checks public/javascript/mailer.js against a fake SMTP server. No database,
+// Checks public/Back-end/mailer.js against a fake SMTP server. No database,
 // no application server, no internet:
 //     node tests/mailer.js
 // Covers: a multi-line reply, AUTH LOGIN, a password beginning with a full
@@ -8,7 +8,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const MAILER = path.join(__dirname, "..", "public", "javascript", "mailer.js");
+const MAILER = path.join(__dirname, "..", "public", "Back-end", "mailer.js");
 
 const failures = [];
 function ok(name, passed, note) {
@@ -75,23 +75,26 @@ const server = net.createServer((socket) => {
   });
 });
 
-// The SETUP block of mailer.js is edited in a copy, never in the project's
-// file. STARTTLS is taken out because the fake speaks no TLS, which is why
-// the expected transcript has two EHLOs.
+// The mail account is set through the environment, so the test sets its own
+// before loading the module; whatever .env or the machine says is overridden.
+// STARTTLS is taken out of a copy of the file (never the project's) because
+// the fake speaks no TLS, which is why the expected transcript has two EHLOs.
 function mailerPointedAt(port) {
+  Object.assign(process.env, {
+    MAIL_HOST: "127.0.0.1",
+    MAIL_PORT: String(port),
+    MAIL_SECURE: "false",
+    MAIL_USER: "shop@example.com",
+    MAIL_PASSWORD: "apppassword",
+    MAIL_FROM_NAME: "Lucelyn Hardware"
+  });
+  delete process.env.HARDWARE_MAIL_OFF;
+
   const source = fs.readFileSync(MAILER, "utf8")
-    // matched by name, so the test is the same whether the machine has mail set up
-    .replace(/^const MAIL_ENABLED = .*$/m, "const MAIL_ENABLED = true;")
-    .replace(/^const MAIL_HOST = .*$/m, 'const MAIL_HOST = "127.0.0.1";')
-    .replace(/^const MAIL_PORT = .*$/m, `const MAIL_PORT = ${port};`)
-    .replace(/^const MAIL_SECURE = .*$/m, "const MAIL_SECURE = false;")
-    .replace(/^const MAIL_USER = .*$/m, 'const MAIL_USER = "shop@example.com";')
-    .replace(/^const MAIL_PASSWORD = .*$/m, 'const MAIL_PASSWORD = "apppassword";')
-    .replace(/^const MAIL_FROM_NAME = .*$/m, 'const MAIL_FROM_NAME = "Hardware Sales & Inventory";')
-    .replace('      await smtp.expect("STARTTLS", 220);\n' +
+    .replace('      await smtp.expect("STARTTLS", [220]);\n' +
              "      socket = await upgrade(socket, MAIL_HOST);\n" +
              "      smtp = openConversation(socket);                    " +
-             "// a new conversation on the wrapped socket\n",
+             "// talk again over the encrypted connection\n",
              "");
 
   const copy = path.join(os.tmpdir(), `mailer-under-test-${process.pid}.js`);
@@ -104,7 +107,7 @@ server.listen(0, "127.0.0.1", async () => {
   const under = mailerPointedAt(port);
   const { sendMail, firstPasswordMessage, isMailConfigured } = under.module;
 
-  ok("mail reports itself configured once the SETUP block is filled in",
+  ok("mail reports itself configured once the MAIL_ settings are filled in",
     isMailConfigured() === true);
 
   // a full stop first, on purpose: see note 3 at the top of this file
@@ -136,7 +139,7 @@ server.listen(0, "127.0.0.1", async () => {
 
   const [headers, encoded] = message.split("\n\n");
   ok("the subject carries the name the mail is sent as",
-    /Subject: Your Hardware Sales & Inventory sign-in details/.test(headers), headers);
+    /Subject: Your Lucelyn Hardware sign-in details/.test(headers), headers);
   ok("the message declares itself base64 UTF-8 text",
     /Content-Transfer-Encoding: base64/.test(headers) && /charset=UTF-8/.test(headers),
     headers);

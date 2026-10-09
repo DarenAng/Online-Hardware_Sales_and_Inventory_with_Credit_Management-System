@@ -1,0 +1,64 @@
+/* ==========================================================================
+   DELIVERY PERSONNEL -- delivery.html
+   Loads after general-ui.css and responsive.css, so anything here wins.
+   Read in a truck cab, one-handed: the targets are big.
+   ========================================================================== */
+
+/* ==========================================================================
+   MONEY OWED AT THE DOOR
+   ========================================================================== */
+/* Money still owed at the door is the one figure a driver must not misread,
+   so it is the only red thing on the page and it is set as a figure. */
+#dcod-table .cell-due,
+#drep-table .cell-due {
+    font-weight: 700;
+    font-size: 15px;
+}
+
+/* ==========================================================================
+   MOVING A DELIVERY ON -- one press, one stage; a row that needs a note is opened
+   ========================================================================== */
+#dpend-table td.cell-action .btn { min-width: 132px; }
+
+/* whose delivery a Pending row is: the driver's own, or still up for grabs */
+#dpend-table .owner-tag { margin-left: 4px; }
+#dpend-table .owner-tag.is-mine { font-weight: 700; }
+
+/* ==========================================================================
+   COLLECTING THE MONEY -- the form on the left, the list beside it
+   (.pair-layout in general-ui.css); the amount is set as a figure
+   ========================================================================== */
+#dcod-form input[name="amount"] {
+    font-family: var(--font-figure);
+    font-size: 19.5px;
+    font-weight: 600;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    min-height: 48px;
+}
+
+/* ==========================================================================
+   THE REPORT -- two date fields, side by side on a phone
+   ========================================================================== */
+#drep-from, #drep-to {
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   ON A PHONE
+   ========================================================================== */
+@media (max-width: 640px) {
+    /* the stage button is the whole width of the card: a small target is a mis-press */
+    #dpend-table td.cell-action .btn { min-width: 0; min-height: 48px; font-size: 16.5px; }
+
+    #dcod-form input[name="amount"] { font-size: 21.5px; min-height: 52px; }
+
+    /* the two dates stay on one line: they are a range, not two questions */
+    #panel-report .panel-toolbar {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+    }
+    #panel-report .toolbar-field input { min-width: 0; width: 100%; }
+}

@@ -1,0 +1,1459 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manager &middot; Lucelyn Hardware</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/general-ui.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/purchase-orders.css">
+    <link rel="stylesheet" href="css/modules/manager.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <a href="#" class="sidebar-brand" onclick="showReports(event)" title="Back to the reports">
+                <span class="brand-mark">LH</span>
+                <span class="brand-text">
+                    <span class="brand-name">Lucelyn Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
+            </a>
+            <div class="sidebar-user">
+                <span class="sidebar-eyebrow">Manager</span>
+                <span data-current-user>User</span>
+            </div>
+            <!-- data-feature names the screen an item opens; shared/features.js hides
+                 the ones switched off for this role and mirrors the counts.
+                 A folding heading does two things (shared/helpers.js sidebarHeading):
+                 its words open the module's first screen, and its caret alone folds
+                 and unfolds the list beneath -->
+            <ul class="sidebar-nav">
+                <!-- Reports and Stocks fold open to every report they hold, grouped in
+                     the order the shop reads them; each entry opens one view of the screen
+                     (manager.js showPanelView). An entry goes when its screen is switched
+                     off for the role, and the heading goes with its last entry. -->
+                <li data-sidebar-dropdown>
+                    <a href="#reports" onclick="sidebarHeading(event, 'reports-nav', 'reports-dropdown', showReports)" class="nav-parent" id="reports-nav"><i class="bi bi-bar-chart-line nav-icon" aria-hidden="true"></i>
+                        Reports <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="reports-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="income"><a href="#" data-panel-link="panel-reports" data-panel-view="report-summary"
+                               onclick="showReport('report-summary', event)"><i class="bi bi-graph-up nav-icon" aria-hidden="true"></i>Sales Summary</a></li>
+                        <li data-feature="sales"><a href="#" data-panel-link="panel-reports" data-panel-view="report-sales"
+                               onclick="showReport('report-sales', event)"><i class="bi bi-receipt-cutoff nav-icon" aria-hidden="true"></i>Sales Transactions</a></li>
+                        <li data-feature="qr-payments"><a href="#" data-panel-link="panel-qr-payments"
+                               onclick="showQrPayments(event)"><i class="bi bi-qr-code-scan nav-icon" aria-hidden="true"></i>QR Payments</a></li>
+                        <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-reports" data-panel-view="report-purchases"
+                               onclick="showReport('report-purchases', event)"><i class="bi bi-bag nav-icon" aria-hidden="true"></i>Total Purchases</a></li>
+                        <li data-feature="reports"><a href="#" data-panel-link="panel-reports" data-panel-view="report-unpaid"
+                               onclick="showReport('report-unpaid', event)"><i class="bi bi-wallet2 nav-icon" aria-hidden="true"></i>Receivables</a></li>
+                        <li data-feature="reports"><a href="#" data-panel-link="panel-reports" data-panel-view="report-loyal"
+                               onclick="showReport('report-loyal', event)"><i class="bi bi-person-check nav-icon" aria-hidden="true"></i>Repeat Customers</a></li>
+                        <li data-feature="reports"><a href="#" data-panel-link="panel-reports" data-panel-view="report-all"
+                               onclick="showReport('report-all', event)"><i class="bi bi-clock-history nav-icon" aria-hidden="true"></i>Activity Log</a></li>
+                    </ul>
+                </li>
+                <li data-sidebar-dropdown>
+                    <a href="#stocks" onclick="sidebarHeading(event, 'stocks-nav', 'stocks-dropdown', showStocks)" class="nav-parent" id="stocks-nav"><i class="bi bi-box-seam nav-icon" aria-hidden="true"></i>
+                        Stocks <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="stocks-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="stock-reports"><a href="#" data-panel-link="panel-stocks" data-panel-view="stock-overview"
+                               onclick="showStockView('stock-overview', event)"><i class="bi bi-boxes nav-icon" aria-hidden="true"></i>Stocks Overview</a></li>
+                        <li data-feature="reorder-alerts"><a href="#" data-panel-link="panel-stocks" data-panel-view="stock-reorder"
+                               onclick="showStockView('stock-reorder', event)"><i class="bi bi-exclamation-triangle nav-icon" aria-hidden="true"></i>Reorder Alerts</a></li>
+                        <li data-feature="stock-reports"><a href="#" data-panel-link="panel-stocks" data-panel-view="stock-moves"
+                               onclick="showStockView('stock-moves', event)"><i class="bi bi-arrow-left-right nav-icon" aria-hidden="true"></i>Stock Movements</a></li>
+                    </ul>
+                </li>
+
+                <!-- the clerk raises an order on the clerk's page; here the manager confirms
+                     it, and counts the delivery in, from the order's card -->
+                <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-po-history" onclick="showPurchasing(event)"><i class="bi bi-cart3 nav-icon" aria-hidden="true"></i>Purchase Orders</a></li>
+
+                <li data-sidebar-dropdown>
+                    <a href="#credit" onclick="sidebarHeading(event, 'credit-nav', 'credit-dropdown', showCredit)" class="nav-parent" id="credit-nav"><i class="bi bi-person-vcard nav-icon" aria-hidden="true"></i>
+                        Customers Record <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="credit-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="credit"><a href="#" data-panel-link="panel-credit" onclick="showCredit(event)"><i class="bi bi-credit-card nav-icon" aria-hidden="true"></i>Customer Credit</a></li>
+                        <li data-feature="credit-requests"><a href="#" data-panel-link="panel-credit-requests" onclick="showCreditRequests(event)"><i class="bi bi-calendar-plus nav-icon" aria-hidden="true"></i>
+                            Extension Requests</a></li>
+                    </ul>
+                </li>
+
+                <!-- The schedule is drawn by shared/delivery-schedule.js; the manager holds
+                     it by role, so its item starts shown here -->
+                <li data-sidebar-dropdown>
+                    <a href="#deliveries" onclick="sidebarHeading(event, 'deliveries-nav', 'deliveries-dropdown', showDeliveries)" class="nav-parent" id="deliveries-nav"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>
+                        Deliveries <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="deliveries-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="deliveries"><a href="#" data-panel-link="panel-deliveries" onclick="showDeliveries(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>
+                            Deliveries</a></li>
+                        <li data-feature="delivery-schedule"><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
+                            Delivery Schedule</a></li>
+                    </ul>
+                </li>
+                <li data-sidebar-dropdown data-feature="records">
+                    <a href="#records" onclick="sidebarHeading(event, 'records-nav', 'records-dropdown', showRecords)" class="nav-parent" id="records-nav"
+                       data-panel-link="panel-records"><i class="bi bi-folder2-open nav-icon" aria-hidden="true"></i>
+                        Records <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="records-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="supplier"
+                               onclick="showRecordType('supplier', event)"><i class="bi bi-building nav-icon" aria-hidden="true"></i>Suppliers</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="customer"
+                               onclick="showRecordType('customer', event)"><i class="bi bi-people nav-icon" aria-hidden="true"></i>Customers</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="product"
+                               onclick="showRecordType('product', event)"><i class="bi bi-tag nav-icon" aria-hidden="true"></i>Products</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="category"
+                               onclick="showRecordType('category', event)"><i class="bi bi-grid nav-icon" aria-hidden="true"></i>Categories</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="unit"
+                               onclick="showRecordType('unit', event)"><i class="bi bi-rulers nav-icon" aria-hidden="true"></i>Units</a></li>
+                    </ul>
+                </li>
+                <li data-feature="archives"><a href="#" data-panel-link="panel-archives" onclick="showArchives(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archives</a></li>
+            </ul>
+        </aside>
+
+        <!-- the shade behind the menu once it slides over the page -->
+        <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
+
+        <main class="main-content">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="menu-toggle" type="button" onclick="toggleSidebar()"
+                            aria-controls="sidebar" aria-expanded="false"
+                            aria-label="Menu">&#9776;</button>
+                    <span class="topbar-title" id="manager-page-title">Reports</span>
+                </div>
+            </header>
+
+            <div class="content-area">
+                <!-- ============================================================
+                     REPORTS -- the first screen. The tab bar across the top groups the
+                     reports: Sales (the summary for a period, and every transaction),
+                     Customers (who owes, who comes back), Activity (everything staff
+                     have filed) and Purchases (the purchase orders of a month). One view
+                     shows at a time; nothing loads until asked.
+                     data-feature on a tab hides it for a role (shared/features.js)
+                     ============================================================ -->
+                <div id="panel-reports" class="tabbed-panel" data-panel data-view="report-summary">
+                    <nav class="view-nav no-print" aria-label="Reports" hidden>
+                        <div class="view-nav-group">
+                            <span class="view-nav-label">Sales</span>
+                            <div class="view-nav-tabs" role="tablist">
+                                <button type="button" class="view-tab" role="tab" data-view-tab="report-summary" data-feature="income"
+                                        onclick="showReport('report-summary', event)">Sales Summary</button>
+                                <button type="button" class="view-tab" role="tab" data-view-tab="report-sales" data-feature="sales"
+                                        onclick="showReport('report-sales', event)">Sales Transactions</button>
+                            </div>
+                        </div>
+                        <div class="view-nav-group">
+                            <span class="view-nav-label">Purchases</span>
+                            <div class="view-nav-tabs" role="tablist">
+                                <button type="button" class="view-tab" role="tab" data-view-tab="report-purchases" data-feature="purchase-orders"
+                                        onclick="showReport('report-purchases', event)">Total Purchases</button>
+                            </div>
+                        </div>
+                        <div class="view-nav-group">
+                            <span class="view-nav-label">Customers</span>
+                            <div class="view-nav-tabs" role="tablist">
+                                <button type="button" class="view-tab" role="tab" data-view-tab="report-unpaid" data-feature="reports"
+                                        onclick="showReport('report-unpaid', event)">Receivables</button>
+                                <button type="button" class="view-tab" role="tab" data-view-tab="report-loyal" data-feature="reports"
+                                        onclick="showReport('report-loyal', event)">Repeat Customers</button>
+                            </div>
+                        </div>
+                        <div class="view-nav-group">
+                            <span class="view-nav-label">Activity</span>
+                            <div class="view-nav-tabs" role="tablist">
+                                <button type="button" class="view-tab" role="tab" data-view-tab="report-all" data-feature="reports"
+                                        onclick="showReport('report-all', event)">Activity Log</button>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <!-- SALES SUMMARY: one period drives the figures and both tables -->
+                    <section class="panel-view" id="report-summary">
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Sales Summary</h3>
+                                    <p class="panel-sub" id="income-range-note">Pick a period, then press Load Data.</p>
+                                </div>
+                                <div class="panel-actions no-print">
+                                    <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                            data-print-for="mgr-income-methods,mgr-income-products"
+                                            onclick="exportIncomeSpreadsheet()" disabled>Spreadsheet</button>
+                                    <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                            data-print-for="mgr-income-methods,mgr-income-products"
+                                            onclick="printReport('mgr-income-methods,mgr-income-products')"
+                                            disabled>Print / PDF</button>
+                                </div>
+                            </div>
+
+                            <div class="panel-toolbar summary-toolbar no-print">
+                                <div class="toolbar-field">
+                                    <label for="income-period">Period</label>
+                                    <!-- filled by manager.js renderIncomeRanges; Custom date opens a popup -->
+                                    <select id="income-period" onchange="incomePeriodPicked(this.value)"></select>
+                                </div>
+                                <div class="toolbar-spacer"></div>
+                                <button type="button" class="btn btn-accent" onclick="loadIncome()">Load Data</button>
+                            </div>
+
+                            <div class="kpi-grid" id="income-kpis"></div>
+
+                        </div>
+
+                        <!-- the two breakdowns side by side, for the same period -->
+                        <div class="summary-tables">
+                            <div class="card">
+                                <div class="panel-head">
+                                    <div><h3>By Payment Method</h3></div>
+                                </div>
+                                <div class="table-responsive grid-5">
+                                    <table id="income-methods-table">
+                                        <thead>
+                                            <tr><th>Method</th><th>Sales</th><th>Billed</th><th>Collected</th><th>Outstanding</th></tr>
+                                        </thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                                <div class="pager is-single" id="income-methods-pager"></div>
+                            </div>
+
+                            <div class="card">
+                                <div class="panel-head">
+                                    <div><h3>Best Sellers</h3></div>
+                                </div>
+                                <div class="table-responsive grid-5">
+                                    <table id="income-products-table">
+                                        <thead>
+                                            <tr><th>Product</th><th>Units Sold</th><th>Revenue</th><th>Share</th></tr>
+                                        </thead>
+                                        <tbody></tbody>
+                                    </table>
+                                </div>
+                                <div class="pager is-single" id="income-products-pager"></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- SALES TRANSACTIONS -->
+                    <section class="panel-view card" id="report-sales" hidden>
+                        <div class="panel-head">
+                            <div>
+                                <h3>Sales Transactions</h3>
+                            </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="mgr-sales" onclick="exportPanelSpreadsheet('mgr-sales', 'Sales Transactions')" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="mgr-sales" onclick="printReport('mgr-sales')" disabled>Print / PDF</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-toolbar no-print">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="sales-search"
+                                       placeholder="Search by customer, cashier, or sale number"
+                                       oninput="dataPanelSearchInput('mgr-sales', event)" onkeydown="dataPanelSearchKey('mgr-sales', event)" title="Type at least two letters to search">
+                            </div>
+
+                            <div class="toolbar-field">
+                                <label for="sales-method">Payment method</label>
+                                <select id="sales-method" data-filter-table="sales-table" data-hides-column="4" onchange="reloadSales()">
+                                    <option value="all">Every method</option>
+                                    <option value="Cash">Cash</option>
+                                    <option value="COD">Cash on Delivery</option>
+                                    <option value="Cheque">Cheque</option>
+                                    <option value="Online Payment">Online Payment</option>
+                                    <option value="Credit">Credit</option>
+                                </select>
+                            </div>
+
+                            <div class="toolbar-field">
+                                <label for="sales-status">Transaction status</label>
+                                <select id="sales-status" data-filter-table="sales-table" data-hides-column="5" onchange="reloadSales()">
+                                    <option value="all">Every status</option>
+                                    <option value="Completed">Completed</option>
+                                    <option value="Pending Delivery">Pending Delivery</option>
+                                    <option value="Partial Credit">Partial Credit</option>
+                                    <option value="Voided">Voided</option>
+                                </select>
+                            </div>
+
+                            <div class="toolbar-field">
+                                <label for="sales-from">From</label>
+                                <input type="date" id="sales-from" onchange="reloadSales()">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="sales-to">To</label>
+                                <input type="date" id="sales-to" onchange="reloadSales()">
+                            </div>
+
+                            <div class="toolbar-spacer"></div>
+                        </div>
+
+                        <div class="table-responsive grid-10">
+                            <table id="sales-table">
+                                <thead>
+                                    <tr><th>Sale</th><th>Date</th><th>Customer</th><th>Method</th><th>Status</th><th>Total</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="sales-pager"></div>
+                    </section>
+
+                    <!-- RECEIVABLES -->
+                    <section class="panel-view card" id="report-unpaid" hidden>
+                        <div class="panel-head">
+                            <div>
+                                <h3>Receivables</h3>
+                                <p class="panel-sub">Every sale with money still owed on it.</p>
+                            </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="mgr-unpaid" onclick="exportPanelSpreadsheet('mgr-unpaid', 'Receivables')" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="mgr-unpaid" onclick="printReport('mgr-unpaid')" disabled>Print / PDF</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-toolbar no-print">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="unpaid-search"
+                                       placeholder="Search by customer or method"
+                                       oninput="dataPanelSearchInput('mgr-unpaid', event)" onkeydown="dataPanelSearchKey('mgr-unpaid', event)" title="Type at least two letters to search">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="unpaid-status">Payment status</label>
+                                <select id="unpaid-status" data-filter-table="unpaid-table" data-hides-column="4" onchange="dataPanelFilter('mgr-unpaid', 'status', this.value)">
+                                    <option value="all">Every status</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="unpaid-method">Payment method</label>
+                                <select id="unpaid-method" data-filter-table="unpaid-table" data-hides-column="3" onchange="dataPanelFilter('mgr-unpaid', 'method', this.value)">
+                                    <option value="all">Every method</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="unpaid-age">Age</label>
+                                <select id="unpaid-age" onchange="dataPanelFilter('mgr-unpaid', 'age', this.value)">
+                                    <option value="all">Any age</option>
+                                    <option value="0-30">Up to 30 days</option>
+                                    <option value="31-60">31 to 60 days</option>
+                                    <option value="61-90">61 to 90 days</option>
+                                    <option value="90+">Over 90 days</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                        </div>
+
+                        <div class="table-responsive grid-8">
+                            <table id="unpaid-table">
+                                <thead>
+                                    <tr><th>Sale</th><th>Customer</th><th>Method</th><th>Status</th><th>Balance Due</th><th>Date</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="unpaid-pager"></div>
+                    </section>
+
+                    <!-- REPEAT CUSTOMERS -->
+                    <section class="panel-view card" id="report-loyal" hidden>
+                        <div class="panel-head">
+                            <div>
+                                <h3>Repeat Customers</h3>
+                                <p class="panel-sub">Customers who have bought more than once.</p>
+                            </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="mgr-loyal" onclick="exportPanelSpreadsheet('mgr-loyal', 'Repeat Customers')" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="mgr-loyal" onclick="printReport('mgr-loyal')" disabled>Print / PDF</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-toolbar no-print">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="loyal-search"
+                                       placeholder="Search by customer"
+                                       oninput="dataPanelSearchInput('mgr-loyal', event)" onkeydown="dataPanelSearchKey('mgr-loyal', event)" title="Type at least two letters to search">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="loyal-purchases">Purchases</label>
+                                <select id="loyal-purchases" onchange="dataPanelFilter('mgr-loyal', 'purchases', this.value)">
+                                    <option value="all">Any number</option>
+                                    <option value="2-4">2 to 4</option>
+                                    <option value="5-9">5 to 9</option>
+                                    <option value="10+">10 or more</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="loyal-balance">Balance</label>
+                                <select id="loyal-balance" onchange="dataPanelFilter('mgr-loyal', 'balance', this.value)">
+                                    <option value="all">Everyone</option>
+                                    <option value="owing">Has a balance</option>
+                                    <option value="clear">No balance</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="loyal-last">Last purchase</label>
+                                <select id="loyal-last" onchange="dataPanelFilter('mgr-loyal', 'last', this.value)">
+                                    <option value="all">Any time</option>
+                                    <option value="30">In the last 30 days</option>
+                                    <option value="90">In the last 90 days</option>
+                                    <option value="older">More than 90 days ago</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                        </div>
+
+                        <div class="table-responsive grid-8">
+                            <table id="loyal-table">
+                                <thead>
+                                    <tr><th>Customer</th><th>Purchases</th><th>Total Spent</th><th>Balance Due</th><th>Last Purchase</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="loyal-pager"></div>
+                    </section>
+
+                    <!-- ACTIVITY LOG: everything staff have filed, newest first, with who filed it -->
+                    <section class="panel-view card" id="report-all" hidden>
+                        <div class="panel-head">
+                            <div>
+                                <h3>Activity Log</h3>
+                                <p class="panel-sub">Sales, payments, stock reports, deliveries, purchase orders and credit decisions, with who filed them.</p>
+                            </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="mgr-all" onclick="exportPanelSpreadsheet('mgr-all', 'Activity Log')" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="mgr-all" onclick="printReport('mgr-all')" disabled>Print / PDF</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-toolbar no-print">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="all-search"
+                                       placeholder="Search by staff, kind of report or details"
+                                       oninput="dataPanelSearchInput('mgr-all', event)" onkeydown="dataPanelSearchKey('mgr-all', event)" title="Type at least two letters to search">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="all-kind">Report</label>
+                                <!-- filled from the loaded rows (manager.js) -->
+                                <select id="all-kind" data-filter-table="all-table" data-hides-column="4" onchange="dataPanelFilter('mgr-all', 'kind', this.value)">
+                                    <option value="all">Every report</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="all-role">Role</label>
+                                <select id="all-role" data-filter-table="all-table" data-hides-column="3" onchange="dataPanelFilter('mgr-all', 'role', this.value)">
+                                    <option value="all">Every role</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                        </div>
+
+                        <div class="table-responsive grid-8">
+                            <table id="all-table">
+                                <thead>
+                                    <tr><th>When</th><th>Filed By</th><th>Role</th><th>Report</th><th>Details</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="all-pager"></div>
+                    </section>
+
+                    <!-- ============================================================
+                         TOTAL PURCHASES: every purchase order in a month, filtered by date,
+                         supplier and status (shared/purchase-orders.js)
+                         ============================================================ -->
+                    <section class="panel-view card" id="report-purchases" hidden>
+                        <div class="panel-head">
+                            <div>
+                                <h3>Total Purchases</h3>
+                                <p class="panel-sub">Every purchase order in a month, and what they add up to. It starts on this month; the figures follow the filters below.</p>
+                            </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="po-totals" onclick="exportPanelSpreadsheet('po-totals', 'Total Purchases')" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="po-totals" onclick="printReport('po-totals')" disabled>Print / PDF</button>
+                            </div>
+                        </div>
+    
+                        <div class="panel-toolbar no-print">
+                            <div class="toolbar-field">
+                                <label for="po-totals-month">Month</label>
+                                <!-- filled from the loaded orders (renderPurchaseTotalsMonths) -->
+                                <select id="po-totals-month" onchange="purchaseTotalsMonth(this.value)">
+                                    <option value="all">Every month</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="po-totals-from">From</label>
+                                <input type="date" id="po-totals-from" onchange="purchaseTotalsDates()">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="po-totals-to">To</label>
+                                <input type="date" id="po-totals-to" onchange="purchaseTotalsDates()">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="po-totals-supplier">Supplier</label>
+                                <select id="po-totals-supplier" data-filter-table="po-totals-table" data-hides-column="2" onchange="purchaseTotalsFilter('supplier', this.value)">
+                                    <option value="all">Every supplier</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                            <button type="button" class="btn btn-accent" onclick="purchaseTotalsShowAll()">Show All Purchases</button>
+                        </div>
+    
+                        <div class="kpi-grid" id="po-totals-kpis"></div>
+    
+                        <div class="table-responsive grid-8">
+                            <table id="po-totals-table">
+                                <thead>
+                                    <tr><th>PO</th><th>Supplier</th><th>Ordered</th>
+                                        <th>Order Value</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="po-totals-pager"></div>
+                    </section>
+                </div>
+
+                <!-- ============================================================
+                     STOCKS -- every stock report behind one entry: the whole inventory
+                     (a row opens the product, where the price and the reorder point are
+                     changed), the reorder to-do list, and the stock movements staff filed
+                     ============================================================ -->
+                <div id="panel-stocks" class="tabbed-panel" data-panel data-view="stock-overview" style="display: none;">
+                    <nav class="view-nav no-print" aria-label="Stocks" hidden>
+                        <div class="view-nav-group">
+                            <span class="view-nav-label">Inventory</span>
+                            <div class="view-nav-tabs" role="tablist">
+                                <button type="button" class="view-tab" role="tab" data-view-tab="stock-overview" data-feature="stock-reports"
+                                        onclick="showStockView('stock-overview', event)">Stocks Overview</button>
+                                <button type="button" class="view-tab" role="tab" data-view-tab="stock-reorder" data-feature="reorder-alerts"
+                                        onclick="showStockView('stock-reorder', event)">Reorder Alerts</button>
+                            </div>
+                        </div>
+                        <div class="view-nav-group">
+                            <span class="view-nav-label">History</span>
+                            <div class="view-nav-tabs" role="tablist">
+                                <button type="button" class="view-tab" role="tab" data-view-tab="stock-moves" data-feature="stock-reports"
+                                        onclick="showStockView('stock-moves', event)">Stock Movements</button>
+                            </div>
+                        </div>
+                    </nav>
+
+                    <!-- STOCKS OVERVIEW -->
+                    <section class="panel-view card" id="stock-overview">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Stocks Overview</h3>
+                                <p class="panel-sub">The whole inventory. Open a product to change its price or reorder point.</p>
+                            </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="mgr-stocks" onclick="exportPanelSpreadsheet('mgr-stocks', 'Stocks Overview')" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="mgr-stocks" onclick="printReport('mgr-stocks')" disabled>Print / PDF</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-toolbar no-print">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="stocks-search"
+                                       placeholder="Search by product, category, or supplier"
+                                       oninput="dataPanelSearchInput('mgr-stocks', event)" onkeydown="dataPanelSearchKey('mgr-stocks', event)" title="Type at least two letters to search">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="stocks-status">Stock status</label>
+                                <select id="stocks-status" data-filter-table="stocks-table" data-hides-column="7"
+                                        onchange="dataPanelFilter('mgr-stocks', 'status', this.value)">
+                                    <option value="all">Every status</option>
+                                    <option value="In Stock">In stock</option>
+                                    <option value="Low Stock">Low stock</option>
+                                    <option value="Out of Stock">Out of stock</option>
+                                </select>
+                            </div>
+
+                            <!-- quantity has its own filter; status only says whether a product is under its reorder point -->
+                            <div class="toolbar-field">
+                                <label for="stocks-level">On hand</label>
+                                <select id="stocks-level"
+                                        onchange="dataPanelFilter('mgr-stocks', 'level', this.value)">
+                                    <option value="all">Any quantity</option>
+                                    <option value="none">Nothing on hand</option>
+                                    <option value="under-rop">Below reorder point</option>
+                                    <option value="near-rop">Within 25% above reorder point</option>
+                                    <option value="1-10">1 to 10</option>
+                                    <option value="11-50">11 to 50</option>
+                                    <option value="51-200">51 to 200</option>
+                                    <option value="200+">More than 200</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="stocks-sort">Order</label>
+                                <select id="stocks-sort"
+                                        onchange="dataPanelFilter('mgr-stocks', 'sort', this.value)">
+                                    <option value="name">Product name, A to Z</option>
+                                    <option value="stock-asc">On hand, lowest first</option>
+                                    <option value="stock-desc">On hand, highest first</option>
+                                    <option value="gap">Furthest below reorder point first</option>
+                                    <option value="value-desc">Stock value, highest first</option>
+                                    <option value="value-asc">Stock value, lowest first</option>
+                                    <option value="cover">Days of cover, shortest first</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                        </div>
+
+                        <div class="table-responsive grid-10">
+                            <table id="stocks-table">
+                                <thead>
+                                    <tr><th>Product</th><th>Category</th><th>On Hand</th><th>Reorder At</th>
+                                        <th>Unit Price</th><th>Stock Value</th><th>Status</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="stocks-pager"></div>
+                    </section>
+
+                    <!-- REORDER ALERTS -->
+                    <section class="panel-view card" id="stock-reorder" hidden>
+                        <div class="panel-head">
+                            <div>
+                                <h3>Reorder Alerts</h3>
+                                <p class="panel-sub">Reorder point = (average daily sales &times; lead time) + safety stock</p>
+                            </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="mgr-reorder" onclick="exportPanelSpreadsheet('mgr-reorder', 'Reorder Alerts')" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="mgr-reorder" onclick="printReport('mgr-reorder')" disabled>Print / PDF</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-toolbar no-print">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="reorder-search"
+                                       placeholder="Search by product or supplier"
+                                       oninput="dataPanelSearchInput('mgr-reorder', event)" onkeydown="dataPanelSearchKey('mgr-reorder', event)" title="Type at least two letters to search">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="reorder-status">Stock status</label>
+                                <select id="reorder-status" data-filter-table="reorder-table" data-hides-column="8"
+                                        onchange="dataPanelFilter('mgr-reorder', 'status', this.value)">
+                                    <option value="all">Low and out of stock</option>
+                                    <option value="Low Stock">Low stock</option>
+                                    <option value="Out of Stock">Out of stock</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="reorder-mode-filter">Reorder point</label>
+                                <select id="reorder-mode-filter"
+                                        onchange="dataPanelFilter('mgr-reorder', 'mode', this.value)">
+                                    <option value="all">Manual and dynamic</option>
+                                    <option value="Dynamic">Dynamic only</option>
+                                    <option value="Manual">Manual only</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                        </div>
+
+                        <div class="table-responsive grid-10">
+                            <table id="reorder-table">
+                                <thead>
+                                    <tr><th>Product</th><th>On Hand</th><th>Reorder At</th><th>Daily Sales</th>
+                                        <th>Cover</th><th>Suggested Order</th><th>Supplier</th><th>Status</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="reorder-pager"></div>
+                    </section>
+
+                    <!-- STOCK MOVEMENTS: the stock reports staff filed (damage, returns,
+                         adjustments, purchase orders), read from the activity log -->
+                    <section class="panel-view card" id="stock-moves" hidden>
+                        <div class="panel-head">
+                            <div>
+                                <h3>Stock Movements</h3>
+                                <p class="panel-sub">Damage and return reports, stock adjustments and purchase orders, newest first.</p>
+                            </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                        data-print-for="mgr-stock-moves" onclick="exportPanelSpreadsheet('mgr-stock-moves', 'Stock Movements')" disabled>Spreadsheet</button>
+                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                        data-print-for="mgr-stock-moves" onclick="printReport('mgr-stock-moves')" disabled>Print / PDF</button>
+                            </div>
+                        </div>
+
+                        <div class="panel-toolbar no-print">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="stock-moves-search"
+                                       placeholder="Search by product, staff or details"
+                                       oninput="dataPanelSearchInput('mgr-stock-moves', event)" onkeydown="dataPanelSearchKey('mgr-stock-moves', event)" title="Type at least two letters to search">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="stock-moves-kind">Kind</label>
+                                <select id="stock-moves-kind" data-filter-table="stock-moves-table" data-hides-column="2"
+                                        onchange="dataPanelFilter('mgr-stock-moves', 'kind', this.value)">
+                                    <option value="all">Every kind</option>
+                                    <option value="STOCK_ADJUST">Stock adjustments</option>
+                                    <option value="DAMAGE">Damage reports</option>
+                                    <option value="RETURN">Return reports</option>
+                                    <option value="PURCHASE_ORDER">Purchase orders raised</option>
+                                    <option value="PO_CONFIRMED">Orders confirmed</option>
+                                    <option value="PO_DECLINED">Orders declined</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="stock-moves-role">Role</label>
+                                <!-- filled from the loaded rows (manager.js fillStockMoveRoles) -->
+                                <select id="stock-moves-role" data-filter-table="stock-moves-table" data-hides-column="5"
+                                        onchange="dataPanelFilter('mgr-stock-moves', 'role', this.value)">
+                                    <option value="all">Every role</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                        </div>
+
+                        <div class="table-responsive grid-10">
+                            <table id="stock-moves-table">
+                                <thead>
+                                    <tr><th>When</th><th>Kind</th><th>Details</th><th>Filed By</th><th>Role</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="stock-moves-pager"></div>
+                    </section>
+                </div>
+
+                <!-- ============================================================
+                     PURCHASE ORDERS -- the clerk raises an order on the clerk's page;
+                     here the manager confirms or declines it. The counts above the
+                     table are also filters; orders waiting for you sort first
+                     ============================================================ -->
+                <div class="card" id="panel-po-history" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Purchase Orders</h3>
+                            <p class="panel-sub">Orders raised by the stockroom. Open one to review its lines, then confirm or decline it.</p>
+                        </div>
+                        <div class="panel-actions no-print">
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-po" onclick="exportPanelSpreadsheet('mgr-po', 'Purchase Orders')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-po" onclick="printReport('mgr-po')" disabled>Print / PDF</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar no-print">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="po-search"
+                                   placeholder="Search by supplier or order number"
+                                   oninput="dataPanelSearchInput('mgr-po', event)" onkeydown="dataPanelSearchKey('mgr-po', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="po-status">Status</label>
+                            <select id="po-status" data-filter-table="po-table" data-hides-column="6"
+                                    onchange="dataPanelFilter('mgr-po', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="For Approval">Waiting for confirmation</option>
+                                <option value="Pending">Waiting for delivery</option>
+                                <option value="Received">Received</option>
+                                <option value="Cancelled">Cancelled</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+                    <div class="table-responsive grid-10">
+                        <table id="po-table">
+                            <thead>
+                                <tr><th>PO</th><th>Supplier</th><th>Ordered</th><th>Lines</th>
+                                    <th>Order Value</th><th>Status</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="po-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     THE ORDER AS A DOCUMENT -- data-panel-of keeps the tab strip on Order History
+                     ============================================================ -->
+                <div id="panel-po-doc" data-panel data-panel-of="panel-po-history" style="display: none;">
+                    <div id="po-doc"></div>
+                </div>
+
+
+                <!-- ============================================================
+                     CUSTOMER CREDIT -- the shop's credit book
+                     ============================================================ -->
+                <div class="card" id="panel-credit" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Customer Credit</h3>
+                        </div>
+                        <div class="panel-actions no-print">
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-credit" onclick="exportPanelSpreadsheet('mgr-credit', 'Customer Credit')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-credit" onclick="printReport('mgr-credit')" disabled>Print / PDF</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar no-print">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="credit-search"
+                                   placeholder="Search by customer or phone"
+                                   oninput="dataPanelSearchInput('mgr-credit', event)" onkeydown="dataPanelSearchKey('mgr-credit', event)" title="Type at least two letters to search">
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="credit-owing">Balance</label>
+                            <select id="credit-owing"
+                                    onchange="dataPanelFilter('mgr-credit', 'owing', this.value)">
+                                <option value="all">Everyone</option>
+                                <option value="owing">Has a balance</option>
+                                <option value="over">Over the limit</option>
+                                <option value="clear">No balance</option>
+                            </select>
+                        </div>
+
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <!-- the late-payment policy: the rate every overdue credit sale is charged,
+                         and the way to change it (loadPenaltyPolicy fills it) -->
+                    <div class="policy-strip no-print" id="penalty-policy">
+                        <div class="policy-text">
+                            <span class="policy-rate" id="penalty-policy-rate">3% a month</span>
+                            <span class="policy-words" id="penalty-policy-words">late-payment penalty on the goods still unpaid,
+                                for every month a credit sale is past its 30-day due date.</span>
+                        </div>
+                        <button type="button" class="btn btn-sm" onclick="openPenaltyPolicy()">Change the rate</button>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="credit-table">
+                            <thead>
+                                <tr><th>Customer</th><th>Credit Limit</th><th>Balance</th><th>Available Balance</th>
+                                    <th>Open Sales</th><th>Oldest Debt</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="credit-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     EXTENSION REQUESTS -- raised at the counter, decided here
+                     ============================================================ -->
+                <div class="card" id="panel-credit-requests" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Extension Requests</h3>
+                        </div>
+                        <div class="panel-actions no-print">
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar no-print">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="requests-search"
+                                   placeholder="Search by customer or who asked"
+                                   oninput="dataPanelSearchInput('mgr-requests', event)" onkeydown="dataPanelSearchKey('mgr-requests', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="requests-status">Status</label>
+                            <select id="requests-status" data-filter-table="requests-table" data-hides-column="7" onchange="reloadCreditRequests()">
+                                <option value="Pending">Waiting for a decision</option>
+                                <option value="all">Every request</option>
+                                <option value="Approved">Approved</option>
+                                <option value="Declined">Declined</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="requests-table">
+                            <thead>
+                                <tr><th>Date Requested</th><th>Customer</th><th>Balance</th><th>Current Credit Limit</th>
+                                    <th>Requested Limit</th><th>Raised By</th><th>Status</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="requests-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     DELIVERIES
+                     ============================================================ -->
+                <div class="card" id="panel-deliveries" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Deliveries</h3>
+                        </div>
+                        <div class="panel-actions no-print">
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-deliveries" onclick="exportPanelSpreadsheet('mgr-deliveries', 'Deliveries')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-deliveries" onclick="printReport('mgr-deliveries')" disabled>Print / PDF</button>
+                        </div>
+                    </div>
+
+                    <div class="track-legend" id="track-legend"></div>
+
+                    <div class="panel-toolbar no-print">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="deliveries-search"
+                                   placeholder="Search by customer, driver, or destination"
+                                   oninput="dataPanelSearchInput('mgr-deliveries', event)" onkeydown="dataPanelSearchKey('mgr-deliveries', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="deliveries-state">Fulfilment</label>
+                            <select id="deliveries-state" data-filter-table="deliveries-table" data-hides-column="7"
+                                    onchange="dataPanelFilter('mgr-deliveries', 'state', this.value)">
+                                <option value="all">Every state</option>
+                                <option value="Pending Cash Collection">Pending cash collection</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Out for Delivery">Out for delivery</option>
+                                <option value="In Transit">In transit</option>
+                                <option value="Pending">Pending</option>
+                                <option value="Delayed">Delayed</option>
+                                <option value="Failed">Failed</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="deliveries-table">
+                            <thead>
+                                <tr><th>Delivery</th><th>Customer</th><th>Destination</th><th>Driver</th>
+                                    <th>Scheduled</th><th>Balance Due</th><th>Fulfilment</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="deliveries-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     QR PAYMENTS -- every GCash and Maya payment tried by QR code and
+                     how it ended (shared/qr-payments.js). Everyone's here;
+                     the server decides whose rows come back.
+                     ============================================================ -->
+                <div class="card" id="panel-qr-payments" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>QR Payments</h3>
+                        </div>
+                        <div class="panel-actions">
+                            <span class="badge badge-warning" id="mqr-badge" hidden></span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-grid qr-kpis" id="mqr-kpis"></div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="mqr-search"
+                                   placeholder="Search by reference, receipt, cashier, or message"
+                                   oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="mqr-from">From</label>
+                            <input type="date" id="mqr-from" onchange="reloadQrPayments('mqr')">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="mqr-to">To</label>
+                            <input type="date" id="mqr-to" onchange="reloadQrPayments('mqr')">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="mqr-status">Status</label>
+                            <select id="mqr-status" onchange="dataPanelFilter('mqr', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="paid">Paid</option>
+                                <option value="failed">Failed</option>
+                                <option value="expired">Expired</option>
+                                <option value="cancelled">Cancelled</option>
+                                <option value="pending">Waiting</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="mqr-staff">Cashier</label>
+                            <select id="mqr-staff" onchange="reloadQrPayments('mqr')">
+                                <option value="all">Everyone</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="mqr-table">
+                            <thead>
+                                <tr><th>Time</th><th>Amount</th><th>Wallet</th><th>Status</th><th>Reference</th>
+                                    <th>Sale</th><th>Cashier</th><th>Message</th><th>Money</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="mqr-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     RECORDS
+                     ============================================================ -->
+                <div class="card" id="panel-records" data-panel data-view="supplier" style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3 id="records-title">Suppliers</h3>
+                        </div>
+                        <div class="panel-actions no-print">
+                            <!-- suppliers, categories and units are added by the manager only -->
+                            <button type="button" class="btn btn-success" id="records-add-btn" onclick="openAddRecord()">Add Supplier</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar no-print">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="records-search"
+                                   placeholder="Search these records"
+                                   oninput="dataPanelSearchInput('mgr-records', event)" onkeydown="dataPanelSearchKey('mgr-records', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="records-sort">Sort by</label>
+                            <!-- options follow the kind of record (manager.js fillRecordSort) -->
+                            <select id="records-sort" onchange="dataPanelFilter('mgr-records', 'sort', this.value)"></select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="records-table">
+                            <thead><tr></tr></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="records-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     ARCHIVES
+                     ============================================================ -->
+                <div class="card" id="panel-archives" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Archived Records</h3>
+                        </div>
+                        <div class="panel-actions no-print">
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar no-print">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="archives-search"
+                                   placeholder="Search archived records"
+                                   oninput="dataPanelSearchInput('mgr-archives', event)" onkeydown="dataPanelSearchKey('mgr-archives', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="archives-module">Module</label>
+                            <!-- filled from the loaded rows, with how many each holds (manager.js) -->
+                            <select id="archives-module" data-filter-table="archives-table" data-hides-column="1" onchange="dataPanelFilter('mgr-archives', 'module', this.value)">
+                                <option value="all">Every module</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="archives-table">
+                            <thead>
+                                <tr><th>Module</th><th>Record</th><th>Detail</th><th>Archived On</th><th>Archived By</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="archives-pager"></div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- PAGED DETAIL POPUP -->
+    <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="detail-avatar">--</div>
+                    <div>
+                        <h3 id="detail-title">Record</h3>
+                        <span class="modal-role" id="detail-subtitle">Detail</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('detail-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-steps" id="detail-steps"></div>
+
+            <div class="modal-body">
+                <div id="detail-page"></div>
+            </div>
+
+            <div class="modal-foot" hidden></div>
+        </div>
+    </div>
+
+    <!-- REORDER POLICY -- lead time and safety stock, with the arithmetic shown as typed -->
+    <div class="modal" id="policy-modal" onclick="closeModalOnBackdrop(event, 'policy-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="policy-avatar">--</div>
+                    <div>
+                        <h3 id="policy-product">Product</h3>
+                        <span class="modal-role" id="policy-sub">Reorder policy</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('policy-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="detail-grid" id="policy-facts"></div>
+
+                <form id="policy-form" onsubmit="saveReorderPolicy(event)">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="policy-lead">Lead time <span class="label-hint">days</span></label>
+                            <input type="number" id="policy-lead" name="leadTimeDays" class="form-control"
+                                   min="1" max="365" required oninput="previewReorderPoint()">
+                        </div>
+                        <div class="form-group">
+                            <label for="policy-safety">Safety stock <span class="label-hint">units</span></label>
+                            <input type="number" id="policy-safety" name="safetyStock" class="form-control"
+                                   min="0" required oninput="previewReorderPoint()">
+                        </div>
+                        <div class="form-group">
+                            <label for="policy-mode">How the reorder point is set</label>
+                            <select id="policy-mode" name="reorderMode" class="form-control" onchange="previewReorderPoint()">
+                                <option value="Manual">Manual &mdash; use the number below</option>
+                                <option value="Dynamic">Dynamic &mdash; work it out from sales</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="policy-manual">Manual reorder point <span class="label-hint">units</span></label>
+                            <input type="number" id="policy-manual" name="reorderPoint" class="form-control"
+                                   min="0" oninput="previewReorderPoint()">
+                        </div>
+                    </div>
+
+                    <p class="formula-preview" id="policy-preview"></p>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('policy-modal')">Cancel</button>
+                <button type="submit" form="policy-form" class="btn btn-success">Save Policy</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- ONE CREDIT ACCOUNT -- limit and standing edited together -->
+    <div class="modal" id="credit-modal" onclick="closeModalOnBackdrop(event, 'credit-modal')">
+        <div class="modal-box modal-wide">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="credit-avatar">--</div>
+                    <div>
+                        <h3 id="credit-name">Customer</h3>
+                        <span class="modal-role" id="credit-sub">Credit account</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('credit-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-tabs">
+                <button type="button" class="modal-tab active" id="credit-tab-account"
+                        onclick="showCreditTab('account')">Account</button>
+                <button type="button" class="modal-tab" id="credit-tab-history"
+                        onclick="showCreditTab('history')">Purchases &amp; Payments</button>
+            </div>
+
+            <div class="modal-body">
+                <div id="credit-account-tab">
+                    <div class="detail-grid" id="credit-facts"></div>
+
+                    <form id="credit-form" onsubmit="saveCreditLimit(event)">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="credit-limit-input">Credit limit</label>
+                                <input type="number" id="credit-limit-input" name="creditLimit"
+                                       class="form-control" min="0" step="0.01" required
+                                       oninput="previewCreditLimit()">
+                            </div>
+                            <div class="form-group">
+                                <label for="credit-standing-input">Standing override
+                                    <span class="label-hint">the figures decide unless you say otherwise</span></label>
+                                <select id="credit-standing-input" name="standing" class="form-control"
+                                        onchange="previewCreditLimit()">
+                                    <option value="Good">None &mdash; let the figures decide</option>
+                                    <option value="Watch">Watch &mdash; flag it whatever the figures say</option>
+                                    <option value="Hold">Hold &mdash; no new credit whatever the figures say</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="credit-penalty-input">Late-payment rate for this account, % a month
+                                    <span class="label-hint" id="credit-penalty-hint">1 to 3; blank means the shop's rate</span></label>
+                                <input type="number" id="credit-penalty-input" name="penaltyRate"
+                                       class="form-control" min="1" max="3" step="0.01" placeholder="Shop's rate"
+                                       oninput="previewCreditLimit()">
+                            </div>
+                            <div class="form-group">
+                                <label for="credit-notes-input">Note <span class="label-hint">why this limit, why this standing</span></label>
+                                <input type="text" id="credit-notes-input" name="notes" class="form-control"
+                                       maxlength="255" placeholder="Cheque bounced in August. No new credit until it clears.">
+                            </div>
+                        </div>
+
+                        <p class="formula-preview" id="credit-preview"></p>
+                    </form>
+                </div>
+
+                <div id="credit-history-tab" style="display: none;">
+                    <div class="history-split" id="credit-history"></div>
+                </div>
+            </div>
+
+            <!-- the buttons belong to the Account tab's form; the foot hides them
+                 on the history tab (showCreditTab) -->
+            <div class="modal-foot" id="credit-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('credit-modal')">Cancel</button>
+                <button type="submit" form="credit-form" class="btn btn-success">Save Credit Terms</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- THE LATE-PAYMENT RATE -->
+    <div class="modal" id="penalty-modal" onclick="closeModalOnBackdrop(event, 'penalty-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">%</div>
+                    <div>
+                        <h3>Late-payment penalty</h3>
+                        <span class="modal-role">The shop's rate for every credit account</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('penalty-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <form id="penalty-form" onsubmit="savePenaltyPolicy(event)">
+                <div class="modal-body">
+                    <div class="detail-grid" id="penalty-facts"></div>
+
+                    <div class="form-group">
+                        <label for="penalty-rate-input">Penalty rate, percent a month
+                            <span class="label-hint">from 1 to 3, of the goods still unpaid; the default is 3</span></label>
+                        <input type="number" id="penalty-rate-input" name="penaltyRate" class="form-control"
+                               min="1" max="3" step="0.01" required oninput="previewPenaltyPolicy()">
+                    </div>
+
+                    <p class="formula-preview" id="penalty-preview"></p>
+
+                    <p class="detail-note">A sale is charged the day after its due date and again every thirty
+                        days it stays unpaid, at the rate in force that day; a part of a month counts as a month.
+                        Changing the rate here does not touch a month already charged. An account given its
+                        own rate on its credit terms keeps that rate instead of this one.</p>
+                </div>
+
+                <div class="modal-foot">
+                    <button type="button" class="btn btn-ghost" onclick="closeModal('penalty-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-success">Save the Rate</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- A CUSTOM PERIOD for the Sales Summary: opened by "Custom date" in the Period box -->
+    <div class="modal" id="income-custom-modal" onclick="closeModalOnBackdrop(event, 'income-custom-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">CD</div>
+                    <div>
+                        <h3>Custom date</h3>
+                        <span class="modal-role">Sales Summary</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="cancelCustomIncomeRange()" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="income-custom-form" onsubmit="applyCustomIncomeRange(event)">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="income-from">From <span class="req">*</span></label>
+                            <input type="date" id="income-from" class="form-control" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="income-to">To <span class="req">*</span></label>
+                            <input type="date" id="income-to" class="form-control" required>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="cancelCustomIncomeRange()">Cancel</button>
+                <button type="submit" form="income-custom-form" class="btn btn-accent">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ADDING A SUPPLIER, A CATEGORY OR A UNIT -- the manager's alone -->
+    <div class="modal" id="record-add-modal" onclick="closeModalOnBackdrop(event, 'record-add-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">+</div>
+                    <div>
+                        <h3 id="record-add-title">Add Supplier</h3>
+                        <span class="modal-role">Records</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('record-add-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="record-add-form" onsubmit="saveAddRecord(event)" novalidate>
+                    <div class="form-group">
+                        <label for="record-add-name" id="record-add-name-label">Company name <span class="req">*</span></label>
+                        <input type="text" id="record-add-name" name="name" class="form-control" maxlength="100" required>
+                    </div>
+                    <!-- the rest is for a supplier only -->
+                    <div id="record-add-supplier">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="record-add-contact">Contact person</label>
+                                <input type="text" id="record-add-contact" name="contactPerson" class="form-control" maxlength="100">
+                            </div>
+                            <div class="form-group">
+                                <label for="record-add-number">Contact number</label>
+                                <div class="phone-field">
+                                    <span class="phone-prefix">+63</span>
+                                    <input type="text" id="record-add-number" name="contactNumber" class="form-control"
+                                           inputmode="numeric" autocomplete="tel" maxlength="20" placeholder="9XXXXXXXXX"
+                                           oninput="onPhoneInput(this)">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="record-add-email">Email</label>
+                                <input type="email" id="record-add-email" name="email" class="form-control" maxlength="100">
+                            </div>
+                            <div class="form-group">
+                                <label for="record-add-address">Address</label>
+                                <input type="text" id="record-add-address" name="address" class="form-control" maxlength="255">
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('record-add-modal')">Cancel</button>
+                <button type="submit" form="record-add-form" class="btn btn-success" id="record-add-save">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- DECIDING AN EXTENSION -->
+    <div class="modal" id="decide-modal" onclick="closeModalOnBackdrop(event, 'decide-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="decide-avatar">--</div>
+                    <div>
+                        <h3 id="decide-name">Extension request</h3>
+                        <span class="modal-role" id="decide-sub">Waiting for a decision</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('decide-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="detail-grid" id="decide-facts"></div>
+                <p class="detail-note" id="decide-reason"></p>
+
+                <div class="form-group">
+                    <label for="decide-note">Your note
+                        <span class="label-hint">required when declining</span></label>
+                    <input type="text" id="decide-note" class="form-control" maxlength="255"
+                           placeholder="Cleared their August balance last week, good for it.">
+                </div>
+            </div>
+
+            <div class="modal-foot" id="decide-actions">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('decide-modal')">Cancel</button>
+                <button type="button" class="btn btn-danger" onclick="decideCreditRequest(false)">Decline</button>
+                <button type="button" class="btn btn-success" onclick="decideCreditRequest(true)">Approve</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="modules/shared/icons.js"></script>
+    <script src="modules/shared/helpers.js"></script>
+    <script src="modules/shared/format.js"></script>
+    <script src="connections/shared-connection.js"></script>
+    <script src="modules/shared/ui-kit.js"></script>
+    <script src="modules/shared/tables.js"></script>
+    <script src="modules/shared/data-panel.js"></script>
+    <script src="modules/shared/live-sync.js"></script>
+    <script src="modules/shared/modals.js"></script>
+    <script src="modules/shared/detail-modal.js"></script>
+    <script src="modules/shared/session.js"></script>
+    <script src="modules/shared/topbar.js"></script>
+    <script src="modules/shared/subnav.js"></script>
+    <script src="modules/shared/my-account.js"></script>
+    <script src="modules/shared/notifications.js"></script>
+    <script src="modules/shared/features.js"></script>
+    <script src="modules/shared/deliveries.js"></script>
+    <script src="modules/shared/delivery-schedule.js"></script>
+    <script src="modules/shared/purchase-orders.js"></script>
+    <script src="modules/shared/qr-payments.js"></script>
+    <script src="connections/manager-connection.js"></script>
+    <script src="modules/manager.js"></script>
+</body>
+</html>

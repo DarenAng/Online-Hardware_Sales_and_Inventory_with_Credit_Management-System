@@ -18,10 +18,6 @@ const TOURS = {
       ["create", "showCreateAccount()"],
       ["archive-closed", "showArchiveModule()"],
       ["archive", "dataPanelOpen('admin-archive')"],
-      ["access-closed", "showAccessControl()"],
-      ["access", "dataPanelOpen('admin-access')"],
-      ["systems-closed", "showConnectedSystems()"],
-      ["systems", "loadConnectedSystems()"],
       ["logs-closed", "showAuditLogs()"],
       ["logs", "dataPanelOpen('admin-logs')"],
       ["backup-closed", "showMaintenance()"],
@@ -29,19 +25,21 @@ const TOURS = {
     ]
   },
   manager: {
-    email: "manager@hardware.com", password: "manager123", page: "manager-dashboard.html",
+    email: "manager@hardware.com", password: "manager123", page: "manager.html",
     steps: [
-      ["home", "showManagerHome()"],
-      // the income breakdown the Collected card opens, over two periods
-      ["income", "openIncomeFromCard()"],
-      ["income-year", "pickIncomeRange('annual')"],
+      // the reports are the first screen; each loads on its own
       ["reports", "showReports()"],
-      ["reports-methods", "dataPanelOpen('mgr-methods')"],
-      ["reports-receivables", "(showReports(), showReportTab('report-unpaid'), dataPanelOpen('mgr-unpaid'))"],
+      ["reports-activity", "(showReport('report-all'), dataPanelOpen('mgr-all'))"],
+      ["reports-receivables", "(showReport('report-unpaid'), dataPanelOpen('mgr-unpaid'))"],
+      // the income breakdown over two periods
+      ["income", "(showIncome(), loadIncome())"],
+      ["income-year", "pickIncomeRange('annual')"],
       ["sales-closed", "showSales()"],
       ["sales", "dataPanelOpen('mgr-sales')"],
       ["reorder-alerts", "(showReorderAlerts(), dataPanelOpen('mgr-reorder'))"],
       ["stock-report", "(showStockReport(), dataPanelOpen('mgr-stocks'))"],
+      ["stock-movements", "(showStockView('stock-moves'), dataPanelOpen('mgr-stock-moves'))"],
+      ["purchase-orders", "(showPurchasing(), dataPanelOpen('mgr-po'))"],
       ["credit", "(showCredit(), dataPanelOpen('mgr-credit'))"],
       ["credit-requests", "(showCreditRequests(), dataPanelOpen('mgr-requests'))"],
       ["deliveries", "(showDeliveries(), dataPanelOpen('mgr-deliveries'))"],
@@ -77,7 +75,6 @@ const TOURS = {
     email: "delivery@hardware.com", password: "delivery123", page: "delivery.html",
     steps: [
       ["pending", "showDeliveryHome()"],
-      ["active", "showDeliveryActive()"],
       ["cod", "showDeliveryCod()"],
       ["reports-closed", "showDeliveryReports()"],
       ["reports", "loadDeliveryReport()"]
@@ -165,7 +162,7 @@ const TOURS = {
 
     // the shared pieces are captured once, on the manager screen
     if (role === "manager") {
-      await page.evaluate("showManagerHome()");
+      await page.evaluate("showReports()");
       await page.waitForTimeout(500);
 
       await page.click("#account-chip");
@@ -217,7 +214,7 @@ const TOURS = {
       await page.waitForTimeout(500);
       await page.screenshot({ path: path.join(OUT, "shared-09-scrolled.png") });
       await page.evaluate("window.scrollTo(0, 0)");
-      await page.evaluate("showManagerHome()");
+      await page.evaluate("showReports()");
       await page.waitForTimeout(700);
 
       await page.evaluate("void toggleNotifications()");

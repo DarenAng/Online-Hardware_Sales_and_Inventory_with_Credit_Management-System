@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cashier &middot; Lucelyn Hardware</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/general-ui.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/modules/cashier.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <a href="#" class="sidebar-brand" onclick="showCashierHome(event)" title="Back to the register">
+                <span class="brand-mark">LH</span>
+                <span class="brand-text">
+                    <span class="brand-name">Lucelyn Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
+            </a>
+            <div class="sidebar-user">
+                <span class="sidebar-eyebrow">Cashier</span>
+                <span data-current-user>User</span>
+            </div>
+            <!-- data-feature names the screen an item opens; shared/features.js hides
+                 the ones switched off for this role and mirrors the counts -->
+            <ul class="sidebar-nav">
+                <!-- A folding heading does two things (shared/helpers.js sidebarHeading): its
+                     words open the module's first screen, its caret alone folds the list -->
+                <li data-sidebar-dropdown>
+                    <a href="#pos" onclick="sidebarHeading(event, 'pos-nav', 'pos-dropdown', showRegister)" class="nav-parent" id="pos-nav"><i class="bi bi-shop nav-icon" aria-hidden="true"></i>
+                        Point of Sale <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="pos-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="pos"><a href="#" data-panel-link="panel-pos" onclick="showRegister(event)"><i class="bi bi-cart-plus nav-icon" aria-hidden="true"></i>New Transaction</a></li>
+                        <li data-feature="deliveries"><a href="#" data-panel-link="panel-delivery" onclick="showCashierDeliveries(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>Deliveries</a></li>
+                        <li data-feature="refunds"><a href="#" data-panel-link="panel-refund" onclick="showRefunds(event)"><i class="bi bi-arrow-counterclockwise nav-icon" aria-hidden="true"></i>Refunds</a></li>
+                        <li data-feature="qr-payments"><a href="#" data-panel-link="panel-qrpayments" onclick="showQrPayments(event)"><i class="bi bi-qr-code-scan nav-icon" aria-hidden="true"></i>QR Payments</a></li>
+                    </ul>
+                </li>
+                <li data-feature="credit"><a href="#" data-panel-link="panel-customers" onclick="showCustomers(event)"><i class="bi bi-person-vcard nav-icon" aria-hidden="true"></i>Customers Record</a></li>
+                <li data-feature="sales-report"><a href="#" data-panel-link="panel-salesreport" onclick="showSalesReport(event)"><i class="bi bi-bar-chart nav-icon" aria-hidden="true"></i>Sales Report</a></li>
+                <li data-feature="daily-summary"><a href="#" data-panel-link="panel-summary" onclick="showDailySummary(event)"><i class="bi bi-calendar-check nav-icon" aria-hidden="true"></i>Daily Summary</a></li>
+                <!-- drawn by shared/delivery-schedule.js; hidden until features.js hears the role has it -->
+                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
+                    Delivery Schedule</a></li>
+
+            </ul>
+        </aside>
+
+        <!-- the shade behind the menu once it slides over the page -->
+        <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
+
+        <main class="main-content">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="menu-toggle" type="button" onclick="toggleSidebar()"
+                            aria-controls="sidebar" aria-expanded="false"
+                            aria-label="Menu">&#9776;</button>
+                    <span class="topbar-title" id="cash-page-title">Point of Sale</span>
+                </div>
+            </header>
+
+            <div class="content-area">
+
+                <!-- DEFAULT: THE REGISTER -->
+                <div id="panel-pos" data-panel>
+                    <div class="pos-layout">
+                        <div class="card pos-catalog">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Product Catalog</h3>
+                                </div>
+                            </div>
+
+                            <!-- two letters or more, matched at the start of a word ("ad" finds Adhesive, not Shade) -->
+                            <div class="panel-toolbar">
+                                <div class="search-wrap">
+                                    <input type="search" class="form-control search-input" id="catalog-search"
+                                           placeholder="Search a product, category, or brand"
+                                           oninput="onCatalogSearchInput(event)" onkeydown="onCatalogSearchKey(event)" title="Type at least two letters to search">
+                                </div>
+                                <div class="toolbar-field">
+                                    <label for="catalog-category">Category</label>
+                                    <select id="catalog-category" onchange="setCatalogFilter('category', this.value)">
+                                        <option value="all">Every category</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div id="catalog-grid" class="catalog-scroll"></div>
+                        </div>
+
+                        <div class="order-summary" id="order-summary">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Order</h3>
+                                </div>
+                            </div>
+
+                            <div id="cart-lines"></div>
+
+                            <div class="cart-totals" id="cart-totals"></div>
+
+                            <form id="checkout-form" onsubmit="handleCheckout(event)" autocomplete="off">
+                                <!-- THE CUSTOMER, TYPED -- a matching name attaches the account; any other
+                                     name opens one when the sale is rung up -->
+                                <div class="form-group">
+                                    <label for="customer-name">Customer</label>
+                                    <div class="suggest-wrap">
+                                        <input type="text" id="customer-name" name="customerName"
+                                               class="form-control" autocomplete="off"
+                                               placeholder="Walk-in — type the customer's name"
+                                               role="combobox" aria-expanded="false"
+                                               aria-controls="customer-suggest" aria-autocomplete="list"
+                                               oninput="onCustomerInput(this.value)"
+                                               onfocus="onCustomerInput(this.value)"
+                                               onkeydown="onCustomerKey(event)">
+                                        <input type="hidden" name="customerId" value="">
+                                        <button type="button" class="suggest-clear" id="customer-clear"
+                                                onclick="clearCustomer()" aria-label="Clear the customer"
+                                                hidden>&times;</button>
+                                        <ul class="suggest-list" id="customer-suggest" role="listbox" hidden></ul>
+                                    </div>
+                                    <p class="customer-verdict" id="customer-verdict"></p>
+                                </div>
+
+                                <div class="credit-strip" id="credit-strip" style="display: none;"></div>
+                                <div class="form-group">
+                                        <label for="pay-method">Payment method</label>
+                                        <select id="pay-method" name="paymentMethod" class="form-control" onchange="onPaymentMethodChange(this.value)" required>
+                                            <option value="Cash">Cash</option>
+                                            <option value="GCash">GCash</option>
+                                            <option value="PayMaya">PayMaya</option>
+                                            <option value="PayPal">PayPal</option>
+                                            <option value="Cheque">Cheque</option>
+                                            <option value="Bank Transfer">Bank Transfer</option>
+                                            <option value="COD">Cash on Delivery</option>
+                                            <option value="Credit">Credit</option>
+                                        </select>
+                                </div>
+                                <div class="form-group" id="tender-field">
+                                    <label for="pay-amount">Amount entered</label>
+                                    <input type="number" id="pay-amount" name="amountPaid" class="form-control" min="0" step="0.01" placeholder="0.00" oninput="renderCart()">
+                                </div>
+
+                                <!-- PART PAYMENT -- what is handed over is taken now; the rest goes on the book -->
+                                <div id="downpayment-field" style="display: none;">
+                                    <div class="grid-2">
+                                        <div class="form-group">
+                                            <label for="pay-down">Paid now <span class="label-hint">optional</span></label>
+                                            <input type="number" id="pay-down" name="downPayment" class="form-control"
+                                                   min="0" step="0.01" placeholder="0.00" oninput="renderCart()">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="pay-down-method">Payment method</label>
+                                            <select id="pay-down-method" name="downPaymentMethod" class="form-control" onchange="renderCart()">
+                                                <option value="Cash">Cash</option>
+                                                <option value="GCash">GCash</option>
+                                                <option value="PayMaya">PayMaya</option>
+                                                <option value="Cheque">Cheque</option>
+                                                <option value="Bank Transfer">Bank Transfer</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="downpayment-quick">
+                                        <span class="quick-label">Quick fill</span>
+                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(0)">Nothing</button>
+                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(0.25)">25%</button>
+                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(0.5)">Half</button>
+                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(1)">All of it</button>
+                                    </div>
+                                    <p class="credit-verdict" id="credit-verdict"></p>
+                                </div>
+
+                                <!-- WHERE A TRANSFER GOES -- shown whenever Bank Transfer is chosen, as the
+                                     sale's method or as the part payment's (renderSalePaymentExtras fills it) -->
+                                <div class="bank-box" id="sale-bank-box" hidden></div>
+
+                                <!-- THE PAYMENT REFERENCE -- required for a cheque or a transfer, optional for
+                                     an e-wallet, and not asked for cash or cash on delivery -->
+                                <div class="form-group" id="sale-reference-field" hidden>
+                                    <label for="sale-reference">Reference <span class="label-hint" id="sale-reference-hint">required</span></label>
+                                    <input type="text" id="sale-reference" name="referenceNo" class="form-control"
+                                           maxlength="60" autocomplete="off" placeholder="e.g. cheque 001234">
+                                </div>
+
+                                <!-- the delivery is filled in beside the order and written the moment the sale exists -->
+                                <div class="delivery-attached" id="delivery-attached" hidden></div>
+
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-success" id="checkout-btn">Complete Sale</button>
+                                    <!-- GCash or PayMaya only: the customer scans a QR code instead of
+                                         the cashier typing a reference (shown by renderCartFigures) -->
+                                    <button type="button" class="btn" id="qr-pay-btn" data-icon="qr-code"
+                                            onclick="payByQr()" hidden>Pay by QR</button>
+                                    <button type="button" class="btn btn-ghost" id="make-delivery-btn"
+                                            onclick="openDeliveryForm()">Make a Delivery</button>
+                                    <button type="button" class="btn btn-ghost" onclick="clearCart()">Clear</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+
+                <!-- ============================================================
+                     CUSTOMERS & CREDIT
+                     ============================================================ -->
+                <div class="card" id="panel-customers" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Customers Record</h3>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="customers-search"
+                                   placeholder="Search by customer or phone"
+                                   oninput="dataPanelSearchInput('cash-credit', event)" onkeydown="dataPanelSearchKey('cash-credit', event)" title="Type at least two letters to search">
+                        </div>
+                        <!-- due date is the oldest unpaid sale plus the 30-day term -->
+                        <div class="toolbar-field">
+                            <label for="customers-due">Due</label>
+                            <select id="customers-due"
+                                    onchange="dataPanelFilter('cash-credit', 'due', this.value)">
+                                <option value="all">Every account</option>
+                                <option value="overdue">Overdue</option>
+                                <option value="week">Due within 7 days</option>
+                                <option value="owing">Has a balance</option>
+                                <option value="clear">No balance</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-8">
+                        <table id="customers-table">
+                            <thead>
+                                <tr><th>Customer</th><th>Phone</th><th>Credit Limit</th><th>Balance</th>
+                                    <th>Available Balance</th><th>Due Date</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="customers-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     DELIVERIES -- tracking only; booking happens at the till. Starts empty.
+                     ============================================================ -->
+                <div class="card" id="panel-delivery" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Delivery Tracking</h3>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="cdel-search"
+                                   placeholder="Search by customer, address, or sale number"
+                                   oninput="dataPanelSearchInput('cash-deliveries', event)" onkeydown="dataPanelSearchKey('cash-deliveries', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="cdel-status">Status</label>
+                            <select id="cdel-status" data-filter-table="cdel-table" data-hides-column="6"
+                                    onchange="dataPanelFilter('cash-deliveries', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="Pending">Pending</option>
+                                <option value="In Transit">In Transit</option>
+                                <option value="Out for Delivery">Out for Delivery</option>
+                                <option value="Delivered">Delivered</option>
+                                <option value="Delayed">Delayed</option>
+                                <option value="Failed">Failed</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="track-legend" id="cdel-legend"></div>
+
+                    <div class="table-responsive grid-8">
+                        <table id="cdel-table">
+                            <thead>
+                                <tr><th>ID</th><th>Sale</th><th>Customer</th><th>Destination</th><th>Scheduled</th><th>Status</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="cdel-pager"></div>
+                </div>
+
+                <!-- REFUNDS -->
+                <div id="panel-refund" data-panel style="display: none;">
+                    <!-- the form on the left, the list beside it: both on one screen -->
+                    <div class="pair-layout form-left">
+                        <div class="card pair-form">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Issue a Refund</h3>
+                                </div>
+                            </div>
+                            <form id="refund-form" class="form-sheet" onsubmit="handleIssueRefund(event)" autocomplete="off">
+                                <!-- WHAT CAME BACK -- unlike the customer box, a name matching nothing is
+                                     not accepted: no strip under the box means nothing is chosen -->
+                                <div class="form-group">
+                                    <label for="refund-product">Product</label>
+                                    <div class="suggest-wrap">
+                                        <input type="text" id="refund-product" class="form-control"
+                                               autocomplete="off" placeholder="Type a product, brand, or category"
+                                               role="combobox" aria-expanded="false"
+                                               aria-controls="refund-suggest" aria-autocomplete="list"
+                                               oninput="onRefundProductInput(this.value)"
+                                               onfocus="onRefundProductInput(this.value)"
+                                               onkeydown="onRefundProductKey(event)">
+                                        <input type="hidden" name="productId" value="">
+                                        <button type="button" class="suggest-clear" id="refund-product-clear"
+                                                onclick="clearRefundProduct()" aria-label="Clear the product"
+                                                hidden>&times;</button>
+                                        <ul class="suggest-list" id="refund-suggest" role="listbox" hidden></ul>
+                                    </div>
+                                    <div class="pick-strip" id="refund-product-strip" hidden></div>
+                                    <p class="pick-verdict" id="refund-product-verdict"></p>
+                                </div>
+
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="refund-qty">Quantity</label>
+                                        <input type="number" id="refund-qty" name="quantity" class="form-control"
+                                               min="1" value="1" required onfocus="this.select()" oninput="onRefundQuantityInput()">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="refund-amount">Refund amount</label>
+                                        <input type="number" id="refund-amount" name="refundAmount" class="form-control"
+                                               min="0" step="0.01" value="0" required onfocus="this.select()"
+                                               oninput="onRefundAmountInput()">
+                                        <p class="amount-source" id="refund-amount-source"></p>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="refund-sale">Sale ID <span class="label-hint">optional</span></label>
+                                    <input type="number" id="refund-sale" name="saleId" class="form-control"
+                                           min="1" placeholder="Receipt number" style="max-width: 220px;">
+                                </div>
+
+                                <!-- MANDATORY REMARKS -- a sentence, not a word -->
+                                <div class="form-group">
+                                    <label for="return-reason">Remarks
+                                        <span class="label-hint">required &mdash; say what happened</span></label>
+                                    <textarea name="reason" id="return-reason" class="form-control" rows="3"
+                                              minlength="10" required
+                                              oninput="onReturnReasonInput()"
+                                              placeholder="Two tins arrived dented in the delivery and cannot be sold."></textarea>
+                                    <p class="reason-counter" id="reason-counter"></p>
+                                </div>
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-success">Issue Refund</button>
+                                    <button type="button" class="btn btn-ghost" onclick="showCashierHome(event)">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Refunds Issued</h3>
+                                </div>
+                            </div>
+
+                            <div class="panel-toolbar">
+                                <div class="search-wrap">
+                                    <input type="search" class="form-control search-input" id="refund-search"
+                                           placeholder="Search by product or reason"
+                                           oninput="dataPanelSearchInput('cash-refunds', event)" onkeydown="dataPanelSearchKey('cash-refunds', event)" title="Type at least two letters to search">
+                                </div>
+                                <div class="toolbar-field">
+                                    <label for="refund-disposition">Goods went</label>
+                                    <select id="refund-disposition" data-filter-table="refund-table" data-hides-column="5"
+                                            onchange="dataPanelFilter('cash-refunds', 'disposition', this.value)">
+                                        <option value="all">Any</option>
+                                        <option value="awaiting">Awaiting inspection</option>
+                                        <option value="Return to Stock">Back on shelf</option>
+                                        <option value="Write-Off">Written off</option>
+                                    </select>
+                                </div>
+                                <div class="toolbar-spacer"></div>
+                            </div>
+
+                            <div class="table-responsive grid-8">
+                                <table id="refund-table">
+                                    <thead>
+                                        <tr><th>ID</th><th>Product</th><th>Qty</th><th>Amount</th><th>Goods Went</th><th>Filed</th><th>Status</th></tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                            <div class="pager is-single" id="refund-pager"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- SALES REPORT -->
+                <div class="card" id="panel-salesreport" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Sales Report</h3>
+                        </div>
+                    </div>
+
+                    <div class="filter-row" id="sales-scope"></div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="csales-search"
+                                   placeholder="Search by customer, method, status, or receipt"
+                                   oninput="dataPanelSearchInput('cash-sales', event)" onkeydown="dataPanelSearchKey('cash-sales', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="csales-method">Payment</label>
+                            <select id="csales-method" data-filter-table="csales-table" data-hides-column="4"
+                                    onchange="dataPanelFilter('cash-sales', 'method', this.value)">
+                                <option value="all">Every method</option>
+                                <option value="Cash">Cash</option>
+                                <option value="Online Payment">Online Payment</option>
+                                <option value="Cheque">Cheque</option>
+                                <option value="COD">Cash on Delivery</option>
+                                <option value="Credit">Credit</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="csales-status">Status</label>
+                            <select id="csales-status" data-filter-table="csales-table" data-hides-column="5"
+                                    onchange="dataPanelFilter('cash-sales', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="Completed">Completed</option>
+                                <option value="Pending Delivery">Pending Delivery</option>
+                                <option value="Partial Credit">Partial Credit</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-8">
+                        <table id="csales-table">
+                            <thead>
+                                <tr><th>Receipt</th><th>Date</th><th>Customer</th><th>Method</th><th>Status</th><th>Total</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="csales-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     QR PAYMENTS -- every GCash and Maya payment tried by QR code and
+                     how it ended (shared/qr-payments.js). The cashier's own here;
+                     the server decides whose rows come back.
+                     ============================================================ -->
+                <div class="card" id="panel-qrpayments" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>QR Payments</h3>
+                        </div>
+                        <div class="panel-actions">
+                            <span class="badge badge-warning" id="cqr-badge" hidden></span>
+                        </div>
+                    </div>
+
+                    <div class="kpi-grid qr-kpis" id="cqr-kpis"></div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="cqr-search"
+                                   placeholder="Search by reference, receipt, cashier, or message"
+                                   oninput="dataPanelSearchInput('cqr', event)" onkeydown="dataPanelSearchKey('cqr', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="cqr-from">From</label>
+                            <input type="date" id="cqr-from" onchange="reloadQrPayments('cqr')">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="cqr-to">To</label>
+                            <input type="date" id="cqr-to" onchange="reloadQrPayments('cqr')">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="cqr-status">Status</label>
+                            <select id="cqr-status" onchange="dataPanelFilter('cqr', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="paid">Paid</option>
+                                <option value="failed">Failed</option>
+                                <option value="expired">Expired</option>
+                                <option value="cancelled">Cancelled</option>
+                                <option value="pending">Waiting</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="cqr-table">
+                            <thead>
+                                <tr><th>Time</th><th>Amount</th><th>Wallet</th><th>Status</th><th>Reference</th>
+                                    <th>Sale</th><th>Cashier</th><th>Message</th><th>Money</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="cqr-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     DAILY SUMMARY -- today only
+                     ============================================================ -->
+                <div id="panel-summary" data-panel style="display: none;">
+                    <div class="page-intro">
+                        <h2>Daily Summary</h2>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <h3 id="summary-day">Today</h3>
+                            </div>
+                            <div class="panel-actions">
+                                <button type="button" class="btn btn-accent" onclick="loadDailySummary()">Load Today</button>
+                            </div>
+                        </div>
+                        <div class="kpi-grid" id="summary-kpis"></div>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>By Payment Method</h3>
+                            </div>
+                        </div>
+                        <div class="table-responsive grid-8">
+                            <table id="summary-table">
+                                <thead>
+                                    <tr><th>Method</th><th>Transactions</th><th>Total</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="summary-pager"></div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- SALES INVOICE -->
+    <div class="modal" id="receipt-modal" onclick="closeModalOnBackdrop(event, 'receipt-modal')">
+        <div class="modal-box receipt-box">
+            <div class="modal-head no-print">
+                <div class="modal-identity">
+                    <div class="avatar">IN</div>
+                    <div>
+                        <h3 id="receipt-heading">Invoice</h3>
+                        <span class="modal-role">Sales invoice</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('receipt-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div id="receipt-paper" class="receipt-paper"></div>
+            </div>
+
+            <div class="modal-foot no-print">
+                <button type="button" class="btn btn-accent" onclick="printReceipt()">Print Invoice</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         MAKE A DELIVERY -- the booked date is the sale's own date, set by the server
+         ============================================================ -->
+    <!-- data-modal-locked: neither a backdrop click nor Escape closes this form,
+         which would throw away a typed address; the two buttons are the ways out -->
+    <div class="modal" id="delivery-modal" data-modal-locked>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">DL</div>
+                    <div>
+                        <h3>Make a Delivery</h3>
+                        <span class="modal-role" id="delivery-modal-sub">Attached to this sale</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="cancelDeliveryForm()" aria-label="Cancel the delivery">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="make-delivery-form" onsubmit="saveDeliveryForm(event)" autocomplete="off">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="dl-name">Customer name</label>
+                            <input type="text" id="dl-name" name="contactName" class="form-control"
+                                   placeholder="Who the driver asks for" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="dl-phone">Phone number</label>
+                            <div class="phone-field">
+                                <span class="phone-prefix">+63</span>
+                                <input type="text" id="dl-phone" name="contactPhone" class="form-control"
+                                       inputmode="numeric" autocomplete="tel"
+                                       maxlength="20" placeholder="9XXXXXXXXX"
+                                       oninput="onPhoneInput(this)" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dl-address">Delivery address</label>
+                        <input type="text" id="dl-address" name="address" class="form-control"
+                               placeholder="Street, barangay, city" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dl-scheduled">Scheduled for</label>
+                        <input type="datetime-local" id="dl-scheduled" name="scheduledDate" class="form-control">
+                        <span class="label-hint">Date and time. Leave it empty if the slot is not
+                            agreed yet.</span>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dl-driver">Driver</label>
+                        <!-- empty means any driver can take it; the hidden id is set only by a pick -->
+                        <div class="suggest-wrap">
+                            <input type="text" id="dl-driver" class="form-control" autocomplete="off"
+                                   role="combobox" aria-expanded="false"
+                                   aria-controls="driver-suggest" aria-autocomplete="list"
+                                   oninput="onDriverInput(this.value)"
+                                   onfocus="onDriverInput(this.value)"
+                                   onkeydown="onDriverKey(event)">
+                            <input type="hidden" name="driverStaffId" value="">
+                            <button type="button" class="suggest-clear" id="driver-clear"
+                                    onclick="clearDriverPick()" aria-label="Clear the driver" hidden>&times;</button>
+                            <ul class="suggest-list" id="driver-suggest" role="listbox" hidden></ul>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="dl-remarks">Remarks <span class="label-hint">optional</span></label>
+                        <textarea id="dl-remarks" name="remarks" class="form-control" rows="2"
+                                  placeholder="Gate code, landmark, best time to arrive"></textarea>
+                    </div>
+
+                    <p class="delivery-verdict" id="delivery-verdict"></p>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="cancelDeliveryForm()">Cancel Delivery</button>
+                <button type="button" class="btn btn-ghost btn-quiet" id="delivery-drop"
+                        onclick="dropDeliveryForm()" hidden>Remove Delivery</button>
+                <button type="button" class="btn btn-success" onclick="saveDeliveryForm(event)">Attach to this Sale</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         WHAT WENT BACK TODAY -- the refund figure opens into this
+         ============================================================ -->
+    <div class="modal" id="refunds-today-modal" onclick="closeModalOnBackdrop(event, 'refunds-today-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">RF</div>
+                    <div>
+                        <h3>Refunds Today</h3>
+                        <span class="modal-role" id="refunds-today-sub">What went back, and for how much</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('refunds-today-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="detail-grid" id="refunds-today-totals"></div>
+                <div id="refunds-today-list"></div>
+            </div>
+
+            <div class="modal-foot" hidden></div>
+        </div>
+    </div>
+
+    <!-- PAGED DETAIL POPUP -->
+    <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="detail-avatar">--</div>
+                    <div>
+                        <h3 id="detail-title">Record</h3>
+                        <span class="modal-role" id="detail-subtitle">Detail</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('detail-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-steps" id="detail-steps"></div>
+
+            <div class="modal-body">
+                <div id="detail-page"></div>
+            </div>
+
+            <div class="modal-foot" hidden></div>
+        </div>
+    </div>
+
+
+    <!-- ============================================================
+         TAKE A PAYMENT -- money against one sale's balance. Locked like the
+         delivery form: a typed amount is not thrown away by a stray click.
+         ============================================================ -->
+    <div class="modal" id="payment-modal" data-modal-locked>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="payment-avatar">PY</div>
+                    <div>
+                        <h3 id="payment-title">Take a Payment</h3>
+                        <span class="modal-role" id="payment-sub">Against a sale</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closePaymentForm()" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="detail-grid" id="payment-facts"></div>
+
+                <form id="payment-form" onsubmit="handleTakePayment(event)" autocomplete="off">
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="pay-debt-amount">Amount received</label>
+                            <input type="number" id="pay-debt-amount" name="amount" class="form-control"
+                                   min="0.01" step="0.01" required oninput="renderPaymentVerdict()">
+                        </div>
+                        <div class="form-group">
+                            <label for="pay-debt-method">Payment method</label>
+                            <select id="pay-debt-method" name="paymentMethod" class="form-control" required
+                                    onchange="renderPaymentVerdict()">
+                                <option value="Cash">Cash</option>
+                                <option value="GCash">GCash</option>
+                                <option value="PayMaya">PayMaya</option>
+                                <option value="Cheque">Cheque</option>
+                                <option value="Bank Transfer">Bank Transfer</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="downpayment-quick">
+                        <span class="quick-label">Quick fill</span>
+                        <button type="button" class="btn btn-sm" onclick="fillPayment(0.25)">25%</button>
+                        <button type="button" class="btn btn-sm" onclick="fillPayment(0.5)">Half</button>
+                        <button type="button" class="btn btn-sm" onclick="fillPayment(1)">The whole balance</button>
+                    </div>
+                    <div class="bank-box" id="payment-bank-box" hidden></div>
+                    <div class="form-group" style="margin-top: 14px;">
+                        <label for="pay-debt-ref">Reference <span class="label-hint">optional &mdash; cheque or transfer number</span></label>
+                        <input type="text" id="pay-debt-ref" name="referenceNo" class="form-control" maxlength="60"
+                               placeholder="e.g. cheque 001234">
+                    </div>
+                    <p class="credit-verdict" id="payment-verdict"></p>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closePaymentForm()">Cancel</button>
+                <button type="button" class="btn" id="payment-qr-btn" data-icon="qr-code"
+                        onclick="handleTakePayment(event, true)" hidden>Pay by QR</button>
+                <button type="button" class="btn btn-success" id="payment-save-btn" onclick="handleTakePayment(event)">Record the Payment</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ONE CUSTOMER, FOR THE COUNTER -- the account on one tab, the unpaid sales
+         (each with Pay) on the next, purchases beside payments on the last (each
+         paged with Previous and Next), and the way to ask for more room -->
+    <div class="modal" id="customer-modal" onclick="closeModalOnBackdrop(event, 'customer-modal')">
+        <div class="modal-box modal-wide">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="customer-avatar">--</div>
+                    <div>
+                        <h3 id="customer-modal-name">Customer</h3>
+                        <span class="modal-role" id="customer-sub">Credit account</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('customer-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-tabs">
+                <button type="button" class="modal-tab active" id="customer-tab-account"
+                        onclick="showCustomerTab('account')">Account</button>
+                <!-- each sale still owing, with the button that takes money against it;
+                     shown only when there is a balance and the role holds debt-payments -->
+                <button type="button" class="modal-tab" id="customer-tab-unpaid"
+                        onclick="showCustomerTab('unpaid')" hidden>Unpaid Sales</button>
+                <button type="button" class="modal-tab" id="customer-tab-history"
+                        onclick="showCustomerTab('history')">Purchases &amp; Payments</button>
+            </div>
+
+            <div class="modal-body">
+                <div id="customer-account-tab">
+                    <div class="detail-grid" id="customer-facts"></div>
+                </div>
+                <div id="customer-unpaid-tab" style="display: none;">
+                    <div id="customer-unpaid"></div>
+                </div>
+                <div id="customer-history-tab" style="display: none;">
+                    <div class="history-split" id="customer-history"></div>
+                </div>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-accent" id="customer-pay-btn" onclick="payFromCustomerCard()" hidden>Take a Payment</button>
+                <button type="button" class="btn btn-gold" onclick="askForExtension()">Ask for a Higher Limit</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         PAY BY QR -- the code the customer scans for a GCash or Maya
+         payment, for a sale or for a payment on a balance. Opened by
+         collectQrPayment() in modules/cashier.js. The code holds the address
+         of the page the customer pays on; the badge says TEST MODE (a
+         PayMongo test key) or SIMULATION (no PayMongo at all). Locked: it
+         closes only through its own buttons, so the checking always stops.
+         ============================================================ -->
+    <div class="modal" id="qr-modal" data-modal-locked>
+        <div class="modal-box qr-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar"><i class="bi bi-qr-code" aria-hidden="true"></i></div>
+                    <div>
+                        <h3 id="qr-title">Pay by QR</h3>
+                        <span class="modal-role" id="qr-sub"></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="modal-body">
+                <p class="qr-sim" id="qr-badge-line" hidden><span class="badge badge-warning" id="qr-badge"></span></p>
+                <p class="qr-amount" id="qr-amount"></p>
+                <!-- above the code, so it is never pushed onto a second page on a short screen -->
+                <p class="qr-status" id="qr-status" role="status" aria-live="polite"></p>
+                <p class="qr-clock" id="qr-clock">The code expires in <strong id="qr-countdown">10:00</strong></p>
+                <div class="qr-frame">
+                    <img id="qr-image" alt="QR code for the customer to scan" width="240" height="240">
+                </div>
+                <p class="qr-ask" id="qr-ask">Ask the customer to scan the code with their phone's camera.</p>
+                <!-- the same page, for opening on this PC when no phone is at hand -->
+                <p class="qr-link">Or open it here: <a id="qr-link" href="#" target="_blank" rel="noopener"></a></p>
+            </div>
+
+            <div class="modal-foot qr-foot">
+                <button type="button" class="btn btn-ghost" id="qr-cancel-btn" onclick="cancelQrPayment()">Cancel</button>
+                <!-- after a failed or expired code -->
+                <button type="button" class="btn btn-ghost" id="qr-other-btn" onclick="chooseAnotherMethod()" hidden>Choose another method</button>
+                <button type="button" class="btn btn-success" id="qr-new-btn" onclick="newQrCode()" hidden>New QR</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="modules/shared/icons.js"></script>
+    <script src="modules/shared/helpers.js"></script>
+    <script src="modules/shared/format.js"></script>
+    <script src="connections/shared-connection.js"></script>
+    <script src="modules/shared/ui-kit.js"></script>
+    <script src="modules/shared/tables.js"></script>
+    <script src="modules/shared/data-panel.js"></script>
+    <script src="modules/shared/live-sync.js"></script>
+    <script src="modules/shared/modals.js"></script>
+    <script src="modules/shared/detail-modal.js"></script>
+    <script src="modules/shared/session.js"></script>
+    <script src="modules/shared/topbar.js"></script>
+    <script src="modules/shared/subnav.js"></script>
+    <script src="modules/shared/my-account.js"></script>
+    <script src="modules/shared/notifications.js"></script>
+    <script src="modules/shared/features.js"></script>
+    <script src="modules/shared/deliveries.js"></script>
+    <script src="modules/shared/delivery-schedule.js"></script>
+    <script src="modules/shared/qr-payments.js"></script>
+    <script src="connections/cashier-connection.js"></script>
+    <script src="modules/cashier.js"></script>
+</body>
+</html>

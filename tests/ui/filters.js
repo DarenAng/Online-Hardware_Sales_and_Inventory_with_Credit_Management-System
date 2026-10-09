@@ -40,14 +40,14 @@ async function signedInPage(context, role, fullName, staffId) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 950 } });
   const page = await signedInPage(context, "Manager", "Manager User", 2);
 
-  await page.goto(`${BASE}/manager-dashboard.html`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/manager.html`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(900);
   await page.evaluate("showSales()");
   await page.waitForTimeout(400);
   await page.evaluate("dataPanelOpen('mgr-sales')");
   await page.waitForTimeout(900);
 
-  check("the sales table loads", await page.locator("#sales-table tbody tr").count() > 0);
+  check("the sales table loads", await page.locator("#sales-table tbody tr:not(.row-filler)").count() > 0);
 
   // ---------- two filter changes with no pause between them ----------
   // six runs: a race that only shows up sometimes slips past a single run

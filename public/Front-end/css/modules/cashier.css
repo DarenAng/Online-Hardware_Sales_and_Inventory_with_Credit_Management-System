@@ -1,0 +1,732 @@
+/* ==========================================================================
+   CASHIER -- cashier-dashboard.html
+   Loads after general-ui.css and responsive.css, so anything here wins.
+   Two columns: the order on the left, the catalog on the right.
+   ========================================================================== */
+
+/* ==========================================================================
+   THE REGISTER -- the order on the left, the catalog on the right, as on
+   Refunds. The catalog shows ten products a page and never scrolls on its
+   own: the search and the Next button are how the list is browsed. The
+   order keeps up with the page.
+   ========================================================================== */
+.pos-layout {
+    display: grid;
+    grid-template-columns: 1fr 1.9fr;
+    gap: 16px;
+    align-items: start;
+}
+/* the catalog comes first in the page, so on one column it stays on top */
+.pos-layout > .order-summary { order: -1; }
+
+.order-summary {
+    background: var(--surface);
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    position: sticky;
+    top: 74px;
+}
+
+@media (min-width: 1025px) {
+    /* the window, less the top bar (61) and the page's own padding (22 + 44) */
+    .pos-layout { min-height: calc(100vh - 127px); }
+    .pos-catalog {
+        display: flex; flex-direction: column;
+        margin-bottom: 0;
+    }
+    .pos-catalog .catalog-scroll { flex: 1 1 auto; overflow: visible; }
+    /* the order never runs the page past the window: a long cart scrolls its
+       own lines, and the totals and the Complete Sale button stay in view */
+    .order-summary {
+        max-height: calc(100vh - 127px);
+        display: flex; flex-direction: column;
+        overflow-y: auto;
+    }
+    .order-summary > * { flex-shrink: 0; }
+    .order-summary > #cart-lines { flex: 0 1 auto; min-height: 90px; overflow-y: auto; }
+}
+.order-summary .panel-head { margin-bottom: 12px; padding-bottom: 10px; }
+.order-summary h3 { margin-bottom: 0; }
+
+/* ==========================================================================
+   THE CATALOG -- a list, one product a line, and the row is the button:
+   pressing it anywhere puts the product on the order. One that has run out
+   is still shown but cannot be pressed.
+   ========================================================================== */
+.catalog-table { margin-top: 0; }
+/* its sizes are the shared table's (general-ui.css), which every screen
+   takes from this one */
+/* "per pcs" sits after the price, and drops under it only when the column is tight */
+.catalog-table td.catalog-price { white-space: normal; }
+.catalog-table tbody tr.row-clickable:hover td { background: var(--go-dim); }
+.catalog-table .catalog-price { font-weight: 600; font-variant-numeric: tabular-nums; }
+.catalog-table .price-per {
+    display: inline-block;
+    margin-left: 6px;
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--steel-soft);
+    letter-spacing: 0.02em;
+}
+.catalog-table .unit-sizes {
+    display: block;
+    font-size: 13px;
+    line-height: 1.25;
+    color: var(--steel-soft);
+    white-space: nowrap;
+}
+.catalog-scroll .pager { padding: 12px 4px 0; }
+
+/* a product already on the order says so on its row */
+.catalog-table tbody tr.is-on-order td.cell-name { color: var(--go-hi); }
+.on-order-mark {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--go-dim);
+    color: var(--go-hi);
+    font-family: var(--font-figure);
+    font-size: 12px;
+    font-weight: 500;
+    vertical-align: 1px;
+    white-space: nowrap;
+}
+.on-order-mark[hidden] { display: none; }
+
+/* ==========================================================================
+   THE CART -- the quantity buttons are sized to be hit, not aimed at
+   ========================================================================== */
+.cart-empty {
+    text-align: center;
+    padding: 26px 12px;
+    color: var(--steel-soft);
+    font-size: 14.5px;
+}
+
+/* Two rows a line: the name and the price of one above; the amount, the
+   unit it is counted in, and what the line comes to below. */
+.cart-line {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+        "main remove"
+        "qty  sub";
+    column-gap: 10px;
+    row-gap: 6px;
+    align-items: center;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--line);
+}
+.cart-line:last-child { border-bottom: none; }
+.cart-line-main { grid-area: main; min-width: 0; }
+.cart-line .cart-remove { grid-area: remove; justify-self: end; }
+.cart-line .cart-qty { grid-area: qty; }
+.cart-line .cart-sub { grid-area: sub; justify-self: end; }
+.cart-name { display: block; font-size: 14.5px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+.cart-unit {
+    display: block;
+    font-family: var(--font-figure);
+    font-size: 12px;
+    color: var(--steel-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+/* a line that was just pressed onto the order lights up for a moment */
+@keyframes cart-line-added {
+    from { background: var(--go-dim); }
+    to   { background: transparent; }
+}
+.cart-line.is-added { animation: cart-line-added 0.5s ease-out; }
+
+.cart-qty { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+
+/* the amount is typed as well as stepped: 2.5 kilos is one box, not five presses */
+.qty-input {
+    width: 64px;
+    height: 30px;
+    padding: 0 6px;
+    text-align: center;
+    font-family: var(--font-figure);
+    font-size: 15px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    -moz-appearance: textfield;
+}
+.qty-input::-webkit-outer-spin-button,
+.qty-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.qty-input:focus { outline: none; border-color: var(--go); box-shadow: 0 0 0 3px var(--go-dim); }
+
+/* the size the line is counted in: kilos, or a sack of them */
+.cart-unit-pick {
+    height: 30px;
+    margin-left: 4px;
+    padding: 0 26px 0 8px;
+    max-width: 150px;
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.cart-unit-pick:hover { border-color: var(--go); }
+.cart-unit-pick:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+.cart-unit-fixed {
+    margin-left: 6px;
+    font-family: var(--font-figure);
+    font-size: 13px;
+    color: var(--steel);
+}
+.qty-btn {
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    cursor: pointer;
+    font-size: 17px; line-height: 1;
+    color: var(--ink);
+    transition: border-color 0.12s, color 0.12s;
+}
+.qty-btn:hover { border-color: var(--go); color: var(--go); }
+.qty-btn:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+.cart-sub {
+    font-family: var(--font-figure);
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    white-space: nowrap;
+}
+.cart-remove {
+    background: none; border: none; cursor: pointer;
+    color: var(--steel-soft); font-size: 20.5px; line-height: 1;
+    width: 28px; height: 28px;
+}
+.cart-remove:hover { color: var(--stop); }
+.cart-remove:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+
+/* ---------- what it comes to ----------
+   the amount due is twice the size of the other lines; change is green,
+   short is red, on account is amber */
+.cart-totals {
+    margin: 14px 0;
+    padding: 12px 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+}
+.total-row {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 3px 0;
+    font-size: 14.5px; color: var(--steel);
+}
+.total-row span:last-child {
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+}
+.total-due {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--ink);
+    padding: 8px 0 4px;
+    margin-top: 4px;
+    border-top: 1px solid var(--line);
+    align-items: baseline;
+}
+.total-due span:last-child {
+    font-family: var(--font-ui);
+    font-size: 25.5px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+}
+.total-change span:last-child { color: var(--ok-ink);    font-weight: 600; }
+.total-short  span:last-child { color: var(--stop);      font-weight: 600; }
+.total-note   span:last-child { color: var(--signal-ink); font-weight: 600; }
+
+/* The disabled treatment is general-ui's now, one rule for every button in
+   the system, so the two lines that used to fake it here have gone. */
+#checkout-btn { min-height: 46px; font-size: 16.5px; }
+
+/* only the receipt reaches the paper */
+@media print {
+    body.printing-receipt .wrapper,
+    body.printing-receipt .no-print,
+    body.printing-receipt .toast-deck,
+    body.printing-receipt .sidebar-shade,
+    body.printing-receipt #detail-modal { display: none !important; }
+
+    body.printing-receipt #receipt-modal {
+        display: block !important;
+        position: static !important;
+        background: none !important;
+        padding: 0 !important;
+        backdrop-filter: none !important;
+    }
+    body.printing-receipt .receipt-box {
+        max-width: 100% !important;
+        box-shadow: none !important;
+        border-radius: 0 !important;
+        max-height: none !important;
+        animation: none !important;
+    }
+    body.printing-receipt .modal-body {
+        padding: 0 !important;
+        overflow: visible !important;
+    }
+    body.printing-receipt .receipt-paper { font-size: 12px; }
+    @page { margin: 10mm; }
+}
+
+/* ==========================================================================
+   ON A SMALL SCREEN -- one column, the order underneath the catalog
+   ========================================================================== */
+@media (max-width: 1024px) {
+    .pos-layout { grid-template-columns: 1fr; }
+    .pos-layout > .order-summary { order: 0; }
+    .order-summary { position: static; }
+}
+
+@media (max-width: 640px) {
+    .order-summary { padding: 16px 14px; }
+
+    /* the two most-pressed controls in the system, at thumb size */
+    .qty-btn { width: 38px; height: 38px; font-size: 19.5px; }
+    .qty-input { width: 70px; height: 38px; font-size: 16px; }
+    .cart-unit-pick { height: 38px; }
+
+    .total-due span:last-child { font-size: 28px; }
+    #checkout-btn { min-height: 50px; }
+
+    .inline-select { min-width: 100%; }
+    .receipt-box { max-width: none; }
+}
+
+/* the due date on the cashier's credit book: the date, then how far off */
+.cell-due-date { white-space: nowrap; }
+.due-date { font-family: var(--font-figure); font-size: 13.5px; margin-right: 6px; }
+
+/* ==========================================================================
+   CREDIT AT THE COUNTER -- the account is read when the customer is picked
+   and sits above the payment fields: green room, yellow look, red no
+   ========================================================================== */
+.credit-strip {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--steel-soft);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 11px 14px;
+    margin: 0 0 14px;
+}
+.credit-strip.is-good  { border-left-color: var(--ok);     background: var(--ok-dim); }
+.credit-strip.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
+.credit-strip.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); }
+
+.credit-strip-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    font-size: 14px;
+    line-height: 1.7;
+}
+.credit-strip-label { color: var(--steel); }
+.credit-strip-value {
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+}
+/* the figure the cashier is actually deciding on */
+.credit-strip-main { margin-top: 4px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.07); }
+.credit-strip-main .credit-strip-label { font-weight: 600; color: var(--ink); }
+.credit-strip-main .credit-strip-value { font-size: 17px; font-weight: 700; }
+
+.credit-strip-note {
+    margin: 8px 0 0;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--steel);
+    font-style: italic;
+}
+
+/* What will happen if this sale is completed as it stands, in words, before
+   the button is pressed rather than as a refusal after it. */
+.credit-verdict {
+    margin: 10px 0 0;
+    padding: 10px 13px;
+    border-radius: var(--radius);
+    font-size: 14px;
+    line-height: 1.55;
+    background: var(--paper);
+    border-left: var(--rule) solid var(--steel-soft);
+}
+.credit-verdict:empty { display: none; }
+.credit-verdict.is-good  { border-left-color: var(--ok);     background: var(--ok-dim); }
+.credit-verdict.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
+.credit-verdict.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); color: var(--ink); }
+
+/* WHERE A TRANSFER GOES -- the shop's account, read out to the customer at
+   the counter. The number is set in the figure face so no digit is misread. */
+.bank-box {
+    margin: 0 0 14px;
+    padding: 11px 14px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--go);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: var(--paper);
+}
+.bank-box[hidden] { display: none; }
+.bank-box-title { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.bank-box-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 14px;
+    margin: 0;
+    font-size: 14px;
+}
+.bank-box-grid dt { color: var(--steel); font-weight: 400; }
+.bank-box-grid dd { margin: 0; text-align: right; color: var(--ink); overflow-wrap: anywhere; }
+.bank-box-number,
+.bank-box-amount {
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+}
+.bank-box-number { font-size: 15.5px; letter-spacing: 0.03em; }
+.bank-box-amount { font-weight: 700; }
+.bank-box-note { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
+
+/* PAY BY QR -- the code turned to face the customer: the amount above it large
+   enough to read across the counter, the code on white with a quiet margin (a
+   scanner needs one), one line saying what is happening, and above it all a
+   badge (TEST MODE or SIMULATION), so nobody takes test money for real. */
+.qr-box { max-width: 440px; }
+.qr-box .modal-body { text-align: center; }
+.qr-sim { margin: 0 0 10px; }
+.qr-amount {
+    margin: 0 0 12px;
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--ink);
+}
+.qr-frame {
+    display: inline-block;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    line-height: 0;
+}
+/* drawn square and crisp: a blurred edge between modules is what fails to scan */
+.qr-frame img {
+    display: block;
+    width: 240px;
+    height: 240px;
+    image-rendering: pixelated;
+}
+.qr-frame img:not([src]) { visibility: hidden; }
+.qr-ask { margin: 12px 0 0; font-size: 15px; color: var(--ink); }
+.qr-status { margin: 0 0 4px; min-height: 1.5em; font-size: 14px; font-weight: 600; color: var(--steel); }
+.qr-status.is-good { color: var(--ok-ink); }
+.qr-status.is-stop { color: var(--stop-hi); }
+.qr-clock { margin: 0 0 12px; font-size: 13.5px; color: var(--steel); }
+.qr-clock strong { font-family: var(--font-figure); font-variant-numeric: tabular-nums; color: var(--ink); }
+.qr-clock.is-ending strong { color: var(--stop-hi); }
+/* the page's address, small: for opening on this PC when no phone is at hand */
+.qr-link { margin: 8px 0 0; font-size: 12px; color: var(--steel); overflow-wrap: anywhere; }
+.qr-link a { color: var(--steel); }
+/* a failed or expired code: the code is greyed so nobody scans it again */
+.qr-box.is-over .qr-frame img { opacity: 0.25; filter: grayscale(1); }
+/* a short screen: a smaller code (still well above what a phone needs) keeps
+   the whole card on one page */
+@media (max-height: 760px) {
+    .qr-amount { font-size: 22px; margin-bottom: 6px; }
+    .qr-frame { padding: 8px; }
+    .qr-frame img { width: 170px; height: 170px; }
+    .qr-ask { font-size: 13.5px; }
+}
+/* the buttons wrap rather than squeeze on a narrow screen */
+.qr-foot { flex-wrap: wrap; }
+
+/* Quick fill. Typing "half of 8,437.50" at a counter with somebody waiting is
+   how a down payment gets recorded wrong. */
+.downpayment-quick {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: -4px;
+}
+.quick-label {
+    font-size: 13px;
+    color: var(--steel-soft);
+    margin-right: 2px;
+}
+
+/* ==========================================================================
+   WHERE THE GOODS GO -- two cards, neither preselected, sized for a thumb
+   ========================================================================== */
+.disposition-choice {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.disposition-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 13px 14px;
+    min-height: 76px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--line);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+.disposition-option:hover { border-color: var(--steel-soft); }
+
+.disposition-option input {
+    margin-top: 3px;
+    width: 18px; height: 18px;
+    flex: none;
+    accent-color: var(--ok);
+    cursor: pointer;
+}
+.disposition-option.is-stop input { accent-color: var(--stop); }
+
+.disposition-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.disposition-title { font-size: 15.5px; font-weight: 600; color: var(--ink); }
+.disposition-note { font-size: 13.5px; line-height: 1.5; color: var(--steel); }
+
+/* the chosen one takes its meaning: green it goes back, red it does not */
+.disposition-option:has(input:checked) {
+    background: var(--ok-dim);
+    border-color: var(--ok);
+    border-left-color: var(--ok);
+}
+.disposition-option.is-stop:has(input:checked) {
+    background: var(--stop-dim);
+    border-color: var(--stop);
+    border-left-color: var(--stop);
+}
+.disposition-option:has(input:focus-visible) { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* asked for and not answered */
+.disposition-choice.is-missing .disposition-option {
+    border-color: var(--stop);
+    border-left-color: var(--stop);
+}
+
+.disposition-verdict {
+    margin: 9px 0 0;
+    padding: 9px 12px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+}
+.disposition-verdict:empty { display: none; }
+.disposition-verdict.is-good { border-left-color: var(--ok);   background: var(--ok-dim); }
+.disposition-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
+
+/* Counting up to the minimum rather than down from a maximum: the question is
+   "have you said enough yet", not "how much room is left". */
+.reason-counter {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--steel-soft);
+}
+.reason-counter.is-short { color: var(--signal-ink); font-weight: 500; }
+.reason-counter.is-good  { color: var(--ok-ink); }
+
+@media (max-width: 640px) {
+    .disposition-choice { grid-template-columns: 1fr; }
+}
+
+/* Which of the three outcomes is in force, said before the sale is completed
+   rather than as a refusal after it. */
+.customer-verdict {
+    margin: 6px 0 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--steel-soft);
+}
+.customer-verdict.is-good { color: var(--ok-ink); font-weight: 500; }
+.customer-verdict.is-new  { color: var(--signal-ink); font-weight: 500; }
+
+/* Complete Sale gets its own full-width row and is the only orange button;
+   the delivery and the clear share the row below */
+.order-summary .form-footer { flex-wrap: wrap; }
+.order-summary .form-footer #checkout-btn { flex: 1 1 100%; }
+/* paying by QR is the other way to finish a GCash or PayMaya sale: a row of its own */
+.order-summary .form-footer #qr-pay-btn { flex: 1 1 100%; min-height: 44px; }
+.order-summary .form-footer #make-delivery-btn { flex: 1 1 auto; white-space: nowrap; }
+.order-summary .form-footer .btn-ghost { flex: 0 0 auto; white-space: nowrap; }
+
+/* the product field is capped so the name and the price read as a pair */
+#refund-form .suggest-wrap,
+#refund-form .pick-strip,
+#refund-form .pick-verdict { max-width: 560px; }
+
+/* quantity and amount are short figures, so they share a row and the page never scrolls */
+@media (min-width: 641px) {
+    #refund-form .grid-2 { grid-template-columns: 1fr 1fr; gap: 0 14px; }
+}
+
+/* where the refund figure came from; marked once a person has overridden it */
+.amount-source {
+    margin: 6px 0 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--steel-soft);
+}
+.amount-source:empty { display: none; }
+.amount-source.is-edited { color: var(--signal-ink); }
+
+/* ==========================================================================
+   THE DELIVERY ATTACHED TO THIS ORDER -- shown above the buttons so it
+   cannot be forgotten
+   ========================================================================== */
+.delivery-attached {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--go);
+    background: var(--go-dim);
+}
+.delivery-attached[hidden] { display: none; }
+
+.delivery-attached-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.delivery-attached-title {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--go-hi);
+}
+.delivery-attached-drop {
+    border: none;
+    background: none;
+    font-size: 19.5px;
+    line-height: 1;
+    color: var(--steel-soft);
+    cursor: pointer;
+    padding: 0 2px;
+}
+.delivery-attached-drop:hover { color: var(--stop); }
+.delivery-attached-drop:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+
+.delivery-attached-line {
+    margin: 0;
+    font-size: 13.5px;
+    line-height: 1.45;
+    color: var(--ink);
+    overflow-wrap: anywhere;
+}
+.delivery-attached-when {
+    margin-top: 3px;
+    color: var(--steel);
+    font-variant-numeric: tabular-nums;
+}
+
+/* what the delivery form says when it will not accept what is in it */
+.delivery-verdict {
+    margin: 4px 0 0;
+    padding: 9px 12px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+}
+.delivery-verdict:empty { display: none; }
+.delivery-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
+
+/* Cancel sits apart on the left, Remove is coloured like the destruction
+   it is, attaching is the orange one */
+#delivery-modal .modal-foot { justify-content: flex-end; }
+
+/* the driver list opens over Remarks; kept short enough that the card does not clip it */
+#driver-suggest { max-height: 150px; }
+#driver-suggest .suggest-item.is-empty { cursor: default; }
+#driver-suggest .suggest-item.is-empty:hover { background: transparent; }
+#delivery-modal .modal-foot .btn:first-child { margin-right: auto; }
+
+.btn-quiet { color: var(--stop); }
+.btn-quiet:hover { color: var(--stop-hi); border-color: var(--stop); background: var(--stop-dim); }
+
+/* ==========================================================================
+   WHAT WENT BACK TODAY -- the refunds figure opens into this, item by item
+   ========================================================================== */
+.refund-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+}
+.refund-line {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--signal);
+    border-radius: var(--radius);
+}
+.refund-line-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.refund-line-name { font-size: 14.5px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+.refund-line-meta {
+    font-size: 13px;
+    color: var(--steel);
+    font-variant-numeric: tabular-nums;
+}
+.refund-line-reason {
+    font-size: 13px;
+    color: var(--steel-soft);
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+.refund-line-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 5px;
+    white-space: nowrap;
+}
+.refund-line-amount {
+    font-family: var(--font-figure);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--stop);
+}
+
+@media (max-width: 520px) {
+    .refund-line { flex-direction: column; gap: 8px; }
+    .refund-line-side { align-items: flex-start; flex-direction: row; align-items: center; }
+}
+
+/* ==========================================================================
+   TAKING A PAYMENT -- from the Unpaid Sales tab of the customer's card
+   ========================================================================== */
+/* the form's facts read like the customer card's */
+#payment-modal .detail-grid + form { margin-top: 16px; }
+#payment-modal .downpayment-quick { margin-top: 2px; }

@@ -1,5 +1,5 @@
 // A stand-in for server.js with no database behind it: serves the real
-// public/ folder and answers the routes with invented rows, so the screens
+// pages, css and browser scripts (the same three folders server.js serves) and answers the routes with invented rows, so the screens
 // can be driven on a machine with no MySQL. tests/smoke.js covers the database.
 //
 //     node tests/ui/stub.js          then open http://localhost:3311
@@ -13,7 +13,13 @@ app.use(express.json({ limit: "5mb" }));
 const PUBLIC_DIR = process.env.PUBLIC_DIR ||
   path.join(__dirname, "..", "..", "public");
 
-app.use(express.static(PUBLIC_DIR));
+// the same three folders public/Back-end/server.js serves
+app.use(express.static(path.join(PUBLIC_DIR, "Front-end")));
+app.use("/modules", express.static(path.join(PUBLIC_DIR, "Back-end", "modules")));
+app.use("/connections", (request, response, next) =>
+  /^\/[a-z]+(-[a-z]+)*-connection\.js$/i.test(request.path) ? next() : response.status(404).send("Not found"),
+  express.static(path.join(PUBLIC_DIR, "Back-end", "Connections")));
+app.use("/vendor", express.static(path.join(PUBLIC_DIR, "vendor")));
 
 // no favicon ships, so answer it rather than log a 404 on every load
 app.get("/favicon.ico", (request, response) => response.status(204).end());
@@ -119,6 +125,14 @@ app.post("/api/heartbeat", (request, response) => response.json({ ok: true }));
 
 app.get("/api/roles", (request, response) => response.json(ROLES));
 
+// one address, one account, whatever the role
+app.get("/api/users/email-check", (request, response) => {
+  const email = String(request.query.email || "").trim().toLowerCase();
+  const staffId = Number(request.query.staffId) || 0;
+  const owner = USERS.find((u) => String(u.email || "").toLowerCase() === email && u.staff_id !== staffId);
+  response.json(owner ? { taken: true, roleName: owner.role_name } : { taken: false });
+});
+
 app.get("/api/users", (request, response) => {
   const status = String(request.query.status || "all");
   let rows = USERS;
@@ -135,16 +149,23 @@ app.get("/api/audit-logs", (request, response) => {
 app.get("/api/audit-logs/types", (request, response) =>
   response.json(TYPES.map((type) => ({ action_type: type, entries: 4 }))));
 
+let autoBackupOn = true;
+
 app.get("/api/backups", (request, response) =>
   response.json({
-    folder: "C:/hardware/backups",
     files: BACKUPS,
     auto: {
-      enabled: true, everySeconds: 60, keep: 60,
+      enabled: autoBackupOn, schedule: "daily", hour: 2, keep: 30,
       lastFileName: BACKUPS[1].fileName, lastAt: "2026-08-21T09:30:00.000Z",
       lastError: null, failures: 0
-    }
+    },
+    limits: { automatic: 30, manual: 20, manualCount: BACKUPS.filter((file) => !file.automatic).length }
   }));
+
+app.put("/api/backups/auto", (request, response) => {
+  autoBackupOn = request.body.enabled === true;
+  response.json({ enabled: autoBackupOn, message: autoBackupOn ? "Automatic backup is on." : "Automatic backup is off." });
+});
 
 // Three alerts, served only once a suite asks (POST /api/test/alerts), since
 // the other suites assume nothing pops up uninvited.
@@ -181,64 +202,9 @@ app.post("/api/notifications/read-all", (request, response) => {
 });
 app.get("/api/me", (request, response) => response.json(USERS[0]));
 
-// ==========================================================================
-// THE CONNECTED SYSTEMS -- the stub always answers as the administrator
-// ==========================================================================
-const SYSTEMS = [
-  { key: "database", name: "MySQL Database", kind: "Internal", enabled: true,
-    description: "The hardware_db schema every screen reads and every procedure writes.",
-    status: { state: "ok", summary: "Answering in 2 ms with all 30 stored procedures loaded.",
-      facts: { "Server": "MySQL 8.0.36 on localhost", "Tables": "26", "Stored procedures": "30 of 30", "Round trip": "2 ms" } },
-    actions: [{ key: "recount-procedures", label: "Re-count the stored procedures", hint: "", danger: false }] },
-  { key: "backup", name: "Automatic Backup", kind: "Internal", enabled: true,
-    description: "The rolling backup the server takes on its own and the folder it writes to.",
-    status: { state: "ok", summary: "Running every 60 seconds; the last 60 are kept.",
-      facts: { "Last automatic backup": "hardware_db_auto_2026-09-13_1030.sql (512 KB)", "Automatic files in the folder": "60 of 60", "Paused": "No" } },
-    actions: [{ key: "run-now", label: "Run a backup now", hint: "", danger: false },
-              { key: "pause", label: "Pause the automatic backup", hint: "", danger: true },
-              { key: "resume", label: "Resume the automatic backup", hint: "", danger: false }] },
-  { key: "archive-sweep", name: "Archive Sweep", kind: "Internal", enabled: false,
-    description: "The nightly pass that puts away closed deliveries and dead stock.",
-    status: { state: "ok", summary: "Runs at startup and once a day. 3 closed deliveries look due on the next pass.",
-      facts: { "Interval": "every 24 hours", "Deliveries past 90 days": "3" } },
-    actions: [{ key: "run-now", label: "Run the sweep now", hint: "", danger: false }] },
-  { key: "live-sync", name: "Live Sync Channel", kind: "Internal", enabled: true,
-    description: "The open connection every signed-in browser holds.",
-    status: { state: "ok", summary: "4 open connections from 3 people; 412 changes announced since this server started.",
-      facts: { "Open connections": "4", "People connected": "3", "Changes announced": "412" } },
-    actions: [{ key: "resync-all", label: "Tell every screen to reload", hint: "", danger: true }] },
-  { key: "mail", name: "Mail Relay", kind: "Internal", enabled: true,
-    description: "The SMTP account first passwords are sent from.",
-    status: { state: "off", summary: "Not set up on this server, so new and reset passwords are shown once on the administrator's screen instead.",
-      facts: { "Configured": "No" } },
-    actions: [{ key: "send-test", label: "Send a test message to my own address", hint: "", danger: false }] },
-  { key: "courier", name: "Courier Tracking", kind: "External", enabled: true,
-    description: "The courier's tracking API for deliveries beyond Nasugbu.", endpointUrl: "https://tracking.example.com/health",
-    status: { state: "bad", summary: "Could not reach https://tracking.example.com/health: no answer within 5 seconds.",
-      facts: { "Address": "https://tracking.example.com/health" } },
-    actions: [{ key: "ping", label: "Ping it", hint: "", danger: false },
-              { key: "send", label: "Send it a message", hint: "", danger: true, needsMessage: true }] }
-];
-
-const ALL_LEVELS = { monitor: true, manage: true, control: true };
-
-// staff_id -> { system key -> grant }; two people hold something to begin with
-const GRANTS = {
-  2: { backup: { monitor: true, manage: false, control: true, note: "Takes a backup before the month-end count", grantedBy: "Admin S. User", grantedAt: "2026-05-02 09:15:00", updatedAt: "2026-05-02 09:15:00" } },
-  7: { database: { monitor: true, manage: false, control: false, note: "", grantedBy: "Admin S. User", grantedAt: "2026-06-11 08:40:00", updatedAt: "2026-06-11 08:40:00" } }
-};
-
-function grantsOf(staffId) {
-  return Object.entries(GRANTS[staffId] || {}).map(([key, grant]) => {
-    const system = SYSTEMS.find((s) => s.key === key);
-    return Object.assign({ key, name: system.name, kind: system.kind, enabled: system.enabled }, grant);
-  });
-}
-
 app.get("/api/me/access", (request, response) => response.json({
   staffId: 1, roleName: "System Administrator", page: "/system.html", isAdmin: true,
-  isManagement: true, canEditOwnDetails: false, canChangeOwnPassword: true, canEditOwnEmail: false,
-  canReachSystems: true, systems: SYSTEMS.map((s) => Object.assign({ key: s.key, name: s.name }, ALL_LEVELS))
+  isManagement: true, canEditOwnDetails: false, canChangeOwnPassword: true, canEditOwnEmail: false
 }));
 
 
@@ -249,8 +215,10 @@ const FEATURES = [
   ["pos", "New Transaction", "Point of Sale", ["Cashier"], ["Cashier"]],
   ["refunds", "Refunds", "Point of Sale", ["Cashier"], ["Cashier"]],
   ["sales-report", "Sales Report", "Point of Sale", ["Cashier"], ["Cashier"]],
+  ["qr-payments", "QR Payments", "Point of Sale", ["Cashier", "Manager"], ["Cashier", "Manager"]],
   ["daily-summary", "Daily Summary", "Point of Sale", ["Cashier"], ["Cashier"]],
   ["credit", "Customer Credit", "Credit", ["Manager", "Cashier"], ["Manager", "Cashier"]],
+  ["debt-payments", "Debt Payments", "Credit", ["Cashier"], ["Cashier"]],
   ["credit-requests", "Extension Requests", "Credit", ["Manager"], ["Manager"]],
   ["income", "Income", "Reports", ["Manager"], ["Manager"]],
   ["reports", "Reports", "Reports", ["Manager"], ["Manager"]],
@@ -258,9 +226,9 @@ const FEATURES = [
   ["material-list", "Material List", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
   ["stock-adjustment", "Stock Adjustment", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
   ["adjustment-history", "Adjustment History", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
-  ["reorder-points", "Reorder Points", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
+  ["reorder-points", "Reorder Point", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
   ["reorder-alerts", "Reorder Alerts", "Inventory", ["Manager"], ["Manager"]],
-  ["stock-reports", "Stock Reports", "Inventory", ["Manager"], ["Manager"]],
+  ["stock-reports", "Stocks Overview", "Inventory", ["Manager"], ["Manager"]],
   ["returns", "Returned Items", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
   ["damage-report", "Make a Report", "Inventory", ["Inventory Clerk"], ["Inventory Clerk"]],
   ["purchase-orders", "Purchase Orders", "Inventory", ["Manager", "Inventory Clerk"], ["Manager", "Inventory Clerk"]],
@@ -270,12 +238,19 @@ const FEATURES = [
   ["delivery-schedule", "Delivery Schedule", "Deliveries",
     ["Manager", "Cashier", "Inventory Clerk", "Delivery Personnel"], ["Manager"]],
   ["records", "Records", "Records", ["Manager"], ["Manager"]],
-  ["archives", "Archives", "Records", ["Manager", "Inventory Clerk"], ["Manager", "Inventory Clerk"]]
+  ["archives", "Archives", "Records", ["Manager", "Inventory Clerk"], ["Manager", "Inventory Clerk"]],
+  ["staff-passwords", "Staff Passwords", "Staff", ["Manager"], ["Manager"]]
 ].map(([key, name, module, available, defaults]) => ({
   key, name, module, description: `The ${name} screen.`, available, defaults
 }));
 
 const FEATURE_ROLES = ROLES.filter((role) => role.role_name !== "System Administrator");
+
+// as the server does: every screen is offered under every role, and only the
+// defaults above decide what a role starts with
+FEATURES.forEach((feature) => {
+  feature.available = FEATURE_ROLES.map((role) => role.role_name);
+});
 
 // role name -> { feature key -> { granted, note, grantedBy, updatedAt } }
 const FEATURE_OVERRIDES = {};
@@ -292,7 +267,7 @@ function featureCell(feature, roleName) {
 
 function roleOfPage(request) {
   const page = String(request.headers.referer || "").toLowerCase();
-  if (page.includes("manager-dashboard")) return "Manager";
+  if (page.includes("manager.html")) return "Manager";
   if (page.includes("inventory-dashboard")) return "Inventory Clerk";
   if (page.includes("cashier-dashboard")) return "Cashier";
   if (page.includes("delivery.html")) return "Delivery Personnel";
@@ -308,24 +283,6 @@ app.get("/api/me/features", (request, response) => {
         ? { available: true, byDefault: true, held: true, overridden: false }
         : featureCell(feature, roleName)));
   response.json({ roleName, features, held: features.filter((f) => f.held).map((f) => f.key) });
-});
-
-// the counts the pages mirror onto their headings and into the top bar
-const FEATURE_COUNTS = {
-  "Manager": { "credit-requests": 2, "reorder-alerts": 3, "deliveries": 1, "delivery-schedule": 4 },
-  "Inventory Clerk": { "reorder-points": 3, "returns": 2, "delivery-schedule": 4 },
-  "Cashier": { "delivery-schedule": 4 },
-  "Delivery Personnel": { "delivery-runs": 5, "delivery-schedule": 4 }
-};
-
-app.get("/api/me/counts", (request, response) => {
-  const roleName = roleOfPage(request);
-  const counts = {};
-  for (const [key, count] of Object.entries(FEATURE_COUNTS[roleName] || {})) {
-    const feature = FEATURES.find((f) => f.key === key);
-    if (feature && featureCell(feature, roleName).held) counts[key] = count;
-  }
-  response.json(counts);
 });
 
 app.get("/api/features", (request, response) => response.json({
@@ -372,90 +329,6 @@ app.post("/api/test/features/reset", (request, response) => {
   for (const key of Object.keys(FEATURE_OVERRIDES)) delete FEATURE_OVERRIDES[key];
   response.json({ ok: true });
 });
-app.get("/api/systems", (request, response) =>
-  response.json(SYSTEMS.map((s) => Object.assign({}, s, { access: ALL_LEVELS }))));
-
-app.get("/api/systems/:key/status", (request, response) => {
-  const system = SYSTEMS.find((s) => s.key === request.params.key);
-  if (!system) return response.status(404).json({ error: "No connected system is registered under that name." });
-  response.json(Object.assign({}, system, { access: ALL_LEVELS }));
-});
-
-app.post("/api/systems", (request, response) => {
-  const body = request.body || {};
-  if (SYSTEMS.some((s) => s.key === body.key)) {
-    return response.status(409).json({ error: `A system is already registered as "${body.key}".` });
-  }
-  const system = { key: body.key, name: body.name, kind: "External", enabled: true, description: body.description || null,
-    endpointUrl: body.endpointUrl, status: { state: "ok", summary: "Answering HTTP 200 in 41 ms.", facts: { "Address": body.endpointUrl } },
-    actions: SYSTEMS[5].actions };
-  SYSTEMS.push(system);
-  response.json({ message: `${body.name} is registered.`, system: Object.assign({}, system, { access: ALL_LEVELS }) });
-});
-
-app.put("/api/systems/:key", (request, response) => {
-  const system = SYSTEMS.find((s) => s.key === request.params.key);
-  if (!system) return response.status(404).json({ error: "No connected system is registered under that name." });
-  const body = request.body || {};
-  if (body.name !== undefined) system.name = body.name;
-  if (body.description !== undefined) system.description = body.description || null;
-  if (body.enabled !== undefined) system.enabled = body.enabled === true;
-  if (body.endpointUrl !== undefined && system.kind === "External") system.endpointUrl = body.endpointUrl;
-  response.json({ message: `${system.name} was updated.`, system: Object.assign({}, system, { access: ALL_LEVELS }) });
-});
-
-app.post("/api/systems/:key/actions/:action", (request, response) => {
-  const system = SYSTEMS.find((s) => s.key === request.params.key);
-  if (!system) return response.status(404).json({ error: "No connected system is registered under that name." });
-  if (!system.enabled) return response.status(409).json({ error: `${system.name} is switched off.` });
-  const action = system.actions.find((a) => a.key === request.params.action);
-  if (!action) return response.status(404).json({ error: `${system.name} has no command called "${request.params.action}".` });
-  if (action.key === "pause") system.status.facts.Paused = "Yes";
-  if (action.key === "resume") system.status.facts.Paused = "No";
-  response.json({ system: system.key, action: action.key, ok: true, message: `"${action.label}" ran on ${system.name}.` });
-});
-
-app.get("/api/access/permissions", (request, response) =>
-  response.json(USERS
-    .filter((user) => user.user_id && user.role_name !== "System Administrator")
-    .map((user) => Object.assign({}, user, { grants: grantsOf(user.staff_id) }))));
-
-app.get("/api/access/users/:id", (request, response) => {
-  const user = USERS.find((row) => row.staff_id === Number(request.params.id));
-  if (!user) return response.status(404).json({ error: "Staff record not found" });
-  response.json(Object.assign({}, user, { grants: grantsOf(user.staff_id) }));
-});
-
-app.put("/api/access/users/:id/systems/:key", (request, response) => {
-  const staffId = Number(request.params.id);
-  const user = USERS.find((row) => row.staff_id === staffId);
-  const system = SYSTEMS.find((s) => s.key === request.params.key);
-  if (!user) return response.status(404).json({ error: "Staff record not found" });
-  if (!system) return response.status(404).json({ error: "No connected system is registered under that name." });
-  if (staffId === 1) return response.status(403).json({ error: "You cannot change your own account from here." });
-
-  const body = request.body || {};
-  const monitor = body.monitor === true || body.manage === true || body.control === true;
-  GRANTS[staffId] = GRANTS[staffId] || {};
-
-  if (!monitor) {
-    const had = Boolean(GRANTS[staffId][system.key]);
-    delete GRANTS[staffId][system.key];
-    return response.json({ message: `${user.full_name} no longer has any access to ${system.name}.`, changed: had, grant: null });
-  }
-
-  GRANTS[staffId][system.key] = {
-    monitor: true, manage: body.manage === true, control: body.control === true,
-    note: String(body.note || ""), grantedBy: "Admin S. User",
-    grantedAt: "2026-09-13 10:00:00", updatedAt: "2026-09-13 10:00:00"
-  };
-  response.json({
-    message: `${user.full_name} may now ${body.control ? "monitor and control" : "monitor"} ${system.name}.`,
-    changed: true,
-    grant: grantsOf(staffId).find((g) => g.key === system.key)
-  });
-});
-
 // ==========================================================================
 // CREATING AN ACCOUNT IS TWO REQUESTS (review, then create from the draft)
 // ==========================================================================
@@ -516,6 +389,72 @@ app.put("/api/users/:id", (request, response) => {
   if (body.email) user.email = body.email;
 
   response.json({ message: "Account updated." });
+});
+
+// ==========================================================================
+// STAFF PASSWORDS -- the manager's fallback; the same refusals as the server
+// ==========================================================================
+const FLOOR_ROLES = ["Cashier", "Inventory Clerk", "Delivery Personnel"];
+
+app.get("/api/staff/passwords", (request, response) => {
+  response.json(USERS
+    .filter((u) => u.email && FLOOR_ROLES.includes(u.role_name) && !u.archived_at)
+    .map((u) => ({
+      staff_id: u.staff_id, full_name: u.full_name, is_active: u.is_active, role_name: u.role_name,
+      email: u.email, must_change_password: u.must_change_password, last_login: u.last_login,
+      held_until: u.staff_id % 6 === 2 ? "2026-09-23 10:15:00" : null
+    })));
+});
+
+app.post("/api/staff/:id/reset-password", (request, response) => {
+  const user = USERS.find((u) => u.staff_id === Number(request.params.id));
+  if (!user) return response.status(404).json({ error: "Staff record not found" });
+  if (!FLOOR_ROLES.includes(user.role_name)) {
+    return response.status(403).json({
+      error: "A manager resets the passwords of cashiers, inventory clerks and delivery personnel only."
+    });
+  }
+  if (!user.email) return response.status(404).json({ error: "This staff member has no login account." });
+  user.must_change_password = true;
+  // odd ids stand in for a mail that could not go, so both outcomes are seen
+  const emailed = user.staff_id % 2 === 0;
+  response.json({
+    message: "Password reset. The new one has to be changed on the next sign-in.",
+    name: user.full_name, email: user.email, emailed: emailed,
+    password: emailed ? undefined : "Stub7Pass!word",
+    reason: emailed ? undefined : "Mail is not set up on this server, so the password could not be sent."
+  });
+});
+
+// ==========================================================================
+// FORGOT YOUR PASSWORD? -- 123456 is the code the stub "sends"
+// ==========================================================================
+app.post("/api/password-reset/request", (request, response) => {
+  const email = String((request.body || {}).email || "").trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return response.status(400).json({ error: "Type the email address you sign in with." });
+  }
+  response.json({
+    message: "If that address belongs to an account here, a six-digit code is on its way to it. " +
+             "It stops working in 15 minutes. Only one code is sent a minute, so give it a moment before asking again.",
+    minutes: 15
+  });
+});
+
+app.post("/api/password-reset/confirm", (request, response) => {
+  const body = request.body || {};
+  if (!/^\d{6}$/.test(String(body.code || ""))) {
+    return response.status(400).json({ error: "The code is the six digits in the email." });
+  }
+  if (typeof body.newPassword !== "string" || body.newPassword.length < 8) {
+    return response.status(400).json({ error: "The new password must contain at least 8 characters." });
+  }
+  if (body.code !== "123456") {
+    return response.status(400).json({
+      error: "That code is not right, or it has stopped working. A code lasts 15 minutes and 5 tries; ask for a new one if it has run out."
+    });
+  }
+  response.json({ message: "Your password was changed. Sign in with the new one." });
 });
 
 app.patch("/api/users/:id/status", (request, response) => {
@@ -592,6 +531,7 @@ const STOCKS = PRODUCTS.map((name, index) => {
     category_name: ["Hand Tools", "Power Tools", "Plumbing", "Electrical", "Construction Materials"][index % 5],
     brand_name: ["Makita", "DeWalt", "Stanley"][index % 3],
     unit_name: ["pcs", "bag", "meter"][index % 3],
+    supplier_id: (index % 2) + 1,
     supplier_name: index % 2 ? "Cebu Tool Co." : "Manila Hardware Supply",
     contact_person: "Juan Dela Cruz", contact_number: "0917-123-4567",
     stock_value: onHand * (100 + index * 55),
@@ -621,6 +561,8 @@ const DELIVERIES = Array.from({ length: 21 }, (_, index) => {
     updated_at: "2026-09-03 08:00:00",
     customer_name: FIRST[index % FIRST.length] + " " + LAST[index % LAST.length],
     customer_phone: "0917-555-0000",
+    // the stub's driver is staff 5; every fifth delivery nobody has taken yet
+    delivery_staff_id: index % 5 === 4 ? null : 5,
     driver_name: index % 5 === 4 ? "Unassigned" : "Delivery D. User",
     final_amount: final, amount_paid: paid,
     payment_method: METHODS[index % METHODS.length],
@@ -735,6 +677,32 @@ app.get("/api/reports/income", (request, response) => {
   });
 });
 
+// everything staff filed, the way the manager's All Reports table reads it
+const ACTIVITY = [
+  ["SALE", "Cashier", "Sale #1042 for Pedro Penduko: 2,450.00 by Cash, Paid"],
+  ["PAYMENT", "Cashier", "Pedro Penduko paid 1,000.00 on sale #1005 by Cash"],
+  ["DAMAGE", "Inventory Clerk", "Claw Hammer x2: Casing cracked during unloading (Pending)"],
+  ["REFUND", "Cashier", "Tox Screw Set 100pc x10 from sale #1010: Wrong gauge (Resolved)"],
+  ["RETURN", "Inventory Clerk", "PVC Pipe 1/2\" x2 from sale #1007: Over-ordered (Resolved)"],
+  ["STOCK_ADJUST", "Inventory Clerk", "Copper Wire 2.0mm: Recount 80 to 76 meter - Physical count"],
+  ["DELIVERY", "Delivery Personnel", "Sale #1040 to Pedro Penduko: Delivered, delivered 18 Sep"],
+  ["CREDIT_REQUEST", "Cashier", "Pedro Penduko: 50,000.00 to 60,000.00 - Bigger site (Approved)"],
+  ["CREDIT_APPROVED", "Manager", "Pedro Penduko: request #9 approved at 60,000.00"],
+  ["CREDIT_LIMIT", "Manager", "Maria Santos: limit 20,000.00, Good"]
+];
+app.get("/api/reports/activity", (request, response) => {
+  const rows = Array.from({ length: 30 }, (_, index) => {
+    const [kind, role, details] = ACTIVITY[index % ACTIVITY.length];
+    const staff = USERS.find((user) => user.role_name === role) || USERS[index % USERS.length];
+    const when = new Date(Date.UTC(2026, 8, 19, 17, 0) - index * 47 * 60000);
+    return {
+      kind: kind, happened_at: when.toISOString().slice(0, 19).replace("T", " "), ref: 900 - index,
+      details: details, staff_name: staff.full_name, role_name: role
+    };
+  });
+  response.json(rows);
+});
+
 app.get("/api/reports/overview", (request, response) => {
   const live = SALES.filter((s) => !s.is_archived);
   const methods = {};
@@ -758,10 +726,6 @@ app.get("/api/reports/overview", (request, response) => {
       customer_id: c.id, customer_name: c.name, phone: c.phone,
       purchase_count: c.purchase_count, total_spent: 12000 + i * 900,
       balance_due: i % 3 === 0 ? i * 400 : 0, last_purchase: "2026-08-2" + (i % 9)
-    })),
-    staffPerf: USERS.slice(0, 14).map((u, i) => ({
-      staff_id: u.staff_id, staff_name: u.full_name, role_name: u.role_name,
-      is_active: u.is_active, sale_count: 20 - i, total_sales: 150000 - i * 9000
     }))
   });
 });
@@ -778,6 +742,10 @@ app.get("/api/sales", (request, response) => {
 });
 
 app.get("/api/sales/:id", (request, response) => {
+  if (RUNG_UP[Number(request.params.id)]) {
+    return response.json(Object.assign({}, RUNG_UP[Number(request.params.id)],
+      { qrPayments: qrStubOfSale(Number(request.params.id)) }));
+  }
   const sale = SALES.find((s) => s.sale_id === Number(request.params.id));
   if (!sale) return response.status(404).json({ error: "Sale not found" });
 
@@ -791,7 +759,8 @@ app.get("/api/sales/:id", (request, response) => {
       ? [{ payment_date: sale.sale_date, amount: sale.amount_paid, payment_method: sale.payment_method,
            reference_no: null, received_by: sale.cashier_name }]
       : [],
-    delivery: DELIVERIES.find((d) => d.sale_id === sale.sale_id) || null
+    delivery: DELIVERIES.find((d) => d.sale_id === sale.sale_id) || null,
+    qrPayments: qrStubOfSale(sale.sale_id)
   });
 });
 
@@ -812,7 +781,28 @@ app.put("/api/stocks/:id/reorder-policy", (request, response) => {
   response.json({ message: `Reorder policy updated for ${product.product_name}.` });
 });
 
+app.put("/api/stocks/:id/price", (request, response) => {
+  const product = STOCKS.find((p) => p.product_id === Number(request.params.id));
+  if (!product) return response.status(404).json({ error: "That product was not found." });
+  const price = Number(request.body.price);
+  if (!Number.isFinite(price) || price < 0) return response.status(400).json({ error: "The price has to be a figure of zero or more." });
+  product.price = Math.round(price * 100) / 100;
+  product.stock_value = product.quantity_in_stock * product.price;
+  response.json({ message: `${product.product_name} now sells at ${product.price.toFixed(2)}, from the next sale on.`, changed: true, price: product.price });
+});
+
 app.get("/api/deliveries", (request, response) => response.json(DELIVERIES));
+// what is on the lorry, for the Items tab of the delivery popup
+app.get("/api/deliveries/:id/items", (request, response) => {
+  const delivery = DELIVERIES.find((d) => d.delivery_id === Number(request.params.id));
+  if (!delivery) return response.status(404).json({ error: "Delivery not found" });
+  response.json([
+    { quantity: 2, unit_name: "sack", base_quantity: 100, base_unit: "kg",
+      unit_price: 280, subtotal: 560, product_name: "Portland Cement" },
+    { quantity: 5, unit_name: "piece", base_quantity: 5, base_unit: "piece",
+      unit_price: 45, subtotal: 225, product_name: "Hollow Block 4in" }
+  ]);
+});
 app.get("/api/records/:type", (request, response) =>
   response.json(RECORDS[request.params.type] || []));
 app.get("/api/archives", (request, response) => response.json(ARCHIVES));
@@ -855,10 +845,17 @@ function applyStanding(row) {
   return row;
 }
 
+// the late-payment policy: the shop's rate, and what the sweep has charged
+const POLICY = { penalty_rate: "3.00", updated_at: "2026-09-01 09:00:00", updated_by: "Manager M. User" };
+
 const CREDIT = RECORDS.customer.map((c, index) => {
   const limit = 10000 + index * 5000;
   // every third account owes something, and one of them is over its limit
   const owed = index % 3 === 0 ? Math.round(limit * (index === 6 ? 1.2 : 0.45)) : 0;
+  const days = owed > 0 ? 5 + index * 9 : null;
+  // an account past its due date carries the months of penalty the sweep charged it
+  const months = days !== null && days > 30 ? Math.ceil((days - 30) / 30) : 0;
+  const penalty = Math.round(owed * 0.03 * months * 100) / 100;
 
   return applyStanding({
     customer_id: c.id,
@@ -870,11 +867,15 @@ const CREDIT = RECORDS.customer.map((c, index) => {
     credit_notes: STANDINGS[index % STANDINGS.length] === "Hold"
       ? "Cheque bounced in August. No new credit until it clears." : null,
     credit_updated_at: "2026-08-30 09:00:00",
+    penalty_rate_override: index === 3 ? "1.00" : null,
+    penalty_rate: index === 3 ? "1.00" : POLICY.penalty_rate,
     total_purchase: 20000 + index * 3100,
-    current_credit: owed,
-    available_credit: Math.max(limit - owed, 0),
+    current_credit: owed + penalty,
+    penalties_owed: penalty,
+    overdue_sales: penalty > 0 ? 1 : 0,
+    available_credit: Math.max(limit - owed - penalty, 0),
     open_sales: owed > 0 ? 1 + (index % 3) : 0,
-    oldest_debt_days: owed > 0 ? 5 + index * 9 : null,
+    oldest_debt_days: days,
     last_purchase: "2026-09-0" + ((index % 4) + 1) + " 10:00:00",
     last_payment: owed > 0 ? "2026-08-2" + (index % 9) + " 14:00:00" : null,
     pending_requests: index === 3 ? 1 : 0
@@ -923,6 +924,66 @@ app.get("/api/credit/customers", (request, response) => {
   response.json(rows);
 });
 
+// every sale still owing, for the counter's Debt Payments screen
+function openSaleRows() {
+  return SALES.filter((s) => !s.is_archived && s.balance_due > 0).map((s, index) => {
+    const credit = CREDIT[index % CREDIT.length];
+    const daysOld = 5 + index * 9;
+    const due = new Date(2026, 8, 17 - daysOld + 30);
+    const method = s.payment_method === "COD" ? "COD" : "Credit";
+    // a Credit sale past its due date was charged the penalty by the sweep
+    if (s.penalty_amount === undefined) {
+      s.penalty_months = method === "Credit" && daysOld > 30 ? Math.ceil((daysOld - 30) / 30) : 0;
+      s.penalty_amount = Math.round((s.final_amount - s.amount_paid) * Number(credit.penalty_rate) / 100 * s.penalty_months * 100) / 100;
+      s.penalty_rate = s.penalty_amount > 0 ? credit.penalty_rate : null;
+      s.penalty_applied_at = s.penalty_amount > 0 ? "2026-09-17 06:00:00" : null;
+      s.amount_due = Math.round((s.final_amount + s.penalty_amount) * 100) / 100;
+      s.balance_due = Math.max(Math.round((s.amount_due - s.amount_paid) * 100) / 100, 0);
+    }
+    return {
+      sale_id: s.sale_id, sale_date: s.sale_date, customer_id: credit.customer_id,
+      customer_name: credit.customer_name, phone: credit.phone,
+      payment_method: method, payment_status: s.payment_status,
+      final_amount: s.final_amount, amount_paid: s.amount_paid, balance_due: s.balance_due,
+      penalty_rate: s.penalty_rate, penalty_months: s.penalty_months, penalty_amount: s.penalty_amount,
+      penalty_applied_at: s.penalty_applied_at, amount_due: s.amount_due,
+      days_old: daysOld, due_date: due.toISOString().slice(0, 10),
+      standing: credit.standing, payment_count: s.amount_paid > 0 ? 1 : 0,
+      last_payment: s.amount_paid > 0 ? s.sale_date : null
+    };
+  });
+}
+
+app.get("/api/credit/open-sales", (request, response) => response.json(openSaleRows()));
+
+app.post("/api/sales/:id/payment", async (request, response) => {
+  const sale = SALES.find((s) => s.sale_id === Number(request.params.id));
+  const body = request.body || {};
+  if (!sale) return response.status(404).json({ error: "Sale not found, or it has no customer to bill." });
+  if (!body.amount || !body.paymentMethod) return response.status(400).json({ error: "Amount and payment method are required" });
+  const amount = Number(body.amount);
+  if (amount <= 0) return response.status(400).json({ error: "Payment amount must be greater than zero." });
+  if (amount > sale.balance_due + 0.004) {
+    return response.status(400).json({ error: `Payment is larger than the balance due of ${sale.balance_due.toFixed(2)}` });
+  }
+  let qr = null;
+  if (body.qrPaymentId) {
+    if (!["GCash", "PayMaya"].includes(body.paymentMethod)) {
+      return response.status(400).json({ error: "A QR payment can only pay for money taken by GCash or PayMaya." });
+    }
+    const refused = await qrStubCheck(body.qrPaymentId, amount, body.paymentMethod);
+    if (refused) return response.status(refused.status).json({ error: refused.message, code: refused.code });
+    qr = QR_ROWS.get(Number(body.qrPaymentId));
+    qrStubLink(qr, sale.sale_id);
+  }
+  sale.amount_paid = Math.round((sale.amount_paid + amount) * 100) / 100;
+  const due = sale.amount_due !== undefined ? sale.amount_due : sale.final_amount;
+  sale.balance_due = Math.max(Math.round((due - sale.amount_paid) * 100) / 100, 0);
+  sale.payment_status = sale.balance_due <= 0 ? "Paid" : "Partial";
+  sale.transaction_status = sale.balance_due <= 0 ? "Completed" : "Partial Credit";
+  response.json({ message: "Payment recorded.", reference: qr ? qr.reference : null });
+});
+
 app.get("/api/credit/customers/:id", (request, response) => {
   const credit = CREDIT.find((c) => c.customer_id === Number(request.params.id));
   if (!credit) return response.status(404).json({ error: "Not found" });
@@ -936,9 +997,16 @@ app.put("/api/credit/customers/:id/limit", (request, response) => {
   const credit = CREDIT.find((c) => c.customer_id === Number(request.params.id));
   if (!credit) return response.status(404).json({ error: "Not found" });
 
+  const own = request.body.penaltyRate;
+  if (own !== undefined && own !== null && String(own).trim() !== "" &&
+      !(Number.isFinite(Number(own)) && Number(own) >= 1 && Number(own) <= 3)) {
+    return response.status(400).json({ error: "A late-payment rate is 1 to 3 percent a month. Leave it blank for the shop's rate." });
+  }
   credit.credit_limit = Number(request.body.creditLimit);
   credit.manual_standing = request.body.standing || "Good";
   credit.credit_notes = request.body.notes || null;
+  credit.penalty_rate_override = own === undefined || own === null || String(own).trim() === "" ? null : Number(own).toFixed(2);
+  credit.penalty_rate = credit.penalty_rate_override || POLICY.penalty_rate;
   credit.available_credit = Math.max(credit.credit_limit - credit.current_credit, 0);
   applyStanding(credit);
 
@@ -1017,15 +1085,44 @@ app.post("/api/credit/requests/:id/decide", (request, response) => {
   });
 });
 
+app.get("/api/credit/policy", (request, response) => {
+  const open = openSaleRows().filter((s) => s.penalty_amount > 0);
+  response.json({
+    ...POLICY,
+    own_rate_accounts: CREDIT.filter((c) => c.penalty_rate_override !== null).length,
+    penalised_sales: open.length,
+    penalties_owed: open.reduce((sum, s) => sum + s.penalty_amount, 0)
+  });
+});
+
+app.put("/api/credit/policy", (request, response) => {
+  const rate = Number((request.body || {}).penaltyRate);
+  if (!Number.isFinite(rate) || rate < 1 || rate > 3) {
+    return response.status(400).json({ error: "The late-payment rate is 1 to 3 percent a month. The default is 3." });
+  }
+  POLICY.penalty_rate = rate.toFixed(2);
+  POLICY.updated_at = "2026-09-17 10:00:00";
+  POLICY.updated_by = "Manager M. User";
+  CREDIT.forEach((c) => { if (c.penalty_rate_override === null) c.penalty_rate = POLICY.penalty_rate; });
+  response.json({
+    message: `Saved. A credit sale past its due date is now charged ${rate.toFixed(2)}% of what is still unpaid on it, every month it stays overdue.`,
+    penalty_rate: POLICY.penalty_rate
+  });
+});
+
 app.get("/api/customers/:id/history", (request, response) => {
   const credit = CREDIT.find((c) => c.customer_id === Number(request.params.id));
   if (!credit) return response.status(404).json({ error: "Not found" });
 
+  openSaleRows();   // stamps the penalties on the sales that carry one
   const purchases = SALES.slice(0, 9).map((s, i) => ({
     sale_id: s.sale_id, sale_date: s.sale_date, total_amount: s.total_amount,
     discount: 0, final_amount: s.final_amount, amount_paid: s.amount_paid,
     payment_method: s.payment_method, payment_status: s.payment_status,
     reference_no: null, is_archived: false,
+    penalty_rate: s.penalty_rate || null, penalty_months: s.penalty_months || 0, penalty_amount: s.penalty_amount || 0,
+    penalty_applied_at: s.penalty_applied_at || null,
+    amount_due: s.amount_due !== undefined ? s.amount_due : s.final_amount,
     balance_due: s.balance_due, cashier_name: s.cashier_name,
     item_count: 2, delivery_id: null, delivery_status: null
   }));
@@ -1048,16 +1145,165 @@ app.get("/api/customers/:id/history", (request, response) => {
   });
 });
 
+// the sizes some products also sell in: product id -> [{unit_name, units_per, price}]
+let UNIT_ID = 1;
+const SELLING_UNITS = {};
+STOCKS.forEach((p, index) => {
+  if (index % 4 === 1) {
+    SELLING_UNITS[p.product_id] = [
+      { product_unit_id: UNIT_ID++, unit_name: "box", units_per: 10, price: p.price * 9 },
+      { product_unit_id: UNIT_ID++, unit_name: "pallet", units_per: 100, price: null }
+    ];
+  } else if (index % 4 === 2) {
+    SELLING_UNITS[p.product_id] = [
+      { product_unit_id: UNIT_ID++, unit_name: "sack", units_per: 25, price: p.price * 23 }
+    ];
+  }
+});
+
 // the till's product grid
+// the pack a material is delivered in, set from the material's card
+app.put("/api/inventory/products/:id/pack", (request, response) => {
+  const product = STOCKS.find((p) => p.product_id === Number(request.params.id));
+  if (!product) return response.status(404).json({ error: "Product not found" });
+  const name = String(request.body.packName || "").trim();
+  const size = Number(request.body.packSize);
+  if (name !== "" && !(size > 0)) return response.status(400).json({ error: "Say how much of the unit one pack holds, like 20." });
+  product.pack_name = name || null; product.pack_size = name ? size : null;
+  response.json({ message: name ? `${product.product_name} is delivered by the ${name} of ${size} ${product.unit_name}.` : `${product.product_name} is delivered by the ${product.unit_name} again.`, packName: product.pack_name, packSize: product.pack_size });
+});
+
+// the clerk's reorder point, set from the row's card
+app.put("/api/inventory/reorder/:id", (request, response) => {
+  const product = STOCKS.find((p) => p.product_id === Number(request.params.id));
+  if (!product) return response.status(404).json({ error: "Not found" });
+  const point = Number(request.body.reorderPoint);
+  if (!Number.isInteger(point) || point < 0) return response.status(400).json({ error: "A reorder point cannot be negative." });
+  product.reorder_point = point;
+  response.json({ message: `${product.product_name} is now reordered at ${point}.` });
+});
+
 app.get("/api/inventory/products", (request, response) =>
   response.json(STOCKS.map((p) => ({
     product_id: p.product_id, product_name: p.product_name, price: p.price,
     quantity_in_stock: p.quantity_in_stock === 0 ? 40 : p.quantity_in_stock,
     unit_name: p.unit_name, category_name: p.category_name, brand_name: p.brand_name,
     reorder_point: p.reorder_point, status: "Active", is_archived: false,
-    supplier_name: p.supplier_name,
-    stock_status: p.stock_status === "Out of Stock" ? "In Stock" : p.stock_status
+    pack_name: p.pack_name || null, pack_size: p.pack_size || null,
+    supplier_id: p.supplier_id, supplier_name: p.supplier_name,
+    stock_status: p.stock_status === "Out of Stock" ? "In Stock" : p.stock_status,
+    selling_units: SELLING_UNITS[p.product_id] || []
   }))));
+
+app.get("/api/inventory/products/:id/units", (request, response) =>
+  response.json(SELLING_UNITS[Number(request.params.id)] || []));
+
+app.post("/api/inventory/products/:id/units", (request, response) => {
+  const product = STOCKS.find((p) => p.product_id === Number(request.params.id));
+  if (!product) return response.status(404).json({ error: "That material was not found." });
+  const body = request.body || {};
+  const name = String(body.unitName || "").trim();
+  if (!name) return response.status(400).json({ error: "Name the size, like box or sack." });
+  if (!(Number(body.unitsPer) > 0)) return response.status(400).json({ error: "Say how many of the product's own unit one of these holds." });
+  if (name.toLowerCase() === String(product.unit_name).toLowerCase()) {
+    return response.status(400).json({ error: `${product.product_name} is already kept by the ${product.unit_name}; add a bigger size, like box or sack.` });
+  }
+  const list = SELLING_UNITS[product.product_id] = SELLING_UNITS[product.product_id] || [];
+  const price = body.price === null || body.price === undefined || body.price === "" ? null : Number(body.price);
+  const found = list.find((u) => u.unit_name.toLowerCase() === name.toLowerCase());
+  if (found) { found.units_per = Number(body.unitsPer); found.price = price; }
+  else list.push({ product_unit_id: UNIT_ID++, unit_name: name, units_per: Number(body.unitsPer), price });
+  list.sort((a, b) => a.units_per - b.units_per);
+  response.json({ message: `${product.product_name} now sells by the ${name} (${body.unitsPer} ${product.unit_name}).`, units: list });
+});
+
+app.delete("/api/inventory/products/:id/units/:unitId", (request, response) => {
+  const product = STOCKS.find((p) => p.product_id === Number(request.params.id));
+  const list = SELLING_UNITS[Number(request.params.id)] || [];
+  const index = list.findIndex((u) => u.product_unit_id === Number(request.params.unitId));
+  if (!product || index === -1) return response.status(404).json({ error: "That size is not on the list." });
+  const [gone] = list.splice(index, 1);
+  response.json({ message: `${product.product_name} no longer sells by the ${gone.unit_name}.`, units: list });
+});
+
+// ringing a sale up: the lines are priced in the size they name
+let NEXT_SALE = 2000;
+const RUNG_UP = {};
+app.post("/api/sales", async (request, response) => {
+  const body = request.body || {};
+  if (!body.paymentMethod || !Array.isArray(body.items) || body.items.length === 0) {
+    return response.status(400).json({ error: "A payment method and at least one item are required" });
+  }
+  const items = [];
+  for (const line of body.items) {
+    const product = STOCKS.find((p) => p.product_id === Number(line.product_id));
+    if (!product) return response.status(404).json({ error: `Product ID ${line.product_id} is invalid or inactive.` });
+    const size = line.unit
+      ? (SELLING_UNITS[product.product_id] || []).find((u) => u.unit_name.toLowerCase() === String(line.unit).toLowerCase())
+      : null;
+    if (line.unit && !size && String(line.unit).toLowerCase() !== String(product.unit_name).toLowerCase()) {
+      return response.status(400).json({ error: `${product.product_name} is not sold by the ${line.unit}.` });
+    }
+    const per = size ? size.units_per : 1;
+    const each = size ? (size.price === null ? Math.round(product.price * per * 100) / 100 : size.price) : product.price;
+    items.push({
+      product_name: product.product_name, quantity: Number(line.quantity),
+      unit_name: size ? size.unit_name : product.unit_name,
+      base_quantity: Number(line.quantity) * per, base_unit: product.unit_name,
+      unit_price: each, subtotal: Math.round(Number(line.quantity) * each * 100) / 100
+    });
+  }
+  const total = items.reduce((sum, it) => sum + it.subtotal, 0);
+  const onAccount = body.paymentMethod === "Credit" || body.paymentMethod === "COD";
+  const paid = onAccount ? Number(body.amountPaid) || 0 : Number(body.amountPaid) || 0;
+  if (!onAccount && paid < total) return response.status(400).json({ error: "Amount paid is less than the total balance due." });
+  // the same reference rule as the server: a cheque or a transfer taken today needs one
+  const takenNow = body.paymentMethod === "Credit"
+    ? (paid > 0 ? (body.downPaymentMethod || "Cash") : null)
+    : (body.paymentMethod === "COD" ? null : body.paymentMethod);
+  const reference = typeof body.referenceNo === "string" ? body.referenceNo.trim() : "";
+  if (["Cheque", "Bank Transfer"].includes(takenNow) && reference === "") {
+    return response.status(400).json({ error: `A ${takenNow.toLowerCase()} needs its reference.` });
+  }
+  // paid by QR code: the same check as the server, with the same rule
+  let qr = null;
+  if (body.qrPaymentId) {
+    if (!["GCash", "PayMaya"].includes(takenNow)) {
+      return response.status(400).json({ error: "A QR payment can only pay for money taken by GCash or PayMaya." });
+    }
+    const refused = await qrStubCheck(body.qrPaymentId, paid, takenNow);
+    if (refused) return response.status(refused.status).json({ error: refused.message, code: refused.code });
+    qr = QR_ROWS.get(Number(body.qrPaymentId));
+  }
+  // a quantity of 9999 or more stands for an item that ran out after the money came in
+  if (qr && body.items.some((line) => Number(line.quantity) >= 9999)) {
+    qrStubSet(qr, "paid", null, QR_UNSAVED_NOTE);
+    return response.status(409).json({ error: "Not enough stock for this item. Only 120 left." });
+  }
+  const saleId = NEXT_SALE++;
+  RUNG_UP[saleId] = {
+    sale: {
+      sale_id: saleId, sale_date: "2026-09-17 10:15:00", total_amount: total, discount: 0, final_amount: total,
+      amount_paid: onAccount ? paid : paid, change_given: onAccount ? 0 : paid - total,
+      payment_method: body.paymentMethod,
+      payment_status: paid >= total ? "Paid" : (paid > 0 ? "Partial" : "Unpaid"),
+      customer_name: body.walkInName || (body.customerId ? (RECORDS.customer.find((c) => c.id === Number(body.customerId)) || {}).name : null) || "Walk-in",
+      cashier_name: "Cashier C. User",
+      reference_no: qr ? qr.reference
+        : (["Cheque", "Bank Transfer", "GCash", "PayMaya", "PayPal"].includes(takenNow) && reference ? reference : null),
+      tax_registration: "VAT", vat_rate: 12, vat_amount: Math.round(total * 12 / 112 * 100) / 100,
+      vatable_sale: total - Math.round(total * 12 / 112 * 100) / 100, vat_exempt_sale: 0, zero_rated_sale: 0
+    },
+    items,
+    payments: body.paymentMethod === "Credit" && paid > 0
+      ? [{ amount: paid, payment_method: body.downPaymentMethod || "Cash", reference_no: "Down payment at counter",
+           payment_date: "2026-09-17 10:15:00", received_by: "Cashier C. User" }]
+      : [],
+    delivery: null
+  };
+  if (qr) qrStubLink(qr, saleId);
+  response.json({ message: "Sale transaction completed successfully.", saleId, referenceNote: null });
+});
 
 app.get("/api/sales/undelivered", (request, response) => response.json([]));
 
@@ -1065,13 +1311,24 @@ app.get("/api/sales/undelivered", (request, response) => response.json([]));
 const STORE = {
   setting_id: 1,
   store_name: "Stub Hardware & Supply",
+  proprietor: "Stub S. Owner",
   address: "123 Rizal Avenue, Quezon City",
   tin: "123-456-789-00000",
   registration_type: "VAT",
   vat_rate: "12.00",
   invoice_note: "Thank you for your business.",
+  get penalty_rate() { return POLICY.penalty_rate; },
+  bank_name: "BDO Unibank",
+  bank_account_name: "Stub Hardware & Supply",
+  bank_account_number: "0012 3456 7890",
   updated_at: "2026-09-01 09:00:00",
-  updated_by: "Admin S. User"
+  updated_by: "Admin S. User",
+  receipt_layout: {
+    paperWidth: 80, fontSize: 12, title: "Sales Invoice", paidLabel: "PAID IN FULL",
+    headerLines: [], footerLines: ["Thank you for your purchase"],
+    show: { proprietor: true, cashier: true, customer: true, payment: true, reference: true,
+            item_count: true, tax: true, bank: true, note: true }
+  }
 };
 
 app.get("/api/store-settings", (request, response) => response.json(STORE));
@@ -1085,8 +1342,17 @@ app.put("/api/store-settings", (request, response) => {
     return response.status(400).json({ error: "That is not a TIN the BIR would have issued." });
   }
 
+  // all three bank boxes are required, as the server has it
+  const bank = [body.bankName, body.bankAccountName, body.bankAccountNumber].map((v) => String(v || "").trim());
+  if (bank.some((v) => v === "")) {
+    return response.status(400).json({ error: "The bank, the account name and the account number are all required." });
+  }
+  Object.assign(STORE, { bank_name: bank[0], bank_account_name: bank[1], bank_account_number: bank[2] });
+  if (body.receiptLayout && typeof body.receiptLayout === "object") STORE.receipt_layout = body.receiptLayout;
+
   Object.assign(STORE, {
     store_name: body.storeName,
+    proprietor: body.proprietor || null,
     address: body.address,
     tin: body.tin,
     registration_type: body.registrationType,
@@ -1115,9 +1381,17 @@ const RETURNS = [
   { return_id: RETURN_ID++, report_type: "Refunded", quantity: 2,
     reason: "Two tins arrived dented in the delivery and cannot be sold.",
     disposition: "Write-Off", refund_amount: 1500, restocked: false,
-    status: "Open", return_date: "2026-09-01 09:20:00", sale_id: 1002,
+    status: "Resolved", return_date: "2026-09-01 09:20:00", sale_id: 1002,
     product_id: 4, product_name: "Latex Paint White", unit_name: "liter",
-    reported_by: "Ana Reyes" }
+    reported_by: "Ana Reyes", inspected_by: "Clerk I. User", inspected_at: "2026-09-01 15:00:00",
+    inspection_note: "Both tins dented through, lids will not seal." },
+  // taken back at the counter, waiting for the clerk to look at it
+  { return_id: RETURN_ID++, report_type: "Refunded", quantity: 1,
+    reason: "Customer said it was the wrong size, box unopened.",
+    disposition: null, refund_amount: 450, restocked: false, awaiting_inspection: 1,
+    status: "Open", return_date: "2026-09-04 10:10:00", sale_id: 1005,
+    product_id: 2, product_name: "Claw Hammer", unit_name: "pcs",
+    reported_by: "Cashier C. User", inspected_by: null, inspected_at: null, inspection_note: null }
 ];
 
 app.post("/api/returns", (request, response) => {
@@ -1126,11 +1400,13 @@ app.post("/api/returns", (request, response) => {
     return response.status(400).json({ error: "Say what happened, in a sentence." });
   }
 
+  const type = request.body.reportType || "Refunded";
   const where = ["Return to Stock", "Write-Off"].includes(request.body.disposition)
     ? request.body.disposition
     : (request.body.restock === true ? "Return to Stock" : null);
 
-  if (!where) {
+  // a refund from the counter waits for the clerk; anything else says where the goods go
+  if (!where && type !== "Refunded") {
     return response.status(400).json({ error: "Say where the goods go: Return to Stock, or Write-Off." });
   }
 
@@ -1139,7 +1415,8 @@ app.post("/api/returns", (request, response) => {
     return_id: RETURN_ID++, report_type: request.body.reportType || "Refunded",
     quantity: Number(request.body.quantity), reason,
     disposition: where, refund_amount: Number(request.body.refundAmount || 0),
-    restocked: where === "Return to Stock", status: "Open",
+    restocked: where === "Return to Stock", status: "Open", awaiting_inspection: where ? 0 : 1,
+    inspected_by: null, inspected_at: null, inspection_note: null,
     return_date: "2026-09-04 12:30:00", sale_id: request.body.saleId || null,
     product_id: Number(request.body.productId),
     product_name: product ? product.product_name : "Product",
@@ -1149,8 +1426,44 @@ app.post("/api/returns", (request, response) => {
   RETURNS.unshift(created);
 
   response.json({
-    message: `${created.report_type} filed for ${created.product_name}.`,
-    reportId: created.return_id, disposition: where
+    message: where
+      ? `${created.report_type} filed for ${created.product_name}.`
+      : `${created.report_type} report filed. The goods are set aside for the stockroom to inspect.`,
+    reportId: created.return_id, disposition: where, awaitingInspection: where === null
+  });
+});
+
+// the clerk's verdict on a refund from the counter, or simply closing a decided report
+app.post("/api/returns/:id/resolve", (request, response) => {
+  const report = RETURNS.find((r) => r.return_id === Number(request.params.id));
+  if (!report) return response.status(404).json({ error: "Report not found." });
+  if (report.status === "Resolved") return response.status(400).json({ error: "That report is already resolved." });
+
+  const verdict = ["Return to Stock", "Write-Off"].includes((request.body || {}).disposition)
+    ? request.body.disposition : null;
+  const note = String((request.body || {}).note || "").trim() || null;
+
+  if (!report.disposition) {
+    if (!verdict) {
+      return response.status(400).json({ error: "Say what the inspection found: Return to Stock if it can be sold again, or Write-Off if not." });
+    }
+    report.disposition = verdict;
+    report.restocked = verdict === "Return to Stock";
+    const stock = STOCKS.find((p) => p.product_id === report.product_id);
+    if (stock && report.restocked) stock.quantity_in_stock += report.quantity;
+  }
+  report.status = "Resolved";
+  report.awaiting_inspection = 0;
+  report.inspected_by = "Clerk I. User";
+  report.inspected_at = "2026-09-04 16:00:00";
+  report.inspection_note = note;
+
+  response.json({
+    message: !verdict ? "Report marked resolved."
+      : verdict === "Return to Stock"
+        ? `${report.product_name} is back on the shelf: stock up by ${report.quantity}.`
+        : `${report.product_name} is written off. It does not go back on the shelf.`,
+    disposition: verdict
   });
 });
 
@@ -1171,6 +1484,9 @@ app.get("/api/inventory/adjustments", (request, response) =>
 // ==========================================================================
 // PURCHASE ORDERS
 // ==========================================================================
+// the printed order's QR code, made the way the server makes it
+const QRCode = require("qrcode");
+
 const PURCHASE_ORDERS = Array.from({ length: 17 }, (_, i) => ({
   po_id: 200 + i,
   supplier_id: (i % 2) + 1,
@@ -1180,20 +1496,33 @@ const PURCHASE_ORDERS = Array.from({ length: 17 }, (_, i) => ({
   order_date: `2026-08-${String(10 + (i % 19)).padStart(2, "0")} 08:00:00`,
   line_count: (i % 4) + 1,
   total_units: ((i % 4) + 1) * 12,
-  total_cost: 12000 + i * 2300,
-  status: ["Pending", "Received", "Cancelled"][i % 3]
+  goods_cost: 12000 + i * 2300, discount: i % 4 === 2 ? 500 : 0,
+  total_cost: 12000 + i * 2300 - (i % 4 === 2 ? 500 : 0),
+  status: ["For Approval", "Pending", "Received", "Cancelled"][i % 4],
+  raised_by: "Clerk I. User",
+  confirmed_by: i % 4 === 0 ? null : "Manager M. User",
+  confirmed_at: i % 4 === 0 ? null : "2026-08-28 10:00:00",
+  decision_note: i % 4 === 3 ? "Ordered elsewhere at a better price" : null,
+  // most orders go to a supplier with an address to email; #204 and #212 do not,
+  // so confirming them shows the manager what to do instead
+  supplier_email: i % 8 === 4 ? null : (i % 2 ? "sales@cebu-tool.test" : "orders@manila-hardware.test"),
+  // the approved orders here were already sent; one the manager approves now is still to print and send
+  supplier_sent_at: i % 4 === 1 ? "2026-08-28 11:00:00" : null,
+  supplier_response: null, supplier_responded_at: null, supplier_note: null
 }));
 
 function purchaseOrderLines(poId) {
   const po = PURCHASE_ORDERS.find((p) => p.po_id === Number(poId));
   if (!po) return [];
+  if (po.items) return po.items;      // an order raised through the form keeps its own lines
   return Array.from({ length: po.line_count }, (_, i) => {
     const p = STOCKS[(poId + i) % STOCKS.length];
     return {
       product_id: p.product_id, product_name: p.product_name, unit_name: p.unit_name,
       category_name: p.category_name, brand_name: p.brand_name,
       quantity: 12, unit_cost: 250 + i * 10, line_cost: 12 * (250 + i * 10),
-      quantity_in_stock: p.quantity_in_stock
+      quantity_in_stock: p.quantity_in_stock,
+      pack_name: null, pack_size: null, pack_count: null
     };
   });
 }
@@ -1201,17 +1530,23 @@ function purchaseOrderLines(poId) {
 app.get("/api/purchase-orders", (request, response) => response.json(PURCHASE_ORDERS));
 app.get("/api/purchase-orders/:id/items", (request, response) =>
   response.json(purchaseOrderLines(request.params.id)));
-app.get("/api/purchase-orders/:id/document", (request, response) => {
+function supplierLink(po) {
+  return `http://localhost:${PORT}/supplier-order.html?code=${"S".repeat(40)}${po.po_id}`;
+}
+app.get("/api/purchase-orders/:id/document", async (request, response) => {
   const po = PURCHASE_ORDERS.find((p) => p.po_id === Number(request.params.id));
   if (!po) return response.status(404).json({ error: "That purchase order does not exist" });
   response.json({
     order: Object.assign({ supplier_email: "sales@supplier.test", supplier_address: "Cebu City",
                            raised_by: "Manager M. User" }, po),
     items: purchaseOrderLines(po.po_id),
-    shop: STORE
+    shop: STORE,
+    // an approved order's print carries the supplier's link and QR code
+    supplier_link: po.status === "Pending" ? supplierLink(po) : undefined,
+    supplier_qr: po.status === "Pending" ? await QRCode.toDataURL(supplierLink(po), { margin: 1 }) : undefined
   });
 });
-app.post("/api/purchase-orders", (request, response) => {
+app.post("/api/purchase-orders",(request, response) => {
   const items = Array.isArray(request.body.items) ? request.body.items : [];
   const po = {
     po_id: 200 + PURCHASE_ORDERS.length,
@@ -1222,19 +1557,81 @@ app.post("/api/purchase-orders", (request, response) => {
     order_date: "2026-09-11 09:00:00",
     line_count: items.length,
     total_units: items.reduce((sum, it) => sum + Number(it.quantity || 0), 0),
-    total_cost: items.reduce((sum, it) => sum + Number(it.quantity || 0) * Number(it.unitCost || 0), 0),
-    status: "Pending"
+    goods_cost: 0, discount: 0, total_cost: 0,
+    status: "For Approval", raised_by: "Clerk I. User", confirmed_by: null, confirmed_at: null, decision_note: null,
+    items: items.map((it) => {
+      const p = STOCKS.find((x) => x.product_id === Number(it.productId)) || {};
+      return { product_id: Number(it.productId) || 0, product_name: p.product_name || it.newName || "New material",
+               unit_name: p.unit_name || it.unitName || "", category_name: p.category_name || "", brand_name: p.brand_name || "",
+               quantity: Number(it.quantity || 0), unit_cost: Number(it.unitCost || 0),
+               line_cost: Number(it.quantity || 0) * Number(it.unitCost || 0), quantity_in_stock: p.quantity_in_stock || 0,
+               pack_name: it.packName || null, pack_size: it.packSize || null, pack_count: it.packCount || null };
+    })
   };
   PURCHASE_ORDERS.unshift(po);
-  response.json({ message: `Purchase order #${po.po_id} created.`, poId: po.po_id });
+  response.json({ message: `Purchase order #${po.po_id} sent to the manager to confirm.`, poId: po.po_id });
+});
+app.post("/api/purchase-orders/:id/decide", (request, response) => {
+  const po = PURCHASE_ORDERS.find((p) => p.po_id === Number(request.params.id));
+  if (!po) return response.status(404).json({ error: "Purchase order not found." });
+  if (po.status !== "For Approval") return response.status(409).json({ error: `This purchase order is already ${po.status.toLowerCase()}.` });
+  const approve = request.body.approve === true;
+  po.status = approve ? "Pending" : "Cancelled";
+  po.confirmed_by = "Manager M. User"; po.confirmed_at = "2026-09-19 10:00:00";
+  po.decision_note = approve ? null : String(request.body.note || "");
+  if (!approve) {
+    return response.json({ message: `Purchase order #${po.po_id} declined.`, status: po.status });
+  }
+  // approving sends nothing: the clerk prints the order and sends it
+  response.json({
+    message: `Purchase order #${po.po_id} is approved. The clerk prints it and sends it to the supplier.`,
+    status: po.status
+  });
+});
+// the clerk emails an approved order to its supplier
+app.post("/api/purchase-orders/:id/send", (request, response) => {
+  const po = PURCHASE_ORDERS.find((p) => p.po_id === Number(request.params.id));
+  if (!po) return response.status(404).json({ error: "That purchase order does not exist" });
+  if (po.status !== "Pending") return response.status(409).json({ error: "Only an approved order is sent." });
+  if (!po.supplier_email) {
+    return response.status(400).json({ error: `${po.supplier_name} has no email address on file. Print the order and send it to them.` });
+  }
+  po.supplier_sent_at = "2026-09-19 11:00:00";
+  const number = "PO-" + String(po.po_id).padStart(6, "0");
+  response.json({
+    message: `${number} was emailed to ${po.supplier_name} at ${po.supplier_email}, with the PDF and the link to accept or decline it.`,
+    linked: true
+  });
 });
 app.post("/api/purchase-orders/:id/receive", (request, response) => {
   const po = PURCHASE_ORDERS.find((p) => p.po_id === Number(request.params.id));
-  if (po) po.status = "Received";
+  if (po) {
+    po.status = "Received";
+    const sheet = Array.isArray(request.body.received) ? request.body.received : [];
+    if (po.items) po.items.forEach((it) => {
+      const line = sheet.find((s) => Number(s.productId) === it.product_id);
+      if (line) { it.quantity = Number(line.quantity); it.unit_cost = Number(line.unitCost || 0); it.line_cost = it.quantity * it.unit_cost; }
+    });
+    po.goods_cost = (po.items || []).reduce((sum, it) => sum + it.line_cost, 0);
+    po.discount = Number(request.body.discount || 0);
+    po.total_cost = po.goods_cost - po.discount;
+  }
   response.json({ message: `Purchase order #${request.params.id} received.`, lines: 1, extras: 0 });
 });
 
+app.get("/api/deliveries/drivers", (request, response) =>
+  response.json([{ staff_id: 5, full_name: "Delivery D. User" }]));
 app.get("/api/delivery/list", (request, response) => response.json(DELIVERIES));
+app.post("/api/delivery/:id/claim", (request, response) => {
+  const delivery = DELIVERIES.find((d) => d.delivery_id === Number(request.params.id));
+  if (!delivery) return response.status(404).json({ error: "Delivery not found" });
+  if (delivery.delivery_staff_id != null && delivery.delivery_staff_id !== 5) {
+    return response.status(409).json({ error: "Another driver has already taken this delivery." });
+  }
+  delivery.delivery_staff_id = 5;          // the stub's one driver
+  delivery.driver_name = "Delivery D. User";
+  response.json({ message: `Delivery #${delivery.delivery_id} is now yours.` });
+});
 app.get("/api/delivery/summary", (request, response) =>
   response.json({
     deliveries: DELIVERIES.slice(0, 12),
@@ -1262,7 +1659,7 @@ let stubVersion = 0;
 const stubClients = new Set();
 
 function stubScopeOf(pathname) {
-  if (/^\/api\/(users|roles)/.test(pathname)) return "staff";
+  if (/^\/api\/(users|roles|staff)/.test(pathname)) return "staff";
   if (/^\/api\/(inventory|purchase-orders|stocks)/.test(pathname)) return "inventory";
   if (/^\/api\/returns/.test(pathname)) return "returns";
   if (/^\/api\/deliveries|^\/api\/delivery/.test(pathname)) return "deliveries";
@@ -1270,9 +1667,7 @@ function stubScopeOf(pathname) {
   if (/^\/api\/sales/.test(pathname)) return "sales";
   if (/^\/api\/(backups|restore)/.test(pathname)) return "system";
   if (/^\/api\/archives/.test(pathname)) return "archives";
-  if (/^\/api\/access/.test(pathname)) return "access";
   if (/^\/api\/features/.test(pathname)) return "features";
-  if (/^\/api\/systems/.test(pathname)) return "systems";
   return null;
 }
 
@@ -1308,3 +1703,140 @@ app.post("/api/test/change", (request, response) => {
 app.get("/api/events/status", (request, response) =>
   response.json({ version: stubVersion, connections: stubClients.size,
                   people: stubClients.size, logged: stubVersion }));
+
+// ==========================================================================
+// QR PAYMENTS -- the same routes as Connections/qr-payments.js, kept in memory.
+// The provider is the real offline simulation (qr-provider-sim.js, with its
+// pay page at /pay-sim/:token), and the rule for recording money against a
+// code and the counts are the server's own (qrRefusal, summarize), so the
+// stub cannot drift from them. Nothing here reaches PayMongo.
+// ==========================================================================
+const qrSim = require(path.join(PUBLIC_DIR, "Back-end", "Connections", "qr-provider-sim"));
+const { qrRefusal, summarize, UNSAVED_NOTE: QR_UNSAVED_NOTE } =
+  require(path.join(PUBLIC_DIR, "Back-end", "Connections", "qr-payments"));
+qrSim.registerRoutes(app);
+
+const QR_ROWS = new Map();
+let QR_NEXT = 1;
+const QR_SECONDS = 600;
+const stubNow = () => new Date().toISOString().replace("T", " ").slice(0, 19);
+
+// the manager's page asks as the manager; every other page as the cashier
+const askedByManager = (request) => /manager\.html/.test(request.get("referer") || "");
+
+function qrStubShape(row) {
+  return {
+    id: row.id, status: row.status, amount: row.amount, wallet: row.wallet, purpose: row.purpose,
+    reference: row.reference, saleId: row.saleId, errorMessage: row.errorMessage, mode: "test", provider: "sim",
+    staffId: row.staffId, cashierName: row.cashierName, createdAt: row.createdAt, paidAt: row.paidAt,
+    closedAt: row.closedAt,
+    secondsLeft: row.status === "pending" ? Math.max(0, Math.round((row.expiresAt - Date.now()) / 1000)) : 0,
+    badge: "SIMULATION"
+  };
+}
+
+// the same rule as sp_set_qr_payment_result: a pending row closes once, and a
+// closed one can still become paid
+function qrStubSet(row, status, reference, message) {
+  if (row.status !== "pending" && row.status !== status && status !== "paid") return;
+  row.status = status;
+  if (reference) row.reference = reference;
+  row.errorMessage = message || null;
+  if (status === "paid" && !row.paidAt) row.paidAt = stubNow();
+  if (!row.closedAt) row.closedAt = stubNow();
+  stubPublish("qr-payments", `qr-payment ${row.id} ${status}`, null);
+}
+
+async function qrStubRefresh(row) {
+  if (!row || row.status !== "pending") return row;
+  const state = await qrSim.getStatus(row.intentId);
+  if (state.status !== "pending") {
+    qrStubSet(row, state.status, state.providerPaymentId, state.errorMessage);
+  } else if (Date.now() >= row.expiresAt) {
+    await qrSim.cancel(row.intentId);
+    qrStubSet(row, "expired", null, "Not paid within 10 minutes.");
+  }
+  return row;
+}
+
+async function qrStubCheck(id, amountNow, wallet) {
+  const row = await qrStubRefresh(QR_ROWS.get(Number(id)));
+  return qrRefusal(row ? { status: row.status, amount: row.amount, wallet: row.wallet, sale_id: row.saleId } : null,
+    amountNow, wallet);
+}
+
+// what GET /api/sales/:id lists under qrPayments, as the server does
+function qrStubOfSale(saleId) {
+  return Array.from(QR_ROWS.values()).filter((row) => row.saleId === saleId).map((row) => ({
+    qr_payment_id: row.id, status: row.status, amount: row.amount, wallet: row.wallet, purpose: row.purpose,
+    provider: "sim", mode: "test", provider_payment_id: row.reference, paid_at: row.paidAt
+  }));
+}
+
+function qrStubLink(row, saleId) {
+  row.saleId = saleId;
+  row.errorMessage = null;
+  stubPublish("qr-payments", `qr-payment ${row.id} linked`, null);
+}
+
+app.post("/api/qr-payments", async (request, response) => {
+  const body = request.body || {};
+  const amount = Math.round(Number(body.amount) * 100) / 100;
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return response.status(400).json({ error: "Type the amount the QR code is for." });
+  }
+  if (!["GCash", "PayMaya"].includes(body.wallet)) {
+    return response.status(400).json({ error: "Only GCash and Maya can be paid by QR code." });
+  }
+  const made = await qrSim.createPayment({ amount, wallet: body.wallet, description: "Stub Hardware",
+    returnUrl: `http://localhost:${PORT}/pay/done` });
+  const manager = askedByManager(request);
+  const row = {
+    id: QR_NEXT++, intentId: made.providerIntentId, status: "pending", amount, wallet: body.wallet,
+    purpose: body.purpose || "sale", reference: null, saleId: null, errorMessage: null,
+    staffId: manager ? 2 : 4, cashierName: manager ? "Manager M. User" : "Cashier C. User",
+    createdAt: stubNow(), paidAt: null, closedAt: null, expiresAt: Date.now() + QR_SECONDS * 1000
+  };
+  QR_ROWS.set(row.id, row);
+  stubPublish("qr-payments", `qr-payment ${row.id} pending`, null);
+  response.status(201).json(Object.assign(qrStubShape(row), {
+    qrImage: await QRCode.toDataURL(made.payUrl, { margin: 1, width: 260 }), payUrl: made.payUrl
+  }));
+});
+
+app.get("/api/qr-payments/:id", async (request, response) => {
+  const row = await qrStubRefresh(QR_ROWS.get(Number(request.params.id)));
+  if (!row) return response.status(404).json({ error: "That QR payment is not on record." });
+  response.json(qrStubShape(row));
+});
+
+app.post("/api/qr-payments/:id/cancel", async (request, response) => {
+  const row = await qrStubRefresh(QR_ROWS.get(Number(request.params.id)));
+  if (!row) return response.status(404).json({ error: "That QR payment is not on record." });
+  if (row.status === "pending") {
+    await qrSim.cancel(row.intentId);
+    qrStubSet(row, "cancelled", null, "Cancelled by the cashier.");
+  }
+  response.json(qrStubShape(row));
+});
+
+app.get("/api/qr-payments", async (request, response) => {
+  for (const row of QR_ROWS.values()) await qrStubRefresh(row);
+  let rows = Array.from(QR_ROWS.values()).reverse();
+  if (!askedByManager(request)) rows = rows.filter((row) => row.staffId === 4);
+  else if (request.query.staff) rows = rows.filter((row) => row.staffId === Number(request.query.staff));
+  const summary = summarize(rows);
+  const status = String(request.query.status || "all");
+  const listed = status === "all" ? rows : rows.filter((row) => row.status === status);
+  response.json({ rows: listed.map(qrStubShape), summary, badge: "SIMULATION" });
+});
+
+// for the tests: run a code's clock out without waiting ten minutes
+app.post("/api/test/qr-payments/:id/expire", (request, response) => {
+  const row = QR_ROWS.get(Number(request.params.id));
+  if (!row) return response.status(404).json({ error: "not found" });
+  row.expiresAt = Date.now();
+  response.json({ ok: true });
+});
+
+app.get("/pay/done", (request, response) => response.send("<h2>You can return to the cashier</h2>"));

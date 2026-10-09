@@ -5,8 +5,14 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-MYSQL_USER=${MYSQL_USER:-root}
-MYSQL_PASSWORD=${MYSQL_PASSWORD:-Password}
+# the MySQL login comes from .env, the same file the server reads; MYSQL_USER
+# and MYSQL_PASSWORD in the environment still win when set
+if [ -f .env ]; then
+  ENV_DB_USER=$(grep '^DB_USER=' .env | cut -d= -f2-)
+  ENV_DB_PASSWORD=$(grep '^DB_PASSWORD=' .env | cut -d= -f2-)
+fi
+MYSQL_USER=${MYSQL_USER:-${ENV_DB_USER:-root}}
+MYSQL_PASSWORD=${MYSQL_PASSWORD:-$ENV_DB_PASSWORD}
 SHOTS=${SHOTS:-shots/current}
 
 reset_everything() {
@@ -18,8 +24,9 @@ reset_everything() {
     sleep 1
   fi
 # mail off, so the passwords the server makes come back in its replies
-  # rather than going to an inbox the checks cannot read
-  HARDWARE_MAIL_OFF=1 nohup node public/javascript/server.js > /tmp/hardware-server.log 2>&1 &
+  # rather than going to an inbox the checks cannot read; QR payments on the
+  # offline simulation, so no suite ever reaches PayMongo whatever .env says
+  HARDWARE_MAIL_OFF=1 PAYMENT_PROVIDER=sim QR_PAYMENT_MINUTES=${QR_PAYMENT_MINUTES:-10}     nohup node public/Back-end/server.js > /tmp/hardware-server.log 2>&1 &
   echo $! > /tmp/hardware-server.pid
   sleep 4
   cat /tmp/hardware-server.log
@@ -38,6 +45,12 @@ echo ""
 echo "== fixed bugs, still fixed =="
 reset_everything
 node tests/regression.js
+
+echo ""
+echo "== QR payments (simulated) =="
+# a code lasts six seconds here, so one can be watched expire
+QR_PAYMENT_MINUTES=0.1 reset_everything
+node tests/qr-payments.js
 
 echo ""
 echo "== screen tour =="
