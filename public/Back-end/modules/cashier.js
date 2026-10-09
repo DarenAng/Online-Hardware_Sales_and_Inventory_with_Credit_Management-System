@@ -248,11 +248,9 @@ function renderCatalog(rows, keyword) {
     const start = (catalogPage - 1) * CATALOG_PAGE_ROWS;
     const slice = rows.slice(start, start + CATALOG_PAGE_ROWS);
 
-    let pager;
-    if (pages === 1) {
-        pager = '<div class="pager is-single"><span class="pager-info">Showing all ' + rows.length +
-              (rows.length === 1 ? ' product' : ' products') + '</span></div>';
-    } else {
+    // one page needs no pager; the count pill already says how many
+    let pager = '';
+    if (pages > 1) {
         pager = '<div class="pager"><span class="pager-info">Showing ' + (start + 1) + '&ndash;' +
               (start + slice.length) + ' of ' + rows.length + '</span>' +
               '<div class="pager-controls">' +

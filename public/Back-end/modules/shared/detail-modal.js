@@ -163,13 +163,10 @@ function pagedTableBody(id) {
         (pages > 1 ? fillerRows(t.pageSize - slice.length, t.headers.length) : '') +
         '</tbody></table>';
 
+    if (pages === 1) return table;
+
     const total = t.rows.length;
     const plural = t.noun + (total === 1 ? '' : 's');
-
-    if (pages === 1) {
-        return table + '<div class="pager paged-pager is-single"><span class="pager-info">' +
-            'Showing all ' + total + ' ' + plural + '</span></div>';
-    }
 
     return table +
         '<div class="pager paged-pager">' +

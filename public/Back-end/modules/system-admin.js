@@ -225,7 +225,10 @@ function buildUsersPanel() {
     });
 }
 
-function openUserModal(staffId) {
+async function openUserModal(staffId) {
+    // opening a card over a dirty Edit form would refill it: ask first
+    if (editUserDirty() && !(await confirmCloseEditUser())) return;
+
     const panel = getDataPanel('admin-users');
     selectedUser = panel ? panel.find(staffId, 'staff_id') : null;
     if (!selectedUser) return;
@@ -383,24 +386,29 @@ async function handleUpdateUser(event) {
 
     const name = staffName(selectedUser);
 
-    // a role change is asked about; a spelling correction is not
-    if (Number(data.roleId) !== Number(selectedUser.role_id)) {
-        const role = systemRoles.find((item) => Number(item.role_id) === Number(data.roleId));
+    // One card for the whole save. A new role or sign-in email ends the
+    // person's sessions (the server does this in PUT /api/users/:staffId), so
+    // those saves say so and take the danger look; a corrected name or phone does not.
+    const roleChanged = Number(data.roleId) !== Number(selectedUser.role_id);
+    const emailChanged = data.email !== String(selectedUser.email || '').trim().toLowerCase();
+    const signsOut = Boolean(selectedUser.user_id) && (roleChanged || emailChanged);
 
-        const yes = await askConfirm(
-            `${name} moves from ${selectedUser.role_name} to ${role ? role.role_name : 'another role'}.`,
-            {
-                title: 'Change this role?',
-                eyebrow: 'Accounts Management',
-                confirmLabel: 'Change the role',
-                detail: [
-                    'They are signed out now and must sign in again.',
-                    'Their menu and their permissions become the new role at once.'
-                ]
-            });
-
-        if (!yes) return;
+    let consequence = `${name} stays signed in.`;
+    if (signsOut) {
+        consequence = `${name} is signed out now and must sign in again.`;
+        if (roleChanged) consequence += ' Their menu and permissions become the new role at once.';
+        if (emailChanged) consequence += ' They sign in with the new email address.';
     }
+
+    const yes = await askConfirm(consequence, {
+        title: 'Save these changes?',
+        eyebrow: 'Accounts Management',
+        confirmLabel: signsOut ? 'Save and sign them out' : 'Save changes',
+        tone: signsOut ? 'danger' : undefined,
+        detail: changeListFor(formChangeLines(form))
+    });
+
+    if (!yes) return;
 
     await sendUserRequest(apiUpdateStaff(selectedUser.staff_id, data), 'Account updated.');
 }
@@ -519,12 +527,21 @@ function formValues(form) {
     const values = {};
     Array.from(form.elements).forEach((field) => {
         if (!field.name || field.disabled) return;
+        if (field.hasAttribute('data-untracked')) return;   // the receipt's line boxes: see below
         if (field.type === 'checkbox') {
             values[field.name] = field.checked;
             return;
         }
         values[field.name] = String(field.value === undefined ? '' : field.value).trim();
     });
+
+    // The receipt's header and footer boxes are numbered as they are drawn, and
+    // a box added but left empty is no change; what counts is the lines that
+    // would be printed, in order.
+    if (form.id === 'store-form') {
+        values.headerLines = readReceiptLines('header');
+        values.footerLines = readReceiptLines('footer');
+    }
     return JSON.stringify(values);
 }
 
@@ -553,6 +570,130 @@ function watchFormEdits(form, button) {
     form.addEventListener('input', update);
     form.addEventListener('change', update);
 }
+
+// ---------- what the form changes, said before it is saved ----------
+const CHANGE_VALUE_MAX = 40;      // characters of one value in the list
+const CHANGE_LINES_MAX = 8;       // lines in the list; the rest are counted
+
+function clipValue(text) {
+    const value = String(text);
+    return value.length > CHANGE_VALUE_MAX ? value.slice(0, CHANGE_VALUE_MAX - 1) + '\u2026' : value;
+}
+
+// A box as the person reads it: its label, and a list's choice by its words.
+function fieldLabelText(form, field) {
+    if (field.type === 'checkbox') {
+        const wrap = field.closest('label');
+        return 'Show ' + (wrap ? wrap.textContent.trim().toLowerCase() : field.name);
+    }
+    const label = field.id ? form.querySelector('label[for="' + field.id + '"]') : null;
+    return label ? label.childNodes[0].textContent.trim() : field.name;
+}
+
+function fieldValueText(field, value) {
+    if (field.type === 'checkbox') return value ? 'Yes' : 'No';
+    if (field.type === 'email') value = String(value).toLowerCase();   // the server stores it so
+    if (field.tagName === 'SELECT') {
+        const option = Array.from(field.options).find((item) => item.value === String(value));
+        if (option) return clipValue(option.textContent.trim());
+    }
+    return value === '' ? '(empty)' : clipValue(value);
+}
+
+// "Field: old -> new" for every box that differs from the record it was
+// filled from. "skip" is asked the name of a box that is not part of the change.
+// The lines are plain text: the confirm card escapes them.
+function formChangeLines(form, skip) {
+    const before = JSON.parse(formBaselines.get(form) || '{}');
+    const after = JSON.parse(formValues(form));
+    const lines = [];
+
+    Object.keys(after).forEach((name) => {
+        if (before[name] === after[name] || (skip && skip(name))) return;
+        const field = form.elements[name];
+        if (!field) return;
+        const was = fieldValueText(field, before[name] === undefined ? '' : before[name]);
+        const now = fieldValueText(field, after[name]);
+        if (was !== now) lines.push(fieldLabelText(form, field) + ': ' + was + ' \u2192 ' + now);
+    });
+    return lines;
+}
+
+// the list as the card shows it: long lists are cut and the rest counted
+function changeListFor(lines) {
+    if (lines.length <= CHANGE_LINES_MAX) return lines;
+    const more = lines.length - (CHANGE_LINES_MAX - 1);
+    return lines.slice(0, CHANGE_LINES_MAX - 1).concat('and ' + more + ' more changes');
+}
+
+// ---------- unsaved changes: asked about, never lost quietly ----------
+function askDiscardChanges(message, eyebrow) {
+    return askDanger(message, {
+        title: 'Discard your changes?',
+        eyebrow: eyebrow,
+        confirmLabel: 'Discard changes',
+        cancelLabel: 'Keep editing'
+    });
+}
+
+// Dirty means different from the record the form was last filled from. A form
+// that was never filled has no record to differ from, so it is not dirty.
+function editUserDirty() {
+    const form = document.getElementById('edit-user-form');
+    const modal = document.getElementById('user-modal');
+    return Boolean(form && modal && modal.classList.contains('open') &&
+                   formBaselines.has(form) && isFormDirty(form));
+}
+
+function storeFormDirty() {
+    const form = document.getElementById('store-form');
+    const panel = document.getElementById('panel-store');
+    return Boolean(form && panel && panel.style.display !== 'none' &&
+                   formBaselines.has(form) && isFormDirty(form));
+}
+
+// The Edit Account card: the x button and Escape ask before closing it.
+async function confirmCloseEditUser() {
+    if (!editUserDirty()) return true;
+    return askDiscardChanges('The changes made to this account have not been saved. ' +
+                             'Closing it now throws them away.', 'Accounts Management');
+}
+
+setModalCloseGuard('user-modal', confirmCloseEditUser);
+
+// Leaving a screen with a dirty form. The click is held, the question asked,
+// and the same click let through once the answer is "discard".
+let sidebarLeaveAllowed = false;
+
+document.addEventListener('click', async function (event) {
+    const link = event.target.closest && event.target.closest('a[data-panel-link], a.sidebar-brand');
+    if (!link) return;
+    if (sidebarLeaveAllowed) { sidebarLeaveAllowed = false; return; }
+    if (!storeFormDirty() && !editUserDirty()) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const storeOpen = storeFormDirty();
+    const yes = await askDiscardChanges(storeOpen
+        ? 'The receipt details have not been saved. Leaving this screen throws the changes away.'
+        : 'The changes made to this account have not been saved. Leaving this screen throws them away.',
+        storeOpen ? 'Receipt Maintenance' : 'Accounts Management');
+    if (!yes) return;
+
+    if (!storeOpen) closeModal('user-modal');
+    sidebarLeaveAllowed = true;
+    link.click();
+}, true);
+
+// closing or reloading the tab: the browser's own question, with its own words
+window.addEventListener('beforeunload', function (event) {
+    // every sign-out removes currentUser before it leaves: the way out is not questioned
+    if (!localStorage.getItem('currentUser')) return;
+    if (!storeFormDirty() && !editUserDirty()) return;
+    event.preventDefault();
+    event.returnValue = '';
+});
 
 // Cancelling the create form empties it so the next person does not find a
 // half-typed account waiting.
@@ -1458,33 +1599,30 @@ function renderAutoBackupCard(auto, procedures) {
     if (procedures && procedures.loaded < procedures.expected) {
         card.className = 'card auto-backup is-bad';
         state.textContent = 'Read this';
-        text.textContent = `This database has ${procedures.loaded} of ${procedures.expected} ` +
-            `stored procedures, so nothing can be saved. Run ` +
-            `public/database/2-RUN-SECOND-stored-procedures.sql, then reload this page. ` +
-            `Older backups are not being deleted meanwhile.`;
+        text.textContent = `Only ${procedures.loaded} of ${procedures.expected} stored procedures are loaded, ` +
+            `so backups cannot run. Run 2-RUN-SECOND-stored-procedures.sql, then reload.`;
         return;
     }
 
     if (!auto.enabled) {
         card.className = 'card auto-backup is-off';
         state.textContent = 'Off';
-        text.textContent = 'The daily backup is off. Only backups taken with Run Backup Now are being saved.';
+        text.textContent = 'Daily backup is off. Only Run Backup Now saves a backup.';
         return;
     }
 
     if (auto.lastError) {
         card.className = 'card auto-backup is-bad';
         state.textContent = 'Failing';
-        text.textContent = `The last daily backup failed: ${auto.lastError}. ` +
-            `It tries again at the next scheduled time. Take one by hand until this is fixed.`;
+        text.textContent = `Last daily backup failed: ${auto.lastError}. ` +
+            `Take one by hand until it is fixed.`;
         return;
     }
 
     card.className = 'card auto-backup is-on';
     state.textContent = 'On';
-    text.textContent = `One backup of the whole system is saved every day at ${hourText(auto.hour)}, ` +
-        `and the newest ${auto.keep} automatic backups are kept.` +
-        (auto.lastFileName ? ` The most recent is ${auto.lastFileName}.` : '');
+    text.textContent = `Backs up daily at ${hourText(auto.hour)} and keeps the newest ${auto.keep}.` +
+        (auto.lastFileName ? ` Latest: ${auto.lastFileName}.` : '');
 }
 
 // the limits under Saved Backups, from the server
@@ -1615,6 +1753,7 @@ function closeBackupDrawer() {
 }
 
 document.addEventListener('keydown', function (event) {
+    // a confirm card over the drawer answers its own Escape (modals.js stops it reaching here)
     if (event.key === 'Escape') closeBackupDrawer();
 });
 
@@ -1875,6 +2014,16 @@ const RECEIPT_SWITCHES = ['proprietor', 'cashier', 'customer', 'payment', 'refer
 const RECEIPT_LINE_MAX = 10;        // lines in the header, and in the footer
 const RECEIPT_LINE_LENGTH = 80;     // characters in one line
 
+// Reset puts the saved details back, after asking if there is anything to lose.
+async function resetStoreForm() {
+    if (storeFormDirty() &&
+        !(await askDiscardChanges('Reset puts back the details as last saved. ' +
+                                  'The changes made since then are thrown away.', 'Receipt Maintenance'))) {
+        return;
+    }
+    await loadStoreSettingsForm();
+}
+
 async function loadStoreSettingsForm() {
     const form = document.getElementById('store-form');
     if (!form) return;
@@ -1941,7 +2090,7 @@ function renderReceiptLines(kind, lines) {
     const values = Array.isArray(lines) ? lines : [];
     list.innerHTML = values.map((line, index) =>
         '<div class="line-row">' +
-            '<input type="text" class="form-control" name="' + kind + 'Line_' + index + '"' +
+            '<input type="text" class="form-control" name="' + kind + 'Line_' + index + '" data-untracked' +
                 ' maxlength="' + RECEIPT_LINE_LENGTH + '" value="' + escapeHtml(line) + '"' +
                 ' aria-label="' + (kind === 'header' ? 'Header' : 'Footer') + ' line ' + (index + 1) + '">' +
             '<button type="button" class="btn btn-ghost btn-sm" title="Move up" aria-label="Move up"' +
@@ -1963,6 +2112,7 @@ function receiptLinesChanged(kind, lines, focusIndex) {
     renderReceiptLines(kind, lines);
     const form = document.getElementById('store-form');
     if (form) form.dispatchEvent(new Event('input', { bubbles: true }));
+    queuePreviewFollow(kind + 'Line_' + (focusIndex === undefined ? -1 : focusIndex), true);
     if (focusIndex !== undefined) {
         const boxes = receiptLineList(kind).querySelectorAll('input');
         if (boxes[focusIndex]) boxes[focusIndex].focus();
@@ -2102,26 +2252,43 @@ async function handleSaveStoreSettings(event) {
         }
     }
 
-    // switching registration changes what every future invoice claims
-    if (storeSettings && storeSettings.registration_type !== registration) {
-        const yes = await askConfirm(
-            'This shop is recorded as ' + storeSettings.registration_type +
-            ' and you are changing it to ' + registration + '.',
-            {
-                title: 'Change the tax registration?',
-                eyebrow: 'Receipt Maintenance',
-                confirmLabel: 'Change it',
-                tone: 'danger',
-                detail: [
-                    registration === 'VAT'
-                        ? 'Invoices from now on will show a VAT breakdown and read VAT REG TIN.'
-                        : 'Invoices from now on will show no VAT at all and read NON-VAT REG TIN.',
-                    'Sales already rung up keep the registration they were issued under.'
-                ]
-            });
+    // One card for the whole save: what changes, and what that does to invoices.
+    // Switching the registration changes what every future invoice claims.
+    const registrationChanged = Boolean(storeSettings) && storeSettings.registration_type !== registration;
 
-        if (!yes) return;
+    let consequence = 'Invoices printed from now on use these details. Sales already rung up keep the ones they were issued with.';
+    if (registrationChanged) {
+        consequence = 'This shop is recorded as ' + storeSettings.registration_type +
+            ' and you are changing it to ' + registration + '. ' +
+            (registration === 'VAT'
+                ? 'Invoices from now on will show a VAT breakdown and read VAT REG TIN.'
+                : 'Invoices from now on will show no VAT at all and read NON-VAT REG TIN.') +
+            ' Sales already rung up keep the registration they were issued under.';
     }
+
+    // the rate is only part of a VAT shop; a shop becoming VAT lists the rate it starts on
+    const becomesVat = registrationChanged && registration === 'VAT';
+    const changes = formChangeLines(form, (name) => name === 'vatRate' && (registration !== 'VAT' || becomesVat));
+    if (becomesVat) changes.push('VAT rate: \u2014 \u2192 ' + (parseFloat(form.elements.vatRate.value) || 0) + '%');
+
+    const saved = JSON.parse(formBaselines.get(form) || '{}');
+    [['header', 'Header lines'], ['footer', 'Footer lines']].forEach((entry) => {
+        const now = readReceiptLines(entry[0]);
+        const was = saved[entry[0] + 'Lines'] || [];
+        if (JSON.stringify(now) === JSON.stringify(was)) return;
+        changes.push(entry[1] + ': ' + (was.length ? clipValue(was.join(' | ')) : '(none)') +
+            ' \u2192 ' + (now.length ? clipValue(now.join(' | ')) : '(none)'));
+    });
+
+    const yes = await askConfirm(consequence, {
+        title: 'Save these changes?',
+        eyebrow: 'Receipt Maintenance',
+        confirmLabel: registrationChanged ? 'Change it and save' : 'Save details',
+        tone: registrationChanged ? 'danger' : undefined,
+        detail: changeListFor(changes)
+    });
+
+    if (!yes) return;
 
     try {
         const response = await apiSaveStoreSettings({
@@ -2145,6 +2312,9 @@ async function handleSaveStoreSettings(event) {
         }
 
         showStoreVerdict('');
+
+        // saved: nothing is left to lose, even if the re-read below cannot reach the server
+        markFormClean(form, document.getElementById('store-save-btn'));
 
         notifySuccess(result.message, 'Receipt saved');
         await loadStoreSettingsForm();
@@ -2233,15 +2403,148 @@ function renderStorePreview() {
     });
 }
 
+// ---------- the preview follows the box being changed ----------
+// Each box is matched to the part of the receipt it draws. After a pause in
+// typing, the preview scrolls that part into view -- inside the preview, never
+// the page, so the box being typed in stays where it is -- and washes it with
+// a colour that fades (.rc-flash in system-admin.css). A box whose part is not
+// drawn (a switch turned off, an empty line) shows the place it was.
+const PREVIEW_FOLLOW_DELAY = 200;     // quiet needed after a keystroke before the preview moves
+const PREVIEW_FLASH_MS = 1100;        // as long as the fade in system-admin.css
+
+let previewFollowTimer = null;
+let previewFlashTimer = null;
+
+// the receipt's parts for a box: { parts: [elements] }, or { whole: true }
+function previewPartsFor(box, form, name) {
+    const all = (selector) => Array.from(box.querySelectorAll(selector));
+    const firstFound = (...lists) => lists.find((list) => list.length > 0) || [];
+
+    // address (when there is one), TIN, then the shop's own lines, all one class
+    const headLines = all('.rc-head .rc-addr');
+    const lead = form.elements.address.value.trim() ? 1 : 0;
+
+    // a row of the meta grid is two cells: the label, then the value
+    const metaRow = (label) => {
+        const cells = all('.rc-meta > span');
+        const at = cells.findIndex((cell, index) => index % 2 === 0 && cell.textContent === label);
+        return at < 0 ? [] : [cells[at], cells[at + 1]];
+    };
+
+    // the nth line typed counts only the lines before it that are not empty
+    const lineRank = (kind, index) => {
+        const typed = typedReceiptLines(kind);
+        if (index < 0 || !typed[index] || typed[index].trim() === '') return -1;
+        return typed.slice(0, index).filter((line) => line.trim() !== '').length;
+    };
+
+    const metaOf = { show_cashier: 'Cashier', show_customer: 'Customer', show_payment: 'Payment', show_reference: 'Reference' };
+    const line = /^(header|footer)Line_(-?\d+)$/.exec(name);
+
+    if (line) {
+        const rank = lineRank(line[1], parseInt(line[2], 10));
+        if (line[1] === 'header') {
+            return { parts: firstFound(rank < 0 ? [] : [headLines[lead + 1 + rank]].filter(Boolean), all('.rc-head')) };
+        }
+        return { parts: firstFound(rank < 0 ? [] : [all('.rc-thanks')[rank]].filter(Boolean), all('.rc-thanks').slice(-1), all('.rc-foot')) };
+    }
+
+    if (metaOf[name]) return { parts: firstFound(metaRow(metaOf[name]), all('.rc-meta'), all('.rc-head')) };
+
+    switch (name) {
+        case 'storeName':         return { parts: all('.rc-shop') };
+        case 'proprietor':
+        case 'show_proprietor':   return { parts: firstFound(all('.rc-prop'), all('.rc-shop')) };
+        case 'address':           return { parts: firstFound(lead ? headLines.slice(0, 1) : [], all('.rc-shop')) };
+        case 'tin':               return { parts: headLines.slice(lead, lead + 1) };
+        case 'registrationType':
+        case 'vatRate':
+        case 'show_tax':          return { parts: firstFound(all('.rc-tax'), all('.rc-totals')) };
+        case 'bankName':
+        case 'bankAccountName':
+        case 'bankAccountNumber':
+        case 'show_bank':         return { parts: firstFound(all('.rc-bank'), all('.rc-foot')) };
+        case 'title':             return { parts: firstFound(all('.rc-line'), all('.rc-no')) };
+        case 'paidLabel':         return { parts: all('.rc-foot') };
+        case 'show_item_count':   return { parts: all('.rc-due') };
+        case 'invoiceNote':
+        case 'show_note':         return { parts: firstFound(all('.rc-note'), all('.rc-foot')) };
+        case 'paperWidth':
+        case 'fontSize':          return { whole: true };
+        default:                  return { parts: [] };
+    }
+}
+
+function clearPreviewFlash() {
+    clearTimeout(previewFlashTimer);
+    document.querySelectorAll('#store-preview.rc-flash, #store-preview .rc-flash').forEach((node) => node.classList.remove('rc-flash'));
+}
+
+// Scrolls the preview's own stage, not the page; nothing moves when the part is already in view.
+function scrollPreviewTo(element) {
+    const stage = element.closest('.store-preview-stage');
+    if (!stage || stage.scrollHeight <= stage.clientHeight + 1) return;
+
+    const area = stage.getBoundingClientRect();
+    const part = element.getBoundingClientRect();
+    const margin = 12;
+    if (part.top >= area.top + margin && part.bottom <= area.bottom - margin) return;
+
+    const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    stage.scrollTo({
+        top: Math.max(0, stage.scrollTop + part.top - area.top - (stage.clientHeight - part.height) / 2),
+        behavior: calm ? 'auto' : 'smooth'
+    });
+}
+
+function followPreview(name) {
+    const box = document.getElementById('store-preview');
+    const form = document.getElementById('store-form');
+    if (!box || !form || !form.elements.address) return;
+
+    const found = previewPartsFor(box, form, name);
+    const parts = found.whole ? [box] : found.parts;
+    if (parts.length === 0) return;
+
+    clearPreviewFlash();
+    void box.offsetWidth;   // a reflow between the class going and coming back, so the fade starts again
+    if (!found.whole) scrollPreviewTo(parts[0]);
+
+    parts.forEach((part) => part.classList.add('rc-flash'));
+    previewFlashTimer = setTimeout(clearPreviewFlash, PREVIEW_FLASH_MS);
+}
+
+// typing waits for a pause; a switch or a list is followed at once
+function queuePreviewFollow(name, atOnce) {
+    clearTimeout(previewFollowTimer);
+    previewFollowTimer = setTimeout(() => followPreview(name), atOnce ? 0 : PREVIEW_FOLLOW_DELAY);
+}
+
+function followFormEvent(event) {
+    const field = event.target;
+    if (!field || !field.name) return;
+
+    const discrete = field.type === 'checkbox' || field.tagName === 'SELECT';
+    if (event.type === 'change' && !discrete) return;   // typing was followed as it happened
+    queuePreviewFollow(field.name, discrete);
+}
+
 // prints the preview alone, at the roll's width, to try the printer
 function printStorePreview() {
     const form = document.getElementById('store-form');
     if (!form) return;
+    clearTimeout(previewFollowTimer);
+    clearPreviewFlash();   // the wash is for the screen
     renderStorePreview();
     setReceiptPageSize(storeFromForm(form));
     document.body.classList.add('printing-receipt');
     window.print();
     setTimeout(function () { document.body.classList.remove('printing-receipt'); }, 400);
+}
+
+function syncTopbarHeight() {
+    const bar = document.querySelector('.topbar');
+    if (bar) document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
 }
 
 // ==========================================
@@ -2266,6 +2569,10 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
 
         showAccountsList();
 
+        // the receipt preview sticks below the top bar, whatever height that bar has
+        syncTopbarHeight();
+        window.addEventListener('resize', syncTopbarHeight);
+
         // the preview redraws as the boxes are typed into
         const storeForm = document.getElementById('store-form');
         if (storeForm) {
@@ -2274,8 +2581,12 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
                     event.target.classList.remove('is-bad');
                 }
                 renderStorePreview();
+                followFormEvent(event);
             });
-            storeForm.addEventListener('change', renderStorePreview);
+            storeForm.addEventListener('change', (event) => {
+                renderStorePreview();
+                followFormEvent(event);
+            });
         }
 
         watchFormEdits(storeForm, document.getElementById('store-save-btn'));

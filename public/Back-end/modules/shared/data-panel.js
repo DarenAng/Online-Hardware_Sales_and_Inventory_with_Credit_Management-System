@@ -387,10 +387,9 @@ const dataPanelMethods = {
         const total = this.visible.length;
         const pages = Math.max(1, Math.ceil(total / this.pageSize));
 
+        // one page says nothing: there is nothing to turn
         if (pages === 1) {
-            mount.innerHTML = '<span class="pager-info">' +
-                'Showing all ' + total + (total === 1 ? ' record' : ' records') + '</span>';
-            mount.classList.add('is-single');
+            this.clearPager();
             return;
         }
 
