@@ -1,0 +1,20 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm install",
+  "buildCommand": "node scripts/vercel-build.js",
+  "outputDirectory": "vercel-static",
+  "regions": ["sin1"],
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "public/{Front-end,database}/**",
+      "maxDuration": 300
+    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
+  ],
+  "crons": [
+    { "path": "/api/cron/daily", "schedule": "0 18 * * *" }
+  ]
+}

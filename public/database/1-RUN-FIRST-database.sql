@@ -498,6 +498,80 @@ CREATE TABLE qr_payments (
     FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
+-- ------------------------------------------------------------
+-- The server's own tables, so any copy of it can answer any request (Vercel
+-- runs many). Not shop data: a backup leaves them out and a restore leaves
+-- them be. The server also creates them itself on start-up if they are
+-- missing. Times are milliseconds since 1970, free of any time zone.
+-- ------------------------------------------------------------
+
+-- who is signed in; token_hash is the SHA-256 of the cookie, never the cookie.
+-- A session somebody else ended keeps its row a day with the reason, so the
+-- screen left behind is told why.
+CREATE TABLE user_sessions (
+    token_hash CHAR(64) PRIMARY KEY,
+    staff_id INT NOT NULL,
+    user_id INT NOT NULL,
+    role_id INT NOT NULL,
+    role_name VARCHAR(50) NOT NULL,
+    email VARCHAR(100) NOT NULL,
+    started_at BIGINT NOT NULL,
+    last_seen BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL,
+    ended_reason VARCHAR(255) NULL,
+    ended_at BIGINT NULL,
+    INDEX idx_user_sessions_staff (staff_id),
+    INDEX idx_user_sessions_expires (expires_at)
+);
+
+-- the live-update log: change_id is the version every screen asks after
+CREATE TABLE live_changes (
+    change_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    scope VARCHAR(30) NOT NULL,
+    detail VARCHAR(255) NULL,
+    origin VARCHAR(64) NULL,
+    created_at BIGINT NOT NULL
+);
+
+-- a new account waiting for the administrator's second look; sealed with a
+-- key only the administrator's screen holds, gone after ten minutes
+CREATE TABLE account_drafts (
+    draft_hash CHAR(64) PRIMARY KEY,
+    staff_id INT NOT NULL,
+    kind VARCHAR(10) NOT NULL,
+    payload TEXT NOT NULL,
+    expires_at BIGINT NOT NULL
+);
+
+-- backups when there is no disk to keep them on (HARDWARE_BACKUP_STORE=database)
+CREATE TABLE backup_files (
+    file_name VARCHAR(100) PRIMARY KEY,
+    bytes INT NOT NULL,
+    created_at BIGINT NOT NULL,
+    content LONGBLOB NOT NULL
+);
+
+-- small switches, such as the daily backup's on/off
+CREATE TABLE app_flags (
+    flag_key VARCHAR(50) PRIMARY KEY,
+    flag_value VARCHAR(255) NULL,
+    updated_at BIGINT NOT NULL
+);
+
+-- the offline payment simulator's codes (PAYMENT_PROVIDER=sim)
+CREATE TABLE qr_sim_intents (
+    intent_id VARCHAR(40) PRIMARY KEY,
+    token VARCHAR(40) NOT NULL UNIQUE,
+    amount DECIMAL(12,2) NOT NULL,
+    wallet VARCHAR(20) NOT NULL,
+    description VARCHAR(255) NULL,
+    return_url VARCHAR(500) NOT NULL,
+    status VARCHAR(10) NOT NULL,
+    payment_id VARCHAR(40) NULL,
+    error_message VARCHAR(255) NULL,
+    created_at BIGINT NOT NULL
+);
+
 INSERT INTO store_settings (setting_id) VALUES (1);
 
 INSERT INTO roles (role_id, role_name) VALUES

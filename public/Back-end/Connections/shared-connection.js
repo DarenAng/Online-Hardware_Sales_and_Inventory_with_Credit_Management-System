@@ -135,9 +135,101 @@ function apiSendHeartbeat() {
     return fetch('/api/heartbeat', { method: 'POST', headers: apiHeaders() });
 }
 
-// GET /api/events -- the live updates ("inventory changed", ...)
+// GET /api/events/poll -- the live updates ("inventory changed", ...)
+// Asks the server every few seconds (it says how often) what changed since
+// the last version seen: an open connection cannot be held on Vercel. Gives
+// back an object raising the same events an EventSource did -- open, hello,
+// change, resync, evicted, error -- so live-sync.js listens to it the same way.
+// The last version is kept across reconnects, so nothing is missed.
+const LIVE_HIDDEN_POLL_MS = 30 * 1000;   // a tab nobody is looking at asks less often
+let liveLastVersion = null;
+
 function apiOpenLiveUpdates() {
-    return new EventSource('/api/events');
+    const listeners = {};
+    let pollMs = 3000;
+    let timer = null;
+    let closed = false;
+    let first = true;
+    let failing = false;
+
+    function emit(type, data) {
+        const event = { data: JSON.stringify(data || {}) };
+        (listeners[type] || []).forEach((handler) => {
+            try { handler(event); } catch (error) { console.error(error); }
+        });
+    }
+
+    async function ask() {
+        timer = null;
+        if (closed) return;
+
+        try {
+            let url = '/api/events/poll';
+            if (liveLastVersion !== null) url += '?since=' + encodeURIComponent(liveLastVersion);
+            const response = await fetch(url, { headers: apiHeaders(), cache: 'no-store' });
+            if (closed) return;
+
+            // signed out: somebody signed in elsewhere, the account was held, or it simply expired
+            if (response.status === 401) {
+                const body = await response.json().catch(() => ({}));
+                closed = true;
+                emit('evicted', { reason: body.error });
+                return;
+            }
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+
+            const body = await response.json();
+            if (body.pollMs > 0) pollMs = body.pollMs;
+            if (failing || first) emit('open');
+            failing = false;
+
+            if (body.gap) {
+                emit('resync', { version: body.version });
+            } else if (first) {
+                // what changed while this page was away, each scope once
+                const scopes = [];
+                (body.changes || []).forEach((change) => {
+                    if (scopes.indexOf(change.scope) === -1) scopes.push(change.scope);
+                });
+                emit('hello', { version: body.version, caughtUp: true, scopes: scopes });
+            } else {
+                (body.changes || []).forEach((change) => emit('change', change));
+            }
+            first = false;
+            liveLastVersion = body.version;
+        } catch (error) {
+            if (!failing) emit('error');
+            failing = true;
+        }
+
+        schedule();
+    }
+
+    function schedule() {
+        if (closed || timer) return;
+        timer = setTimeout(ask, document.hidden ? Math.max(pollMs, LIVE_HIDDEN_POLL_MS) : pollMs);
+    }
+
+    // back to the tab: ask at once rather than waiting out the slow interval
+    document.addEventListener('visibilitychange', function () {
+        if (closed || document.hidden || !timer) return;
+        clearTimeout(timer);
+        timer = null;
+        ask();
+    });
+
+    ask();
+
+    return {
+        addEventListener(type, handler) {
+            (listeners[type] = listeners[type] || []).push(handler);
+        },
+        close() {
+            closed = true;
+            if (timer) clearTimeout(timer);
+            timer = null;
+        }
+    };
 }
 
 // POST /api/password-reset/request -- email a 6-digit code

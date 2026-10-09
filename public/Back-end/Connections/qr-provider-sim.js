@@ -15,16 +15,18 @@
 // No PayMongo, no GCash, no Maya, no internet and no money: the page says
 // SIMULATION in plain words and carries none of their names' logos. It is for
 // a demo when the internet is down, and for the tests. The payments live in
-// memory, so a restart forgets them; a code on screen then reads as expired.
+// the qr_sim_intents table, so the pay page works whichever copy of the
+// server answers it (Vercel runs many) and survives a restart.
 // ============================================================
 
 const crypto = require("crypto");
 const express = require("express");
 
-// every payment made since the server started, by its intent id
-const intents = new Map();
-// the same payments by the secret in their pay page's address
-const byToken = new Map();
+// Where the codes are kept. qr-payments.js hands over the database through
+// registerRoutes(app, db), and they go in qr_sim_intents. Without one (the
+// UI test stub, which runs no MySQL) they are kept in memory instead.
+let db = null;
+const memory = new Map();   // intent id -> intent
 
 // a day is far longer than any code lasts; a server left running for weeks
 // should not keep every one
@@ -34,14 +36,78 @@ function randomId(prefix) {
   return `${prefix}_sim_${crypto.randomBytes(8).toString("hex")}`;
 }
 
+// a row of qr_sim_intents in the shape the code below reads
+function intentFrom(row) {
+  if (!row) return null;
+  return {
+    id: row.intent_id,
+    token: row.token,
+    amount: Number(row.amount),
+    wallet: row.wallet,
+    description: row.description || "",
+    returnUrl: row.return_url,
+    status: row.status,
+    paymentId: row.payment_id,
+    errorMessage: row.error_message,
+    createdAt: Number(row.created_at)
+  };
+}
+
+const store = {
+  async forgetBefore(time) {
+    if (!db) {
+      for (const [id, old] of memory) if (old.createdAt < time) memory.delete(id);
+      return;
+    }
+    await db.query("DELETE FROM qr_sim_intents WHERE created_at < ?", [time]);
+  },
+
+  async add(intent) {
+    if (!db) {
+      memory.set(intent.id, Object.assign({}, intent));
+      return;
+    }
+    await db.query(
+      `INSERT INTO qr_sim_intents
+         (intent_id, token, amount, wallet, description, return_url, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [intent.id, intent.token, intent.amount, intent.wallet, String(intent.description).slice(0, 255),
+       intent.returnUrl, intent.status, intent.createdAt]);
+  },
+
+  // by "id" or by "token" (the secret in the pay page's address)
+  async find(field, value) {
+    const wanted = String(value || "");
+    if (!db) {
+      for (const intent of memory.values()) {
+        if (intent[field] === wanted) return Object.assign({}, intent);
+      }
+      return null;
+    }
+    const [rows] = await db.query(
+      `SELECT * FROM qr_sim_intents WHERE ${field === "token" ? "token" : "intent_id"} = ?`, [wanted]);
+    return intentFrom(rows[0]);
+  },
+
+  // only a code still waiting can be settled, and only once: true if this one was
+  async settle(id, status, paymentId, errorMessage) {
+    if (!db) {
+      const intent = memory.get(String(id || ""));
+      if (!intent || intent.status !== "pending") return false;
+      Object.assign(intent, { status, paymentId, errorMessage });
+      return true;
+    }
+    const [result] = await db.query(
+      `UPDATE qr_sim_intents SET status = ?, payment_id = ?, error_message = ?
+       WHERE intent_id = ? AND status = 'pending'`,
+      [status, paymentId, errorMessage, String(id || "")]);
+    return result.affectedRows === 1;
+  }
+};
+
 async function createPayment({ amount, wallet, description, returnUrl }) {
   const now = Date.now();
-  for (const [id, old] of intents) {
-    if (now - old.createdAt > FORGET_AFTER_MS) {
-      intents.delete(id);
-      byToken.delete(old.token);
-    }
-  }
+  await store.forgetBefore(now - FORGET_AFTER_MS);
 
   const intent = {
     id: randomId("pi"),
@@ -55,8 +121,7 @@ async function createPayment({ amount, wallet, description, returnUrl }) {
     errorMessage: null,
     createdAt: now
   };
-  intents.set(intent.id, intent);
-  byToken.set(intent.token, intent);
+  await store.add(intent);
 
   // the page lives on this app, at the same address the customer returns to
   const origin = new URL(returnUrl).origin;
@@ -64,12 +129,12 @@ async function createPayment({ amount, wallet, description, returnUrl }) {
 }
 
 async function getStatus(providerIntentId) {
-  const intent = intents.get(String(providerIntentId || ""));
+  const intent = await store.find("id", providerIntentId);
   if (!intent) {
     return {
       status: "expired",
       providerPaymentId: null,
-      errorMessage: "The simulator no longer knows this code (the server was restarted)."
+      errorMessage: "The simulator no longer knows this code (it is more than a day old)."
     };
   }
   return { status: intent.status, providerPaymentId: intent.paymentId, errorMessage: intent.errorMessage };
@@ -77,11 +142,7 @@ async function getStatus(providerIntentId) {
 
 // a cancelled or timed-out code can no longer be paid on its page
 async function cancel(providerIntentId) {
-  const intent = intents.get(String(providerIntentId || ""));
-  if (!intent || intent.status !== "pending") return false;
-  intent.status = "expired";
-  intent.errorMessage = "The code was closed before it was paid.";
-  return true;
+  return await store.settle(providerIntentId, "expired", null, "The code was closed before it was paid.");
 }
 
 function escapeHtml(text) {
@@ -111,13 +172,15 @@ function page(title, body) {
 <div class="card">${body}</div></body></html>`;
 }
 
-function registerRoutes(app) {
-  app.get("/pay-sim/:token", (request, response) => {
-    const intent = byToken.get(request.params.token);
+function registerRoutes(app, database) {
+  db = database;
+
+  app.get("/pay-sim/:token", async (request, response) => {
+    const intent = await store.find("token", request.params.token);
     response.set("Cache-Control", "no-store");
     if (!intent) {
       return response.status(404).send(page("Unknown code",
-        "<h2>This code is not known</h2><p class=\"muted\">It may be from before the shop's server restarted. " +
+        "<h2>This code is not known</h2><p class=\"muted\">It may be more than a day old. " +
         "Ask the cashier for a new QR code.</p>"));
     }
 
@@ -140,18 +203,21 @@ function registerRoutes(app) {
   });
 
   // a plain form post, so the page works on any phone without scripts
-  app.post("/pay-sim/:token", express.urlencoded({ extended: false, limit: "1kb" }), (request, response) => {
-    const intent = byToken.get(request.params.token);
+  app.post("/pay-sim/:token", express.urlencoded({ extended: false, limit: "1kb" }), async (request, response) => {
+    const intent = await store.find("token", request.params.token);
     if (!intent) return response.status(404).send(page("Unknown code", "<h2>This code is not known</h2>"));
 
+    // only a code still waiting can be paid or failed, and only once
     const result = request.body && request.body.result;
     if (intent.status === "pending" && (result === "paid" || result === "failed")) {
-      intent.status = result;
+      let paymentId = null;
+      let errorMessage = null;
       if (result === "paid") {
-        intent.paymentId = randomId("pay");
+        paymentId = randomId("pay");
       } else {
-        intent.errorMessage = "The customer pressed Fail on the simulated pay page.";
+        errorMessage = "The customer pressed Fail on the simulated pay page.";
       }
+      await store.settle(intent.id, result, paymentId, errorMessage);
     }
 
     // the same as PayMongo: back to the shop's return page once done

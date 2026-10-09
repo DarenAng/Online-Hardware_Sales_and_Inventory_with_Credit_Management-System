@@ -4,9 +4,12 @@ A point of sale, inventory, and customer credit system. Node with Express on the
 server, plain HTML, CSS, Bootstrap 5 and JavaScript on the client, MySQL 8 for
 the data.
 
+> **Putting it online?** [DEPLOY-VERCEL-AIVEN.md](DEPLOY-VERCEL-AIVEN.md) runs the same
+> app on Vercel with the database on Aiven MySQL.
+
 ## Setup on a new computer
 
-You need MySQL 8.0 or newer and Node 18 or newer installed first.
+You need MySQL 8.0 or newer and Node 20 or newer installed first.
 
 ### 1. Copy the project folder
 
@@ -33,7 +36,7 @@ public/database/2-RUN-SECOND-stored-procedures.sql
 ```
 
 The names give the order. `1-RUN-FIRST-database.sql` drops and rebuilds
-`hardware_db`, creates the 27 tables, loads the demo data, and then six months
+`hardware_db`, creates the 33 tables, loads the demo data, and then six months
 of mock trading on top of it (see *Mock data* below).
 `2-RUN-SECOND-stored-procedures.sql` loads the 3 views and the 36 stored
 procedures; the tables have to exist before it will run.
@@ -876,7 +879,9 @@ once, and is said on the screen in plain words.
 
 On a cloud host, set `TZ=Asia/Manila` so the hour is the shop's, and point
 `HARDWARE_BACKUP_DIR` at a disk that survives a redeploy. The folder's path is
-never sent to the browser.
+never sent to the browser. On Vercel, which has no lasting disk, backups are
+kept in the database instead (`HARDWARE_BACKUP_STORE=database`) and the daily
+one is taken by Vercel Cron; see [DEPLOY-VERCEL-AIVEN.md](DEPLOY-VERCEL-AIVEN.md).
 
 A restore and the backup never overlap. A restore drops and rebuilds every table
 in turn, and a backup taken then would be a dump of a half-restored database,

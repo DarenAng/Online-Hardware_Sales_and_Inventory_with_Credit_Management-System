@@ -65,6 +65,9 @@ function lanAddress() {
 function siteBaseUrl(port) {
   const site = String(process.env.HARDWARE_SITE_URL || "").trim().replace(/\/+$/, "");
   if (site) return site;
+  // on Vercel, the project's own address (its production domain, else this deployment's)
+  const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  if (vercelHost) return `https://${vercelHost}`;
   return `http://${lanAddress() || "localhost"}:${port}`;
 }
 
@@ -126,7 +129,7 @@ function registerQrPaymentRoutes(app, deps) {
   const { db, callProcedure, getActorId, publishChange, isDateText, CASHIER, port } = deps;
 
   const provider = pickProvider();
-  if (typeof provider.registerRoutes === "function") provider.registerRoutes(app);
+  if (typeof provider.registerRoutes === "function") provider.registerRoutes(app, db);
 
   // what the screens show beside every code: test money, a simulation, or nothing
   let badge = null;
@@ -519,8 +522,10 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
     } else {
       lines.push(`QR payments: PayMongo, ${provider.mode === "test" ? "TEST MODE (no real money)" : "LIVE (real money)"}.`);
     }
-    lines.push(`Phones reach this app at ${baseUrl}` +
-      (process.env.HARDWARE_SITE_URL ? " (HARDWARE_SITE_URL)." : " (this PC on the Wi-Fi; the phone must be on the same network)."));
+    let where = " (this PC on the Wi-Fi; the phone must be on the same network).";
+    if (process.env.HARDWARE_SITE_URL) where = " (HARDWARE_SITE_URL).";
+    else if (process.env.VERCEL) where = " (this Vercel project's address).";
+    lines.push(`Phones reach this app at ${baseUrl}${where}`);
     return lines;
   }
 

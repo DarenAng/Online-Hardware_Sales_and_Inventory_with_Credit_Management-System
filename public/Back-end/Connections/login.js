@@ -17,12 +17,17 @@ const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
 const passwordResetMessage = mailer.passwordResetMessage;
 
+// Over https (Vercel) the cookie is marked Secure so it never travels in the
+// clear; a PC in the shop serves plain http, where a Secure cookie would not
+// be sent back at all. COOKIE_SECURE=1 forces it behind your own https proxy.
+const SECURE_COOKIE = Boolean(process.env.VERCEL) || process.env.COOKIE_SECURE === "1";
+
 function registerLoginRoutes(app, deps) {
   // take the helpers we need out of "deps" (sent to us by server.js)
   const {
     db, writeAuditLog,
     hashPassword, isHashed, verifyPassword,
-    sessions, SESSION_HOURS, startSession, endSession, endSessionsForStaff,
+    SESSION_HOURS, startSession, endSession, endSessionsForStaff,
     signOutAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
     LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES
   } = deps;
@@ -240,7 +245,7 @@ function registerLoginRoutes(app, deps) {
             { email: String(email), attempts: attempts, hold_minutes: LOGIN_HOLD_MINUTES }
           );
           // whoever is at the screen is signed out too: the guesses may be theirs
-          endSessionsForStaff(user.staff_id, null,
+          await endSessionsForStaff(user.staff_id, null,
             "This account was held after too many wrong passwords, so this screen was signed out.");
           return response.status(423).json({
             error: heldMessage(LOGIN_HOLD_MINUTES), heldMinutes: LOGIN_HOLD_MINUTES
@@ -284,17 +289,10 @@ function registerLoginRoutes(app, deps) {
         `${user.email} signed in`
       );
 
-      const token = startSession(user);
+      const token = await startSession(user);
 
-      // how many OTHER sessions this person already had open (minus the new one)
-      let sameStaff = 0;
-      for (const session of sessions.values()) {
-        if (session.staffId === user.staff_id) {
-          sameStaff += 1;
-        }
-      }
-      const previous = sameStaff - 1;
-      endSessionsForStaff(user.staff_id, token,
+      // how many OTHER sessions this person already had open, now ended
+      const previous = await endSessionsForStaff(user.staff_id, token,
         "This account signed in on another device, so this screen was signed out.");
       if (previous > 0) {
         await writeAuditLog(
@@ -308,6 +306,7 @@ function registerLoginRoutes(app, deps) {
       response.cookie("sid", token, {
         httpOnly: true,                              // JavaScript on the page cannot read it
         sameSite: "strict",                          // not sent from another site
+        secure: SECURE_COOKIE,                       // only over https (on Vercel)
         maxAge: SESSION_HOURS * 60 * 60 * 1000,
         path: "/"
       });
@@ -323,7 +322,7 @@ function registerLoginRoutes(app, deps) {
   app.post("/api/logout", async (request, response) => {
     await writeAuditLog(request, "LOGOUT", `${request.actor.email} signed out`);
 
-    endSession(request);
+    await endSession(request);
     response.clearCookie("sid", { path: "/" });
     response.json({ message: "Signed out" });
   });
@@ -375,7 +374,7 @@ function registerLoginRoutes(app, deps) {
       await writeAuditLog(request, "CHANGE_OWN_PASSWORD",
         `${request.actor.email} chose their own password on first sign-in`);
 
-      signOutAfterPasswordChange(request, response);
+      await signOutAfterPasswordChange(request, response);
       response.json({ message: "Password changed successfully", signedOut: true });
     } catch (error) {
       console.error("Password update failed:", error.message);
@@ -578,7 +577,7 @@ function registerLoginRoutes(app, deps) {
          WHERE user_id = ?`,
         [await hashPassword(newPassword), user.user_id]);
 
-      endSessionsForStaff(user.staff_id, null,
+      await endSessionsForStaff(user.staff_id, null,
         "Your password was changed with a code sent to your email. Sign in with the new one.");
 
       await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },

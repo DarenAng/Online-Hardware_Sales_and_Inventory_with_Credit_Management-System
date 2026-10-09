@@ -46,3 +46,10 @@ _to_delete/
 *-1.js
 *-1.css
 *-1.html
+
+# Vercel: the build output and the CLI's project link
+vercel-static/
+.vercel/
+
+# a database CA certificate saved for DB_SSL_CA_FILE
+*.pem
