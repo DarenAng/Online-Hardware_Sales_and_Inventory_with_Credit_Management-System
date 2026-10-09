@@ -249,6 +249,29 @@ h4 { font-size: 18px; }
     margin-left: 4px;
 }
 
+/* Fields side by side share their label row, box row and note row, so a
+   label that wraps (a long hint) or a note under one box no longer pushes
+   the boxes beside it out of line. Each label sits on its own box.
+   The grid's row gap would fall between a field's own rows, so the space
+   between rows of fields moves onto the fields (--field-row-gap, the gap the
+   grid had) and the grid gives the last one back. */
+@supports (grid-template-rows: subgrid) and selector(:has(*)) {
+    .grid-2:has(> .form-group) {
+        --field-row-gap: 18px;
+        row-gap: 0;
+        margin-bottom: calc(-1 * var(--field-row-gap));
+    }
+    .grid-2 > .form-group {
+        display: grid;
+        grid-row: span 3;
+        grid-template-rows: subgrid;
+        row-gap: 0;
+        margin-bottom: calc(15px + var(--field-row-gap, 18px));
+    }
+    .grid-2 > .form-group > label { align-self: end; }
+    .grid-2 > .form-group > :nth-child(n+3) { grid-row: 3; }
+}
+
 /* 16px is not a style choice: below it, iOS Safari zooms the whole page in
    when a field takes focus and the person has to pinch their way back out. */
 .form-control {
@@ -511,7 +534,7 @@ input[type="number"].form-control:placeholder-shown { text-align: left; }
 .pair-layout .panel-head h3 { margin-bottom: 0; }
 
 /* the narrow column: paired fields stack, the buttons sit at the card's foot */
-.pair-form .grid-2 { grid-template-columns: 1fr; gap: 0; }
+.pair-form .grid-2 { grid-template-columns: 1fr; gap: 0; --field-row-gap: 0px; }
 .card.pair-form { display: flex; flex-direction: column; }
 .pair-form > form { flex: 1; display: flex; flex-direction: column; }
 .pair-form .form-footer { margin-top: auto; }
@@ -1281,6 +1304,15 @@ html:has(.modal.open) { overflow: hidden; }
 .modal *::-webkit-scrollbar,
 .drawer::-webkit-scrollbar,
 .drawer *::-webkit-scrollbar { display: none; }
+
+/* a card kept to one page (data-modal-scroll, modals.js) scrolls instead,
+   with a bar so it is plain there is more below */
+.modal[data-modal-scroll] .modal-body {
+    overflow-y: auto;
+    scrollbar-width: thin;
+}
+.modal[data-modal-scroll] .modal-body::-webkit-scrollbar { display: block; width: 8px; }
+.modal[data-modal-scroll] .modal-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 
 /* The pages: the wrapper is the body's height and one column wide; overflow
    lays into further columns to the right and the wrapper slides sideways. */
@@ -2965,6 +2997,12 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
     gap: 12px;
 }
 .make-card .form-group { margin-bottom: 0; }
+/* its suggestion boxes have no caret or clear button to leave room for. The
+   list is only as wide as its box, so it stays inside the card at any width:
+   long words wrap and the count drops under the name */
+.make-card .suggest-wrap .form-control { padding-right: 12px; }
+.make-card .suggest-line { flex-wrap: wrap; gap: 0 12px; }
+.make-card .suggest-name { min-width: 0; overflow-wrap: anywhere; }
 .make-card .form-footer { margin-top: 14px; }
 
 

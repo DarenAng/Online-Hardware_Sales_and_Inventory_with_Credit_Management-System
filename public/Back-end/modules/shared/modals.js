@@ -28,7 +28,7 @@ document.addEventListener('keydown', function (event) {
     });
 });
 
-// A card never scrolls; content taller than the body is flowed into pages
+// A card does not scroll (unless marked data-modal-scroll); content taller than the body is flowed into pages
 // (browser column layout, one column per page) with a pager of its own under
 // the content -- "Page 1 of 3" and Previous/Next -- never in the foot, which
 // holds the card's actions only.
@@ -61,6 +61,9 @@ function paginateModal(modal, resetPage) {
 
     const previous = modal._pages;
     unpaginateModal(modal);
+
+    // a card marked data-modal-scroll keeps one page and scrolls its body
+    if (modal.hasAttribute('data-modal-scroll')) { delete modal._pages; return; }
 
     if (body.scrollHeight <= body.clientHeight + 1) { delete modal._pages; return; }
 

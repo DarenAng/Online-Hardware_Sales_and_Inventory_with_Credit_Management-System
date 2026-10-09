@@ -92,8 +92,9 @@
     order: 99;
 }
 
-/* Add another material: full width under the last line, dashed like a space
-   waiting to be filled, in the orange that means "add" */
+/* Add another material: full width above the first line (a new line goes on
+   top, right under it), dashed like a space waiting to be filled, in the
+   orange that means "add" */
 .po-add-line {
     display: flex;
     align-items: center;
@@ -124,7 +125,7 @@
     line-height: 1;
 }
 /* until the company is settled there are no lines to add to; the note says why */
-#po-lines[hidden] ~ .po-add-line { display: none; }
+.po-add-line[hidden] { display: none; }
 
 /* the note under the total, and the two buttons that end the form */
 .po-footnote {
