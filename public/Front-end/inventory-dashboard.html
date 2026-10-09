@@ -357,12 +357,13 @@
                         <p class="po-lock" id="po-lines-lock">
                             Name the supplier company first. The material lines open once it is
                             settled, and offer only what that company supplies.</p>
-                        <div id="po-lines" hidden></div>
-                        <!-- under the last line, where the eye is once a line is filled in;
-                             hidden with the lines until the company is settled -->
+                        <!-- above the lines: a new line is put on top, right under this, so the
+                             clerk never scrolls past the filled-in ones; hidden with the lines
+                             until the company is settled -->
                         <button type="button" class="btn po-add-line is-inactive" id="po-add-line"
-                                aria-disabled="true" onclick="addPurchaseLine(true)">
+                                aria-disabled="true" hidden onclick="addPurchaseLine(true)">
                             <span class="po-add-mark" aria-hidden="true">+</span>Add another material</button>
+                        <div id="po-lines" hidden></div>
 
                         <!-- drawn by renderPoTotals(); the order prices itself off the material list -->
                         <div id="po-total"></div>

@@ -152,18 +152,16 @@ function makeCardHtml(id) {
                     'when the order is sent.</p>' +
                 '<div class="make-grid">' +
                     '<div class="form-group">' +
-                        '<label for="' + id + '-unit">Counted in</label>' +
-                        '<input type="text" class="form-control" id="' + id + '-unit" ' +
-                               'maxlength="20" placeholder="pcs, bag, kilogram">' +
+                        '<label for="' + id + '-unit">Unit</label>' +
+                        makeSuggestInputHtml(id, 'unit', 'maxlength="20" placeholder="pcs, bag, kilogram"') +
                     '</div>' +
                     '<div class="form-group">' +
                         '<label for="' + id + '-category">Category</label>' +
-                        '<input type="text" class="form-control" id="' + id + '-category" ' +
-                               'maxlength="50" placeholder="Fasteners, Cement">' +
+                        makeSuggestInputHtml(id, 'category', 'maxlength="50" placeholder="Fasteners, Cement"') +
                     '</div>' +
                     '<div class="form-group">' +
                         '<label for="' + id + '-brand">Brand <span class="label-hint">optional</span></label>' +
-                        '<input type="text" class="form-control" id="' + id + '-brand" maxlength="100">' +
+                        makeSuggestInputHtml(id, 'brand', 'maxlength="100"') +
                     '</div>' +
                     '<div class="form-group">' +
                         '<label for="' + id + '-price">Price per unit</label>' +
@@ -174,6 +172,180 @@ function makeCardHtml(id) {
                 '</div>' +
             '</div>' +
         '</div>';
+}
+
+// Unit, Category and Brand each offer what the material list already uses, so
+// a spelling is reused rather than invented twice. Nothing is forced: a word
+// that is not offered is simply a new one. Price has nothing on the list worth
+// offering (another material's price says nothing about this one), so it stays
+// a plain number box.
+const MAKE_SUGGEST_COLUMN = { unit: 'unit_name', category: 'category_name', brand: 'brand_name' };
+const MAKE_SUGGEST_LIMIT = 8;
+
+function makeSuggestInputHtml(id, field, attributes) {
+    const box = id + '-' + field;
+    const at = '\'' + id + '\', \'' + field + '\'';
+    return '' +
+        '<div class="suggest-wrap">' +
+            '<input type="text" class="form-control" id="' + box + '" ' + attributes + ' ' +
+                   'autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list" ' +
+                   'aria-controls="' + box + '-list" ' +
+                   'oninput="makeFieldInput(' + at + ')" ' +
+                   'onfocus="makeSuggest(' + at + ')" ' +
+                   'onclick="makeSuggest(' + at + ')" ' +
+                   'onblur="makeSuggestHide(' + at + ')" ' +
+                   'onkeydown="makeSuggestKey(' + at + ', event)">' +
+            '<ul class="suggest-list" id="' + box + '-list" role="listbox" ' +
+                'onmousedown="event.preventDefault()" hidden></ul>' +
+        '</div>';
+}
+
+// every spelling the material list uses for this field, once each, the most
+// used first
+function makeKnownValues(field) {
+    const column = MAKE_SUGGEST_COLUMN[field];
+    const found = new Map();   // lower-case spelling -> { value, count }
+
+    for (const p of poMaterials) {
+        const value = String(p[column] || '').trim();
+        if (value === '') continue;
+        const key = value.toLowerCase();
+        if (found.has(key)) {
+            found.get(key).count += 1;
+        } else {
+            found.set(key, { value: value, count: 1 });
+        }
+    }
+
+    return Array.from(found.values()).sort((a, b) =>
+        (b.count - a.count) || a.value.localeCompare(b.value));
+}
+
+// An empty box offers the common ones; typed text offers the ones that start
+// with it, then the ones that hold it further in (at most 8).
+function makeSuggest(id, field) {
+    const list = document.getElementById(id + '-' + field + '-list');
+    const box = document.getElementById(id + '-' + field);
+    if (!list || !box) return;
+
+    // the list is normally in hand by now; if not, offer again once it arrives
+    if (!poMaterialsLoaded) {
+        ensurePoMaterials(false).then((ok) => {
+            if (ok && document.activeElement === box) makeSuggest(id, field);
+        });
+    }
+
+    const query = box.value.trim().toLowerCase();
+    const known = makeKnownValues(field);
+
+    let matches;
+    if (query === '') {
+        matches = known;
+    } else {
+        const starts = known.filter((k) => k.value.toLowerCase().indexOf(query) === 0);
+        const inside = known.filter((k) => k.value.toLowerCase().indexOf(query) > 0);
+        matches = starts.concat(inside);
+    }
+    matches = matches.slice(0, MAKE_SUGGEST_LIMIT);
+
+    // nothing to pick when the box already holds the only thing on offer
+    if (matches.length === 0 || (matches.length === 1 && matches[0].value.toLowerCase() === query)) {
+        makeSuggestHide(id, field);
+        return;
+    }
+
+    // one list open at a time: the others (a material's, another box's) close first
+    hideAllMatSuggestions(box.closest('.suggest-wrap'));
+
+    list.innerHTML = matches.map((m, i) =>
+        '<li class="suggest-item" role="option" aria-selected="false" id="' + list.id + '-' + i + '" ' +
+            'data-value="' + escapeHtml(m.value) + '" ' +
+            'onclick="makeSuggestPick(\'' + id + '\', \'' + field + '\', this)">' +
+            '<span class="suggest-line">' +
+                '<span class="suggest-name">' + escapeHtml(m.value) + '</span>' +
+                '<span class="suggest-figure">' + m.count + ' material' + (m.count === 1 ? '' : 's') + '</span>' +
+            '</span>' +
+        '</li>').join('');
+    list.hidden = false;
+    box.setAttribute('aria-expanded', 'true');
+    box.removeAttribute('aria-activedescendant');
+}
+
+function makeSuggestHide(id, field) {
+    const list = document.getElementById(id + '-' + field + '-list');
+    const box = document.getElementById(id + '-' + field);
+    if (list) { list.hidden = true; list.innerHTML = ''; }
+    if (box) {
+        box.setAttribute('aria-expanded', 'false');
+        box.removeAttribute('aria-activedescendant');
+    }
+}
+
+// what typing or picking a word changes on the line: the description under the
+// material box and, through the unit, what the line is priced per
+function makeFieldChanged(id) {
+    renderMatDesc(id);
+    renderPoTotals();
+}
+
+function makeFieldInput(id, field) {
+    makeSuggest(id, field);
+    makeFieldChanged(id);
+}
+
+function makeSuggestPick(id, field, item) {
+    const box = document.getElementById(id + '-' + field);
+    if (box) box.value = item.dataset.value;
+    makeSuggestHide(id, field);
+    makeFieldChanged(id);
+}
+
+function makeSuggestKey(id, field, event) {
+    const list = document.getElementById(id + '-' + field + '-list');
+    const box = document.getElementById(id + '-' + field);
+
+    // Enter never sends the form from these boxes, open list or not
+    if (!list || list.hidden) {
+        if (event.key === 'Enter') event.preventDefault();
+        if (event.key === 'ArrowDown') { event.preventDefault(); makeSuggest(id, field); }
+        return;
+    }
+
+    const items = list.querySelectorAll('.suggest-item');
+    if (items.length === 0) {
+        if (event.key === 'Enter') event.preventDefault();
+        return;
+    }
+
+    let at = -1;
+    items.forEach((item, i) => { if (item.classList.contains('is-active')) at = i; });
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        if (at === -1) {
+            at = step > 0 ? 0 : items.length - 1;
+        } else {
+            at = (at + step + items.length) % items.length;
+        }
+        items.forEach((item, i) => {
+            item.classList.toggle('is-active', i === at);
+            item.setAttribute('aria-selected', i === at ? 'true' : 'false');
+        });
+        if (box) box.setAttribute('aria-activedescendant', items[at].id);
+        if (items[at].scrollIntoView) items[at].scrollIntoView({ block: 'nearest' });
+        return;
+    }
+
+    // Enter takes the highlighted one; with none highlighted it keeps what was
+    // typed (and does not send the form)
+    if (event.key === 'Enter') {
+        event.preventDefault();
+        if (at >= 0) items[at].click(); else makeSuggestHide(id, field);
+        return;
+    }
+
+    if (event.key === 'Escape') makeSuggestHide(id, field);
 }
 
 // Opening the box shows the whole list to read down -- everything the chosen
@@ -341,11 +513,15 @@ function hideAllMatSuggestions(except) {
     document.querySelectorAll('.suggest-list[id$="-list"]').forEach((list) => {
         if (except && except.contains(list)) return;   // the box just clicked keeps its list
         const id = list.id.replace(/-list$/, '');
-        const box = document.getElementById(id + '-box');
+        // a material box is "<id>-box"; the New material card's boxes carry the id itself
+        const box = document.getElementById(id + '-box') || document.getElementById(id);
         if (matPickers[id]) matPickers[id].browseAll = false;
         list.hidden = true;
         list.innerHTML = '';
-        if (box) box.setAttribute('aria-expanded', 'false');
+        if (box) {
+            box.setAttribute('aria-expanded', 'false');
+            box.removeAttribute('aria-activedescendant');
+        }
     });
 }
 
@@ -356,6 +532,9 @@ function matKey(id, event) {
         if (event.key === 'ArrowDown') { event.preventDefault(); matOpen(id); }
         return;
     }
+
+    // leaving the box by Tab leaves its list behind otherwise
+    if (event.key === 'Tab') { hideMatSuggestions(id); return; }
 
     const items = list.querySelectorAll('.suggest-item');
     if (items.length === 0) return;
@@ -483,7 +662,7 @@ function renderMatDesc(id) {
     const unit = field('unit');
     box.hidden = false;
     box.innerHTML = strip([field('brand'), field('category') || 'No category',
-        unit ? 'counted in ' + unit : 'not counted in anything yet'],
+        unit ? 'counted in ' + unit : 'no unit yet'],
         parseFloat(field('price')) || 0, unit || 'unit');
 }
 
@@ -717,6 +896,7 @@ function renderPoLinesGate() {
     lines.hidden = !open;
     if (lock) lock.hidden = open;
     if (add) {
+        add.hidden = !open;
         add.classList.toggle('is-inactive', !open);
         add.setAttribute('aria-disabled', open ? 'false' : 'true');
     }
@@ -831,6 +1011,10 @@ function renderSupplierState() {
 // ==========================================
 // THE ORDER LINES
 // ==========================================
+// A new line goes on top, right under the Add button, so the clerk never scrolls
+// past the lines already filled in. "Line N" counts in the order they were
+// added (the newest, on top, has the highest number) and the order is sent
+// oldest first: poLineRows() is the one place that order is read.
 // fromButton: pressed by the clerk, which the shut lines refuse
 function addPurchaseLine(fromButton) {
     const box = document.getElementById('po-lines');
@@ -875,8 +1059,19 @@ function addPurchaseLine(fromButton) {
                    'readonly tabindex="-1" placeholder="—"></div>' +
         '</div>';
 
-    box.appendChild(row);
+    box.insertBefore(row, box.firstChild);
     renderPoTotals();
+
+    // pressed by the clerk: straight into the new line's material box
+    if (fromButton) {
+        const field = matBox(pickerId);
+        if (field) field.focus();
+    }
+}
+
+// the lines as they were added, oldest first (the page shows them newest first)
+function poLineRows() {
+    return Array.from(document.querySelectorAll('.po-line')).reverse();
 }
 
 // A material delivered in a pack (a box of 20 kilogram) is ordered in that
@@ -986,7 +1181,7 @@ function renderPoTotals() {
     let goods = 0;
     let priced = 0;
 
-    document.querySelectorAll('.po-line').forEach((row, position) => {
+    poLineRows().forEach((row, position) => {
         const index = row.id.replace('po-line-', '');
         const qty = parseInt(row.querySelector('.po-qty').value, 10) || 0;
         const pack = poLineIn(row);
@@ -994,7 +1189,7 @@ function renderPoTotals() {
         const amount = qty > 0 ? qty * price.perPrice : 0;
         if (price.chosen) { goods += amount; priced += 1; }
 
-        // numbered as they stand, so removing line 2 of 3 leaves lines 1 and 2
+        // numbered as they were added, as they stand: removing line 2 of 3 leaves lines 1 and 2
         const title = document.getElementById('po-line-title-' + index);
         if (title) title.textContent = 'Line ' + (position + 1);
 
@@ -1067,7 +1262,7 @@ async function handleCreatePurchaseOrder(event) {
         }
     }
 
-    const rows = document.querySelectorAll('.po-line');
+    const rows = poLineRows();
     const items = [];
 
     for (const row of rows) {
@@ -1099,7 +1294,7 @@ async function handleCreatePurchaseOrder(event) {
 
         if (picked.isNew && picked.unitName === '') {
             notifyWarning('"' + picked.newName + '" needs a unit before it can be added. ' +
-                'What is it counted in?', 'Order not sent');
+                'Fill in its Unit, like pcs or bag.', 'Order not sent');
             const field = document.getElementById(row.dataset.picker + '-unit');
             if (field) field.focus();
             return;
@@ -1949,7 +2144,7 @@ async function submitReceiveOrder() {
 
         if (picked.isNew && picked.unitName === '') {
             notifyWarning('"' + picked.newName + '" needs a unit before it can be added. ' +
-                'What is it counted in?', 'Nothing received');
+                'Fill in its Unit, like pcs or bag.', 'Nothing received');
             return;
         }
 
@@ -2100,7 +2295,7 @@ async function openPurchaseOrderDetail(poId) {
             ? detailField('Ships', escapeHtml(poShipDay(po.supplier_ship_date)) +
                 ' <span class="muted">as the supplier said</span>')
             : '') +
-        detailField('Size', po.line_count + (Number(po.line_count) === 1 ? ' line' : ' lines') +
+        detailField('Items', po.line_count + (Number(po.line_count) === 1 ? ' line' : ' lines') +
             ' <span class="muted">' + po.total_units + (Number(po.total_units) === 1 ? ' unit' : ' units') + '</span>') +
         money +
         '</div>';
@@ -2127,7 +2322,7 @@ async function openPurchaseOrderDetail(poId) {
                 items.map((it) => [escapeHtml(it.product_name), escapeHtml(poQuantityText(it))]), [1]);
     }
 
-    // how to reach the supplier, under the facts (the name is in the facts already)
+    // how to reach the supplier, under the materials (the name is in the facts already)
     const contact = '<h4 class="detail-subhead">Supplier contact</h4>' +
         '<div class="detail-grid">' +
         detailField('Contact Person', escapeHtml(po.contact_person || 'Not set')) +
@@ -2154,14 +2349,14 @@ async function openPurchaseOrderDetail(poId) {
                 'openReceiveOrder(' + po.po_id + ')">Count In the Delivery</button>';
     }
 
-    // one wide page: the facts and the supplier's contact on the left, every
-    // material on the right, so the whole order is read without turning pages
+    // one wide page, never turned: the facts on the left, every material and
+    // the supplier's contact on the right; a very long order scrolls instead
     openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(po.status), 'P' + po.po_id, [
         { label: 'Order', body: '<div class="po-detail-layout">' +
-            '<div class="po-detail-facts">' + summary + contact + '</div>' +
-            '<div class="po-detail-lines"><h4 class="detail-subhead">What is ordered</h4>' + lines + '</div>' +
+            '<div class="po-detail-facts">' + summary + '</div>' +
+            '<div class="po-detail-lines"><h4 class="detail-subhead">What is ordered</h4>' + lines + contact + '</div>' +
           '</div>' }
-    ], foot, { wide: 'xl' });
+    ], foot, { wide: 'xl', scroll: true });
 }
 
 // The manager's decision. Approving asks once; declining asks for the reason,
@@ -2287,7 +2482,11 @@ function poShipDay(value) {
 }
 
 // A click closes every list but the one clicked into: two open at once is two
-// answers to the same question.
+// answers to the same question. The box that has the focus counts as clicked
+// into: a click on a list row that sends the focus to another box (a new
+// material's Unit) must not close the list that box has just opened.
 document.addEventListener('click', function (event) {
-    hideAllMatSuggestions(event.target.closest('.suggest-wrap'));
+    const active = document.activeElement;
+    hideAllMatSuggestions(event.target.closest('.suggest-wrap') ||
+        (active && active.closest ? active.closest('.suggest-wrap') : null));
 });

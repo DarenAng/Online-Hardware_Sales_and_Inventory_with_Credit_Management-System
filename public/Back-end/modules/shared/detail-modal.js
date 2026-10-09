@@ -37,6 +37,8 @@ function openDetailModal(title, subtitle, initials, pages, footActions, options)
 
     const settings = options || {};
     const modal = document.getElementById('detail-modal');
+    // scroll: the record stays on one page and scrolls rather than turn pages
+    if (modal) modal.toggleAttribute('data-modal-scroll', Boolean(settings.scroll));
     const box = modal ? modal.querySelector('.modal-box') : null;
     if (box) {
         box.classList.toggle('modal-wide', Boolean(settings.wide));

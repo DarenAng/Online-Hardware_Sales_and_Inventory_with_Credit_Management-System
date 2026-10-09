@@ -7,7 +7,7 @@
   "regions": ["sin1"],
   "functions": {
     "api/index.js": {
-      "includeFiles": "public/{Front-end,database}/**",
+      "includeFiles": "{public/Front-end/**,public/database/**,node_modules/pdfkit/js/standard-fonts/**,node_modules/pdfkit/js/data/**}",
       "maxDuration": 300
     }
   },

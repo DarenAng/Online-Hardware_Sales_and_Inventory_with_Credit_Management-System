@@ -463,8 +463,10 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
-    margin-top: -4px;
 }
+/* the buttons sit a little closer under the boxes than the next field would;
+   the grid owns that space (see --field-row-gap in general-ui.css) */
+#downpayment-field > .grid-2 { margin-bottom: calc(-4px - var(--field-row-gap, 0px)); }
 .quick-label {
     font-size: 13px;
     color: var(--steel-soft);
@@ -581,7 +583,7 @@
 
 /* quantity and amount are short figures, so they share a row and the page never scrolls */
 @media (min-width: 641px) {
-    #refund-form .grid-2 { grid-template-columns: 1fr 1fr; gap: 0 14px; }
+    #refund-form .grid-2 { grid-template-columns: 1fr 1fr; gap: 0 14px; --field-row-gap: 0px; }
 }
 
 /* where the refund figure came from; marked once a person has overridden it */
