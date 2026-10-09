@@ -1,13 +1,19 @@
 # installed packages, rebuilt with npm install
 node_modules/
 
-# editor and OS files
+# editor, tool and OS files
 .vscode/
+.claude/
+launch/
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# secrets: passwords and keys stay on this computer
 .env
 .env.*
 !.env.example
+mail-password.txt
 
 # local notes and database dumps
 *.log
@@ -15,21 +21,28 @@ Thumbs.db
 
 # dated backups written by the Backup & Recovery screen
 backups/*.sql
+backups/auto-backup.json
+
+# paper drafts
+Capstone outputs/
+~$*
 
 # screenshots written by tests/shots.js
 shots/
 
-# the mail account's app password, read by public/javascript/mailer.js
-public/javascript/mail-password.txt
+# local folder-tidying scripts
+*.bat
 
-# local editor config and paper drafts
-.claude/
-Capstone outputs/
-~$*
+# old copies the app no longer loads
+# (the app now runs from public/Front-end, public/Back-end and public/vendor)
+_reorganize/
+public/css/
+public/javascript/
+public/Back-end/javascript/
 
 # old snapshots kept locally only
 _unused/
-Claude outputs/
+_to_delete/
 *-1.js
 *-1.css
 *-1.html

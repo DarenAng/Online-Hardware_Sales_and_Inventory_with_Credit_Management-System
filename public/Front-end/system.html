@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Administration &middot; Lucelyn Hardware</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
+    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
+    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/general-ui.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    <link rel="stylesheet" href="css/modules/system-admin.css">
+</head>
+
+<body>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <a href="#" class="sidebar-brand" onclick="showAccountsList(event)" title="Back to the default view">
+                <span class="brand-mark">LH</span>
+                <span class="brand-text">
+                    <span class="brand-name">Lucelyn Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
+            </a>
+            <div class="sidebar-user">
+                <span class="sidebar-eyebrow">System Administrator</span>
+                <span data-current-user>User</span>
+            </div>
+            <ul class="sidebar-nav">
+                <!-- A folding heading does two things (shared/helpers.js sidebarHeading): its
+                     words open the module's first screen, its caret alone folds the list -->
+                <li data-sidebar-dropdown>
+                    <a href="#accounts" onclick="sidebarHeading(event, 'accounts-nav', 'accounts-dropdown', showAllUsers)" class="nav-parent" id="accounts-nav"><i class="bi bi-people nav-icon" aria-hidden="true"></i>
+                        Accounts Management <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="accounts-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-accounts" onclick="showAllUsers(event)"><i class="bi bi-person-lines-fill nav-icon" aria-hidden="true"></i>List Users</a></li>
+                        <li><a href="#" data-panel-link="panel-archive" onclick="showArchiveModule(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
+                    </ul>
+                </li>
+                <!-- which screens each role's menu holds -->
+                <li><a href="#" data-panel-link="panel-features" onclick="showAccessControl(event)"><i class="bi bi-shield-lock nav-icon" aria-hidden="true"></i>Access Control</a></li>
+                <li><a href="#" data-panel-link="panel-logs" onclick="showAuditLogs(event)"><i class="bi bi-journal-text nav-icon" aria-hidden="true"></i>Audit Logs</a></li>
+                <li><a href="#" data-panel-link="panel-maintenance" onclick="showMaintenance(event)"><i class="bi bi-database-gear nav-icon" aria-hidden="true"></i>Backup &amp; Recovery</a></li>
+                <li><a href="#" data-panel-link="panel-store" onclick="showStoreSettings(event)"><i class="bi bi-receipt nav-icon" aria-hidden="true"></i>Receipt Maintenance</a></li>
+            </ul>
+        </aside>
+
+        <!-- the shade behind the menu once it slides over the page -->
+        <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
+
+        <main class="main-content">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="menu-toggle" type="button" onclick="toggleSidebar()"
+                            aria-controls="sidebar" aria-expanded="false"
+                            aria-label="Menu">&#9776;</button>
+                    <span class="topbar-title" id="admin-page-title">System Administration</span>
+                </div>
+            </header>
+
+            <div class="content-area">
+
+                <!-- LIST USERS -->
+                <div class="card" id="panel-accounts" data-panel>
+                    <div class="panel-head">
+                        <div>
+                            <h3>Staff Directory</h3>
+                        </div>
+                        <div class="panel-actions">
+                            <button type="button" class="btn btn-success" onclick="showCreateAccount(event)">Create Account</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" id="accounts-search" class="form-control search-input"
+                                   placeholder="Search by name, email, or role"
+                                   oninput="dataPanelSearchInput('admin-users', event)" onkeydown="dataPanelSearchKey('admin-users', event)" title="Type at least two letters to search">
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="accounts-status">Account state</label>
+                            <select id="accounts-status" onchange="reloadUsers()">
+                                <option value="all">Active and inactive</option>
+                                <option value="active">Active only</option>
+                                <option value="inactive">Inactive only</option>
+                            </select>
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="accounts-role">Role</label>
+                            <select id="accounts-role" data-role-filter
+                                    onchange="filterDirectory('roleId', this.value)">
+                                <option value="all">Every role</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="accounts-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <div class="pager is-single" id="accounts-pager"></div>
+                </div>
+
+                <!-- ARCHIVE -->
+                <div class="card" id="panel-archive" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Archived Accounts</h3>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" id="archive-search" class="form-control search-input"
+                                   placeholder="Search archived staff by name, email, or role"
+                                   oninput="dataPanelSearchInput('admin-archive', event)" onkeydown="dataPanelSearchKey('admin-archive', event)" title="Type at least two letters to search">
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="archive-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Archived</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <div class="pager is-single" id="archive-pager"></div>
+                </div>
+
+                <!-- ACCESS CONTROL -- the roles down the left, the picked role's screens
+                     on the right. Every role's switches are kept in the page so a change
+                     made under one role survives looking at another before Save. -->
+                <div class="card" id="panel-features" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Access Control</h3>
+                        </div>
+                        <div class="panel-actions">
+                            <button type="button" class="btn btn-success" id="features-save-btn"
+                                    onclick="saveFeatureMatrix()" disabled title="Nothing has changed yet">Save Screens</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" id="features-search" class="form-control search-input"
+                                   placeholder="Search screens by name or module"
+                                   oninput="filterFeatureScreens(this.value)">
+                        </div>
+                    </div>
+
+                    <div class="access-layout">
+                        <aside class="access-roles" aria-label="Roles">
+                            <span class="eyebrow">Roles</span>
+                            <div class="role-list" id="features-role" role="tablist" aria-label="Pick a role">
+                                <p class="muted">Loading the roles</p>
+                            </div>
+                        </aside>
+
+                        <div class="access-screens">
+                            <div id="features-matrix" class="feature-strips" aria-live="polite">
+                                <p class="table-empty">Loading the screens</p>
+                            </div>
+                            <p class="table-empty" id="features-no-match" hidden>No screen matches that search.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AUDIT LOGS -->
+                <div class="card" id="panel-logs" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Audit Trail</h3>
+                        </div>
+                        <div class="panel-actions">
+                            <button type="button" class="btn" onclick="exportAuditLogs('xlsx')">Export Excel</button>
+                            <button type="button" class="btn" onclick="exportAuditLogs('pdf')">Export PDF</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" id="logs-search" class="form-control search-input"
+                                   placeholder="Search by person, action, detail, or address"
+                                   oninput="dataPanelSearchInput('admin-logs', event)" onkeydown="dataPanelSearchKey('admin-logs', event)" title="Type at least two letters to search">
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="logs-type">Action type</label>
+                            <select id="logs-type" onchange="refreshAuditLogs()">
+                                <option value="all">Every type</option>
+                                <option value="CREATE">Create</option>
+                                <option value="UPDATE">Update</option>
+                                <option value="DELETE">Delete / archive</option>
+                                <option value="VOID">Void</option>
+                                <option value="PAYMENT">Payment</option>
+                                <option value="RESTORE">Restore</option>
+                                <option value="BACKUP">Backup</option>
+                                <option value="SECURITY">Password / security</option>
+                                <option value="ACCESS">Access granted / revoked</option>
+                                <option value="LOGIN">Sign in</option>
+                                <option value="LOGOUT">Sign out</option>
+                                <option value="LOGIN_FAILURE">Failed sign-in</option>
+                                <option value="OTHER">Everything else</option>
+                            </select>
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="logs-from">From</label>
+                            <input type="date" id="logs-from" onchange="refreshAuditLogs()">
+                        </div>
+
+                        <div class="toolbar-field">
+                            <label for="logs-to">To</label>
+                            <input type="date" id="logs-to" onchange="refreshAuditLogs()">
+                        </div>
+
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="logs-table">
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>User</th>
+                                    <th>Role</th>
+                                    <th>IP Address</th>
+                                    <th>Action Type</th>
+                                    <th>Detail</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                    <div class="pager is-single" id="logs-pager"></div>
+                </div>
+
+                <!-- BACKUP & RECOVERY -->
+                <div id="panel-maintenance" data-panel style="display: none;">
+
+                    <!-- filled in from the server: whether the timer is running is a fact about the server -->
+                    <div class="card auto-backup" id="auto-backup-card">
+                        <span class="auto-backup-state" id="auto-backup-state">Checking</span>
+                        <div class="auto-backup-body">
+                            <h3>Automatic Backup</h3>
+                            <p class="panel-sub" id="auto-backup-text">Reading the backup folder&hellip;</p>
+                        </div>
+                        <!-- the switch: hidden until the server has said which way it is -->
+                        <button type="button" class="btn btn-ghost auto-backup-toggle" id="auto-backup-toggle"
+                                onclick="toggleAutoBackup()" style="display: none;">Turn Off</button>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="card tile">
+                            <h3>Save the Whole System</h3>
+                            <button type="button" class="btn btn-accent" id="run-backup-btn"
+                                    onclick="runBackup()">Run Backup Now</button>
+                        </div>
+                        <div class="card tile">
+                            <h3>Restore From a File</h3>
+                            <button type="button" class="btn btn-danger" onclick="chooseRestoreFile()">
+                                Restore From My Computer</button>
+                            <input type="file" id="restore-file" accept=".sql,application/sql,text/plain"
+                                   style="display: none;" onchange="handleRestoreFile(event)">
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Saved Backups</h3>
+                                <p class="panel-sub" id="backup-limit-note"></p>
+                            </div>
+                        </div>
+
+                        <div class="table-responsive grid-10">
+                            <table id="backup-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Time</th>
+                                        <th>File</th>
+                                        <th>Kind</th>
+                                        <th>Size</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+
+                        <div class="pager is-single" id="backup-pager"></div>
+                    </div>
+                </div>
+
+                <!-- RECEIPT MAINTENANCE -- everything the till prints on an invoice, read from
+                     and saved to store_settings; the preview is the same builder the till uses -->
+                <div id="panel-store" data-panel style="display: none;">
+                  <div class="store-layout">
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Receipt Maintenance</h3>
+                            </div>
+                        </div>
+
+                        <form id="store-form" class="form-sheet" onsubmit="handleSaveStoreSettings(event)" novalidate>
+                            <fieldset class="store-section">
+                                <legend class="form-legend">Business details</legend>
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="store-name">Registered name <span class="req">*</span></label>
+                                        <input type="text" id="store-name" name="storeName" class="form-control"
+                                               maxlength="150" placeholder="Lucelyn Hardware" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="store-proprietor">Proprietor</label>
+                                        <input type="text" id="store-proprietor" name="proprietor" class="form-control"
+                                               maxlength="150" placeholder="Lucelyn D. Santos">
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="store-address">Business address <span class="req">*</span></label>
+                                    <input type="text" id="store-address" name="address" class="form-control"
+                                           maxlength="255" placeholder="Wawa, Nasugbu, Batangas" required>
+                                </div>
+
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="store-tin">TIN <span class="req">*</span></label>
+                                        <input type="text" id="store-tin" name="tin" class="form-control"
+                                               inputmode="numeric" autocomplete="off"
+                                               maxlength="17" placeholder="000-000-000-00000" required
+                                               oninput="onTinInput(this)">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="store-registration">Tax registration <span class="req">*</span></label>
+                                        <select id="store-registration" name="registrationType" class="form-control"
+                                                onchange="onRegistrationChange(this.value)" required>
+                                            <option value="VAT">VAT-registered</option>
+                                            <option value="NON-VAT">Non-VAT &mdash; percentage tax</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="grid-2">
+                                    <div class="form-group" id="store-rate-field">
+                                        <label for="store-rate">VAT rate (%) <span class="req">*</span></label>
+                                        <input type="number" id="store-rate" name="vatRate" class="form-control"
+                                               min="0.01" max="100" step="0.01" value="12">
+                                    </div>
+                                </div>
+                            </fieldset>
+
+                            <!-- the account the till shows whenever Bank Transfer is chosen -->
+                            <fieldset class="store-section store-bank" id="store-bank">
+                                <legend class="form-legend">Bank transfer details</legend>
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="store-bank-name">Bank <span class="req">*</span></label>
+                                        <input type="text" id="store-bank-name" name="bankName" class="form-control"
+                                               maxlength="100" autocomplete="off" placeholder="BDO Unibank" required oninput="onBankInput()">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="store-bank-account-name">Account name <span class="req">*</span></label>
+                                        <input type="text" id="store-bank-account-name" name="bankAccountName" class="form-control"
+                                               maxlength="150" autocomplete="off" placeholder="Lucelyn Hardware" required oninput="onBankInput()">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="store-bank-account-number">Account number <span class="req">*</span></label>
+                                    <input type="text" id="store-bank-account-number" name="bankAccountNumber" class="form-control"
+                                           maxlength="50" inputmode="numeric" autocomplete="off" placeholder="0012 3456 7890" required oninput="onBankInput()">
+                                </div>
+                                <p class="store-bank-note" id="store-bank-note"></p>
+                            </fieldset>
+
+                            <fieldset class="store-section">
+                                <legend class="form-legend">Receipt layout</legend>
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="store-paper">Paper width <span class="req">*</span></label>
+                                        <select id="store-paper" name="paperWidth" class="form-control" required>
+                                            <option value="58">58 mm thermal roll</option>
+                                            <option value="80">80 mm thermal roll</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="store-font">Text size <span class="req">*</span></label>
+                                        <select id="store-font" name="fontSize" class="form-control" required>
+                                            <option value="11">Small</option>
+                                            <option value="12">Normal</option>
+                                            <option value="13">Large</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="store-title">Document title <span class="req">*</span></label>
+                                        <input type="text" id="store-title" name="title" class="form-control"
+                                               maxlength="40" placeholder="Sales Invoice" required>
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="store-paid-label">Fully paid stamp <span class="req">*</span></label>
+                                        <input type="text" id="store-paid-label" name="paidLabel" class="form-control"
+                                               maxlength="40" placeholder="PAID IN FULL" required>
+                                    </div>
+                                </div>
+
+                                <span class="store-subhead">Show on the receipt</span>
+                                <div class="store-checks" id="store-show">
+                                    <label><input type="checkbox" name="show_proprietor"> Proprietor</label>
+                                    <label><input type="checkbox" name="show_cashier"> Cashier</label>
+                                    <label><input type="checkbox" name="show_customer"> Customer</label>
+                                    <label><input type="checkbox" name="show_payment"> Payment method</label>
+                                    <label><input type="checkbox" name="show_reference"> Reference number</label>
+                                    <label><input type="checkbox" name="show_item_count"> Item count</label>
+                                    <label><input type="checkbox" name="show_tax"> Tax breakdown</label>
+                                    <label><input type="checkbox" name="show_bank"> Bank details</label>
+                                    <label><input type="checkbox" name="show_note"> Invoice footnote</label>
+                                </div>
+                            </fieldset>
+
+                            <fieldset class="store-section">
+                                <legend class="form-legend">Header lines</legend>
+                                <div class="line-list" id="store-header-lines"></div>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="addReceiptLine('header')">+ Add header line</button>
+                            </fieldset>
+
+                            <fieldset class="store-section">
+                                <legend class="form-legend">Footer</legend>
+                                <div class="form-group">
+                                    <label for="store-note">Invoice footnote</label>
+                                    <input type="text" id="store-note" name="invoiceNote" class="form-control"
+                                           maxlength="255" placeholder="Returns accepted within 7 days with this invoice.">
+                                </div>
+                                <span class="store-subhead">Footer lines</span>
+                                <div class="line-list" id="store-footer-lines"></div>
+                                <button type="button" class="btn btn-ghost btn-sm" onclick="addReceiptLine('footer')">+ Add footer line</button>
+                            </fieldset>
+
+                            <p class="store-verdict" id="store-verdict"></p>
+
+                            <div class="form-footer">
+                                <button type="submit" class="btn btn-success" id="store-save-btn"
+                                        disabled title="Nothing has changed yet">Save Details</button>
+                                <button type="button" class="btn btn-ghost" onclick="loadStoreSettingsForm()">Reset</button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="card store-preview-card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Receipt Preview</h3>
+                            </div>
+                            <button type="button" class="btn btn-sm" onclick="printStorePreview()">Print Test</button>
+                        </div>
+                        <div class="store-preview-stage">
+                            <div class="receipt-paper store-preview" id="store-preview"></div>
+                        </div>
+                    </div>
+                  </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- CREATE ACCOUNT -- a popup over the directory; Create makes the account at once -->
+    <div class="modal" id="create-modal" onclick="closeModalOnBackdrop(event, 'create-modal')">
+        <div class="modal-box create-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">+</div>
+                    <div>
+                        <h3>Create New Account</h3>
+                        <span class="modal-role">Accounts Management</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="cancelCreateAccount()" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="create-user-form" onsubmit="handleCreateUser(event)" novalidate>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="create-first">First name <span class="req">*</span></label>
+                            <input type="text" id="create-first" name="firstName" class="form-control" maxlength="100" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="create-middle">Middle name</label>
+                            <input type="text" id="create-middle" name="middleName" class="form-control"
+                                   maxlength="100" placeholder="Dela Cruz">
+                        </div>
+                        <div class="form-group">
+                            <label for="create-last">Last name <span class="req">*</span></label>
+                            <input type="text" id="create-last" name="lastName" class="form-control" maxlength="100" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="create-phone">Phone <span class="req">*</span></label>
+                            <div class="phone-field">
+                                <span class="phone-prefix">+63</span>
+                                <input type="text" id="create-phone" name="phone" class="form-control"
+                                       inputmode="numeric" autocomplete="tel" required
+                                       maxlength="20" placeholder="9XXXXXXXXX"
+                                       oninput="onPhoneInput(this)">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="create-role">Role <span class="req">*</span></label>
+                            <select id="create-role" name="roleId" class="form-control" data-role-select required></select>
+                        </div>
+                        <div class="form-group">
+                            <label for="create-email">Email <span class="req">*</span></label>
+                            <input type="email" id="create-email" name="email" class="form-control"
+                                   maxlength="100" autocomplete="off" placeholder="name@example.com" required
+                                   oninput="onEmailInput(this)" onblur="checkEmailFree(this)">
+                            <span class="field-error" id="create-email-error" hidden></span>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="cancelCreateAccount()">Cancel</button>
+                <button type="submit" form="create-user-form" class="btn btn-success" id="create-user-btn">Create</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- USER DETAIL MODAL -->
+    <div class="modal" id="user-modal" onclick="closeModalOnBackdrop(event, 'user-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="modal-user-avatar">--</div>
+                    <div>
+                        <h3 id="modal-user-name">User</h3>
+                        <span class="modal-role" id="modal-user-role">Role</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('user-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-tabs">
+                <button type="button" class="modal-tab active" id="modal-view-tab" onclick="showUserTab('view')">Credentials</button>
+                <button type="button" class="modal-tab" id="modal-edit-tab" onclick="showUserTab('edit')">Edit</button>
+            </div>
+
+            <div class="modal-body">
+                <!-- shown only on the signed-in administrator's own card (openUserModal) -->
+                <p class="cred-note" id="modal-own-note" style="display: none;">This is your own account.
+                    An administrator's details, role, status and password are changed by another
+                    administrator, so nothing on this card can be edited from here. Your password is
+                    still yours to change under My Account.</p>
+                <div class="detail-grid" id="modal-user-details"></div>
+
+                <div id="modal-user-edit" style="display: none;">
+                    <form id="edit-user-form" onsubmit="handleUpdateUser(event)">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="edit-first">First name <span class="req">*</span></label>
+                                <input type="text" id="edit-first" name="firstName" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-middle">Middle name</label>
+                                <input type="text" id="edit-middle" name="middleName" class="form-control"
+                                       maxlength="100" placeholder="Dela Cruz">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-last">Last name <span class="req">*</span></label>
+                                <input type="text" id="edit-last" name="lastName" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-phone">Phone</label>
+                                <div class="phone-field">
+                                    <span class="phone-prefix">+63</span>
+                                    <input type="text" id="edit-phone" name="phone" class="form-control"
+                                           inputmode="numeric" autocomplete="tel"
+                                           maxlength="20" placeholder="9XXXXXXXXX"
+                                           oninput="onPhoneInput(this)">
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-role">Role <span class="req">*</span></label>
+                                <select id="edit-role" name="roleId" class="form-control" data-role-select required></select>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-email">Email <span class="req" id="edit-email-req">*</span></label>
+                            <input type="email" id="edit-email" name="email" class="form-control"
+                                   maxlength="100" autocomplete="off" oninput="onEmailInput(this)" onblur="checkEmailFree(this)">
+                            <span class="field-error" id="edit-email-error" hidden></span>
+                        </div>
+                        <div class="form-footer">
+                            <button type="submit" class="btn btn-success" id="edit-user-save-btn"
+                                    disabled title="Nothing has changed yet">Save Changes</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-accent" id="modal-login-btn" onclick="createLoginAccount()" style="display: none;">Create Login</button>
+                <button type="button" class="btn btn-ghost" id="modal-reset-btn" onclick="resetUserPassword()">Reset Password</button>
+                <button type="button" class="btn btn-danger" id="modal-status-btn" onclick="toggleUserStatus()">Deactivate Account</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CREDENTIALS & RESTORATION CARD -- an archived person, with the one action that applies -->
+    <div class="modal" id="restore-modal" onclick="closeModalOnBackdrop(event, 'restore-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="restore-avatar">--</div>
+                    <div>
+                        <h3 id="restore-name">Archived account</h3>
+                        <span class="modal-role" id="restore-role">Role</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('restore-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="detail-grid" id="restore-details"></div>
+                <p class="detail-warn" id="restore-warning">
+                    Restoring puts this account back on the active list. The person can sign in
+                    again straight away with the password they had before.
+                </p>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('restore-modal')">Cancel</button>
+                <button type="button" class="btn btn-success" onclick="restoreSelectedAccount()">Restore Account</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ONE AUDIT ENTRY, IN FULL -->
+    <div class="modal" id="log-modal" onclick="closeModalOnBackdrop(event, 'log-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="log-avatar">--</div>
+                    <div>
+                        <h3 id="log-action">Action</h3>
+                        <span class="modal-role" id="log-when">When</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('log-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="detail-grid" id="log-details"></div>
+            </div>
+
+            <div class="modal-foot" hidden></div>
+        </div>
+    </div>
+
+    <!-- BACKUP ACTIONS, IN A DRAWER -- opened with the backup they belong to -->
+    <div class="drawer-shade" id="backup-shade" onclick="closeBackupDrawer()"></div>
+    <aside class="drawer" id="backup-drawer" role="dialog" aria-labelledby="backup-drawer-title">
+        <div class="drawer-head">
+            <div>
+                <span class="drawer-eyebrow">Backup</span>
+                <h3 id="backup-drawer-title">File</h3>
+            </div>
+            <button type="button" class="drawer-close" onclick="closeBackupDrawer()" aria-label="Close">&times;</button>
+        </div>
+
+        <div class="drawer-body">
+            <div class="detail-grid" id="backup-drawer-details"></div>
+            <p class="detail-warn">
+                Restoring replaces everything currently in the system with the contents of this
+                file. Anything recorded since it was taken is lost.
+            </p>
+        </div>
+
+        <div class="drawer-foot">
+            <button type="button" class="btn" onclick="downloadSelectedBackup()">Download</button>
+            <button type="button" class="btn btn-gold" onclick="restoreSelectedBackup()">Restore</button>
+            <button type="button" class="btn btn-danger" onclick="deleteSelectedBackup()">Delete</button>
+        </div>
+    </aside>
+
+    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
+    <script src="modules/shared/icons.js"></script>
+    <script src="modules/shared/helpers.js"></script>
+    <script src="modules/shared/format.js"></script>
+    <script src="connections/shared-connection.js"></script>
+    <script src="modules/shared/ui-kit.js"></script>
+    <script src="modules/shared/tables.js"></script>
+    <script src="modules/shared/data-panel.js"></script>
+    <script src="modules/shared/live-sync.js"></script>
+    <script src="modules/shared/modals.js"></script>
+    <script src="modules/shared/detail-modal.js"></script>
+    <script src="modules/shared/session.js"></script>
+    <script src="modules/shared/topbar.js"></script>
+    <script src="modules/shared/subnav.js"></script>
+    <script src="modules/shared/my-account.js"></script>
+    <script src="modules/shared/notifications.js"></script>
+    <script src="connections/admin-connection.js"></script>
+    <script src="modules/system-admin.js"></script>
+</body>
+</html>

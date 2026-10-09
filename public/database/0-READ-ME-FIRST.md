@@ -1,11 +1,12 @@
 # public/database/
 
-Two files. Run them in the order the names give.
+Two files to set up, run in the order the names give, and one upgrade file.
 
 | File | What it is | When you run it |
 |---|---|---|
-| `1-RUN-FIRST-database.sql` | The whole schema — 26 tables, the demo data, and six months of mock trading | Setting up a new machine, or resetting one back to the demo and mock data |
-| `2-RUN-SECOND-stored-procedures.sql` | The 3 views and the 30 stored procedures the app uses | Straight after file 1, and again any time a view or a procedure changes |
+| `1-RUN-FIRST-database.sql` | The whole schema — 27 tables, the demo data, and six months of mock trading | Setting up a new machine, or resetting one back to the demo and mock data |
+| `2-RUN-SECOND-stored-procedures.sql` | The 3 views and the 36 stored procedures the app uses | Straight after file 1, and again any time a view or a procedure changes |
+| `3-ADD-qr-payments.sql` | The `qr_payments` table, for a database made before QR payments | Once, on a database that already holds real data; then file 2 (or restart the server) |
 
 ## In MySQL Workbench
 
@@ -32,8 +33,14 @@ holding work you want to keep, take a backup first — the System
 Administrator's **Backup & Recovery** screen writes one into `backups/`.
 
 File 2 is different: it only drops and recreates the views and procedures,
-so it is always safe to re-run on its own. If the server starts up complaining that a
-`PROCEDURE does not exist`, running file 2 again is the fix.
+so it is always safe to re-run on its own. The server also runs it for you: on
+start-up, if the database holds fewer procedures than the code expects, it
+loads this file itself and says so in the terminal. So if a screen ever says
+"this database has N of M stored procedures", restart the server.
+
+One thing to watch in Workbench: it executes the text in the open tab, not the
+file on disk. After the file changes, close the tab and open the file again
+(File → Open SQL Script), or run it from the command line above.
 
 ## Where the upgrade files went
 

@@ -1,0 +1,161 @@
+/* ==========================================================================
+   SIGN IN
+   Login.html and change-password.html
+
+   The only two screens with no menu, no top bar and no role. One card on the
+   dark ground, and the measured grid behind it: the graph paper a hardware
+   order is written on. The grid is kept here and nowhere else, so it reads as
+   the front door rather than as wallpaper.
+   ========================================================================== */
+
+.login-body {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background-color: var(--chrome);
+    background-image:
+        repeating-linear-gradient(0deg,  rgba(255,255,255,0.03) 0 1px, transparent 1px 26px),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 26px);
+    padding: 24px max(24px, env(safe-area-inset-left))
+             calc(24px + env(safe-area-inset-bottom))
+             max(24px, env(safe-area-inset-right));
+}
+
+/* the card's top edge carries the hazard stripe of the printed order and the
+   supplier's page, so the front door is in the shop's own orange */
+.login-card {
+    position: relative;
+    overflow: hidden;
+    background: var(--surface);
+    padding: 40px 36px 30px;
+    border-radius: var(--radius-lg);
+    width: 100%; max-width: 420px;
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.34);
+}
+.login-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 6px;
+    background: var(--hazard);
+}
+
+.login-brand {
+    display: flex; align-items: center; gap: 12px;
+    padding-bottom: 20px; margin-bottom: 26px;
+    border-bottom: 1px solid var(--line);
+}
+.login-brand .brand-name {
+    display: block;
+    font-size: 20.5px; font-weight: 700; letter-spacing: -0.015em;
+    color: var(--ink);
+    line-height: 1.1;
+}
+.login-brand .brand-sub {
+    display: block;
+    font-size: 13.5px;
+    color: var(--steel-soft);
+}
+
+.login-card h2 { margin-bottom: 22px; }
+
+/* the sentence under the heading on the password screen; the heading
+   closes up to it */
+.login-card h2:has(+ .login-lead) { margin-bottom: 6px; }
+.login-lead {
+    font-size: 15px;
+    color: var(--steel);
+    line-height: 1.6;
+    margin-bottom: 22px;
+    max-width: 44ch;
+}
+
+/* A refused sign-in, said at the form rather than in the corner of a wide
+   monitor. It carries the system's meaning rule down its left edge — the same
+   3px device that marks everything else in the system that means something —
+   so it reads as part of this interface rather than as a stray red box. */
+.login-alert {
+    margin-bottom: 18px;
+    padding: 11px 14px;
+    border-left: var(--rule) solid var(--stop);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: var(--stop-dim);
+    color: var(--stop-hi);
+    font-size: 14.5px;
+    line-height: 1.5;
+}
+/* good news at the sign-in screen: a password just changed */
+.login-alert.is-good {
+    border-left-color: var(--ok);
+    background: var(--ok-dim);
+    color: var(--ok-ink);
+}
+
+/* Show sits inside the password box like the envelope sits in the email box:
+   the same white, a quiet word, no grey block hanging off the end */
+.login-card .password-toggle {
+    background: var(--surface);
+    border-left: none;
+    color: var(--steel);
+    padding: 0 14px;
+}
+.login-card .password-toggle:hover { background: var(--paper); color: var(--ink); }
+
+.login-submit { width: 100%; margin-top: 8px; min-height: 50px; font-size: 16.5px; }
+
+.login-foot {
+    margin-top: 20px; padding-top: 16px;
+    border-top: 1px solid var(--line);
+    font-size: 14px; color: var(--steel-soft); line-height: 1.55;
+}
+
+/* "Forgot your password?" and the way back: words that act, set as links so
+   they read as a way out rather than a second thing to press */
+.login-link {
+    display: inline;
+    padding: 0;
+    margin: 0 10px 0 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-weight: 600;
+    color: var(--go);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+}
+.login-link:hover { color: var(--go-hi); }
+.login-link:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.login-link[hidden] { display: none; }
+
+/* the six digits from the mail, set so each one is read on its own */
+.reset-code {
+    font-family: var(--font-figure);
+    font-size: 22px;
+    letter-spacing: 0.3em;
+    text-align: center;
+}
+
+/* only one of the two cards shows; the phone layout below sets display on it */
+.login-card[hidden] { display: none; }
+
+/* ==========================================================================
+   ON A PHONE
+   The card gives up its own margins and becomes the screen. Nothing here
+   needs to be smaller; it needs to be closer to the thumb.
+   ========================================================================== */
+@media (max-width: 480px) {
+    .login-body { padding: 0; align-items: stretch; }
+    .login-card {
+        max-width: none;
+        min-height: 100dvh;
+        border-radius: 0;
+        box-shadow: none;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 28px max(20px, env(safe-area-inset-left))
+                 calc(28px + env(safe-area-inset-bottom))
+                 max(20px, env(safe-area-inset-right));
+    }
+}

@@ -1,4 +1,4 @@
-# Online Hardware Sales and Inventory with Credit Management
+# Lucelyn Hardware — Online Sales and Inventory with Credit Management
 
 A point of sale, inventory, and customer credit system. Node with Express on the
 server, plain HTML, CSS, Bootstrap 5 and JavaScript on the client, MySQL 8 for
@@ -33,9 +33,9 @@ public/database/2-RUN-SECOND-stored-procedures.sql
 ```
 
 The names give the order. `1-RUN-FIRST-database.sql` drops and rebuilds
-`hardware_db`, creates the 26 tables, loads the demo data, and then six months
+`hardware_db`, creates the 27 tables, loads the demo data, and then six months
 of mock trading on top of it (see *Mock data* below).
-`2-RUN-SECOND-stored-procedures.sql` loads the 3 views and the 30 stored
+`2-RUN-SECOND-stored-procedures.sql` loads the 3 views and the 36 stored
 procedures; the tables have to exist before it will run.
 
 Run them in MySQL Workbench or the `mysql` command line. Those two honour the
@@ -69,15 +69,18 @@ There are two automatic upgrades, and both happen on `npm start`. The first:
 `middle_name VARCHAR(100)` and `full_name` is rebuilt around it. The letters
 already in there are kept and are still valid middle names of one letter, so
 nothing is lost and nothing has to be retyped — fill in the whole name the
-next time you open each record. The second: the three access-control tables
-(`connected_systems` and `system_permissions`, see *Connected systems*
-below, and `role_feature_permissions`, see *Screens by role*) are created if
-they are missing, the five internal systems are registered, and the audit
-trail's list of action types is widened to take the two new ones. Each
-upgrade says so on the console when it does something
-and does nothing at all on a database that already has it — but **re-run file
-2 afterwards** if the console says to, because the two procedures the new
-tables need only come from there.
+next time you open each record. The second: the `role_feature_permissions`
+table (see *Screens by role*) is created if it is missing, and the audit
+trail's list of action types is widened to take the *Access* kind. Each
+upgrade says so on the console when it does something and does nothing at all
+on a database that already has it.
+
+Two more arrive the same way. `store_settings` gains `bank_name`,
+`bank_account_name` and `bank_account_number` (see *Bank transfers* below),
+and the `password_resets` table is created for "Forgot your password?". Both
+are added on `npm start`, and the server then finds fewer procedures than it
+expects (31 of 33) and **loads file 2 by itself**, so restarting the server is
+all an existing database needs. Running file 2 by hand does the same.
 
 Earlier versions of the project shipped `upgrade.sql` through `upgrade_v8.sql`
 and `fix_patch.sql` for stepping an existing database forward one version at a
@@ -87,64 +90,85 @@ history still has them.
 
 ### 4. Point the server at your MySQL
 
-Open `public/javascript/server.js` and edit the SETUP block at the top:
+Copy `.env.example` to `.env` in the project folder and fill it in:
 
-```js
-const DB_HOST = "localhost";
-const DB_USER = "root";
-const DB_PASSWORD = "your-mysql-password";
-const DB_NAME = "hardware_db";
-const port = 3000;
+```env
+DB_HOST=localhost
+DB_USER=root
+DB_PASSWORD=your-mysql-password
+DB_NAME=hardware_db
+DB_PORT=3306
 ```
 
-`DB_PASSWORD` is the MySQL root password on the new machine.
+`DB_PASSWORD` is the MySQL root password on the new machine. The file is
+read by `dotenv` when the server starts and is ignored by git, so the password
+never lands in the repository; `server.js` warns at startup if it is missing
+or still a placeholder.
+
+Everything else the server can be told is in the same file, and every one of
+them has a working default, so they can be left out:
+
+| Setting               | Default              | What it does                                      |
+|-----------------------|----------------------|---------------------------------------------------|
+| `HARDWARE_PORT`       | `3000`               | the port the app listens on                       |
+| `SESSION_HOURS`       | `8`                  | how long a sign-in lasts without signing out      |
+| `TRUST_PROXY`         | `0`                  | `1` only behind a reverse proxy you control, so the audit trail reads the visitor's address from `X-Forwarded-For` |
+| `HARDWARE_BACKUP_DIR` | `backups/`           | where Backup & Recovery writes its `.sql` files   |
+| `MAIL_*`              | mail off             | the mail account; see the next step               |
+
+Nothing about the machine, the account or the shop is written into a source
+file. `.env.example` lists every setting with a note beside it.
 
 ### 5. Point the server at a mail account (optional)
 
-The system sends one kind of email: the first password for an account somebody
-has just been given. It works without this step — the password is shown once on
-the administrator's screen instead, to be handed over — so leave it until the
-rest is running.
+The system sends three kinds of email: the password for an account somebody
+has just been given (or had reset), the six-digit code behind "Forgot your
+password?", and a confirmed purchase order to its supplier. It works without
+this step — a new password is shown once on the screen instead, to be handed
+over; the sign-in page says codes cannot be sent and who can reset a password
+instead; and a confirmed order tells the manager to print it and send it — so
+leave it until the rest is running.
 
-Open `public/javascript/mailer.js` and edit the SETUP block at the top:
+Add the mail account to the same `.env`:
 
-```js
-const MAIL_ENABLED = false;
-const MAIL_HOST = "smtp.gmail.com";
-const MAIL_PORT = 465;
-const MAIL_SECURE = true;          // true on 465, false on 587
-const MAIL_USER = "";              // the full address, e.g. shop@gmail.com
-const MAIL_PASSWORD = readPasswordFile();   // see WHERE THE PASSWORD GOES, above
+```env
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=465
+MAIL_USER=shop@gmail.com
+MAIL_PASSWORD=the-app-password
+MAIL_FROM_NAME=
 ```
 
-Set `MAIL_ENABLED` to `true` and fill in the address. The password does not go
-in this file: create `public/javascript/mail-password.txt` next to it, holding
-the password on one line and nothing else. That file is in `.gitignore`, so it
-stays on the machine and never reaches GitHub; every computer this is set up on
-makes its own. With no such file, mail is simply off and the fallback is used.
+With `MAIL_USER` or `MAIL_PASSWORD` empty, mail is simply off and the fallback
+is used. `MAIL_FROM_NAME` is the name on the From: line; left empty, the mail
+is signed with the shop's name from System Administration. Since `.env` is in
+`.gitignore`, the account stays on the machine and never reaches GitHub; every
+computer this is set up on fills in its own. (A machine set up before these
+settings existed may still have the password in
+`public/Back-end/mail-password.txt`; that still works, and `MAIL_PASSWORD` wins
+when both are present.)
 
-**For a Gmail account,** the password in that file is not the password you sign
-in to Gmail with — Google refuses those over SMTP. Turn on 2-Step Verification
-on the account, make an App Password (16 letters) at
-`myaccount.google.com/apppasswords`, and put that in the file. Leave the host
-and port as they are.
+**For a Gmail account,** `MAIL_PASSWORD` is not the password you sign in to
+Gmail with — Google refuses those over SMTP. Turn on 2-Step Verification on the
+account, make an App Password (16 letters) at
+`myaccount.google.com/apppasswords`, and put that in. Leave the host and port
+as they are.
 
-**For anything else,** port 465 is TLS from the first byte, so `MAIL_SECURE`
-stays `true`; port 587 starts in the clear and is upgraded with STARTTLS, so set
-it to `false`. Port 25 is not offered: it is unencrypted, and this connection
-carries a password.
+**For anything else,** port 465 is TLS from the first byte, and `MAIL_SECURE`
+defaults to `true` there; port 587 starts in the clear and is upgraded with
+STARTTLS, which is what it defaults to on any other port (`MAIL_SECURE=false`).
+Port 25 is not offered: it is unencrypted, and this connection carries a
+password.
 
 There is no package to install. `mailer.js` speaks SMTP over Node's own `tls`,
 for the same reason passwords are hashed with Node's own scrypt rather than with
 bcrypt off npm: `npm install` should fetch as little as possible on a machine
-this is being set up on. Check it without sending anything real:
+this is being set up on.
 
-```
-node tests/mailer.js
-```
-
-`mailer.js` and `mail-password.txt` sit under `public/`, so — like `server.js`
-— the server refuses to serve either of them to a browser.
+The server code in `public/Back-end/` — `server.js`, `mailer.js`, the old
+`mail-password.txt` — stays on the server; only `public/Back-end/modules/` and
+the `*-connection.js` files in `public/Back-end/Connections/` (the browser
+scripts) are handed to a browser.
 
 ### 6. Start the server
 
@@ -158,7 +182,7 @@ On startup you should see three lines:
 
 ```
 Connected to MySQL database "hardware_db" on localhost.
-All 30 stored procedures are loaded.
+All 36 stored procedures are loaded.
 Server running at http://localhost:3000
 ```
 
@@ -175,8 +199,10 @@ A warning about missing procedures means step 3 did not finish. Run
 | Cashier              | cashier@hardware.com    | cashier123   |
 | Delivery Personnel   | delivery@hardware.com   | delivery123  |
 
-Only the admin account skips the first login password change. The other five
-land on `change-password.html` and pick a new password of 8 characters or more.
+These five are the only accounts the database ships with; the administrator
+makes any others from the Accounts screen. Only the admin account skips the
+first login password change. The other four land on `change-password.html`
+and pick a new password of 8 characters or more.
 
 ### Mock data
 
@@ -184,20 +210,15 @@ The demo data above is a handful of rows so every screen has something to
 show. Section 8 of `1-RUN-FIRST-database.sql` then loads six months of
 trading for a hardware shop in Nasugbu, Batangas, so the system can be tested
 and evaluated against something that looks like a shop rather than against
-tables with three rows in them: seven more staff (one of whom left in June),
-twenty-six more customers with credit accounts in every standing, four more
+tables with three rows in them: twenty-six more customers with credit accounts in every standing, four more
 suppliers, forty more materials with stock on the shelf, eleven purchase
 orders, a hundred-odd sales with their lines and payments, deliveries at
 every stage, returns, stock movements, credit extension requests, alerts and
-an audit trail to match — including two people who hold a key to a
-connected system (the manager may watch and run the backup; the senior clerk
-may watch the database), so the Access Control screen has something to show
-besides "Nothing".
+an audit trail to match.
 
-The extra accounts sign in with the pattern `firstname12345` —
-`liza.gonzales@hardware.com` / `liza12345`, `carlo.dizon@hardware.com` /
-`carlo12345`, and so on; the directory lists them. Every one of them has to
-choose a password on first sign-in, as above.
+Every row of it is the work of one of the five accounts above: the cashier
+rang up every sale, the driver ran every delivery, the clerk made every stock
+movement, and the manager took every credit decision. No other staff exist.
 
 None of it is special. Every row is the kind a day's trading writes, and the
 credit book deliberately holds one account of each standing worked out by the
@@ -217,9 +238,7 @@ screens inside whichever module is open, and it changes as you move; on a
 module that has only one screen it is not there at all. The strip is built
 from the menu itself, so a screen a role cannot open never gets a tab. Which
 screens a role's menu holds is the administrator's to change (see *Screens
-by role*), and a screen with things waiting on it says how many, on the item,
-on the heading above it and in the top bar (see *What is waiting, and where
-it shows*).
+by role*).
 
 The bar itself is separated from the page three ways: a tinted band along its
 top edge, a ground a shade off the white of the cards below it, and a soft
@@ -269,28 +288,52 @@ colours means changing those values and nothing else.
 
 The cashier's screen is the busiest in the system and the only one used with
 somebody waiting, so it is laid out for that. The catalog is a **list**, one
-product a line — name, category, brand, price, whether it can be sold, and
-an Add button — rather than a grid of cards, because six hundred products
+product a line — name, category, brand, what it is sold by, price, whether
+it can be sold — rather than a grid of cards, because six hundred products
 read faster down a column than across a wall, and the prices sit in one
-column where they can be compared. The Add button is the only thing that
-puts a product on the order; pressing the line anywhere else opens the
-product on a card — everything the catalog knows about it, with its own Add
-button — because a row that adds on a press adds a bag of cement when
-somebody meant to read about it. A product that has run out says so on its
-line and on its card, and neither will add it.
+column where they can be compared. **The row is the button**: pressing a
+product anywhere on its line puts one on the order, and pressing it again
+puts one more. There is no Add button to aim at and no card to read first;
+the line lights up on the order as it lands, and the catalog row says *2 on
+order* beside the name until it is taken off. A product that has run out
+says so on its line and cannot be pressed.
 
-**Counted and measured.** A bag of cement is counted, and Add puts one on
-the order; nails are weighed and wire is cut, so a product sold by the
-kilogram, gram, metre, litre, foot or gallon is *measured*: Add opens a
-card asking how much — *2.5* kg — with what is on the shelf as the ceiling,
-the cart line reads *2.5 kg* and its − / + step by a half, and the amount
-can be retyped by pressing it. Which a unit is comes from its name
-(`MEASURED_UNITS` in `shared/format.js`); every other unit is counted. The
-quantity columns behind this — stock on hand, sale lines, adjustments,
-returns — take three decimal places, and the server widens them on a
-database from before at startup; **re-run file 2 afterwards**, because the
-procedures that read them come from there and until then a fraction is
-rounded inside the procedure, as it always was.
+**Counted, measured, and sold by the box.** A bag of cement is counted, and
+a press puts one on the order; nails are weighed and wire is cut, so a
+product sold by the kilogram, gram, metre, litre, foot or gallon is
+*measured*: the amount on its cart line is typed — *2.5* kg — as well as
+stepped by a half with − / +, with what is on the shelf as the ceiling.
+Which a unit is comes from its name (`MEASURED_UNITS` in
+`shared/format.js`); every other unit is counted, in whole numbers.
+
+Many things also go out in bigger sizes: nails by the sack, bulbs by the
+box, cement by the pallet. Those are **selling units**, kept by the clerk
+on the material's card (*Selling Units* tab — the size's name, how many of
+the product's own unit it holds, and its price, or none to charge the unit
+price times the count). The till reads them from the catalogue, and every
+cart line whose product has sizes carries a small **unit picker** — *kg*,
+*box (5 kg)*, *sack (25 kg)* — so the same product is counted in whichever
+size the customer asked for. Stock is always kept in the product's own
+unit: two sacks ask the shelf for fifty kilos, the ceiling on the line is
+what the shelf can give in that size, and a size the shelf cannot fill even
+once falls back to the unit and says so. The invoice prints what was
+charged for and what left the shelf on one line — *2 sack (50 kg) x
+₱1,850.00*.
+
+Behind it: `product_units` holds the sizes, and a sale line records the
+size it was sold in (`sale_items.sold_unit`, `sold_quantity`) beside
+`quantity`, which stays in the product's own unit so stock, reorder points
+and the reports that count units keep reading it as they always have;
+`unit_price` is the price of one of whatever was sold, and `subtotal`
+multiplies the two. `sp_create_sale_transaction` takes `unit` on each
+line, prices it from `product_units`, and adds every line naming one
+material up in the product's own unit before checking the shelf, so a sack
+and a loose kilo of the same nails cannot between them sell what is not
+there. The quantity columns take three decimal places, and the server adds
+the sizes table and the sale-line columns on a database from before at
+startup; **re-run file 2 afterwards**, because the sale procedure that
+reads them comes from there. Removing a size later changes nothing already
+sold: each sale line keeps its own copy.
 
 The printed invoice carries a **Total Items Purchased** line above the
 subtotal: the quantities added up, and the number of lines beside it when
@@ -314,6 +357,90 @@ Refunds — are listed under **Point of Sale** in the menu, folding open and
 shut under the heading the way the manager's Credit does, rather than as a
 strip of tabs across the page.
 
+**Debt payments, from the customer's card.** A sale on account is settled
+later, at the counter, from **Customers Record**: press the customer's
+name and, when they owe something, their card has an **Unpaid Sales** tab
+listing every sale still carrying a balance — receipt, date, what is left
+and when it falls due (thirty days from the sale, the same term that turns
+an account to Watch), oldest first. Pressing a sale, or *Take a Payment*
+in the card's foot (which opens the only sale owing at once, or the tab
+when there are several), opens **Take a Payment**: the balance is filled
+in, a quick-fill row offers a quarter, half or all of it, the method is
+chosen, a cheque or transfer number goes in the reference box (and is
+insisted on for those two), and a line under the form says what the balance
+becomes before the button is pressed. The server records it through
+`sp_record_credit_payment`, which refuses anything over the balance and
+marks the sale *Paid* when it reaches zero. When the form closes the card
+comes back with the new balance, and the credit book and a customer picked
+at the till follow at once. Taking payments is still a switch in the
+catalogue (`debt-payments`), so the administrator can turn it off for the
+cashiers; the tab and the button then do not appear.
+
+**The button says what pressing it does.** The checkout button's words follow
+the payment method and what has been typed, so nobody books a sale to an
+account thinking they took the money for it:
+
+| The sale as it stands | The button says |
+|---|---|
+| paid in full at the counter (cash, cheque, e-wallet, transfer) | **Complete Sale** |
+| Credit, nothing paid now | **Charge to Account** |
+| Credit, part paid now | **Take Part Payment & Charge the Rest** |
+| Credit, the whole amount paid now | **Complete Sale** |
+| Cash on Delivery | **Place COD Order** |
+
+It is worked out in `checkoutLabel()` in `cashier.js`, from the same totals
+the order panel shows.
+
+**A payment reference, so the money can be traced.** Money that is not handed
+over in notes is only money once it clears, and it is found again by its
+number. A **Reference** box appears under the payment fields for anything but
+cash:
+
+| How the money arrives | Reference |
+|---|---|
+| Cheque | required — the cheque number |
+| Bank Transfer | required — the bank's reference for the transfer |
+| GCash, PayMaya, PayPal | optional — the e-wallet's reference |
+| Cash, Cash on Delivery | not asked |
+
+On a Credit sale the part payment's own method decides it, and nothing paid now
+asks for nothing. The screen refuses a cheque or a transfer with an empty box
+before anything is sent, and `POST /api/sales` refuses it again whichever
+screen sends it. Once the sale exists the reference is written to
+`sales.reference_no` by `sp_set_sale_reference`, which never overwrites a
+reference already on a sale (it is what the money is traced by; a second one
+typed later would lose the first) and puts a `SALE_REFERENCE_SET` entry on the
+audit trail. A reference typed against cash is not kept. The invoice prints it
+on the *Reference* line.
+
+**Bank transfers.** The shop's account — bank, account name, account number —
+is kept by the administrator under **Receipt Maintenance**, in a *Bank transfer
+details* box: all three, or none, because a bank with no number, or a number
+with no name on it, sends a customer's money nowhere anyone can find it. The
+screen and the server both hold to that, and the number has to be digits (with
+spaces or dashes where the bank prints them). It is saved through
+`sp_update_store_bank_details`, called only when the account actually
+changed; the audit entry carries only the last four digits.
+
+Whenever **Bank Transfer** is chosen at the till — as the sale's method, as the
+part payment's method on a Credit sale, or on the *Take a Payment* card — a box
+shows the bank, the account name, the account number and the amount to send,
+to be read out to the customer. With no account on file it says so, and says
+who can add one. The invoice prints the account too: as a record when the sale
+was paid by transfer, and as the way to pay when the sale leaves a balance, with
+a line asking the customer to quote the invoice number (*OR-000123*) as the
+transfer reference so the money is matched to the sale when it lands.
+
+**The customer's history is paged, not scrolled.** A customer's card at the
+till and on the manager's Credit screen shows purchases beside payments; a
+customer with sixty sales used to have the tables flowed sideways into pages
+of the card, cut mid-table. Each table now pages on its own — six rows, a
+*Previous* and *Next* under it, and *1–6 of 60 sales* between them — on a
+tab of its own beside the account facts, and the card scrolls down on a
+short screen rather than turning pages (`pagedTable` in
+`shared/detail-modal.js`; a card marked `data-modal-scroll` opts out of the
+page-turning that every other card does).
+
 ## On a phone
 
 Every screen works on a phone, and the tables are the reason that took work.
@@ -325,7 +452,7 @@ of the record on top, then one line per value with the name of its column
 beside it, then whatever you can do to that record as a full-width button at
 the bottom. Nothing has to be repeated in the markup for this — the column
 names are read off the table's own headings by `labelTableCells()` in
-`javascript/modules/shared/tables.js` and stamped onto every cell as it is
+`Back-end/modules/shared/tables.js` and stamped onto every cell as it is
 filled in, so the thirty-odd functions that draw these tables did not change.
 
 The rest of it:
@@ -364,13 +491,15 @@ in at a counter is otherwise a screen on which anybody who sits down can set
 a new password and own the account from then on, and asking for the current
 one first only helps if the person who sat down does not know it.
 
-So a new password comes from the administrator: **Reset Password** on the
-staff card makes one the way a new account's is made (see *The first
-password* below) — nobody types it, it is mailed to the address on file,
-every screen the person has open is signed out, and the system asks for a
-password of their own choosing on the next sign-in. Nobody but the owner
-ever knows the password they end up with. The server refuses the two routes
-whichever screen sends them (`notOwnCredentials` in `server.js`).
+So a new password comes from outside the signed-in screen, one of three ways
+(see *When a password is lost* below): a code emailed to the person from the
+sign-in page, a reset by a manager or the administrator — made the way a new
+account's password is made, mailed to the address on file, every screen the
+person has open signed out, and a password of their own chosen on the next
+sign-in — or, when nothing else is left, a script run on the server's own
+computer. The server refuses the two own-password routes whichever screen sends
+them (`notOwnCredentials` in `server.js`), and the refusal names the ways
+that do work.
 
 **The System Administrator is the other way round.** They keep the Password
 tab — an administrator locked out with nobody above them is a shop that is
@@ -484,14 +613,76 @@ says, in as many words, that nobody will ever ask them for their password.
 
 The audit trail records that an account was created, by whom, from which
 machine, and whether the password was emailed. It never records the password
-itself. The database stores only a scrypt hash. `tests/smoke.js` checks the
-trail for the generated password and fails if it finds it.
+itself. The database stores only a scrypt hash.
 
 **Reset Password** on an existing account is the same machinery. Nobody types
 the new password: the server makes one, mails it, ends every session the
 account holds, and the person chooses their own on the next sign-in. If the
 mail cannot go, the password comes back to the administrator's screen once,
 as it does for a new account.
+
+## When a password is lost
+
+The administrator's **Reset Password** is the first answer, and it is not
+always there: the administrator is off for the day, or is the one locked out.
+So there are three more ways back in, each for a different gap.
+
+### 1. "Forgot your password?" on the sign-in page
+
+For anybody, when mail works. Under the sign-in form, **Forgot your
+password?** turns the card over: type the address you sign in with, and a
+six-digit code is emailed to it; type the code and a new password, and that
+is your password. It is chosen by you, so it is not a temporary one.
+
+- The code comes from `crypto.randomInt` and only its scrypt hash is kept, in
+  `password_resets`. It lasts **15 minutes** and **five wrong tries**, and
+  asking again retires the one before.
+- An account is sent **at most one code a minute and five an hour**.
+- The reply to "send me a code" is the same sentence whether or not the
+  address has an account, and it is given before any mail goes, so neither
+  the words nor the time taken says which addresses exist. A wrong code and
+  an unknown address get the same refusal too.
+- Using the code releases a sign-in hold, ends every session the account had,
+  and goes on the audit trail as `PASSWORD_RESET_BY_CODE`; codes sent,
+  refused and mistyped are on it as well.
+- The mail has **no link**, for the same reason the first password has none
+  (`passwordResetMessage()` in `mailer.js`).
+- If mail is not set up, the page says so and names who can help instead.
+
+Routes: `POST /api/password-reset/request` and
+`POST /api/password-reset/confirm`, both open (nobody is signed in yet), in
+`Back-end/Connections/login.js`; the page is `shared/password-reset.js`.
+
+### 2. A manager's Staff Passwords screen
+
+For cashiers, inventory clerks and delivery personnel, when mail does not
+work or the person cannot reach it. **Staff Passwords** on the manager's menu
+lists everyone in those three roles with a login, and **Reset Password** does
+exactly what the administrator's does — it is the same function
+(`resetStaffPassword` in `Connections/admin.js`, passed to `Connections/manager.js` rather than
+copied): a generated password, emailed, shown once on the manager's screen if
+the mail cannot go, every session ended, the hold released, and a new one
+chosen on the next sign-in. The server refuses a Manager's or a System
+Administrator's account whatever the screen sends, so one manager cannot take
+over another's account or the administrator's. It is a screen in the catalogue
+(`staff-passwords`), so the administrator can switch it off. Routes:
+`GET /api/staff/passwords` and `POST /api/staff/:id/reset-password`.
+
+### 3. The last resort, on the server's own computer
+
+For when nobody can get in at all — the administrator is locked out and mail
+is not set up:
+
+```
+npm run recover-password -- someone@example.com
+```
+
+It sets a temporary password on that one account, prints it **once**, marks it
+to be changed on the next sign-in, releases the sign-in hold, and writes a
+`RECOVER_PASSWORD` entry on the audit trail naming the computer it was run
+on. It needs the `.env` the server uses, so only someone who can already read
+the database password can run it. A screen still signed in on the old password
+stays signed in until the server restarts; restart it to end those.
 
 ## Alerts
 
@@ -578,6 +769,48 @@ number and leaves the reader to know the currency. The spreadsheet export
 strips it again on the way out, so a column of money lands in the sheet as
 numbers.
 
+Figures read down their column. In a table a figure is marked `cell-num` and
+set to the right in tabular figures, and `alignTableColumns()` in
+`shared/tables.js` sets the heading over it to match. An amount typed into a
+number box is set the same way (`input[type="number"].form-control` in
+`general-ui.css`); the order's − / + quantity boxes are not form controls and
+keep their centred figure.
+
+The credit screens use the same four words everywhere: **Credit Limit**, the
+most an account may owe; **Balance**, what it owes now; **Available
+Balance**, what it can still take on account; and **No balance** for an
+account that owes nothing. A payment's method is labelled **Payment method**,
+at checkout and on *Take a Payment* alike.
+
+## GCash and Maya by QR code
+
+With GCash or PayMaya chosen, the till offers **Pay by QR** beside Complete
+Sale (and on *Take a Payment*). The card shows a QR code holding the address of
+the page the customer pays on. The customer scans it with the phone's camera
+and approves the payment, and the till sees it within three seconds and
+finishes the sale by itself. The server asks the payment provider again before
+anything is recorded, and a payment is used once: its number becomes the
+sale's reference. A code lasts 10 minutes. A failed or expired code offers
+**New QR** or **Choose another method**, and nothing is recorded for it.
+
+Every attempt is a row in `qr_payments` with how it ended (paid, failed,
+expired, cancelled), and **QR Payments** lists them with the success rate: the
+cashier their own, the manager everyone's. A paid code whose sale could not be
+saved (an item ran out) stays paid and says *paid but sale not saved – refund
+needed*.
+
+`PAYMENT_PROVIDER` in `.env` decides who takes the money:
+
+- `paymongo`: PayMongo, with `PAYMONGO_SECRET_KEY`. An `sk_test_` key is test
+  mode (no real money) and the screens say **TEST MODE**.
+- `sim`: an offline simulation served by this app, with Pay and Fail buttons
+  under a **SIMULATION** banner. For a demo with no internet.
+
+The phone opens the page at the address the server prints at start-up (or at
+`HARDWARE_SITE_URL`), so it must be on the same Wi-Fi as this PC.
+`node tests/paymongo-check.js` makes one PayMongo test payment and prints the
+page to pay it on.
+
 ## Staff names and the middle name
 
 Two people may share a first and a last name. The middle name is what tells them
@@ -618,58 +851,45 @@ application understands.
 
 There are two kinds, and they are told apart by their name.
 
-### The automatic one, every sixty seconds
+### The automatic one, once a day
 
-The server backs the whole database up **once a minute**, on its own, with
-nobody pressing anything. The most that can be lost is the last minute of
-trading. The **Backup & Recovery** screen says so at the top, from the server
-rather than from a sentence written into the page — a screen that claims a
-backup is being taken every minute because its own HTML says so is worse than a
-screen that says nothing.
+The server backs the whole database up **once a day**, on its own, at
+`BACKUP_HOUR` (2 in the morning unless `.env` says otherwise). It used to dump
+the whole database after every transaction, which made a busy till lag: every
+sale paid for a full copy of every table. A check runs every ten minutes and
+writes the day's file once the hour has come, so a server that was asleep or
+restarted at that hour catches up on its next check. The **Backup &
+Recovery** screen says whether it is on, when it runs, and the last file, from
+the server rather than from a sentence written into the page.
 
-**Old ones are overwritten.** Sixty seconds is 1,440 complete `.sql` files a
-day. At even a megabyte each that is a gigabyte and a half a day into a folder
-that never stops growing, so within a week the backup feature is the reason the
-disk is full — and a full disk is how the *next* backup fails, quietly, at the
-moment it matters. So the automatic ones rotate: sixty exist at a time, and
-writing the newest deletes the oldest. The folder settles at a fixed size on the
-first hour and stays there, covering the last hour minute by minute.
+The dump streams each table from MySQL and writes it a hundred rows at a time,
+so a large table is never held in memory whole.
 
-It is sixty files rather than one file rewritten in place on purpose. A dump
-takes a moment to write; a crash, a full disk or a killed process halfway
-through leaves a truncated file, and if that file is the only one there is, the
-system has no backup at all — and it had one a minute ago. Sixty files is the
-same idea with the last fifty-nine still standing.
+**Old ones are deleted.** The newest `BACKUP_KEEP_DAYS` automatic files (30 by
+default) are kept, and writing a new one deletes the oldest. The copy the system
+takes just before a restore counts as an automatic one too. If the database is
+missing stored procedures, the backup is still written but nothing is deleted,
+so the last good file is never rotated away.
 
-Nothing is written to the audit trail for a successful automatic backup. An
-entry a minute is 1,440 entries a day, and the trail is where somebody looks to
-find out who deactivated an account; burying that under a wall of identical
-backup lines makes the trail unreadable. A *failure* is recorded, once, and said
-on the screen in plain words with what the server actually reported — because a
-backup that has quietly stopped working looks exactly like one that is working,
-right up until the afternoon somebody needs it.
+A successful daily backup is not written to the audit trail; a *failure* is,
+once, and is said on the screen in plain words.
 
-The three settings are three lines near the top of the backup section in
-`server.js`:
+On a cloud host, set `TZ=Asia/Manila` so the hour is the shop's, and point
+`HARDWARE_BACKUP_DIR` at a disk that survives a redeploy. The folder's path is
+never sent to the browser.
 
-```js
-const AUTO_BACKUP_ENABLED = true;
-const AUTO_BACKUP_MS = 60 * 1000;   // every sixty seconds
-const AUTO_KEEP = 60;               // the last hour, minute by minute
-```
-
-A restore and the timer never overlap. A restore drops and rebuilds every table
-in turn, and for the seconds that takes the database is neither the old contents
-nor the new ones; a backup taken then would be a dump of a half-restored
-database, indistinguishable from a good one and useless as the thing you reach
-for next. So the timer stands down while a restore is running.
+A restore and the backup never overlap. A restore drops and rebuilds every table
+in turn, and a backup taken then would be a dump of a half-restored database,
+so the backup stands down while a restore is running.
 
 ### The one you take yourself
 
 **Run Backup Now** writes a file named `hardware_db_backup_...`. Those are
-decisions — taken before a restore, before a schema change, at the end of a day
-— and they are **never rotated away**. Nothing automatic can delete something an
-administrator chose to keep.
+decisions — taken before a schema change, at the end of a day — and they are
+**never rotated away**. Nothing automatic can delete something an administrator
+chose to keep. Because they are kept, there can be at most `BACKUP_MANUAL_LIMIT`
+of them (20 by default); at the limit, Run Backup Now asks for an old one to be
+deleted first.
 
 The list shows both kinds with a **Kind** column saying which is which, because
 it decides how long the file will be there. Each one can be downloaded,
@@ -716,10 +936,11 @@ This is the flaw that mattered, and it is worth being blunt about it.
 
 When the procedures went missing, the automatic backup did exactly what it was
 told: it took a faithful backup of a database that could not be written to, once
-a minute, and each one rotated an older file out. Sixteen went into the folder
-before anybody noticed. At the steady state of 60 files, **one hour of that would
-have rotated out every last backup that still had the procedures in it** — sixty
-flawless copies of a broken database and no way back.
+a minute (it ran on a clock then), and each one rotated an older file out.
+Sixteen went into the folder before anybody noticed. At the steady state of 60
+files, **one hour of that would have rotated out every last backup that still
+had the procedures in it** — sixty flawless copies of a broken database and no
+way back.
 
 A rolling window is only safe if what it is rolling over is known good. So the
 procedure count is checked before anything is deleted:
@@ -750,33 +971,13 @@ sentence that reports the success — after rather than before, because the hone
 test is not what the file appeared to contain, it is what the database ended up
 with.
 
-## Fewer columns, and the rest a press away
+## Every column, all the time
 
-A seven-column table is read by nobody: the eye finds the name and the one
-figure it came for and skips the rest, and the rest is still taking the
-width. So every table with more to say than fits a glance shows its main
-columns and keeps the others off the grid until asked for. A heading is
-marked in the page —
-
-```html
-<th data-secondary>Supplier</th>
-```
-
-— and `shared/tables.js` does the rest: the column is hidden, a switch
-appears above the table, *Show 3 more columns* / *Fewer columns*, and the
-reader's choice is remembered per table on that browser. The Reorder Alerts
-table went from eight columns to five this way; the staff directory lost its
-ID column, the audit trail its IP address, the credit book its open-sales
-count and oldest debt. Nothing is dropped: the spreadsheet export and the
-print still carry every column, because a report read away from the screen
-has no switch to press.
-
-The details are one press away either way. A row that opens a popup of its
-own — most of them do — opens it as before, and the popup carries
-everything. A row that has no popup unfolds in place: pressed, it shows a
-line underneath naming the hidden columns and their values, and pressed
-again it folds back. The chevron at the start of such a row is what says it
-will.
+A table shows every one of its columns. There is no switch that hides some
+of them behind a *Show more columns* button: a column that is on the screen
+at all is worth reading without a press first, and the screen, the
+spreadsheet export and the print all carry the same columns. A row that
+opens a popup of its own still does, and the popup carries everything.
 
 ## Tables that wait to be asked
 
@@ -834,7 +1035,7 @@ Once loaded, a table shows **ten rows at a time** with Previous and Next under
 it, and it is the same height whether the page holds two rows or ten, so
 nothing walks up and down the screen while somebody reads.
 
-The whole of it lives in `javascript/modules/shared/data-panel.js`, so a table
+The whole of it lives in `Back-end/modules/shared/data-panel.js`, so a table
 that loads on demand and a table that pages are the same table in two states
 rather than thirty copies of the same logic.
 
@@ -856,93 +1057,7 @@ so a screen two roles share does not show the second a button that would only
 ever answer "not allowed". Hiding is never granting: the server's answer is the
 one that counts.
 
-## Connected systems, and who may touch them
-
-A role says what somebody does in the shop. It says nothing about whether
-they may reach past the shop into the systems around it: the MySQL database
-underneath, the backup that ticks on its own, the nightly archive sweep, the
-live channel between the desktops, the mail relay first passwords go out
-through — and whatever outside service the shop later plugs in, a courier's
-tracking API or a supplier portal or a second branch. None of that is a sale
-or a stock count, and a Manager is no more entitled to pause the backup than
-a Cashier is.
-
-So reaching those is **a permission and not a role**, held by one person on
-one system at one of three levels, and by default nobody holds any:
-
-| Level | Lets the person |
-|---|---|
-| **Monitor** | read the system's state — the card on the Connected Systems screen |
-| **Manage** | change how it is set up: switch it on or off, rename it, change the address an external one answers at |
-| **Control** | run commands against it: take a backup now, pause or resume the timer, run the sweep, send a test mail, ping a remote service or post it a message |
-
-Manage and control both include monitor, and the database procedure forces
-that whichever screen or tool sent the request: nobody may command what
-they cannot see. The System Administrator holds every level on every system
-by role and is the only one who hands them out.
-
-**Where it is done.** Access Control on the administrator's page has two
-screens. *Who Holds Access* lists every person with a login who is not an
-administrator — including the ones who hold nothing, because that is the
-default and the screen has to be able to show it — and opening a person
-gives a matrix: one line per system, the three levels as boxes, and a line
-for why. Ticking control ticks monitor with it; Save reads the changes back
-first, in a card that turns crimson when control is among them. *Connected
-Systems* is the systems themselves, and it is the same screen every other
-dashboard carries.
-
-**Where it shows.** Every dashboard has a Connected Systems entry in its
-menu, hidden. It is unhidden only once the server (`/api/me/access`) says
-the person holds a key to something, and hidden again over the live channel
-the moment the last key is taken back — with no reload, and with the screen
-saying so if it happens to be open. A cashier granted control of the backup
-sees one card with its commands; the same cashier granted monitor on the
-database sees a second card with none. Nobody else sees the entry at all.
-
-**How it is enforced.** Not from the session. The three levels are read
-from `system_permissions` on every request under `/api/systems`, so a
-revocation bites on the very next call rather than at the next sign-in. The
-access table in `server.js` lets any signed-in person *ask*, and each route
-then carries `requireSystemAccess('monitor' | 'manage' | 'control')`, which
-looks the grant up and refuses with the level that was missing. Handing out
-keys is under `/api/access` and administrator-only; `notOwnAccount` is on
-the route as well, and the procedure refuses a grant to any administrator,
-to a person with no login, or to a deactivated account (keys can still be
-taken back from those).
-
-**What is written down.** Two new kinds of audit entry, filterable on the
-Audit Trail as *Access granted / revoked* and *Commands run on
-connected systems*:
-
-- `GRANT_SYSTEM_ACCESS` and `REVOKE_SYSTEM_ACCESS` — who was given or lost
-  what on which system, with the levels before and after and the reason the
-  administrator typed. A save of the same three boxes writes nothing.
-- `SYSTEM_ACTION` — every command, by whoever ran it, whether it worked, and
-  what it reported (the backup file it wrote, the HTTP status the remote
-  answered). A command that failed is an entry too, with the reason.
-- `SYSTEM_ACCESS_DENIED` — somebody without the key trying the door. The
-  role-based refusals elsewhere are ordinary screens hiding ordinary
-  buttons; this one is a person reaching for something they were never
-  offered, which is exactly what an audit is opened to find.
-- `CREATE_CONNECTED_SYSTEM` and `UPDATE_CONNECTED_SYSTEM` — a system
-  registered, renamed, re-addressed, or switched off and on.
-
-Each carries the role held at the time and the address it came from, like
-every other entry.
-
-**The internal systems** are seeded by file 1 and re-seeded by the server
-if any is missing, keyed by names `server.js` knows how to answer for
-(`INTERNAL_SYSTEMS`). **An external system** is registered from the
-Connected Systems screen with a key that never changes, a name, and the
-`http://` or `https://` address it answers at — no username or password in
-it. Its status is whether that address answers, read with a five-second
-patience and shown as a state rather than an error when it does not; its
-commands are to ask it again and to post it a short JSON message signed
-with who sent it. A system switched off keeps its row and its grants and
-takes no commands until it is switched back on, which is a manage change
-made on purpose.
-
-## Screens by role
+## Access control: screens by role
 
 A role decides what somebody does, and each role's menu is written into its
 own page: a manager's page lists the manager's screens, a cashier's the
@@ -953,9 +1068,18 @@ because every clerk did.
 
 So every screen is now an entry in a catalogue (`FEATURES` in `server.js`):
 its name, the roles whose page can draw it, the roles that hold it by role,
-and the routes it is made of. **Screens by Role**, under Access Control on
-the administrator's page, is that catalogue as a matrix — one row per screen,
-one column per role, each cell a switch — and the administrator can:
+and the routes it is made of. **Access Control**, one link on the
+administrator's menu, is that catalogue in two columns: the **roles down
+the left** — one button each, saying how many of its screens are on, with
+an amber mark while it carries unsaved changes — and on the **right the
+picked role's screens as a list of switches**, grouped under their module
+(Point of Sale, Credit, Inventory…), every row the same three columns —
+the switch, the screen's name and what it does, and a word saying what the
+switch means for the role — so the switches sit on one line down the page.
+Every role's switches are drawn and all but the picked role's hidden, so a
+change made under the cashiers survives a look at the clerks before Save;
+on a narrow screen the roles sit above the switches as a row. The
+administrator can:
 
 - **switch a screen off** for a role that holds it by role. Refunds off the
   cashiers, say, or Adjustment History off the clerks.
@@ -964,14 +1088,14 @@ one column per role, each cell a switch — and the administrator can:
   to go out, under Overdue, Today, Tomorrow and Later — which the manager
   holds by role and any of the other three can be given.
 
-A cell the switch cannot reach is shown as a dash: that role's dashboard has
-no such screen, and a menu item with nothing behind it is a dead end, not a
-feature. The System Administrator is not in the matrix at all; the
-administrator's screens are the administrator's by role and nobody grants
-them anything. The word under each switch says what it means for that role —
-*by role*, *granted*, *off* — and Save reads the changes back first, in a
-card that turns crimson when a screen is being taken away, because somebody
-may be standing in front of it.
+A screen a role's dashboard cannot draw is not on that role's line at all:
+a menu item with nothing behind it is a dead end, not a feature. The System
+Administrator is not in the dropdown; the administrator's screens are the
+administrator's by role and nobody grants them anything. The word beside
+each switch says what it means for that role — *on by default*, *switched
+on*, *switched off* — and Save reads the changes back first, in a card that
+turns crimson when a screen is being taken away, because somebody may be
+standing in front of it.
 
 **Where it shows.** Every menu item on the four staff dashboards names the
 screen it opens (`data-feature="credit-requests"`), and
@@ -982,10 +1106,9 @@ screens have all been taken away goes with them, and the strip of tabs
 across the top follows the menu. If the screen somebody is looking at is
 switched off while they are on it, their page goes back to its first screen
 and says why. The Delivery Schedule is drawn by `shared/delivery-schedule.js`
-rather than written into a page, the way the Connected Systems screen is,
-because a screen that can land on any page has to be able to draw itself on
-any page; its menu item is in each page's markup, hidden until the role has
-it.
+rather than written into a page, because a screen that can land on any page
+has to be able to draw itself on any page; its menu item is in each page's
+markup, hidden until the role has it.
 
 **How it is enforced.** Not by the menu. Each screen lists the routes it is
 made of, and the access hook in `server.js` reads them after `ACCESS_RULES`
@@ -993,7 +1116,7 @@ has had its say:
 
 - a route is **refused once every screen using it is switched off** for the
   role. A route two screens share — `/api/stocks` under both Reorder Alerts
-  and Stock Reports — is not refused while either is still held.
+  and Stocks Overview — is not refused while either is still held.
 - a route the role table would refuse is **allowed when the role holds a
   screen that needs it by grant** — an override, not a default. A screen held
   by role has its routes in the role table already, and a default never
@@ -1004,50 +1127,18 @@ has had its say:
 The overrides are one row each in `role_feature_permissions`, and only the
 administrator's changes are rows — set a switch back to what the page has and
 the row is deleted, so an empty table means every menu is exactly what its
-page says. Read on every request rather than kept on the session, like the
-connected-systems grants, so a revocation bites on the very next call; cached
-in memory between writes, because it is a few rows. Every switch thrown is on
-the audit trail as `GRANT_SCREEN` or `REVOKE_SCREEN`, filterable as *Access
-granted / revoked* beside the connected-systems keys. The table is created by
-the server at startup on a database from before it existed, the way the
-access-control tables are.
+page says. Read on every request rather than kept on the session, so a
+revocation bites on the very next call; cached in memory between writes,
+because it is a few rows. Every switch thrown is on the audit trail as
+`GRANT_SCREEN` or `REVOKE_SCREEN`, filterable as *Access granted / revoked*.
+The table is created by the server at startup on a database from before it
+existed.
 
 Making another screen grantable means drawing it by script the way the
 schedule is (so any page can carry it), giving each page a hidden menu item
 for it, and listing the roles whose pages have one under `available` in the
 catalogue. A screen that is only ever on one page needs none of that: its
 entry in the catalogue is what lets the administrator switch it off.
-
-## What is waiting, and where it shows
-
-A request nobody sees is a queue at the till nobody knows about. A menu item
-with things waiting on it carries the number — the manager's Extension
-Requests has for a while — but that number was only visible once the heading
-above it had been folded open, which is to say, only to somebody who already
-knew to look.
-
-So every count on the menu now shows in three places:
-
-- **on the item**, as before: *Extension Requests 2*;
-- **on the heading above it**, added up across the items under it, while the
-  heading is folded: *Credit 2*, *Stocks 3*. It steps aside while the list is
-  open, because then the item's own badge is in view and the same number
-  twice, one above the other, reads as two queues;
-- **in the top bar**, beside the bell, as one chip that adds up every count
-  on the menu — *10 waiting* — and opens to a list of what is waiting where.
-  A line on the list presses the menu item it names, so there is one route
-  into each screen and nothing to keep in step.
-
-The counts come from `/api/me/counts`, one small query each, for the screens
-the person holds and no others: pending extension requests and pending
-deliveries for the manager, materials at or under their reorder point for the
-manager and the clerk, open returns for the clerk, the driver's own pending
-run, and deliveries due today or overdue for whoever holds the schedule. They
-are read on arrival and again whenever the live channel says the tables
-behind them moved, so the number on the menu is the number in the table and
-not the number from when the page opened. The module scripts still write the
-same badges when their own tables load, and the mirrors follow whichever
-wrote last.
 
 ## Who is actually here
 
@@ -1080,7 +1171,7 @@ before/after table.
 
 ## Income, and the four ways to answer it
 
-The **Collected** card on the manager's dashboard opens a breakdown over any
+The **Income** entry in the manager's menu opens a breakdown over any
 period: today, 7 days, 30, 90, six months, twelve, all time, or two dates typed
 in. Named periods count back from today rather than snapping to a calendar
 month, because "this month" on the third of the month is four days of trading
@@ -1105,13 +1196,18 @@ which folds open to list the three. The entry for the table on the screen is
 the marked one, so the menu and the page can never say two different things,
 and the other two tables are one click away rather than two screens down.
 
-**Reports** and **Records** work the same way. Each is one screen holding one
-table at a time — four reports, five kinds of record — and the one showing is
-chosen from the entry in the menu, which folds open under the heading the way
-Income does. Reports also carries a dropdown at the top of its card, because
-a report is often switched while it is being read; both call the same
-function, so they always agree. Records has no second control: the card is
+**Records** works the same way: one screen holding one table at a time — five
+kinds of record — chosen from the entry in the menu, which folds open under
+the heading the way Income does. There is no second control: the card is
 headed with the kind of record showing, and the menu is beside it.
+
+**Reports** is the manager's first screen, the one that opens on signing in
+and the one the brand corner goes back to. All four reports — Payment
+Methods, Receivables, Repeat Customers, Staff Performance — sit down one page,
+each a card of its own with its own Load Data button, so opening the page
+fetches nothing and a report is read only when it is asked for. The list
+under **Reports** in the menu does not swap the screen; it scrolls to that
+report and marks the entry.
 
 ### Two ways off every screen
 
@@ -1142,24 +1238,50 @@ within a quarter above it, or a band of round numbers — and sorts by what is
 on hand, by how far under the reorder point a product has fallen, by stock
 value, or by days of cover.
 
-## Purchase orders: raised upstairs, counted in at the door
+### The price is the manager's
 
-Buying is a manager's decision, so a purchase order is raised on the manager's
-page: name the supplier, list the materials, send it, and the printed order
-opens ready to hand to a company that has no login to this system. The
-supplier is typed rather than picked, and so is each material, because a
-purchase order is how a shop buys something it does not have yet, often from
-somebody it has not bought from before.
+The clerk counts and the manager prices. A product's card on the Stock
+Report has a **Change Price** button on its Pricing tab: the new figure is
+typed, read back with the percentage it moves by and what the stock value
+becomes (a jump of half or more turns the card crimson, because that is
+more often a slipped decimal than a decision), and saved through
+`PUT /api/stocks/:id/price`, manager-only and on the audit trail as
+`UPDATE_PRICE`. It reaches the till from the next sale on; sales already
+rung up keep the price on their lines, and a selling size with a price of
+its own keeps that too, while one priced from the unit follows the new
+figure by itself.
 
-Receiving is the manager's too: the count sheet — what was ordered on the
-left, what came off the lorry typed on the right — books the goods onto the
-shelf and closes the order.
+## Purchase orders: raised and counted in at the door, checked upstairs
 
-The clerk's page keeps a read-only copy. Every order is listed there as a
-reference — what is meant to arrive, and from whom — with the printed sheet
-to hold beside the delivery receipt when it does. There is no form on the
-clerk's page and no Receive button, and the server refuses a clerk who calls
-either route anyway.
+A purchase order is raised on the clerk's page: name the supplier, list the
+materials, send it, and the printed order opens ready to hand to a company
+that has no login to this system. The supplier is typed rather than picked,
+and so is each material, because a purchase order is how a shop buys
+something it does not have yet, often from somebody it has not bought from
+before.
+
+Buying is still a manager's decision, so the order waits for the manager to
+confirm or decline it. That is all the manager's page does with it: check the
+order, confirm it or send it back with a reason. There is no count sheet on
+the manager's page, and the server refuses a manager who calls the receive
+route anyway.
+
+**Confirming is placing the order.** The moment the manager confirms it, the
+server emails the order to the supplier at the address on the supplier's
+record: plain text, with the order number to quote, the date, where it is to be
+delivered, every line (quantity, unit, unit cost, line cost) and the total
+(`purchaseOrderMessage()` in `mailer.js`). The confirm dialog says where it
+is going before the button is pressed. The decision never waits on the mail:
+if the supplier has no address on file, mail is not set up, or the mail server
+refuses it, the order is still confirmed and the manager is told, in a card
+that stays until it is closed, to print the order and send it. Either way the
+audit trail says which (`PURCHASE_ORDER_SENT` or `PURCHASE_ORDER_NOT_SENT`),
+and the route answers with `supplierNotified` and `supplierNote`.
+
+Once confirmed, receiving is the clerk's: the count sheet — what was ordered
+on the left, what came off the lorry typed on the right — books the goods
+onto the shelf and closes the order. An order the manager has not confirmed
+yet cannot be received, and the server refuses that too.
 
 The screens are one piece of code (`shared/purchase-orders.js`) that each
 page configures with what it is allowed to do, so the two desks cannot
@@ -1273,6 +1395,39 @@ has to ask again tomorrow.
 by side. Neither means much alone: one says how good a customer somebody is,
 the other how good a payer, and the shop needs both before extending anything.
 
+### The late-payment penalty
+
+A credit sale is due thirty days after it is rung up. Past that, it costs the
+customer: **1 to 3 percent a month of the goods still unpaid**, and the
+default is **3**. The first month is charged the day after the due date and
+another every thirty days the sale stays unpaid; a part of a month counts as
+a month, so a sale forty days overdue has been charged twice. It is the
+goods that are charged on — the sale less what has been paid — never the
+penalty itself, and a payment comes off the goods first, so a sale whose
+goods are paid but whose penalty is not stops growing.
+
+The charge is made by the database (`sp_apply_late_penalties`), which the
+server runs at start-up and every hour after. Each sale keeps the rate it was
+charged at, how many months have been charged, what they add up to and when
+the last one was, so the charge can be read back later whatever the policy
+becomes; the manager and the cashier are each told of every charge under
+*Late Penalty* in their alerts, and the audit trail records it. The penalty
+sits on the sale as `amount_due` — the bill with the penalty on it — and
+**every balance in the system reads that**: the credit book, the account
+card, the cashier's balances-due sheet and the payment it takes, the receipt
+reprinted later, the income figures and the standing rules. The sale itself,
+`final_amount`, is untouched, so the sales figures are still the sales.
+
+**The rate is the manager's.** The strip above the manager's credit book says
+the shop's rate in force and what is owed in penalties; *Change the rate*
+sets another, anywhere from 1 to 3, with a worked example before it is
+saved. A change applies from the next month charged and never rewrites a
+month already charged. An account can also be given **a rate of its own** on
+its credit terms, beside the limit and the standing override — a loyal
+customer at 1 percent while the shop stays at 3 — and blank there means the
+shop's rate. The cashier reads the rate and sees the penalties but cannot set
+either; the server refuses the route to anyone but a manager.
+
 ## Returns: what happened, and where the goods went
 
 Two things are compulsory on a return and neither used to be.
@@ -1292,6 +1447,21 @@ under the box says whether enough has been said while it is being typed.
 Neither is preselected, because a default here is answered by not being read,
 and a return filed the wrong way used to leave the goods unaccounted for:
 not on the shelf, not written off, still in a box behind the counter.
+
+**Who decides it depends on where the goods are.** A damage report from the
+stockroom is filed by the person holding the goods, so the clerk says where
+they go as they file it. A refund at the counter is different: the cashier
+takes the item back and gives the money, but is not the one to judge whether
+it can be sold again. So a refund is filed **awaiting inspection** — nothing
+moves on the stock count, the goods are set aside, and the clerk is told.
+On the clerk's Returned Items screen the *To inspect* chip counts them; the
+report card asks the one question, *can it be sold again?*, with a line for
+what was found, and the answer closes the report: **sellable** puts it back
+on the shelf and the count goes up, **not sellable** writes it off (the sale
+already took it off the count, so nothing moves). The report keeps who
+inspected it, when, and what they found; the manager and the counter are
+both told the verdict. The server ignores any disposition a cashier sends,
+so the counter cannot decide it by accident.
 
 A write-off is read back before it happens, naming the quantity and the
 product, because correcting one afterwards means a stock adjustment rather than
@@ -1403,13 +1573,11 @@ Three pieces of restraint matter more than the refresh itself:
   put the dot back, build the element in `buildLiveIndicator()` in
   `shared/live-sync.js` and write the state onto it — the state names have not
   changed.
-- **The dashboard tiles honour the badge above them.** The manager's five
-  figures used to load once on arrival and never move again, with a green dot
-  sitting directly over them. Anything that is not a table can now
-  subscribe to the same scopes through `onLiveChange`, so the tiles re-read
-  themselves when a sale, a payment, a stock move or a delivery lands. A
-  background refresh that fails leaves the last good figures where they are
-  rather than blanking them.
+- **Anything that is not a table can subscribe too.** The delivery schedule
+  listens to the same scopes through `onLiveChange`, so it re-reads itself
+  when a sale or a delivery lands on another machine. A background refresh
+  that fails leaves the last good figures where they are rather than blanking
+  them.
 
 A browser that was disconnected long enough to fall behind the server's change
 log is told to reload rather than shown a half-updated screen.
@@ -1421,212 +1589,105 @@ new route is covered the day it is written.
 ## Project layout
 
 ```
+launch/launch.json          starts the app from the editor (node public/Back-end/server.js)
+tests/                      automated checks (not used by the app; see tests/ui/stub.js)
 public/
-  Login.html, change-password.html
-  system.html               System Administrator dashboard
-  manager-dashboard.html    Manager dashboard
-  inventory-dashboard.html  Inventory Clerk dashboard
-  cashier-dashboard.html    Cashier dashboard
-  delivery.html             Delivery Personnel page
+  Front-end/                what the user sees: the pages and their styles
+    Login.html, change-password.html
+    system.html               System Administrator dashboard
+    manager.html              Manager page
+    inventory-dashboard.html  Inventory Clerk dashboard
+    cashier-dashboard.html    Cashier dashboard
+    delivery.html             Delivery Personnel page
 
-  css/
-    general-ui.css          colours, type, the shell, and every component
-                            two or more roles share
-    responsive.css          the phone layout, for every role
-    purchase-orders.css     the order form, the printed order and the count
-                            sheet, on the manager's page and the clerk's
-    connected-systems.css   the system cards, on every dashboard
-    modules/
-      login.css                    the sign-in and password screens
-      system-admin.css             system.html
-      manager.css                  manager-dashboard.html
-      inventory-clerk.css          inventory-dashboard.html
-      cashier.css                  cashier-dashboard.html
-      delivery-personnel.css       delivery.html
-    style.css               a signpost; the rules moved to the files above
+    css/
+      general-ui.css          colours, type, the shell, and every component
+                              two or more roles share
+      responsive.css          the phone layout, for every role
+      purchase-orders.css     the order form, the printed order and the count
+                              sheet, on the manager's page and the clerk's
+      modules/                one stylesheet per role
 
-  javascript/
-    server.js               Express server and API routes
-    mailer.js               SMTP, hand-written over Node's own tls
-    modules/
-      shared/
-        helpers.js          the menu, tab switching, escaping, API headers
-        format.js           money, badges, dates, the one fetch
-        ui-kit.js           popup cards, the ask card, and how long each stays
-        live-sync.js        the open channel, and what to refresh when it speaks
-        tables.js           column alignment, and column names on a phone
-        data-panel.js       tables that load on request and page ten at a time
-        modals.js           open, close, backdrop, Escape
-        detail-modal.js     the paged record popup
-        session.js          signing in, the role guard, and the heartbeat
-        topbar.js           the bell and the account chip
-        my-account.js       my credentials
-        notifications.js    the alert list
-        deliveries.js       the delivery record, shared by three roles
-        purchase-orders.js  raising, printing and counting in an order,
-                            shared by the manager and the clerk
-        connected-systems.js the systems beyond the shop, shown to whoever
-                            holds a key to them, on every dashboard
-        features.js         the menu as the administrator has set it for the
-                            role, and the counts mirrored onto headings and
-                            into the top bar
-        delivery-schedule.js the deliveries still to go out, by the day they
-                            are due; drawn by script so any page can carry it
+  Back-end/                 every JavaScript file
+    server.js               Express, sessions, the audit trail, live sync,
+                            the access table, screens by role
+    passwords.js            hashing and making passwords
+    mailer.js               sending email (SMTP)
+    recover-password.js     npm run recover-password: the last resort, run on
+                            the server's own computer
+
+    Connections/            both halves of every connection, side by side
+      database.js                     the MySQL connection (settings from .env)
+      login.js                        server: sign in, sign out, heartbeat, passwords
+      shared-connection.js            browser: calls used by more than one kind of user
+      admin.js                        server: System Administrator routes
+      admin-connection.js             browser: System Administrator calls
+      manager.js                      server: Manager routes
+      manager-connection.js           browser: Manager calls
+      cashier.js                      server: Cashier routes
+      cashier-connection.js           browser: Cashier calls
+      inventory-clerk.js              server: Inventory Clerk routes
+      inventory-clerk-connection.js   browser: Inventory Clerk calls
+      delivery.js                     server: Delivery Personnel routes
+      delivery-connection.js          browser: Delivery Personnel calls
+                            (every browser function that talks to the server
+                            starts with "api"; only the *-connection.js files
+                            are ever sent to a browser)
+
+    modules/                the page scripts, run in the browser
+      shared/               screen code every page shares (menus, tables,
+                            popups, sign-in, notifications, purchase orders,
+                            icons)
       system-admin.js       system.html
-      manager.js            manager-dashboard.html
+      manager.js            manager.html
       inventory-clerk.js    inventory-dashboard.html
       cashier.js            cashier-dashboard.html
       delivery-personnel.js delivery.html
-    app.js                  a signpost; the code moved to modules/
 
   vendor/bootstrap/         Bootstrap 5, kept in the project, no internet needed
+  vendor/bootstrap-icons/   Bootstrap Icons (the font and its stylesheet), also kept here;
+                            shared/icons.js puts them on buttons, tabs, titles and cards
   database/
     0-READ-ME-FIRST.md                    how to run the two files below
-    1-RUN-FIRST-database.sql              26 tables, the demo data, and six
-                                          months of mock trading
-    2-RUN-SECOND-stored-procedures.sql    3 views and 30 stored procedures
+    1-RUN-FIRST-database.sql              the tables and the demo data
+    2-RUN-SECOND-stored-procedures.sql    the views and stored procedures
 backups/                    dated .sql backups
-  hardware_db_auto_*.sql      written every minute, oldest rotated away
-  hardware_db_backup_*.sql    taken by hand, never rotated
-tests/                      the checks described below
-  mailer.js                 the SMTP client, against a fake mail server
-  smoke.js                  every API route as every role, against MySQL
-  regression.js             the bugs that were found and fixed, held down
-  shots.js                  every screen photographed, against MySQL
-  ui/                       every screen driven in a browser, with no MySQL
 ```
+
+### Which address serves which folder
+
+The pages keep short addresses; server.js maps them onto the folders:
+
+```
+/Login.html, /css/...   ->  public/Front-end/
+/modules/...            ->  public/Back-end/modules/
+/connections/*-connection.js -> public/Back-end/Connections/ (browser files only)
+/vendor/...             ->  public/vendor/
+```
+
+Nothing else is served, so the server code in `public/Back-end/` and the SQL
+files in `public/database/` never reach a browser.
 
 ### Which files a page loads
 
-Every page loads the same shared set, then the one file for its own role.
-The order is not decoration:
+Every page loads the same shared set, then the files for its own role:
 
 ```
 css:  general-ui.css  ->  responsive.css  ->  modules/<role>.css
-js:   shared/*        ->  modules/<role>.js
+js:   modules/shared/*  ->  connections/shared-connection.js
+      ->  connections/<role>-connection.js  ->  modules/<role>.js
 ```
 
-The general stylesheet sets the system, the responsive one overrides it for
-small screens, and a role's own file has the last word on its own screens.
-The manager's page and the clerk's also load `css/purchase-orders.css` and
-`shared/purchase-orders.js` between the shared set and their own file, for
-the one feature the two desks share. Every page loads
-`css/connected-systems.css` and `shared/connected-systems.js` the same way,
-for the one screen every desk carries and almost none of them show. The
-four staff pages also load `shared/features.js` and
-`shared/delivery-schedule.js`: the first shapes the menu to what the
-administrator has switched on for the role, the second is the one screen
-any of them can be given (see *Screens by role*).
-
-Adding a screen to a role means editing that role's two files and nothing
-else. If a change would touch two roles it belongs in `general-ui.css` or in
-`javascript/modules/shared/`, and that is the rule that keeps the five roles
-from drifting apart.
-
-## Checking that it still works
-
-```
-sh tests/run-all.sh
-```
-
-That runs `tests/mailer.js` first — it needs neither MySQL nor the server, and
-drives the SMTP client against a fake mail server on a local port — then
-rebuilds the database, restarts the server, runs `tests/smoke.js` (every
-API route as every role, plus the rules that matter: that a cashier cannot
-export a report or set a credit limit, that the reorder point matches its own
-inputs, that a delivered order owing money is not Completed, that a return
-cannot be filed without a reason or a disposition, that a cashier holds no
-connected system until granted one and loses it on the very next request
-when it is revoked, and that every grant and every command is on the trail),
-then `tests/regression.js`,
-then `tests/shots.js`, which signs in as all five roles with a real browser,
-walks every screen, saves a screenshot of each into `shots/`, and reports any
-console error or failed request it saw on the way.
-
-`tests/regression.js` is the newest of the three and asks a different question
-from the other two. `smoke.js` asks whether every route answers; this one asks
-whether the answer is right, which is the question six defects got past while
-every route was answering perfectly:
-
-- the guard on `server.js` and `public/database/` tested the raw text of the
-  address bar while the file server tested the decoded, collapsed path, so
-  `//javascript/server.js` handed the database password to anybody who asked,
-  signed in or not
-- a sale checked stock line by line and deducted line by line, so one material
-  written on two lines sold twice the shelf and left the count negative
-- the end-of-shift **Collected** figure summed what customers handed over
-  rather than what stayed in the drawer, so a broken banknote read as takings
-- a staff id in the address bar decided whose shift and whose delivery round
-  came back, so one cashier could read another's figures by editing a number
-- report ranges were worked out against the UTC calendar while every figure
-  they bound was worked out in SQL against the machine's own, so **Today** meant
-  yesterday until eight in the morning Philippine time
-- the two routes acting on your own account, and the one that changes the shop's
-  tax registration, wrote audit entries with no role and no address on them
-
-Each of those is now one line in that file, so the next change that reintroduces
-one is a failing check rather than a discovery months later.
-
-Every screen is photographed twice now, closed and loaded, because a table that
-starts empty is a state worth being able to look at.
-
-**Run the suites through `run-all.sh`, not on their own against a database you
-have been using.** Each one signs the demo accounts in, and every account except
-the administrator has to pick a real password on its first sign-in — so a second
-run against the same database finds passwords that are no longer the ones in the
-table above, and reports a wall of failures that are about the state of the
-database rather than about the code. `run-all.sh` rebuilds from the two SQL files
-before each suite for exactly that reason.
-
-`tests/mailer.js` is the exception and can be run whenever: it touches neither
-MySQL nor the server.
-
-`run-all.sh` starts the server with `HARDWARE_MAIL_OFF=1`, which makes
-`mailer.js` report that mail is not set up whatever the SETUP block says.
-The passwords the server makes for new and reset accounts then come back in
-its replies, where the checks can sign in with them, instead of going to a
-real inbox nobody is watching. It is an environment variable rather than a
-setting so it cannot be left switched on by accident in the file people edit.
-
-`tests/shots.js` needs Playwright:
-
-```
-npm install --no-save playwright
-npx playwright install chromium
-```
-
-### Checking the screens without a database
-
-```
-sh tests/ui/run-all.sh
-```
-
-This one needs no MySQL at all. It starts `tests/ui/stub.js`, which serves the
-project's own `public/` folder and answers the API with invented rows — 23
-staff, 47 audit entries, 34 sales, 18 products, 21 deliveries, 17 credit
-accounts, enough of each that paging, filtering and the empty states are real
-rather than theoretical — and then drives every module in a real browser:
-
-| Suite | What it walks |
-|-------|---------------|
-| `admin.js` | the directory, presence, the archive card, the audit trail, the backup drawer, the access matrix and the system cards |
-| `manager.js` | clickable cards, the income breakdown with its tables chosen from the Income dropdown, the Spreadsheet and Print pair dead until a table has rows, the reports and the kinds of record as screens in the strip, sales filters, the stock report sorted and filtered by quantity, the reorder formula, raising a purchase order, fulfilment states |
-| `credit.js` | limits and standings, purchases beside payments, an extension raised at the till and decided by a manager |
-| `returns.js` | the mandatory remarks and the disposition, on both refusals |
-| `filters.js` | that a table still agrees with the dropdowns above it after two filters are changed in quick succession |
-| `lazy-loading.js` | that every table starts closed and pages ten at a time, and that the clerk can read a purchase order but neither raise nor receive one |
-| `live-sync.js` | two browsers at once: a change on one reaching the other, and the three cases where it deliberately does not redraw |
-| `features.js` | the administrator switches a screen on for the cashiers and off again; the cashier's menu and tab strip follow with no reload, and the counts on the manager's menu show on the heading above them and in the top bar |
-
-It proves nothing about MySQL; `tests/smoke.js` does that against the real
-database. What it proves is that the screens behave, which is the half that is
-tedious to check by hand. Screenshots of every step land in `shots/ui/`.
+A screen never writes a server address itself. It calls a function from
+its connection file, for example `apiGetDeliveries()`, and that function
+holds the address (`/api/deliveries`). To see what a screen sends to the
+server, open the connection file of that role.
 
 ## Notes
 
-- `database/` and `server.js` sit inside the folder Express serves, so the
-  server refuses to hand them out; the pages, the stylesheet and `app.js` are
-  served normally.
+- Express serves only `Front-end/`, `Back-end/modules/`, the
+  `*-connection.js` files in `Back-end/Connections/`, and `vendor/`.
+  The server code and `database/` are never handed out.
 - Passwords are stored as scrypt hashes, never as readable text. A database
   restored from an older backup that still holds readable passwords is upgraded
   automatically the first time each person signs in.

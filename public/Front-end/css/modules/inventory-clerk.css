@@ -1,0 +1,196 @@
+/* ==========================================================================
+   INVENTORY CLERK -- inventory-dashboard.html
+   Loads after general-ui.css and responsive.css, so anything here wins.
+   ========================================================================== */
+
+/* ==========================================================================
+   THE STOCK BANNER -- first thing on the screen, with the meaning rule on its left
+   ========================================================================== */
+.banner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px; flex-wrap: wrap;
+    padding: 13px 16px;
+    margin-bottom: 16px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--steel-soft);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-size: 15px;
+    color: var(--steel);
+}
+.banner-text { line-height: 1.5; }
+.banner strong { color: var(--ink); font-weight: 600; }
+
+.banner-ok     { border-left-color: var(--ok); }
+.banner-warn   { border-left-color: var(--signal); background: rgba(245, 179, 1, 0.08); }
+.banner-danger { border-left-color: var(--stop);   background: var(--stop-dim); }
+
+/* ==========================================================================
+   REORDER POINTS, EDITED IN PLACE
+   ========================================================================== */
+/* sized so a row holding one is the height of a row of text */
+.inline-input {
+    width: 96px;
+    padding: 4px 9px;
+    min-height: 33px;
+    height: 33px;
+    font-family: var(--font-figure);
+    font-size: 15px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   THE STOCK LEVEL -- on the Reorder Point table: the figure over a bar. The
+   full bar is twice the reorder point; the tick is the point itself.
+   ========================================================================== */
+.stock-level { display: flex; flex-direction: column; gap: 5px; min-width: 150px; max-width: 240px; }
+.stock-level-figure {
+    font-family: var(--font-figure);
+    font-size: 14.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+}
+.stock-level-track {
+    position: relative;
+    display: block;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--paper-2);
+    overflow: visible;
+}
+.stock-level-fill {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: var(--ok);
+    transition: width 0.3s ease;
+}
+.stock-level.is-low .stock-level-fill { background: var(--signal); }
+.stock-level.is-out .stock-level-fill { background: var(--stop); }
+.stock-level.is-out .stock-level-figure { color: var(--stop); font-weight: 600; }
+.stock-level-tick {
+    position: absolute;
+    top: -3px;
+    width: 2px;
+    height: 14px;
+    margin-left: -1px;
+    background: var(--ink);
+    border-radius: 1px;
+}
+
+/* ==========================================================================
+   THE MATERIAL CARD -- its first page leads with the company that supplies it
+   ========================================================================== */
+.supplier-panel {
+    margin-bottom: 18px;
+    padding: 14px 16px 4px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--go);
+    border-radius: var(--radius);
+    background: var(--paper);
+}
+.supplier-panel-eyebrow {
+    margin: 0;
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--steel-soft);
+}
+.supplier-panel-name {
+    margin: 2px 0 12px;
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--ink);
+}
+
+/* ==========================================================================
+   FILING A REPORT -- the refund field is hidden by script but keeps its room
+   ========================================================================== */
+#report-form textarea.form-control { min-height: 96px; }
+
+/* ==========================================================================
+   ON A PHONE -- every typed figure gets a full-width field
+   ========================================================================== */
+@media (max-width: 640px) {
+    .banner {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    .banner .btn { width: 100%; }
+
+    /* in a card-shaped row the field fills the line it sits on */
+    .inline-input { width: 100%; max-width: 160px; }
+    table tbody td .inline-input { max-width: none; }
+}
+
+/* ==========================================================================
+   THE ADJUSTMENT FORM -- two typed boxes and a sentence
+   ========================================================================== */
+
+/* the material field is capped so the name and the stock figure read as a pair */
+#adjust-form .suggest-wrap,
+#adjust-form .pick-strip,
+#adjust-form .pick-verdict { max-width: 560px; }
+
+/* The unit box sits inside the two-column grid, so it takes the column. */
+#adjust-form .grid-2 .suggest-wrap { max-width: none; }
+
+/* what the typed unit is about to do; a note, not a warning */
+.unit-verdict {
+    margin: 6px 0 0;
+    font-size: 12.5px;
+    line-height: 1.45;
+    color: var(--steel-soft);
+}
+.unit-verdict:empty { display: none; }
+.unit-verdict.is-new { color: var(--signal-ink); font-weight: 500; }
+
+/* ==========================================================================
+   WHAT THIS WILL DO TO THE SHELF -- green sensible, amber on or under the
+   reorder point, red below zero
+   ========================================================================== */
+.adjust-preview {
+    margin: 14px 0 0;
+    padding: 10px 13px;
+    font-size: 14px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+    font-variant-numeric: tabular-nums;
+}
+.adjust-preview:empty { display: none; }
+.adjust-preview.is-good  { border-left-color: var(--ok);     background: var(--ok-dim); }
+.adjust-preview.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
+.adjust-preview.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); }
+
+/* ==========================================================================
+   SELLING UNITS -- the sizes a material also sells in, on its card
+   ========================================================================== */
+.unit-sizes-table { margin-top: 12px; }
+.unit-size-form {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+.unit-size-fields {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr 1fr;
+    gap: 12px;
+}
+.unit-size-per { display: flex; align-items: center; gap: 8px; }
+.unit-size-per .form-control { min-width: 0; }
+.unit-size-own {
+    font-family: var(--font-figure);
+    font-size: 13.5px;
+    color: var(--steel);
+    white-space: nowrap;
+}
+.unit-size-form .detail-actions { margin-top: 10px; }
+
+@media (max-width: 640px) {
+    .unit-size-fields { grid-template-columns: 1fr; }
+}

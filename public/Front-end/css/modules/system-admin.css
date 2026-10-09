@@ -1,0 +1,383 @@
+/* ==========================================================================
+   SYSTEM ADMINISTRATOR -- system.html
+   Loads after general-ui.css and responsive.css, so anything here wins.
+   ========================================================================== */
+
+/* A backup is named after the moment it was taken. The day reads as a date
+   and the time reads as a figure, because that is what each one is. */
+.backup-day {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+}
+.backup-time {
+    font-family: var(--font-figure);
+    font-size: 13.5px;
+    color: var(--steel-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+/* the safe tile and the destructive one should not look alike */
+#panel-maintenance .tile .btn { margin-top: 2px; }
+
+/* ==========================================================================
+   IS THIS SYSTEM BACKING ITSELF UP? -- green for fine, crimson for broken,
+   grey for switched off
+   ========================================================================== */
+/* Bootstrap's .card is a flex column; this one is a row, with the state
+   word beside the heading rather than above it. */
+.auto-backup {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 14px;
+    border-left: var(--rule) solid var(--steel-soft);
+}
+.auto-backup .auto-backup-body { min-width: 0; flex: 1; }
+.auto-backup h3 { margin-bottom: 2px; }
+.auto-backup .panel-sub { margin-bottom: 0; }
+
+/* the switch sits at the far end of the card, level with the title */
+.auto-backup-toggle { flex: none; align-self: flex-start; min-width: 96px; }
+
+.auto-backup-state {
+    flex: none;
+    margin-top: 2px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--steel);
+    white-space: nowrap;
+}
+
+.auto-backup.is-on { border-left-color: var(--ok); }
+.auto-backup.is-on .auto-backup-state {
+    border-color: rgba(14, 122, 95, 0.35);
+    background: var(--ok-dim);
+    color: var(--ok-ink);
+}
+
+.auto-backup.is-bad { border-left-color: var(--stop); background: var(--stop-dim); }
+.auto-backup.is-bad .auto-backup-state {
+    border-color: rgba(158, 27, 50, 0.4);
+    background: var(--surface);
+    color: var(--stop-hi);
+}
+
+.auto-backup.is-off { border-left-color: var(--steel-soft); }
+
+@media (max-width: 640px) {
+    .auto-backup { flex-direction: column; gap: 10px; }
+    .auto-backup-toggle { align-self: stretch; }
+}
+
+/* ==========================================================================
+   THE STAFF DIRECTORY -- the middle name takes the same box as the others
+   ========================================================================== */
+/* Create Account, as a popup over the directory */
+.create-box { max-width: 640px; }
+#create-modal .grid-2 { align-items: start; }
+
+/* what is wrong with a box, said under it */
+.field-error {
+    display: block;
+    margin-top: 5px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--stop);
+}
+.field-error[hidden] { display: none; }
+.form-control.is-bad { border-color: var(--stop); }
+.form-control.is-bad:focus { box-shadow: 0 0 0 3px var(--stop-dim); }
+
+/* Deactivate is the last button in the row and the only red one on the
+   screen: it is where a person stops being able to sign in. */
+#modal-status-btn { min-width: 168px; }
+
+/* ==========================================================================
+   ACCESS CONTROL -- two columns: the roles down the left, the picked
+   role's screens as a list of switches on the right. Each row reads left to
+   right: the screen and what it does, the state it is in (grey, amber or
+   crimson), then the switch (orange, an action) on the right-hand edge.
+   ========================================================================== */
+.access-layout {
+    display: grid;
+    grid-template-columns: 236px minmax(0, 1fr);
+    gap: 22px;
+    align-items: start;
+}
+.access-screens { min-width: 0; }
+
+.access-roles {
+    position: sticky;
+    top: 74px;
+    padding-right: 22px;
+    border-right: 1px solid var(--line);
+}
+.role-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.role-pick {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas: "name mark";
+    align-items: center;
+    column-gap: 8px;
+    text-align: left;
+    padding: 10px 12px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--line);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    cursor: pointer;
+    font: inherit;
+    transition: border-color 0.12s, background 0.12s;
+}
+.role-pick:hover { border-color: var(--steel-soft); }
+.role-pick:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+.role-pick.active {
+    background: var(--go-dim);
+    border-color: var(--go);
+    border-left-color: var(--go);
+}
+.role-pick-name { grid-area: name; font-size: 15px; font-weight: 600; color: var(--ink); }
+.role-pick.active .role-pick-name { color: var(--go-hi); }
+.role-pick-mark {
+    grid-area: mark;
+    font-size: 23.5px; line-height: 1;
+    color: var(--signal);
+}
+.role-pick-mark[hidden] { display: none; }
+.feature-strip[hidden] { display: none; }
+/* the screens this role's dashboard can draw: a group per module, each
+   screen a row of the same three columns -- name, state, checkbox -- so
+   every checkbox sits on one vertical line */
+.feature-line { display: flex; flex-direction: column; gap: 18px; }
+.feature-group {
+    display: flex; flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.feature-module {
+    padding: 7px 14px;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line);
+    font-size: 12px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--steel);
+}
+
+.feature-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 118px 40px;
+    align-items: center;
+    column-gap: 14px;
+    margin: 0;
+    padding: 10px 14px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    cursor: pointer;
+    transition: background 0.12s;
+}
+.feature-row:last-child { border-bottom: none; }
+.feature-row:hover { background: var(--paper); }
+.feature-row:has(.feature-box:focus-visible) { outline: 2px solid var(--signal); outline-offset: -2px; }
+.feature-row-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.feature-row-name { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.feature-row .feature-desc { margin-top: 0; }
+.feature-row .feature-state { justify-self: end; }
+.feature-row .feature-box {
+    justify-self: center;
+    width: 20px; height: 20px;
+    margin: 0;
+    accent-color: var(--go);
+    cursor: pointer;
+}
+
+.feature-state {
+    display: inline-block;
+    min-width: 54px;
+    white-space: nowrap;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-family: var(--font-figure);
+    font-size: 12px; font-weight: 600;
+    text-align: center;
+    background: var(--paper-2); color: var(--steel);
+}
+.feature-state.is-granted { background: var(--signal-dim); color: var(--signal-ink); }
+.feature-state.is-revoked { background: var(--stop-dim); color: var(--stop); }
+.feature-state.is-unavailable { background: transparent; color: var(--steel-soft); min-width: 0; }
+.feature-state[hidden], .feature-row[hidden], .feature-group[hidden] { display: none; }
+
+#panel-features .panel-toolbar { margin-bottom: 16px; }
+#features-no-match[hidden] { display: none; }
+
+/* ==========================================================================
+   ON A PHONE
+   ========================================================================== */
+/* the roles go above the screens once there is no room beside them, as a
+   row of buttons rather than a column */
+@media (max-width: 900px) {
+    .access-layout { grid-template-columns: 1fr; }
+    .access-roles {
+        position: static;
+        padding-right: 0;
+        border-right: none;
+        padding-bottom: 14px;
+        border-bottom: 1px solid var(--line);
+    }
+    .role-list { flex-direction: row; flex-wrap: wrap; }
+    .role-pick { flex: 1 1 160px; border-radius: var(--radius); border-left-width: 1px; }
+    .role-pick.active { border-left-color: var(--go); }
+}
+
+@media (max-width: 640px) {
+    /* the state word drops under the name so the row fits a phone */
+    .feature-row { grid-template-columns: minmax(0, 1fr) 40px; row-gap: 4px; }
+    .feature-row .feature-desc { display: none; }
+    .feature-row .feature-row-text { grid-column: 1; grid-row: 1; }
+    .feature-row .feature-state { grid-column: 1; grid-row: 2; justify-self: start; }
+    .feature-row .feature-box { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+    .role-pick { flex-basis: 100%; }
+
+    /* the whole footer of the user popup is destructive-adjacent; each
+       button gets its own line so none of them is pressed by accident */
+    #user-modal .modal-foot .btn { width: 100%; }
+    #modal-status-btn { min-width: 0; }
+}
+
+/* ==========================================================================
+   RECEIPT MAINTENANCE -- the form on the left, a printed-looking preview
+   on the right, both on one screen
+   ========================================================================== */
+.store-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: 18px;
+    align-items: start;
+}
+.store-layout .card { margin-bottom: 0; }
+.store-layout .card:has(> .form-sheet) { max-width: none; }
+.store-layout .form-sheet { max-width: none; }
+.store-preview-card { position: sticky; top: 16px; }
+
+/* the bank account a transfer is sent to: its three boxes read as one thing */
+.store-bank .is-bad { border-color: var(--stop); }
+.store-bank-note { margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
+.store-bank-note:empty { display: none; }
+.store-bank-note.is-stop { color: var(--stop); }
+
+/* the form's parts, one framed section each */
+.store-section {
+    margin: 0 0 16px;
+    padding: 12px 14px 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+.store-section.store-bank { background: var(--paper); }
+.store-section legend { float: left; width: 100%; margin-bottom: 10px; }
+.store-section legend + * { clear: both; }
+.store-section > .btn { margin-bottom: 12px; }
+.store-subhead {
+    display: block;
+    margin: 4px 0 8px;
+    font-size: 13px; font-weight: 600;
+    color: var(--steel);
+}
+.store-checks {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 8px 14px;
+    margin-bottom: 14px;
+}
+.store-checks label {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0;
+    font-size: 14.5px;
+    cursor: pointer;
+}
+.store-checks input { width: 18px; height: 18px; accent-color: var(--go); }
+
+/* one header or footer line: the words, then move up, move down, remove */
+.line-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.line-list:empty { display: none; }
+.line-row { display: flex; gap: 6px; align-items: center; }
+.line-row .form-control { flex: 1; min-width: 0; min-height: 38px; padding: 7px 10px; font-size: 15px; }
+.line-row .btn { flex: none; min-width: 36px; min-height: 38px; padding: 4px 8px; }
+.line-row .line-remove { color: var(--stop); }
+
+/* The paper is the roll's real width (set by format.js applyReceiptPaper),
+   so what is seen here is what the printer gets. */
+.store-preview-stage {
+    display: flex;
+    justify-content: center;
+    padding: 14px 0;
+    background: var(--paper);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+.store-preview {
+    flex: none;
+    max-width: 100%;      /* a phone narrower than the roll shrinks it; print keeps the width */
+    box-sizing: border-box;
+    padding: 4mm 3mm;
+    background: var(--surface);
+    box-shadow: 0 1px 4px rgba(20, 24, 29, 0.18);
+}
+
+/* only the preview reaches the paper when Print Test is pressed */
+@media print {
+    body.printing-receipt .wrapper > *:not(.main-content),
+    body.printing-receipt .topbar,
+    body.printing-receipt .toast-deck,
+    body.printing-receipt .modal { display: none !important; }
+    body.printing-receipt .content-area > *:not(#panel-store),
+    body.printing-receipt .store-layout > .card:not(.store-preview-card),
+    body.printing-receipt .store-preview-card .panel-head { display: none !important; }
+    body.printing-receipt .main-content,
+    body.printing-receipt .content-area,
+    body.printing-receipt .store-layout,
+    body.printing-receipt .store-preview-card,
+    body.printing-receipt .store-preview-stage {
+        display: block !important;
+        margin: 0 !important; padding: 0 !important;
+        border: none !important; box-shadow: none !important;
+        background: none !important;
+    }
+    body.printing-receipt .store-preview { box-shadow: none; padding: 0; }
+}
+
+@media (max-width: 1100px) {
+    .store-layout { grid-template-columns: 1fr; }
+    .store-preview-card { position: static; }
+}
+
+/* the TIN box says whether it is happy as it is filled in, like the phone box */
+#store-tin {
+    font-family: var(--font-figure);
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+}
+#store-tin.is-bad { border-color: var(--signal-hi); }
+#store-tin.is-bad:focus {
+    border-color: var(--signal-hi);
+    box-shadow: 0 0 0 3px var(--signal-dim);
+}
+
+/* what the server refused, said next to the boxes rather than only as a card
+   in the corner that has gone by the time the form is read again */
+.store-verdict {
+    margin: 4px 0 0;
+    padding: 9px 12px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+}
+.store-verdict:empty { display: none; }
+.store-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }

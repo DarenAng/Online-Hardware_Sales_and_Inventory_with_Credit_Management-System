@@ -1,6 +1,6 @@
-// Screens by Role, end to end against the stub: the matrix switches a screen
-// on and off, the menu follows over the live channel, and the counts are
-// mirrored onto the heading and the top bar.
+// Access Control, end to end against the stub: a role is picked at the top,
+// its line of switches turns a screen on and off, the menu follows over the
+// live channel, and the counts are mirrored onto the heading and the top bar.
 const { chromium } = require("playwright");
 const path = require("path");
 const fs = require("fs");
@@ -51,50 +51,27 @@ async function screenFor(browser, role, fullName, staffId, page, problems) {
   // every run starts from the pages' own menus
   await fetch(`${BASE}/api/test/features/reset`, { method: "POST" });
 
-  // ---------- 1. the manager's counts, without opening anything ----------
-  const manager = await screenFor(browser, "Manager", "Manager M. User", 2, "manager-dashboard.html", problems);
+  // ---------- 1. the manager's menu, as the page writes it ----------
+  const manager = await screenFor(browser, "Manager", "Manager M. User", 2, "manager.html", problems);
   const m = manager.tab;
 
   check("the Credit heading starts folded",
     (await m.locator("#credit-dropdown:visible").count()) === 0);
-  check("the count on Extension Requests is mirrored onto the Credit heading while it is folded",
-    (await m.locator("#credit-nav .nav-count-parent.is-waiting").textContent()).trim() === "2",
-    await m.locator("#credit-nav").textContent());
-  check("the Stocks heading carries the reorder count the same way",
-    (await m.locator("#stocks-nav .nav-count-parent.is-waiting").textContent()).trim() === "3");
-  check("the top bar adds every count on the menu up",
-    (await m.locator("#pending-chip:visible").count()) === 1 &&
-    (await m.locator("#pending-chip-count").textContent()).trim() === "10",
-    await m.locator("#pending-chip").textContent());
-  await shot(m, "01-manager-counts-folded");
+  await shot(m, "01-manager-menu-folded");
 
   await m.click("#credit-nav");
   await m.waitForTimeout(300);
-  check("opening the heading shows the item's own badge and steps the heading's copy aside",
-    (await m.locator("#credit-request-count.is-waiting:visible").count()) === 1 &&
-    (await m.locator("#credit-nav .nav-count-parent:visible").count()) === 0);
-  await shot(m, "02-manager-counts-open");
+  check("opening the heading's caret shows the Extension Requests item",
+    (await m.locator('#credit-dropdown a[data-panel-link="panel-credit-requests"]:visible').count()) === 1);
+  await shot(m, "02-manager-menu-open");
 
-  await m.click("#pending-chip");
-  await m.waitForTimeout(300);
-  const rows = await m.locator("#pending-drop:visible .pending-row").allTextContents();
-  check("the chip opens to a list of what is waiting where",
-    rows.length === 4 && rows.some((r) => /Extension Requests/.test(r) && /waiting for your decision/.test(r)),
-    rows.join(" | "));
-  await shot(m, "03-manager-waiting-list");
-
-  await m.locator("#pending-drop .pending-row", { hasText: "Extension Requests" }).click();
+  await m.click('a[data-panel-link="panel-credit-requests"]');
   await m.waitForTimeout(400);
-  check("a line on the list opens the screen it names",
-    (await m.locator("#panel-credit-requests:visible").count()) === 1 &&
-    (await m.locator("#pending-drop:visible").count()) === 0);
+  check("the menu item opens the screen it names",
+    (await m.locator("#panel-credit-requests:visible").count()) === 1);
 
   check("the manager holds the Delivery Schedule by role, under the Deliveries heading",
-    (await m.locator('#deliveries-dropdown li[data-feature="delivery-schedule"]:not([hidden])').count()) === 1 &&
-    (await m.locator("#deliveries-nav .nav-count-parent.is-waiting").textContent()).trim() === "5" &&
-    /not yet sent out/.test(await m.locator("#deliveries-nav .nav-count-parent").getAttribute("title")));
-  check("every count says in words what it counts",
-    /credit requests waiting for your decision/.test(await m.locator("#credit-request-count").getAttribute("title")));
+    (await m.locator('#deliveries-dropdown li[data-feature="delivery-schedule"]:not([hidden])').count()) === 1);
 
   // ---------- 2. the cashier before anything is switched ----------
   const cashier = await screenFor(browser, "Cashier", "Cashier C. User", 4, "cashier-dashboard.html", problems);
@@ -105,21 +82,42 @@ async function screenFor(browser, role, fullName, staffId, page, problems) {
   check("the cashier's Refunds item is under Point of Sale",
     (await c.locator('#pos-dropdown li[data-feature="refunds"]:not([hidden])').count()) === 1);
 
-  // ---------- 3. the administrator's matrix ----------
+  // ---------- 3. the administrator's Access Control page ----------
   const admin = await screenFor(browser, "System Administrator", "Admin S. User", 1, "system.html", problems);
   const a = admin.tab;
 
-  await a.click("#access-nav");
+  check("Access Control is one link in the menu, with no list under it",
+    (await a.locator('.sidebar-nav a[data-panel-link="panel-features"]').count()) === 1 &&
+    (await a.locator("#access-dropdown").count()) === 0);
+
   await a.click('a[data-panel-link="panel-features"]');
   await a.waitForTimeout(800);
 
+  check("the top bar names the screen as the menu does",
+    (await a.locator("#admin-page-title").textContent()).trim() === "Access Control");
+
   const cells = await a.locator("#features-matrix .feature-box").count();
-  check("the matrix is drawn from the catalogue", cells > 20, `${cells} switches`);
-  check("a screen a dashboard cannot draw is a dash, not a switch",
-    (await a.locator("#features-matrix .feature-cell.is-unavailable").count()) > 0);
+  check("every role's switches are drawn from the catalogue", cells > 20, `${cells} switches`);
+  check("only the picked role's line is showing",
+    (await a.locator("#features-matrix .feature-strip:not([hidden])").count()) === 1);
+  check("a screen a dashboard cannot draw is not on the role's line",
+    (await a.locator('.feature-strip:not([hidden]) .feature-box[data-feature="delivery-runs"]').count()) === 0);
   check("Save is dead until something moves",
     await a.locator("#features-save-btn").isDisabled());
-  await shot(a, "04-admin-matrix");
+  await shot(a, "04-admin-manager-line");
+
+  // pick the cashier from the roles down the right-hand column
+  check("the roles are listed beside the screens",
+    (await a.locator("#features-role .role-pick").count()) === 4);
+  const cashierPick = a.locator("#features-role .role-pick", { hasText: "Cashier" });
+  const cashierRoleId = await cashierPick.getAttribute("data-role");
+  await cashierPick.click();
+  await a.waitForTimeout(300);
+  check("picking a role shows that role's screens",
+    (await a.locator('.feature-strip:not([hidden])[data-role="' + cashierRoleId + '"]').count()) === 1 &&
+    (await a.locator('.feature-strip:not([hidden]) .feature-box[data-feature="pos"]').count()) === 1 &&
+    (await cashierPick.getAttribute("aria-selected")) === "true");
+  await shot(a, "04b-admin-cashier-line");
 
   await a.locator('.feature-box[data-feature="delivery-schedule"][data-role-name="Cashier"]').check({ force: true });
   await a.locator('.feature-box[data-feature="refunds"][data-role-name="Cashier"]').uncheck({ force: true });
@@ -130,6 +128,8 @@ async function screenFor(browser, role, fullName, staffId, page, problems) {
     (await a.locator('.feature-box[data-feature="refunds"][data-role-name="Cashier"] ~ .feature-state').textContent()).trim() === "switched off");
   check("Save comes alive once something moves",
     !(await a.locator("#features-save-btn").isDisabled()));
+  check("the role carries a mark while its changes are unsaved",
+    (await a.locator('#features-role .role-pick[data-role="' + cashierRoleId + '"] .role-pick-mark:not([hidden])').count()) === 1);
 
   await a.click("#features-save-btn");
   await a.waitForTimeout(400);
@@ -141,9 +141,8 @@ async function screenFor(browser, role, fullName, staffId, page, problems) {
 
   await a.locator("button", { hasText: /^Save screens$/ }).click();
   await a.waitForTimeout(1200);
-  check("the matrix says how many switches differ from the pages",
-    /2 changed/.test(await a.locator("#features-count").textContent()),
-    await a.locator("#features-count").textContent());
+  check("the switched screens say they differ from the role's default",
+    await a.locator("#features-matrix .feature-state:not([hidden])").count() >= 1);
   await shot(a, "06-admin-saved");
 
   // ---------- 4. the cashier's menu follows, with no reload ----------
@@ -152,9 +151,6 @@ async function screenFor(browser, role, fullName, staffId, page, problems) {
     (await c.locator('.sidebar-nav li[data-feature="delivery-schedule"]:visible').count()) === 1);
   check("the Refunds item has left the Point of Sale list",
     (await c.locator('#pos-dropdown li[data-feature="refunds"]:not([hidden])').count()) === 0);
-  check("the granted screen's count reaches the top bar",
-    (await c.locator("#pending-chip:visible").count()) === 1 &&
-    (await c.locator("#pending-chip-count").textContent()).trim() === "4");
   await shot(c, "07-cashier-granted");
 
   await c.click('a[data-panel-link="panel-delivery-schedule"]');

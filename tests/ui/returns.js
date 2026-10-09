@@ -167,7 +167,7 @@ function isOurProblem(text) {
     await page.locator('input[name="disposition"]:checked').count() === 0);
 
   // ---------- the list says where each one went ----------
-  const rows = await page.locator("#refund-table tbody tr").count();
+  const rows = await page.locator("#refund-table tbody tr:not(.row-filler)").count();
   check("the refund list has the new record", rows >= 3, `saw ${rows}`);
 
   const headers = await page.locator("#refund-table thead th").allTextContents();
