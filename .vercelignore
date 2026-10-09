@@ -1,0 +1,15 @@
+# never uploaded to Vercel by "vercel deploy" (a git deploy only sees committed files)
+.env
+.env.*
+!.env.example
+mail-password.txt
+*.pem
+node_modules/
+backups/
+tests/
+shots/
+launch/
+_reorganize/
+Capstone outputs/
+vercel-static/
+*.bat

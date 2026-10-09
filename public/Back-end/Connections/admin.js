@@ -19,7 +19,9 @@ const path = require("path");
 const fs = require("fs");
 const fsp = require("fs/promises");   // the same as fs, but works with "await"
 const crypto = require("crypto");
+const zlib = require("zlib");
 const mailer = require("../mailer");
+const { splitSqlStatements } = require("../sql-script");
 const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
 const firstPasswordMessage = mailer.firstPasswordMessage;
@@ -38,7 +40,7 @@ function registerAdminRoutes(app, deps) {
     requireRole, publishChange, ADMIN, USER_SELECT, withPresence, notOwnAccount,
     endSessionsForStaff, hashPassword, generatePassword, phoneComplaint, cleanPhone, cleanMiddleName,
     tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
-    sqlName, EXPECTED_PROCEDURES, countProcedures, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
+    sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
     FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom
   } = deps;
 
@@ -104,69 +106,99 @@ function registerAdminRoutes(app, deps) {
   }
 
   // Drafts: creating an account is two requests with a person reading the
-  // details in between. The draft lives here, in memory, keyed by id and held
-  // to one administrator, so what was confirmed on screen is what is written.
-  // Drafts expire on their own.
-  const accountDrafts = new Map();      // draftId -> { by, kind, details, password, expires }
+  // details in between. The draft is kept in account_drafts (any copy of the
+  // server may answer the second request), held to one administrator, so what
+  // was confirmed on screen is what is written. Drafts expire on their own.
+  //
+  // The draft holds the new account's first password, so the row is sealed:
+  // it is filed under the SHA-256 of its id and encrypted with a key made from
+  // the id. Only the administrator's screen holds the id, so the table alone
+  // gives away nothing.
   const DRAFT_LIFE_MS = 10 * 60 * 1000; // long enough to read a card, short enough to forget
   const DRAFT_MAX = 200;                // one runaway client cannot grow this without limit
 
-  function newAccountDraft(staffId, kind, details, password) {
-    // swept here rather than on a timer: the map only grows when it is being used
-    const now = Date.now();
+  function draftHash(draftId) {
+    return crypto.createHash("sha256").update("draft-id:" + draftId).digest("hex");
+  }
 
-    // remove the drafts that have expired
-    for (const id of Array.from(accountDrafts.keys())) {
-      if (accountDrafts.get(id).expires <= now) {
-        accountDrafts.delete(id);
-      }
-    }
+  function draftKey(draftId) {
+    return crypto.createHash("sha256").update("draft-key:" + draftId).digest();
+  }
 
-    // still too many? remove the one that expires first
-    if (accountDrafts.size >= DRAFT_MAX) {
-      let oldestId = null;
-      let oldestExpires = Infinity;
-      for (const id of accountDrafts.keys()) {
-        const expires = accountDrafts.get(id).expires;
-        if (expires < oldestExpires) {
-          oldestExpires = expires;
-          oldestId = id;
-        }
-      }
-      if (oldestId !== null) accountDrafts.delete(oldestId);
+  function sealDraft(draftId, value) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv("aes-256-gcm", draftKey(draftId), iv);
+    const body = Buffer.concat([cipher.update(JSON.stringify(value), "utf8"), cipher.final()]);
+    return Buffer.concat([iv, cipher.getAuthTag(), body]).toString("base64");
+  }
+
+  function openDraft(draftId, sealed) {
+    const raw = Buffer.from(sealed, "base64");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", draftKey(draftId), raw.subarray(0, 12));
+    decipher.setAuthTag(raw.subarray(12, 28));
+    const text = Buffer.concat([decipher.update(raw.subarray(28)), decipher.final()]).toString("utf8");
+    return JSON.parse(text);
+  }
+
+  async function removeExpiredDrafts() {
+    await db.query("DELETE FROM account_drafts WHERE expires_at <= ?", [Date.now()]);
+  }
+
+  async function newAccountDraft(staffId, kind, details, password) {
+    // swept here rather than on a timer: the table only grows when it is being used
+    await removeExpiredDrafts();
+
+    // still too many? remove the ones that expire first
+    const [counted] = await db.query("SELECT COUNT(*) AS total FROM account_drafts");
+    const extra = Number(counted[0].total) - DRAFT_MAX + 1;
+    if (extra > 0) {
+      await db.query("DELETE FROM account_drafts ORDER BY expires_at LIMIT ?", [extra]);
     }
 
     const draftId = crypto.randomBytes(18).toString("base64url");
-    accountDrafts.set(draftId, {
-      by: staffId,
-      kind: kind,
-      details: details,
-      password: password,
-      expires: now + DRAFT_LIFE_MS
-    });
+    await db.query(
+      "INSERT INTO account_drafts (draft_hash, staff_id, kind, payload, expires_at) VALUES (?, ?, ?, ?, ?)",
+      [draftHash(draftId), staffId, kind,
+       sealDraft(draftId, { details: details, password: password }), Date.now() + DRAFT_LIFE_MS]);
 
     return { draftId: draftId, expiresInSeconds: Math.round(DRAFT_LIFE_MS / 1000) };
   }
 
   // Reads a draft and removes it: a draft is good for one confirmation, so a
-  // double-clicked button is not a second account.
-  function takeAccountDraft(draftId, staffId, kind) {
-    const draft = accountDrafts.get(String(draftId || ""));
+  // double-clicked button is not a second account (only the request whose
+  // DELETE removed the row goes on).
+  async function takeAccountDraft(draftId, staffId, kind) {
+    const expired = { error: "That review has expired. Fill the form in again." };
+    const id = String(draftId || "");
+    if (id === "") return expired;
 
-    if (!draft) return { error: "That review has expired. Fill the form in again." };
-    accountDrafts.delete(String(draftId));
+    const hash = draftHash(id);
+    const [rows] = await db.query(
+      "SELECT staff_id, kind, payload, expires_at FROM account_drafts WHERE draft_hash = ?", [hash]);
+    if (rows.length === 0) return expired;
 
-    if (draft.expires <= Date.now()) {
-      return { error: "That review has expired. Fill the form in again." };
-    }
-    if (draft.by !== staffId) {
+    const [removed] = await db.query("DELETE FROM account_drafts WHERE draft_hash = ?", [hash]);
+    if (removed.affectedRows !== 1) return expired;
+
+    const row = rows[0];
+    if (Number(row.expires_at) <= Date.now()) return expired;
+    if (row.staff_id !== staffId) {
       return { error: "That review belongs to another administrator's session." };
     }
-    if (draft.kind !== kind) {
+    if (row.kind !== kind) {
       return { error: "That review was for a different kind of account." };
     }
 
-    return { draft };
+    let sealed;
+    try {
+      sealed = openDraft(id, row.payload);
+    } catch (error) {
+      return expired;
+    }
+
+    return {
+      draft: { by: row.staff_id, kind: row.kind, details: sealed.details, password: sealed.password }
+    };
   }
 
   // Every staff member, including anyone with no login, with presence. The
@@ -195,7 +227,7 @@ function registerAdminRoutes(app, deps) {
 
     try {
       const [rows] = await db.query(`${USER_SELECT}${filter} ORDER BY s.staff_id`, params);
-      response.json(withPresence(rows));
+      response.json(await withPresence(rows));
     } catch (error) {
       console.error("Loading users failed:", error.message);
       response.status(500).json({ error: error.message });
@@ -288,7 +320,7 @@ function registerAdminRoutes(app, deps) {
       };
 
       const password = generatePassword();
-      const draft = newAccountDraft(request.actor.staffId, "staff", details, password);
+      const draft = await newAccountDraft(request.actor.staffId, "staff", details, password);
 
       // the name as the directory will spell it (same as staff.full_name),
       // e.g. "Juan D. Cruz"
@@ -317,7 +349,7 @@ function registerAdminRoutes(app, deps) {
 
   // Step 2 of 2: create it from the draft and send the password.
   app.post("/api/users", async (request, response) => {
-    const draftResult = takeAccountDraft(request.body.draftId, request.actor.staffId, "staff");
+    const draftResult = await takeAccountDraft(request.body.draftId, request.actor.staffId, "staff");
 
     if (draftResult.error) return response.status(410).json({ error: draftResult.error });
 
@@ -445,7 +477,7 @@ function registerAdminRoutes(app, deps) {
         if (roleChanged) {
           reason = "Your role was changed by the System Administrator. Sign in again to continue as that role.";
         }
-        endSessionsForStaff(request.params.staffId, null, reason);
+        await endSessionsForStaff(request.params.staffId, null, reason);
       }
 
       const after = {
@@ -484,7 +516,7 @@ function registerAdminRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      if (!isActive) endSessionsForStaff(request.params.staffId);
+      if (!isActive) await endSessionsForStaff(request.params.staffId);
 
       let action = "DEACTIVATE_ACCOUNT";
       let words = "removed from";
@@ -556,7 +588,7 @@ function registerAdminRoutes(app, deps) {
       };
 
       const password = generatePassword();
-      const draft = newAccountDraft(request.actor.staffId, "login", details, password);
+      const draft = await newAccountDraft(request.actor.staffId, "login", details, password);
 
       // the answer: the draft id, the password, and every field of "details"
       const answer = Object.assign({
@@ -574,7 +606,7 @@ function registerAdminRoutes(app, deps) {
   });
 
   app.post("/api/users/:staffId/account", notOwnAccount, async (request, response) => {
-    const draftResult = takeAccountDraft(request.body.draftId, request.actor.staffId, "login");
+    const draftResult = await takeAccountDraft(request.body.draftId, request.actor.staffId, "login");
 
     if (draftResult.error) return response.status(410).json({ error: draftResult.error });
 
@@ -666,7 +698,7 @@ function registerAdminRoutes(app, deps) {
       return { status: output.status_code, body: { error: output.message } };
     }
 
-    endSessionsForStaff(Number(staffId), null,
+    await endSessionsForStaff(Number(staffId), null,
       `Your password was reset by ${by}. Sign in with the one that was sent to you.`);
 
     // a reset is also the way to release a held account
@@ -992,13 +1024,20 @@ function registerAdminRoutes(app, deps) {
   // ==========================================
   // BACKUP & RECOVERY
   //
-  // A backup is a complete .sql file (schema, rows, views, procedures) written
-  // into backups/ and named after the moment it was taken. It opens and runs in
-  // MySQL Workbench.
+  // A backup is a complete .sql file (schema, rows, views, procedures) named
+  // after the moment it was taken. It opens and runs in MySQL Workbench.
+  //
+  // Where the files are kept (HARDWARE_BACKUP_STORE in .env):
+  //   folder    the backups/ folder on this PC (or HARDWARE_BACKUP_DIR). The default on a PC.
+  //   database  the backup_files table, gzipped. The default on Vercel, whose
+  //             disk is wiped between requests. Download a copy now and then:
+  //             a backup kept inside the database it backs up is lost with it.
   // ==========================================
   // HARDWARE_BACKUP_DIR in .env can point the backups to another folder
   const BACKUP_DIR = process.env.HARDWARE_BACKUP_DIR || path.join(__dirname, "..", "..", "..", "backups");
   const BACKUP_PREFIX = "hardware_db_backup_";
+  const BACKUP_STORE_KIND = String(process.env.HARDWARE_BACKUP_STORE || (IS_VERCEL ? "database" : "folder"))
+    .trim().toLowerCase() === "database" ? "database" : "folder";
 
   // Two kinds, told apart by name: one somebody pressed the button for is kept
   // until deleted; an automatic one (the daily backup, and the copy taken just
@@ -1013,9 +1052,166 @@ function registerAdminRoutes(app, deps) {
     /^hardware_db_(backup|auto)_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
   const AUTO_NAME = /^hardware_db_auto_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
 
-  async function ensureBackupFolder() {
-    await fsp.mkdir(BACKUP_DIR, { recursive: true });
+  // The two stores answer the same calls:
+  //   names()            every backup's file name
+  //   list()             [{ name, bytes, createdAt }]
+  //   exists(name)       true or false
+  //   writer(name)       { write(text), finish() -> bytes, abandon() }
+  //   readText(name)     the file's text, or null when it is gone
+  //   remove(name)       true, or false when it was already gone
+  //   readSwitch() / writeSwitch(enabled)   the daily backup's on/off switch
+  //   readError() / writeError(message)     why the last daily backup failed
+
+  // the on/off switch lives in a small file beside the backups, so a server
+  // restart does not quietly turn the backup back on for someone who switched
+  // it off. Missing or unreadable means on, the safe default.
+  const AUTO_SWITCH_FILE = path.join(BACKUP_DIR, "auto-backup.json");
+
+  const folderStore = {
+    async names() {
+      await fsp.mkdir(BACKUP_DIR, { recursive: true });
+      return (await fsp.readdir(BACKUP_DIR)).filter((name) => BACKUP_NAME.test(name));
+    },
+    async list() {
+      const files = [];
+      for (const name of await this.names()) {
+        const stats = await fsp.stat(path.join(BACKUP_DIR, name));
+        files.push({ name: name, bytes: stats.size, createdAt: stats.mtime.toISOString() });
+      }
+      return files;
+    },
+    async exists(name) {
+      return fs.existsSync(path.join(BACKUP_DIR, name));
+    },
+    async writer(name) {
+      await fsp.mkdir(BACKUP_DIR, { recursive: true });
+      const fullPath = path.join(BACKUP_DIR, name);
+      const out = fs.createWriteStream(fullPath, { encoding: "utf8" });
+      const close = () => new Promise((resolve) => out.end(resolve));
+      return {
+        // "await write(...)" waits until the text is in the file
+        write(text) {
+          return new Promise((resolve, reject) => {
+            out.write(text, (error) => (error ? reject(error) : resolve()));
+          });
+        },
+        async finish() {
+          await close();
+          return (await fsp.stat(fullPath)).size;
+        },
+        async abandon() {
+          await close();
+        }
+      };
+    },
+    async readText(name) {
+      try {
+        return await fsp.readFile(path.join(BACKUP_DIR, name), "utf8");
+      } catch (error) {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      }
+    },
+    async remove(name) {
+      try {
+        await fsp.unlink(path.join(BACKUP_DIR, name));
+        return true;
+      } catch (error) {
+        if (error.code === "ENOENT") return false;   // already gone
+        throw error;
+      }
+    },
+    async readSwitch() {
+      try {
+        return JSON.parse(await fsp.readFile(AUTO_SWITCH_FILE, "utf8")).enabled !== false;
+      } catch (error) {
+        return true;
+      }
+    },
+    async writeSwitch(enabled) {
+      await fsp.mkdir(BACKUP_DIR, { recursive: true });
+      await fsp.writeFile(AUTO_SWITCH_FILE,
+        JSON.stringify({ enabled: enabled, changedAt: new Date().toISOString() }, null, 2) + "\n");
+    },
+    // one server, so its memory is enough
+    async readError() {
+      return autoBackup.lastError;
+    },
+    async writeError() {}
+  };
+
+  async function readFlag(key) {
+    const [rows] = await db.query("SELECT flag_value FROM app_flags WHERE flag_key = ?", [key]);
+    return rows.length > 0 ? rows[0].flag_value : null;
   }
+
+  async function writeFlag(key, value) {
+    await db.query(
+      `INSERT INTO app_flags (flag_key, flag_value, updated_at) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE flag_value = VALUES(flag_value), updated_at = VALUES(updated_at)`,
+      [key, value === null ? null : String(value).slice(0, 255), Date.now()]);
+  }
+
+  const databaseStore = {
+    async names() {
+      const [rows] = await db.query("SELECT file_name FROM backup_files");
+      return rows.map((row) => row.file_name);
+    },
+    async list() {
+      const [rows] = await db.query("SELECT file_name, bytes, created_at FROM backup_files");
+      return rows.map((row) => ({
+        name: row.file_name,
+        bytes: Number(row.bytes),
+        createdAt: new Date(Number(row.created_at)).toISOString()
+      }));
+    },
+    async exists(name) {
+      const [rows] = await db.query("SELECT 1 FROM backup_files WHERE file_name = ?", [name]);
+      return rows.length > 0;
+    },
+    // gathered in memory and saved gzipped in one row: a shop's backup is a
+    // few hundred kilobytes of text and squeezes to a tenth of that
+    async writer(name) {
+      const parts = [];
+      return {
+        async write(text) {
+          parts.push(text);
+        },
+        async finish() {
+          const text = Buffer.from(parts.join(""), "utf8");
+          await db.query(
+            "INSERT INTO backup_files (file_name, bytes, created_at, content) VALUES (?, ?, ?, ?)",
+            [name, text.length, Date.now(), zlib.gzipSync(text)]);
+          return text.length;
+        },
+        async abandon() {}
+      };
+    },
+    async readText(name) {
+      const [rows] = await db.query("SELECT content FROM backup_files WHERE file_name = ?", [name]);
+      if (rows.length === 0) return null;
+      return zlib.gunzipSync(rows[0].content).toString("utf8");
+    },
+    async remove(name) {
+      const [result] = await db.query("DELETE FROM backup_files WHERE file_name = ?", [name]);
+      return result.affectedRows > 0;
+    },
+    async readSwitch() {
+      return (await readFlag("auto_backup_enabled")) !== "0";
+    },
+    async writeSwitch(enabled) {
+      await writeFlag("auto_backup_enabled", enabled ? "1" : "0");
+    },
+    // many copies of the server, so the one that ran the job writes it down
+    async readError() {
+      return await readFlag("auto_backup_error");
+    },
+    async writeError(message) {
+      await writeFlag("auto_backup_error", message);
+    }
+  };
+
+  const backupStore = BACKUP_STORE_KIND === "database" ? databaseStore : folderStore;
 
   // 5 -> "05"
   function twoDigits(number) {
@@ -1030,17 +1226,16 @@ function registerAdminRoutes(app, deps) {
   }
 
   // a file name that is not taken yet (adds -2, -3, ... when needed)
-  async function freeBackupPath(when, prefix) {
-    await ensureBackupFolder();
+  async function freeBackupName(when, prefix) {
     const base = backupFileName(when, prefix);
     let name = base;
     let counter = 2;
 
-    while (fs.existsSync(path.join(BACKUP_DIR, name))) {
+    while (await backupStore.exists(name)) {
       name = base.replace(/\.sql$/, `-${counter}.sql`);
       counter += 1;
     }
-    return { name: name, fullPath: path.join(BACKUP_DIR, name) };
+    return name;
   }
 
   // Generated columns cannot be written back; read from the catalogue so a
@@ -1076,7 +1271,8 @@ function registerAdminRoutes(app, deps) {
        ORDER BY TABLE_NAME`,
       [DB_NAME]
     );
-    return rows.map((row) => row.TABLE_NAME);
+    // the server's own tables (sign-ins, the backups themselves) are not shop data
+    return rows.map((row) => row.TABLE_NAME).filter((name) => !SERVER_TABLES.includes(name));
   }
 
   // in the order they can be created: a view that names another view goes after it
@@ -1142,27 +1338,17 @@ function registerAdminRoutes(app, deps) {
   // Writes the whole database to one .sql file. Pass AUTO_PREFIX for a rotating one.
   async function writeBackupFile(prefix) {
     const now = new Date();
-    const file = await freeBackupPath(now, prefix);
-    const name = file.name;
-    const fullPath = file.fullPath;
+    const name = await freeBackupName(now, prefix);
 
     const tables = await listBaseTables();
     const views = await listViews();
     const procedures = await listProcedures();
 
-    // "out" writes into the file bit by bit.
+    // "out" writes into the file bit by bit (see the two stores above).
     // write(text) adds text to the file, and "await write(...)" waits until it is written.
-    const out = fs.createWriteStream(fullPath, { encoding: "utf8" });
+    const out = await backupStore.writer(name);
     function write(text) {
-      return new Promise(function (resolve, reject) {
-        out.write(text, function (error) {
-          if (error) {
-            reject(error);
-          } else {
-            resolve();
-          }
-        });
-      });
+      return out.write(text);
     }
 
     let rowTotal = 0;
@@ -1253,19 +1439,18 @@ function registerAdminRoutes(app, deps) {
       }
 
       await write(`SET FOREIGN_KEY_CHECKS = 1;\n`);
-    } finally {
-      // close the file and wait until it is closed
-      await new Promise(function (resolve) {
-        out.end(resolve);
-      });
+    } catch (error) {
+      await out.abandon();
+      throw error;
     }
 
-    const stats = await fsp.stat(fullPath);
+    // close the file (or save the row) and wait until it is done
+    const bytes = await out.finish();
 
     return {
       fileName: name,
       createdAt: now.toISOString(),
-      bytes: stats.size,
+      bytes: bytes,
       tableCount: tables.length,
       viewCount: views.length,
       procedureCount: procedures.length,
@@ -1273,106 +1458,8 @@ function registerAdminRoutes(app, deps) {
     };
   }
 
-  // Splits the text of a .sql file into separate statements (like MySQL
-  // Workbench does). It reads the text one character at a time:
-  //   - "DELIMITER //" changes what ends a statement (used around procedures)
-  //   - text inside quotes '...' "..." `...` is copied as it is
-  //     (a ; inside quotes does not end a statement)
-  //   - comments (-- ..., # ..., /* ... */) are skipped
-  //   - the delimiter (normally ;) ends the current statement
-  //   - any other character is added to the current statement
-  function splitSqlStatements(sql) {
-    const statements = [];
-    let delimiter = ";";
-    let current = "";
-    let index = 0;
-
-    while (index < sql.length) {
-      const character = sql[index];
-      const rest = sql.slice(index);
-
-      // a "DELIMITER xx" line
-      if (current.trim() === "" && /^delimiter[ \t]+/i.test(rest)) {
-        let lineEnd = rest.indexOf("\n");
-        if (lineEnd === -1) {
-          lineEnd = rest.length;   // the last line of the file
-        }
-        const line = rest.slice(0, lineEnd);
-        delimiter = line.replace(/^delimiter[ \t]+/i, "").trim() || ";";
-        index += line.length;
-        current = "";
-        continue;
-      }
-
-      // text in quotes: copy everything up to the closing quote
-      if (character === "'" || character === '"' || character === "`") {
-        const quote = character;
-        current += character;
-        index += 1;
-
-        while (index < sql.length) {
-          // a backslash keeps the next character (e.g. \' inside '...')
-          if (sql[index] === "\\" && quote !== "`") {
-            current += sql.slice(index, index + 2);
-            index += 2;
-            continue;
-          }
-          if (sql[index] === quote) {
-            // two quotes in a row ('') are a quote inside the text
-            if (sql[index + 1] === quote) {
-              current += quote + quote;
-              index += 2;
-              continue;
-            }
-            current += quote;
-            index += 1;
-            break;
-          }
-          current += sql[index];
-          index += 1;
-        }
-        continue;
-      }
-
-      // a "-- comment" or "# comment": skip to the end of the line
-      const isDashComment = rest.startsWith("--") &&
-        (rest[2] === " " || rest[2] === "\t" || rest[2] === "\n");
-      if (isDashComment || character === "#") {
-        const stop = sql.indexOf("\n", index);
-        if (stop === -1) {
-          index = sql.length;
-        } else {
-          index = stop + 1;
-        }
-        continue;
-      }
-
-      // a "/* comment */": skip to the closing */
-      if (rest.startsWith("/*")) {
-        const stop = sql.indexOf("*/", index + 2);
-        if (stop === -1) {
-          index = sql.length;
-        } else {
-          index = stop + 2;
-        }
-        continue;
-      }
-
-      // the delimiter: the current statement is finished
-      if (rest.startsWith(delimiter)) {
-        if (current.trim() !== "") statements.push(current.trim());
-        current = "";
-        index += delimiter.length;
-        continue;
-      }
-
-      current += character;
-      index += 1;
-    }
-
-    if (current.trim() !== "") statements.push(current.trim());
-    return statements;
-  }
+  // splitSqlStatements (in ../sql-script.js) turns the text of a .sql file
+  // into separate statements, the way MySQL Workbench does.
 
   // Runs a backup file back into the database on one connection. It cannot be
   // all-or-nothing: a dump is mostly DROP TABLE and CREATE TABLE, and MySQL
@@ -1416,12 +1503,14 @@ function registerAdminRoutes(app, deps) {
   //
   // One full backup a day, at BACKUP_HOUR (2 in the morning unless .env says
   // otherwise), not after every transaction: dumping the whole database on
-  // every sale made a busy till lag. A check runs every few minutes and writes
-  // the day's file once the hour has come; a server that was asleep or
-  // restarted catches up on its next check. The newest AUTO_KEEP automatic
-  // files are kept and older ones are deleted. Backups taken by hand are never
-  // deleted by the system, and there can be at most MANUAL_LIMIT of them.
-  // The hour is the server's clock: set TZ=Asia/Manila in .env on a cloud host.
+  // every sale made a busy till lag. On a PC a check runs every few minutes
+  // and writes the day's file once the hour has come; a server that was asleep
+  // or restarted catches up on its next check. On Vercel nothing runs between
+  // requests, so the daily job (/api/cron/daily, at the hour vercel.json sets)
+  // calls runDailyBackup instead. The newest AUTO_KEEP automatic files are
+  // kept and older ones are deleted. Backups taken by hand are never deleted
+  // by the system, and there can be at most MANUAL_LIMIT of them.
+  // The hour is the shop's clock (HARDWARE_TIME_ZONE, Asia/Manila on Vercel).
   // ==========================================
   function settingNumber(name, fallback, low, high) {
     const value = Number(process.env[name]);
@@ -1434,30 +1523,9 @@ function registerAdminRoutes(app, deps) {
   const AUTO_CHECK_MS = 10 * 60 * 1000;     // how often the day's backup is looked for
   const AUTO_FIRST_CHECK_MS = 60 * 1000;    // a minute after start, so starting stays quick
 
-  // The on/off switch lives in a small file beside the backups, so a server
-  // restart does not quietly turn the backup back on for someone who switched it
-  // off. Missing or unreadable means on, the safe default.
-  const AUTO_SWITCH_FILE = path.join(BACKUP_DIR, "auto-backup.json");
-
-  async function readAutoBackupSwitch() {
-    try {
-      const parsed = JSON.parse(await fsp.readFile(AUTO_SWITCH_FILE, "utf8"));
-      return parsed.enabled !== false;
-    } catch (error) {
-      return true;
-    }
-  }
-
-  async function writeAutoBackupSwitch(enabled) {
-    await ensureBackupFolder();
-    await fsp.writeFile(AUTO_SWITCH_FILE,
-      JSON.stringify({ enabled: enabled, changedAt: new Date().toISOString() }, null, 2) + "\n");
-  }
-
-  // the backup files in the folder, by kind, oldest first (the stamp is year-first)
+  // the backup files, by kind, oldest first (the stamp is year-first)
   async function backupNames() {
-    await ensureBackupFolder();
-    const all = await fsp.readdir(BACKUP_DIR);
+    const all = await backupStore.names();
     const automatic = all.filter((name) => AUTO_NAME.test(name)).sort();
     const manual = all.filter((name) => BACKUP_NAME.test(name) && !AUTO_NAME.test(name)).sort();
     return { automatic, manual };
@@ -1470,11 +1538,7 @@ function registerAdminRoutes(app, deps) {
 
     const doomed = names.slice(0, names.length - AUTO_KEEP);
     for (const name of doomed) {
-      try {
-        await fsp.unlink(path.join(BACKUP_DIR, name));
-      } catch (error) {
-        if (error.code !== "ENOENT") throw error;   // already gone is fine
-      }
+      await backupStore.remove(name);   // already gone is fine
     }
     return doomed.length;
   }
@@ -1488,7 +1552,7 @@ function registerAdminRoutes(app, deps) {
 
   // the state the Backup & Recovery screen reads, from the server not a constant
   const autoBackup = {
-    enabled: true,         // the switch, read from AUTO_SWITCH_FILE at startup
+    enabled: true,         // the switch, read from the store at startup
     running: false,        // a dump is in flight right now
     lastFileName: null,
     lastAt: null,
@@ -1503,10 +1567,10 @@ function registerAdminRoutes(app, deps) {
   }
 
   async function runAutoBackup() {
-    if (!autoBackup.enabled || autoBackup.running) return;
+    if (!autoBackup.enabled || autoBackup.running) return "off or already running";
 
     // a dump taken halfway through a restore is a dump of neither database
-    if (restoreInProgress) return;
+    if (restoreInProgress) return "a restore is running";
 
     autoBackup.running = true;
 
@@ -1519,9 +1583,14 @@ function registerAdminRoutes(app, deps) {
       if (autoBackup.lastError) console.log(`The daily backup is working again (${summary.fileName}).`);
       autoBackup.lastError = null;
       autoBackup.failures = 0;
+      await backupStore.writeError(null);
+      return `saved ${summary.fileName}`;
     } catch (error) {
       autoBackup.failures += 1;
       autoBackup.lastError = error.message;
+      try {
+        await backupStore.writeError(error.message);
+      } catch (ignored) { /* the database is the thing that is broken */ }
 
       // said once when it starts failing, not on every check
       if (autoBackup.failures === 1) {
@@ -1534,9 +1603,17 @@ function registerAdminRoutes(app, deps) {
           );
         } catch (ignored) { /* the database is the thing that is broken */ }
       }
+      throw error;
     } finally {
       autoBackup.running = false;
     }
+  }
+
+  // true when today's automatic backup is already saved
+  async function todayIsBackedUp() {
+    const today = AUTO_PREFIX + todayStamp();
+    const names = (await backupNames()).automatic;
+    return names.some((name) => name.startsWith(today));
   }
 
   // writes today's backup once the hour has come, if today has none yet
@@ -1545,19 +1622,30 @@ function registerAdminRoutes(app, deps) {
     if (new Date().getHours() < AUTO_HOUR) return;
 
     try {
-      const today = AUTO_PREFIX + todayStamp();
-      const names = (await backupNames()).automatic;
-      if (names.some((name) => name.startsWith(today))) return;
+      if (await todayIsBackedUp()) return;
     } catch (error) {
       return;     // the folder cannot be read; the next check tries again
     }
 
     // a failed attempt waits for the next check rather than retrying at once
-    await runAutoBackup();
+    try {
+      await runAutoBackup();
+    } catch (error) {
+      // already recorded on autoBackup and in the audit trail
+    }
+  }
+
+  // The daily job's part (Vercel): the switch is read fresh, because another
+  // copy of the server may have changed it, and the hour is the job's own.
+  async function runDailyBackup() {
+    autoBackup.enabled = await backupStore.readSwitch();
+    if (!autoBackup.enabled) return "switched off";
+    if (await todayIsBackedUp()) return "today's is already saved";
+    return await runAutoBackup();
   }
 
   async function startAutoBackup() {
-    autoBackup.enabled = await readAutoBackupSwitch();
+    autoBackup.enabled = await backupStore.readSwitch();
 
     // the screen names the last automatic file even before today's is written
     try {
@@ -1778,16 +1866,15 @@ function registerAdminRoutes(app, deps) {
     try {
       const names = await backupNames();
 
-      // one entry per backup file in the folder
+      // one entry per backup file in the store
       const files = [];
-      for (const name of names.automatic.concat(names.manual)) {
-        const stats = await fsp.stat(path.join(BACKUP_DIR, name));
+      for (const file of await backupStore.list()) {
         files.push({
-          fileName: name,
-          bytes: stats.size,
-          createdAt: stats.mtime.toISOString(),
+          fileName: file.name,
+          bytes: file.bytes,
+          createdAt: file.createdAt,
           // so a row can say which kind it is
-          automatic: AUTO_NAME.test(name)
+          automatic: AUTO_NAME.test(file.name)
         });
       }
 
@@ -1796,6 +1883,12 @@ function registerAdminRoutes(app, deps) {
         return right.createdAt.localeCompare(left.createdAt);
       });
 
+      // Read from the store rather than this copy's memory: on Vercel the
+      // daily job ran on another copy of the server.
+      autoBackup.enabled = await backupStore.readSwitch();
+      const lastAuto = files.find((file) => file.automatic) || null;
+      const lastError = await backupStore.readError();
+
       response.json({
         files: files,
         auto: {
@@ -1803,10 +1896,12 @@ function registerAdminRoutes(app, deps) {
           schedule: "daily",
           hour: AUTO_HOUR,
           keep: AUTO_KEEP,
-          lastFileName: autoBackup.lastFileName,
-          lastAt: autoBackup.lastAt,
-          lastError: autoBackup.lastError,
-          failures: autoBackup.failures
+          lastFileName: lastAuto ? lastAuto.fileName : autoBackup.lastFileName,
+          lastAt: lastAuto ? lastAuto.createdAt : autoBackup.lastAt,
+          lastError: lastError,
+          failures: lastError ? Math.max(autoBackup.failures, 1) : 0,
+          // where the files are kept: "folder" (this PC) or "database" (Vercel)
+          store: BACKUP_STORE_KIND
         },
         limits: {
           automatic: AUTO_KEEP,
@@ -1834,13 +1929,14 @@ function registerAdminRoutes(app, deps) {
     }
 
     try {
-      await writeAutoBackupSwitch(enabled);
+      await backupStore.writeSwitch(enabled);
       autoBackup.enabled = enabled;
 
       if (enabled) {
         await writeAuditLog(request, "AUTO_BACKUP_ON",
           `Daily backup switched on (at ${twoDigits(AUTO_HOUR)}:00, keeping the last ${AUTO_KEEP})`);
-        dailyBackupCheck();
+        // on Vercel the daily job does it; a copy of the server may stop once this answer is sent
+        if (!IS_VERCEL) dailyBackupCheck();
         response.json({
           message: `The daily backup is on. It runs every day at ${twoDigits(AUTO_HOUR)}:00.`,
           enabled: enabled
@@ -1891,13 +1987,19 @@ function registerAdminRoutes(app, deps) {
       return response.status(400).json({ error: "That is not a backup file name." });
     }
 
-    const fullPath = path.join(BACKUP_DIR, name);
+    try {
+      const text = await backupStore.readText(name);
+      if (text === null) {
+        return response.status(404).json({ error: "That backup is no longer saved." });
+      }
 
-    if (!fs.existsSync(fullPath)) {
-      return response.status(404).json({ error: "That backup is no longer in the folder." });
+      response.attachment(name);
+      response.type("application/sql");
+      response.send(text);
+    } catch (error) {
+      console.error("Backup download failed:", error.message);
+      response.status(500).json({ error: "Unable to read that backup" });
     }
-
-    response.download(fullPath, name);
   });
 
   app.delete("/api/backups/:fileName", requireRole(ADMIN), async (request, response) => {
@@ -1908,13 +2010,12 @@ function registerAdminRoutes(app, deps) {
     }
 
     try {
-      await fsp.unlink(path.join(BACKUP_DIR, name));
+      if (!(await backupStore.remove(name))) {
+        return response.status(404).json({ error: "That backup is no longer saved." });
+      }
       await writeAuditLog(request, "BACKUP_DELETE", name);
       response.json({ message: `${name} deleted.` });
     } catch (error) {
-      if (error.code === "ENOENT") {
-        return response.status(404).json({ error: "That backup is no longer in the folder." });
-      }
       console.error("Backup delete failed:", error.message);
       response.status(500).json({ error: "Unable to delete that backup" });
     }
@@ -1945,17 +2046,16 @@ function registerAdminRoutes(app, deps) {
       return response.status(400).json({ error: "That is not a backup file name." });
     }
 
-    const fullPath = path.join(BACKUP_DIR, name);
-
-    if (!fs.existsSync(fullPath)) {
-      return response.status(404).json({ error: "That backup is no longer in the folder." });
-    }
-
     let safety = null;
     try {
-      // the database as it is now, kept in the same folder in case this has to be undone
+      const text = await backupStore.readText(name);
+      if (text === null) {
+        return response.status(404).json({ error: "That backup is no longer saved." });
+      }
+
+      // the database as it is now, kept beside the others in case this has to be undone
       safety = await writeBackupFile(AUTO_PREFIX);
-      const count = await runSqlScript(await fsp.readFile(fullPath, "utf8"));
+      const count = await runSqlScript(text);
       await writeAuditLog(request, "RESTORE", `Restored from ${name}; the database before it is ${safety.fileName}`);
       response.json({
         message: `Database restored from ${name}. ${count} statements ran. ` +
@@ -2164,7 +2264,11 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  return { startAutoBackup, startArchiveSweep, runSqlScript, resetStaffPassword };
+  return {
+    startAutoBackup, startArchiveSweep, runSqlScript, resetStaffPassword,
+    // the daily job on Vercel (server.js, /api/cron/daily)
+    runArchiveSweep, runDailyBackup, removeExpiredDrafts
+  };
 }
 
 module.exports = { registerAdminRoutes };

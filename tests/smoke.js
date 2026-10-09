@@ -668,44 +668,14 @@ function expect(role, label, response, allowed) {
 
   console.log("== LIVE SYNC ==");
 
-  // the stream never ends: opened, read until the first frame, then abandoned
-  async function readStream(cookie, ms) {
-    const stop = new AbortController();
-    const timer = setTimeout(() => stop.abort(), ms);
+  // every screen asks what changed since the version it last saw
+  const firstPoll = await call(manager, "GET", "/api/events/poll");
+  expect("manager", "GET events/poll", firstPoll, [200]);
+  record("manager", "the first ask gives a version and how often to ask",
+    firstPoll.body && Number.isInteger(firstPoll.body.version) && firstPoll.body.pollMs > 0,
+    JSON.stringify(firstPoll.body));
 
-    try {
-      const response = await fetch(`${BASE}/api/events`, {
-        headers: { Cookie: cookie || "" },
-        signal: stop.signal
-      });
-
-      const type = response.headers.get("content-type") || "";
-      const reader = response.body.getReader();
-      const chunk = await reader.read();
-      const text = new TextDecoder().decode(chunk.value || new Uint8Array());
-
-      stop.abort();
-      return { status: response.status, type, text };
-    } catch (error) {
-      return { status: 0, type: "", text: "", error: error.name };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  const stream = await readStream(manager, 4000);
-  record("manager", "the live channel opens",
-    stream.status === 200, `status ${stream.status} ${stream.error || ""}`);
-  record("manager", "and is sent as an event stream",
-    stream.type.includes("text/event-stream"), stream.type);
-  record("manager", "which opens with a hello and a version",
-    /event: hello/.test(stream.text) && /"version"/.test(stream.text),
-    stream.text.slice(0, 120).replace(/\n/g, " "));
-
-  const anonStream = await readStream(null, 3000);
-  record("anon", "a stranger cannot listen",
-    anonStream.status === 401 || anonStream.status === 403,
-    `status ${anonStream.status}`);
+  expect("anon", "a stranger cannot listen", await call(null, "GET", "/api/events/poll"), [401, 403]);
 
   const liveStatus = await call(manager, "GET", "/api/events/status");
   expect("manager", "GET events/status", liveStatus, [200]);
@@ -719,6 +689,12 @@ function expect(role, label, response, allowed) {
   const versionAfter = (await call(manager, "GET", "/api/events/status")).body.version;
   record("manager", "a write bumps the version every listener sees",
     versionAfter > versionBefore, `${versionBefore} -> ${versionAfter}`);
+
+  const caughtUp = await call(manager, "GET", `/api/events/poll?since=${versionBefore}`);
+  record("manager", "the next ask names what changed",
+    caughtUp.body && Array.isArray(caughtUp.body.changes) &&
+      caughtUp.body.changes.some((change) => change.scope === "credit"),
+    JSON.stringify(caughtUp.body).slice(0, 200));
 
   console.log("== WHO MAY TAKE A REPORT AWAY ==");
   expect("manager", "GET reports/export", await call(manager, "GET",

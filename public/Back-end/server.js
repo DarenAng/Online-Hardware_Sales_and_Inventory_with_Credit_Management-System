@@ -65,6 +65,12 @@ const db = database.db;
 const DB_NAME = database.DB_NAME;
 const DB_HOST = database.DB_HOST;
 const DB_PORT = database.DB_PORT;
+// true when running as a Vercel Function: no timers, no files, many copies
+const IS_VERCEL = database.IS_VERCEL;
+
+// Behind Vercel's proxy, request.protocol reads "https" from X-Forwarded-Proto,
+// so links built from the request (the supplier's order link) are https too.
+if (IS_VERCEL) app.set("trust proxy", true);
 
 // hashing and generating passwords, shared with the recovery script
 const passwords = require("./passwords");
@@ -708,6 +714,76 @@ async function migrateQrPayments() {
   console.log("Added the qr_payments table for GCash and Maya payments by QR code.");
 }
 
+// The tables the server keeps for itself, so that any copy of it can answer
+// any request (Vercel runs many): who is signed in, the live-update log,
+// account drafts waiting for a second look, backups when there is no disk to
+// keep them on, a few switches, and the offline payment simulator. They are
+// not shop data, so a backup leaves them out and a restore leaves them be.
+// Times are milliseconds since 1970 (Date.now()), free of any time zone.
+const SERVER_TABLES = ["user_sessions", "live_changes", "account_drafts",
+                       "backup_files", "app_flags", "qr_sim_intents"];
+
+async function migrateServerTables() {
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS user_sessions (
+       token_hash CHAR(64) PRIMARY KEY,
+       staff_id INT NOT NULL,
+       user_id INT NOT NULL,
+       role_id INT NOT NULL,
+       role_name VARCHAR(50) NOT NULL,
+       email VARCHAR(100) NOT NULL,
+       started_at BIGINT NOT NULL,
+       last_seen BIGINT NOT NULL,
+       expires_at BIGINT NOT NULL,
+       ended_reason VARCHAR(255) NULL,
+       ended_at BIGINT NULL,
+       INDEX idx_user_sessions_staff (staff_id),
+       INDEX idx_user_sessions_expires (expires_at)
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS live_changes (
+       change_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+       scope VARCHAR(30) NOT NULL,
+       detail VARCHAR(255) NULL,
+       origin VARCHAR(64) NULL,
+       created_at BIGINT NOT NULL
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS account_drafts (
+       draft_hash CHAR(64) PRIMARY KEY,
+       staff_id INT NOT NULL,
+       kind VARCHAR(10) NOT NULL,
+       payload TEXT NOT NULL,
+       expires_at BIGINT NOT NULL
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS backup_files (
+       file_name VARCHAR(100) PRIMARY KEY,
+       bytes INT NOT NULL,
+       created_at BIGINT NOT NULL,
+       content LONGBLOB NOT NULL
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS app_flags (
+       flag_key VARCHAR(50) PRIMARY KEY,
+       flag_value VARCHAR(255) NULL,
+       updated_at BIGINT NOT NULL
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS qr_sim_intents (
+       intent_id VARCHAR(40) PRIMARY KEY,
+       token VARCHAR(40) NOT NULL UNIQUE,
+       amount DECIMAL(12,2) NOT NULL,
+       wallet VARCHAR(20) NOT NULL,
+       description VARCHAR(255) NULL,
+       return_url VARCHAR(500) NOT NULL,
+       status VARCHAR(10) NOT NULL,
+       payment_id VARCHAR(40) NULL,
+       error_message VARCHAR(255) NULL,
+       created_at BIGINT NOT NULL
+     )`);
+}
+
 // a named figure so adding a procedure changes one number, not two
 const EXPECTED_PROCEDURES = 36;
 
@@ -797,47 +873,89 @@ function procedureAdvice() {
     "That file touches no table and no row. Nothing else is wrong: your data is intact.";
 }
 
-db.getConnection()
+// The start-up work below runs once per copy of the server. On a PC that is
+// once; on Vercel it is every time a new copy wakes up, and the first request
+// waits for it (see the hook after this) so it never meets a missing table.
+async function migrateDatabase() {
+  // first: sign-in reads user_sessions on every request
+  await migrateServerTables();
+
+  const total = await countProcedures();
+  if (total >= EXPECTED_PROCEDURES) {
+    console.log(`All ${EXPECTED_PROCEDURES} stored procedures are loaded.`);
+  }
+  // otherwise they are loaded from the file below, once the columns they read exist
+
+  await migrateSignInHold();
+  await migrateMiddleNameColumn();
+  await migratePhoneNumbers();
+  await migrateAccessControlTables();
+  await migrateMeasuredQuantities();
+  await migrateSellingUnits();
+  await migratePurchaseOrderApproval();
+  await migratePackSizes();
+  await migrateLatePenalties();
+  await migrateProprietorName();
+  await migrateReturnInspection();
+  await migrateBankDetails();
+  await migrateReceiptLayout();
+  await migratePasswordResets();
+  await migrateSupplierResponse();
+  await migrateSupplierQuote();
+  await migrateQrPayments();
+  await loadProceduresIfMissing();
+  await hashLegacyPasswords();
+}
+
+// Two copies starting together (Vercel waking several at once) would both
+// see a column missing and both add it, and one fails. A MySQL lock, held on
+// its own connection, makes them take turns; the second finds nothing to do.
+async function migrateOneAtATime() {
+  const lockName = `${DB_NAME}.startup`;
+  const connection = await db.getConnection();
+  try {
+    const [locked] = await connection.query("SELECT GET_LOCK(?, 120) AS got", [lockName]);
+    if (Number(locked[0].got) !== 1) throw new Error("another copy of the server held the start-up lock too long");
+    try {
+      await migrateDatabase();
+    } finally {
+      await connection.query("SELECT RELEASE_LOCK(?)", [lockName]);
+    }
+  } finally {
+    connection.release();
+  }
+}
+
+const startup = db.getConnection()
   .then(async (connection) => {
     connection.release();
     console.log(`Connected to MySQL database "${DB_NAME}" on ${DB_HOST}:${DB_PORT}.`);
 
-    const total = await countProcedures();
-    if (total >= EXPECTED_PROCEDURES) {
-      console.log(`All ${EXPECTED_PROCEDURES} stored procedures are loaded.`);
+    await migrateOneAtATime();
+
+    // last, so the first backup is not taken of a schema about to change.
+    // On Vercel nothing runs between requests, so the daily job at
+    // /api/cron/daily (vercel.json) does this work instead of timers.
+    if (!IS_VERCEL) {
+      adminModule.startAutoBackup();
+      adminModule.startArchiveSweep();
+      managerModule.startPenaltySweep();
+      const sessionTimer = setInterval(() => {
+        removeExpiredSessions().catch((error) => console.error("Session sweep failed:", error.message));
+      }, SESSION_SWEEP_MS);
+      sessionTimer.unref();
     }
-    // otherwise they are loaded from the file below, once the columns they read exist
-
-    await migrateSignInHold();
-    await migrateMiddleNameColumn();
-    await migratePhoneNumbers();
-    await migrateAccessControlTables();
-    await migrateMeasuredQuantities();
-    await migrateSellingUnits();
-    await migratePurchaseOrderApproval();
-    await migratePackSizes();
-    await migrateLatePenalties();
-    await migrateProprietorName();
-    await migrateReturnInspection();
-    await migrateBankDetails();
-    await migrateReceiptLayout();
-    await migratePasswordResets();
-    await migrateSupplierResponse();
-    await migrateSupplierQuote();
-    await migrateQrPayments();
-    await loadProceduresIfMissing();
-    await hashLegacyPasswords();
-
-    // last, so the first backup is not taken of a schema about to change
-    adminModule.startAutoBackup();
-    adminModule.startArchiveSweep();
-    managerModule.startPenaltySweep();
   })
   .catch((error) => {
     console.error("DATABASE CONNECTION FAILED:", error.message);
     console.error("Check DB_HOST, DB_PORT, DB_USER and DB_PASSWORD in .env at the project root (see .env.example),");
     console.error("and make sure you ran the two files in public/database/, in the order their names give.");
   });
+
+app.use(async (request, response, next) => {
+  await startup;
+  next();
+});
 
 // PayMongo signs the exact bytes it sends, so its webhook is read raw: this
 // comes before express.json(), which would parse the body and lose them.
@@ -947,7 +1065,7 @@ ROLE_PAGES[CLERK] = "/inventory-dashboard.html";
 ROLE_PAGES[CASHIER] = "/cashier-dashboard.html";
 ROLE_PAGES[DRIVER] = "/delivery.html";
 
-app.use((request, response, next) => {
+app.use(async (request, response, next) => {
   if (request.method !== "GET" && request.method !== "HEAD") return next();
 
   const pathname = resolvedPath(request.path);
@@ -964,7 +1082,7 @@ app.use((request, response, next) => {
   const changePassword = pathname.toLowerCase() === "/change-password.html";
   if (!page && !changePassword) return next();
 
-  const session = currentSession(request);
+  const session = await currentSession(request);
   if (!session) return response.redirect("/Login.html");
 
   if (changePassword) return next();
@@ -1150,9 +1268,10 @@ function cleanTin(value) {
 // ==========================================
 
 // TRUST_PROXY=1 in .env only behind a reverse proxy you control; otherwise
-// any browser can put whatever it likes in X-Forwarded-For.
+// any browser can put whatever it likes in X-Forwarded-For. Vercel is such a
+// proxy: it replaces the header with the real address, so it is trusted there.
 const trustProxySetting = String(process.env.TRUST_PROXY || "").toLowerCase();
-const TRUST_PROXY_HEADERS = ["1", "true", "yes", "on"].includes(trustProxySetting);
+const TRUST_PROXY_HEADERS = IS_VERCEL || ["1", "true", "yes", "on"].includes(trustProxySetting);
 
 function clientIp(request) {
   let address = "";
@@ -1306,23 +1425,39 @@ const SESSION_HOURS = numberSetting(process.env.SESSION_HOURS, 8);
 const LOGIN_MAX_ATTEMPTS = numberSetting(process.env.LOGIN_MAX_ATTEMPTS, 3);
 const LOGIN_HOLD_MINUTES = numberSetting(process.env.LOGIN_HOLD_MINUTES, 15);
 
-// All signed-in users, kept in memory.
-// A Map works like an object: sessions.get(token) gives back
-// { staffId, userId, roleId, roleName, email, expiresAt }
-const sessions = new Map();
+// All signed-in users, kept in the user_sessions table rather than in memory:
+// on Vercel every request may reach a different copy of this server, and a
+// restart no longer signs everybody out. The cookie holds a random token; the
+// table holds only its SHA-256, so a copy of the table cannot sign anybody in.
+// Times are milliseconds since 1970 (Date.now()), so no time zone touches them.
+// A session ended by somebody else (signed in elsewhere, held, deactivated)
+// keeps its row for a while with the reason, so the screen left behind is
+// told why when it next asks.
+const SESSION_MS = SESSION_HOURS * 60 * 60 * 1000;
 
-function startSession(user) {
+// how stale last_seen may get before a request writes it again: one write a
+// minute per screen instead of one per request
+const SESSION_TOUCH_MS = 30 * 1000;
+
+// how long an ended session's reason is kept for its screen to read
+const ENDED_REASON_MS = 24 * 60 * 60 * 1000;
+
+// how often a PC server clears out expired sessions (Vercel: the daily job)
+const SESSION_SWEEP_MS = 15 * 60 * 1000;
+
+function tokenHash(token) {
+  return crypto.createHash("sha256").update(String(token)).digest("hex");
+}
+
+async function startSession(user) {
   const token = crypto.randomBytes(32).toString("hex");
-  sessions.set(token, {
-    staffId: user.staff_id,
-    userId: user.user_id,
-    roleId: user.role_id,
-    roleName: user.role_name,
-    email: user.email,
-    startedAt: Date.now(),
-    lastSeen: Date.now(),
-    expiresAt: Date.now() + SESSION_HOURS * 60 * 60 * 1000
-  });
+  const now = Date.now();
+  await db.query(
+    `INSERT INTO user_sessions
+       (token_hash, staff_id, user_id, role_id, role_name, email, started_at, last_seen, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [tokenHash(token), user.staff_id, user.user_id, user.role_id, user.role_name, user.email,
+     now, now, now + SESSION_MS]);
   return token;
 }
 
@@ -1340,51 +1475,78 @@ function readCookie(request, name) {
   return null;
 }
 
-function currentSession(request) {
+// { session } for a live sign-in, { endedReason } for one somebody else
+// ended, or {} for no sign-in at all
+async function sessionState(request) {
   const token = readCookie(request, "sid");
-  if (!token) return null;
+  if (!token) return {};
 
-  const session = sessions.get(token);
-  if (!session) return null;
+  const hash = tokenHash(token);
+  const [rows] = await db.query(
+    `SELECT staff_id, user_id, role_id, role_name, email, started_at, last_seen,
+            expires_at, ended_reason
+     FROM user_sessions WHERE token_hash = ?`,
+    [hash]);
+  const row = rows[0];
+  if (!row) return {};
 
-  if (session.expiresAt < Date.now()) {
-    sessions.delete(token);
-    return null;
+  if (row.ended_reason) return { endedReason: row.ended_reason };
+
+  const now = Date.now();
+  if (Number(row.expires_at) < now) {
+    await db.query("DELETE FROM user_sessions WHERE token_hash = ?", [hash]);
+    return {};
   }
 
-  session.expiresAt = Date.now() + SESSION_HOURS * 60 * 60 * 1000;   // sliding window
-  session.lastSeen = Date.now();
-  return session;
+  // sliding window, written at most twice a minute
+  let lastSeen = Number(row.last_seen);
+  if (now - lastSeen > SESSION_TOUCH_MS) {
+    lastSeen = now;
+    await db.query(
+      "UPDATE user_sessions SET last_seen = ?, expires_at = ? WHERE token_hash = ? AND ended_reason IS NULL",
+      [now, now + SESSION_MS, hash]);
+  }
+
+  return {
+    session: {
+      token: token,
+      staffId: row.staff_id,
+      userId: row.user_id,
+      roleId: row.role_id,
+      roleName: row.role_name,
+      email: row.email,
+      startedAt: Number(row.started_at),
+      lastSeen: lastSeen,
+      expiresAt: Number(row.expires_at)
+    }
+  };
 }
 
-// Presence (at a screen right now) is answered from the session store:
-// every request and the heartbeat refresh it, and anything quiet longer
-// than the window is gone. Memory only on purpose.
+async function currentSession(request) {
+  return (await sessionState(request)).session || null;
+}
+
+// Presence (at a screen right now) is answered from the session table:
+// every request and the live-update check refresh it, and anything quiet
+// longer than the window is gone.
 const PRESENCE_WINDOW_MS = 2 * 60 * 1000;
 
-function presenceByStaff() {
-  const now = Date.now();
+async function presenceByStaff() {
+  const [rows] = await db.query(
+    `SELECT staff_id, MAX(last_seen) AS last_seen FROM user_sessions
+     WHERE ended_reason IS NULL AND expires_at > ?
+     GROUP BY staff_id`,
+    [Date.now()]);
+
   const seen = new Map();   // staffId -> most recent lastSeen
-
-  for (const session of sessions.values()) {
-    if (session.expiresAt < now) continue;
-
-    const previous = seen.get(session.staffId);
-    if (previous === undefined || session.lastSeen > previous) {
-      seen.set(session.staffId, session.lastSeen);
-    }
+  for (const row of rows) {
+    seen.set(row.staff_id, Number(row.last_seen));
   }
-
-  // a browser holding the live channel open is a page somebody has in front of them
-  for (const client of liveClients) {
-    seen.set(client.staffId, now);
-  }
-
   return seen;
 }
 
-function withPresence(rows) {
-  const seen = presenceByStaff();
+async function withPresence(rows) {
+  const seen = await presenceByStaff();
   const now = Date.now();
 
   // copy every row and add two fields: is_online and seconds_idle
@@ -1398,59 +1560,44 @@ function withPresence(rows) {
       copy.seconds_idle = null;
     } else {
       copy.is_online = now - lastSeen < PRESENCE_WINDOW_MS;
-      copy.seconds_idle = Math.round((now - lastSeen) / 1000);
+      copy.seconds_idle = Math.max(0, Math.round((now - lastSeen) / 1000));
     }
     result.push(copy);
   }
   return result;
 }
 
-function endSession(request) {
+async function endSession(request) {
   const token = readCookie(request, "sid");
-  if (token) sessions.delete(token);
+  if (token) await db.query("DELETE FROM user_sessions WHERE token_hash = ?", [tokenHash(token)]);
 }
 
-// Expired sessions were only dropped when their own browser came back, so
-// they are swept on a timer. unref() so the timer does not keep the process alive.
-const SESSION_SWEEP_MS = 15 * 60 * 1000;
-
-function removeExpiredSessions() {
+// Expired sessions, and ended ones whose reason has been kept long enough.
+// Run by the local timer below, and by the daily job on Vercel.
+async function removeExpiredSessions() {
   const now = Date.now();
-  for (const token of Array.from(sessions.keys())) {
-    if (sessions.get(token).expiresAt < now) {
-      sessions.delete(token);
-    }
-  }
+  await db.query(
+    "DELETE FROM user_sessions WHERE expires_at < ? OR (ended_reason IS NOT NULL AND ended_at < ?)",
+    [now, now - ENDED_REASON_MS]);
 }
-const sessionTimer = setInterval(removeExpiredSessions, SESSION_SWEEP_MS);
-sessionTimer.unref();
 
 // One person, one session: a sign-in ends every other session the same
-// person holds, and the screen left behind is told over the live channel.
-function endSessionsForStaff(staffId, keepToken, reason) {
-  const id = Number(staffId);
-
-  for (const token of Array.from(sessions.keys())) {
-    const session = sessions.get(token);
-    if (session.staffId !== id) continue;
-    if (keepToken && token === keepToken) continue;
-    sessions.delete(token);
+// person holds. The row stays with the reason, and the screen left behind
+// reads it on its next request (the live-update check asks every few seconds).
+// How many sessions it ended is given back.
+async function endSessionsForStaff(staffId, keepToken, reason) {
+  const params = [String(reason || "Your session was ended."), Date.now(), Number(staffId), Date.now()];
+  let keep = "";
+  if (keepToken) {
+    keep = " AND token_hash <> ?";
+    params.push(tokenHash(keepToken));
   }
 
-  // Array.from makes a copy, so we can safely delete from liveClients inside the loop
-  for (const client of Array.from(liveClients)) {
-    if (client.staffId !== id) continue;
-    if (keepToken && client.token === keepToken) continue;
-
-    try {
-      const message = { reason: reason || "Your session was ended." };
-      client.response.write("event: evicted\ndata: " + JSON.stringify(message) + "\n\n");
-      client.response.end();
-    } catch (error) {
-      // the browser is already gone; nothing to do
-    }
-    liveClients.delete(client);
-  }
+  const [result] = await db.query(
+    `UPDATE user_sessions SET ended_reason = ?, ended_at = ?
+     WHERE staff_id = ? AND ended_reason IS NULL AND expires_at > ?${keep}`,
+    params);
+  return result.affectedRows;
 }
 
 // the signed-in staff id, from the session and never from the request body
@@ -1464,15 +1611,19 @@ function getActorId(request) {
 // ==========================================
 // LIVE SYNC ACROSS DESKTOPS
 //
-// A running version number and a short log of what changed; every signed-in
-// browser holds one SSE connection to hear about it. What travels is only
-// "inventory moved, version 412"; the browser re-reads through the normal
-// routes with the normal access checks.
+// Every write adds a row to live_changes: its id is the running version
+// number, and the row says only "inventory moved". Every signed-in browser
+// asks GET /api/events/poll?since=<version> every few seconds and re-reads
+// what moved through the normal routes with the normal access checks. Kept
+// in the database, not in memory, so it works when every request may reach a
+// different copy of this server (Vercel).
 // ==========================================
-let changeVersion = 0;
-const changeLog = [];          // the last few changes, for a client that reconnects
-const CHANGE_LOG_SIZE = 200;
-const liveClients = new Set(); // { id, staffId, roleName, response }
+const CHANGE_LOG_SIZE = 500;     // rows kept; a browser further behind reloads
+
+// How often a browser asks, in seconds. Each ask is one request, so on
+// Vercel (where requests are counted) it is less often. LIVE_POLL_SECONDS
+// in .env overrides both.
+const LIVE_POLL_SECONDS = numberSetting(process.env.LIVE_POLL_SECONDS, IS_VERCEL ? 8 : 3);
 
 // Which part of the system a route belongs to; browsers subscribe by scope.
 // Example: /^\/api\/(users|roles|staff)/ matches any address that starts
@@ -1492,46 +1643,76 @@ function scopeOf(pathname) {
   return null;
 }
 
-function publishChange(scope, detail, origin) {
-  if (!scope) return;
+let changesWritten = 0;
 
-  changeVersion += 1;
+async function recordChange(scope, detail, origin) {
+  try {
+    const [result] = await db.query(
+      "INSERT INTO live_changes (scope, detail, origin, created_at) VALUES (?, ?, ?, ?)",
+      [scope, detail ? String(detail).slice(0, 255) : null,
+       origin ? String(origin).slice(0, 64) : null, Date.now()]);
 
-  const change = {
-    version: changeVersion,
-    scope: scope,
-    detail: detail || null,
-    origin: origin || null,          // so a browser can ignore its own writes
-    at: new Date().toISOString()
-  };
-
-  changeLog.push(change);
-  if (changeLog.length > CHANGE_LOG_SIZE) changeLog.shift();
-
-  const frame = `id: ${change.version}\nevent: change\ndata: ${JSON.stringify(change)}\n\n`;
-
-  for (const client of liveClients) {
-    try {
-      client.response.write(frame);
-    } catch (error) {
-      // a browser that has gone away is removed by its own close handler
+    // trimmed now and then rather than on every write
+    changesWritten += 1;
+    if (changesWritten % 50 === 0) {
+      await db.query("DELETE FROM live_changes WHERE change_id <= ?", [result.insertId - CHANGE_LOG_SIZE]);
     }
+  } catch (error) {
+    console.error("Recording a live change failed:", error.message);
   }
 }
 
-// everything since a version; a gap wider than the log means reload
-function changesSince(version) {
-  if (!Number.isInteger(version) || version <= 0) return { changes: [], gap: false };
-  if (changeLog.length === 0) return { changes: [], gap: false };
-  if (version < changeLog[0].version - 1) return { changes: [], gap: true };
+// Fire and forget for the caller. On Vercel the instance may be frozen once
+// the response is sent, so waitUntil keeps it running until the row is written.
+function publishChange(scope, detail, origin) {
+  if (!scope) return;
+  keepAlive(recordChange(scope, detail, origin));
+}
 
-  const newer = [];
-  for (const change of changeLog) {
-    if (change.version > version) {
-      newer.push(change);
+function keepAlive(promise) {
+  if (IS_VERCEL) {
+    try {
+      require("@vercel/functions").waitUntil(promise);
+    } catch (error) {
+      // the package is missing; the promise still runs, it just may be cut short
     }
   }
-  return { changes: newer, gap: false };
+  return promise;
+}
+
+async function latestChangeVersion() {
+  const [rows] = await db.query("SELECT COALESCE(MAX(change_id), 0) AS version FROM live_changes");
+  return Number(rows[0].version);
+}
+
+// everything since a version; a gap wider than the log means reload
+async function changesSince(version) {
+  const latest = await latestChangeVersion();
+  if (!Number.isInteger(version) || version <= 0 || version >= latest) {
+    return { version: latest, changes: [], gap: false };
+  }
+
+  const [rows] = await db.query(
+    `SELECT change_id, scope, detail, origin, created_at FROM live_changes
+     WHERE change_id > ? ORDER BY change_id LIMIT ?`,
+    [version, CHANGE_LOG_SIZE]);
+
+  // the oldest row still kept is newer than the one after "version": some were trimmed
+  if (rows.length === 0 || Number(rows[0].change_id) > version + 1) {
+    const [oldest] = await db.query("SELECT MIN(change_id) AS first FROM live_changes");
+    if (oldest[0].first === null || Number(oldest[0].first) > version + 1) {
+      return { version: latest, changes: [], gap: true };
+    }
+  }
+
+  const changes = rows.map((row) => ({
+    version: Number(row.change_id),
+    scope: row.scope,
+    detail: row.detail,
+    origin: row.origin,          // so a browser can ignore its own writes
+    at: new Date(Number(row.created_at)).toISOString()
+  }));
+  return { version: latest, changes: changes, gap: false };
 }
 
 // ==========================================
@@ -1551,6 +1732,8 @@ const SIGNED_IN = "signed-in";        // any role, just not a stranger
 const ACCESS_RULES = [
   // --- authentication ---
   ["POST",  /^\/api\/login$/,                          PUBLIC],
+  // the daily job (Vercel Cron); the route checks CRON_SECRET itself
+  ["GET",   /^\/api\/cron\/daily$/,                    PUBLIC],
   // "Forgot your password?": a code by email, then the code and a new password.
   // Nobody is signed in yet, so both are open; the routes ration the codes.
   ["POST",  /^\/api\/password-reset\/request$/,         PUBLIC],
@@ -1558,7 +1741,7 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/logout$/,                         SIGNED_IN],
   ["POST",  /^\/api\/change-password$/,                SIGNED_IN],
   ["POST",  /^\/api\/heartbeat$/,                      SIGNED_IN],
-  ["GET",   /^\/api\/events$/,                         SIGNED_IN],
+  ["GET",   /^\/api\/events\/poll$/,                    SIGNED_IN],
   ["GET",   /^\/api\/events\/status$/,                  SIGNED_IN],
 
   // --- your own account, any role ---
@@ -1955,10 +2138,14 @@ function featuresCovering(method, pathname) {
 
 // the overrides, cached between writes:
 // role name -> Map(feature key -> { granted, note, grantedBy, grantedAt, updatedAt })
+// On Vercel a write on one copy of the server cannot clear another copy's
+// cache, so there it is only trusted for a few seconds.
 let featureOverrides = null;
+let featureOverridesAt = 0;
+const FEATURE_CACHE_MS = IS_VERCEL ? 10 * 1000 : Infinity;
 
 async function loadFeatureOverrides() {
-  if (featureOverrides) return featureOverrides;
+  if (featureOverrides && Date.now() - featureOverridesAt < FEATURE_CACHE_MS) return featureOverrides;
 
   const byRole = new Map();
   try {
@@ -1984,6 +2171,7 @@ async function loadFeatureOverrides() {
   }
 
   featureOverrides = byRole;
+  featureOverridesAt = Date.now();
   return byRole;
 }
 
@@ -2119,9 +2307,16 @@ app.use(async (request, response, next) => {
 
   if (allowed === PUBLIC) return next();
 
-  const session = currentSession(request);
+  const state = await sessionState(request);
+  const session = state.session;
   if (!session) {
-    return response.status(401).json({ error: "Your session has ended. Please sign in again." });
+    // signedOut tells the screen to go back to sign-in, with the reason when
+    // somebody else ended this session (signed in elsewhere, held, deactivated)
+    return response.status(401).json({
+      error: state.endedReason || "Your session has ended. Please sign in again.",
+      signedOut: true,
+      ended: Boolean(state.endedReason)
+    });
   }
 
   const byRole = allowed === SIGNED_IN || allowed.includes(session.roleName);
@@ -2177,7 +2372,10 @@ app.use(async (request, response, next) => {
   request.actor = session;
 
   // Every write passes through here, so this is where a change is announced
-  // from, after the response finished and only when it succeeded.
+  // from, only when it succeeded. The change is written just before the
+  // answer goes out, so it is safe in the database even if the server is
+  // frozen the moment the answer is sent (Vercel), and the screen that made
+  // the write never sees an older version than its own change.
   let changesNothing = false;
   for (const pattern of CHANGES_NOTHING) {
     if (pattern.test(request.path)) {
@@ -2185,17 +2383,18 @@ app.use(async (request, response, next) => {
     }
   }
 
-  if (request.method !== "GET" && request.method !== "HEAD" && !changesNothing) {
-    // "finish" runs after the answer has been sent to the browser
-    response.on("finish", () => {
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        publishChange(
-          scopeOf(request.path),
-          `${request.method} ${request.path}`,
-          request.headers["x-client-id"] || null
-        );
+  const scope = scopeOf(request.path);
+  if (request.method !== "GET" && request.method !== "HEAD" && !changesNothing && scope) {
+    const sendAnswer = response.end;
+    response.end = function (...args) {
+      response.end = sendAnswer;
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return sendAnswer.apply(response, args);
       }
-    });
+      recordChange(scope, `${request.method} ${request.path}`, request.headers["x-client-id"] || null)
+        .finally(() => sendAnswer.apply(response, args));
+      return response;
+    };
   }
 
   next();
@@ -2298,7 +2497,7 @@ const USER_SELECT = `
 registerLoginRoutes(app, {
   db, writeAuditLog,
   hashPassword, isHashed, verifyPassword,
-  sessions, SESSION_HOURS, startSession, endSession, endSessionsForStaff,
+  SESSION_HOURS, startSession, endSession, endSessionsForStaff,
   signOutAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
   LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES
 });
@@ -2306,110 +2505,53 @@ registerLoginRoutes(app, {
 // ==========================================
 // THE LIVE CHANNEL
 //
-// One open GET per signed-in browser. A comment every twenty-five seconds
-// keeps a proxy from timing it out, X-Accel-Buffering off keeps nginx from
-// holding frames, and Last-Event-ID lets a reconnecting browser catch up.
+// Every signed-in browser asks here every few seconds what changed since the
+// version it last saw. The first ask (no "since") only learns the version.
+// The access check ahead of it has already refreshed the session, so asking
+// also marks the person present. A browser further behind than the log is
+// told so (gap) and offered a reload.
 // ==========================================
-const LIVE_PING_MS = 25000;
+app.get("/api/events/poll", async (request, response) => {
+  const since = parseInt(request.query.since, 10);
 
-app.get("/api/events", (request, response) => {
-  const actor = request.actor;
-
-  response.writeHead(200, {
-    "Content-Type": "text/event-stream; charset=utf-8",
-    "Cache-Control": "no-cache, no-transform",
-    "Connection": "keep-alive",
-    "X-Accel-Buffering": "no"
-  });
-
-  response.write("retry: 3000\n\n");
-
-  const client = {
-    id: crypto.randomBytes(8).toString("hex"),
-    staffId: actor.staffId,
-    roleName: actor.roleName,
-    token: readCookie(request, "sid"),
-    response: response
-  };
-  liveClients.add(client);
-
-  // what was missed while away; a gap wider than the log says so plainly
-  const lastSeen = parseInt(request.headers["last-event-id"], 10);
-  const missed = changesSince(lastSeen);
-
-  // the list of scopes that changed, each one only once
-  const scopes = [];
-  for (const change of missed.changes) {
-    if (!scopes.includes(change.scope)) {
-      scopes.push(change.scope);
-    }
+  try {
+    const result = await changesSince(since);
+    response.set("Cache-Control", "no-store");
+    response.json({
+      version: result.version,
+      changes: result.changes,
+      gap: result.gap,
+      pollMs: LIVE_POLL_SECONDS * 1000
+    });
+  } catch (error) {
+    console.error("Reading live changes failed:", error.message);
+    response.status(500).json({ error: "Unable to read what changed" });
   }
-
-  const hello = {
-    clientId: client.id,
-    version: changeVersion,
-    caughtUp: !missed.gap,
-    scopes: scopes
-  };
-  response.write("event: hello\ndata: " + JSON.stringify(hello) + "\n\n");
-
-  if (missed.gap) {
-    response.write(`event: resync\ndata: ${JSON.stringify({ version: changeVersion })}\n\n`);
-  } else {
-    for (const change of missed.changes) {
-      response.write(`id: ${change.version}\nevent: change\ndata: ${JSON.stringify(change)}\n\n`);
-    }
-  }
-
-  // the ping also keeps the session alive and marks the person present
-  const ping = setInterval(() => {
-    let session = null;
-    if (client.token) {
-      session = sessions.get(client.token);
-    }
-
-    if (!session || session.expiresAt < Date.now()) {
-      clearInterval(ping);
-      liveClients.delete(client);
-      try { response.end(); } catch (error) { /* already gone */ }
-      return;
-    }
-
-    session.lastSeen = Date.now();
-
-    try {
-      response.write(": ping\n\n");
-    } catch (error) {
-      clearInterval(ping);
-      liveClients.delete(client);
-    }
-  }, LIVE_PING_MS);
-
-  const close = () => {
-    clearInterval(ping);
-    liveClients.delete(client);
-  };
-
-  request.on("close", close);
-  request.on("aborted", close);
 });
 
-app.get("/api/events/status", (request, response) => {
-  // count the different people connected (one person may have two tabs open)
-  const people = [];
-  for (const client of liveClients) {
-    if (!people.includes(client.staffId)) {
-      people.push(client.staffId);
-    }
-  }
+app.get("/api/events/status", async (request, response) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT COUNT(*) AS connections, COUNT(DISTINCT staff_id) AS people
+       FROM user_sessions
+       WHERE ended_reason IS NULL AND expires_at > ? AND last_seen > ?`,
+      [Date.now(), Date.now() - PRESENCE_WINDOW_MS]);
+    const [logged] = await db.query("SELECT COUNT(*) AS total FROM live_changes");
 
-  response.json({
-    version: changeVersion,
-    connections: liveClients.size,
-    people: people.length,
-    logged: changeLog.length
-  });
+    response.json({
+      version: await latestChangeVersion(),
+      // screens that asked within the presence window
+      connections: Number(rows[0].connections),
+      people: Number(rows[0].people),
+      logged: Number(logged[0].total),
+      pollSeconds: LIVE_POLL_SECONDS
+    });
+  } catch (error) {
+    console.error("Reading the live status failed:", error.message);
+    response.status(500).json({ error: "Unable to read the live status" });
+  }
 });
+
 
 // A changed password ends every session, this one included: the old password
 // may be known to somebody else, and signing in with the new one straight
@@ -2417,8 +2559,8 @@ app.get("/api/events/status", (request, response) => {
 const PASSWORD_CHANGED =
   "Your password was changed. Sign in again with the new one.";
 
-function signOutAfterPasswordChange(request, response) {
-  endSessionsForStaff(request.actor.staffId, null, PASSWORD_CHANGED);
+async function signOutAfterPasswordChange(request, response) {
+  await endSessionsForStaff(request.actor.staffId, null, PASSWORD_CHANGED);
   response.clearCookie("sid", { path: "/" });
 }
 
@@ -2578,7 +2720,7 @@ app.post("/api/me/password", notOwnCredentials, async (request, response) => {
     await writeAuditLog(request, "CHANGE_OWN_PASSWORD",
       `${actor.email} changed their own password; every session on the old one was ended`);
 
-    signOutAfterPasswordChange(request, response);
+    await signOutAfterPasswordChange(request, response);
     response.json({ message: "Your password was changed.", signedOut: true });
   } catch (error) {
     console.error("Own password change failed:", error.message);
@@ -2597,7 +2739,7 @@ const adminModule = registerAdminRoutes(app, {
   requireRole, publishChange, ADMIN, USER_SELECT, withPresence, notOwnAccount,
   endSessionsForStaff, hashPassword, generatePassword, phoneComplaint, cleanPhone, cleanMiddleName,
   tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
-  sqlName, EXPECTED_PROCEDURES, countProcedures, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
+  sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
   FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom
 });
 
@@ -2822,7 +2964,58 @@ app.post("/api/archives/archive", async (request, response) => {
 // ==========================================
 // START
 // ==========================================
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
-  for (const line of qrPayments.describe()) console.log(line);
+// ==========================================
+// THE DAILY JOB -- on Vercel, where no timer runs between requests.
+// vercel.json calls it once a day; Vercel sends "Authorization: Bearer
+// <CRON_SECRET>", and without that secret nobody else can start it. On a PC
+// the same work runs on the timers started above.
+// ==========================================
+function sameSecret(given, expected) {
+  const a = crypto.createHash("sha256").update(String(given)).digest();
+  const b = crypto.createHash("sha256").update(String(expected)).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+app.get("/api/cron/daily", async (request, response) => {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) {
+    return response.status(503).json({ error: "CRON_SECRET is not set, so the daily job is switched off." });
+  }
+  if (!sameSecret(request.headers.authorization || "", `Bearer ${secret}`)) {
+    return response.status(401).json({ error: "Not allowed" });
+  }
+
+  // each step on its own, so one failing does not stop the rest
+  const steps = {
+    penalties: () => managerModule.runPenaltySweep(),
+    archives: () => adminModule.runArchiveSweep(),
+    backup: () => adminModule.runDailyBackup(),
+    sessions: () => removeExpiredSessions(),
+    housekeeping: () => adminModule.removeExpiredDrafts()
+  };
+  const report = {};
+  for (const name of Object.keys(steps)) {
+    try {
+      await steps[name]();
+      report[name] = "ok";
+    } catch (error) {
+      console.error(`Daily job, ${name}:`, error.message);
+      report[name] = "failed: " + error.message;
+    }
+  }
+  console.log("Daily job:", JSON.stringify(report));
+  response.json(report);
 });
+
+// npm start runs this file and it listens on the port; on Vercel,
+// api/index.js loads it and Vercel hands it the requests.
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Server running at http://localhost:${port}`);
+    for (const line of qrPayments.describe()) console.log(line);
+  });
+} else if (IS_VERCEL) {
+  for (const line of qrPayments.describe()) console.log(line);
+}
+
+module.exports = app;

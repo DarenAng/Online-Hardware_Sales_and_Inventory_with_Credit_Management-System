@@ -4,7 +4,7 @@ Two files to set up, run in the order the names give, and one upgrade file.
 
 | File | What it is | When you run it |
 |---|---|---|
-| `1-RUN-FIRST-database.sql` | The whole schema — 27 tables, the demo data, and six months of mock trading | Setting up a new machine, or resetting one back to the demo and mock data |
+| `1-RUN-FIRST-database.sql` | The whole schema — 33 tables (6 of them the server's own: sign-ins, live updates, stored backups), the demo data, and six months of mock trading | Setting up a new machine, or resetting one back to the demo and mock data |
 | `2-RUN-SECOND-stored-procedures.sql` | The 3 views and the 36 stored procedures the app uses | Straight after file 1, and again any time a view or a procedure changes |
 | `3-ADD-qr-payments.sql` | The `qr_payments` table, for a database made before QR payments | Once, on a database that already holds real data; then file 2 (or restart the server) |
 

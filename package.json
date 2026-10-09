@@ -5,18 +5,23 @@
   "main": "public/Back-end/server.js",
   "scripts": {
     "start": "node public/Back-end/server.js",
-    "recover-password": "node public/Back-end/recover-password.js"
+    "recover-password": "node public/Back-end/recover-password.js",
+    "vercel-build-static": "node scripts/vercel-build.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@vercel/functions": "^3.9.11",
     "dotenv": "^18.0.0",
     "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "mysql2": "^3.23.0",
     "pdfkit": "^0.20.2",
     "qrcode": "^1.5.4"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

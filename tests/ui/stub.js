@@ -1676,6 +1676,8 @@ function stubPublish(scope, detail, origin) {
   stubVersion += 1;
   const change = { version: stubVersion, scope, detail: detail || null,
                    origin: origin || null, at: new Date().toISOString() };
+  stubChanges.push(change);
+  if (stubChanges.length > 200) stubChanges.shift();
   const frame = `id: ${change.version}\nevent: change\ndata: ${JSON.stringify(change)}\n\n`;
   for (const c of stubClients) { try { c.write(frame); } catch (e) { /* gone */ } }
 }
@@ -1694,6 +1696,16 @@ app.get("/api/events", (request, response) => {
   request.on("close", () => stubClients.delete(response));
 });
 
+// the same as the real server's: every screen asks what changed since its version
+const stubChanges = [];
+let stubLastPoll = 0;
+app.get("/api/events/poll", (request, response) => {
+  stubLastPoll = Date.now();
+  const since = parseInt(request.query.since, 10);
+  const changes = Number.isInteger(since) ? stubChanges.filter((change) => change.version > since) : [];
+  response.json({ version: stubVersion, changes: changes, gap: false, pollMs: 1000 });
+});
+
 // a way for the test to announce a change as though another desktop made it
 app.post("/api/test/change", (request, response) => {
   stubPublish(request.body.scope, request.body.detail || "test", request.body.origin || null);
@@ -1701,8 +1713,8 @@ app.post("/api/test/change", (request, response) => {
 });
 
 app.get("/api/events/status", (request, response) =>
-  response.json({ version: stubVersion, connections: stubClients.size,
-                  people: stubClients.size, logged: stubVersion }));
+  response.json({ version: stubVersion, connections: Date.now() - stubLastPoll < 5000 ? 1 : 0,
+                  people: Date.now() - stubLastPoll < 5000 ? 1 : 0, logged: stubVersion }));
 
 // ==========================================================================
 // QR PAYMENTS -- the same routes as Connections/qr-payments.js, kept in memory.

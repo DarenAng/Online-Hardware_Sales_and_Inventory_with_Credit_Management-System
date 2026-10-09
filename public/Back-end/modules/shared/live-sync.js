@@ -1,4 +1,5 @@
-// live-sync.js -- one open server connection per browser; a change event names a
+// live-sync.js -- every browser asks the server every few seconds what changed
+// (apiOpenLiveUpdates in shared-connection.js); a change event names a
 // scope ("inventory moved"), and any panel reading that scope re-reads through
 // its normal route. Tables are never redrawn while somebody is reading them.
 // Loaded by: all five dashboards
@@ -65,7 +66,7 @@ let liveConnected = false;
 // THE CONNECTION
 // ==========================================
 function startLiveSync() {
-    if (liveSource || typeof window.EventSource !== 'function') return;
+    if (liveSource) return;
 
     buildLiveIndicator();
     openLiveStream();
