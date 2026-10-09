@@ -20,11 +20,50 @@ function isModalLocked(modal) {
     return !!modal && modal.hasAttribute('data-modal-locked');
 }
 
+// A card with something to lose can ask first. The guard is a function that
+// answers true (or a promise of true) when the card may close; "Discard your
+// changes?" is one. It is asked when a person closes the card (the x button
+// or Escape, through requestCloseModal) and never when the page itself closes
+// it with closeModal after an action, so a saved form is not questioned.
+const modalCloseGuards = {};      // modal id -> guard
+const modalCloseAsking = {};      // modal id -> a guard is being answered
+
+function setModalCloseGuard(id, guard) {
+    modalCloseGuards[id] = guard;
+}
+
+async function requestCloseModal(id) {
+    const modal = document.getElementById(id);
+    if (!modal || !modal.classList.contains('open')) return true;
+
+    const guard = modalCloseGuards[id];
+    if (guard) {
+        if (modalCloseAsking[id]) return false;   // the question is already on screen
+        modalCloseAsking[id] = true;
+        let allowed = false;
+        try { allowed = await guard(); } finally { modalCloseAsking[id] = false; }
+        if (!allowed) return false;
+    }
+    closeModal(id);
+    return true;
+}
+
 document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
 
+    // a question card (confirm, discard) is the one on top: Escape answers
+    // "no" to it and leaves the cards beneath alone (and stops the page's other
+    // Escape listeners, such as a drawer, from also reading this key)
+    const question = document.getElementById('ask-modal');
+    if (question && question.classList.contains('open') && typeof closeAsk === 'function') {
+        closeAsk(false);
+        event.stopImmediatePropagation();
+        return;
+    }
+
     document.querySelectorAll('.modal.open').forEach((modal) => {
-        if (!isModalLocked(modal)) modal.classList.remove('open');
+        if (isModalLocked(modal)) return;
+        if (modalCloseGuards[modal.id]) requestCloseModal(modal.id); else modal.classList.remove('open');
     });
 });
 

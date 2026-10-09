@@ -469,7 +469,7 @@
                             <div class="form-footer">
                                 <button type="submit" class="btn btn-success" id="store-save-btn"
                                         disabled title="Nothing has changed yet">Save Details</button>
-                                <button type="button" class="btn btn-ghost" onclick="loadStoreSettingsForm()">Reset</button>
+                                <button type="button" class="btn btn-ghost" onclick="resetStoreForm()">Reset</button>
                             </div>
                         </form>
                     </div>
@@ -565,7 +565,7 @@
                         <span class="modal-role" id="modal-user-role">Role</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('user-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('user-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-tabs">
