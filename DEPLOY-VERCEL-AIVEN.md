@@ -94,7 +94,7 @@ The code that makes this work: `vercel.json`, `api/index.js`,
    |---|---|
    | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | from Aiven |
    | `DB_NAME` | `hardware_db` |
-   | `DB_SSL_CA` | the **whole text** of `aiven-ca.pem`, from `-----BEGIN CERTIFICATE-----` to `-----END CERTIFICATE-----` |
+   | `DB_SSL_CA` | the whole of `aiven-ca.pem` on **one line**, from `-----BEGIN CERTIFICATE-----` to `-----END CERTIFICATE-----` (Vercel's box takes one line; the app puts the line breaks back) |
    | `CRON_SECRET` | any long random text, such as the output of `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
    | `PAYMENT_PROVIDER` | `paymongo` (with `PAYMONGO_SECRET_KEY` = your `sk_test_...` key), or `sim` for the offline simulator |
    | `MAIL_USER`, `MAIL_PASSWORD` | optional: the Gmail account and App Password that send first passwords and reset codes. Without them the password is shown on screen. |

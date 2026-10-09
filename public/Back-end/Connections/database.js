@@ -78,10 +78,25 @@ function sslOptions() {
     ca = fs.readFileSync(path.resolve(path.join(__dirname, "..", "..", ".."), process.env.DB_SSL_CA_FILE), "utf8");
   }
   if (!ca) return undefined;
+  return { ca: cleanCertificate(ca), rejectUnauthorized: true };
+}
 
-  // pasted on one line with \n written out: put the line breaks back
-  ca = ca.replace(/\\n/g, "\n");
-  return { ca: ca, rejectUnauthorized: true };
+// A settings box on a website may take one line only, so the certificate can
+// arrive with its line breaks gone, written out as \n, or turned into spaces.
+// The letters between BEGIN and END are what count; they are put back into
+// the 64-character lines a certificate is written in.
+function cleanCertificate(text) {
+  const blocks = String(text).match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g);
+  if (!blocks) return String(text).replace(/\\n/g, "\n");
+
+  return blocks.map((block) => {
+    const body = block
+      .replace("-----BEGIN CERTIFICATE-----", "")
+      .replace("-----END CERTIFICATE-----", "")
+      .replace(/\\n/g, "")
+      .replace(/\s+/g, "");
+    return "-----BEGIN CERTIFICATE-----\n" + body.match(/.{1,64}/g).join("\n") + "\n-----END CERTIFICATE-----\n";
+  }).join("");
 }
 
 const db = mysql.createPool({
@@ -125,5 +140,6 @@ module.exports = {
   DB_NAME: DB_NAME,
   DB_HOST: DB_HOST,
   DB_PORT: DB_PORT,
-  IS_VERCEL: IS_VERCEL
+  IS_VERCEL: IS_VERCEL,
+  cleanCertificate: cleanCertificate
 };

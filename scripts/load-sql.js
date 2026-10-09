@@ -19,6 +19,7 @@ const path = require("path");
 const dotenv = require("dotenv");
 const mysql = require("mysql2/promise");
 const { splitSqlStatements } = require("../public/Back-end/sql-script");
+const { cleanCertificate } = require("../public/Back-end/Connections/database");
 
 const ROOT = path.join(__dirname, "..");
 
@@ -41,7 +42,7 @@ function sslOptions() {
     ca = fs.readFileSync(path.resolve(ROOT, process.env.DB_SSL_CA_FILE), "utf8");
   }
   if (!ca) return undefined;
-  return { ca: ca.replace(/\\n/g, "\n"), rejectUnauthorized: true };
+  return { ca: cleanCertificate(ca), rejectUnauthorized: true };
 }
 
 async function main() {
