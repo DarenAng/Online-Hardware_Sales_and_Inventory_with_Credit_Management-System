@@ -39,12 +39,15 @@ function generatePassword() {
     password += PASSWORD_ALPHABET[crypto.randomInt(PASSWORD_ALPHABET.length)];
   }
 
-  // it must have a small letter, a capital letter and a digit;
-  // if one is missing, simply make a new password and check again
+  // It must follow the same password rules a person's own password must
+  // (passwordComplaint in server.js): a small letter, a capital letter, a
+  // digit and a symbol, and no spaces (the alphabet has none).
+  // If one is missing, simply make a new password and check again.
   const hasLower = /[a-z]/.test(password);
   const hasUpper = /[A-Z]/.test(password);
   const hasDigit = /[0-9]/.test(password);
-  if (!hasLower || !hasUpper || !hasDigit) {
+  const hasSymbol = /[^A-Za-z0-9]/.test(password);
+  if (!hasLower || !hasUpper || !hasDigit || !hasSymbol) {
     return generatePassword();
   }
   return password;

@@ -1,6 +1,17 @@
 // helpers.js -- shared helpers
 // Loaded by: every page
 
+// Where data-panel.js writes down which tables are loaded, so they load again
+// after a reload. Signing out empties it, so the next person starts with
+// closed tables.
+const LOADED_PANELS_KEY = 'loadedPanels';
+
+function forgetLoadedPanels() {
+    try {
+        sessionStorage.removeItem(LOADED_PANELS_KEY);
+    } catch (error) { /* storage is blocked: nothing was kept */ }
+}
+
 // On a phone the menu slides over the page: the shade, Escape and choosing an
 // item all close it, and the page is held still while it is open.
 function toggleSidebar(force) {

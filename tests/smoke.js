@@ -991,6 +991,10 @@ function expect(role, label, response, allowed) {
       taken ? `delivery_staff_id=${taken.delivery_staff_id}` : "gone from the list");
     expect("delivery", "taking it again is harmless", await call(driver, "POST",
       `/api/delivery/${global.smokeDeliveryId}/claim`, {}), [200]);
+    expect("delivery", "PATCH skipping a step refused", await call(driver, "PATCH",
+      `/api/deliveries/${global.smokeDeliveryId}/status`, { status: "Out for Delivery" }), [400]);
+    expect("delivery", "PATCH in transit", await call(driver, "PATCH",
+      `/api/deliveries/${global.smokeDeliveryId}/status`, { status: "In Transit" }), [200]);
     expect("delivery", "PATCH out for delivery", await call(driver, "PATCH",
       `/api/deliveries/${global.smokeDeliveryId}/status`, { status: "Out for Delivery" }), [200]);
     expect("delivery", "PATCH delivered", await call(driver, "PATCH",
@@ -1039,7 +1043,7 @@ function expect(role, label, response, allowed) {
       `${stolen.status} ${JSON.stringify(stolen.body)}`);
 
     const ownPassword = await call(cookie, "POST", "/api/me/password", {
-      currentPassword: "not-my-password", newPassword: "brandnew12345"
+      currentPassword: "not-my-password", newPassword: "Brandnew-12345"
     });
     record(role, "cannot change their own password from their screen", ownPassword.status === 403,
       `got ${ownPassword.status}`);
@@ -1047,7 +1051,7 @@ function expect(role, label, response, allowed) {
 
   // the administrator keeps their own password, and the current one is asked for
   const adminWrong = await call(admin, "POST", "/api/me/password", {
-    currentPassword: "not-my-password", newPassword: "brandnew12345"
+    currentPassword: "not-my-password", newPassword: "Brandnew-12345"
   });
   record("admin", "own password change needs the current one", adminWrong.status === 403,
     `got ${adminWrong.status}`);
@@ -1089,8 +1093,8 @@ function expect(role, label, response, allowed) {
     `got ${stillTemporary.status}`);
   // settle the clerk on a password of their own and sign in with it, so the
   // checks below have a clerk session that is past the first-sign-in screen
-  await call(stillTemporary.cookie, "POST", "/api/change-password", { newPassword: "clerkpass456" });
-  const clerkSettled = await login("clerk@hardware.com", "clerkpass456");
+  await call(stillTemporary.cookie, "POST", "/api/change-password", { newPassword: "Clerkpass-456" });
+  const clerkSettled = await login("clerk@hardware.com", "Clerkpass-456");
   record("clerk", "the chosen password signs in", clerkSettled.ok, `got ${clerkSettled.status}`);
   clerk = clerkSettled.cookie;
 

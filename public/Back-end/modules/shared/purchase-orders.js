@@ -222,7 +222,7 @@ function makeKnownValues(field) {
 }
 
 // An empty box offers the common ones; typed text offers the ones that start
-// with it, then the ones that hold it further in (at most 8).
+// with it, then the ones with a word that starts with it (at most 8).
 function makeSuggest(id, field) {
     const list = document.getElementById(id + '-' + field + '-list');
     const box = document.getElementById(id + '-' + field);
@@ -242,9 +242,9 @@ function makeSuggest(id, field) {
     if (query === '') {
         matches = known;
     } else {
-        const starts = known.filter((k) => k.value.toLowerCase().indexOf(query) === 0);
-        const inside = known.filter((k) => k.value.toLowerCase().indexOf(query) > 0);
-        matches = starts.concat(inside);
+        const starts = known.filter((k) => k.value.toLowerCase().startsWith(query));
+        const words = known.filter((k) => !k.value.toLowerCase().startsWith(query) && startsAWord(k.value, query));
+        matches = starts.concat(words);
     }
     matches = matches.slice(0, MAKE_SUGGEST_LIMIT);
 
@@ -1393,23 +1393,47 @@ function resetPurchaseOrderForm() {
 }
 
 // The history. A row opens the order's card, where the lines are reviewed and
-// the order is confirmed, declined or printed; a delivery waiting on the clerk
-// opens straight on the receive form. The words below are the ones the Status
-// filter offers, and every badge and heading for an order uses the same.
+// the order is confirmed, declined, printed or counted in; an order that is
+// accepted or on its way also has a Refer to PO button that opens the receive
+// sheet. The words below are the ones the Status filter offers, and every
+// badge and heading for an order uses the same. They are stages, not the
+// database's status: the database says Pending from the manager's approval
+// until the delivery is counted in, and the supplier's answer and ship date
+// split that into the four middle stages.
 const PO_STATES = [
     { status: 'For Approval', label: 'Waiting for confirmation' },
     { status: 'Pending',      label: 'Waiting for delivery' },
+    { status: 'PO Accepted',  label: 'PO Accepted' },
+    { status: 'On the way',   label: 'On the way' },
     { status: 'Received',     label: 'Received' },
     { status: 'Cancelled',    label: 'Cancelled' }
 ];
 
-function poStatusWord(status) {
-    const state = PO_STATES.find((s) => s.status === status);
-    return state ? state.label : statusWord(status);
+// the stage an order is in now: an approved order the supplier has accepted is
+// PO Accepted, and On the way from the day the supplier said it ships (no ship
+// date given: it stays PO Accepted). A declined or unanswered order stays Pending.
+function poStage(po) {
+    if (po.status !== 'Pending' || po.supplier_response !== 'Accepted') return po.status;
+
+    const ships = String(po.supplier_ship_date || '').slice(0, 10);
+    if (ships && ships <= todayDateValue()) return 'On the way';
+    return 'PO Accepted';
 }
 
-function poStatusBadge(status) {
-    return statusBadge(status, poStatusWord(status));
+// the goods are due at the store: the clerk checks them against the order
+function poCanRefer(po) {
+    const stage = poStage(po);
+    return stage === 'PO Accepted' || stage === 'On the way';
+}
+
+function poStatusWord(stage) {
+    const state = PO_STATES.find((s) => s.status === stage);
+    return state ? state.label : statusWord(stage);
+}
+
+function poStatusBadge(po) {
+    const stage = poStage(po);
+    return statusBadge(stage, poStatusWord(stage));
 }
 
 // the orders this page has to act on sort first; newest first after that
@@ -1439,21 +1463,19 @@ function poToSend(po) {
     return po.status === 'Pending' && !po.supplier_response && !po.supplier_sent_at;
 }
 
-// a delivery the supplier has answered opens straight on the receive form;
-// an approved order still to be sent, and every other row, opens the order's
-// card (where it is printed, emailed or counted in)
-function openPurchaseOrderRow(poId) {
-    const po = findPurchaseOrder(poId);
-    if (po && poSetup.canReceive && po.status === 'Pending' && !poToSend(po)) {
-        openReceiveOrder(poId);
-    } else {
-        openPurchaseOrderDetail(poId);
-    }
+// the status cell: the badge, and for the clerk a Refer to PO button on an
+// order whose goods are due. The click stays on the button, so the row does
+// not also open the order's card.
+function poStatusCell(po) {
+    if (!(poSetup.canReceive && poCanRefer(po))) return poStatusBadge(po);
+
+    return '<span class="po-status-cell">' + poStatusBadge(po) +
+        '<button type="button" class="btn btn-ghost btn-sm" title="Check the delivery against this order" ' +
+        'onclick="event.stopPropagation(); openReceiveOrder(' + po.po_id + ')">Refer to PO</button></span>';
 }
 
 function poRowTitle(po) {
     if (poSetup.canReceive && poToSend(po)) return 'Print this order and send it to the supplier';
-    if (poSetup.canReceive && po.status === 'Pending') return 'Count in this delivery';
     if (poSetup.canDecide && po.status === 'For Approval') return 'Review this order';
     return 'Open this order';
 }
@@ -1464,11 +1486,11 @@ function renderPurchaseOrderLegend(rows) {
     if (!legend) return;
 
     legend.innerHTML = PO_STATES.map((state) => {
-        const count = rows.filter((po) => po.status === state.status).length;
+        const count = rows.filter((po) => poStage(po) === state.status).length;
         if (count === 0) return '';
 
         const mine = (poSetup.canDecide && state.status === 'For Approval') ||
-                     (poSetup.canReceive && state.status === 'Pending');
+                     (poSetup.canReceive && ['Pending', 'PO Accepted', 'On the way'].indexOf(state.status) !== -1);
         return '<button type="button" class="track-chip' + (mine ? ' track-chip-alert' : '') + '" ' +
             'onclick="filterPurchaseOrdersBy(\'' + state.status + '\')">' +
             '<span class="track-count">' + count + '</span>' + escapeHtml(state.label) + '</button>';
@@ -1478,6 +1500,9 @@ function renderPurchaseOrderLegend(rows) {
 function filterPurchaseOrdersBy(status) {
     const select = document.getElementById('po-status');
     if (select) select.value = status;
+    // setting a value from here fires no change event, so the Status column
+    // is shown or hidden the way the dropdown would have
+    syncFilteredColumns('po-table');
     dataPanelFilter(poSetup.key, 'status', status);
 }
 
@@ -1499,7 +1524,7 @@ function buildPurchaseOrderPanel() {
         load: () => apiGetPurchaseOrders(),
 
         match: (po, query) => prefixMatch([po.supplier_name, po.po_id, '#' + po.po_id], query),
-        filter: (po, filters) => filters.status === 'all' || po.status === filters.status,
+        filter: (po, filters) => filters.status === 'all' || poStage(po) === filters.status,
         sort: (rows) => sortPurchaseOrders(rows),
         onLoaded: (rows) => renderPurchaseOrderLegend(rows),
 
@@ -1507,13 +1532,13 @@ function buildPurchaseOrderPanel() {
             '<tr class="row-clickable row-reveal' + (poNeedsMe(po) ? ' row-attention' : '') + '" ' +
                 'style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'title="' + poRowTitle(po) + '" ' +
-                'onclick="openPurchaseOrderRow(' + po.po_id + ')">' +
+                'onclick="openPurchaseOrderDetail(' + po.po_id + ')">' +
             '<td class="cell-id">#' + po.po_id + '</td>' +
             '<td class="cell-name">' + escapeHtml(po.supplier_name) + '</td>' +
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
             '<td class="cell-num">' + po.line_count + '</td>' +
             '<td class="cell-num">' + poValueCell(po) + '</td>' +
-            '<td>' + poStatusBadge(po.status) + '</td></tr>'
+            '<td>' + poStatusCell(po) + '</td></tr>'
     });
 }
 
@@ -1688,6 +1713,7 @@ function buildPurchaseTotalsPanel() {
         pagerId: 'po-totals-pager',
         idField: 'po_id',
         filters: { month: poThisMonth(), supplier: 'all', from: '', to: '' },
+        inputs: ['po-totals-from', 'po-totals-to', 'po-totals-month', 'po-totals-supplier'],
 
         gate: {
             title: 'Total purchases not loaded',
@@ -1862,7 +1888,8 @@ function renderPurchaseOrderDocument() {
                 : '') +
             (poSetup.canReceive && order.status === 'Pending'
                 ? '<button type="button" class="btn btn-success" ' +
-                  'onclick="openReceiveOrder(' + order.po_id + ')">Receive this delivery</button>'
+                  'onclick="openReceiveOrder(' + order.po_id + ')">' +
+                  (poCanRefer(order) ? 'Refer to PO' : 'Receive this delivery') + '</button>'
                 : '') +
         '</div>' +
         '<div class="po-doc">' +
@@ -1881,7 +1908,7 @@ function renderPurchaseOrderDocument() {
                         '<div class="po-doc-kind-title">Purchase Order</div>' +
                         '<div class="po-doc-ref">#' + order.po_id + '</div>' +
                         '<div class="po-doc-date">Raised ' + escapeHtml(ordered) + '</div>' +
-                        '<div class="po-doc-date">' + escapeHtml(poStatusWord(order.status)) + '</div>' +
+                        '<div class="po-doc-date">' + escapeHtml(poStatusWord(poStage(order))) + '</div>' +
                     '</div>' +
                 '</div>' +
 
@@ -2241,7 +2268,8 @@ async function openPurchaseOrderDetail(poId) {
                    (po.supplier_ship_date ? ' and ships it ' + escapeHtml(poShipDay(po.supplier_ship_date)) : '') +
                    (po.supplier_note ? ' (' + escapeHtml(po.supplier_note) + ')' : '') + '. ' +
                    (poSetup.canReceive
-                       ? 'Count it in once the goods have been checked against the order.'
+                       ? 'Once the goods are at the store, press Refer to PO to check them against the order ' +
+                         'and count them in.'
                        : 'The clerk receives it once the goods have been checked against it.');
         } else if (poSetup.canReceive) {
             next = ' Print it and send it to the supplier: the printed order carries a QR code for them to ' +
@@ -2279,7 +2307,7 @@ async function openPurchaseOrderDetail(poId) {
     const summary = note +
         '<div class="detail-grid">' +
         detailField('Supplier', escapeHtml(po.supplier_name)) +
-        detailField('Status', poStatusBadge(po.status)) +
+        detailField('Status', poStatusBadge(po)) +
         detailField('Raised', escapeHtml(String(po.order_date).slice(0, 16)) +
             (po.raised_by ? ' <span class="muted">by ' + escapeHtml(po.raised_by) + '</span>' : '')) +
         (po.confirmed_at
@@ -2346,12 +2374,13 @@ async function openPurchaseOrderDetail(poId) {
     }
     if (poSetup.canReceive && po.status === 'Pending') {
         foot += '<button type="button" class="btn btn-success" onclick="closeModal(\'detail-modal\'); ' +
-                'openReceiveOrder(' + po.po_id + ')">Count In the Delivery</button>';
+                'openReceiveOrder(' + po.po_id + ')">' +
+                (poCanRefer(po) ? 'Refer to PO' : 'Count In the Delivery') + '</button>';
     }
 
     // one wide page, never turned: the facts on the left, every material and
     // the supplier's contact on the right; a very long order scrolls instead
-    openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(po.status), 'P' + po.po_id, [
+    openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(poStage(po)), 'P' + po.po_id, [
         { label: 'Order', body: '<div class="po-detail-layout">' +
             '<div class="po-detail-facts">' + summary + '</div>' +
             '<div class="po-detail-lines"><h4 class="detail-subhead">What is ordered</h4>' + lines + contact + '</div>' +

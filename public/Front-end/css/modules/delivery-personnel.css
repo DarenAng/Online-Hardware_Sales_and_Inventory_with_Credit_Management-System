@@ -62,3 +62,58 @@
     }
     #panel-report .toolbar-field input { min-width: 0; width: 100%; }
 }
+
+/* ==========================================================================
+   A DELIVERY'S CARD -- one page: route, payment and progress on the left, the goods
+   and remarks on the right (shared/deliveries.js). Stacks on a phone.
+   ========================================================================== */
+.drec-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 20px;
+    align-items: start;
+}
+.drec-side .detail-subhead:first-child,
+.drec-main .detail-subhead:first-child { margin-top: 0; }
+.drec-side .detail-grid + .detail-subhead { margin-top: 22px; }
+/* three facts to a row beside the goods, so the card is short enough to see whole */
+@media (min-width: 901px) {
+    .drec-side .detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+/* ==========================================================================
+   REFUND AT THE DOOR -- one row per item on the sale
+   ========================================================================== */
+.refund-line {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 90px 90px;
+    gap: 4px 12px;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+}
+.refund-pick { font-weight: 600; }
+.refund-sold { grid-column: 1; font-size: 13.5px; }
+.refund-qty {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    text-align: right;
+    font-family: var(--font-figure);
+}
+.refund-amount {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    text-align: right;
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+}
+.refund-total {
+    margin: 12px 0 18px;
+    text-align: right;
+    font-weight: 700;
+}
+
+@media (max-width: 900px) {
+    .drec-layout { grid-template-columns: 1fr; }
+    .drec-main .detail-subhead:first-child { margin-top: 22px; }
+}

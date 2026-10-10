@@ -189,6 +189,8 @@
                                 <div>
                                     <h3>Sales Summary</h3>
                                     <p class="panel-sub" id="income-range-note">Pick a period, then press Load Data.</p>
+                                    <!-- which cashier the figures are for; filled by manager.js renderIncome, and printed -->
+                                    <p class="panel-sub" id="income-cashier-note" hidden></p>
                                 </div>
                                 <div class="panel-actions no-print">
                                     <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -206,6 +208,13 @@
                                     <label for="income-period">Period</label>
                                     <!-- filled by manager.js renderIncomeRanges; Custom date opens a popup -->
                                     <select id="income-period" onchange="incomePeriodPicked(this.value)"></select>
+                                </div>
+                                <div class="toolbar-field">
+                                    <label for="income-cashier">Cashier</label>
+                                    <!-- the cashiers are filled in by manager.js once the data has loaded -->
+                                    <select id="income-cashier" onchange="incomeCashierPicked(this.value)">
+                                        <option value="all">All cashiers</option>
+                                    </select>
                                 </div>
                                 <div class="toolbar-spacer"></div>
                                 <button type="button" class="btn btn-accent" onclick="loadIncome()">Load Data</button>
@@ -267,7 +276,7 @@
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="sales-search"
                                        placeholder="Search by customer, cashier, or sale number"
-                                       oninput="dataPanelSearchInput('mgr-sales', event)" onkeydown="dataPanelSearchKey('mgr-sales', event)" title="Type at least two letters to search">
+                                       oninput="dataPanelSearchInput('mgr-sales', event)" onkeydown="dataPanelSearchKey('mgr-sales', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
 
                             <div class="toolbar-field">
@@ -335,7 +344,7 @@
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="unpaid-search"
                                        placeholder="Search by customer or method"
-                                       oninput="dataPanelSearchInput('mgr-unpaid', event)" onkeydown="dataPanelSearchKey('mgr-unpaid', event)" title="Type at least two letters to search">
+                                       oninput="dataPanelSearchInput('mgr-unpaid', event)" onkeydown="dataPanelSearchKey('mgr-unpaid', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
                             <div class="toolbar-field">
                                 <label for="unpaid-status">Payment status</label>
@@ -392,7 +401,7 @@
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="loyal-search"
                                        placeholder="Search by customer"
-                                       oninput="dataPanelSearchInput('mgr-loyal', event)" onkeydown="dataPanelSearchKey('mgr-loyal', event)" title="Type at least two letters to search">
+                                       oninput="dataPanelSearchInput('mgr-loyal', event)" onkeydown="dataPanelSearchKey('mgr-loyal', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
                             <div class="toolbar-field">
                                 <label for="loyal-purchases">Purchases</label>
@@ -453,7 +462,7 @@
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="all-search"
                                        placeholder="Search by staff, kind of report or details"
-                                       oninput="dataPanelSearchInput('mgr-all', event)" onkeydown="dataPanelSearchKey('mgr-all', event)" title="Type at least two letters to search">
+                                       oninput="dataPanelSearchInput('mgr-all', event)" onkeydown="dataPanelSearchKey('mgr-all', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
                             <div class="toolbar-field">
                                 <label for="all-kind">Report</label>
@@ -585,7 +594,7 @@
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="stocks-search"
                                        placeholder="Search by product, category, or supplier"
-                                       oninput="dataPanelSearchInput('mgr-stocks', event)" onkeydown="dataPanelSearchKey('mgr-stocks', event)" title="Type at least two letters to search">
+                                       oninput="dataPanelSearchInput('mgr-stocks', event)" onkeydown="dataPanelSearchKey('mgr-stocks', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
                             <div class="toolbar-field">
                                 <label for="stocks-status">Stock status</label>
@@ -660,7 +669,7 @@
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="reorder-search"
                                        placeholder="Search by product or supplier"
-                                       oninput="dataPanelSearchInput('mgr-reorder', event)" onkeydown="dataPanelSearchKey('mgr-reorder', event)" title="Type at least two letters to search">
+                                       oninput="dataPanelSearchInput('mgr-reorder', event)" onkeydown="dataPanelSearchKey('mgr-reorder', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
                             <div class="toolbar-field">
                                 <label for="reorder-status">Stock status</label>
@@ -715,7 +724,7 @@
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="stock-moves-search"
                                        placeholder="Search by product, staff or details"
-                                       oninput="dataPanelSearchInput('mgr-stock-moves', event)" onkeydown="dataPanelSearchKey('mgr-stock-moves', event)" title="Type at least two letters to search">
+                                       oninput="dataPanelSearchInput('mgr-stock-moves', event)" onkeydown="dataPanelSearchKey('mgr-stock-moves', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
                             <div class="toolbar-field">
                                 <label for="stock-moves-kind">Kind</label>
@@ -772,19 +781,24 @@
                         </div>
                     </div>
 
+                    <div class="track-legend no-print" id="po-legend"></div>
+
                     <div class="panel-toolbar no-print">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="po-search"
                                    placeholder="Search by supplier or order number"
-                                   oninput="dataPanelSearchInput('mgr-po', event)" onkeydown="dataPanelSearchKey('mgr-po', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('mgr-po', event)" onkeydown="dataPanelSearchKey('mgr-po', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="po-status">Status</label>
                             <select id="po-status" data-filter-table="po-table" data-hides-column="6"
+                                    data-keeps-column-for="PO Accepted|On the way"
                                     onchange="dataPanelFilter('mgr-po', 'status', this.value)">
                                 <option value="all">Every status</option>
                                 <option value="For Approval">Waiting for confirmation</option>
                                 <option value="Pending">Waiting for delivery</option>
+                                <option value="PO Accepted">PO Accepted</option>
+                                <option value="On the way">On the way</option>
                                 <option value="Received">Received</option>
                                 <option value="Cancelled">Cancelled</option>
                             </select>
@@ -831,7 +845,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="credit-search"
                                    placeholder="Search by customer or phone"
-                                   oninput="dataPanelSearchInput('mgr-credit', event)" onkeydown="dataPanelSearchKey('mgr-credit', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('mgr-credit', event)" onkeydown="dataPanelSearchKey('mgr-credit', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
 
                         <div class="toolbar-field">
@@ -887,7 +901,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="requests-search"
                                    placeholder="Search by customer or who asked"
-                                   oninput="dataPanelSearchInput('mgr-requests', event)" onkeydown="dataPanelSearchKey('mgr-requests', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('mgr-requests', event)" onkeydown="dataPanelSearchKey('mgr-requests', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="requests-status">Status</label>
@@ -935,7 +949,16 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="deliveries-search"
                                    placeholder="Search by customer, driver, or destination"
-                                   oninput="dataPanelSearchInput('mgr-deliveries', event)" onkeydown="dataPanelSearchKey('mgr-deliveries', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('mgr-deliveries', event)" onkeydown="dataPanelSearchKey('mgr-deliveries', event)" title="Type one letter or more; it finds words that start with it">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="deliveries-driver">Driver</label>
+                            <!-- the drivers are filled in by manager.js once the deliveries have loaded -->
+                            <select id="deliveries-driver"
+                                    onchange="dataPanelFilter('mgr-deliveries', 'driver', this.value)">
+                                <option value="all">All drivers</option>
+                                <option value="Unassigned">Unassigned</option>
+                            </select>
                         </div>
                         <div class="toolbar-field">
                             <label for="deliveries-state">Fulfilment</label>
@@ -987,7 +1010,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="mqr-search"
                                    placeholder="Search by reference, receipt, cashier, or message"
-                                   oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="mqr-from">From</label>
@@ -1047,7 +1070,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="records-search"
                                    placeholder="Search these records"
-                                   oninput="dataPanelSearchInput('mgr-records', event)" onkeydown="dataPanelSearchKey('mgr-records', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('mgr-records', event)" onkeydown="dataPanelSearchKey('mgr-records', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="records-sort">Sort by</label>
@@ -1082,7 +1105,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="archives-search"
                                    placeholder="Search archived records"
-                                   oninput="dataPanelSearchInput('mgr-archives', event)" onkeydown="dataPanelSearchKey('mgr-archives', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('mgr-archives', event)" onkeydown="dataPanelSearchKey('mgr-archives', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="archives-module">Module</label>

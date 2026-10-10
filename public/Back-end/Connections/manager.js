@@ -17,7 +17,7 @@
 
 function registerManagerRoutes(app, deps) {
   const {
-    db, callProcedure, getActorId, writeAuditLog, fieldChanges, searchPrefix,
+    db, callProcedure, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
     requireRole, MANAGER, LOW_STOCK_EFFECTIVE_SQL, isDateText, SALE_CUSTOMER_SQL,
     proceduresAreMissing, publishChange,
     CLERK, CASHIER, DRIVER, cleanPhone, phoneComplaint
@@ -110,9 +110,24 @@ function registerManagerRoutes(app, deps) {
 
   // The income breakdown: billed, collected (the headline), outstanding and
   // discounts. One function behind both the screen and the export.
-  async function incomeReport(range) {
+  // The optional cashier filter: a staff id from the query (?cashier=3), or
+  // null for every cashier. Anything that is not a whole number above 0 is ignored.
+  function cashierFromQuery(query) {
+    const id = Number(query.cashier);
+    if (Number.isInteger(id) && id > 0) return id;
+    return null;
+  }
+
+  async function incomeReport(range, cashierId) {
     const bucket = BUCKET_SQL[range.bucket] || BUCKET_SQL.day;
     const window = [`${range.from} 00:00:00`, `${range.to} 23:59:59`];
+
+    // with a cashier chosen, every query below only counts that cashier's sales
+    let cashierSql = "";
+    if (cashierId !== null) {
+      cashierSql = " AND s.cashier_staff_id = ?";
+      window.push(cashierId);
+    }
 
     {
       const [totalsRows] = await db.query(
@@ -125,7 +140,7 @@ function registerManagerRoutes(app, deps) {
               -- the part of outstanding that is late-payment penalty rather than goods
               COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0) - GREATEST(s.final_amount - s.amount_paid, 0)), 0) AS penalties
        FROM sales s
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?`,
+       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}`,
         window
       );
 
@@ -135,7 +150,7 @@ function registerManagerRoutes(app, deps) {
         `SELECT COALESCE(SUM(si.quantity), 0) AS units_sold
        FROM sale_items si
        JOIN sales s ON s.sale_id = si.sale_id
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?`,
+       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}`,
         window
       );
 
@@ -147,7 +162,7 @@ function registerManagerRoutes(app, deps) {
               COALESCE(SUM(s.final_amount), 0) AS billed,
               COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected
        FROM sales s
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?
+       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}
        GROUP BY bucket
        ORDER BY bucket`,
         window
@@ -160,7 +175,7 @@ function registerManagerRoutes(app, deps) {
               COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected,
               COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS outstanding
        FROM sales s
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?
+       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}
        GROUP BY s.payment_method
        ORDER BY billed DESC`,
         window
@@ -174,7 +189,7 @@ function registerManagerRoutes(app, deps) {
        JOIN sales s ON s.sale_id = si.sale_id
        JOIN products p ON p.product_id = si.product_id
        LEFT JOIN units u ON u.unit_id = p.unit_id
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?
+       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}
        GROUP BY p.product_id, p.product_name, u.unit_name
        ORDER BY revenue DESC
        LIMIT 10`,
@@ -188,11 +203,29 @@ function registerManagerRoutes(app, deps) {
               COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected
        FROM sales s
        JOIN staff st ON st.staff_id = s.cashier_staff_id
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?
+       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}
        GROUP BY st.staff_id, st.full_name
        ORDER BY billed DESC`,
         window
       );
+
+      // everyone who has rung up a sale, for the Cashier dropdown (whatever the period)
+      const [cashierChoices] = await db.query(
+        `SELECT DISTINCT st.staff_id, st.full_name
+       FROM sales s
+       JOIN staff st ON st.staff_id = s.cashier_staff_id
+       WHERE s.is_archived = FALSE
+       ORDER BY st.full_name`
+      );
+
+      // the chosen cashier's name, so the screen, print and export can say who it is for
+      let cashier = null;
+      if (cashierId !== null) {
+        cashier = { staff_id: cashierId, name: "Staff #" + cashierId };
+        for (const choice of cashierChoices) {
+          if (choice.staff_id === cashierId) cashier.name = choice.full_name;
+        }
+      }
 
       const saleCount = Number(totals.sale_count) || 0;
 
@@ -223,14 +256,16 @@ function registerManagerRoutes(app, deps) {
         series: series,
         methods: methods,
         products: products,
-        cashiers: cashiers
+        cashiers: cashiers,
+        cashier: cashier,
+        cashierChoices: cashierChoices
       };
     }
   }
 
   app.get("/api/reports/income", async (request, response) => {
     try {
-      const report = await incomeReport(resolveRange(request.query));
+      const report = await incomeReport(resolveRange(request.query), cashierFromQuery(request.query));
       report.range.name = String(request.query.range || "custom");
       response.json(report);
     } catch (error) {
@@ -240,6 +275,12 @@ function registerManagerRoutes(app, deps) {
       response.status(500).json({ error: error.message });
     }
   });
+
+  // A period of one day (Today, or a custom pair with the same date twice) has
+  // nothing to break down by day, so the by-day sheet is left out of its file.
+  function isSingleDay(range) {
+    return range.from === range.to;
+  }
 
   // Exports are Excel workbooks (spreadsheet.js). The access table is what
   // stops a cashier exporting.
@@ -296,6 +337,7 @@ function registerManagerRoutes(app, deps) {
         ["Range", data.range.label],
         ["From", data.range.from],
         ["To", data.range.to],
+        ["Cashier", data.cashier ? data.cashier.name : "All cashiers"],
         ["Transactions", data.totals.saleCount],
         ["Units sold", data.totals.unitsSold],
         ["Billed", data.totals.billed],
@@ -312,7 +354,8 @@ function registerManagerRoutes(app, deps) {
       headers: [],
       rows: function (data) {
         const rows = [];
-        rows.push(["Income breakdown", data.range.label, `${data.range.from} to ${data.range.to}`]);
+        rows.push(["Income breakdown", data.range.label, `${data.range.from} to ${data.range.to}`,
+                   data.cashier ? "Cashier: " + data.cashier.name : "All cashiers"]);
 
         // one section = an empty line, the section name, its headers, then its rows
         function addSection(name, headers, body) {
@@ -326,7 +369,9 @@ function registerManagerRoutes(app, deps) {
 
         // .slice(3) skips the Range/From/To lines, which are already in the first line
         addSection("Summary", ["Figure", "Value"], EXPORTS["income-summary"].rows(data).slice(3));
-        addSection("Over time", EXPORTS["income-series"].headers, EXPORTS["income-series"].rows(data));
+        if (!isSingleDay(data.range)) {
+          addSection("Over time", EXPORTS["income-series"].headers, EXPORTS["income-series"].rows(data));
+        }
         addSection("By payment method", EXPORTS["payment-methods"].headers, EXPORTS["payment-methods"].rows(data));
         addSection("Best sellers", EXPORTS["top-products"].headers, EXPORTS["top-products"].rows(data));
         return rows;
@@ -345,14 +390,19 @@ function registerManagerRoutes(app, deps) {
   };
 
   function exportSheets(name, plan, data, range) {
-    const subtitle = `${range.label}, ${range.from} to ${range.to}`;
+    let subtitle = `${range.label}, ${range.from} to ${range.to}`;
+    if (data.cashier) {
+      subtitle += `, Cashier: ${data.cashier.name}`;
+    } else {
+      subtitle += ", All cashiers";
+    }
     if (name !== "income-breakdown") {
       return [{ name: plan.title, title: plan.title.replace(/-/g, " "), subtitle: subtitle,
                 headers: plan.headers, rows: plan.rows(data), money: EXPORT_MONEY[name] || [] }];
     }
 
     const summary = EXPORTS["income-summary"].rows(data).slice(3);
-    return [
+    const sheets = [
       { name: "Summary", title: "Sales Summary", subtitle: subtitle,
         headers: ["Figure", "Value"], rows: summary, money: [] },
       { name: "By Payment Method", title: "By Payment Method", subtitle: subtitle,
@@ -360,11 +410,16 @@ function registerManagerRoutes(app, deps) {
         money: EXPORT_MONEY["payment-methods"] },
       { name: "Best Sellers", title: "Best Sellers", subtitle: subtitle,
         headers: EXPORTS["top-products"].headers, rows: EXPORTS["top-products"].rows(data),
-        money: EXPORT_MONEY["top-products"] },
-      { name: "By Day", title: "Sales by Day", subtitle: subtitle,
-        headers: EXPORTS["income-series"].headers, rows: EXPORTS["income-series"].rows(data),
-        money: EXPORT_MONEY["income-series"] }
+        money: EXPORT_MONEY["top-products"] }
     ];
+
+    // the by-day sheet goes last, and only when the period has more than one day
+    if (!isSingleDay(range)) {
+      sheets.push({ name: "By Day", title: "Sales by Day", subtitle: subtitle,
+        headers: EXPORTS["income-series"].headers, rows: EXPORTS["income-series"].rows(data),
+        money: EXPORT_MONEY["income-series"] });
+    }
+    return sheets;
   }
 
   // A table on a report screen, saved as a workbook. The browser sends the
@@ -483,12 +538,15 @@ function registerManagerRoutes(app, deps) {
     }
 
     try {
-      const data = await incomeReport(range);
+      const data = await incomeReport(range, cashierFromQuery(request.query));
       const rows = plan.rows(data);
 
+      let forWhom = "all cashiers";
+      if (data.cashier) forWhom = "cashier " + data.cashier.name;
+
       await writeAuditLog(request, "EXPORT_REPORT",
-        `${plan.title} exported for ${range.label}`,
-        { report: name, from: range.from, to: range.to, rows: rows.length });
+        `${plan.title} exported for ${range.label}, ${forWhom}`,
+        { report: name, from: range.from, to: range.to, cashier_staff_id: data.cashier ? data.cashier.staff_id : null, rows: rows.length });
 
       await sendWorkbook(response, `${plan.title}_${range.from}_to_${range.to}`, exportSheets(name, plan, data, range));
     } catch (error) {
@@ -801,8 +859,7 @@ function registerManagerRoutes(app, deps) {
     if (request.query.overLimit === "true") where.push("v.current_credit > v.credit_limit");
 
     if (search !== "") {
-      where.push("(v.customer_name LIKE ? OR v.phone LIKE ?)");
-      params.push(searchPrefix(search), searchPrefix(search));
+      where.push(wordStartSearch(["v.customer_name", "v.phone"], search, params));
     }
 
     let filter = "";
@@ -1084,10 +1141,24 @@ function registerManagerRoutes(app, deps) {
       return response.status(400).json({ error: "A customer and a requested limit are required" });
     }
 
+    // A manager reading the request later does not have the customer in front
+    // of them, so it always says why: not blank, and more than a word.
+    const MINIMUM_REQUEST_REASON = 5;
+    const why = typeof reason === "string" ? reason.trim().replace(/\s+/g, " ") : "";
+    if (why.length < MINIMUM_REQUEST_REASON) {
+      return response.status(400).json({
+        error: "Say why the limit should go up, so the manager deciding it can see the reason " +
+               `(at least ${MINIMUM_REQUEST_REASON} characters).`
+      });
+    }
+    if (why.length > 255) {
+      return response.status(400).json({ error: "The reason is at most 255 characters." });
+    }
+
     try {
       const output = await callProcedure(
         "CALL sp_request_credit_extension(?, ?, ?, ?, @request_id, @status_code, @message)",
-        [customerId, limit, reason || null, getActorId(request)],
+        [customerId, limit, why, getActorId(request)],
         ["request_id", "status_code", "message"]
       );
 
@@ -1097,7 +1168,7 @@ function registerManagerRoutes(app, deps) {
 
       await writeAuditLog(request, "CREDIT_REQUEST",
         `Extension to ${limit} asked for on customer #${customerId}`,
-        { customer_id: Number(customerId), requested_limit: limit, reason: reason || null });
+        { customer_id: Number(customerId), requested_limit: limit, reason: why });
 
       response.json({ message: output.message, requestId: output.request_id });
     } catch (error) {
@@ -1219,36 +1290,66 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // Open an account from the counter. The procedure sets the limit to zero and
-  // the standing to Good; moving the limit is manager-only.
+  // Open an account from Customers Record (the Add Customer form). The
+  // procedure sets the limit to zero and the standing to Good; moving the limit
+  // is manager-only. A name already on the books (any case, extra spaces
+  // ignored) is refused with 409 -- the till no longer opens accounts by
+  // typing a name, so this is the one place an account starts.
   app.post("/api/customers", async (request, response) => {
     const { firstName, lastName, phone, address } = request.body;
 
     if (!firstName || String(firstName).trim() === "") {
-      return response.status(400).json({ error: "A customer needs at least a first name" });
+      return response.status(400).json({ error: "A customer needs a name" });
+    }
+    if (!address || String(address).trim() === "") {
+      return response.status(400).json({ error: "A customer needs an address" });
     }
 
+    const first = String(firstName).trim().replace(/\s+/g, " ").slice(0, 100);
+    const last = String(lastName || "").trim().replace(/\s+/g, " ").slice(0, 100);
+    const fullName = (first + " " + last).trim();
+
+    const phoneProblem = phoneComplaint(phone);
+    if (phoneProblem) {
+      return response.status(400).json({ error: phoneProblem });
+    }
+    const phoneText = cleanPhone(phone) || "";
+
     try {
+      const [same] = await db.query(
+        `SELECT customer_id FROM customers
+         WHERE LOWER(TRIM(CONCAT(first_name, ' ', last_name))) = LOWER(?)
+         LIMIT 1`, [fullName]);
+      if (same.length > 0) {
+        return response.status(409).json({
+          error: `${fullName} is already on the books. Find them in Customers Record instead of adding them again.`,
+          customerId: same[0].customer_id
+        });
+      }
+
       const output = await callProcedure(
         "CALL sp_create_customer(?, ?, ?, ?, ?, @customer_id, @status_code, @message)",
-        [String(firstName).trim().slice(0, 100),
-         String(lastName || "").trim().slice(0, 100),
-         String(phone || "").trim().slice(0, 20),
-         String(address || "").trim(),
-         getActorId(request)],
+        [first, last, phoneText, String(address || "").trim().slice(0, 500), getActorId(request)],
         ["customer_id", "status_code", "message"]
       );
 
-      // 200: the account already existed and was handed back; 201: a new one
+      // 201: a new account. 200 would mean the procedure found the same name and
+      // phone and handed that account back, which the check above has already refused
       if (output.status_code !== 201 && output.status_code !== 200) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      // 201 means "a new customer was created", 200 means "already existed"
+      const created = output.status_code === 201;
+      if (created) {
+        await writeAuditLog(request, "CREATE_CUSTOMER", `Customer ${fullName} added`,
+          { customer_id: Number(output.customer_id), name: fullName,
+            phone: phoneText || null, address: String(address || "").trim() || null });
+      }
+
       response.status(output.status_code).json({
-        message: output.message,
+        message: created ? `${fullName} was added to Customers Record.` : output.message,
         customerId: output.customer_id,
-        created: output.status_code === 201
+        created: created
       });
     } catch (error) {
       console.error("Create customer failed:", error.message);

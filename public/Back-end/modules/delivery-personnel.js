@@ -8,6 +8,7 @@
 //   - the driver's deliveries: the numbers at the top and the lists
 //   - taking a delivery (the status buttons live in the popup, shared/deliveries.js)
 //   - collecting cash on delivery (COD)
+//   - refunding items the customer turns away at the door
 //   - the driver's report for a date range
 //   - the page start-up code at the very bottom ("DELIVERY PAGE BOOT")
 // ============================================================
@@ -350,6 +351,208 @@ function openDriverDetail(deliveryId) {
     showDeliveryRecord(driverDeliveries.find((x) => x.delivery_id === deliveryId), true);
 }
 
+// ---------- refund at the door ----------
+// An item the customer turns away at the door (damaged, wrong item). Each
+// one is filed like a cashier's refund (POST /api/returns): it waits for the
+// stockroom to inspect it. A refund report does not change the sale's own
+// figures, so it is only offered on an order already paid in full.
+const MINIMUM_DOOR_REASON = 10;
+let refundDeliveryId = null;
+let refundLines = [];     // what can still be refunded, one per sale line
+
+async function openDriverRefund(deliveryId) {
+    const d = driverDeliveries.find((x) => x.delivery_id === deliveryId);
+    if (!d) return;
+
+    if (Number(d.balance_due) > 0) {
+        closeModal('refund-modal');
+        notifyWarning(refundOwesMessage(d.balance_due), 'Refund not available');
+        return;
+    }
+
+    let items;
+    try {
+        items = await apiGetDeliveryItems(deliveryId);
+    } catch (error) {
+        notifyOffline();
+        return;
+    }
+
+    // Work out how much of each line can still go back. The shelf counts in
+    // its own unit (base_quantity); the customer bought in the sold unit
+    // (quantity), so one sold unit is "ratio" shelf units.
+    refundLines = [];
+    for (const it of items) {
+        const sold = Number(it.quantity);
+        const ratio = sold > 0 ? Number(it.base_quantity) / sold : 1;
+        const leftBase = Number(it.base_quantity) - Number(it.refunded_quantity || 0);
+        const left = Math.round((leftBase / ratio) * 1000) / 1000;
+
+        if (left > 0) {
+            refundLines.push({
+                productId: it.product_id,
+                saleId: it.sale_id,
+                name: it.product_name,
+                unit: it.unit_name,
+                sold: sold,
+                left: left,
+                ratio: ratio,
+                price: Number(it.unit_price)
+            });
+        }
+    }
+
+    if (refundLines.length === 0) {
+        closeModal('refund-modal');
+        notifyWarning('Everything on this delivery has already been refunded.', 'Nothing to refund');
+        return;
+    }
+
+    refundDeliveryId = deliveryId;
+    closeModal('detail-modal');
+
+    document.getElementById('refund-subtitle').textContent = 'Delivery #' + deliveryId + ' · ' + d.customer_name;
+    document.getElementById('refund-reason').value = '';
+
+    document.getElementById('refund-explain').textContent =
+        'Tick each item the customer turned away and say how many. The order is already paid, so the refund is ' +
+        'cash handed back to the customer. The goods go to the inventory clerk for inspection.';
+
+    document.getElementById('refund-lines').innerHTML = refundLines.map((line, i) =>
+        '<div class="refund-line">' +
+            '<label class="refund-pick"><input type="checkbox" id="refund-pick-' + i + '" onchange="onRefundLineChange()"> ' +
+                escapeHtml(line.name) + '</label>' +
+            '<span class="refund-sold muted">bought ' + escapeHtml(qtyText(line.sold, line.unit)) +
+                ' at ' + peso(line.price) + ', up to ' + line.left + ' can go back</span>' +
+            '<input type="number" class="form-control refund-qty" id="refund-qty-' + i + '" ' +
+                'min="0" max="' + line.left + '" step="any" value="' + Math.min(1, line.left) + '" ' +
+                'oninput="onRefundLineChange()" aria-label="Quantity of ' + escapeHtml(line.name) + '">' +
+            '<span class="refund-amount" id="refund-amount-' + i + '"></span>' +
+        '</div>'
+    ).join('');
+
+    onRefundLineChange();
+    showModal('refund-modal');
+}
+
+// what each ticked line comes to, and the total, as the boxes change
+function onRefundLineChange() {
+    let total = 0;
+
+    refundLines.forEach((line, i) => {
+        const picked = document.getElementById('refund-pick-' + i).checked;
+        const quantity = Number(document.getElementById('refund-qty-' + i).value) || 0;
+        const amount = Math.round(quantity * line.price * 100) / 100;
+
+        document.getElementById('refund-amount-' + i).textContent = picked ? peso(amount) : '';
+        if (picked) total = total + amount;
+    });
+
+    document.getElementById('refund-total').textContent = 'Refund total: ' + peso(total);
+}
+
+async function handleDriverRefund(event) {
+    event.preventDefault();
+
+    const reason = document.getElementById('refund-reason').value.trim();
+
+    // the lines that are ticked, checked one by one before anything is sent
+    const chosen = [];
+    for (let i = 0; i < refundLines.length; i++) {
+        if (!document.getElementById('refund-pick-' + i).checked) continue;
+
+        const line = refundLines[i];
+        const quantity = Number(document.getElementById('refund-qty-' + i).value);
+
+        if (!quantity || quantity <= 0 || quantity > line.left) {
+            notifyWarning(line.name + ': the quantity must be more than zero and no more than ' + line.left + '.',
+                'Nothing was filed');
+            return;
+        }
+        if (!isMeasuredUnit(line.unit) && !Number.isInteger(quantity)) {
+            notifyWarning(line.name + ' is counted in whole pieces.', 'Nothing was filed');
+            return;
+        }
+        chosen.push({ line: line, quantity: quantity });
+    }
+
+    if (chosen.length === 0) {
+        notifyWarning('Tick the item the customer turned away.', 'Nothing was filed');
+        return;
+    }
+    if (reason.length < MINIMUM_DOOR_REASON) {
+        notifyWarning('Say what was wrong, in a sentence. The stockroom reads this when it inspects the goods.',
+            'The reason is required');
+        document.getElementById('refund-reason').focus();
+        return;
+    }
+
+    // Sent one at a time. The button is off meanwhile, so a double tap cannot
+    // file the same refund twice.
+    const button = document.querySelector('#refund-modal button[type="submit"]');
+    if (button && button.disabled) return;   // already sending
+    if (button) button.disabled = true;
+
+    const filed = [];       // names of the items recorded
+    const notFiled = [];    // "Name (why)" for each one that was not
+    try {
+        for (const pick of chosen) {
+            const name = pick.line.name;
+
+            // after a failure the rest are not tried: the same reason would likely stop them too
+            if (notFiled.length > 0) {
+                notFiled.push(name + ' (not tried)');
+                continue;
+            }
+
+            try {
+                const response = await apiFileReturn({
+                    productId: pick.line.productId,
+                    saleId: pick.line.saleId,
+                    reportType: 'Refunded',
+                    // the shelf counts in its own unit, so the sold quantity is converted
+                    quantity: Math.round(pick.quantity * pick.line.ratio * 1000) / 1000,
+                    reason: reason,
+                    refundAmount: Math.round(pick.quantity * pick.line.price * 100) / 100
+                });
+                const result = await response.json();
+
+                if (!response.ok) {
+                    // a session that has ended is sent back to sign in
+                    if (handleAuthFailure(response, result)) return;
+                    notFiled.push(name + ' (' + result.error + ')');
+                } else {
+                    filed.push(name);
+                }
+            } catch (error) {
+                notFiled.push(name + ' (the connection was lost)');
+            }
+        }
+
+        if (filed.length > 0) await loadDriverDeliveries();
+
+        if (notFiled.length === 0) {
+            closeModal('refund-modal');
+            notifySuccess(filed.length + (filed.length === 1 ? ' item' : ' items') + ' set aside for the stockroom. ' +
+                'The clerk has been asked to inspect ' + (filed.length === 1 ? 'it' : 'them') + '.', 'Refund recorded');
+            return;
+        }
+
+        // Something failed: say which is which and keep the form open. The
+        // list is read again so what is left to refund is up to date, and the
+        // reason typed is kept.
+        let message = '';
+        if (filed.length > 0) message = 'Recorded: ' + filed.join(', ') + '. ';
+        message += 'Not recorded: ' + notFiled.join('; ') + '.';
+        notifyError(message, filed.length > 0 ? 'Only some items were recorded' : 'Nothing was recorded');
+
+        await openDriverRefund(refundDeliveryId);
+        document.getElementById('refund-reason').value = reason;
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 // The report: one fetch for the range, two data panels reading from it.
 let driverReport = null;
 const DRIVER_REPORT_PANELS = ['driver-report', 'driver-report-pay'];
@@ -420,6 +623,7 @@ async function fetchDeliveryReport() {
 function buildReportPanels() {
     createDataPanel({
         key: 'driver-report',
+        inputs: ['drep-from', 'drep-to'],
         tableId: 'drep-table',
         columns: 7,
         pagerId: 'drep-pager',
@@ -443,6 +647,7 @@ function buildReportPanels() {
 
     createDataPanel({
         key: 'driver-report-pay',
+        inputs: ['drep-from', 'drep-to'],
         tableId: 'drep-pay-table',
         columns: 6,
         pagerId: 'drep-pay-pager',

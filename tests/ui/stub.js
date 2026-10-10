@@ -133,6 +133,22 @@ app.get("/api/users/email-check", (request, response) => {
   response.json(owner ? { taken: true, roleName: owner.role_name } : { taken: false });
 });
 
+// one phone number, one staff member (numbers here are stored like 0917...)
+function phoneKey(phone) {
+  return String(phone || "").replace(/\D/g, "").replace(/^(63|0)+/, "");
+}
+
+function phoneOwnerOf(phone, staffId) {
+  const key = phoneKey(phone);
+  if (key === "") return null;
+  return USERS.find((u) => phoneKey(u.phone) === key && u.staff_id !== Number(staffId)) || null;
+}
+
+app.get("/api/users/phone-check", (request, response) => {
+  const owner = phoneOwnerOf(request.query.phone, request.query.staffId);
+  response.json(owner ? { taken: true, roleName: owner.role_name, name: owner.full_name } : { taken: false });
+});
+
 app.get("/api/users", (request, response) => {
   const status = String(request.query.status || "all");
   let rows = USERS;
@@ -189,6 +205,17 @@ app.get("/api/notifications", (request, response) => response.json(alertsOn ? NO
 app.post("/api/test/alerts", (request, response) => {
   alertsOn = Boolean(request.body && request.body.on);
   NOTIFICATIONS.forEach((n, i) => { n.is_read = i === 2 ? 1 : 0; });
+
+  // { on: true, count: 12 } serves twelve alerts, for the scrolling and queueing tests
+  const wanted = Number(request.body && request.body.count) || 3;
+  NOTIFICATIONS.length = Math.min(NOTIFICATIONS.length, 3);
+  while (NOTIFICATIONS.length < wanted) {
+    const id = NOTIFICATIONS.length + 1;
+    NOTIFICATIONS.push({ notification_id: id, notif_type: "Low Stock", title: "Material " + id + " is low",
+      message: "Only a few left on the shelf. Reorder soon.", is_read: 0,
+      created_at: "2026-09-08 10:00:00", product_id: id, product_name: "Material " + id,
+      from_name: "System", from_role: "Automatic" });
+  }
   response.json({ on: alertsOn });
 });
 app.post("/api/notifications/:id/read", (request, response) => {
@@ -234,6 +261,7 @@ const FEATURES = [
   ["purchase-orders", "Purchase Orders", "Inventory", ["Manager", "Inventory Clerk"], ["Manager", "Inventory Clerk"]],
   ["deliveries", "Delivery Tracking", "Deliveries", ["Manager", "Cashier"], ["Manager", "Cashier"]],
   ["delivery-runs", "Delivery Runs", "Deliveries", ["Delivery Personnel"], ["Delivery Personnel"]],
+  ["delivery-refunds", "Refund at the Door", "Deliveries", ["Delivery Personnel"], ["Delivery Personnel"]],
   ["delivery-reports", "Delivery Reports", "Deliveries", ["Delivery Personnel"], ["Delivery Personnel"]],
   ["delivery-schedule", "Delivery Schedule", "Deliveries",
     ["Manager", "Cashier", "Inventory Clerk", "Delivery Personnel"], ["Manager"]],
@@ -337,6 +365,15 @@ const DRAFTS = {};
 app.post("/api/users/draft", (request, response) => {
   const body = request.body || {};
   const middle = String(body.middleName || "").trim();
+
+  const phoneOwner = phoneOwnerOf(body.phone, 0);
+  if (phoneOwner) {
+    return response.status(409).json({
+      error: "That phone number is already used by " + phoneOwner.full_name +
+             " (" + phoneOwner.role_name + ")."
+    });
+  }
+
   const draftId = "draft-" + Object.keys(DRAFTS).length;
 
   DRAFTS[draftId] = body;
@@ -361,6 +398,15 @@ app.post("/api/users", (request, response) => {
   const draft = DRAFTS[String((request.body || {}).draftId)];
   if (!draft) return response.status(410).json({ error: "That review has expired." });
 
+  // the draft may be old: the number could have been taken since
+  const phoneOwner = phoneOwnerOf(draft.phone, 0);
+  if (phoneOwner) {
+    return response.status(409).json({
+      error: "That phone number is already used by " + phoneOwner.full_name +
+             " (" + phoneOwner.role_name + ")."
+    });
+  }
+
   response.json({
     message: "Account created successfully.",
     staffId: 99,
@@ -378,6 +424,17 @@ app.put("/api/users/:id", (request, response) => {
   if (!user) return response.status(404).json({ error: "Staff record not found" });
 
   const body = request.body || {};
+
+  // only a changed number is checked, as on the real server
+  const samePhone = phoneKey(body.phone) === phoneKey(user.phone);
+  const phoneOwner = samePhone ? null : phoneOwnerOf(body.phone, user.staff_id);
+  if (phoneOwner) {
+    return response.status(409).json({
+      error: "That phone number is already used by " + phoneOwner.full_name +
+             " (" + phoneOwner.role_name + ")."
+    });
+  }
+
   user.first_name = body.firstName;
   user.middle_name = body.middleName || null;
   user.last_name = body.lastName;
@@ -446,8 +503,17 @@ app.post("/api/password-reset/confirm", (request, response) => {
   if (!/^\d{6}$/.test(String(body.code || ""))) {
     return response.status(400).json({ error: "The code is the six digits in the email." });
   }
-  if (typeof body.newPassword !== "string" || body.newPassword.length < 8) {
-    return response.status(400).json({ error: "The new password must contain at least 8 characters." });
+  // the same rules as passwordComplaint in server.js
+  const password = String(body.newPassword || "");
+  const missing = [];
+  if (password.length < 8) missing.push("at least 8 characters");
+  if (!/[A-Z]/.test(password)) missing.push("an uppercase letter");
+  if (!/[a-z]/.test(password)) missing.push("a lowercase letter");
+  if (!/[0-9]/.test(password)) missing.push("a number");
+  if (!/[^A-Za-z0-9\s]/.test(password)) missing.push("a symbol such as ! ? - + . $ %");
+  if (/\s/.test(password)) missing.push("no spaces");
+  if (missing.length > 0) {
+    return response.status(400).json({ error: "A password needs " + missing.join(", ") + "." });
   }
   if (body.code !== "123456") {
     return response.status(400).json({
@@ -627,7 +693,16 @@ app.get("/api/manager/summary", (request, response) => {
 });
 
 app.get("/api/reports/income", (request, response) => {
-  const live = SALES.filter((s) => !s.is_archived);
+  // like the real server: an optional ?cashier=<staff id>, ignored unless it is a whole number above 0
+  const cashierId = Number(request.query.cashier);
+  const oneCashier = Number.isInteger(cashierId) && cashierId > 0;
+  const live = SALES.filter((s) => !s.is_archived && (!oneCashier || s.cashier_staff_id === cashierId));
+  const everyone = SALES.filter((s) => !s.is_archived);
+  const choiceIds = [...new Set(everyone.map((s) => s.cashier_staff_id))];
+  const cashierChoices = choiceIds.map((id) => USERS.find((u) => u.staff_id === id))
+    .map((u) => ({ staff_id: u.staff_id, full_name: u.full_name }))
+    .sort((a, b) => a.full_name.localeCompare(b.full_name));
+  const chosen = oneCashier ? cashierChoices.find((c) => c.staff_id === cashierId) : null;
   const billed = money(live, "final_amount");
   const collected = money(live, "amount_paid");
 
@@ -659,10 +734,10 @@ app.get("/api/reports/income", (request, response) => {
       name: request.query.range || "custom"
     },
     totals: {
-      saleCount: live.length, unitsSold: 1284,
+      saleCount: live.length, unitsSold: live.length * 24,
       gross: billed, discounts: 1200, billed, collected,
       outstanding: billed - collected,
-      averageSale: billed / live.length
+      averageSale: live.length ? billed / live.length : 0
     },
     series: Object.values(buckets).sort((a, b) => a.bucket.localeCompare(b.bucket)),
     methods: Object.values(methods).sort((a, b) => b.billed - a.billed),
@@ -673,7 +748,9 @@ app.get("/api/reports/income", (request, response) => {
     cashiers: USERS.slice(0, 6).map((u, i) => ({
       staff_id: u.staff_id, staff_name: u.full_name,
       sale_count: 12 - i, billed: 90000 - i * 8000, collected: 82000 - i * 8000
-    }))
+    })).filter((c) => !oneCashier || c.staff_id === cashierId),
+    cashier: oneCashier ? { staff_id: cashierId, name: chosen ? chosen.full_name : "Staff #" + cashierId } : null,
+    cashierChoices
   });
 });
 
@@ -730,11 +807,17 @@ app.get("/api/reports/overview", (request, response) => {
   });
 });
 
+const CASHIER_OWN_STAFF = 1;
 app.get("/api/sales", (request, response) => {
   const method = String(request.query.method || "all");
   const status = String(request.query.status || "all");
 
   let rows = status === "Voided" ? SALES.filter((s) => s.is_archived) : SALES.filter((s) => !s.is_archived);
+  // as the server does: asked from the cashier's page, only the cashier's own sales come back.
+  // The stub has no session, so "their own" is the sales staff 1 rang up (CASHIER_OWN_STAFF).
+  if (/cashier-dashboard\.html/.test(request.get("referer") || "")) {
+    rows = rows.filter((s) => s.cashier_staff_id === CASHIER_OWN_STAFF);
+  }
   if (method !== "all") rows = rows.filter((s) => s.payment_group === method);
   if (status !== "all" && status !== "Voided") rows = rows.filter((s) => s.transaction_status === status);
 
@@ -796,12 +879,58 @@ app.get("/api/deliveries", (request, response) => response.json(DELIVERIES));
 app.get("/api/deliveries/:id/items", (request, response) => {
   const delivery = DELIVERIES.find((d) => d.delivery_id === Number(request.params.id));
   if (!delivery) return response.status(404).json({ error: "Delivery not found" });
+  // refunded_quantity is read from the refunds on file, as the real route does
+  const refunded = (productId) => RETURNS
+    .filter((r) => r.sale_id === delivery.sale_id && r.product_id === productId &&
+                   ["Refunded", "Return"].includes(r.report_type))
+    .reduce((sum, r) => sum + r.quantity, 0);
   response.json([
     { quantity: 2, unit_name: "sack", base_quantity: 100, base_unit: "kg",
-      unit_price: 280, subtotal: 560, product_name: "Portland Cement" },
+      unit_price: 280, subtotal: 560, product_name: "Portland Cement",
+      product_id: 6, sale_id: delivery.sale_id, refunded_quantity: refunded(6) },
     { quantity: 5, unit_name: "piece", base_quantity: 5, base_unit: "piece",
-      unit_price: 45, subtotal: 225, product_name: "Hollow Block 4in" }
+      unit_price: 45, subtotal: 225, product_name: "Hollow Block 4in",
+      product_id: 17, sale_id: delivery.sale_id, refunded_quantity: refunded(17) }
   ]);
+});
+
+// Moving a delivery: one step at a time, as PATCH /api/deliveries/:id/status
+// does in Connections/cashier.js. The stub's driver is staff 5.
+const NEXT_DELIVERY_STATUS = {
+  "Pending": ["In Transit", "Delayed", "Failed"],
+  "In Transit": ["Out for Delivery", "Delayed", "Failed"],
+  "Out for Delivery": ["Delivered", "Delayed", "Failed"],
+  "Delayed": ["In Transit", "Out for Delivery", "Failed"],
+  "Failed": ["Pending", "In Transit", "Out for Delivery"],
+  "Delivered": []
+};
+app.patch("/api/deliveries/:id/status", (request, response) => {
+  const delivery = DELIVERIES.find((d) => d.delivery_id === Number(request.params.id));
+  const status = (request.body || {}).status;
+  if (!status) return response.status(400).json({ error: "A status is required" });
+  if (!delivery) return response.status(404).json({ error: "Delivery not found" });
+  if (!Object.keys(NEXT_DELIVERY_STATUS).includes(status)) return response.status(400).json({ error: "That is not a valid delivery status." });
+
+  if (roleOfPage(request) === "Delivery Personnel") {
+    if (delivery.delivery_staff_id == null) return response.status(409).json({ error: "Take this delivery before updating it." });
+    if (delivery.delivery_staff_id !== 5) return response.status(403).json({ error: "This delivery is assigned to another driver." });
+  }
+
+  const next = NEXT_DELIVERY_STATUS[delivery.status];
+  if (next.length > 0 && status !== delivery.status && Object.keys(NEXT_DELIVERY_STATUS).includes(status) && !next.includes(status)) {
+    return response.status(400).json({
+      error: `A delivery cannot go from ${delivery.status} to ${status}. From ${delivery.status} it can go to: ${next.join(", ")}.`
+    });
+  }
+  if (status === delivery.status) return response.status(400).json({ error: `This delivery is already marked ${status}.` });
+  if (delivery.status === "Delivered") return response.status(409).json({ error: `Delivery #${delivery.delivery_id} is already delivered and cannot be reopened.` });
+
+  delivery.status = status;
+  delivery.fulfilment_state = status;
+  if (status === "Delivered") delivery.delivered_at = "2026-09-04 13:00:00";
+  const remarks = String((request.body || {}).remarks || "").trim();
+  if (remarks) delivery.remarks = remarks;
+  response.json({ message: `Delivery #${delivery.delivery_id} marked ${status}.` });
 });
 app.get("/api/records/:type", (request, response) =>
   response.json(RECORDS[request.params.type] || []));
@@ -1024,6 +1153,11 @@ app.post("/api/credit/requests", (request, response) => {
   const credit = CREDIT.find((c) => c.customer_id === Number(request.body.customerId));
   if (!credit) return response.status(404).json({ error: "Customer not found." });
 
+  // the server refuses a blank or one-word-short reason
+  if (String(request.body.reason || "").trim().length < 5) {
+    return response.status(400).json({ error: "Say why the limit should go up, so the manager deciding it can see the reason (at least 5 characters)." });
+  }
+
   if (REQUESTS.some((r) => r.customer_id === credit.customer_id && r.status === "Pending")) {
     return response.status(409).json({
       error: `A request for ${credit.customer_name} is already waiting for a manager.`
@@ -1108,6 +1242,36 @@ app.put("/api/credit/policy", (request, response) => {
     message: `Saved. A credit sale past its due date is now charged ${rate.toFixed(2)}% of what is still unpaid on it, every month it stays overdue.`,
     penalty_rate: POLICY.penalty_rate
   });
+});
+
+// Add Customer: the same duplicate rule as the server (any case, extra spaces ignored)
+app.post("/api/customers", (request, response) => {
+  const body = request.body || {};
+  const first = String(body.firstName || "").trim().replace(/\s+/g, " ");
+  const last = String(body.lastName || "").trim().replace(/\s+/g, " ");
+  if (first === "") return response.status(400).json({ error: "A customer needs a name" });
+  if (String(body.address || "").trim() === "") return response.status(400).json({ error: "A customer needs an address" });
+
+  const name = (first + " " + last).trim();
+  const same = RECORDS.customer.find((c) => c.name.trim().replace(/\s+/g, " ").toLowerCase() === name.toLowerCase());
+  if (same) {
+    return response.status(409).json({
+      error: `${name} is already on the books. Find them in Customers Record instead of adding them again.`,
+      customerId: same.id
+    });
+  }
+
+  const id = RECORDS.customer.length + 1;
+  const record = { id, name, phone: body.phone || "", purchase_count: 0, credit_limit: 0, current_credit: 0 };
+  RECORDS.customer.push(record);
+  CREDIT.push(applyStanding({
+    customer_id: id, customer_name: name, phone: body.phone || "", address: body.address || "",
+    credit_limit: 0, manual_standing: "Good", credit_notes: null, credit_updated_at: "2026-09-17 09:00:00",
+    penalty_rate_override: null, penalty_rate: POLICY.penalty_rate, total_purchase: 0, current_credit: 0,
+    penalties_owed: 0, overdue_sales: 0, available_credit: 0, open_sales: 0, oldest_debt_days: null,
+    last_purchase: null, last_payment: null, pending_requests: 0
+  }));
+  response.status(201).json({ message: `${name} was added to Customers Record.`, customerId: id, created: true });
 });
 
 app.get("/api/customers/:id/history", (request, response) => {
@@ -1234,6 +1398,12 @@ app.post("/api/sales", async (request, response) => {
   if (!body.paymentMethod || !Array.isArray(body.items) || body.items.length === 0) {
     return response.status(400).json({ error: "A payment method and at least one item are required" });
   }
+  if (typeof body.walkInName === "string" && body.walkInName.trim() !== "" && !body.customerId) {
+    return response.status(400).json({
+      error: `"${body.walkInName.trim()}" is not a customer on the books. Add them under Customers Record first, ` +
+             "then pick them from the list (or leave the customer empty for a walk-in)."
+    });
+  }
   const items = [];
   for (const line of body.items) {
     const product = STOCKS.find((p) => p.product_id === Number(line.product_id));
@@ -1287,7 +1457,7 @@ app.post("/api/sales", async (request, response) => {
       amount_paid: onAccount ? paid : paid, change_given: onAccount ? 0 : paid - total,
       payment_method: body.paymentMethod,
       payment_status: paid >= total ? "Paid" : (paid > 0 ? "Partial" : "Unpaid"),
-      customer_name: body.walkInName || (body.customerId ? (RECORDS.customer.find((c) => c.id === Number(body.customerId)) || {}).name : null) || "Walk-in",
+      customer_name: (body.customerId ? (RECORDS.customer.find((c) => c.id === Number(body.customerId)) || {}).name : null) || "Walk-in",
       cashier_name: "Cashier C. User",
       reference_no: qr ? qr.reference
         : (["Cheque", "Bank Transfer", "GCash", "PayMaya", "PayPal"].includes(takenNow) && reference ? reference : null),
@@ -1401,9 +1571,45 @@ app.post("/api/returns", (request, response) => {
   }
 
   const type = request.body.reportType || "Refunded";
-  const where = ["Return to Stock", "Write-Off"].includes(request.body.disposition)
+  const isDriver = roleOfPage(request) === "Delivery Personnel";
+
+  if (isDriver) {
+    const saleId = Number(request.body.saleId);
+    const productId = Number(request.body.productId);
+    const quantity = Number(request.body.quantity);
+    const amount = Number(request.body.refundAmount);
+    if (type !== "Refunded" || !saleId) {
+      return response.status(400).json({ error: "A driver can only refund an item on a sale they are delivering." });
+    }
+    const delivery = DELIVERIES.find((d) => d.sale_id === saleId && d.delivery_staff_id === 5);
+    if (!delivery) return response.status(403).json({ error: "You can only refund items on a delivery you took." });
+    if (!["Out for Delivery", "Delivered"].includes(delivery.status)) {
+      return response.status(409).json({ error: "Refund items once the delivery is out with the customer." });
+    }
+    // a refund does not lower the bill, so only an order paid in full
+    if (delivery.balance_due > 0.01) {
+      return response.status(409).json({ error: "This order still owes ₱" + delivery.balance_due.toFixed(2) + ". A refund at the door is only for orders already paid in full. Write the refused item in the delivery's remarks and the manager or cashier will settle it at the counter." });
+    }
+    // the two lines every stub delivery carries (see /api/deliveries/:id/items)
+    const line = { 6: { sold: 100, worth: 560 }, 17: { sold: 5, worth: 225 } }[productId];
+    if (!line) return response.status(400).json({ error: "That item is not on this sale." });
+    if (!(quantity > 0)) return response.status(400).json({ error: "Quantity must be greater than zero." });
+    const back = RETURNS
+      .filter((r) => r.sale_id === saleId && r.product_id === productId && ["Refunded", "Return"].includes(r.report_type))
+      .reduce((sum, r) => sum + r.quantity, 0);
+    const left = line.sold - back;
+    if (quantity > left + 0.0005) {
+      return response.status(400).json({ error: left <= 0 ? "That item has already been refunded in full." : `Only ${left} of that item can still be refunded.` });
+    }
+    const most = line.worth * quantity / line.sold;
+    if (!(amount > 0) || amount > most + 0.01) {
+      return response.status(400).json({ error: `The refund must be more than zero and no more than ${most.toFixed(2)}, what the customer was charged for those pieces.` });
+    }
+  }
+
+  const where = !isDriver && ["Return to Stock", "Write-Off"].includes(request.body.disposition)
     ? request.body.disposition
-    : (request.body.restock === true ? "Return to Stock" : null);
+    : (!isDriver && request.body.restock === true ? "Return to Stock" : null);
 
   // a refund from the counter waits for the clerk; anything else says where the goods go
   if (!where && type !== "Refunded") {
@@ -1421,7 +1627,7 @@ app.post("/api/returns", (request, response) => {
     product_id: Number(request.body.productId),
     product_name: product ? product.product_name : "Product",
     unit_name: product ? product.unit_name : "pcs",
-    reported_by: "Cashier C. User"
+    reported_by: isDriver ? "Delivery D. User" : "Cashier C. User"
   };
   RETURNS.unshift(created);
 
@@ -1508,8 +1714,24 @@ const PURCHASE_ORDERS = Array.from({ length: 17 }, (_, i) => ({
   supplier_email: i % 8 === 4 ? null : (i % 2 ? "sales@cebu-tool.test" : "orders@manila-hardware.test"),
   // the approved orders here were already sent; one the manager approves now is still to print and send
   supplier_sent_at: i % 4 === 1 ? "2026-08-28 11:00:00" : null,
-  supplier_response: null, supplier_responded_at: null, supplier_note: null
+  supplier_response: null, supplier_responded_at: null, supplier_note: null, supplier_ship_date: null
 }));
+
+// the supplier's answers to some of the approved orders: #205 shipped (a day in
+// the past) and #209 ships in a week, both accepted; #213 is accepted with no
+// ship date; #201 declined
+const stubDay = (offset) => {
+  const d = new Date(Date.now() + offset * 86400000);
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+};
+[[205, "Accepted", stubDay(-1)], [209, "Accepted", stubDay(7)], [213, "Accepted", null], [201, "Declined", null]]
+  .forEach(([id, answer, ships]) => {
+    const po = PURCHASE_ORDERS.find((p) => p.po_id === id);
+    po.supplier_response = answer;
+    po.supplier_responded_at = "2026-08-29 09:00:00";
+    po.supplier_note = answer === "Declined" ? "Out of stock until next month" : null;
+    po.supplier_ship_date = ships;
+  });
 
 function purchaseOrderLines(poId) {
   const po = PURCHASE_ORDERS.find((p) => p.po_id === Number(poId));

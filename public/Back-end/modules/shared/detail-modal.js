@@ -134,6 +134,8 @@ function pagedTable(id, headers, rows, numeric, options) {
         pageSize: settings.pageSize || PAGED_TABLE_ROWS,
         empty: settings.empty || 'Nothing to show here.',
         noun: settings.noun || 'record',
+        // false leaves out the "1-6 of 12 sales" caption beside Previous and Next
+        info: settings.info !== false,
         // optional: (index) => attributes for that row's <tr>, e.g. a click handler
         rowAttrs: typeof settings.rowAttrs === 'function' ? settings.rowAttrs : null
     };
@@ -170,8 +172,9 @@ function pagedTableBody(id) {
 
     return table +
         '<div class="pager paged-pager">' +
-            '<span class="pager-info">' + (start + 1) + '&ndash;' + (start + slice.length) +
-                ' of ' + total + ' ' + plural + '</span>' +
+            '<span class="pager-info">' + (t.info
+                ? (start + 1) + '&ndash;' + (start + slice.length) + ' of ' + total + ' ' + plural
+                : '') + '</span>' +
             '<div class="pager-controls">' +
                 '<button type="button" class="btn btn-sm" onclick="pagedTableGo(\'' + id + '\', -1)"' +
                     (t.page === 1 ? ' disabled' : '') + ' aria-label="Previous page">Previous</button>' +

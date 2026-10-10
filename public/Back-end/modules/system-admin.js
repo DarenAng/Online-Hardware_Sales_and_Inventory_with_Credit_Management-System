@@ -109,6 +109,10 @@ async function loadRoles() {
 
         document.querySelectorAll('[data-role-filter]').forEach((select) => {
             select.innerHTML = '<option value="all">Every role</option>' + options;
+
+            // a role chosen before the list arrived (a table loaded again after a reload) stays shown
+            const users = getDataPanel('admin-users');
+            if (users) setBoxValue(select, users.filters.roleId);
         });
     } catch (error) {
         console.error('Unable to load roles:', error);
@@ -184,6 +188,7 @@ function syncLogColumns() {
 function buildUsersPanel() {
     createDataPanel({
         key: 'admin-users',
+        inputs: ['accounts-status', 'accounts-role'],
         tableId: 'accounts-table',
         columns: 5,
         pagerId: 'accounts-pager',
@@ -269,6 +274,7 @@ async function openUserModal(staffId) {
     form.elements.middleName.value = selectedUser.middle_name || '';
     form.elements.lastName.value = selectedUser.last_name;
     phoneFill(form.elements.phone, selectedUser.phone);
+    setPhoneError(form.elements.phone, '');
     form.elements.email.value = selectedUser.email || '';
     form.elements.email.required = Boolean(selectedUser.user_id);
     document.getElementById('edit-email-req').hidden = !selectedUser.user_id;
@@ -361,6 +367,12 @@ async function handleUpdateUser(event) {
     if (empty) {
         notifyWarning('Fill in every field marked with *.', 'Fill in the form');
         empty.focus();
+        return;
+    }
+
+    // the phone number may be empty, but one that is given has to be free
+    if (!(await checkPhoneFree(form.elements.phone))) {
+        form.elements.phone.focus();
         return;
     }
 
@@ -707,6 +719,7 @@ function clearCreateForm() {
     const phone = form.elements.phone;
     if (phone) phoneFill(phone, '');
 
+    setPhoneError(form.elements.phone, '');
     setEmailError(form.elements.email, '');
 }
 
@@ -767,6 +780,10 @@ async function checkEmailFree(input) {
 
     try {
         const answer = await apiCheckEmail(email, input.id === 'edit-email' && selectedUser ? selectedUser.staff_id : null);
+
+        // typed something else while the answer was coming: that address gets its own check
+        if (input.value.trim() !== email) return true;
+
         if (answer && answer.taken) {
             setEmailError(input, 'This email is already used by another account (' + answer.roleName + ').');
             return false;
@@ -775,6 +792,61 @@ async function checkEmailFree(input) {
         // offline: the server says so on save
     }
     setEmailError(input, '');
+    return true;
+}
+
+// ==========================================
+// THE PHONE BOX -- format is checked by format.js; here, one no other staff member uses
+// ==========================================
+function setPhoneError(input, text) {
+    if (!input) return;
+    const box = document.getElementById(input.id + '-error');
+    // A badly written number keeps its red edge (format.js put it there);
+    // only a number that is well written but taken gets it from here.
+    const badlyWritten = input.value !== '' && phoneComplaint(input) !== null;
+    input.classList.toggle('is-bad', Boolean(text) || badlyWritten);
+    if (box) {
+        box.textContent = text || '';
+        box.hidden = !text;
+    }
+}
+
+// Asked when the box is left: does another staff member already have this
+// number? Every role counts, active or archived. The server asks again on
+// save, so this is only for saying it early.
+async function checkPhoneFree(input) {
+    if (!input) return true;
+    const phone = phoneToStore(input);   // like +639171234567, the way it is stored
+
+    // An empty box (the edit form allows it) or a badly written number is not
+    // a clash; the format check says what is wrong with it.
+    if (phone === '' || phoneComplaint(input) !== null) {
+        setPhoneError(input, '');
+        return true;
+    }
+
+    // the edit form may leave the number as it was
+    const own = input.id === 'edit-phone' && selectedUser &&
+        phoneToStore(selectedUser.phone) === phone;
+    if (own) {
+        setPhoneError(input, '');
+        return true;
+    }
+
+    try {
+        const answer = await apiCheckPhone(phone, input.id === 'edit-phone' && selectedUser ? selectedUser.staff_id : null);
+
+        // typed something else while the answer was coming: that number gets its own check
+        if (phoneToStore(input) !== phone) return true;
+
+        if (answer && answer.taken) {
+            setPhoneError(input, 'This number is already used by ' + answer.name + ' (' + answer.roleName + ').');
+            return false;
+        }
+    } catch (error) {
+        // offline: the server says so on save
+    }
+    setPhoneError(input, '');
     return true;
 }
 
@@ -853,6 +925,13 @@ async function handleCreateUser(event) {
     }
 
     if (button) { button.disabled = true; button.textContent = 'Checking...'; }
+    const phoneFree = await checkPhoneFree(form.elements.phone);
+    if (!phoneFree) {
+        if (button) { button.disabled = false; button.textContent = 'Create'; }
+        form.elements.phone.focus();
+        return;
+    }
+
     const emailFree = await checkEmailFree(form.elements.email);
     if (!emailFree) {
         if (button) { button.disabled = false; button.textContent = 'Create'; }
@@ -890,9 +969,12 @@ async function handleCreateUser(event) {
         clearCreateForm();
         showPanel('panel-accounts');
 
-        // the directory is refreshed only if somebody already had it open
+        // the new account shows in the directory: an open one is re-read, a
+        // closed one is loaded now
         const panel = getDataPanel('admin-users');
-        if (panel && panel.state === 'ready') await panel.refresh();
+        if (panel) {
+            if (panel.state === 'ready') await panel.refresh(); else await panel.open();
+        }
 
         await reportFirstPassword(result, result.email, result.name);
     } catch (error) {
@@ -1253,7 +1335,7 @@ function filterFeatureScreens(query) {
     document.querySelectorAll('#features-matrix .feature-group').forEach((group) => {
         let shown = 0;
         group.querySelectorAll('.feature-row').forEach((row) => {
-            const match = wanted === '' || (row.dataset.search || '').includes(wanted);
+            const match = wanted === '' || startsAWord(row.dataset.search || '', wanted);
             row.hidden = !match;
             if (match) shown += 1;
         });
@@ -1458,6 +1540,7 @@ async function refreshAuditLogs() {
 function buildLogsPanel() {
     createDataPanel({
         key: 'admin-logs',
+        inputs: ['logs-type', 'logs-from', 'logs-to'],
         tableId: 'logs-table',
         columns: 6,
         pagerId: 'logs-pager',
@@ -1680,6 +1763,7 @@ async function toggleAutoBackup() {
 function buildBackupPanel() {
     createDataPanel({
         key: 'admin-backups',
+        remember: false,   // it loads by itself whenever its screen opens
         tableId: 'backup-table',
         columns: 5,
         pagerId: 'backup-pager',

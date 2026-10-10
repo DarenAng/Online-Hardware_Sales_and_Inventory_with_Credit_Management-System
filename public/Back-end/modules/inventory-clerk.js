@@ -55,13 +55,7 @@ function showInventoryHome(event) {
     showInventoryPanel('panel-inventory', 'Inventory Management', event);
     document.querySelectorAll('[data-panel-link]').forEach((link) => link.classList.remove('active'));
 
-    const search = document.getElementById('inv-search');
-    if (search) search.value = '';
-
-    // the panel stays closed; the banner is one small query
-    const panel = getDataPanel('clerk-materials');
-    if (panel) panel.reset();
-
+    // the material list keeps whatever it had loaded; the banner is one small query
     loadStockBanner();
 }
 
@@ -463,7 +457,7 @@ function renderUnitSuggestions(text) {
 
     if (invUnits.length === 0) { hide(); return; }
 
-    // an empty box (or one letter) offers the whole short list
+    // an empty box offers the whole short list
     const typed = searchText(query);
     let matches;
     if (typed === '') {

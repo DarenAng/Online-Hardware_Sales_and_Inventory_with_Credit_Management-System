@@ -76,6 +76,9 @@
 .po-remove { min-height: 30px; padding: 3px 10px; color: var(--stop); border-color: transparent; }
 .po-remove:hover { background: var(--stop-dim); color: var(--stop); border-color: transparent; }
 
+/* a history row's status: the badge, and Refer to PO beside it when the goods are due */
+.po-status-cell { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+
 /* the figures on the line are set as figures */
 .po-qty, .po-cost {
     font-family: var(--font-figure);

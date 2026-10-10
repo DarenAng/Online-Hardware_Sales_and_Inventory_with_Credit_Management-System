@@ -131,6 +131,8 @@ function watchTablesForAlignment() {
 // A toolbar dropdown marked data-filter-table="sales-table" data-hides-column="5"
 // decides that column: while it holds anything but "all", every row would
 // say the same thing there, so the column is not drawn. Used on every page.
+// A dropdown can name values that keep its column drawn, because the column
+// holds more than the filtered word: data-keeps-column-for="PO Accepted|On the way".
 // ==========================================
 function syncFilteredColumns(tableId) {
     const table = document.getElementById(tableId);
@@ -138,7 +140,10 @@ function syncFilteredColumns(tableId) {
 
     const hidden = [];
     document.querySelectorAll('select[data-filter-table="' + tableId + '"]').forEach((select) => {
-        if (select.value !== 'all') hidden.push(Number(select.dataset.hidesColumn));
+        const keeps = String(select.dataset.keepsColumnFor || '').split('|');
+        if (select.value !== 'all' && keeps.indexOf(select.value) === -1) {
+            hidden.push(Number(select.dataset.hidesColumn));
+        }
     });
     setHiddenColumns(table, hidden);
 }

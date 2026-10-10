@@ -229,9 +229,9 @@
         max-height: 94dvh;
         animation: sheet-up 0.24s cubic-bezier(0.2, 0.7, 0.3, 1);
     }
-    /* the locked height comes from the phone's screen: the sheet rises from the bottom */
+    /* the sheet fits what it holds, up to 94% of the phone's screen */
     .modal-tabs + .modal-body,
-    .modal-steps + .modal-body { height: calc(94dvh - 220px); }
+    .modal-steps + .modal-body { height: auto; }
     @keyframes sheet-up {
         from { transform: translateY(28px); opacity: 0; }
         to   { transform: translateY(0); opacity: 1; }

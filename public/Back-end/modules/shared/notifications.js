@@ -1,9 +1,16 @@
 // notifications.js -- the bell and its popup cards
 // Loaded by: all five dashboards
-// Unseen alerts pop once per session as cards; opening one marks it read.
+// Every unseen alert pops up once per session as its own card, three at a
+// time; opening one marks it read.
 let invNotifications = [];
 const poppedNotifications = new Set();
-let notificationsEverLoaded = false;
+
+// Alerts that have not had their card yet. The next one comes forward as soon
+// as there is room, so a long list never covers the screen.
+const POP_CARDS_AT_ONCE = 3;
+const POP_RECHECK_MS = 700;
+let popQueue = [];
+let popTimer = null;
 
 const NOTIF_TONE = {
     'Out of Stock':     'danger',
@@ -85,6 +92,7 @@ function openNotifications() {
     if (!drop) return;
 
     clearCards();
+    popQueue = [];   // the list is open: the alerts are in front of the reader already
 
     drop.style.display = 'block';
     closeAccountMenu();
@@ -162,28 +170,32 @@ async function loadNotifications() {
     popNewNotifications(unread);
 }
 
-// the newest three unseen alerts come forward; the rest stay behind the bell
+// every unseen alert gets a card, once; they queue up and come forward three at a time
 function popNewNotifications(unread) {
     const fresh = unread.filter((n) => !poppedNotifications.has(n.notification_id));
     fresh.forEach((n) => poppedNotifications.add(n.notification_id));
 
-    if (!notificationsEverLoaded) {
-        notificationsEverLoaded = true;
-        if (fresh.length === 0) return;
+    popQueue = popQueue.concat(fresh);
+    showQueuedCards();
+}
 
-        if (fresh.length > 2) {
-            showCard({
-                tone: 'warning',
-                title: fresh.length + ' alerts are waiting',
-                message: 'Open the bell in the top right corner to read them.',
-                onOpen: () => openNotifications(),
-                life: 7000
-            });
-            return;
-        }
-    }
+// Shows queued alerts while there is room for them. When the deck is full it
+// looks again in a moment, until the queue is empty.
+function showQueuedCards() {
+    clearTimeout(popTimer);
+    popTimer = null;
 
-    fresh.slice(0, 2).forEach((n) => {
+    while (popQueue.length > 0) {
+        // asked each time round: the first card builds the deck
+        const deck = document.getElementById('toast-deck');
+        const onScreen = deck ? deck.querySelectorAll('.toast-card:not(.is-leaving)').length : 0;
+        if (onScreen >= POP_CARDS_AT_ONCE) break;
+
+        // an alert read in the meantime (from the bell, say) no longer needs its card
+        const queued = popQueue.shift();
+        const n = invNotifications.find((item) => item.notification_id === queued.notification_id);
+        if (!n || n.is_read) continue;
+
         showCard({
             tone: NOTIF_TONE[n.notif_type] || 'info',
             title: n.title,
@@ -193,7 +205,9 @@ function popNewNotifications(unread) {
             onOpen: () => openNotification(n.notification_id),
             life: 9000
         });
-    });
+    }
+
+    if (popQueue.length > 0) popTimer = setTimeout(showQueuedCards, POP_RECHECK_MS);
 }
 
 // One alert, laid out like a mail: subject, sender and time, then the message.

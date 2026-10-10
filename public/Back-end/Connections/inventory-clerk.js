@@ -57,7 +57,7 @@ function singularName(value) {
 
 function registerInventoryRoutes(app, deps) {
   const {
-    db, callProcedure, getActorId, writeAuditLog, fieldChanges, DEFAULT_STORE_SETTINGS, CASHIER,
+    db, callProcedure, getActorId, writeAuditLog, fieldChanges, DEFAULT_STORE_SETTINGS, CASHIER, DRIVER,
     phoneComplaint, cleanPhone, publishChange
   } = deps;
 
@@ -1291,9 +1291,15 @@ function registerInventoryRoutes(app, deps) {
   // Filing a return: a reason (a sentence) is compulsory. So is a disposition,
   // except on a refund from the counter, which the clerk inspects before it
   // is decided: a cashier never says where the goods go, whatever is sent.
+  // A driver's refund at the customer's door is treated the same way.
   // restock is still accepted from older callers and mapped across.
   const RETURN_DISPOSITIONS = ["Return to Stock", "Write-Off"];
   const MINIMUM_RETURN_REASON = 10;
+
+  // A driver's figures may be off by rounding: a quantity is kept to three
+  // decimals and an amount to cents, so these small margins are let through.
+  const QUANTITY_SLACK = 0.0005;
+  const AMOUNT_SLACK = 0.01;
 
   app.post("/api/returns", async (request, response) => {
     const { productId, saleId, reportType, quantity, reason, refundAmount,
@@ -1314,7 +1320,88 @@ function registerInventoryRoutes(app, deps) {
       });
     }
 
-    const fromCounter = request.actor && request.actor.roleName === CASHIER;
+    const isDriver = request.actor && request.actor.roleName === DRIVER;
+
+    // A driver refunds at the customer's door, and only on a delivery they
+    // took. Nothing a driver sends is trusted: the sale, the item, how many
+    // and how much are all checked against the sale itself.
+    if (isDriver) {
+      if (reportType !== "Refunded" || !saleId) {
+        return response.status(400).json({ error: "A driver can only refund an item on a sale they are delivering." });
+      }
+
+      try {
+        const [deliveries] = await db.query(
+          `SELECT d.status, (s.amount_due - s.amount_paid) AS balance_due
+           FROM deliveries d
+           JOIN sales s ON s.sale_id = d.sale_id
+           WHERE d.sale_id = ? AND d.delivery_staff_id = ? AND d.is_archived = FALSE`,
+          [saleId, request.actor.staffId]
+        );
+        if (deliveries.length === 0) {
+          return response.status(403).json({ error: "You can only refund items on a delivery you took." });
+        }
+        // the goods have to have reached the customer
+        if (!["Out for Delivery", "Delivered"].includes(deliveries[0].status)) {
+          return response.status(409).json({ error: "Refund items once the delivery is out with the customer." });
+        }
+
+        // A refund report does not lower the bill, so it is only for an order paid in full
+        const balance = Number(deliveries[0].balance_due);
+        if (balance > AMOUNT_SLACK) {
+          return response.status(409).json({
+            error: `This order still owes ₱${balance.toFixed(2)}. A refund at the door is only for orders ` +
+                   "already paid in full. Write the refused item in the delivery's remarks and the manager " +
+                   "or cashier will settle it at the counter."
+          });
+        }
+
+        // what the sale holds of this product, and what has already come back
+        const [lines] = await db.query(
+          `SELECT COALESCE(SUM(quantity), 0) AS sold, COALESCE(SUM(subtotal), 0) AS worth
+           FROM sale_items WHERE sale_id = ? AND product_id = ?`,
+          [saleId, productId]
+        );
+        const [taken] = await db.query(
+          `SELECT COALESCE(SUM(quantity), 0) AS refunded FROM returned_items
+           WHERE sale_id = ? AND product_id = ? AND report_type IN ('Refunded', 'Return')`,
+          [saleId, productId]
+        );
+
+        const qty = Number(quantity);
+        if (!(qty > 0)) {
+          return response.status(400).json({ error: "Quantity must be greater than zero." });
+        }
+
+        const sold = Number(lines[0].sold);
+        const left = sold - Number(taken[0].refunded);
+        if (sold === 0) {
+          return response.status(400).json({ error: "That item is not on this sale." });
+        }
+        if (qty > left + QUANTITY_SLACK) {
+          return response.status(400).json({
+            error: left <= 0 ? "That item has already been refunded in full."
+                             : `Only ${left} of that item can still be refunded.`
+          });
+        }
+
+        // never more than the customer was charged for those pieces
+        const mostToRefund = Number(lines[0].worth) * qty / sold;
+        if (!(Number(refundAmount) > 0) || Number(refundAmount) > mostToRefund + AMOUNT_SLACK) {
+          return response.status(400).json({
+            error: `The refund must be more than zero and no more than ${mostToRefund.toFixed(2)}, ` +
+                   "what the customer was charged for those pieces."
+          });
+        }
+      } catch (error) {
+        console.error("Driver refund check failed:", error.message);
+        return response.status(500).json({ error: "Unable to check the refund" });
+      }
+    }
+
+    // a refund brought back at the counter or from the door waits for the clerk
+    const fromCounter = request.actor &&
+      (request.actor.roleName === CASHIER || request.actor.roleName === DRIVER);
     let where;
     if (fromCounter) {
       where = null;

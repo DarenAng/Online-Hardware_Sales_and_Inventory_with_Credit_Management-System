@@ -78,7 +78,7 @@
                         <div class="search-wrap">
                             <input type="search" id="accounts-search" class="form-control search-input"
                                    placeholder="Search by name, email, or role"
-                                   oninput="dataPanelSearchInput('admin-users', event)" onkeydown="dataPanelSearchKey('admin-users', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('admin-users', event)" onkeydown="dataPanelSearchKey('admin-users', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
 
                         <div class="toolbar-field">
@@ -129,7 +129,7 @@
                         <div class="search-wrap">
                             <input type="search" id="archive-search" class="form-control search-input"
                                    placeholder="Search archived staff by name, email, or role"
-                                   oninput="dataPanelSearchInput('admin-archive', event)" onkeydown="dataPanelSearchKey('admin-archive', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('admin-archive', event)" onkeydown="dataPanelSearchKey('admin-archive', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-spacer"></div>
                     </div>
@@ -207,7 +207,7 @@
                         <div class="search-wrap">
                             <input type="search" id="logs-search" class="form-control search-input"
                                    placeholder="Search by person, action, detail, or address"
-                                   oninput="dataPanelSearchInput('admin-logs', event)" onkeydown="dataPanelSearchKey('admin-logs', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('admin-logs', event)" onkeydown="dataPanelSearchKey('admin-logs', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
 
                         <div class="toolbar-field">
@@ -529,8 +529,9 @@
                                 <input type="text" id="create-phone" name="phone" class="form-control"
                                        inputmode="numeric" autocomplete="tel" required
                                        maxlength="20" placeholder="9XXXXXXXXX"
-                                       oninput="onPhoneInput(this)">
+                                       oninput="setPhoneError(this, ''); onPhoneInput(this)" onblur="checkPhoneFree(this)">
                             </div>
+                            <span class="field-error" id="create-phone-error" hidden></span>
                         </div>
                         <div class="form-group">
                             <label for="create-role">Role <span class="req">*</span></label>
@@ -604,8 +605,9 @@
                                     <input type="text" id="edit-phone" name="phone" class="form-control"
                                            inputmode="numeric" autocomplete="tel"
                                            maxlength="20" placeholder="9XXXXXXXXX"
-                                           oninput="onPhoneInput(this)">
+                                           oninput="setPhoneError(this, ''); onPhoneInput(this)" onblur="checkPhoneFree(this)">
                                 </div>
+                                <span class="field-error" id="edit-phone-error" hidden></span>
                             </div>
                             <div class="form-group">
                                 <label for="edit-role">Role <span class="req">*</span></label>

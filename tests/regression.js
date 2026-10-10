@@ -112,10 +112,10 @@ async function signIn(email, demoPassword, chosenPassword) {
   // ==========================================
   // THE SESSIONS THE REST OF THE FILE WORKS THROUGH
   // ==========================================
-  const admin    = await signIn("admin@hardware.com",    "admin123",    "adminpass123");
-  const manager  = await signIn("manager@hardware.com",  "manager123",  "managerpass123");
-  const cashier  = await signIn("cashier@hardware.com",  "cashier123",  "cashierpass123");
-  const driver   = await signIn("delivery@hardware.com", "delivery123", "driverpass123");
+  const admin    = await signIn("admin@hardware.com",    "admin123",    "Adminpass-123");
+  const manager  = await signIn("manager@hardware.com",  "manager123",  "Managerpass-123");
+  const cashier  = await signIn("cashier@hardware.com",  "cashier123",  "Cashierpass-123");
+  const driver   = await signIn("delivery@hardware.com", "delivery123", "Driverpass-123");
 
   // The database ships with one account per role, so a second cashier and a
   // second driver are made here (or found, from an earlier run). Either way
@@ -147,11 +147,11 @@ async function signIn(email, demoPassword, chosenPassword) {
 
   const cashierEmail = "probe.cashier@hardware.com";
   const otherCashier = await signIn(cashierEmail,
-    await makeProbe("Probe", "Cashier", 4, cashierEmail), "probecashier2");
+    await makeProbe("Probe", "Cashier", 4, cashierEmail), "Probecashier-2");
 
   const probeEmail = "probe.driver@hardware.com";
   const otherDriver = await signIn(probeEmail,
-    await makeProbe("Probe", "Driver", 5, probeEmail), "probedriver2");
+    await makeProbe("Probe", "Driver", 5, probeEmail), "Probedriver-2");
 
   record("every account used by this file signed in",
     [admin, manager, cashier, driver, otherCashier, otherDriver].every((s) => s.cookie),
@@ -271,7 +271,7 @@ async function signIn(email, demoPassword, chosenPassword) {
   });
   // a standard user no longer changes their own password; check the reset above
   const ownChange = await call(manager.cookie, "POST", "/api/me/password", {
-    currentPassword: "managerpass123", newPassword: "managerpass456"
+    currentPassword: "Managerpass-123", newPassword: "Managerpass-456"
   });
   record("a standard user cannot change their own password from their screen",
     ownChange.status === 403, `got ${ownChange.status}`);

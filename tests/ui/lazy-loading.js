@@ -119,17 +119,47 @@ function isOurProblem(text) {
   await clerk.page.evaluate("showPurchaseOrderHistory()");
   await clerk.page.waitForTimeout(300);
   const clerkStatuses = (await clerk.page.locator("#po-table tbody tr td:nth-child(6)").allTextContents()).map((t) => t.trim());
-  check("the clerk's list puts the orders to count in first, with no buttons",
-    /Waiting for delivery/.test(clerkStatuses[0]) &&
-    await clerk.page.locator("#po-table tbody button").count() === 0 &&
+  check("the clerk's list puts the orders to count in first: accepted, then on the way, each with Refer to PO",
+    /PO Accepted/.test(clerkStatuses[0]) &&
+    /Refer to PO/.test(clerkStatuses[0]) &&
+    clerkStatuses.some((t) => /On the way/.test(t) && /Refer to PO/.test(t)) &&
+    await clerk.page.locator("#po-table tbody button").count() === 3 &&
     await clerk.page.locator("#po-table tbody tr.row-attention").count() > 0,
     clerkStatuses.join(" / "));
+  // the order the supplier declined has nothing to refer to
+  check("an order the supplier declined stays Waiting for delivery, with no button",
+    await clerk.page.locator("#po-table tbody tr:has-text('#201') button").count() === 0 &&
+    /Waiting for delivery/.test(await clerk.page.textContent("#po-table tbody tr:has-text('#201') td:nth-child(6)")));
   await clerk.page.click("#po-table tbody tr.row-attention >> nth=0");
   await clerk.page.waitForTimeout(600);
-  check("pressing an order waiting for delivery opens the receive form",
-    await clerk.page.locator("#panel-po-receive").isVisible());
+  check("pressing an accepted order's row opens its card, not the receive form",
+    await clerk.page.locator("#detail-modal.open").count() === 1 &&
+    !(await clerk.page.locator("#panel-po-receive").isVisible()));
+  await clerk.page.evaluate("closeModal('detail-modal')");
+  await clerk.page.waitForTimeout(300);
+  await clerk.page.click("#po-table tbody tr.row-attention >> nth=0 >> button:has-text('Refer to PO')");
+  await clerk.page.waitForTimeout(600);
+  check("Refer to PO on the row opens the receive form, and only that (the row's own click does not also open the card)",
+    await clerk.page.locator("#panel-po-receive").isVisible() &&
+    await clerk.page.locator("#detail-modal.open").count() === 0);
   await clerk.page.evaluate("showPurchaseOrderHistory()");
   await clerk.page.waitForTimeout(300);
+  // filtered to a stage that carries the button, the Status column stays; filtered to any other, it goes
+  await clerk.page.selectOption("#po-status", "PO Accepted");
+  await clerk.page.waitForTimeout(500);
+  check("filtered to PO Accepted, the Status column and its Refer to PO buttons stay",
+    await clerk.page.locator("#po-table tbody tr:not(.row-filler) button:has-text('Refer to PO'):visible").count() === 2);
+  await clerk.page.selectOption("#po-status", "Received");
+  await clerk.page.waitForTimeout(500);
+  check("filtered to Received, the Status column is hidden as before",
+    await clerk.page.locator("#po-table thead th.col-hidden").count() === 1);
+  await clerk.page.click("#po-legend .track-chip:has-text('On the way')");
+  await clerk.page.waitForTimeout(500);
+  check("the On the way count filters to it, sets the status box, and keeps the Refer to PO button",
+    (await clerk.page.inputValue("#po-status")) === "On the way" &&
+    await clerk.page.locator("#po-table tbody tr:not(.row-filler) button:has-text('Refer to PO'):visible").count() === 1);
+  await clerk.page.selectOption("#po-status", "all");
+  await clerk.page.waitForTimeout(500);
   await clerk.page.evaluate("openPurchaseOrderDetail(200)");   // one still waiting for the manager
   await clerk.page.waitForTimeout(600);
   check("but no way to confirm one: a row still waiting opens the order's card, with nothing on it to press but the printed order",
@@ -139,13 +169,14 @@ function isOurProblem(text) {
     await clerk.page.locator("#detail-modal button:has-text('Count In the Delivery')").count() === 0 &&
     await clerk.page.locator("#detail-modal button:has-text('Printed Order'):visible").count() === 1);
   await clerk.page.evaluate("closeModal('detail-modal')");
-  await clerk.page.evaluate("openPurchaseOrderDetail(201)");   // one the manager has confirmed (Pending)
+  await clerk.page.evaluate("openPurchaseOrderDetail(205)");   // one the supplier accepted and has shipped
   await clerk.page.waitForTimeout(600);
-  check("an order the manager has confirmed offers the clerk Count in the delivery, and nothing else",
+  check("an order the supplier accepted offers the clerk Refer to PO, and nothing else",
     await clerk.page.locator("#detail-modal.open").count() === 1 &&
     await clerk.page.locator("#detail-modal button:has-text('Approve Order')").count() === 0 &&
-    await clerk.page.locator("#detail-modal button:has-text('Count In the Delivery'):visible").count() === 1);
-  await clerk.page.click("#detail-modal button:has-text('Count In the Delivery')");
+    await clerk.page.locator("#detail-modal button:has-text('Count In the Delivery')").count() === 0 &&
+    await clerk.page.locator("#detail-modal button:has-text('Refer to PO'):visible").count() === 1);
+  await clerk.page.click("#detail-modal button:has-text('Refer to PO')");
   await clerk.page.waitForTimeout(600);
   check("which opens the count sheet on the clerk's page",
     await clerk.page.locator("#panel-po-receive").isVisible() &&

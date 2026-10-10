@@ -3,7 +3,7 @@
 // Loaded by: server.js only (from the connections folder). Never sent to a browser.
 //
 // Routes in this file:
-//   GET   /api/sales                       the list of sales, with filters
+//   GET   /api/sales                       the list of sales, with filters (a cashier gets only their own)
 //   POST  /api/sales                       ring up a new sale
 //   POST  /api/deliveries                  book a delivery for a sale
 //   PATCH /api/deliveries/:id/status       move a delivery to its next status
@@ -21,12 +21,25 @@
 // these routes run.
 // ============================================================
 
+// Where a delivery can go from each status: the next step, plus Delayed and
+// Failed, which can happen at any point on the way. The browser has the same list
+// (NEXT_DELIVERY_STATUS in modules/shared/deliveries.js) to pick the buttons.
+const NEXT_DELIVERY_STATUS = {
+  "Pending":          ["In Transit", "Delayed", "Failed"],
+  "In Transit":       ["Out for Delivery", "Delayed", "Failed"],
+  "Out for Delivery": ["Delivered", "Delayed", "Failed"],
+  "Delayed":          ["In Transit", "Out for Delivery", "Failed"],
+  "Failed":           ["Pending", "In Transit", "Out for Delivery"],
+  "Delivered":        []
+};
+const ALL_DELIVERY_STATUSES = Object.keys(NEXT_DELIVERY_STATUS);
+
 // the methods a customer can pay by scanning the QR code
 const QR_METHODS = ["GCash", "PayMaya"];
 
 function registerCashierRoutes(app, deps) {
   const {
-    db, callProcedure, getActorId, DRIVER, isDateText, SALE_CUSTOMER_SQL,
+    db, callProcedure, getActorId, DRIVER, CASHIER, isDateText, SALE_CUSTOMER_SQL,
     phoneComplaint, cleanPhone, qrPayments
   } = deps;
 
@@ -70,6 +83,16 @@ function registerCashierRoutes(app, deps) {
       where.push("s.is_archived = TRUE");
     } else {
       where.push("s.is_archived = FALSE");
+    }
+
+    // A cashier's Sales Report is their own sales and no one else's: the staff
+    // id comes from the session, never from the request, so a query string
+    // cannot widen it. The manager's view of every sale is unchanged. (One
+    // sale is still opened by its number, GET /api/sales/:id, from a refund
+    // or a customer's card, whoever rang it up.)
+    if (request.actor && request.actor.roleName === CASHIER) {
+      where.push("s.cashier_staff_id = ?");
+      params.push(request.actor.staffId);
     }
 
     if (method !== "all") {
@@ -168,6 +191,22 @@ function registerCashierRoutes(app, deps) {
       return response.status(400).json({ error: "A payment method and at least one item are required" });
     }
 
+    // A walk-in is a sale with no customer and no name. A name is only ever a
+    // customer picked from the book, sent as customerId: a bare name opens no
+    // account at the till any more, so it is refused here, before any QR payment
+    // below is checked or spent on it.
+    let typedName = "";
+    if (typeof walkInName === "string") {
+      typedName = walkInName.trim();
+    }
+    if (typedName !== "" && !customerId) {
+      return response.status(400).json({
+        error: `"${typedName.slice(0, 80)}" is not a customer on the books. ` +
+               "Add them under Customers Record first, then pick them from the list " +
+               "(or leave the customer empty for a walk-in)."
+      });
+    }
+
     const TENDER_METHODS = ["Cash", "Cheque", "GCash", "PayMaya", "PayPal", "Bank Transfer"];
     let downMethod = "Cash";
     if (TENDER_METHODS.includes(downPaymentMethod)) {
@@ -241,18 +280,10 @@ function registerCashierRoutes(app, deps) {
     }
     let saleId = null;
 
-    // trimmed and capped to the column (150) rather than failing the sale
-    let typedName;
-    if (typeof walkInName === "string") {
-      typedName = walkInName.trim().slice(0, 150);
-    } else {
-      typedName = "";
-    }
-
     try {
       const output = await callProcedure(
         "CALL sp_create_sale_transaction(?, ?, ?, ?, ?, ?, ?, ?, @sale_id, @status_code, @message)",
-        [customerId || null, typedName || null, getActorId(request), discount || 0, amountPaid || 0,
+        [customerId || null, null, getActorId(request), discount || 0, amountPaid || 0,
          paymentMethod, JSON.stringify(items), downMethod],
         ["sale_id", "status_code", "message"]
       );
@@ -419,21 +450,35 @@ function registerCashierRoutes(app, deps) {
     }
 
     try {
+      const [rows] = await db.query(
+        "SELECT status, delivery_staff_id FROM deliveries WHERE delivery_id = ? AND is_archived = FALSE",
+        [request.params.deliveryId]
+      );
+      if (rows.length === 0) {
+        return response.status(404).json({ error: "Delivery not found" });
+      }
+      const delivery = rows[0];
+
       // a driver moves only a delivery they took (POST /api/delivery/:id/claim)
       if (actor.roleName === DRIVER) {
-        const [rows] = await db.query(
-          "SELECT delivery_staff_id FROM deliveries WHERE delivery_id = ? AND is_archived = FALSE",
-          [request.params.deliveryId]
-        );
-        if (rows.length === 0) {
-          return response.status(404).json({ error: "Delivery not found" });
-        }
-        if (rows[0].delivery_staff_id === null) {
+        if (delivery.delivery_staff_id === null) {
           return response.status(409).json({ error: "Take this delivery before updating it." });
         }
-        if (Number(rows[0].delivery_staff_id) !== Number(actor.staffId)) {
+        if (Number(delivery.delivery_staff_id) !== Number(actor.staffId)) {
           return response.status(403).json({ error: "This delivery is assigned to another driver." });
         }
+      }
+
+      // One step at a time. The same status again, a status that does not
+      // exist and a delivery that is already Delivered are left to the
+      // procedure, which has its own message for each.
+      const nextSteps = NEXT_DELIVERY_STATUS[delivery.status];
+      if (nextSteps && nextSteps.length > 0 && status !== delivery.status
+          && ALL_DELIVERY_STATUSES.includes(status) && !nextSteps.includes(status)) {
+        return response.status(400).json({
+          error: `A delivery cannot go from ${delivery.status} to ${status}. ` +
+                 `From ${delivery.status} it can go to: ${nextSteps.join(", ")}.`
+        });
       }
 
       const output = await callProcedure(

@@ -404,11 +404,9 @@
 
 /* PAY BY QR -- the code turned to face the customer: the amount above it large
    enough to read across the counter, the code on white with a quiet margin (a
-   scanner needs one), one line saying what is happening, and above it all a
-   badge (TEST MODE or SIMULATION), so nobody takes test money for real. */
+   scanner needs one), and one line saying what is happening. */
 .qr-box { max-width: 440px; }
 .qr-box .modal-body { text-align: center; }
-.qr-sim { margin: 0 0 10px; }
 .qr-amount {
     margin: 0 0 12px;
     font-family: var(--font-figure);
@@ -440,9 +438,6 @@
 .qr-clock { margin: 0 0 12px; font-size: 13.5px; color: var(--steel); }
 .qr-clock strong { font-family: var(--font-figure); font-variant-numeric: tabular-nums; color: var(--ink); }
 .qr-clock.is-ending strong { color: var(--stop-hi); }
-/* the page's address, small: for opening on this PC when no phone is at hand */
-.qr-link { margin: 8px 0 0; font-size: 12px; color: var(--steel); overflow-wrap: anywhere; }
-.qr-link a { color: var(--steel); }
 /* a failed or expired code: the code is greyed so nobody scans it again */
 .qr-box.is-over .qr-frame img { opacity: 0.25; filter: grayscale(1); }
 /* a short screen: a smaller code (still well above what a phone needs) keeps
@@ -565,16 +560,72 @@
     color: var(--steel-soft);
 }
 .customer-verdict.is-good { color: var(--ok-ink); font-weight: 500; }
-.customer-verdict.is-new  { color: var(--signal-ink); font-weight: 500; }
+.customer-verdict.is-stop { color: var(--stop-hi); font-weight: 500; }
 
-/* Complete Sale gets its own full-width row and is the only orange button;
-   the delivery and the clear share the row below */
-.order-summary .form-footer { flex-wrap: wrap; }
-.order-summary .form-footer #checkout-btn { flex: 1 1 100%; }
-/* paying by QR is the other way to finish a GCash or PayMaya sale: a row of its own */
-.order-summary .form-footer #qr-pay-btn { flex: 1 1 100%; min-height: 44px; }
-.order-summary .form-footer #make-delivery-btn { flex: 1 1 auto; white-space: nowrap; }
-.order-summary .form-footer .btn-ghost { flex: 0 0 auto; white-space: nowrap; }
+/* Under the order: Proceed to Payment takes the row, Clear sits beside it */
+.order-summary .order-actions { flex-wrap: nowrap; margin-top: 0; }
+.order-summary .order-actions #proceed-btn { flex: 1 1 auto; min-height: 46px; font-size: 16.5px; }
+.order-summary .order-actions #clear-btn { flex: 0 0 auto; white-space: nowrap; min-height: 46px; }
+/* Credit Payment, in the order's heading, is a small second action */
+.order-summary .panel-head { align-items: center; }
+.order-summary .panel-actions .btn { white-space: nowrap; }
+
+/* ==========================================================================
+   THE PAYMENT WINDOW -- Proceed to Payment. The amount due and what happens
+   to it sit at the top of the card, where they stay in view while the fields
+   below are filled in. Complete Sale is the only orange button in the foot.
+   ========================================================================== */
+.pay-totals { margin: 0 0 16px; padding: 10px 0 12px; }
+.checkout-foot { flex-wrap: wrap; }
+.checkout-foot #checkout-btn { min-height: 46px; font-size: 16.5px; }
+.checkout-foot #qr-pay-btn { min-height: 46px; }
+.checkout-foot .btn { white-space: nowrap; }
+.checkout-foot #checkout-btn { margin-left: auto; }
+
+/* Money fields read from the right, like every column of figures: the typed
+   amount and the 0.00 hint in an empty box sit at the right edge. The hint on
+   a label ("required", "optional") sits on the right of the label row too. */
+.amount-field { text-align: right; }
+.checkout-box .form-group > label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.checkout-box .form-group > label .label-hint { margin-left: auto; text-align: right; }
+#limit-modal .form-group > label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+#limit-modal .form-group > label .label-hint,
+#add-customer-modal .form-group > label .label-hint { margin-left: auto; }
+#add-customer-modal .form-group > label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+
+/* a product already on the order cannot be pressed again: its line is changed
+   with + and - on the order (markCatalogRows) */
+.catalog-table tbody tr.is-on-order,
+.catalog-table tbody tr.is-on-order.row-clickable { cursor: not-allowed; }
+.catalog-table tbody tr.is-on-order td { opacity: 0.55; }
+.catalog-table tbody tr.is-on-order td.cell-name { opacity: 1; }
+.catalog-table tbody tr.is-on-order.row-clickable:hover td { background: transparent; }
+
+/* Customers Record's customer card: the filters over a history table */
+.history-filters {
+    display: flex; flex-wrap: wrap; gap: 10px 14px;
+    margin: 0 0 12px;
+}
+.history-filters .toolbar-field { min-width: 0; }
+.history-filters select,
+.history-filters input { min-width: 130px; }
+
+/* Credit Payment's list of who owes */
+.credit-pay-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
+.credit-pay-item {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    width: 100%; padding: 10px 13px; text-align: left;
+    background: var(--surface); border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--signal);
+    border-radius: var(--radius); cursor: pointer; font: inherit; color: var(--ink);
+}
+.credit-pay-item:hover { background: var(--go-dim); border-color: var(--go); }
+.credit-pay-item:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
+.credit-pay-name { font-weight: 600; }
+.credit-pay-meta { display: block; font-size: 12.5px; font-weight: 400; color: var(--steel-soft); }
+.credit-pay-owes { font-family: var(--font-figure); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+
+.add-customer-note, .limit-intro { margin: 4px 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
 
 /* the product field is capped so the name and the price read as a pair */
 #refund-form .suggest-wrap,

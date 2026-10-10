@@ -622,7 +622,7 @@ function isOurProblem(text) {
   check("the Print pair is alive over the loaded history",
     await page.locator("#panel-po-history [data-print-kind='pdf']").isEnabled());
   check("the status counts sit over the table",
-    await page.locator("#po-legend .track-chip").count() === 4 &&
+    await page.locator("#po-legend .track-chip").count() === 6 &&
     /Waiting for confirmation/.test(await page.textContent("#po-legend .track-chip-alert")));
 
   await page.click("#po-legend .track-chip:has-text('Waiting for confirmation')");

@@ -36,9 +36,10 @@ function emailedText(emailed, yesText) {
 
 function registerAdminRoutes(app, deps) {
   const {
-    db, callProcedure, getActorId, writeAuditLog, fieldChanges, searchPrefix,
+    db, callProcedure, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
     requireRole, publishChange, ADMIN, USER_SELECT, withPresence, notOwnAccount,
     endSessionsForStaff, hashPassword, generatePassword, phoneComplaint, cleanPhone, cleanMiddleName,
+    findPhoneOwner, phoneTakenMessage,
     tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
     sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
     FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom
@@ -213,11 +214,9 @@ function registerAdminRoutes(app, deps) {
     if (status === "active") where.push("s.is_active = TRUE");
     else if (status === "inactive") where.push("s.is_active = FALSE");
 
-    // starts-with, not contains; see searchPrefix
+    // a word starts with the text, not contains; see wordStartSearch
     if (search !== "") {
-      where.push("(s.full_name LIKE ? OR u.email LIKE ? OR r.role_name LIKE ?)");
-      const like = searchPrefix(search);
-      params.push(like, like, like);
+      where.push(wordStartSearch(["s.full_name", "u.email", "r.role_name"], search, params));
     }
 
     let filter = "";
@@ -254,6 +253,19 @@ function registerAdminRoutes(app, deps) {
     } catch (error) {
       console.error("Email check failed:", error.message);
       response.status(500).json({ error: "Unable to check the email address" });
+    }
+  });
+
+  // Is this phone number already on a staff account? Every role counts,
+  // active or archived. staffId leaves out the account being edited.
+  app.get("/api/users/phone-check", async (request, response) => {
+    try {
+      const owner = await findPhoneOwner(request.query.phone, request.query.staffId);
+      if (!owner) return response.json({ taken: false });
+      response.json({ taken: true, roleName: owner.role_name, name: owner.full_name });
+    } catch (error) {
+      console.error("Phone check failed:", error.message);
+      response.status(500).json({ error: "Unable to check the phone number" });
     }
   });
 
@@ -309,6 +321,12 @@ function registerAdminRoutes(app, deps) {
         });
       }
 
+      // each staff member has their own phone number
+      const phoneOwner = await findPhoneOwner(phone, 0);
+      if (phoneOwner) {
+        return response.status(409).json({ error: phoneTakenMessage(phoneOwner) });
+      }
+
       const details = {
         firstName: String(firstName).trim(),
         middleName: cleanMiddleName(middleName),
@@ -357,6 +375,12 @@ function registerAdminRoutes(app, deps) {
     const details = draft.details;
 
     try {
+      // the draft may be minutes old: someone else could have taken the number since
+      const phoneOwner = await findPhoneOwner(details.phone, 0);
+      if (phoneOwner) {
+        return response.status(409).json({ error: phoneTakenMessage(phoneOwner) });
+      }
+
       const output = await callProcedure(
         "CALL sp_create_staff_account(?, ?, ?, ?, ?, ?, ?, @staff_id, @status_code, @message)",
         [details.firstName, details.middleName, details.lastName, details.phone,
@@ -445,6 +469,17 @@ function registerAdminRoutes(app, deps) {
         [request.params.staffId]
       );
       const before = existing[0] || null;
+
+      // A phone number may be left empty, but a new one must be free. A number
+      // that is not being changed is not checked, so an older record that
+      // already shares one can still be saved.
+      const oldPhone = before ? before.phone : null;
+      if (cleanPhone(phone) !== oldPhone) {
+        const phoneOwner = await findPhoneOwner(phone, request.params.staffId);
+        if (phoneOwner) {
+          return response.status(409).json({ error: phoneTakenMessage(phoneOwner) });
+        }
+      }
 
       const output = await callProcedure(
         "CALL sp_update_staff_account(?, ?, ?, ?, ?, ?, ?, @status_code, @message)",
@@ -777,9 +812,7 @@ function registerAdminRoutes(app, deps) {
     }
 
     if (search !== "") {
-      where.push("(s.full_name LIKE ? OR l.action LIKE ? OR l.details LIKE ? OR l.ip_address LIKE ?)");
-      const like = searchPrefix(search);
-      params.push(like, like, like, like);
+      where.push(wordStartSearch(["s.full_name", "l.action", "l.details", "l.ip_address"], search, params));
     }
 
     let filter = "";

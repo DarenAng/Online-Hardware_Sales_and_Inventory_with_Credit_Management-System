@@ -114,7 +114,8 @@ them has a working default, so they can be left out:
 | Setting               | Default              | What it does                                      |
 |-----------------------|----------------------|---------------------------------------------------|
 | `HARDWARE_PORT`       | `3000`               | the port the app listens on                       |
-| `SESSION_HOURS`       | `8`                  | how long a sign-in lasts without signing out      |
+| `SESSION_HOURS`       | `8`                  | the longest a sign-in lasts without signing out   |
+| `SESSION_IDLE_MINUTES`| `30`                 | minutes of not using the screen before it signs out (the page warns a minute before) |
 | `TRUST_PROXY`         | `0`                  | `1` only behind a reverse proxy you control, so the audit trail reads the visitor's address from `X-Forwarded-For` |
 | `HARDWARE_BACKUP_DIR` | `backups/`           | where Backup & Recovery writes its `.sql` files   |
 | `MAIL_*`              | mail off             | the mail account; see the next step               |
@@ -205,7 +206,7 @@ A warning about missing procedures means step 3 did not finish. Run
 These five are the only accounts the database ships with; the administrator
 makes any others from the Accounts screen. Only the admin account skips the
 first login password change. The other four land on `change-password.html`
-and pick a new password of 8 characters or more.
+and pick a new password: at least 8 characters with an uppercase letter, a lowercase letter, a number and a symbol, and no spaces.
 
 ### Mock data
 

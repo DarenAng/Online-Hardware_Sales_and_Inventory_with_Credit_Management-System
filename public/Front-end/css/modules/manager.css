@@ -65,8 +65,26 @@
 /* ==========================================================================
    ON PAPER -- the table is unpaged; the Sales Summary prints both tables
    ========================================================================== */
+/* The Totals table at the foot of a printed report (printReport adds it just
+   before printing). It is never on the screen. */
+.print-totals { display: none; }
+
 @media print {
     .summary-tables { grid-template-columns: 1fr; }
+
+    /* the status cards come off the printout; their figures are in the Totals table */
+    body.is-printing .kpi-grid,
+    body.is-printing .track-legend { display: none !important; }
+
+    body.is-printing .print-totals {
+        display: block;
+        margin-top: 18px;
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+    body.is-printing .print-totals h3 { font-size: 14px; margin-bottom: 6px; }
+    body.is-printing .print-totals table { width: auto; min-width: 280px; }
+    body.is-printing .print-totals td { padding: 4px 14px 4px 0; }
 
     /* the views share a screen; Print on one sends that view alone
        (printReport marks it) */
