@@ -41,6 +41,15 @@ function apiCheckEmail(email, staffId) {
     return getJson(url);
 }
 
+// GET /api/users/phone-check -- { taken, roleName, name } for a stored-style
+// number (+639171234567); staffId is the account being edited, whose own
+// number does not count against it
+function apiCheckPhone(phone, staffId) {
+    let url = '/api/users/phone-check?phone=' + encodeURIComponent(phone);
+    if (staffId) url += '&staffId=' + encodeURIComponent(staffId);
+    return getJson(url);
+}
+
 // Creating an account is two steps: review (the server makes a password
 // and keeps a "draft"), then confirm the draft.
 // These give back the answer, or null if refused.

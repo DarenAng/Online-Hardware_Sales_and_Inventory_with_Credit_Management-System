@@ -18,6 +18,7 @@
 let recordType = 'supplier';
 let incomeRange = { name: 'monthly', from: null, to: null };
 let incomeData = null;
+let incomeCashier = 'all';    // 'all', or the staff id of the cashier picked in the Cashier box
 let policyProduct = null;
 
 // the view showing on each tabbed screen; opening the screen again goes back to it
@@ -254,12 +255,19 @@ async function applyCustomIncomeRange(event) {
     await incomeRangeChanged();
 }
 
+// the period, then the cashier if one is picked; the screen, the Spreadsheet and Print all use this
 function incomeQuery() {
+    let query;
     if (incomeRange.name === 'custom') {
-        return '?from=' + encodeURIComponent(incomeRange.from) + '&to=' + encodeURIComponent(incomeRange.to);
+        query = '?from=' + encodeURIComponent(incomeRange.from) + '&to=' + encodeURIComponent(incomeRange.to);
     } else {
-        return '?range=' + encodeURIComponent(incomeRange.name);
+        query = '?range=' + encodeURIComponent(incomeRange.name);
     }
+
+    if (incomeCashier !== 'all') {
+        query += '&cashier=' + encodeURIComponent(incomeCashier);
+    }
+    return query;
 }
 
 // the figures are on screen (a table can be loaded without them)
@@ -267,6 +275,27 @@ let incomeSummaryShown = false;
 
 async function fetchIncome() {
     incomeData = await apiGetIncome(incomeQuery());
+    renderIncomeCashiers();
+}
+
+// The Cashier box: "All cashiers", then everyone who has made a sale. The
+// list comes with the income data, so it is filled once data has loaded.
+function renderIncomeCashiers() {
+    const select = document.getElementById('income-cashier');
+    if (!select || !incomeData) return;
+
+    let html = '<option value="all">All cashiers</option>';
+    for (const cashier of incomeData.cashierChoices) {
+        html += '<option value="' + cashier.staff_id + '">' + escapeHtml(cashier.full_name) + '</option>';
+    }
+    select.innerHTML = html;
+    select.value = incomeCashier;
+}
+
+// the Cashier box changed: reload whatever is already showing for that cashier
+async function incomeCashierPicked(value) {
+    incomeCashier = value;
+    await incomeRangeChanged();
 }
 
 // Load Data: the figures and both tables for the chosen period
@@ -311,6 +340,17 @@ function renderIncome() {
         const note = document.getElementById('income-range-note');
         if (note) {
             note.textContent = data.range.label + ' — ' + data.range.from + ' to ' + data.range.to;
+        }
+
+        // who the figures are for; this line is on the printout too
+        const cashierNote = document.getElementById('income-cashier-note');
+        if (cashierNote) {
+            if (data.cashier) {
+                cashierNote.textContent = 'Cashier: ' + data.cashier.name;
+            } else {
+                cashierNote.textContent = 'All cashiers';
+            }
+            cashierNote.hidden = false;
         }
     }
 
@@ -512,6 +552,57 @@ async function exportPanelSpreadsheet(keys, title) {
 // the browser's own print dialogue; the named tables are unpaged while it is open
 let printRestore = null;
 
+// The status cards over a table (the figure cards and the count chips) stay
+// off the printout. Their figures are read back here as label/value rows, to
+// go in a Totals table at the bottom of the report instead.
+function printTotalRows(container) {
+    const rows = [];
+
+    container.querySelectorAll('.kpi-card').forEach((card) => {
+        const label = card.querySelector('.kpi-label');
+        const value = card.querySelector('.kpi-value');
+        if (label && value) {
+            rows.push([label.textContent.trim(), value.textContent.trim()]);
+        }
+    });
+
+    // a chip reads "3 Completed": the number is in .track-count, the words are the rest
+    let chipTotal = 0;
+    const chips = container.querySelectorAll('.track-chip');
+    chips.forEach((chip) => {
+        const countBox = chip.querySelector('.track-count');
+        const count = countBox ? Number(countBox.textContent) : 0;
+        chipTotal += count;
+
+        const copy = chip.cloneNode(true);
+        const copyCount = copy.querySelector('.track-count');
+        if (copyCount) copyCount.remove();
+        rows.push([copy.textContent.trim(), String(count)]);
+    });
+    if (chips.length > 0) {
+        rows.push(['Total', String(chipTotal)]);
+    }
+
+    return rows;
+}
+
+// puts the Totals table at the bottom of the report; its CSS shows it on paper only
+function addPrintTotals(container) {
+    const rows = printTotalRows(container);
+    if (rows.length === 0) return null;
+
+    const block = document.createElement('div');
+    block.className = 'print-totals';
+    block.innerHTML = '<h3>Totals</h3><table><tbody>' +
+        rows.map((row) =>
+            '<tr><td>' + escapeHtml(row[0]) + '</td>' +
+            '<td class="cell-num">' + escapeHtml(row[1]) + '</td></tr>'
+        ).join('') +
+        '</tbody></table>';
+    container.appendChild(block);
+    return block;
+}
+
 function printReport(keys) {
     if (!canExportReports()) {
         notifyWarning('Printing a report is a manager action.', 'Not allowed');
@@ -540,6 +631,16 @@ function printReport(keys) {
     }).filter(Boolean);
     targets.forEach((card) => card.classList.add('is-print-target'));
 
+    // the whole report each table belongs to (two tables of one report share it);
+    // its status cards are hidden by the print CSS and listed as Totals at its foot
+    const reports = [];
+    panels.forEach((panel) => {
+        const table = document.getElementById(panel.config.tableId);
+        const report = table ? table.closest('.panel-view, [data-panel]') : null;
+        if (report && reports.indexOf(report) === -1) reports.push(report);
+    });
+    const totalBlocks = reports.map(addPrintTotals).filter(Boolean);
+
     document.body.classList.add('is-printing');
 
     // afterprint is the reliable signal; the timer covers a browser that never sends it
@@ -548,6 +649,7 @@ function printReport(keys) {
         printRestore = null;
         document.body.classList.remove('is-printing');
         targets.forEach((card) => card.classList.remove('is-print-target'));
+        totalBlocks.forEach((block) => block.remove());
         saved.forEach((entry) => {
             entry.panel.pageSize = entry.pageSize;
             if (entry.panel.state === 'ready') {
@@ -586,6 +688,7 @@ function buildIncomePanels() {
 
     createDataPanel({
         key: 'mgr-income-methods',
+        remember: false,   // the period and cashier above are not kept, so it opens closed
         tableId: 'income-methods-table',
         columns: 5,
         pageSize: 5,
@@ -603,6 +706,7 @@ function buildIncomePanels() {
 
     createDataPanel({
         key: 'mgr-income-products',
+        remember: false,
         tableId: 'income-products-table',
         columns: 4,
         pageSize: 5,
@@ -899,6 +1003,8 @@ function buildSalesPanel() {
         columns: 6,
         pagerId: 'sales-pager',
         idField: 'sale_id',
+        // the boxes that load() reads, put back with the table after a reload
+        inputs: ['sales-method', 'sales-status', 'sales-from', 'sales-to'],
         gate: {
             title: 'No sales loaded',
             text: 'Pick a payment method, a status or a date range above, then press Load Data.',
@@ -1398,6 +1504,8 @@ function buildCreditPanels() {
             text: 'Press Load Data for extension requests raised at the counter.',
             button: 'Load Data'
         },
+
+        inputs: ['requests-status'],
 
         load: () => {
             const status = document.getElementById('requests-status');
@@ -1997,7 +2105,7 @@ function buildDeliveryPanel() {
         columns: 7,
         pagerId: 'deliveries-pager',
         idField: 'delivery_id',
-        filters: { state: 'all' },
+        filters: { state: 'all', driver: 'all' },
         gate: {
             title: 'Deliveries not loaded',
             text: 'Press Load Data for every delivery on record, or filter by fulfilment first.',
@@ -2005,8 +2113,13 @@ function buildDeliveryPanel() {
         },
         load: () => apiGetDeliveries(),
         match: (d, query) => prefixMatch([d.customer_name, d.driver_name, d.delivery_address], query),
-        filter: (d, filters) => filters.state === 'all' || d.fulfilment_state === filters.state,
-        onLoaded: (rows) => renderTrackLegend(rows),
+        filter: (d, filters) =>
+            (filters.state === 'all' || d.fulfilment_state === filters.state) &&
+            (filters.driver === 'all' || d.driver_name === filters.driver),
+        onLoaded: (rows) => {
+            renderTrackLegend(rows);
+            renderDriverOptions(rows);
+        },
         renderRow: (d, index) => {
             const tone = FULFILMENT_TONE[d.fulfilment_state] || 'badge-neutral';
             const owed = Number(d.balance_due) || 0;
@@ -2041,6 +2154,37 @@ function renderTrackLegend(rows) {
             'onclick="filterDeliveriesBy(\'' + state + '\')">' +
             '<span class="track-count">' + count + '</span>' + escapeHtml(state) + '</button>';
     }).join('');
+}
+
+// The Driver box: "All drivers", "Unassigned", then each driver found in the
+// deliveries. The names come from the loaded rows, so it fills when they arrive.
+function renderDriverOptions(rows) {
+    const select = document.getElementById('deliveries-driver');
+    if (!select) return;
+
+    const names = [];
+    for (const d of rows) {
+        if (d.driver_name !== 'Unassigned' && names.indexOf(d.driver_name) === -1) {
+            names.push(d.driver_name);
+        }
+    }
+
+    // rebuilding the options must not lose the driver already chosen, even if
+    // none of the loaded deliveries is theirs any more: the box has to show
+    // the filter that is applied
+    const panel = getDataPanel('mgr-deliveries');
+    const chosen = panel ? panel.filters.driver : 'all';
+    if (chosen !== 'all' && chosen !== 'Unassigned' && names.indexOf(chosen) === -1) {
+        names.push(chosen);
+    }
+    names.sort((a, b) => a.localeCompare(b));
+
+    let html = '<option value="all">All drivers</option><option value="Unassigned">Unassigned</option>';
+    for (const name of names) {
+        html += '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>';
+    }
+    select.innerHTML = html;
+    select.value = chosen;
 }
 
 function filterDeliveriesBy(state) {
@@ -2109,6 +2253,7 @@ function writeRecordHeaders() {
 function buildRecordsPanel() {
     createDataPanel({
         key: 'mgr-records',
+        remember: false,   // which kind of record it holds is not kept, so it opens closed
         tableId: 'records-table',
         columns: 5,
         pagerId: 'records-pager',

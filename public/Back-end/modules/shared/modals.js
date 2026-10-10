@@ -67,6 +67,8 @@ document.addEventListener('keydown', function (event) {
     });
 });
 
+// A card grows to fit what it holds, up to the window's height. When it is
+// still too tall it first gets wider (modal-roomy) to become shorter.
 // A card does not scroll (unless marked data-modal-scroll); content taller than the body is flowed into pages
 // (browser column layout, one column per page) with a pager of its own under
 // the content -- "Page 1 of 3" and Previous/Next -- never in the foot, which
@@ -89,9 +91,20 @@ function unpaginateModal(modal) {
     if (pager) pager.remove();
 }
 
+// does everything in the body fit without a second page?
+function modalBodyFits(body) {
+    return body.scrollHeight <= body.clientHeight + 1;
+}
+
 function paginateModal(modal, resetPage) {
     if (!modal || !modal.classList.contains('open')) {
-        if (modal) { unpaginateModal(modal); delete modal._pages; }
+        if (modal) {
+            unpaginateModal(modal);
+            delete modal._pages;
+            // a closed card goes back to its normal width for next time
+            const box = modal.querySelector('.modal-box');
+            if (box) box.classList.remove('modal-roomy');
+        }
         return;
     }
     const body = modalBodyOf(modal);
@@ -104,7 +117,16 @@ function paginateModal(modal, resetPage) {
     // a card marked data-modal-scroll keeps one page and scrolls its body
     if (modal.hasAttribute('data-modal-scroll')) { delete modal._pages; return; }
 
-    if (body.scrollHeight <= body.clientHeight + 1) { delete modal._pages; return; }
+    if (modalBodyFits(body)) { delete modal._pages; return; }
+
+    // Too tall for the window? Before adding pages, make the card wider
+    // (.modal-roomy in general-ui.css puts three facts to a row), so it gets
+    // shorter. Only if it still does not fit does it turn pages.
+    const box = modal.querySelector('.modal-box');
+    if (box && !box.classList.contains('modal-roomy')) {
+        box.classList.add('modal-roomy');
+        if (modalBodyFits(body)) { delete modal._pages; return; }
+    }
 
     const style = getComputedStyle(body);
     const width  = body.clientWidth  - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);

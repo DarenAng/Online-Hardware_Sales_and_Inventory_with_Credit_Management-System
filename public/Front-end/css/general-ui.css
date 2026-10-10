@@ -492,6 +492,18 @@ input[type="number"].form-control:placeholder-shown { text-align: left; }
 }
 .password-reveal .password-toggle:hover { background: var(--paper); }
 
+/* the checklist under a new-password box: a rule gets a tick and turns green once met */
+.password-rules {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    font-size: 13px;
+    color: var(--steel-soft);
+}
+.password-rules li::before { content: "\25CB\00a0"; }            /* an empty circle */
+.password-rules li.is-met { color: var(--ok-ink); }
+.password-rules li.is-met::before { content: "\2713\00a0"; }     /* a tick */
+
 .form-footer {
     display: flex;
     gap: 10px;
@@ -1054,6 +1066,7 @@ kbd {
 .badge-success { background: var(--ok-dim);     color: var(--ok-ink);     border-color: rgba(14, 122, 95, 0.30); }
 .badge-danger  { background: var(--stop-dim);   color: var(--stop-hi);    border-color: rgba(158, 27, 50, 0.28); }
 .badge-warning { background: var(--signal-dim); color: var(--signal-ink); border-color: rgba(245, 179, 1, 0.5); }
+.badge-info    { background: rgba(29, 98, 176, 0.10); color: #1a4f94; border-color: rgba(29, 98, 176, 0.30); }
 .badge-neutral { background: rgba(20, 24, 29, 0.06); color: var(--steel); border-color: rgba(20, 24, 29, 0.14); }
 
 /* ==========================================================================
@@ -1350,14 +1363,15 @@ html:has(.modal.open) { overflow: hidden; }
 .modal-pager .pager-controls { display: flex; gap: 8px; }
 .modal-pager .btn[disabled] { opacity: 0.4; cursor: default; }
 
-/* The locked height, only on popups that page or tab. 540px holds the
-   longest ordinary page; on a short window the height comes from the window.
-   It may still shrink, so a foot of buttons below it is never cut off. */
+/* No locked height: every card grows to fit what it holds, so Previous and
+   Next only show up when the window itself is too short for the card.
+   The card's max-height (.modal-box) stops it at the window's edge, and the
+   body shrinks so a foot of buttons below it is never cut off. */
 .modal-tabs + .modal-body,
 .modal-steps + .modal-body {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     min-height: 0;
-    height: min(540px, calc(100vh - 270px));
+    height: auto;
 }
 
 .modal-foot {
@@ -1368,8 +1382,6 @@ html:has(.modal.open) { overflow: hidden; }
 }
 /* a foot with nothing to press is not drawn: the x in the corner closes the card */
 .modal-foot[hidden], .modal-steps[hidden] { display: none; }
-/* one page needs no locked height: the card is as tall as the record */
-.modal-steps[hidden] + .modal-body { height: auto; max-height: calc(100vh - 200px); }
 
 /* a record shown whole on a wide card: three fields to a row */
 .detail-grid.detail-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2449,19 +2461,16 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 .modal-box.modal-wide { max-width: 820px; }
 /* a record with a table beside its facts (a purchase order and its materials) */
 .modal-box.modal-xl { max-width: min(1140px, calc(100vw - 32px)); }
-.modal-box.modal-xl .modal-steps + .modal-body { height: auto; max-height: calc(100vh - 230px); }
 
 /* Every record popup (#detail-modal: a sale, a product, an order, a record)
-   is one size, wide and tall, whatever the record holds, so the card does not
-   jump from one size to the next. A short record leaves room below; a long one
-   turns pages or scrolls inside the same box. A phone keeps its sheet
-   (responsive.css), and the small question and form cards keep their size. */
+   is one width, wide, whatever the record holds. Its height fits the record,
+   up to the window's height (.modal-box max-height); only a record taller
+   than the window turns pages. A phone keeps its sheet (responsive.css). */
 @media (min-width: 641px) and (min-height: 561px) {
     #detail-modal .modal-box,
     #detail-modal .modal-box.modal-wide,
     #detail-modal .modal-box.modal-xl {
         max-width: min(1140px, calc(100vw - 32px));
-        height: min(720px, calc(100vh - 52px - 4vh));
     }
     #detail-modal .modal-body,
     #detail-modal .modal-steps + .modal-body,
@@ -3011,6 +3020,22 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
    hole; buttons for the record sit in the foot beside Close
    ========================================================================== */
 .detail-grid > .detail-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
+
+/* A ROOMY CARD -- modals.js adds .modal-roomy when a card is too tall for the
+   window. The card gets wider and its facts sit three to a row, so it is
+   shorter and usually needs no Previous / Next. Not on a phone: there the
+   card is already as wide as the screen. */
+@media (min-width: 761px) {
+    .modal-box.modal-roomy { max-width: min(1140px, calc(100vw - 32px)); }
+    .modal-roomy .detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    /* a form row of three or more fields goes three to a row as well
+       (a row of two stays two, so no empty column is left beside it) */
+    .modal-roomy .grid-2:has(> :nth-child(3)) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    /* the last row is filled, so no grey hole is left at its end */
+    .modal-roomy .detail-grid > .detail-item:last-child:nth-child(odd) { grid-column: auto; }
+    .modal-roomy .detail-grid > .detail-item:last-child:nth-child(3n+1) { grid-column: 1 / -1; }
+    .modal-roomy .detail-grid > .detail-item:last-child:nth-child(3n+2) { grid-column: span 2; }
+}
 
 .detail-foot-actions { display: flex; gap: 9px; flex-wrap: wrap; }
 

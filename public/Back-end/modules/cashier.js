@@ -8,19 +8,20 @@
 //   - refunds: picking the product, the amount, and filing the refund
 //   - the customer box: typing a name, suggestions, picking a customer
 //   - the cart: adding lines, sizes (e.g. sack / kg), quantities, totals
-//   - paying: cash, cheque, e-wallet, bank transfer, credit or COD
+//   - the Payment window (Proceed to Payment): the customer, cash, cheque,
+//     e-wallet, bank transfer, credit or COD
 //   - checkout (handleCheckout) and the printed receipt
 //   - booking a delivery for the sale
-//   - the lists: deliveries, refunds, sales report, daily summary
-//   - the customer credit screen, and payments taken from a customer's card
+//   - the lists: deliveries, refunds, sales report
+//   - the customer credit screen: adding a customer, the card with its
+//     history tabs, asking for a higher limit, and payments taken from a
+//     customer's card (or from the register, with Credit Payment)
 //   - the page start-up code at the very bottom ("CASHIER PAGE BOOT")
 // ============================================================
 let catalog = [];
 let catalogLoaded = false;
-let catalogMode = 'idle';     // 'idle' keeps the grid clean, 'top' shows the first ten, 'all' shows everything
+let catalogMode = 'idle';     // 'idle' keeps the grid clean, 'all' lists the whole catalog (ten a page)
 let cart = [];
-let cashierSales = [];
-let salesScope = 'Mine';
 let lastReceipt = null;
 
 // eight rows is what fits above the fold on the counter machine
@@ -34,10 +35,8 @@ let customerDirectory = [];
 let customerDirectoryLoaded = false;
 let suggestHighlight = -1;
 
-// a delivery filled in beside the order; written the moment the sale exists
+// a delivery filled in in the Payment window; written the moment the sale exists
 let pendingDelivery = null;
-
-let dailySummary = null;
 
 function showCashierPanel(panelId, title, event) {
     if (event) event.preventDefault();
@@ -62,11 +61,8 @@ function showCashierPanel(panelId, title, event) {
 function showRegister(event) {
     showCashierPanel('panel-pos', 'Point of Sale', event);
 
-    const search = document.getElementById('catalog-search');
-    if (search) search.value = '';
-
-    catalogMode = 'idle';
-    renderCatalogEmpty();
+    // the catalog keeps what it showed when the cashier left; the page draws
+    // it empty once, when it starts
     renderCart();
 }
 
@@ -95,11 +91,6 @@ function showSalesReport(event) {
 // the cashier's own QR codes; a row that paid for a sale opens its invoice
 function showQrPayments(event) {
     showCashierPanel('panel-qrpayments', 'QR Payments', event);
-}
-
-function showDailySummary(event) {
-    showCashierPanel('panel-summary', 'Daily Summary', event);
-    loadDailySummary();
 }
 
 // ---------- product catalog ----------
@@ -132,8 +123,8 @@ function renderCatalogEmpty() {
                 </svg>
             </div>
             <h4>No products loaded</h4>
-            <p>Search above for what the customer is buying, or view the first ten products.</p>
-            <button type="button" class="btn btn-accent" onclick="loadCatalogTop(event)">View Top 10 Rows</button>
+            <p>Search above for what the customer is buying, or press Load Data to list every product.</p>
+            <button type="button" class="btn btn-accent" onclick="loadCatalogAll(event)">Load Data</button>
         </div>`;
     holdBoxHeight(grid);
 }
@@ -153,13 +144,15 @@ function renderCatalogNoMatch(keyword) {
             <p>${keyword ? "Nothing matches <kbd>" + escapeHtml(keyword) + "</kbd>" : "Nothing is left"}${
                 catalogFilters.category !== "all"
                     ? " in the category picked above" : ""}. Archived and out-of-stock products never appear here.</p>
-            <button type="button" class="btn btn-accent" onclick="loadCatalogTop(event)">View Top 10 Rows</button>
+            <button type="button" class="btn btn-accent" onclick="loadCatalogAll(event)">Load Data</button>
         </div>`;
     holdBoxHeight(grid);
 }
 
 // The catalog is a table, not a grid of cards. Pressing a row anywhere puts
-// the product on the order; only in-stock products are listed.
+// the product on the order; only in-stock products are listed. A product that
+// is already on the order is greyed and cannot be pressed again: its amount is
+// changed with + and - on the order (pressCatalogRow, markCatalogRows).
 const catalogFilters = { category: 'all' };
 
 function setCatalogFilter(name, value) {
@@ -171,6 +164,21 @@ function setCatalogFilter(name, value) {
         return;
     }
     applyCatalogView();
+}
+
+const CATALOG_ROW_TITLE = {
+    off: 'Press to put it on the order',
+    on: 'Already on the order. Change the amount with + and − on the order.'
+};
+
+// the click on a row: a product on the order is not added a second time; the
+// line it is on lights up instead, so the cashier can see where to change it
+function pressCatalogRow(productId) {
+    if (cart.some((l) => l.product_id === productId)) {
+        flashCartLine(productId);
+        return;
+    }
+    addToCart(productId);
 }
 
 // only products that can be sold are listed; out of stock ones stay off the table
@@ -209,10 +217,9 @@ function applyCatalogView() {
 
     if (text === '' && catalogMode === 'idle') { renderCatalogEmpty(); return; }
 
-    let rows = catalog.filter((p) =>
+    const rows = catalog.filter((p) =>
         catalogMatchesFilters(p) &&
         (text === '' || prefixMatch([p.product_name, p.category_name, p.brand_name], text)));
-    if (text === '' && catalogMode === 'top') rows = rows.slice(0, CATALOG_TOP_ROWS);
     renderCatalog(rows, text);
 }
 
@@ -220,7 +227,6 @@ function applyCatalogView() {
 // kept while the same rows are redrawn (a line put on the order) and starts
 // over when the search or a filter changes what is listed.
 const CATALOG_PAGE_ROWS = 10;
-const CATALOG_TOP_ROWS = 10;
 let catalogShown = [];
 let catalogShownKey = '';
 let catalogPage = 1;
@@ -274,8 +280,9 @@ function renderCatalog(rows, keyword) {
             const sizes = sellingUnitsOf(p);
             return '<tr class="row-reveal row-clickable' + (inCart ? ' is-on-order' : '') + '"' +
                 ' style="animation-delay:' + Math.min(i, 12) * 26 + 'ms"' +
-                ' onclick="addToCart(' + p.product_id + ')"' +
-                ' title="Press to put it on the order"' +
+                ' onclick="pressCatalogRow(' + p.product_id + ')"' +
+                ' title="' + CATALOG_ROW_TITLE[inCart ? 'on' : 'off'] + '"' +
+                (inCart ? ' aria-disabled="true"' : '') +
                 ' data-product-row="' + p.product_id + '">' +
                 '<td class="cell-name">' + escapeHtml(p.product_name) +
                     '<span class="on-order-mark" title="On the order"' + (inCart ? '' : ' hidden') + '>' +
@@ -298,9 +305,7 @@ function renderCatalog(rows, keyword) {
     holdBoxHeight(grid);
 }
 
-// the first ten products only, so the till does not list the whole catalog
-function loadCatalogTop(event) { return loadCatalogView('top', event); }
-
+// Load Data: the whole catalog (in stock), ten a page like every other list
 function loadCatalogAll(event) { return loadCatalogView('all', event); }
 
 async function loadCatalogView(mode, event) {
@@ -642,9 +647,10 @@ function onRefundAmountInput() {
     suggestRefundAmount();
 }
 
-// The customer is typed, not picked. A name picked from the suggestions is
-// an account (the credit strip appears); a name matching nobody is a walk-in
-// with a name; nothing typed is a walk-in.
+// The customer is typed and picked. A name picked from the suggestions is an
+// account (the credit strip appears); nothing typed is a walk-in. A name that
+// matches nobody is refused (handleCheckout): the till does not open accounts,
+// Customers Record does.
 async function loadCustomerDirectory(force) {
     if (customerDirectoryLoaded && !force) return true;
 
@@ -653,7 +659,8 @@ async function loadCustomerDirectory(force) {
         customerDirectoryLoaded = true;
         return true;
     } catch (error) {
-        // not fatal: a cash sale to a walk-in needs none of this
+        // not fatal: a cash sale to a walk-in needs none of this (a typed name
+        // cannot be checked against the book until it loads, and is refused then)
         customerDirectoryLoaded = false;
         return false;
     }
@@ -855,12 +862,14 @@ function renderCustomerVerdict() {
 
     if (typed === '') {
         box.className = 'customer-verdict';
-        box.textContent = 'Walk-in. Type a name if you have one.';
+        box.textContent = 'Walk-in. To put the sale on a customer, type their name and pick them from the list.';
         return;
     }
 
-    box.className = 'customer-verdict is-new';
-    box.textContent = 'Not on the books yet. They are added to Customers Record when the sale is rung up.';
+    // a name that matches nobody is a stop, not a new account
+    box.className = 'customer-verdict is-stop';
+    box.textContent = 'Not a customer on the books. Add them under Customers Record first, then pick them here, ' +
+        'or clear the box for a walk-in.';
 }
 
 // kept under the old name because the boot sequence and the catalog loader call it
@@ -1188,11 +1197,15 @@ function renderCart() {
     markCatalogRows();
 }
 
-// the catalog rows say what is already on the order, without being redrawn
+// the catalog rows say what is already on the order, without being redrawn:
+// a product on the order is greyed and cannot be pressed (pressCatalogRow)
 function markCatalogRows() {
     document.querySelectorAll('#catalog-table tr[data-product-row]').forEach((row) => {
         const line = cart.find((l) => l.product_id === Number(row.dataset.productRow));
         row.classList.toggle('is-on-order', Boolean(line));
+        row.title = CATALOG_ROW_TITLE[line ? 'on' : 'off'];
+        if (line) row.setAttribute('aria-disabled', 'true');
+        else row.removeAttribute('aria-disabled');
         const mark = row.querySelector('.on-order-mark');
         if (!mark) return;
         mark.hidden = !line;
@@ -1211,11 +1224,23 @@ function renderCartFigures() {
     });
 
     const t = cartTotals();
+
+    // the order's own box: what the lines come to, and nothing about payment
     const totals = document.getElementById('cart-totals');
     if (totals) {
-        let html =
-            '<div class="total-row"><span>Subtotal</span><span>' + peso(t.gross) + '</span></div>' +
-            '<div class="total-row total-due"><span>Amount Due</span><span>' + peso(t.due) + '</span></div>';
+        let html = '<div class="total-row"><span>Subtotal</span><span>' + peso(t.gross) + '</span></div>';
+        // no discount box at the till; shown only if a total ever carries one
+        if (t.discount > 0) {
+            html += '<div class="total-row"><span>Discount</span><span>' + peso(t.discount) + '</span></div>';
+        }
+        html += '<div class="total-row total-due"><span>Amount Due</span><span>' + peso(t.due) + '</span></div>';
+        totals.innerHTML = html;
+    }
+
+    // the Payment window's own figures: the amount due, then what becomes of it
+    const payTotals = document.getElementById('pay-totals');
+    if (payTotals) {
+        let html = '<div class="total-row total-due"><span>Amount Due</span><span>' + peso(t.due) + '</span></div>';
 
         if (t.onCredit) {
             // credit: part paid now, the rest goes on the account
@@ -1229,20 +1254,21 @@ function renderCartFigures() {
             // cash on delivery: nothing is paid at the counter
             html += '<div class="total-row total-note"><span>Collected on delivery</span><span>' +
                     peso(t.due) + '</span></div>';
+        } else if (t.tendered < t.due) {
+            // paid now, and what was handed over does not cover it yet
+            html += '<div class="total-row total-short"><span>Short by</span><span>' +
+                    peso(t.due - t.tendered) + '</span></div>';
         } else {
-            // paid now: show the money handed over, and the change (or how much is missing)
-            html += '<div class="total-row"><span>Tendered</span><span>' + peso(t.tendered) + '</span></div>';
-            if (t.tendered < t.due) {
-                html += '<div class="total-row total-short"><span>Short by</span><span>' +
-                        peso(t.due - t.tendered) + '</span></div>';
-            } else {
-                html += '<div class="total-row total-change"><span>Change</span><span>' +
-                        peso(t.change) + '</span></div>';
-            }
+            html += '<div class="total-row total-change"><span>Change</span><span>' +
+                    peso(t.change) + '</span></div>';
         }
 
-        totals.innerHTML = html;
+        payTotals.innerHTML = html;
     }
+
+    // nothing to pay for until something is on the order
+    const proceed = document.getElementById('proceed-btn');
+    if (proceed) proceed.disabled = cart.length === 0;
 
     renderCreditVerdict(t);
     renderSalePaymentExtras(t);
@@ -1348,17 +1374,23 @@ function bankBoxHtml(amount, note) {
 function renderSalePaymentExtras(totals) {
     const t = totals || cartTotals();
 
+    // The reference is on screen only while the money taken now has a number to
+    // trace it by (REFERENCE_WORDS): not for cash, not for cash on delivery, and
+    // not for a credit sale with nothing paid now (taken is null then) or a part
+    // payment in cash. When it goes, so does anything typed in it.
     const taken = methodTakenNow(t);
     const field = document.getElementById('sale-reference-field');
     const words = REFERENCE_WORDS[taken];
     if (field) {
         field.hidden = !words;
+        const box = document.getElementById('sale-reference');
         if (words) {
             const hint = document.getElementById('sale-reference-hint');
             if (hint) hint.textContent = words.hint;
             // not the browser's required: handleCheckout says which number it needs, in words
-            const box = document.getElementById('sale-reference');
             if (box) box.placeholder = words.placeholder;
+        } else if (box && box.value !== '') {
+            box.value = '';
         }
     }
 
@@ -1492,8 +1524,9 @@ function isModalOpen(id) {
     return Boolean(modal && modal.classList.contains('open'));
 }
 
-// the card's words, its badge, the code and the buttons; made is null while
-// the code is being made
+// the card's words, the code and the buttons; made is null while the code is
+// being made. The page address the code holds is kept on the image
+// (data-pay-url) for the tests, and is not shown.
 function showQrCard(session, made) {
     document.getElementById('qr-title').textContent = 'Pay by QR · ' + (QR_APP_WORDS[session.method] || session.method);
     document.getElementById('qr-sub').textContent = session.what;
@@ -1502,18 +1535,14 @@ function showQrCard(session, made) {
         (QR_APP_WORDS[session.method] || session.method) + '.';
     document.getElementById('qr-amount').textContent = peso(session.amount);
 
-    const badge = made && made.badge;
-    document.getElementById('qr-badge-line').hidden = !badge;
-    document.getElementById('qr-badge').textContent = badge || '';
-
     const image = document.getElementById('qr-image');
-    if (made) image.src = made.qrImage;
-    else image.removeAttribute('src');
-
-    const link = document.getElementById('qr-link');
-    link.textContent = made ? made.payUrl : '';
-    link.href = made ? made.payUrl : '#';
-    link.parentElement.hidden = !made;
+    if (made) {
+        image.src = made.qrImage;
+        image.setAttribute('data-pay-url', made.payUrl || '');
+    } else {
+        image.removeAttribute('src');
+        image.removeAttribute('data-pay-url');
+    }
 
     document.getElementById('qr-clock').hidden = !made;
     document.querySelector('#qr-modal .qr-box').classList.remove('is-over');
@@ -1556,7 +1585,9 @@ function endQr(session, result) {
     stopQrTimers(session);
     if (qrSession === session) qrSession = null;
     closeModal('qr-modal');
-    document.getElementById('qr-image').removeAttribute('src');
+    const image = document.getElementById('qr-image');
+    image.removeAttribute('src');
+    image.removeAttribute('data-pay-url');
     session.resolve(result);
 }
 
@@ -1791,7 +1822,7 @@ function renderCreditStrip() {
         availableText = 'Nothing &mdash; on hold';
     }
 
-    // a short note: why the account is not in good standing, or the manager's notes
+    // a short note: why the credit rating is not Good, or the manager's notes
     let note = '';
     if (c.standing !== 'Good' && c.standing_reason) {
         note = '<p class="credit-strip-note">' + escapeHtml(c.standing_reason) + '</p>';
@@ -1802,6 +1833,11 @@ function renderCreditStrip() {
     strip.className = 'credit-strip ' + tone;
     strip.style.display = 'block';
     strip.innerHTML =
+        // the rating in words as well as in the strip's colour
+        '<div class="credit-strip-row">' +
+            '<span class="credit-strip-label">Credit Rating</span>' +
+            '<span class="credit-strip-value">' + escapeHtml(CASH_RATING_WORD[c.standing] || c.standing || '') + '</span>' +
+        '</div>' +
         '<div class="credit-strip-row">' +
             '<span class="credit-strip-label">Credit Limit</span>' +
             '<span class="credit-strip-value">' + peso(c.credit_limit) + '</span>' +
@@ -1872,7 +1908,80 @@ function fillDownPayment(share) {
     renderCart();
 }
 
+// ---------- the Payment window ----------
+// Proceed to Payment, under the order, opens the checkout form (the customer,
+// the method, the amounts, the reference, a delivery). It is locked: it closes
+// through Back to the Order, its x, or a finished sale, never by a stray click,
+// so what was typed in it is not lost.
+function openCheckoutModal() {
+    if (cart.length === 0) {
+        notifyWarning('Add at least one item before going to payment.', 'The order is empty');
+        return;
+    }
+
+    renderCart();
+
+    const sub = document.getElementById('checkout-sub');
+    if (sub) sub.textContent = cart.length + (cart.length === 1 ? ' item' : ' items') + ' on the order';
+
+    showModal('checkout-modal');
+    setTimeout(() => {
+        const amount = document.getElementById('pay-amount');
+        if (isModalOpen('checkout-modal') && amount && amount.offsetParent !== null) amount.focus();
+    }, 60);
+}
+
+function closeCheckoutModal() {
+    hideCustomerSuggestions();
+    closeModal('checkout-modal');
+}
+
+// the name the confirmation and the messages use for whoever the sale is for
+function checkoutCustomerName() {
+    const id = selectedCustomerId();
+    if (!id) return 'Walk-in';
+    if (selectedCustomerCredit && selectedCustomerCredit.customer_name) return selectedCustomerCredit.customer_name;
+    const found = customerDirectory.find((c) => c.id === id);
+    return found ? found.name : typedCustomerName();
+}
+
 // ---------- checkout ----------
+// The question asked before a sale is rung up: what it comes to, how it is
+// paid, and what the customer gets back or still owes. Its words follow the
+// button that was pressed.
+function checkoutQuestion(t, customerName) {
+    const methodName = t.method === 'COD' ? 'Cash on Delivery' : t.method;
+    const detail = ['Customer: ' + customerName, 'Amount due: ' + peso(t.due), 'Payment method: ' + methodName];
+
+    let title = 'Complete this sale?';
+    let message = 'Ring up this sale of ' + peso(t.due) + ' for ' + customerName + '?';
+    let confirmLabel = 'Complete Sale';
+
+    if (t.method === 'COD') {
+        title = 'Place this COD order?';
+        message = 'Nothing is collected now; ' + peso(t.due) + ' goes on ' + customerName + "'s account until the delivery is paid.";
+        confirmLabel = 'Place COD Order';
+        detail.push('Goes on account: ' + peso(t.due));
+    } else if (t.onCredit) {
+        detail.push('Paid now: ' + peso(t.down) + (t.down > 0 ? ' by ' + downPaymentMethod() : ''));
+        if (t.onBook > 0) {
+            title = t.down > 0 ? 'Take part payment and book the rest?' : 'Put this sale on account?';
+            message = peso(t.onBook) + ' of this sale goes on ' + customerName + "'s account.";
+            confirmLabel = t.down > 0 ? 'Take ' + peso(t.down) + ' and book the rest' : 'Book it to their account';
+            detail.push('Goes on account: ' + peso(t.onBook));
+        } else {
+            detail.push('Balance on account: ' + peso(0));
+        }
+    } else {
+        detail.push('Amount entered: ' + peso(t.tendered));
+        detail.push('Change: ' + peso(t.change));
+    }
+
+    if (pendingDelivery) detail.push('Delivery: to ' + pendingDelivery.address);
+
+    return { title: title, message: message, confirmLabel: confirmLabel, detail: detail };
+}
+
 // viaQr: pressed as Pay by QR; the money is taken by the QR code
 async function handleCheckout(event, viaQr) {
     event.preventDefault();
@@ -1885,11 +1994,37 @@ async function handleCheckout(event, viaQr) {
     const t = cartTotals();
     const typedName = typedCustomerName();
 
+    // Walk-in is allowed (nothing typed). A name has to be a customer picked
+    // from the list; the till does not open an account from a typed name.
+    let customerId = null;
+    if (form.elements.customerId.value) {
+        customerId = parseInt(form.elements.customerId.value, 10);
+    } else if (typedName !== '') {
+        // the book may not have been read yet when the name was typed
+        await loadCustomerDirectory(false);
+        const exact = customerMatchingTypedName();
+        if (exact) {
+            customerId = exact.id;
+            form.elements.customerId.value = String(exact.id);
+            await onCustomerChange(String(exact.id));
+            renderCustomerVerdict();
+        } else {
+            notifyWarning(
+                '"' + typedName + '" is not a customer on the books. Add them under Customers Record first, ' +
+                'then pick them from the list here, or clear the box to ring this up as a walk-in.',
+                'Not a customer yet');
+            renderCustomerVerdict();
+            const box = customerNameBox();
+            if (box) box.focus();
+            return;
+        }
+    }
+
     // a settled-later sale needs a customer, not just a walk-in
-    if (t.onAccount && !form.elements.customerId.value && typedName === '') {
+    if (t.onAccount && !customerId) {
         notifyWarning(
             'A ' + t.method + ' sale is settled later, so it has to be booked against a customer. '
-            + 'Type their name.',
+            + 'Pick them from the list.',
             'Name the customer');
         const box = customerNameBox();
         if (box) box.focus();
@@ -1915,51 +2050,21 @@ async function handleCheckout(event, viaQr) {
         return;
     }
 
-    // A typed name that matches nobody goes on the books as it is rung up, so
-    // every named buyer is in Customers Record without a second step.
-    let customerId;
-    if (form.elements.customerId.value) {
-        customerId = parseInt(form.elements.customerId.value, 10);
-    } else {
-        customerId = null;
-    }
-
-    if (!customerId && typedName !== '') {
-        const created = await createCustomerFromCounter(typedName);
-        if (created === false) return;      // the server refused; nothing was sold
-        customerId = created;
-    }
-
-    // a part-paid credit sale leaves money on the account; the server checks the limit again
-    if (t.onCredit && t.onBook > 0) {
-        let name;
-        if (selectedCustomerCredit) {
-            name = selectedCustomerCredit.customer_name;
-        } else {
-            name = 'this customer';
-        }
-
-        const yes = await askConfirm(
-            peso(t.onBook) + ' of this sale goes on ' + name + "'s account.",
-            {
-                title: t.down > 0 ? 'Take part payment and book the rest?' : 'Put this sale on account?',
-                eyebrow: 'Point of Sale',
-                confirmLabel: t.down > 0 ? 'Take ' + peso(t.down) + ' and book the rest' : 'Book it to their account',
-                detail: [
-                    'Taken at the counter now: ' + peso(t.down) + '.',
-                    'Added to what they owe: ' + peso(t.onBook) + '.',
-                    'The receipt shows both, and the balance appears on their credit page.'
-                ]
-            });
+    // Asked before anything is sent: the amount due, the method, and the change
+    // or the balance that goes on the account. Paying by QR is its own
+    // confirmation (the customer pays the code), except that a balance left on
+    // the account is still asked about.
+    if (!viaQr || (t.onCredit && t.onBook > 0)) {
+        const question = checkoutQuestion(t, checkoutCustomerName());
+        const yes = await askConfirm(question.message, {
+            title: question.title,
+            eyebrow: 'Point of Sale',
+            confirmLabel: question.confirmLabel,
+            cancelLabel: 'Go back',
+            detail: question.detail
+        });
 
         if (!yes) return;
-    }
-
-    // the name typed is kept only when there is no account;
-    // a named customer already lives in the customers table
-    let walkInName = null;
-    if (!customerId) {
-        walkInName = typedName || null;
     }
 
     // how much money is taken now
@@ -1997,9 +2102,10 @@ async function handleCheckout(event, viaQr) {
         items.push({ product_id: l.product_id, quantity: l.quantity, unit: unit });
     }
 
+    // no name goes with a walk-in: the customer is an account or nobody
     const data = {
         customerId: customerId,
-        walkInName: walkInName,
+        walkInName: null,
         discount: t.discount,
         amountPaid: amountPaid,
         paymentMethod: t.method,
@@ -2044,6 +2150,7 @@ async function handleCheckout(event, viaQr) {
 
         catalogLoaded = false;
         renderCart();
+        closeCheckoutModal();
         if (catalogMode !== 'idle') { await ensureCatalogLoaded(true); applyCatalogView(); }
         else renderCatalogEmpty();
 
@@ -2053,47 +2160,6 @@ async function handleCheckout(event, viaQr) {
         // the payment or is told it is already on a sale
         if (qr) qrPaidUnused = qr;
         notifyOffline();
-    }
-}
-
-// The counter's half of opening an account: the record only, limit zero,
-// with the phone and address from the attached delivery when there is one.
-// The server hands back an existing account when the name is already on the
-// books. Returns the customer id, or false when the server refused (which
-// stops the sale).
-async function createCustomerFromCounter(fullName) {
-    const parts = String(fullName).trim().split(/\s+/);
-    const firstName = parts.shift();
-    const lastName = parts.join(' ');
-
-    try {
-        const response = await apiCreateCustomer({
-                firstName: firstName,
-                lastName: lastName,
-                phone: pendingDelivery && pendingDelivery.contactPhone ? pendingDelivery.contactPhone : '',
-                address: pendingDelivery ? pendingDelivery.address : ''
-            });
-        const result = await response.json();
-
-        if (!response.ok) {
-            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Account not created');
-            return false;
-        }
-
-        if (result.created) notifySuccess(result.message, 'Customer recorded');
-
-        customerDirectoryLoaded = false;
-        await loadCustomerDirectory(true);
-
-        const idBox = customerIdBox();
-        if (idBox) idBox.value = String(result.customerId);
-        await onCustomerChange(String(result.customerId));
-        renderCustomerVerdict();
-
-        return result.customerId;
-    } catch (error) {
-        notifyOffline();
-        return false;
     }
 }
 
@@ -2869,7 +2935,8 @@ function openRefundDetail(returnId) {
     ]);
 }
 
-// Sales report. "Mine" and "All" are a filter like the other two.
+// Sales report. The server sends a cashier their own sales and no others, so
+// there is no Mine / All switch: whatever is loaded is theirs.
 function buildSalesPanel() {
     createDataPanel({
         key: 'cash-sales',
@@ -2878,20 +2945,17 @@ function buildSalesPanel() {
         pageSize: CASHIER_ROWS_PER_PAGE,
         pagerId: 'csales-pager',
         idField: 'sale_id',
-        filters: { scope: 'Mine', method: 'all', status: 'all' },
+        filters: { method: 'all', status: 'all' },
+        // no "Showing 1-8 of N" caption: the pager is Previous, Next and the page
+        pagerInfo: false,
 
         gate: {
             title: 'No sales loaded',
-            text: 'Search for a customer or a receipt number, or press Load Data to read the sales on record.',
+            text: 'Search for a customer or a receipt number, or press Load Data to read your sales.',
             button: 'Load Data'
         },
 
-        load: async () => {
-            cashierSales = await apiGetSales('');
-            return cashierSales;
-        },
-
-        onLoaded: () => renderSalesScope(),
+        load: () => apiGetSales(''),
 
         match: (row, query) => prefixMatch([
             row.customer_name, row.payment_method, row.payment_status, row.transaction_status,
@@ -2899,7 +2963,6 @@ function buildSalesPanel() {
         ], query),
 
         filter: (row, filters) => {
-            if (!saleIsInScope(row, filters.scope)) return false;
             if (filters.method !== 'all' && row.payment_group !== filters.method) return false;
             if (filters.status !== 'all' && row.transaction_status !== filters.status) return false;
             return true;
@@ -2917,38 +2980,9 @@ function buildSalesPanel() {
     });
 }
 
-// decided by staff id, not by name: two people can share a name
-function saleIsInScope(row, scope) {
-    if (scope === 'All') return true;
-    const user = getCurrentUser();
-    if (!user) return false;
-    return row.cashier_staff_id === user.staff_id;
-}
-
-function renderSalesScope() {
-    const box = document.getElementById('sales-scope');
-    if (!box) return;
-
-    box.innerHTML = ['Mine', 'All'].map((sc) => {
-        const count = cashierSales.filter((s) => saleIsInScope(s, sc)).length;
-        return '<button type="button" class="filter-chip' + (salesScope === sc ? ' active' : '') +
-            '" onclick="setSalesScope(\'' + sc + '\')">' + (sc === 'Mine' ? 'My Sales' : 'All Sales') +
-            ' <span class="chip-count">' + count + '</span></button>';
-    }).join('');
-}
-
-function setSalesScope(scope) {
-    salesScope = scope;
-    renderSalesScope();
-    dataPanelFilter('cash-sales', 'scope', scope);
-}
-
 function clearSalesPanel() {
     const panel = getDataPanel('cash-sales');
     if (panel) panel.reset();
-
-    cashierSales = [];
-    salesScope = 'Mine';
 
     const search = document.getElementById('csales-search');
     if (search) search.value = '';
@@ -2958,9 +2992,6 @@ function clearSalesPanel() {
 
     const status = document.getElementById('csales-status');
     if (status) status.value = 'all';
-
-    const scope = document.getElementById('sales-scope');
-    if (scope) scope.innerHTML = '';
 }
 
 async function loadCashierSales() {
@@ -2968,172 +2999,6 @@ async function loadCashierSales() {
     if (!panel) return;
     if (panel.state === 'closed') await panel.open();
     else await panel.refresh();
-}
-
-// Daily summary: today only, bounded at the server. The figures and the
-// breakdown come from one call so the cards and the table cannot disagree.
-async function loadDailySummary() {
-    const grid = document.getElementById('summary-kpis');
-    if (!grid) return;
-
-    const user = getCurrentUser();
-    if (!user) return;
-
-    const panel = getDataPanel('cash-summary');
-    if (!panel) return;
-
-    // the four cards wait with a dash, so the table under them stays put
-    grid.innerHTML = ['Transactions', 'Gross Sales', 'Collected', 'Refunds'].map((label) =>
-        '<div class="kpi-card"><span class="kpi-label">' + label + '</span>' +
-        '<span class="kpi-value">—</span><span class="kpi-note">Loading...</span></div>').join('');
-
-    if (panel.state === 'closed' || panel.state === 'error') await panel.open();
-    else await panel.refresh();
-
-    // the cards have to say so themselves rather than sit on old figures
-    if (!dailySummary) {
-        grid.innerHTML = '<div class="kpi-card"><span class="kpi-label">Offline</span>' +
-            '<span class="kpi-value">--</span>' +
-            '<span class="kpi-note">Cannot reach the server</span></div>';
-    }
-}
-
-function renderDailySummary() {
-    const grid = document.getElementById('summary-kpis');
-    const s = dailySummary;
-    if (!grid || !s) return;
-
-    const heading = document.getElementById('summary-day');
-    if (heading) heading.textContent = summaryDayText(s.date);
-
-    const refundCount = Number(s.refundCount) || 0;
-    const refundItems = Number(s.refundItems) || 0;
-
-    const cards = [
-        '<div class="kpi-card"><span class="kpi-label">Transactions</span>' +
-            '<span class="kpi-value">' + escapeHtml(String(s.saleCount)) + '</span>' +
-            '<span class="kpi-note">rung up today</span></div>',
-
-        '<div class="kpi-card"><span class="kpi-label">Gross Sales</span>' +
-            '<span class="kpi-value">' + peso(s.gross) + '</span>' +
-            '<span class="kpi-note">' +
-                (Number(s.discounts) > 0
-                    ? 'today, after discounts of ' + peso(s.discounts)
-                    : 'billed today') + '</span></div>',
-
-        '<div class="kpi-card"><span class="kpi-label">Collected</span>' +
-            '<span class="kpi-value">' + peso(s.collected) + '</span>' +
-            '<span class="kpi-note">taken at the counter today</span></div>',
-
-        // a button rather than a card, because it opens
-        '<button type="button" class="kpi-card' + (refundCount > 0 ? ' kpi-warn' : '') + '" ' +
-                'onclick="openRefundsToday()">' +
-            '<span class="kpi-go">Open</span>' +
-            '<span class="kpi-label">Refunds</span>' +
-            '<span class="kpi-value">' + peso(s.refundTotal) + '</span>' +
-            '<span class="kpi-note">' +
-                (refundCount === 0
-                    ? 'nothing came back today'
-                    : refundCount + (refundCount === 1 ? ' refund' : ' refunds') + ', ' +
-                      refundItems + (refundItems === 1 ? ' item' : ' items') + ' &mdash; tap for the details') +
-            '</span></button>'
-    ];
-
-    grid.innerHTML = cards.join('');
-}
-
-function summaryDayText(day) {
-    if (!day) return 'Today';
-
-    const when = new Date(String(day).slice(0, 10) + 'T00:00:00');
-    if (isNaN(when.getTime())) return String(day).slice(0, 10);
-
-    return when.toLocaleDateString('en-PH', {
-        weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
-    });
-}
-
-// the breakdown table reads from the summary already fetched
-function buildSummaryPanel() {
-    createDataPanel({
-        key: 'cash-summary',
-        tableId: 'summary-table',
-        columns: 3,
-        pageSize: CASHIER_ROWS_PER_PAGE,
-        pagerId: 'summary-pager',
-        idField: 'payment_method',
-
-        gate: {
-            title: 'Nothing loaded yet',
-            text: 'Press Load Today to read today\'s takings.',
-            button: 'Load Today'
-        },
-
-        load: async () => {
-            const user = getCurrentUser();
-            if (!user) return [];
-
-            // dropped first, so a failed read leaves no stale figures for the cards
-            dailySummary = null;
-            dailySummary = await apiGetDailySummary(user.staff_id);
-            renderDailySummary();
-            return dailySummary.methods || [];
-        },
-
-        renderRow: (row) =>
-            '<tr><td class="cell-name">' + escapeHtml(row.payment_method) + '</td>' +
-            '<td class="cell-num">' + row.sale_count + '</td>' +
-            '<td class="cell-num">' + peso(row.total_amount) + '</td></tr>'
-    });
-}
-
-function openRefundsToday() {
-    const s = dailySummary;
-    if (!s) return;
-
-    const rows = s.refunds || [];
-    const count = Number(s.refundCount) || 0;
-
-    const sub = document.getElementById('refunds-today-sub');
-    if (sub) sub.textContent = summaryDayText(s.date);
-
-    const totals = document.getElementById('refunds-today-totals');
-    if (totals) {
-        totals.innerHTML =
-            detailField('Refunds Issued', String(count)) +
-            detailField('Items Returned', String(Number(s.refundItems) || 0)) +
-            detailField('Total Refunded',
-                '<span class="' + (Number(s.refundTotal) > 0 ? 'cell-due' : '') + '">' +
-                peso(s.refundTotal) + '</span>');
-    }
-
-    const list = document.getElementById('refunds-today-list');
-    if (list) {
-        if (rows.length === 0) {
-            list.innerHTML = '<p class="detail-empty">Nothing was refunded today.</p>';
-        } else {
-            list.innerHTML = '<div class="refund-lines">' + rows.map((r) =>
-                    '<div class="refund-line">' +
-                        '<div class="refund-line-main">' +
-                            '<span class="refund-line-name">' + escapeHtml(r.product_name) + '</span>' +
-                            '<span class="refund-line-meta">' +
-                                r.quantity + ' ' + escapeHtml(r.unit_name || '') +
-                                ' at ' + peso(r.unit_refund) + ' each' +
-                                (r.sale_id ? ' &middot; from sale #' + r.sale_id : '') +
-                            '</span>' +
-                            (r.reason
-                                ? '<span class="refund-line-reason">' + escapeHtml(r.reason) + '</span>'
-                                : '') +
-                        '</div>' +
-                        '<div class="refund-line-side">' +
-                            '<span class="refund-line-amount">' + peso(r.refund_amount) + '</span>' +
-                            dispositionBadge(r) +
-                        '</div>' +
-                    '</div>').join('') + '</div>';
-        }
-    }
-
-    showModal('refunds-today-modal');
 }
 
 // ==========================================
@@ -3297,6 +3162,21 @@ function renderPaymentVerdict() {
     const amount = parseFloat(fields.amount.value) || 0;
 
     renderPaymentBankBox(Math.min(Math.max(amount, 0), balance));
+
+    // The reference is on screen only for a method that has a number to trace it
+    // by (REFERENCE_WORDS): not for cash. When it goes, so does anything typed.
+    const refField = document.getElementById('payment-ref-field');
+    const words = REFERENCE_WORDS[fields.paymentMethod.value];
+    if (refField) {
+        refField.hidden = !words;
+        if (words) {
+            const hint = document.getElementById('payment-ref-hint');
+            if (hint) hint.textContent = words.hint;
+            fields.referenceNo.placeholder = words.placeholder;
+        } else if (fields.referenceNo.value !== '') {
+            fields.referenceNo.value = '';
+        }
+    }
 
     // GCash or PayMaya: the customer can pay by QR code instead of a typed reference
     const qrButton = document.getElementById('payment-qr-btn');
@@ -3480,10 +3360,10 @@ function renderCustomerUnpaid() {
 
 // Customers and credit: the cashier can read an account and ask a manager
 // for more room. Setting a limit is refused by the server here.
-const CASH_STANDING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
+const CASH_RATING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
 
 // The cashier's book reads by due date: oldest unpaid sale plus thirty days,
-// the same thirty after which the standing turns to Watch (vw_customer_credit).
+// the same thirty after which the credit rating turns to Watch (vw_customer_credit).
 const CREDIT_TERM_DAYS = 30;
 
 function creditDueDate(row) {
@@ -3531,7 +3411,8 @@ function creditDueCell(row) {
         '<span class="badge ' + tone + '" title="' + escapeHtml(row.standing_reason || '') + '">' +
         escapeHtml(word) + '</span>';
 }
-const CASH_STANDING_WORD = { Good: 'Good', Watch: 'Watch', Hold: 'On hold' };
+// a customer's Credit Rating (the data still calls it "standing")
+const CASH_RATING_WORD = { Good: 'Good', Watch: 'Watch', Hold: 'On hold' };
 
 let openCustomer = null;
 
@@ -3596,7 +3477,7 @@ function clearCreditPanel() {
 }
 
 // tab: which tab to open on ('account' unless asked; 'unpaid' after a payment,
-// falling back to the account once nothing is owed)
+// falling back to the account once nothing is owed; 'history' or 'payments')
 async function openCustomerCredit(customerId, tab) {
     try {
         const data = await apiGetCustomerHistory(customerId);
@@ -3621,7 +3502,7 @@ async function openCustomerCredit(customerId, tab) {
 
         document.getElementById('customer-modal-name').textContent = c.customer_name;
         document.getElementById('customer-sub').textContent =
-            (c.phone || 'No phone on file') + ' · ' + (CASH_STANDING_WORD[c.standing] || c.standing);
+            (c.phone || 'No phone on file') + ' · Credit Rating: ' + (CASH_RATING_WORD[c.standing] || c.standing);
         document.getElementById('customer-avatar').textContent = initialsOf(c.customer_name);
 
         document.getElementById('customer-facts').innerHTML =
@@ -3632,9 +3513,9 @@ async function openCustomerCredit(customerId, tab) {
                 ? '<span class="cell-due">Nothing, on hold</span>'
                 : peso(c.available_credit)) +
             detailField('Due Date', creditDueCell(c)) +
-            detailField('Standing', '<span class="badge ' +
-                (CASH_STANDING_TONE[c.standing] || 'badge-neutral') + '">' +
-                escapeHtml(CASH_STANDING_WORD[c.standing] || c.standing) + '</span>') +
+            detailField('Credit Rating', '<span class="badge ' +
+                (CASH_RATING_TONE[c.standing] || 'badge-neutral') + '">' +
+                escapeHtml(CASH_RATING_WORD[c.standing] || c.standing) + '</span>') +
             detailField('Why', escapeHtml(c.standing_reason || '')) +
             detailField('Open Sales', String(c.open_sales) +
                 (Number(c.overdue_sales) > 0
@@ -3645,11 +3526,14 @@ async function openCustomerCredit(customerId, tab) {
                     escapeHtml(penaltyRateWord(c.penalty_rate)) + ' a month</span>')
                 : '') +
             detailField('Lifetime Purchases', peso(c.total_purchase)) +
+            detailField('Address', c.address ? escapeHtml(c.address) : '<span class="muted">Not on file</span>') +
             (c.credit_notes
                 ? detailField('Manager Note', escapeHtml(c.credit_notes))
                 : '');
 
-        renderCustomerHistory(data);
+        resetHistoryFilters();
+        renderCustomerHistory();
+        renderCustomerPayments();
         renderCustomerUnpaid();
 
         // the Unpaid Sales tab and Take a Payment, only when there is something to pay
@@ -3659,16 +3543,19 @@ async function openCustomerCredit(customerId, tab) {
         const pay = document.getElementById('customer-pay-btn');
         if (pay) pay.hidden = !hasUnpaid;
 
-        showCustomerTab(tab === 'unpaid' && hasUnpaid ? 'unpaid' : 'account');
+        let open = 'account';
+        if (tab === 'unpaid' && hasUnpaid) open = 'unpaid';
+        else if (tab === 'history' || tab === 'payments') open = tab;
+        showCustomerTab(open);
         showModal('customer-modal');
     } catch (error) {
         notifyError('That customer could not be opened.', 'Nothing to show');
     }
 }
 
-// the account, the unpaid sales and the history, one tab each
+// the account, the unpaid sales, the purchases and the payments, one tab each
 function showCustomerTab(name) {
-    ['account', 'unpaid', 'history'].forEach((each) => {
+    ['account', 'unpaid', 'history', 'payments'].forEach((each) => {
         const body = document.getElementById('customer-' + each + '-tab');
         if (body) body.style.display = name === each ? 'block' : 'none';
         const tab = document.getElementById('customer-tab-' + each);
@@ -3676,15 +3563,54 @@ function showCustomerTab(name) {
     });
 }
 
-// purchases beside payments, each paged with Previous and Next rather than
-// scrolled, so every sale and every payment can be reached
-function renderCustomerHistory(data) {
-    const box = document.getElementById('customer-history');
-    if (!box) return;
+// ---------- the history tabs ----------
+// Purchase History and Credit & Payments are a tab each, paged with Previous
+// and Next rather than scrolled, and filtered in the browser over the rows
+// the card already loaded (openCustomer): a date range on both, the sale's
+// status on purchases and the method on payments. Changing a filter starts
+// the table again at its first page.
+function filterValue(id) {
+    const box = document.getElementById(id);
+    return box ? box.value : '';
+}
 
-    const purchases = pagedTable('cash-purchases', ['Date', 'Sale', 'Amount', 'Balance'],
-        data.purchases.map((p) => [
-            escapeHtml(String(p.sale_date).slice(0, 10)),
+// "2026-09-05 10:00:00" -> "2026-09-05"; the day is what the date boxes compare
+function dayOfStamp(value) { return String(value || '').slice(0, 10); }
+
+function dayInRange(day, from, to) {
+    if (from && day < from) return false;
+    if (to && day > to) return false;
+    return true;
+}
+
+// the sentence under a filtered table that has no rows
+function emptyHistoryNote(nothing, from, to, filtered) {
+    if (from && to && from > to) return 'The From date is after the To date.';
+    return filtered ? 'Nothing matches these filters.' : nothing;
+}
+
+function renderCustomerHistory() {
+    const box = document.getElementById('customer-history');
+    if (!box || !openCustomer) return;
+
+    const from = filterValue('hist-from');
+    const to = filterValue('hist-to');
+    const status = filterValue('hist-status') || 'all';
+
+    const rows = openCustomer.purchases.filter((p) => {
+        if (!dayInRange(dayOfStamp(p.sale_date), from, to)) return false;
+        const owing = Number(p.balance_due) > 0;
+        if (status === 'owing') return owing;
+        if (status === 'paid') return !owing;
+        return true;
+    });
+
+    const total = document.getElementById('customer-history-total');
+    if (total) total.textContent = peso(openCustomer.credit.total_purchase);
+
+    box.innerHTML = pagedTable('cash-purchases', ['Date', 'Sale', 'Amount', 'Balance'],
+        rows.map((p) => [
+            escapeHtml(dayOfStamp(p.sale_date)),
             '#' + p.sale_id + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
             peso(p.final_amount) +
                 (Number(p.penalty_amount) > 0
@@ -3692,35 +3618,74 @@ function renderCustomerHistory(data) {
             Number(p.balance_due) > 0
                 ? '<span class="cell-due">' + peso(p.balance_due) + '</span>'
                 : '<span class="muted">Paid</span>'
-        ]), [2, 3], { empty: 'Nothing bought yet.', noun: 'sale' });
+        ]), [2, 3], {
+            empty: emptyHistoryNote('Nothing bought yet.', from, to, status !== 'all' || from || to),
+            noun: 'sale', info: false
+        });
+}
 
-    const payments = pagedTable('cash-payments', ['Date', 'Amount', 'How'],
-        data.payments.map((p) => [
-            escapeHtml(String(p.payment_date).slice(0, 10)),
+function renderCustomerPayments() {
+    const box = document.getElementById('customer-payments');
+    if (!box || !openCustomer) return;
+
+    const from = filterValue('pay-from');
+    const to = filterValue('pay-to');
+    const how = filterValue('pay-how') || 'all';
+
+    const rows = openCustomer.payments.filter((p) =>
+        dayInRange(dayOfStamp(p.payment_date), from, to) && (how === 'all' || p.payment_method === how));
+
+    const c = openCustomer.credit;
+    const total = document.getElementById('customer-payments-total');
+    if (total) {
+        total.innerHTML = Number(c.current_credit) > 0
+            ? '<span class="cell-due">' + peso(c.current_credit) + ' balance</span>'
+            : 'No balance';
+    }
+
+    box.innerHTML = pagedTable('cash-payments', ['Date', 'Amount', 'How'],
+        rows.map((p) => [
+            escapeHtml(dayOfStamp(p.payment_date)),
             peso(p.amount),
             escapeHtml(p.payment_method) +
                 (p.sale_id ? ' <span class="muted">#' + p.sale_id + '</span>' : '')
-        ]), [1], { empty: 'No payments recorded.', noun: 'payment' });
-
-    box.innerHTML =
-        '<div class="history-column">' +
-            '<h4 class="history-head">Purchase History' +
-            '<span class="history-total">' + peso(data.credit.total_purchase) + '</span></h4>' +
-            purchases +
-        '</div>' +
-        '<div class="history-column">' +
-            '<h4 class="history-head">Credit &amp; Payments' +
-            '<span class="history-total">' +
-                (Number(data.credit.current_credit) > 0
-                    ? '<span class="cell-due">' + peso(data.credit.current_credit) + ' balance</span>'
-                    : 'No balance') +
-            '</span></h4>' +
-            payments +
-        '</div>';
+        ]), [1], {
+            empty: emptyHistoryNote('No payments recorded.', from, to, how !== 'all' || from || to),
+            noun: 'payment', info: false
+        });
 }
 
-// the one thing a cashier can do about a limit: ask
-async function askForExtension() {
+// a card just opened: the filters start empty, and the method list is the
+// methods this customer has actually paid by
+function resetHistoryFilters() {
+    ['hist-from', 'hist-to', 'pay-from', 'pay-to'].forEach((id) => {
+        const box = document.getElementById(id);
+        if (box) box.value = '';
+    });
+    const status = document.getElementById('hist-status');
+    if (status) status.value = 'all';
+
+    const how = document.getElementById('pay-how');
+    if (how) {
+        const methods = [];
+        openCustomer.payments.forEach((p) => {
+            if (p.payment_method && methods.indexOf(p.payment_method) === -1) methods.push(p.payment_method);
+        });
+        methods.sort();
+        how.innerHTML = '<option value="all">All</option>' +
+            methods.map((m) => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
+        how.value = 'all';
+    }
+}
+
+// ---------- asking for a higher limit ----------
+// One form: the new limit and why. The reason is required, here and at the
+// server. The customer's card steps aside while the form is up (the form
+// would otherwise sit beneath it) and comes back if the request is dropped.
+const MINIMUM_LIMIT_REASON = 5;
+let limitReturnCustomer = null;
+
+function askForExtension() {
     if (!openCustomer) return;
 
     const c = openCustomer.credit;
@@ -3735,56 +3700,258 @@ async function askForExtension() {
         return;
     }
 
-    const asked = await askInput({
-        title: 'Ask for a higher limit',
-        eyebrow: 'Credit Management',
-        message: c.customer_name + ' may currently owe up to ' + peso(current) + ' and owes ' +
-                 peso(c.current_credit) + '. What should the new limit be? A manager decides it; ' +
-                 'nothing changes until they do.',
-        label: 'New limit',
-        type: 'number',
-        value: String(Math.round(current * 1.5)),
-        confirmLabel: 'Next',
-        check: (value) => {
-            const number = Number(value);
-            if (!value || !isFinite(number)) return 'Type a figure.';
-            if (number <= current) return 'It has to be more than the current ' + peso(current) + '.';
-            return null;
-        }
-    });
+    limitReturnCustomer = c.customer_id;
 
-    if (asked === false || asked === null) return;
+    document.getElementById('limit-sub').textContent = c.customer_name;
+    document.getElementById('limit-intro').textContent =
+        c.customer_name + ' may currently owe up to ' + peso(current) + ' and owes ' + peso(c.current_credit) +
+        '. A manager decides the new limit; nothing changes until they do.';
 
-    const reason = await askInput({
-        title: 'Why?',
-        eyebrow: 'Credit Management',
-        message: 'A manager reading this later will not have the customer in front of them. ' +
-                 'One line is enough.',
-        label: 'Reason',
-        placeholder: 'Regular contractor, pays on the 15th, needs cement for a job this week.',
-        confirmLabel: 'Send the request'
-    });
+    const form = document.getElementById('limit-form');
+    form.elements.requestedLimit.value = current > 0 ? String(Math.round(current * 1.5)) : '';
+    form.elements.reason.value = '';
 
-    if (reason === false || reason === null) return;
+    const send = document.getElementById('limit-send');
+    if (send) send.disabled = false;
+
+    renderLimitVerdict();
+    closeModal('customer-modal');
+    showModal('limit-modal');
+    setTimeout(() => form.elements.requestedLimit.focus(), 60);
+}
+
+// counts up to the minimum: "have you said enough yet"
+function renderLimitVerdict() {
+    const form = document.getElementById('limit-form');
+    const counter = document.getElementById('limit-counter');
+    const verdict = document.getElementById('limit-verdict');
+    if (!form || !counter) return;
+
+    const length = form.elements.reason.value.trim().length;
+
+    if (length === 0) {
+        counter.className = 'reason-counter';
+        counter.textContent = 'Required. One line is enough: a manager reading this later will not have the customer in front of them.';
+    } else if (length < MINIMUM_LIMIT_REASON) {
+        counter.className = 'reason-counter is-short';
+        counter.textContent = (MINIMUM_LIMIT_REASON - length) + ' more character' +
+            (MINIMUM_LIMIT_REASON - length === 1 ? '' : 's') + ' before this can be sent.';
+    } else {
+        counter.className = 'reason-counter is-good';
+        counter.textContent = 'That will do.';
+    }
+
+    // an earlier complaint goes once the form is being fixed
+    if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+}
+
+// Cancel puts the customer's card back, read afresh
+function closeLimitForm() {
+    closeModal('limit-modal');
+    const customerId = limitReturnCustomer;
+    limitReturnCustomer = null;
+    if (customerId) openCustomerCredit(customerId);
+}
+
+async function handleLimitRequest(event) {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    if (!openCustomer) return;
+
+    const c = openCustomer.credit;
+    const current = Number(c.credit_limit) || 0;
+    const form = document.getElementById('limit-form');
+    const verdict = document.getElementById('limit-verdict');
+
+    const complain = (text, field) => {
+        if (verdict) { verdict.className = 'delivery-verdict is-stop'; verdict.textContent = text; }
+        if (field) field.focus();
+    };
+
+    const typed = form.elements.requestedLimit.value;
+    const requested = Number(typed);
+    const reason = form.elements.reason.value.trim().replace(/\s+/g, ' ');
+
+    if (typed === '' || !isFinite(requested)) {
+        complain('Type the limit you are asking for.', form.elements.requestedLimit);
+        return;
+    }
+    if (requested <= current) {
+        complain('It has to be more than the current ' + peso(current) + '.', form.elements.requestedLimit);
+        return;
+    }
+    if (reason.length < MINIMUM_LIMIT_REASON) {
+        complain('Say why the limit should go up (at least ' + MINIMUM_LIMIT_REASON + ' characters). ' +
+            'The manager deciding it will not have the customer in front of them.', form.elements.reason);
+        return;
+    }
+
+    const send = document.getElementById('limit-send');
+    if (send) send.disabled = true;
 
     try {
         const response = await apiAskCreditExtension({
                 customerId: c.customer_id,
-                requestedLimit: Number(asked),
-                reason: String(reason).trim()
+                requestedLimit: requested,
+                reason: reason
             });
         const result = await response.json();
 
         if (!response.ok) {
-            if (!handleAuthFailure(response, result)) notifyError(result.error);
+            if (send) send.disabled = false;
+            if (!handleAuthFailure(response, result)) complain(result.error || 'The request was not sent.');
             return;
         }
 
         notifySuccess(result.message, 'Request sent');
-        closeModal('customer-modal');
+        limitReturnCustomer = null;
+        closeModal('limit-modal');
     } catch (error) {
+        if (send) send.disabled = false;
         notifyOffline();
     }
+}
+
+// ---------- Add Customer ----------
+// The one place an account is opened (the till no longer opens one from a
+// typed name). Name is required; the server refuses a name already on the
+// books, any case, and gives the account a credit limit of zero.
+function openAddCustomer() {
+    const form = document.getElementById('add-customer-form');
+    if (!form) return;
+
+    form.reset();
+    phoneFill(form.elements.phone, '');
+
+    const verdict = document.getElementById('add-customer-verdict');
+    if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+    const save = document.getElementById('add-customer-save');
+    if (save) save.disabled = false;
+
+    showModal('add-customer-modal');
+    setTimeout(() => form.elements.name.focus(), 60);
+}
+
+function cancelAddCustomer() { closeModal('add-customer-modal'); }
+
+async function handleAddCustomer(event) {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+
+    const form = document.getElementById('add-customer-form');
+    const verdict = document.getElementById('add-customer-verdict');
+    if (!form) return;
+
+    const complain = (text, field) => {
+        if (verdict) { verdict.className = 'delivery-verdict is-stop'; verdict.textContent = text; }
+        if (field) field.focus();
+    };
+
+    // "Maria  Santos" and "Maria Santos" are one customer
+    const name = form.elements.name.value.trim().replace(/\s+/g, ' ');
+    const phone = phoneToStore(form.elements.phone);
+    const phoneProblem = phoneComplaint(form.elements.phone);
+    const address = form.elements.address.value.trim();
+
+    if (name === '') { complain('A customer needs a name.', form.elements.name); return; }
+    if (phoneProblem) { complain(phoneProblem, form.elements.phone); return; }
+    if (address === '') { complain('A customer needs an address.', form.elements.address); return; }
+
+    // the first word is the first name, the rest the surname
+    const parts = name.split(' ');
+    const firstName = parts.shift();
+    const lastName = parts.join(' ');
+
+    const save = document.getElementById('add-customer-save');
+    if (save) save.disabled = true;
+
+    try {
+        const response = await apiCreateCustomer({
+                firstName: firstName, lastName: lastName, phone: phone, address: address });
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (save) save.disabled = false;
+            if (!handleAuthFailure(response, result)) {
+                complain(result.error || 'The customer was not added.', form.elements.name);
+            }
+            return;
+        }
+
+        closeModal('add-customer-modal');
+        notifySuccess(result.message, 'Customer added');
+
+        // the register's customer box reads the book afresh, and the list shows the new account
+        customerDirectoryLoaded = false;
+        const panel = getDataPanel('cash-credit');
+        if (panel) {
+            if (panel.state === 'closed' || panel.state === 'error') await panel.open();
+            else await panel.refresh();
+        }
+    } catch (error) {
+        if (save) save.disabled = false;
+        notifyOffline();
+    }
+}
+
+// ---------- Credit Payment, from the register ----------
+// Takes a payment against a customer's balance without going to Customers
+// Record: pick who owes, and the card's own flow follows -- the card opens on
+// Unpaid Sales, a sale opens the payment form, and the form offers Pay by QR.
+// A customer owing on one sale only goes straight to that sale's form.
+async function openCreditPaymentPicker() {
+    if (!canTakePayments()) return;
+
+    const search = document.getElementById('credit-pay-search');
+    if (search) search.value = '';
+
+    const list = document.getElementById('credit-pay-list');
+    if (list) list.innerHTML = '<p class="detail-empty">Reading the customers...</p>';
+
+    showModal('credit-pay-modal');
+    setTimeout(() => { if (search) search.focus(); }, 60);
+
+    // read fresh: a balance paid a moment ago must not be offered again
+    const loaded = await loadCustomerDirectory(true);
+    if (!loaded && list) {
+        list.innerHTML = '<p class="detail-empty">The customers could not be read. Check the connection and try again.</p>';
+        return;
+    }
+    renderCreditPayList();
+}
+
+function renderCreditPayList() {
+    const list = document.getElementById('credit-pay-list');
+    const search = document.getElementById('credit-pay-search');
+    if (!list) return;
+
+    const owing = customerDirectory.filter((c) => Number(c.current_credit) > 0);
+    if (owing.length === 0) {
+        list.innerHTML = '<p class="detail-empty">Nobody owes anything right now.</p>';
+        return;
+    }
+
+    const query = searchText(search ? search.value : '');
+    const found = owing
+        .filter((c) => query === '' || prefixMatch([c.name, c.phone], query))
+        .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    if (found.length === 0) {
+        list.innerHTML = '<p class="detail-empty">Nobody who owes matches <kbd>' + escapeHtml(query) + '</kbd>.</p>';
+        return;
+    }
+
+    list.innerHTML = found.map((c) =>
+        '<button type="button" class="credit-pay-item" onclick="pickCreditPayCustomer(' + c.id + ')">' +
+            '<span><span class="credit-pay-name">' + escapeHtml(c.name) + '</span>' +
+                '<span class="credit-pay-meta">' + escapeHtml(c.phone || 'No phone on file') + '</span></span>' +
+            '<span class="credit-pay-owes">owes ' + peso(c.current_credit) + '</span>' +
+        '</button>').join('');
+}
+
+async function pickCreditPayCustomer(customerId) {
+    closeModal('credit-pay-modal');
+    await openCustomerCredit(customerId, 'unpaid');
+
+    if (isModalOpen('customer-modal') && customerOpenSales.length === 1) payFromCustomerCard();
 }
 
 // ==========================================
@@ -3798,7 +3965,6 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
         buildSalesPanel();
         buildQrPaymentsPanel({ key: 'cqr', prefix: 'cqr', openSale: openReceipt, byStaff: false });
         buildRefundPanel();
-        buildSummaryPanel();
 
         // the schedule follows what the administrator switched on for this role
         configureDeliverySchedule({ showPanel: (panelId, title) => showCashierPanel(panelId, title) });
@@ -3818,6 +3984,7 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
         });
 
         onReturnReasonInput();
+        renderCatalogEmpty();
         renderCustomerVerdict();
         renderRefundProductVerdict();
         renderDeliveryAttached();

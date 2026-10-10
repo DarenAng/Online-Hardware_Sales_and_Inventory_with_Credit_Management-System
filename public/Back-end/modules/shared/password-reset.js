@@ -128,8 +128,9 @@ async function handleResetConfirm(event) {
         form.elements.code.focus();
         return;
     }
-    if (newPassword.length < 8) {
-        showResetAlert('A password needs at least 8 characters.');
+    const complaint = passwordComplaint(newPassword);
+    if (complaint) {
+        showResetAlert(complaint);
         form.elements.newPassword.focus();
         return;
     }
@@ -155,6 +156,7 @@ async function handleResetConfirm(event) {
 
         // back to the sign-in card, with the address filled in and the news beside it
         form.reset();
+        showPasswordRules();
         const email = document.getElementById('login-email');
         if (email) email.value = resetEmail;
         resetCard('sign-in');

@@ -1186,6 +1186,36 @@ function phoneComplaint(value) {
   return null;
 }
 
+// What a password someone chooses must have. Each rule has the words used in
+// the message and a test. The screens show the same list (format.js).
+// It applies when a password is set; passwords already set still sign in.
+const PASSWORD_RULES = [
+  { need: "at least 8 characters", ok: (password) => password.length >= 8 },
+  { need: "an uppercase letter", ok: (password) => /[A-Z]/.test(password) },
+  { need: "a lowercase letter", ok: (password) => /[a-z]/.test(password) },
+  { need: "a number", ok: (password) => /[0-9]/.test(password) },
+  { need: "a symbol such as ! ? - + . $ %", ok: (password) => /[^A-Za-z0-9\s]/.test(password) },
+  { need: "no spaces", ok: (password) => !/\s/.test(password) }
+];
+
+// null when the password follows every rule, otherwise the one sentence the
+// screen shows
+function passwordComplaint(password) {
+  if (typeof password !== "string" || password === "") {
+    return "Type a password.";
+  }
+
+  const missing = [];
+  for (const rule of PASSWORD_RULES) {
+    if (!rule.ok(password)) {
+      missing.push(rule.need);
+    }
+  }
+
+  if (missing.length === 0) return null;
+  return "A password needs " + missing.join(", ") + ".";
+}
+
 // "0917 123 4567" -> "+639171234567" (an empty box stays empty: null)
 function cleanPhone(value) {
   const digits = phoneDigits(value);
@@ -1193,6 +1223,30 @@ function cleanPhone(value) {
     return null;
   }
   return "+" + digits;
+}
+
+// Which staff member already has this phone number? Gives back their name
+// and role, or null. Every role counts, active or archived, like the email
+// check. Phones are stored as "+639171234567" (cleanPhone), so the typed
+// number is cleaned the same way before comparing. staffId leaves out the
+// account being edited.
+async function findPhoneOwner(phone, staffId) {
+  const stored = cleanPhone(phone);
+  if (stored === null) return null;   // an empty box has no owner
+
+  const [rows] = await db.query(
+    `SELECT s.full_name, r.role_name FROM staff s
+     JOIN roles r ON r.role_id = s.role_id
+     WHERE s.phone = ? AND s.staff_id <> ?
+     LIMIT 1`,
+    [stored, Number(staffId) || 0]);
+  return rows[0] || null;
+}
+
+// the sentence for a refused phone number; owner comes from findPhoneOwner
+function phoneTakenMessage(owner) {
+  return `That phone number is already used by ${owner.full_name} (${owner.role_name}). ` +
+         "Each staff account needs its own phone number.";
 }
 
 // The whole middle name is stored; the initial is worked out where it is
@@ -1206,12 +1260,30 @@ function cleanMiddleName(value) {
   return trimmed.slice(0, 100);
 }
 
-// A search matches the start of a field (LIKE 'text%'), the same rule as
-// prefixMatch in shared/data-panel.js. % and _ are escaped.
+// A search matches the start of a field (LIKE 'text%'). % and _ are escaped.
 // Example: searchPrefix("50%") -> "50\\%%"  (the user's % is not a wildcard)
 function searchPrefix(text) {
   // put a backslash in front of every \ % and _ the user typed
   return String(text).replace(/[\\%_]/g, "\\$&") + "%";
+}
+
+// The same rule as startsAWord in shared/data-panel.js: a column matches when
+// it starts with the text or one of its words does ("c" finds "Carl" and
+// "Mark Cole", not "Lace"). Pass the column names and the typed text; the
+// two patterns for each column are added to params, and the SQL to put in
+// WHERE is returned.
+// Example: wordStartSearch(["u.email"], "ca", params)
+//   -> "(u.email LIKE ? OR u.email LIKE ?)"   and "ca%" and "% ca%" go into params
+function wordStartSearch(columns, text, params) {
+  const atStart = searchPrefix(text);
+  const afterSpace = "% " + atStart;
+
+  const tests = [];
+  for (const column of columns) {
+    tests.push(column + " LIKE ?", column + " LIKE ?");
+    params.push(atStart, afterSpace);
+  }
+  return "(" + tests.join(" OR ") + ")";
 }
 
 // A TIN is nine digits and a branch code, 000-000-000-00000. An older
@@ -1420,6 +1492,10 @@ function numberSetting(value, defaultValue) {
 
 const SESSION_HOURS = numberSetting(process.env.SESSION_HOURS, 8);
 
+// how long a sign-in may sit unused before it ends; SESSION_IDLE_MINUTES in .env.
+// SESSION_HOURS above stays the longest any one sign-in can last.
+const SESSION_IDLE_MINUTES = numberSetting(process.env.SESSION_IDLE_MINUTES, 30);
+
 // Wrong passwords in a row before an account is held, and for how long. An
 // administrator resetting the password releases it sooner. Both in .env.
 const LOGIN_MAX_ATTEMPTS = numberSetting(process.env.LOGIN_MAX_ATTEMPTS, 3);
@@ -1434,6 +1510,17 @@ const LOGIN_HOLD_MINUTES = numberSetting(process.env.LOGIN_HOLD_MINUTES, 15);
 // keeps its row for a while with the reason, so the screen left behind is
 // told why when it next asks.
 const SESSION_MS = SESSION_HOURS * 60 * 60 * 1000;
+const SESSION_IDLE_MS = SESSION_IDLE_MINUTES * 60 * 1000;
+
+// what a screen is told when its sign-in ran out of idle time
+const IDLE_ENDED_REASON =
+  `You were signed out after ${SESSION_IDLE_MINUTES} minutes of inactivity. Please sign in again.`;
+
+// When a sign-in that was used at "now" runs out: the idle time later, but
+// never past SESSION_HOURS after it started. expires_at holds this.
+function sessionExpiry(startedAt, now) {
+  return Math.min(now + SESSION_IDLE_MS, startedAt + SESSION_MS);
+}
 
 // how stale last_seen may get before a request writes it again: one write a
 // minute per screen instead of one per request
@@ -1457,8 +1544,23 @@ async function startSession(user) {
        (token_hash, staff_id, user_id, role_id, role_name, email, started_at, last_seen, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [tokenHash(token), user.staff_id, user.user_id, user.role_id, user.role_name, user.email,
-     now, now, now + SESSION_MS]);
+     now, now, sessionExpiry(now, now)]);
   return token;
+}
+
+// Over https (Vercel) the cookie is marked Secure so it never travels in the
+// clear; a PC in the shop serves plain http, where a Secure cookie would not
+// be sent back at all. COOKIE_SECURE=1 forces it behind your own https proxy.
+const SECURE_COOKIE = Boolean(process.env.VERCEL) || process.env.COOKIE_SECURE === "1";
+
+function setSessionCookie(response, token) {
+  response.cookie("sid", token, {
+    httpOnly: true,          // JavaScript on the page cannot read it
+    sameSite: "strict",      // not sent from another site
+    secure: SECURE_COOKIE,   // only over https (on Vercel)
+    maxAge: SESSION_MS,
+    path: "/"
+  });
 }
 
 function readCookie(request, name) {
@@ -1493,18 +1595,42 @@ async function sessionState(request) {
   if (row.ended_reason) return { endedReason: row.ended_reason };
 
   const now = Date.now();
+  const startedAt = Number(row.started_at);
+
   if (Number(row.expires_at) < now) {
-    await db.query("DELETE FROM user_sessions WHERE token_hash = ?", [hash]);
-    return {};
+    // past the longest a sign-in may last: simply gone
+    if (now >= startedAt + SESSION_MS) {
+      await db.query("DELETE FROM user_sessions WHERE token_hash = ?", [hash]);
+      return {};
+    }
+
+    // otherwise it sat unused too long: ended with the reason, so the screen can say why
+    await db.query(
+      "UPDATE user_sessions SET ended_reason = ?, ended_at = ? WHERE token_hash = ? AND ended_reason IS NULL",
+      [IDLE_ENDED_REASON, now, hash]);
+    return { endedReason: IDLE_ENDED_REASON };
   }
 
-  // sliding window, written at most twice a minute
+  // The pages ask in the background too (live updates, the heartbeat) and mark
+  // those asks with X-Background: 1 when nobody has touched the page lately.
+  // Such an ask still shows the person is at a screen (last_seen), but it
+  // does not keep the sign-in alive (expires_at); only real use does.
+  const background = request.headers["x-background"] === "1";
+
   let lastSeen = Number(row.last_seen);
-  if (now - lastSeen > SESSION_TOUCH_MS) {
-    lastSeen = now;
+  let expiresAt = Number(row.expires_at);
+  const newExpiry = sessionExpiry(startedAt, now);
+
+  // both are written at most twice a minute
+  const seenIsOld = now - lastSeen > SESSION_TOUCH_MS;
+  const expiryIsOld = !background && newExpiry - expiresAt > SESSION_TOUCH_MS;
+
+  if (seenIsOld || expiryIsOld) {
+    if (seenIsOld) lastSeen = now;
+    if (expiryIsOld) expiresAt = newExpiry;
     await db.query(
       "UPDATE user_sessions SET last_seen = ?, expires_at = ? WHERE token_hash = ? AND ended_reason IS NULL",
-      [now, now + SESSION_MS, hash]);
+      [lastSeen, expiresAt, hash]);
   }
 
   return {
@@ -1515,9 +1641,9 @@ async function sessionState(request) {
       roleId: row.role_id,
       roleName: row.role_name,
       email: row.email,
-      startedAt: Number(row.started_at),
+      startedAt: startedAt,
       lastSeen: lastSeen,
-      expiresAt: Number(row.expires_at)
+      expiresAt: expiresAt
     }
   };
 }
@@ -1754,6 +1880,7 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/roles$/,                          [ADMIN]],
   ["GET",   /^\/api\/users$/,                          [ADMIN]],
   ["GET",   /^\/api\/users\/email-check$/,              [ADMIN]],
+  ["GET",   /^\/api\/users\/phone-check$/,              [ADMIN]],
   ["GET",   /^\/api\/users\/\d+$/,                     [ADMIN]],
   // the review step creates nothing but does make a readable password
   ["POST",  /^\/api\/users\/draft$/,                    [ADMIN]],
@@ -1865,7 +1992,9 @@ const ACCESS_RULES = [
 
   // --- returns, damage and refunds ---
   ["GET",   /^\/api\/returns$/,                        [CLERK, CASHIER]],
-  ["POST",  /^\/api\/returns$/,                        [CLERK, CASHIER]],
+  // the driver files a refund at the customer's door; the route checks it is
+  // a delivery they took, and only the one report type (see inventory-clerk.js)
+  ["POST",  /^\/api\/returns$/,                        [CLERK, CASHIER, DRIVER]],
   ["POST",  /^\/api\/returns\/\d+\/resolve$/,          [CLERK]],
 
   // --- credit management ---
@@ -1967,7 +2096,7 @@ const FEATURES = [
   { key: "pos", name: "New Transaction", module: "Point of Sale",
     description: "The register: ring a sale up, take the payment, book the delivery.",
     available: [CASHIER], defaults: [CASHIER],
-    routes: [["POST", /^\/api\/sales$/], ["POST", /^\/api\/deliveries$/], ["POST", /^\/api\/customers$/],
+    routes: [["POST", /^\/api\/sales$/], ["POST", /^\/api\/deliveries$/],
              ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
              ["POST", /^\/api\/qr-payments\/\d+\/cancel$/]] },
   { key: "refunds", name: "Refunds", module: "Point of Sale",
@@ -1989,12 +2118,13 @@ const FEATURES = [
 
   // --- credit ---
   { key: "credit", name: "Customer Credit", module: "Credit",
-    description: "Every credit account and its standing; the cashier's copy files extension requests, the manager's decides limits.",
+    description: "Every credit account and its credit rating; the cashier's copy adds customers and files extension requests, the manager's decides limits.",
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
     routes: [["GET", /^\/api\/credit\/customers$/], ["GET", /^\/api\/credit\/customers\/\d+$/],
              ["PUT", /^\/api\/credit\/customers\/\d+\/limit$/], ["GET", /^\/api\/customers\/\d+\/history$/],
              ["GET", /^\/api\/credit\/policy$/], ["PUT", /^\/api\/credit\/policy$/],
-             ["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests$/]] },
+             ["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests$/],
+             ["POST", /^\/api\/customers$/]] },
   { key: "debt-payments", name: "Debt Payments", module: "Credit",
     description: "Take a payment against what a customer still owes, sale by sale, from the customer's card.",
     available: [CASHIER], defaults: [CASHIER],
@@ -2081,6 +2211,10 @@ const FEATURES = [
              ["PATCH", /^\/api\/deliveries\/\d+\/status$/],
              ["POST", /^\/api\/delivery\/\d+\/claim$/],
              ["POST", /^\/api\/delivery\/\d+\/payment$/]] },
+  { key: "delivery-refunds", name: "Refund at the Door", module: "Deliveries",
+    description: "Record a refund for an item the customer turns away at the door; the stockroom inspects it before it can be sold again.",
+    available: [DRIVER], defaults: [DRIVER],
+    routes: [["POST", /^\/api\/returns$/]] },
   { key: "delivery-reports", name: "Delivery Reports", module: "Deliveries",
     description: "The driver's deliveries and collections over a period.",
     available: [DRIVER], defaults: [DRIVER],
@@ -2497,9 +2631,9 @@ const USER_SELECT = `
 registerLoginRoutes(app, {
   db, writeAuditLog,
   hashPassword, isHashed, verifyPassword,
-  SESSION_HOURS, startSession, endSession, endSessionsForStaff,
-  signOutAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
-  LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES
+  startSession, setSessionCookie, endSession, endSessionsForStaff,
+  renewSessionAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
+  LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES, passwordComplaint
 });
 
 // ==========================================
@@ -2553,15 +2687,21 @@ app.get("/api/events/status", async (request, response) => {
 });
 
 
-// A changed password ends every session, this one included: the old password
-// may be known to somebody else, and signing in with the new one straight
-// away is what proves it was typed right.
+// A changed password ends every session on the old one, since the old password
+// may be known to somebody else. The person who changed it stays signed in:
+// this screen gets a new session in place of the one just ended.
 const PASSWORD_CHANGED =
   "Your password was changed. Sign in again with the new one.";
 
-async function signOutAfterPasswordChange(request, response) {
-  await endSessionsForStaff(request.actor.staffId, null, PASSWORD_CHANGED);
-  response.clearCookie("sid", { path: "/" });
+async function renewSessionAfterPasswordChange(request, response) {
+  const actor = request.actor;
+  await endSessionsForStaff(actor.staffId, null, PASSWORD_CHANGED);
+
+  const token = await startSession({
+    staff_id: actor.staffId, user_id: actor.userId, role_id: actor.roleId,
+    role_name: actor.roleName, email: actor.email
+  });
+  setSessionCookie(response, token);
 }
 
 // ==========================================
@@ -2660,6 +2800,17 @@ app.put("/api/me", notOwnDetailsIfAdmin, async (request, response) => {
   if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
   try {
+    // a new phone number must not belong to another staff member; keeping
+    // the one on file is always fine
+    const [mine] = await db.query("SELECT phone FROM staff WHERE staff_id = ?", [actor.staffId]);
+    const oldPhone = mine[0] ? mine[0].phone : null;
+    if (cleanPhone(phone) !== oldPhone) {
+      const phoneOwner = await findPhoneOwner(phone, actor.staffId);
+      if (phoneOwner) {
+        return response.status(409).json({ error: phoneTakenMessage(phoneOwner) });
+      }
+    }
+
     // the role and the email are the ones on file, never from the browser
     const output = await callProcedure(
       "CALL sp_update_staff_account(?, ?, ?, ?, ?, ?, ?, @status_code, @message)",
@@ -2687,10 +2838,6 @@ app.post("/api/me/password", notOwnCredentials, async (request, response) => {
   const { currentPassword, newPassword } = request.body;
   const actor = request.actor;
 
-  if (typeof newPassword !== "string" || newPassword.length < 8) {
-    return response.status(400).json({ error: "The new password must contain at least 8 characters" });
-  }
-
   if (typeof currentPassword !== "string" || currentPassword === "") {
     return response.status(400).json({ error: "Enter your current password" });
   }
@@ -2699,6 +2846,11 @@ app.post("/api/me/password", notOwnCredentials, async (request, response) => {
   // database is asked
   if (newPassword === currentPassword) {
     return response.status(400).json({ error: "The new password must be different from your current password" });
+  }
+
+  const complaint = passwordComplaint(newPassword);
+  if (complaint) {
+    return response.status(400).json({ error: complaint });
   }
 
   try {
@@ -2718,10 +2870,10 @@ app.post("/api/me/password", notOwnCredentials, async (request, response) => {
     );
 
     await writeAuditLog(request, "CHANGE_OWN_PASSWORD",
-      `${actor.email} changed their own password; every session on the old one was ended`);
+      `${actor.email} changed their own password; every other session on the old one was ended`);
 
-    await signOutAfterPasswordChange(request, response);
-    response.json({ message: "Your password was changed.", signedOut: true });
+    await renewSessionAfterPasswordChange(request, response);
+    response.json({ message: "Your password was changed." });
   } catch (error) {
     console.error("Own password change failed:", error.message);
     response.status(500).json({ error: "Unable to change your password" });
@@ -2735,9 +2887,10 @@ app.post("/api/me/password", notOwnCredentials, async (request, response) => {
 // Each route file gets "app" plus an object with the helpers it needs.
 // { db, callProcedure } is short for { db: db, callProcedure: callProcedure }.
 const adminModule = registerAdminRoutes(app, {
-  db, callProcedure, getActorId, writeAuditLog, fieldChanges, searchPrefix,
+  db, callProcedure, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
   requireRole, publishChange, ADMIN, USER_SELECT, withPresence, notOwnAccount,
   endSessionsForStaff, hashPassword, generatePassword, phoneComplaint, cleanPhone, cleanMiddleName,
+  findPhoneOwner, phoneTakenMessage,
   tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
   sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
   FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom
@@ -2773,7 +2926,7 @@ const DELIVERY_PHONE_SQL = `
 // Registered here, after SALE_CUSTOMER_SQL, because the deps are read eagerly.
 // ==========================================
 const managerModule = registerManagerRoutes(app, {
-  db, callProcedure, getActorId, writeAuditLog, fieldChanges, searchPrefix,
+  db, callProcedure, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
   requireRole, MANAGER, LOW_STOCK_EFFECTIVE_SQL, isDateText, SALE_CUSTOMER_SQL,
   proceduresAreMissing, publishChange,
   CLERK, CASHIER, DRIVER, cleanPhone, phoneComplaint
@@ -2794,7 +2947,7 @@ const qrPayments = registerQrPaymentRoutes(app, {
 // and moving a delivery, the end-of-shift summary, payments on a sale
 // ==========================================
 registerCashierRoutes(app, {
-  db, callProcedure, getActorId, DRIVER, isDateText, SALE_CUSTOMER_SQL,
+  db, callProcedure, getActorId, DRIVER, CASHIER, isDateText, SALE_CUSTOMER_SQL,
   phoneComplaint, cleanPhone, qrPayments
 });
 
@@ -2812,7 +2965,7 @@ registerDeliveryRoutes(app, {
 // and damage reports, and the notifications every role reads
 // ==========================================
 registerInventoryRoutes(app, {
-  db, callProcedure, getActorId, writeAuditLog, fieldChanges, DEFAULT_STORE_SETTINGS, CASHIER,
+  db, callProcedure, getActorId, writeAuditLog, fieldChanges, DEFAULT_STORE_SETTINGS, CASHIER, DRIVER,
   phoneComplaint, cleanPhone, publishChange
 });
 

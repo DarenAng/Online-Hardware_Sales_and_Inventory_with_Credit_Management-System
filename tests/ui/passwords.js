@@ -64,8 +64,8 @@ function isOurProblem(text) {
 
   // the screen checks the obvious before the server is asked
   await login.fill("#reset-code", "12345");
-  await login.fill("#reset-new-password", "a-new-password");
-  await login.fill("#reset-confirm-password", "a-new-password");
+  await login.fill("#reset-new-password", "A-new-password-1");
+  await login.fill("#reset-confirm-password", "A-new-password-1");
   await login.click("#reset-confirm-btn");
   await login.waitForTimeout(200);
   check("a code that is not six digits is refused on the screen",
@@ -79,16 +79,16 @@ function isOurProblem(text) {
     /do not match/.test(await login.textContent("#reset-alert")));
 
   await login.fill("#reset-code", "999999");
-  await login.fill("#reset-new-password", "a-new-password");
-  await login.fill("#reset-confirm-password", "a-new-password");
+  await login.fill("#reset-new-password", "A-new-password-1");
+  await login.fill("#reset-confirm-password", "A-new-password-1");
   await login.click("#reset-confirm-btn");
   await login.waitForTimeout(400);
   check("a wrong code is refused without saying whether the account exists",
     /not right, or it has stopped working/.test(await login.textContent("#reset-alert")));
 
   await login.fill("#reset-code", "123456");
-  await login.fill("#reset-new-password", "a-new-password");
-  await login.fill("#reset-confirm-password", "a-new-password");
+  await login.fill("#reset-new-password", "A-new-password-1");
+  await login.fill("#reset-confirm-password", "A-new-password-1");
   await login.click("#reset-confirm-btn");
   await login.waitForTimeout(400);
   check("the right code saves the password and returns to sign in",

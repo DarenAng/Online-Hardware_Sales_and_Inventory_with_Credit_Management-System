@@ -71,11 +71,14 @@ function statusBadge(text, label) {
     const good = ['Paid', 'Delivered', 'In Stock', 'Active', 'Received'];
     const bad = ['Unpaid', 'Failed', 'Out of Stock', 'Inactive', 'Cancelled'];
     const warn = ['Partial', 'Low Stock', 'Delayed', 'Pending', 'For Approval', 'In Transit', 'Out for Delivery'];
+    // a purchase order the supplier has taken on: in hand, not yet at the store
+    const info = ['PO Accepted', 'On the way'];
 
     let tone = 'badge-neutral';
     if (good.indexOf(text) !== -1) tone = 'badge-success';
     else if (bad.indexOf(text) !== -1) tone = 'badge-danger';
     else if (warn.indexOf(text) !== -1) tone = 'badge-warning';
+    else if (info.indexOf(text) !== -1) tone = 'badge-info';
 
     return '<span class="badge ' + tone + '">' + escapeHtml(label || statusWord(text)) + '</span>';
 }
@@ -479,3 +482,58 @@ function receiptHtml(shop, parts) {
     });
     return html;
 }
+
+// ==========================================
+// PASSWORD RULES
+// The same list as PASSWORD_RULES in server.js, which has the last word.
+// Every box that sets a password has a checklist under it:
+//   <ul class="password-rules" data-rules-for="the-box-id"></ul>
+// ==========================================
+const PASSWORD_RULES = [
+    { need: 'at least 8 characters', ok: (password) => password.length >= 8 },
+    { need: 'an uppercase letter', ok: (password) => /[A-Z]/.test(password) },
+    { need: 'a lowercase letter', ok: (password) => /[a-z]/.test(password) },
+    { need: 'a number', ok: (password) => /[0-9]/.test(password) },
+    { need: 'a symbol such as ! ? - + . $ %', ok: (password) => /[^A-Za-z0-9\s]/.test(password) },
+    { need: 'no spaces', ok: (password) => !/\s/.test(password) }
+];
+
+// null when the password follows every rule, otherwise the one sentence to show
+function passwordComplaint(password) {
+    const text = String(password || '');
+    if (text === '') return 'Type a password.';
+
+    const missing = [];
+    for (const rule of PASSWORD_RULES) {
+        if (!rule.ok(text)) {
+            missing.push(rule.need);
+        }
+    }
+
+    if (missing.length === 0) return null;
+    return 'A password needs ' + missing.join(', ') + '.';
+}
+
+// draws every checklist on the page; a rule that is met gets a tick and turns green
+function showPasswordRules() {
+    document.querySelectorAll('ul[data-rules-for]').forEach((list) => {
+        const box = document.getElementById(list.getAttribute('data-rules-for'));
+        const typed = box ? box.value : '';
+
+        list.innerHTML = PASSWORD_RULES.map((rule) => {
+            const met = typed !== '' && rule.ok(typed);
+            const words = rule.need.charAt(0).toUpperCase() + rule.need.slice(1);
+            return '<li class="' + (met ? 'is-met' : '') + '">' + escapeHtml(words) + '</li>';
+        }).join('');
+    });
+}
+
+// the checklist follows the box as it is typed in
+document.addEventListener('input', function (event) {
+    if (event.target && event.target.id &&
+        document.querySelector('ul[data-rules-for="' + event.target.id + '"]')) {
+        showPasswordRules();
+    }
+});
+
+document.addEventListener('DOMContentLoaded', showPasswordRules);

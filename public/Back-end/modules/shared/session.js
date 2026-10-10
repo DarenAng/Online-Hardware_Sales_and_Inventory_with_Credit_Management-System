@@ -164,8 +164,10 @@ async function handlePasswordChange(event) {
         return;
     }
 
-    if (newPassword.length < 8) {
-        notifyWarning('A password needs at least 8 characters.', 'Password not saved');
+    // the same rules the server checks (passwordComplaint in format.js)
+    const complaint = passwordComplaint(newPassword);
+    if (complaint) {
+        notifyWarning(complaint, 'Password not saved');
         return;
     }
 
@@ -178,9 +180,11 @@ async function handlePasswordChange(event) {
             return;
         }
 
-        signOutWithReason(result.message
-            ? result.message.replace(/[.!]?$/, '.') + ' Sign in again with the new one.'
-            : 'Your password was changed. Sign in again with the new one.', 'good');
+        // the server kept this screen signed in on a new session, so carry on
+        // straight to the dashboard
+        currentUser.must_change_password = false;
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        window.location.replace(landingPageFor(currentUser));
     } catch (error) {
         notifyError('The server is not answering. Start it with npm start in the project folder, then try again.', 'Cannot reach the server');
     }
@@ -212,6 +216,7 @@ function signOutWithReason(reason, tone) {
 
 function logout() {
     localStorage.removeItem('currentUser');
+    forgetLoadedPanels();
     apiSignOut();
 }
 
@@ -233,6 +238,8 @@ function initializeSession() {
             sendSignedInPersonOn(currentUser);
             return;
         }
+        // every way of signing out ends here, so nobody inherits loaded tables
+        forgetLoadedPanels();
         showRememberedSignOutReason();
         return;
     }
@@ -283,6 +290,7 @@ function initializeSession() {
     applyCurrentUserToPage(currentUser);
     applyAccessMarks(currentUser);
     startHeartbeat();
+    startIdleWatch();
     holdAgainstBack();
 
     if (typeof startLiveSync === 'function') startLiveSync();
@@ -365,6 +373,160 @@ function startHeartbeat() {
     document.addEventListener('visibilitychange', function () {
         if (!document.hidden) sendHeartbeat();
     });
+}
+
+// ==========================================
+// SIGNING OUT WHEN THE SCREEN IS NOT USED
+//
+// The mouse, the keyboard, scrolling and touch count as using the screen. The
+// time of the latest one is kept in localStorage, so every tab of the site
+// shares it: working in one tab keeps the others signed in. A minute before
+// the limit a card warns; at the limit the person is signed out and sent to
+// the sign-in page with the reason. The server enforces the same limit
+// (SESSION_IDLE_MINUTES in server.js), counting only asks sent while the
+// screen was in use: apiHeaders marks the others X-Background.
+// ==========================================
+let IDLE_LIMIT_MS = 30 * 60 * 1000;   // unused this long and the sign-in ends
+let IDLE_WARNING_MS = 60 * 1000;      // the card shows this long before that
+
+const ACTIVITY_KEY = 'lastActivity';
+const ACTIVITY_SAVE_MS = 2000;            // write to localStorage at most this often
+const ACTIVE_LATELY_MS = 70 * 1000;       // a bit longer than the heartbeat gap
+
+let lastActivityAt = Date.now();          // this tab's own copy; opening the page counts
+let lastActivitySavedAt = 0;
+let idleTimer = null;
+let idleWarningShown = false;
+
+// the time of the latest activity in any tab (this tab's own copy if localStorage is blocked)
+function latestActivity() {
+    let saved = 0;
+    try {
+        saved = Number(localStorage.getItem(ACTIVITY_KEY)) || 0;
+    } catch (error) { /* blocked: this tab's own copy is all there is */ }
+
+    return Math.max(lastActivityAt, saved);
+}
+
+function noteActivity(saveNow) {
+    const now = Date.now();
+    lastActivityAt = now;
+
+    if (!saveNow && now - lastActivitySavedAt < ACTIVITY_SAVE_MS) return;
+    lastActivitySavedAt = now;
+
+    try {
+        localStorage.setItem(ACTIVITY_KEY, String(now));
+    } catch (error) { /* blocked */ }
+}
+
+// used by apiHeaders: has anybody touched the site (in any tab) in the last minute or so?
+function userWasActiveLately() {
+    return Date.now() - latestActivity() < ACTIVE_LATELY_MS;
+}
+
+function onUserActivity() {
+    // while the warning is up only its own button counts, so the card cannot
+    // be dismissed by a bump of the mouse
+    if (idleWarningShown) return;
+    noteActivity(false);
+}
+
+function startIdleWatch() {
+    if (idleTimer) return;
+
+    noteActivity(true);
+
+    // capture: scroll does not bubble, so listen on the way down to catch every scroller
+    ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'].forEach(function (name) {
+        document.addEventListener(name, onUserActivity, { capture: true, passive: true });
+    });
+
+    idleTimer = setInterval(checkIdle, 1000);
+}
+
+function checkIdle() {
+    const idleFor = Date.now() - latestActivity();
+
+    if (idleFor >= IDLE_LIMIT_MS) {
+        signOutForInactivity();
+    } else if (idleFor >= IDLE_LIMIT_MS - IDLE_WARNING_MS) {
+        showIdleWarning(IDLE_LIMIT_MS - idleFor);
+    } else if (idleWarningShown) {
+        hideIdleWarning();   // another tab was used meanwhile
+    }
+}
+
+function buildIdleWarning() {
+    let modal = document.getElementById('idle-modal');
+
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.id = 'idle-modal';
+        modal.setAttribute('data-modal-locked', '');   // Escape does not close it
+        modal.innerHTML = `
+            <div class="modal-box ask-box">
+                <div class="modal-head">
+                    <div class="modal-identity">
+                        <div class="avatar">!</div>
+                        <div>
+                            <h3>Still there?</h3>
+                            <span class="modal-role">Signing out soon</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <p class="ask-text">You will be signed out in <strong id="idle-seconds">60</strong>
+                        seconds because this screen has not been used for a while.</p>
+                </div>
+                <div class="modal-foot">
+                    <button type="button" class="btn btn-ghost" onclick="signOutForInactivity()">Sign out now</button>
+                    <button type="button" class="btn btn-accent" onclick="stayAfterWarning()">Stay signed in</button>
+                </div>
+            </div>`;
+    }
+
+    // added last, so it sits above any other card that is open
+    document.body.appendChild(modal);
+    return modal;
+}
+
+function showIdleWarning(msLeft) {
+    if (!idleWarningShown) {
+        buildIdleWarning();
+        showModal('idle-modal');
+        idleWarningShown = true;
+    }
+
+    const seconds = Math.max(1, Math.ceil(msLeft / 1000));
+    const number = document.getElementById('idle-seconds');
+    if (number) number.textContent = seconds;
+}
+
+function hideIdleWarning() {
+    idleWarningShown = false;
+    closeModal('idle-modal');
+}
+
+// "Stay signed in": counts as use, and tells the server straight away
+function stayAfterWarning() {
+    hideIdleWarning();
+    noteActivity(true);
+    sendHeartbeat();
+}
+
+function signOutForInactivity() {
+    clearInterval(idleTimer);
+    idleTimer = null;
+    hideIdleWarning();
+
+    const minutes = Math.max(1, Math.round(IDLE_LIMIT_MS / 60000));
+    localStorage.removeItem('currentUser');
+    rememberSignOutReason('You were signed out after ' + minutes +
+        ' minutes of inactivity. Please sign in again.');
+    apiSignOut();
+    window.location.replace('Login.html');
 }
 
 // Fallback spelling of a name before /api/me answers: first, middle initial,

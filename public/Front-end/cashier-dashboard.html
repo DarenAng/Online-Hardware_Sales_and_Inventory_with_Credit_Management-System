@@ -46,7 +46,6 @@
                 </li>
                 <li data-feature="credit"><a href="#" data-panel-link="panel-customers" onclick="showCustomers(event)"><i class="bi bi-person-vcard nav-icon" aria-hidden="true"></i>Customers Record</a></li>
                 <li data-feature="sales-report"><a href="#" data-panel-link="panel-salesreport" onclick="showSalesReport(event)"><i class="bi bi-bar-chart nav-icon" aria-hidden="true"></i>Sales Report</a></li>
-                <li data-feature="daily-summary"><a href="#" data-panel-link="panel-summary" onclick="showDailySummary(event)"><i class="bi bi-calendar-check nav-icon" aria-hidden="true"></i>Daily Summary</a></li>
                 <!-- drawn by shared/delivery-schedule.js; hidden until features.js hears the role has it -->
                 <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
                     Delivery Schedule</a></li>
@@ -79,12 +78,12 @@
                                 </div>
                             </div>
 
-                            <!-- two letters or more, matched at the start of a word ("ad" finds Adhesive, not Shade) -->
+                            <!-- one letter or more, matched at the start of a word ("ad" finds Adhesive, not Shade) -->
                             <div class="panel-toolbar">
                                 <div class="search-wrap">
                                     <input type="search" class="form-control search-input" id="catalog-search"
                                            placeholder="Search a product, category, or brand"
-                                           oninput="onCatalogSearchInput(event)" onkeydown="onCatalogSearchKey(event)" title="Type at least two letters to search">
+                                           oninput="onCatalogSearchInput(event)" onkeydown="onCatalogSearchKey(event)" title="Type one letter or more; it finds words that start with it">
                                 </div>
                                 <div class="toolbar-field">
                                     <label for="catalog-category">Category</label>
@@ -97,10 +96,20 @@
                             <div id="catalog-grid" class="catalog-scroll"></div>
                         </div>
 
+                        <!-- THE ORDER: its lines and what they come to, and nothing else. The
+                             customer, the payment and the delivery are asked for in the
+                             Payment window (#checkout-modal, below), opened by Proceed to
+                             Payment. -->
                         <div class="order-summary" id="order-summary">
                             <div class="panel-head">
                                 <div>
                                     <h3>Order</h3>
+                                </div>
+                                <!-- a payment against a customer's unpaid balance, taken here
+                                     instead of in Customers Record; held with debt-payments -->
+                                <div class="panel-actions">
+                                    <button type="button" class="btn btn-sm" id="credit-payment-btn"
+                                            data-feature="debt-payments" onclick="openCreditPaymentPicker()">Credit Payment</button>
                                 </div>
                             </div>
 
@@ -108,103 +117,11 @@
 
                             <div class="cart-totals" id="cart-totals"></div>
 
-                            <form id="checkout-form" onsubmit="handleCheckout(event)" autocomplete="off">
-                                <!-- THE CUSTOMER, TYPED -- a matching name attaches the account; any other
-                                     name opens one when the sale is rung up -->
-                                <div class="form-group">
-                                    <label for="customer-name">Customer</label>
-                                    <div class="suggest-wrap">
-                                        <input type="text" id="customer-name" name="customerName"
-                                               class="form-control" autocomplete="off"
-                                               placeholder="Walk-in — type the customer's name"
-                                               role="combobox" aria-expanded="false"
-                                               aria-controls="customer-suggest" aria-autocomplete="list"
-                                               oninput="onCustomerInput(this.value)"
-                                               onfocus="onCustomerInput(this.value)"
-                                               onkeydown="onCustomerKey(event)">
-                                        <input type="hidden" name="customerId" value="">
-                                        <button type="button" class="suggest-clear" id="customer-clear"
-                                                onclick="clearCustomer()" aria-label="Clear the customer"
-                                                hidden>&times;</button>
-                                        <ul class="suggest-list" id="customer-suggest" role="listbox" hidden></ul>
-                                    </div>
-                                    <p class="customer-verdict" id="customer-verdict"></p>
-                                </div>
-
-                                <div class="credit-strip" id="credit-strip" style="display: none;"></div>
-                                <div class="form-group">
-                                        <label for="pay-method">Payment method</label>
-                                        <select id="pay-method" name="paymentMethod" class="form-control" onchange="onPaymentMethodChange(this.value)" required>
-                                            <option value="Cash">Cash</option>
-                                            <option value="GCash">GCash</option>
-                                            <option value="PayMaya">PayMaya</option>
-                                            <option value="PayPal">PayPal</option>
-                                            <option value="Cheque">Cheque</option>
-                                            <option value="Bank Transfer">Bank Transfer</option>
-                                            <option value="COD">Cash on Delivery</option>
-                                            <option value="Credit">Credit</option>
-                                        </select>
-                                </div>
-                                <div class="form-group" id="tender-field">
-                                    <label for="pay-amount">Amount entered</label>
-                                    <input type="number" id="pay-amount" name="amountPaid" class="form-control" min="0" step="0.01" placeholder="0.00" oninput="renderCart()">
-                                </div>
-
-                                <!-- PART PAYMENT -- what is handed over is taken now; the rest goes on the book -->
-                                <div id="downpayment-field" style="display: none;">
-                                    <div class="grid-2">
-                                        <div class="form-group">
-                                            <label for="pay-down">Paid now <span class="label-hint">optional</span></label>
-                                            <input type="number" id="pay-down" name="downPayment" class="form-control"
-                                                   min="0" step="0.01" placeholder="0.00" oninput="renderCart()">
-                                        </div>
-                                        <div class="form-group">
-                                            <label for="pay-down-method">Payment method</label>
-                                            <select id="pay-down-method" name="downPaymentMethod" class="form-control" onchange="renderCart()">
-                                                <option value="Cash">Cash</option>
-                                                <option value="GCash">GCash</option>
-                                                <option value="PayMaya">PayMaya</option>
-                                                <option value="Cheque">Cheque</option>
-                                                <option value="Bank Transfer">Bank Transfer</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                    <div class="downpayment-quick">
-                                        <span class="quick-label">Quick fill</span>
-                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(0)">Nothing</button>
-                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(0.25)">25%</button>
-                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(0.5)">Half</button>
-                                        <button type="button" class="btn btn-sm" onclick="fillDownPayment(1)">All of it</button>
-                                    </div>
-                                    <p class="credit-verdict" id="credit-verdict"></p>
-                                </div>
-
-                                <!-- WHERE A TRANSFER GOES -- shown whenever Bank Transfer is chosen, as the
-                                     sale's method or as the part payment's (renderSalePaymentExtras fills it) -->
-                                <div class="bank-box" id="sale-bank-box" hidden></div>
-
-                                <!-- THE PAYMENT REFERENCE -- required for a cheque or a transfer, optional for
-                                     an e-wallet, and not asked for cash or cash on delivery -->
-                                <div class="form-group" id="sale-reference-field" hidden>
-                                    <label for="sale-reference">Reference <span class="label-hint" id="sale-reference-hint">required</span></label>
-                                    <input type="text" id="sale-reference" name="referenceNo" class="form-control"
-                                           maxlength="60" autocomplete="off" placeholder="e.g. cheque 001234">
-                                </div>
-
-                                <!-- the delivery is filled in beside the order and written the moment the sale exists -->
-                                <div class="delivery-attached" id="delivery-attached" hidden></div>
-
-                                <div class="form-footer">
-                                    <button type="submit" class="btn btn-success" id="checkout-btn">Complete Sale</button>
-                                    <!-- GCash or PayMaya only: the customer scans a QR code instead of
-                                         the cashier typing a reference (shown by renderCartFigures) -->
-                                    <button type="button" class="btn" id="qr-pay-btn" data-icon="qr-code"
-                                            onclick="payByQr()" hidden>Pay by QR</button>
-                                    <button type="button" class="btn btn-ghost" id="make-delivery-btn"
-                                            onclick="openDeliveryForm()">Make a Delivery</button>
-                                    <button type="button" class="btn btn-ghost" onclick="clearCart()">Clear</button>
-                                </div>
-                            </form>
+                            <div class="form-footer order-actions">
+                                <button type="button" class="btn btn-success" id="proceed-btn"
+                                        onclick="openCheckoutModal()" disabled>Proceed to Payment</button>
+                                <button type="button" class="btn btn-ghost" id="clear-btn" onclick="clearCart()">Clear</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -218,13 +135,17 @@
                         <div>
                             <h3>Customers Record</h3>
                         </div>
+                        <div class="panel-actions">
+                            <button type="button" class="btn btn-accent" id="add-customer-btn"
+                                    data-feature="credit" onclick="openAddCustomer()">Add Customer</button>
+                        </div>
                     </div>
 
                     <div class="panel-toolbar">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="customers-search"
                                    placeholder="Search by customer or phone"
-                                   oninput="dataPanelSearchInput('cash-credit', event)" onkeydown="dataPanelSearchKey('cash-credit', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('cash-credit', event)" onkeydown="dataPanelSearchKey('cash-credit', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <!-- due date is the oldest unpaid sale plus the 30-day term -->
                         <div class="toolbar-field">
@@ -267,7 +188,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="cdel-search"
                                    placeholder="Search by customer, address, or sale number"
-                                   oninput="dataPanelSearchInput('cash-deliveries', event)" onkeydown="dataPanelSearchKey('cash-deliveries', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('cash-deliveries', event)" onkeydown="dataPanelSearchKey('cash-deliveries', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="cdel-status">Status</label>
@@ -380,7 +301,7 @@
                                 <div class="search-wrap">
                                     <input type="search" class="form-control search-input" id="refund-search"
                                            placeholder="Search by product or reason"
-                                           oninput="dataPanelSearchInput('cash-refunds', event)" onkeydown="dataPanelSearchKey('cash-refunds', event)" title="Type at least two letters to search">
+                                           oninput="dataPanelSearchInput('cash-refunds', event)" onkeydown="dataPanelSearchKey('cash-refunds', event)" title="Type one letter or more; it finds words that start with it">
                                 </div>
                                 <div class="toolbar-field">
                                     <label for="refund-disposition">Goods went</label>
@@ -416,13 +337,11 @@
                         </div>
                     </div>
 
-                    <div class="filter-row" id="sales-scope"></div>
-
                     <div class="panel-toolbar">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="csales-search"
                                    placeholder="Search by customer, method, status, or receipt"
-                                   oninput="dataPanelSearchInput('cash-sales', event)" onkeydown="dataPanelSearchKey('cash-sales', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('cash-sales', event)" onkeydown="dataPanelSearchKey('cash-sales', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="csales-method">Payment</label>
@@ -481,7 +400,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="cqr-search"
                                    placeholder="Search by reference, receipt, cashier, or message"
-                                   oninput="dataPanelSearchInput('cqr', event)" onkeydown="dataPanelSearchKey('cqr', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('cqr', event)" onkeydown="dataPanelSearchKey('cqr', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="cqr-from">From</label>
@@ -517,50 +436,13 @@
                     <div class="pager is-single" id="cqr-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     DAILY SUMMARY -- today only
-                     ============================================================ -->
-                <div id="panel-summary" data-panel style="display: none;">
-                    <div class="page-intro">
-                        <h2>Daily Summary</h2>
-                    </div>
-
-                    <div class="card">
-                        <div class="panel-head">
-                            <div>
-                                <h3 id="summary-day">Today</h3>
-                            </div>
-                            <div class="panel-actions">
-                                <button type="button" class="btn btn-accent" onclick="loadDailySummary()">Load Today</button>
-                            </div>
-                        </div>
-                        <div class="kpi-grid" id="summary-kpis"></div>
-                    </div>
-
-                    <div class="card">
-                        <div class="panel-head">
-                            <div>
-                                <h3>By Payment Method</h3>
-                            </div>
-                        </div>
-                        <div class="table-responsive grid-8">
-                            <table id="summary-table">
-                                <thead>
-                                    <tr><th>Method</th><th>Transactions</th><th>Total</th></tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                        <div class="pager is-single" id="summary-pager"></div>
-                    </div>
-                </div>
-
             </div>
         </main>
     </div>
 
-    <!-- SALES INVOICE -->
-    <div class="modal" id="receipt-modal" onclick="closeModalOnBackdrop(event, 'receipt-modal')">
+    <!-- SALES INVOICE -- data-modal-scroll: a long invoice scrolls inside the card instead of
+         being cut into pages (modals.js), and prints whole (cashier.css) -->
+    <div class="modal" id="receipt-modal" data-modal-scroll onclick="closeModalOnBackdrop(event, 'receipt-modal')">
         <div class="modal-box receipt-box">
             <div class="modal-head no-print">
                 <div class="modal-identity">
@@ -579,6 +461,265 @@
 
             <div class="modal-foot no-print">
                 <button type="button" class="btn btn-accent" onclick="printReceipt()">Print Invoice</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         PAYMENT -- opened by Proceed to Payment under the order. Everything the
+         sale still needs is asked for here: who the customer is (empty is a
+         walk-in; a name has to be picked from the list), how it is paid, the
+         reference, and a delivery. Complete Sale, Pay by QR and Make a
+         Delivery are in its foot. The form keeps the ids and names it had
+         beside the order, so handleCheckout and the QR and delivery code read
+         it as before. Locked, like the delivery form: a stray click or Escape
+         must not throw away what was typed. data-modal-scroll keeps it to one
+         page that scrolls (modals.js) rather than turning pages.
+         ============================================================ -->
+    <div class="modal" id="checkout-modal" data-modal-locked data-modal-scroll>
+        <div class="modal-box checkout-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">PY</div>
+                    <div>
+                        <h3>Payment</h3>
+                        <span class="modal-role" id="checkout-sub">Who is paying, and how</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeCheckoutModal()" aria-label="Back to the order">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <!-- the amount due, and what happens to it: change, what is short, what goes on the book -->
+                <div class="cart-totals pay-totals" id="pay-totals"></div>
+
+                <form id="checkout-form" onsubmit="handleCheckout(event)" autocomplete="off">
+                    <!-- THE CUSTOMER -- empty is a walk-in. A name has to be a customer picked
+                         from the list: the till opens no account (Customers Record does). -->
+                    <div class="form-group">
+                        <label for="customer-name">Customer <span class="label-hint">empty is a walk-in</span></label>
+                        <div class="suggest-wrap">
+                            <input type="text" id="customer-name" name="customerName"
+                                   class="form-control" autocomplete="off"
+                                   placeholder="Walk-in — or type a name and pick the customer"
+                                   role="combobox" aria-expanded="false"
+                                   aria-controls="customer-suggest" aria-autocomplete="list"
+                                   oninput="onCustomerInput(this.value)"
+                                   onfocus="onCustomerInput(this.value)"
+                                   onkeydown="onCustomerKey(event)">
+                            <input type="hidden" name="customerId" value="">
+                            <button type="button" class="suggest-clear" id="customer-clear"
+                                    onclick="clearCustomer()" aria-label="Clear the customer"
+                                    hidden>&times;</button>
+                            <ul class="suggest-list" id="customer-suggest" role="listbox" hidden></ul>
+                        </div>
+                        <p class="customer-verdict" id="customer-verdict"></p>
+                    </div>
+
+                    <div class="credit-strip" id="credit-strip" style="display: none;"></div>
+                    <div class="form-group">
+                            <label for="pay-method">Payment method</label>
+                            <select id="pay-method" name="paymentMethod" class="form-control" onchange="onPaymentMethodChange(this.value)" required>
+                                <option value="Cash">Cash</option>
+                                <option value="GCash">GCash</option>
+                                <option value="PayMaya">PayMaya</option>
+                                <option value="PayPal">PayPal</option>
+                                <option value="Cheque">Cheque</option>
+                                <option value="Bank Transfer">Bank Transfer</option>
+                                <option value="COD">Cash on Delivery</option>
+                                <option value="Credit">Credit</option>
+                            </select>
+                    </div>
+                    <div class="form-group" id="tender-field">
+                        <label for="pay-amount">Amount entered</label>
+                        <input type="number" id="pay-amount" name="amountPaid" class="form-control amount-field" min="0" step="0.01" placeholder="0.00" oninput="renderCart()">
+                    </div>
+
+                    <!-- PART PAYMENT -- what is handed over is taken now; the rest goes on the book -->
+                    <div id="downpayment-field" style="display: none;">
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="pay-down">Paid now <span class="label-hint">optional</span></label>
+                                <input type="number" id="pay-down" name="downPayment" class="form-control amount-field"
+                                       min="0" step="0.01" placeholder="0.00" oninput="renderCart()">
+                            </div>
+                            <div class="form-group">
+                                <label for="pay-down-method">Payment method</label>
+                                <select id="pay-down-method" name="downPaymentMethod" class="form-control" onchange="renderCart()">
+                                    <option value="Cash">Cash</option>
+                                    <option value="GCash">GCash</option>
+                                    <option value="PayMaya">PayMaya</option>
+                                    <option value="Cheque">Cheque</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="downpayment-quick">
+                            <span class="quick-label">Quick fill</span>
+                            <button type="button" class="btn btn-sm" onclick="fillDownPayment(0)">Nothing</button>
+                            <button type="button" class="btn btn-sm" onclick="fillDownPayment(0.25)">25%</button>
+                            <button type="button" class="btn btn-sm" onclick="fillDownPayment(0.5)">Half</button>
+                            <button type="button" class="btn btn-sm" onclick="fillDownPayment(1)">All of it</button>
+                        </div>
+                        <p class="credit-verdict" id="credit-verdict"></p>
+                    </div>
+
+                    <!-- WHERE A TRANSFER GOES -- shown whenever Bank Transfer is chosen, as the
+                         sale's method or as the part payment's (renderSalePaymentExtras fills it) -->
+                    <div class="bank-box" id="sale-bank-box" hidden></div>
+
+                    <!-- THE PAYMENT REFERENCE -- required for a cheque or a transfer, optional for
+                         an e-wallet, and not on the screen at all for cash, cash on delivery, or a
+                         credit sale with nothing paid now (renderSalePaymentExtras) -->
+                    <div class="form-group" id="sale-reference-field" hidden>
+                        <label for="sale-reference">Reference <span class="label-hint" id="sale-reference-hint">required</span></label>
+                        <input type="text" id="sale-reference" name="referenceNo" class="form-control"
+                               maxlength="60" autocomplete="off" placeholder="e.g. cheque 001234">
+                    </div>
+
+                    <!-- the delivery is filled in beside the order and written the moment the sale exists -->
+                    <div class="delivery-attached" id="delivery-attached" hidden></div>
+                </form>
+            </div>
+
+            <div class="modal-foot checkout-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeCheckoutModal()">Back to the Order</button>
+                <button type="button" class="btn btn-ghost" id="make-delivery-btn"
+                        onclick="openDeliveryForm()">Make a Delivery</button>
+                <!-- GCash or PayMaya only: the customer scans a QR code instead of
+                     the cashier typing a reference (shown by renderCartFigures) -->
+                <button type="button" class="btn" id="qr-pay-btn" data-icon="qr-code"
+                        onclick="payByQr()" hidden>Pay by QR</button>
+                <button type="submit" form="checkout-form" class="btn btn-success" id="checkout-btn">Complete Sale</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         CREDIT PAYMENT -- from the register: pick a customer who owes, and the
+         usual flow follows (their card on the Unpaid Sales tab, the payment
+         form, Pay by QR). Held with debt-payments.
+         ============================================================ -->
+    <div class="modal" id="credit-pay-modal">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">CP</div>
+                    <div>
+                        <h3>Credit Payment</h3>
+                        <span class="modal-role">Take a payment against a customer's balance</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('credit-pay-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="credit-pay-search">Customer who owes</label>
+                    <input type="search" id="credit-pay-search" class="form-control" autocomplete="off"
+                           placeholder="Type a name or phone, or pick from the list"
+                           oninput="renderCreditPayList()">
+                </div>
+                <div id="credit-pay-list" class="credit-pay-list"></div>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('credit-pay-modal')">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         ADD CUSTOMER -- the one place an account is opened. Locked like the
+         other forms that hold typed data.
+         ============================================================ -->
+    <div class="modal" id="add-customer-modal" data-modal-locked>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">+</div>
+                    <div>
+                        <h3>Add Customer</h3>
+                        <span class="modal-role">Opens an account at the counter</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="cancelAddCustomer()" aria-label="Cancel">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="add-customer-form" onsubmit="handleAddCustomer(event)" autocomplete="off" novalidate>
+                    <div class="form-group">
+                        <label for="ac-name">Name <span class="label-hint">required</span></label>
+                        <input type="text" id="ac-name" name="name" class="form-control" maxlength="200"
+                               placeholder="First name and surname, e.g. Maria Santos">
+                    </div>
+                    <div class="form-group">
+                        <label for="ac-phone">Phone number <span class="label-hint">optional</span></label>
+                        <div class="phone-field">
+                            <span class="phone-prefix">+63</span>
+                            <input type="text" id="ac-phone" name="phone" class="form-control"
+                                   inputmode="numeric" autocomplete="tel"
+                                   maxlength="20" placeholder="9XXXXXXXXX"
+                                   oninput="onPhoneInput(this)">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="ac-address">Address <span class="label-hint">required</span></label>
+                        <input type="text" id="ac-address" name="address" class="form-control" maxlength="500"
+                               placeholder="Street, barangay, city">
+                    </div>
+                    <p class="add-customer-note">The account opens with a credit limit of zero. Only a manager
+                        raises it; the cashier can ask for a higher one from the customer's card.</p>
+                    <p class="delivery-verdict" id="add-customer-verdict"></p>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="cancelAddCustomer()">Cancel</button>
+                <button type="button" class="btn btn-success" id="add-customer-save" onclick="handleAddCustomer(event)">Add Customer</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         ASK FOR A HIGHER LIMIT -- one form: the new limit and why. The reason
+         is required (the server refuses a blank one too). Locked.
+         ============================================================ -->
+    <div class="modal" id="limit-modal" data-modal-locked>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">LM</div>
+                    <div>
+                        <h3>Ask for a Higher Limit</h3>
+                        <span class="modal-role" id="limit-sub">Credit Management</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeLimitForm()" aria-label="Cancel">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <p class="limit-intro" id="limit-intro"></p>
+                <form id="limit-form" onsubmit="handleLimitRequest(event)" autocomplete="off" novalidate>
+                    <div class="form-group">
+                        <label for="limit-new">New limit</label>
+                        <input type="number" id="limit-new" name="requestedLimit" class="form-control amount-field"
+                               min="0" step="0.01" placeholder="0.00" oninput="renderLimitVerdict()">
+                    </div>
+                    <div class="form-group">
+                        <label for="limit-reason">Reason <span class="label-hint">required</span></label>
+                        <textarea id="limit-reason" name="reason" class="form-control" rows="3" maxlength="255"
+                                  oninput="renderLimitVerdict()"
+                                  placeholder="Regular contractor, pays on the 15th, needs cement for a job this week."></textarea>
+                        <p class="reason-counter" id="limit-counter"></p>
+                    </div>
+                    <p class="delivery-verdict" id="limit-verdict"></p>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeLimitForm()">Cancel</button>
+                <button type="button" class="btn btn-gold" id="limit-send" onclick="handleLimitRequest(event)">Send the Request</button>
             </div>
         </div>
     </div>
@@ -670,31 +811,6 @@
         </div>
     </div>
 
-    <!-- ============================================================
-         WHAT WENT BACK TODAY -- the refund figure opens into this
-         ============================================================ -->
-    <div class="modal" id="refunds-today-modal" onclick="closeModalOnBackdrop(event, 'refunds-today-modal')">
-        <div class="modal-box">
-            <div class="modal-head">
-                <div class="modal-identity">
-                    <div class="avatar">RF</div>
-                    <div>
-                        <h3>Refunds Today</h3>
-                        <span class="modal-role" id="refunds-today-sub">What went back, and for how much</span>
-                    </div>
-                </div>
-                <button type="button" class="modal-close" onclick="closeModal('refunds-today-modal')" aria-label="Close">&times;</button>
-            </div>
-
-            <div class="modal-body">
-                <div class="detail-grid" id="refunds-today-totals"></div>
-                <div id="refunds-today-list"></div>
-            </div>
-
-            <div class="modal-foot" hidden></div>
-        </div>
-    </div>
-
     <!-- PAGED DETAIL POPUP -->
     <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
         <div class="modal-box">
@@ -766,8 +882,10 @@
                         <button type="button" class="btn btn-sm" onclick="fillPayment(1)">The whole balance</button>
                     </div>
                     <div class="bank-box" id="payment-bank-box" hidden></div>
-                    <div class="form-group" style="margin-top: 14px;">
-                        <label for="pay-debt-ref">Reference <span class="label-hint">optional &mdash; cheque or transfer number</span></label>
+                    <!-- asked for only when the method has a number to trace it by
+                         (renderPaymentVerdict); cash needs none -->
+                    <div class="form-group" id="payment-ref-field" style="margin-top: 14px;" hidden>
+                        <label for="pay-debt-ref">Reference <span class="label-hint" id="payment-ref-hint">optional</span></label>
                         <input type="text" id="pay-debt-ref" name="referenceNo" class="form-control" maxlength="60"
                                placeholder="e.g. cheque 001234">
                     </div>
@@ -807,8 +925,11 @@
                      shown only when there is a balance and the role holds debt-payments -->
                 <button type="button" class="modal-tab" id="customer-tab-unpaid"
                         onclick="showCustomerTab('unpaid')" hidden>Unpaid Sales</button>
+                <!-- purchases and payments are a tab each, with filters over what is loaded -->
                 <button type="button" class="modal-tab" id="customer-tab-history"
-                        onclick="showCustomerTab('history')">Purchases &amp; Payments</button>
+                        onclick="showCustomerTab('history')">Purchase History</button>
+                <button type="button" class="modal-tab" id="customer-tab-payments"
+                        onclick="showCustomerTab('payments')">Credit &amp; Payments</button>
             </div>
 
             <div class="modal-body">
@@ -819,7 +940,48 @@
                     <div id="customer-unpaid"></div>
                 </div>
                 <div id="customer-history-tab" style="display: none;">
-                    <div class="history-split" id="customer-history"></div>
+                    <h4 class="history-head">Purchase History
+                        <span class="history-total" id="customer-history-total"></span></h4>
+                    <div class="history-filters">
+                        <div class="toolbar-field">
+                            <label for="hist-from">From</label>
+                            <input type="date" id="hist-from" onchange="renderCustomerHistory()">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="hist-to">To</label>
+                            <input type="date" id="hist-to" onchange="renderCustomerHistory()">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="hist-status">Status</label>
+                            <select id="hist-status" onchange="renderCustomerHistory()">
+                                <option value="all">All</option>
+                                <option value="owing">Has balance</option>
+                                <option value="paid">Paid</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="customer-history"></div>
+                </div>
+                <div id="customer-payments-tab" style="display: none;">
+                    <h4 class="history-head">Credit &amp; Payments
+                        <span class="history-total" id="customer-payments-total"></span></h4>
+                    <div class="history-filters">
+                        <div class="toolbar-field">
+                            <label for="pay-from">From</label>
+                            <input type="date" id="pay-from" onchange="renderCustomerPayments()">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="pay-to">To</label>
+                            <input type="date" id="pay-to" onchange="renderCustomerPayments()">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="pay-how">Method</label>
+                            <select id="pay-how" onchange="renderCustomerPayments()">
+                                <option value="all">All</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div id="customer-payments"></div>
                 </div>
             </div>
 
@@ -834,9 +996,9 @@
          PAY BY QR -- the code the customer scans for a GCash or Maya
          payment, for a sale or for a payment on a balance. Opened by
          collectQrPayment() in modules/cashier.js. The code holds the address
-         of the page the customer pays on; the badge says TEST MODE (a
-         PayMongo test key) or SIMULATION (no PayMongo at all). Locked: it
-         closes only through its own buttons, so the checking always stops.
+         of the page the customer pays on (kept on the image as data-pay-url).
+         Locked: it closes only through its own buttons, so the checking
+         always stops.
          ============================================================ -->
     <div class="modal" id="qr-modal" data-modal-locked>
         <div class="modal-box qr-box">
@@ -851,7 +1013,6 @@
             </div>
 
             <div class="modal-body">
-                <p class="qr-sim" id="qr-badge-line" hidden><span class="badge badge-warning" id="qr-badge"></span></p>
                 <p class="qr-amount" id="qr-amount"></p>
                 <!-- above the code, so it is never pushed onto a second page on a short screen -->
                 <p class="qr-status" id="qr-status" role="status" aria-live="polite"></p>
@@ -860,8 +1021,6 @@
                     <img id="qr-image" alt="QR code for the customer to scan" width="240" height="240">
                 </div>
                 <p class="qr-ask" id="qr-ask">Ask the customer to scan the code with their phone's camera.</p>
-                <!-- the same page, for opening on this PC when no phone is at hand -->
-                <p class="qr-link">Or open it here: <a id="qr-link" href="#" target="_blank" rel="noopener"></a></p>
             </div>
 
             <div class="modal-foot qr-foot">

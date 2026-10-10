@@ -17,7 +17,10 @@
 //       renderRow: (row, index) => '<tr>...</tr>',
 //       gate: { title, text, button },  // what the closed state says
 //       empty: { title, text },        // optional; a loaded table with no rows
-//       loadOnFilter: false            // optional; see dataPanelFilter
+//       loadOnFilter: false,           // optional; see dataPanelFilter
+//       pagerInfo: false,              // optional; leave out the "Showing 1-8 of 24" caption
+//       inputs: ['sales-from'],        // optional; ids of other boxes that decide what load() reads
+//       remember: false                // optional; do not load this table again after a reload
 //   });
 //   panel.open(); panel.reset(); panel.search('pedro');
 //   panel.setFilter('status', 'inactive'); panel.refresh();
@@ -220,6 +223,9 @@ const dataPanelMethods = {
         if (this.pageSize === this.basePageSize()) {
             holdTableHeight(document.getElementById(this.config.tableId));
         }
+
+        // a table that is showing rows is written down as loaded
+        if (this.state === 'ready') this.remember();
     },
 
     // A load asked for during a load is remembered and run when the current one
@@ -268,15 +274,91 @@ const dataPanelMethods = {
         this.goTo(page);
     },
 
+    // closes the table on purpose, so it is not loaded again after a reload
     reset() {
         this.query = '';
         this.filters = Object.assign({}, this.config.filters || {});
+        this.forget();
         this.renderClosed();
     },
 
+    // ---------- staying loaded ----------
+    // The search box above this table (its oninput names the panel's key)
+    searchBox() {
+        return document.querySelector('[oninput*="dataPanelSearchInput(\'' + this.key + '\'"]');
+    },
+
+    // Writes down that this table is loaded: the search text, the filters and
+    // the boxes named in config.inputs, so they can be put back (see recall)
+    remember() {
+        if (this.config.remember === false) return;
+
+        const box = this.searchBox();
+        const inputs = {};
+        (this.config.inputs || []).forEach((id) => {
+            const field = document.getElementById(id);
+            if (field) inputs[id] = field.value;
+        });
+
+        const all = readLoadedPanels();
+        const page = thisPageName();
+        if (!all[page]) all[page] = {};
+        all[page][this.key] = {
+            text: box ? box.value : this.query,
+            filters: this.filters,
+            inputs: inputs
+        };
+        writeLoadedPanels(all);
+    },
+
+    forget() {
+        const all = readLoadedPanels();
+        const page = thisPageName();
+        if (!all[page]) return;
+        delete all[page][this.key];
+        writeLoadedPanels(all);
+    },
+
+    // Loads the table again the way it was left: the same search, filters and boxes
+    async recall(saved) {
+        this.query = searchText(saved.text);
+        Object.assign(this.filters, saved.filters || {});
+
+        const box = this.searchBox();
+        if (box) box.value = saved.text || '';
+
+        // before the load, because load() can read these boxes
+        this.putBoxesBack(saved, false);
+        await this.open();
+
+        // after it, because a box filled from the rows has its options only now
+        this.putBoxesBack(saved, true);
+        if (this.state === 'ready') this.apply();
+    },
+
+    // Sets the filter dropdowns and the other boxes to what was saved. Once the
+    // load is over, a filter whose choice is no longer in its dropdown goes back to its default.
+    putBoxesBack(saved, loaded) {
+        const filters = saved.filters || {};
+
+        Object.keys(filters).forEach((name) => {
+            const select = document.querySelector(
+                '[onchange*="dataPanelFilter(\'' + this.key + '\', \'' + name + '\'"]');
+            if (!select) return;
+
+            const done = setBoxValue(select, filters[name]);
+            if (loaded && !done) {
+                const first = (this.config.filters || {})[name];
+                this.filters[name] = first === undefined ? 'all' : first;
+            }
+        });
+
+        const inputs = saved.inputs || {};
+        Object.keys(inputs).forEach((id) => setBoxValue(document.getElementById(id), inputs[id]));
+    },
+
     // ---------- searching and filtering ----------
-    // Typing on a closed table also loads it. A single letter is not a search
-    // yet (see searchText), so it neither loads nor narrows anything.
+    // Typing on a closed table also loads it.
     async search(text) {
         this.query = searchText(text);
 
@@ -393,10 +475,15 @@ const dataPanelMethods = {
             return;
         }
 
+        // a panel can leave the caption out; the empty span keeps the controls on the right
+        const info = this.config.pagerInfo === false
+            ? '<span class="pager-info"></span>'
+            : '<span class="pager-info">Showing ' + (start + 1) + '&ndash;' + (start + shown) +
+                ' of ' + total + '</span>';
+
         mount.classList.remove('is-single');
         mount.innerHTML =
-            '<span class="pager-info">Showing ' + (start + 1) + '&ndash;' + (start + shown) +
-                ' of ' + total + '</span>' +
+            info +
             '<div class="pager-controls">' +
                 '<button type="button" class="btn btn-sm" ' +
                         'onclick="dataPanelPrev(\'' + this.key + '\')"' +
@@ -444,6 +531,66 @@ const dataPanelMethods = {
     }
 };
 
+// ---------- loaded tables stay loaded ----------
+// A table that was loaded is loaded again after a reload, or after a visit to
+// another page of the app, in the same browser tab. sessionStorage keeps, for
+// each page and each panel key, the search text, the filters and the boxes
+// named in config.inputs. A table that was never loaded is never saved, so it
+// is never loaded by itself. Signing out forgets everything
+// (forgetLoadedPanels in helpers.js). Storage can be blocked, so every
+// access is wrapped and the page works the same without it.
+
+// the file name of this page, such as "manager.html"
+function thisPageName() {
+    return window.location.pathname.split('/').pop().toLowerCase();
+}
+
+// everything remembered, as { "manager.html": { "mgr-credit": { text, filters, inputs } } }
+function readLoadedPanels() {
+    try {
+        const all = JSON.parse(sessionStorage.getItem(LOADED_PANELS_KEY) || '{}');
+        if (all && typeof all === 'object') return all;
+    } catch (error) { /* blocked, or not readable */ }
+    return {};
+}
+
+function writeLoadedPanels(all) {
+    try {
+        sessionStorage.setItem(LOADED_PANELS_KEY, JSON.stringify(all));
+    } catch (error) { /* blocked: the table just starts closed next time */ }
+}
+
+// Sets a box to a value. A dropdown without that choice is left alone.
+// True when the box now holds the value.
+function setBoxValue(box, value) {
+    if (!box) return false;
+
+    if (box.tagName === 'SELECT') {
+        const found = Array.from(box.options).some((option) => option.value === String(value));
+        if (!found) return false;
+    }
+    box.value = value;
+    return true;
+}
+
+// Loads again every table of this page that was loaded before.
+function restoreLoadedPanels() {
+    // only for somebody signed in; session.js sends everyone else to the sign-in page
+    if (typeof getCurrentUser !== 'function' || !getCurrentUser()) return;
+
+    const saved = readLoadedPanels()[thisPageName()] || {};
+    Object.keys(saved).forEach((key) => {
+        const panel = getDataPanel(key);
+        if (panel && panel.config.remember !== false) panel.recall(saved[key]);
+    });
+}
+
+// The page builds its tables in its own DOMContentLoaded handler. A timer
+// of 0 runs after all of those handlers have finished, so the tables exist.
+document.addEventListener('DOMContentLoaded', function () {
+    setTimeout(restoreLoadedPanels, 0);
+});
+
 // ---------- the handlers the generated buttons call ----------
 function dataPanelOpen(key) { const p = getDataPanel(key); if (p) p.open(); }
 function dataPanelNext(key) { const p = getDataPanel(key); if (p) p.next(); }
@@ -489,17 +636,13 @@ function dataPanelSearch(key, text) {
     if (panel) panel.search(text);
 }
 
-// Every search box in the system follows one rule. A single letter is not a
-// search yet: "a" would list nearly everything. From two letters on, the text
-// has to begin a word, so "ad" finds Adhesive and Wood Adhesive but not Shade
-// or Thread. A lone digit still searches, for record numbers.
-const SEARCH_MIN_LETTERS = 2;
+// Every search box in the system follows one rule: what is typed has to begin
+// a word. One letter is enough, so "c" finds Carl and Mark Cole but not Lace
+// or KC, and "ad" finds Adhesive and Wood Adhesive but not Shade or Thread.
 
-// lower-cased and trimmed, or '' while it is too short to search on
+// lower-cased and trimmed; '' when nothing is typed
 function searchText(text) {
-    const query = String(text || '').trim().toLowerCase();
-    if (query.length < SEARCH_MIN_LETTERS && !/^[0-9]$/.test(query)) return '';
-    return query;
+    return String(text || '').trim().toLowerCase();
 }
 
 // true when the query begins the value or any word inside it

@@ -103,12 +103,13 @@ function buildAccountModal() {
                         </div>
                         <div class="grid-2">
                             <div class="form-group">
-                                <label for="me-new">New password <span class="label-hint">at least 8 characters, not the current one</span></label>
+                                <label for="me-new">New password <span class="label-hint">not the current one</span></label>
                                 <div class="password-field">
                                     <input type="password" id="me-new" name="newPassword" class="form-control"
                                            minlength="8" required autocomplete="new-password">
                                     <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
                                 </div>
+                                <ul class="password-rules" data-rules-for="me-new"></ul>
                             </div>
                             <div class="form-group">
                                 <label for="me-confirm">Confirm new password</label>
@@ -137,6 +138,7 @@ function buildAccountModal() {
             </div>
         </div>`;
     document.body.appendChild(modal);
+    showPasswordRules();   // draws the checklist under the new-password box
 }
 
 // The server refuses PUT /api/me for System Administrator (notOwnDetailsIfAdmin
@@ -312,8 +314,9 @@ async function handleChangeMyPassword(event) {
         notifyWarning('The two new passwords do not match.', 'Password not changed');
         return;
     }
-    if (newPassword.length < 8) {
-        notifyWarning('A password needs at least 8 characters.', 'Password not changed');
+    const complaint = passwordComplaint(newPassword);
+    if (complaint) {
+        notifyWarning(complaint, 'Password not changed');
         return;
     }
     // the server refuses this too; this saves the round trip
@@ -332,10 +335,12 @@ async function handleChangeMyPassword(event) {
         }
 
         form.reset();
+        showPasswordRules();   // the checklist starts again
         closeModal('account-modal');
 
-        // every session on the old password is over, this one included
-        signOutWithReason('Your password was changed. Sign in again with the new one.', 'good');
+        // every other session on the old password is over; this one carries on
+        notifySuccess('Your password was changed. Any other device signed in with the old one was signed out.',
+            'Password changed');
     } catch (error) {
         notifyOffline();
     }

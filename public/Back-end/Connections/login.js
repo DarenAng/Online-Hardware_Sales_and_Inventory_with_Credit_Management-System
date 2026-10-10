@@ -17,19 +17,14 @@ const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
 const passwordResetMessage = mailer.passwordResetMessage;
 
-// Over https (Vercel) the cookie is marked Secure so it never travels in the
-// clear; a PC in the shop serves plain http, where a Secure cookie would not
-// be sent back at all. COOKIE_SECURE=1 forces it behind your own https proxy.
-const SECURE_COOKIE = Boolean(process.env.VERCEL) || process.env.COOKIE_SECURE === "1";
-
 function registerLoginRoutes(app, deps) {
   // take the helpers we need out of "deps" (sent to us by server.js)
   const {
     db, writeAuditLog,
     hashPassword, isHashed, verifyPassword,
-    SESSION_HOURS, startSession, endSession, endSessionsForStaff,
-    signOutAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
-    LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES
+    startSession, setSessionCookie, endSession, endSessionsForStaff,
+    renewSessionAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
+    LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES, passwordComplaint
   } = deps;
 
   const LOGIN_SELECT =
@@ -303,13 +298,7 @@ function registerLoginRoutes(app, deps) {
         );
       }
 
-      response.cookie("sid", token, {
-        httpOnly: true,                              // JavaScript on the page cannot read it
-        sameSite: "strict",                          // not sent from another site
-        secure: SECURE_COOKIE,                       // only over https (on Vercel)
-        maxAge: SESSION_HOURS * 60 * 60 * 1000,
-        path: "/"
-      });
+      setSessionCookie(response, token);
 
       // the profile is only for drawing the screen; nothing sent back is trusted
       response.json({ message: "Login successful", user });
@@ -343,8 +332,13 @@ function registerLoginRoutes(app, deps) {
     // always the signed-in account, never one named in the body
     const userId = request.actor.userId;
 
-    if (!userId || typeof newPassword !== "string" || newPassword.length < 8) {
-      return response.status(400).json({ error: "Password must contain at least 8 characters" });
+    if (!userId) {
+      return response.status(400).json({ error: "Password change is not allowed" });
+    }
+
+    const complaint = passwordComplaint(newPassword);
+    if (complaint) {
+      return response.status(400).json({ error: complaint });
     }
 
     try {
@@ -374,8 +368,8 @@ function registerLoginRoutes(app, deps) {
       await writeAuditLog(request, "CHANGE_OWN_PASSWORD",
         `${request.actor.email} chose their own password on first sign-in`);
 
-      await signOutAfterPasswordChange(request, response);
-      response.json({ message: "Password changed successfully", signedOut: true });
+      await renewSessionAfterPasswordChange(request, response);
+      response.json({ message: "Password changed successfully" });
     } catch (error) {
       console.error("Password update failed:", error.message);
       response.status(500).json({ error: "Unable to change password" });
@@ -522,8 +516,9 @@ function registerLoginRoutes(app, deps) {
     if (!/^\d{6}$/.test(code)) {   // must be exactly 6 digits
       return response.status(400).json({ error: "The code is the six digits in the email." });
     }
-    if (typeof newPassword !== "string" || newPassword.length < 8) {
-      return response.status(400).json({ error: "The new password must contain at least 8 characters." });
+    const complaint = passwordComplaint(newPassword);
+    if (complaint) {
+      return response.status(400).json({ error: complaint });
     }
 
     try {

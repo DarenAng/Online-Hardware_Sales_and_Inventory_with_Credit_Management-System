@@ -86,7 +86,7 @@
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="dpend-search"
                                        placeholder="Search by customer or destination"
-                                       oninput="dataPanelSearchInput('driver-pending', event)" onkeydown="dataPanelSearchKey('driver-pending', event)" title="Type at least two letters to search">
+                                       oninput="dataPanelSearchInput('driver-pending', event)" onkeydown="dataPanelSearchKey('driver-pending', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
                         </div>
                         <div class="table-responsive grid-10">
@@ -152,7 +152,7 @@
                                 <div class="search-wrap">
                                     <input type="search" class="form-control search-input" id="dcod-search"
                                            placeholder="Search by customer"
-                                           oninput="dataPanelSearchInput('driver-cod', event)" onkeydown="dataPanelSearchKey('driver-cod', event)" title="Type at least two letters to search">
+                                           oninput="dataPanelSearchInput('driver-cod', event)" onkeydown="dataPanelSearchKey('driver-cod', event)" title="Type one letter or more; it finds words that start with it">
                                 </div>
                             </div>
                             <div class="table-responsive grid-10">
@@ -271,6 +271,44 @@
             </div>
 
             <div class="modal-foot" hidden></div>
+        </div>
+    </div>
+
+    <!-- REFUND AT THE DOOR -- items the customer turns away; opened from a delivery's card.
+         Locked like the other forms that hold typed data; kept to one page that scrolls. -->
+    <div class="modal" id="refund-modal" data-modal-locked data-modal-scroll>
+        <div class="modal-box modal-wide">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">RF</div>
+                    <div>
+                        <h3>Refund Items</h3>
+                        <span class="modal-role" id="refund-subtitle">At the door</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('refund-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="refund-form" onsubmit="handleDriverRefund(event)" autocomplete="off">
+                    <p class="detail-note" id="refund-explain"></p>
+
+                    <div class="refund-lines" id="refund-lines"></div>
+                    <p class="refund-total" id="refund-total"></p>
+
+                    <div class="form-group">
+                        <label for="refund-reason">What was wrong
+                            <span class="label-hint">required &mdash; say what happened</span></label>
+                        <textarea id="refund-reason" class="form-control" rows="3" minlength="10" required
+                                  placeholder="Two tins arrived dented and the customer would not take them."></textarea>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('refund-modal')">Cancel</button>
+                <button type="submit" class="btn btn-success" form="refund-form">Record Refund</button>
+            </div>
         </div>
     </div>
 

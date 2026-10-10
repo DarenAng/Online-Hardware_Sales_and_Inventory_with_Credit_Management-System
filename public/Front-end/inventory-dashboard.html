@@ -88,7 +88,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="inv-search"
                                    placeholder="Search by material, category, or supplier"
-                                   oninput="dataPanelSearchInput('clerk-materials', event)" onkeydown="dataPanelSearchKey('clerk-materials', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('clerk-materials', event)" onkeydown="dataPanelSearchKey('clerk-materials', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="inv-status">Stock status</label>
@@ -213,7 +213,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="adjust-search"
                                    placeholder="Search by material, reason, or who adjusted it"
-                                   oninput="dataPanelSearchInput('clerk-adjustments', event)" onkeydown="dataPanelSearchKey('clerk-adjustments', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('clerk-adjustments', event)" onkeydown="dataPanelSearchKey('clerk-adjustments', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="adjust-type-filter">Type</label>
@@ -251,7 +251,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="reorder-search"
                                    placeholder="Search by material"
-                                   oninput="dataPanelSearchInput('clerk-reorder', event)" onkeydown="dataPanelSearchKey('clerk-reorder', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('clerk-reorder', event)" onkeydown="dataPanelSearchKey('clerk-reorder', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="reorder-status">Stock status</label>
@@ -401,19 +401,24 @@
                             <button type="button" class="btn btn-accent" onclick="showPurchaseOrders(event)">New Order</button>
                         </div>
                     </div>
+                    <div class="track-legend no-print" id="po-legend"></div>
+
                     <div class="panel-toolbar">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="po-search"
                                    placeholder="Search by supplier or order number"
-                                   oninput="dataPanelSearchInput('clerk-po', event)" onkeydown="dataPanelSearchKey('clerk-po', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('clerk-po', event)" onkeydown="dataPanelSearchKey('clerk-po', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="po-status">Status</label>
                             <select id="po-status" data-filter-table="po-table" data-hides-column="6"
+                                    data-keeps-column-for="PO Accepted|On the way"
                                     onchange="dataPanelFilter('clerk-po', 'status', this.value)">
                                 <option value="all">Every status</option>
                                 <option value="For Approval">Waiting for confirmation</option>
                                 <option value="Pending">Waiting for delivery</option>
+                                <option value="PO Accepted">PO Accepted</option>
+                                <option value="On the way">On the way</option>
                                 <option value="Received">Received</option>
                                 <option value="Cancelled">Cancelled</option>
                             </select>
@@ -483,7 +488,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="returns-search"
                                    placeholder="Search by material or reason"
-                                   oninput="dataPanelSearchInput('clerk-returns', event)" onkeydown="dataPanelSearchKey('clerk-returns', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('clerk-returns', event)" onkeydown="dataPanelSearchKey('clerk-returns', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
                             <label for="returns-where">Goods went</label>
@@ -591,7 +596,7 @@
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="arch-search"
                                    placeholder="Search archived materials"
-                                   oninput="dataPanelSearchInput('clerk-archive', event)" onkeydown="dataPanelSearchKey('clerk-archive', event)" title="Type at least two letters to search">
+                                   oninput="dataPanelSearchInput('clerk-archive', event)" onkeydown="dataPanelSearchKey('clerk-archive', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-spacer"></div>
                     </div>

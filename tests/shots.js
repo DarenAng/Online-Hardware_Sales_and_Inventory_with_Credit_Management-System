@@ -120,7 +120,7 @@ const TOURS = {
       if (role === "manager") {
         await page.screenshot({ path: path.join(OUT, "00-change-password.png") });
       }
-      const fresh = `${role}pass123`;
+      const fresh = `${role}Pass-123`;
       await page.fill('input[name="newPassword"]', fresh);
       await page.fill('input[name="confirmPassword"]', fresh);
       await page.click('button[type="submit"]');

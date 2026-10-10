@@ -68,13 +68,20 @@ function registerDeliveryRoutes(app, deps) {
 
   // what is on the lorry: the sale's lines, for the delivery popup on every
   // screen. Read the way the receipt reads them, so 2 sacks shows as 2 sacks.
+  // The driver's refund form also needs the product, the sale and how much
+  // of the line has already been taken back (refunded_quantity, in the
+  // shelf's own unit like base_quantity).
   app.get("/api/deliveries/:deliveryId/items", async (request, response) => {
     try {
       const [rows] = await db.query(
         `SELECT COALESCE(si.sold_quantity, si.quantity) AS quantity,
               COALESCE(si.sold_unit, u.unit_name) AS unit_name,
               si.quantity AS base_quantity, u.unit_name AS base_unit,
-              si.unit_price, si.subtotal, p.product_name
+              si.unit_price, si.subtotal, p.product_name,
+              si.product_id, si.sale_id,
+              (SELECT COALESCE(SUM(r.quantity), 0) FROM returned_items r
+               WHERE r.sale_id = si.sale_id AND r.product_id = si.product_id
+                 AND r.report_type IN ('Refunded', 'Return')) AS refunded_quantity
        FROM deliveries d
        JOIN sale_items si ON si.sale_id = d.sale_id
        JOIN products p ON p.product_id = si.product_id

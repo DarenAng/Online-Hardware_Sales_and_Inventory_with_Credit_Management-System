@@ -214,18 +214,17 @@ function fillScheduleOptions() {
 // typing on a list not loaded yet loads it, as the tables do
 function onScheduleSearch(text) {
     if (scheduleRows === null) {
-        if (String(text || '').trim().length >= 2) loadDeliverySchedule();
+        if (searchText(text) !== '') loadDeliverySchedule();
         return;
     }
     renderDeliverySchedule();
 }
 
 function scheduleMatches(d) {
-    const query = String((document.getElementById('schedule-search') || {}).value || '').trim().toLowerCase();
-    if (query.length >= 2) {
-        const words = [d.customer_name || 'Walk-in', d.delivery_address || '', d.driver_name || 'Unassigned',
-                       String(d.delivery_id || '')].join(' ').toLowerCase();
-        if (!words.includes(query)) return false;
+    const query = searchText((document.getElementById('schedule-search') || {}).value);
+    if (query !== '') {
+        if (!prefixMatch([d.customer_name || 'Walk-in', d.delivery_address || '', d.driver_name || 'Unassigned',
+                          d.delivery_id], query)) return false;
     }
     const due = scheduleValue('schedule-due');
     if (due !== 'all' && scheduleGroupOf(d) !== due) return false;

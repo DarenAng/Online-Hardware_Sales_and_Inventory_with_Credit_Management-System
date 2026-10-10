@@ -52,6 +52,7 @@ function buildQrPaymentsPanel(options) {
         pagerId: p + '-pager',
         idField: 'id',
         filters: { status: 'all' },
+        inputs: [p + '-from', p + '-to'],
         // a code paid or closed anywhere, or a sale it was recorded on
         scopes: ['qr-payments', 'sales'],
 

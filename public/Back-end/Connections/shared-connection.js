@@ -28,10 +28,17 @@
 // The headers sent with every request. The sign-in itself travels in a
 // cookie; X-Client-ID only names this browser tab, so the tab can recognise
 // its own changes when the live updates come back.
+// X-Background: 1 says "nobody has touched this page lately" (see
+// userWasActiveLately in session.js). The live updates and the heartbeat go on
+// asking while a page sits unused; the server must not count those asks as
+// someone using the system, or a sign-in would never run out of idle time.
 function apiHeaders() {
     const headers = { 'Content-Type': 'application/json' };
     if (typeof CLIENT_ID === 'string') {
         headers['X-Client-ID'] = CLIENT_ID;
+    }
+    if (typeof userWasActiveLately === 'function' && !userWasActiveLately()) {
+        headers['X-Background'] = '1';
     }
     return headers;
 }
@@ -351,7 +358,7 @@ function apiGetCustomerHistory(customerId) {
 
 
 // ==========================================
-// RETURNS (cashier and inventory clerk)
+// RETURNS (cashier, inventory clerk, and the driver at the door)
 // ==========================================
 
 // GET /api/returns
