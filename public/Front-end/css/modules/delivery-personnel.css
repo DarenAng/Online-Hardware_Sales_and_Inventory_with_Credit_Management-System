@@ -64,6 +64,114 @@
 }
 
 /* ==========================================================================
+   A COMPACT ROW ON A PHONE -- Pending and Cash on Delivery
+   The phone layout in responsive.css gives every value its own line, which
+   leaves room for two deliveries a screen. Here a delivery is three lines in
+   a small grid (two columns), and the whole row is still the button:
+       Pending:           Customer ........ #ID
+                          Destination (wraps)
+                          Status badges ... Scheduled date
+       Cash on Delivery:  Customer ........ #ID
+                          Method .......... Order total
+                          Status ........... Balance
+   Only rows that can be opened (row-clickable) are changed; the "Loading..."
+   and "nothing here" messages keep the normal layout.
+   ========================================================================== */
+@media (max-width: 640px) {
+    #dpend-table .row-clickable,
+    #dcod-table .row-clickable {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        column-gap: 12px;
+        row-gap: 4px;
+        align-items: center;
+        padding: 12px 13px;
+        min-height: 76px;
+    }
+
+    /* every value is a plain block; the column names are dropped, because the
+       place on the card says what each value is */
+    #dpend-table .row-clickable td,
+    #dcod-table .row-clickable td {
+        display: block;
+        padding: 0;
+        margin: 0;
+        border: none;
+        order: 0;
+        text-align: left;
+        font-size: 14.5px;
+    }
+    #dpend-table .row-clickable td::before,
+    #dcod-table .row-clickable td::before { display: none; }
+
+    /* first line: the customer, then the number */
+    #dpend-table .row-clickable td[data-column="Customer"],
+    #dcod-table .row-clickable td[data-column="Customer"] {
+        grid-column: 1;
+        grid-row: 1;
+        font-size: 17px;
+    }
+    #dpend-table .row-clickable td[data-column="ID"],
+    #dcod-table .row-clickable td[data-column="ID"] {
+        grid-column: 2;
+        grid-row: 1;
+        text-align: right;
+    }
+
+    /* Pending, second line: where it goes, the whole width, may wrap */
+    #dpend-table .row-clickable td[data-column="Destination"] {
+        grid-column: 1 / 3;
+        grid-row: 2;
+        color: var(--steel-soft);
+        line-height: 1.35;
+    }
+
+    /* the third line: the badges on the left (they wrap if there are many) ... */
+    #dpend-table .row-clickable td[data-column="Status"],
+    #dcod-table .row-clickable td[data-column="Status"] {
+        grid-column: 1;
+        grid-row: 3;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    #dpend-table .owner-tag { margin-left: 0; }
+
+    /* ... and the date on the right */
+    #dpend-table .row-clickable td[data-column="Scheduled"] {
+        grid-column: 2;
+        grid-row: 3;
+        text-align: right;
+    }
+
+    /* Cash on Delivery, second line: how it is paid, and the order total */
+    #dcod-table .row-clickable td[data-column="Method"] {
+        grid-column: 1;
+        grid-row: 2;
+        color: var(--steel-soft);
+    }
+    #dcod-table .row-clickable td[data-column="Order Total"] {
+        grid-column: 2;
+        grid-row: 2;
+        text-align: right;
+        color: var(--steel-soft);
+    }
+    /* third line, right: what is still owed at the door */
+    #dcod-table .row-clickable td[data-column="Balance"] {
+        grid-column: 2;
+        grid-row: 3;
+        text-align: right;
+    }
+    /* the two money figures keep their names, so they are not mixed up */
+    #dcod-table .row-clickable td[data-column="Order Total"]::before,
+    #dcod-table .row-clickable td[data-column="Balance"]::before {
+        display: inline;
+        margin-right: 6px;
+        font-size: 13px;
+    }
+}
+
+/* ==========================================================================
    A DELIVERY'S CARD -- one page: route, payment and progress on the left, the goods
    and remarks on the right (shared/deliveries.js). Stacks on a phone.
    ========================================================================== */

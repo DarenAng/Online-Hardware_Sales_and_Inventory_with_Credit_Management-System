@@ -135,6 +135,7 @@ async function handleLogin(event) {
 
         clearLoginAlert();
 
+        forgetLoadedPanels();   // a new sign-in starts with closed tables
         localStorage.setItem('currentUser', JSON.stringify(result.user));
 
         // replace, not assign: the sign-in page leaves the history, so the
@@ -330,6 +331,7 @@ function sendSignedInPersonOn(currentUser) {
                 return;
             }
             localStorage.removeItem('currentUser');
+            forgetLoadedPanels();
             showRememberedSignOutReason();
         })
         .catch(function () {
@@ -361,6 +363,14 @@ function sendHeartbeat() {
     if (document.hidden) return;
 
     apiSendHeartbeat()
+        .then(function (response) { return response.ok ? response.json() : null; })
+        .then(function (body) {
+            // the server says how long a screen may sit unused (SESSION_IDLE_MINUTES)
+            if (body && body.idleMinutes > 0) {
+                IDLE_LIMIT_MS = body.idleMinutes * 60 * 1000;
+                IDLE_WARNING_MS = Math.min(60 * 1000, IDLE_LIMIT_MS / 2);   // a minute before
+            }
+        })
         .catch(function () { /* the server is not there; nothing to say about it */ });
 }
 
@@ -378,7 +388,7 @@ function startHeartbeat() {
 // ==========================================
 // SIGNING OUT WHEN THE SCREEN IS NOT USED
 //
-// The mouse, the keyboard, scrolling and touch count as using the screen. The
+// The mouse, the keyboard, the wheel and touch count as using the screen. The
 // time of the latest one is kept in localStorage, so every tab of the site
 // shares it: working in one tab keeps the others signed in. A minute before
 // the limit a card warns; at the limit the person is signed out and sent to
@@ -386,7 +396,7 @@ function startHeartbeat() {
 // (SESSION_IDLE_MINUTES in server.js), counting only asks sent while the
 // screen was in use: apiHeaders marks the others X-Background.
 // ==========================================
-let IDLE_LIMIT_MS = 30 * 60 * 1000;   // unused this long and the sign-in ends
+let IDLE_LIMIT_MS = 30 * 60 * 1000;   // unused this long and the sign-in ends (30 until the server's heartbeat answer says otherwise)
 let IDLE_WARNING_MS = 60 * 1000;      // the card shows this long before that
 
 const ACTIVITY_KEY = 'lastActivity';
@@ -395,6 +405,7 @@ const ACTIVE_LATELY_MS = 70 * 1000;       // a bit longer than the heartbeat gap
 
 let lastActivityAt = Date.now();          // this tab's own copy; opening the page counts
 let lastActivitySavedAt = 0;
+let lastMouseSpot = '';                   // where the mouse was at its last move
 let idleTimer = null;
 let idleWarningShown = false;
 
@@ -425,10 +436,18 @@ function userWasActiveLately() {
     return Date.now() - latestActivity() < ACTIVE_LATELY_MS;
 }
 
-function onUserActivity() {
+function onUserActivity(event) {
     // while the warning is up only its own button counts, so the card cannot
     // be dismissed by a bump of the mouse
     if (idleWarningShown) return;
+
+    // A mousemove at the same spot is not a person: the browser fires one when
+    // the page moves under a still mouse (a table redrawn by a live update).
+    if (event.type === 'mousemove') {
+        const spot = event.screenX + ',' + event.screenY;
+        if (spot === lastMouseSpot) return;
+        lastMouseSpot = spot;
+    }
     noteActivity(false);
 }
 
@@ -437,8 +456,9 @@ function startIdleWatch() {
 
     noteActivity(true);
 
-    // capture: scroll does not bubble, so listen on the way down to catch every scroller
-    ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'].forEach(function (name) {
+    // The scroll event is not used: the page scrolls by itself when a live
+    // update changes a table's height. A wheel turn or a finger drag is a person.
+    ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'touchmove'].forEach(function (name) {
         document.addEventListener(name, onUserActivity, { capture: true, passive: true });
     });
 
@@ -524,7 +544,7 @@ function signOutForInactivity() {
     const minutes = Math.max(1, Math.round(IDLE_LIMIT_MS / 60000));
     localStorage.removeItem('currentUser');
     rememberSignOutReason('You were signed out after ' + minutes +
-        ' minutes of inactivity. Please sign in again.');
+        (minutes === 1 ? ' minute' : ' minutes') + ' of inactivity. Please sign in again.');
     apiSignOut();
     window.location.replace('Login.html');
 }

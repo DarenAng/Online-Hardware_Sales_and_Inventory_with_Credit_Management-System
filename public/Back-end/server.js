@@ -1267,21 +1267,34 @@ function searchPrefix(text) {
   return String(text).replace(/[\\%_]/g, "\\$&") + "%";
 }
 
+// The characters a word can start after, besides the start of the field. The
+// screen counts any character that is not a letter or digit; these are the
+// ones that turn up in names, emails, phone numbers and addresses.
+const WORD_SEPARATORS = [" ", ".", "@", "-", "_", "(", "/", ","];
+
 // The same rule as startsAWord in shared/data-panel.js: a column matches when
-// it starts with the text or one of its words does ("c" finds "Carl" and
-// "Mark Cole", not "Lace"). Pass the column names and the typed text; the
-// two patterns for each column are added to params, and the SQL to put in
-// WHERE is returned.
+// it starts with the text or one of its words does ("c" finds "Carl",
+// "Mark Cole" and "juan@cruz.com", not "Lace"). Pass the column names and the
+// typed text; the patterns for each column are added to params, and the SQL
+// to put in WHERE is returned.
 // Example: wordStartSearch(["u.email"], "ca", params)
-//   -> "(u.email LIKE ? OR u.email LIKE ?)"   and "ca%" and "% ca%" go into params
+//   -> "(u.email LIKE ? OR u.email LIKE ? OR ...)"   one test for the start
+//      of the field ("ca%") and one for each separator ("% ca%", "%.ca%", ...)
 function wordStartSearch(columns, text, params) {
   const atStart = searchPrefix(text);
-  const afterSpace = "% " + atStart;
+
+  // "%" then the separator then the text; the separator is escaped as well, since "_" is a wildcard
+  const patterns = [atStart];
+  for (const separator of WORD_SEPARATORS) {
+    patterns.push("%" + separator.replace(/[\\%_]/g, "\\$&") + atStart);
+  }
 
   const tests = [];
   for (const column of columns) {
-    tests.push(column + " LIKE ?", column + " LIKE ?");
-    params.push(atStart, afterSpace);
+    for (const pattern of patterns) {
+      tests.push(column + " LIKE ?");
+      params.push(pattern);
+    }
   }
   return "(" + tests.join(" OR ") + ")";
 }
@@ -1514,7 +1527,8 @@ const SESSION_IDLE_MS = SESSION_IDLE_MINUTES * 60 * 1000;
 
 // what a screen is told when its sign-in ran out of idle time
 const IDLE_ENDED_REASON =
-  `You were signed out after ${SESSION_IDLE_MINUTES} minutes of inactivity. Please sign in again.`;
+  `You were signed out after ${SESSION_IDLE_MINUTES} ${SESSION_IDLE_MINUTES === 1 ? "minute" : "minutes"} ` +
+  "of inactivity. Please sign in again.";
 
 // When a sign-in that was used at "now" runs out: the idle time later, but
 // never past SESSION_HOURS after it started. expires_at holds this.
@@ -1699,11 +1713,13 @@ async function endSession(request) {
 }
 
 // Expired sessions, and ended ones whose reason has been kept long enough.
+// An ended row is judged by when it ended, not by expires_at (which is only
+// about 30 minutes after the last use), so its screen can still read the reason.
 // Run by the local timer below, and by the daily job on Vercel.
 async function removeExpiredSessions() {
   const now = Date.now();
   await db.query(
-    "DELETE FROM user_sessions WHERE expires_at < ? OR (ended_reason IS NOT NULL AND ended_at < ?)",
+    "DELETE FROM user_sessions WHERE (ended_reason IS NULL AND expires_at < ?) OR (ended_reason IS NOT NULL AND ended_at < ?)",
     [now, now - ENDED_REASON_MS]);
 }
 
@@ -2633,7 +2649,7 @@ registerLoginRoutes(app, {
   hashPassword, isHashed, verifyPassword,
   startSession, setSessionCookie, endSession, endSessionsForStaff,
   renewSessionAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
-  LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES, passwordComplaint
+  LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES, SESSION_IDLE_MINUTES, passwordComplaint
 });
 
 // ==========================================
@@ -2687,21 +2703,16 @@ app.get("/api/events/status", async (request, response) => {
 });
 
 
-// A changed password ends every session on the old one, since the old password
-// may be known to somebody else. The person who changed it stays signed in:
-// this screen gets a new session in place of the one just ended.
+// A changed password ends every OTHER session on the old one, since the old
+// password may be known to somebody else. The session making the change is
+// kept, so a request this screen already has on its way is not refused.
+// (response is not needed any more; the callers still pass it.)
 const PASSWORD_CHANGED =
   "Your password was changed. Sign in again with the new one.";
 
 async function renewSessionAfterPasswordChange(request, response) {
   const actor = request.actor;
-  await endSessionsForStaff(actor.staffId, null, PASSWORD_CHANGED);
-
-  const token = await startSession({
-    staff_id: actor.staffId, user_id: actor.userId, role_id: actor.roleId,
-    role_name: actor.roleName, email: actor.email
-  });
-  setSessionCookie(response, token);
+  await endSessionsForStaff(actor.staffId, actor.token, PASSWORD_CHANGED);
 }
 
 // ==========================================

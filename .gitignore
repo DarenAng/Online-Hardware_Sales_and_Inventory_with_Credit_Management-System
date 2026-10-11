@@ -53,3 +53,9 @@ vercel-static/
 
 # a database CA certificate saved for DB_SSL_CA_FILE
 *.pem
+
+# design mockups from Claude brainstorming sessions
+.superpowers/
+
+# test scripts, kept off GitHub (they are not part of the app)
+tests/

@@ -224,12 +224,22 @@
 
                         </div>
 
-                        <!-- the two breakdowns side by side, for the same period -->
-                        <div class="summary-tables">
-                            <div class="card">
-                                <div class="panel-head">
-                                    <div><h3>By Payment Method</h3></div>
-                                </div>
+                        <!-- the two breakdowns for the same period, one at a time:
+                             the tabs switch between them (showSummaryTab in manager.js).
+                             A printout shows both, one under the other. -->
+                        <div class="card summary-card">
+                            <div class="summary-tabs no-print" role="tablist">
+                                <button type="button" class="summary-tab active" role="tab" aria-selected="true"
+                                        data-summary-tab="summary-methods"
+                                        onclick="showSummaryTab('summary-methods')">By Payment Method</button>
+                                <button type="button" class="summary-tab" role="tab" aria-selected="false"
+                                        data-summary-tab="summary-products"
+                                        onclick="showSummaryTab('summary-products')">Best Sellers</button>
+                            </div>
+
+                            <div class="summary-pane" id="summary-methods" role="tabpanel">
+                                <!-- the heading is only for the printout; on screen the tab names it -->
+                                <h3 class="summary-pane-title">By Payment Method</h3>
                                 <div class="table-responsive grid-5">
                                     <table id="income-methods-table">
                                         <thead>
@@ -241,10 +251,8 @@
                                 <div class="pager is-single" id="income-methods-pager"></div>
                             </div>
 
-                            <div class="card">
-                                <div class="panel-head">
-                                    <div><h3>Best Sellers</h3></div>
-                                </div>
+                            <div class="summary-pane" id="summary-products" role="tabpanel" hidden>
+                                <h3 class="summary-pane-title">Best Sellers</h3>
                                 <div class="table-responsive grid-5">
                                     <table id="income-products-table">
                                         <thead>

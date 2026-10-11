@@ -134,7 +134,7 @@ document.addEventListener('click', function (event) {
     if (!event.target.closest('.account-menu')) closeAccountMenu();
 
     const notifications = document.getElementById('notif-drop');
-    if (notifications && notifications.style.display === 'block' &&
+    if (notifications && notifications.style.display === 'flex' &&
         !event.target.closest('#notif-drop') && !event.target.closest('.bell')) {
         notifications.style.display = 'none';
     }

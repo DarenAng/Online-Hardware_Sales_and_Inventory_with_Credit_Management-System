@@ -239,6 +239,7 @@ const dataPanelMethods = {
 
         this.loadTicket = (this.loadTicket || 0) + 1;
         const ticket = this.loadTicket;
+        this.failedStatus = 0;
 
         this.renderLoading();
 
@@ -258,6 +259,7 @@ const dataPanelMethods = {
             }
         } catch (error) {
             if (ticket !== this.loadTicket) return;
+            this.failedStatus = (error && error.status) || 0;   // 401 or 403: not allowed
             this.renderError(error && error.handled ? error.message : null);
         } finally {
             if (ticket === this.loadTicket && this.reloadWanted) {
@@ -319,19 +321,20 @@ const dataPanelMethods = {
         writeLoadedPanels(all);
     },
 
-    // Loads the table again the way it was left: the same search, filters and boxes
-    async recall(saved) {
+    // Puts the saved search, filters and boxes back, before the table loads
+    // (load() can read these boxes)
+    prepare(saved) {
         this.query = searchText(saved.text);
         Object.assign(this.filters, saved.filters || {});
 
         const box = this.searchBox();
         if (box) box.value = saved.text || '';
 
-        // before the load, because load() can read these boxes
         this.putBoxesBack(saved, false);
-        await this.open();
+    },
 
-        // after it, because a box filled from the rows has its options only now
+    // After the load: a box filled from the rows has its options only now
+    finish(saved) {
         this.putBoxesBack(saved, true);
         if (this.state === 'ready') this.apply();
     },
@@ -573,22 +576,72 @@ function setBoxValue(box, value) {
     return true;
 }
 
+// True when the menu has hidden this table's screen (switched off for the
+// role by Access Control), so it is not loaded for nothing.
+function screenIsHidden(panel) {
+    const table = document.getElementById(panel.config.tableId);
+    const screen = table ? table.closest('[data-panel]') : null;
+    if (!screen) return false;
+
+    // a screen with several views (Reports, Stocks) hides a view by hiding its tab
+    const view = table.closest('.panel-view');
+    const tab = view ? screen.querySelector('[data-view-tab="' + view.id + '"]') : null;
+    if (tab && tab.hidden) return true;
+
+    const link = document.querySelector('.sidebar-nav a[data-panel-link="' +
+        (screen.getAttribute('data-panel-of') || screen.id) + '"]');
+    if (!link) return false;
+
+    const item = link.closest('li');
+    const heading = item && item.parentElement ? item.parentElement.closest('li') : null;
+    return Boolean((item && item.hidden) || (heading && heading.hidden));
+}
+
 // Loads again every table of this page that was loaded before.
-function restoreLoadedPanels() {
+async function restoreLoadedPanels() {
     // only for somebody signed in; session.js sends everyone else to the sign-in page
     if (typeof getCurrentUser !== 'function' || !getCurrentUser()) return;
 
     const saved = readLoadedPanels()[thisPageName()] || {};
+    const panels = [];
+
     Object.keys(saved).forEach((key) => {
         const panel = getDataPanel(key);
-        if (panel && panel.config.remember !== false) panel.recall(saved[key]);
+        if (!panel || panel.config.remember === false) return;
+
+        // a screen switched off since: forget it instead of asking the server
+        if (screenIsHidden(panel)) {
+            panel.forget();
+            return;
+        }
+        panel.prepare(saved[key]);
+        panels.push(panel);
     });
+
+    // One at a time. Some tables load together (the driver's two lists): the
+    // first one's load also fills the other, so by its turn it is no longer
+    // closed and is not read a second time.
+    for (const panel of panels) {
+        if (panel.state !== 'closed') continue;
+
+        await panel.open();
+
+        // not allowed any more: forget it, so it does not complain on every reload
+        if (panel.state === 'error' && (panel.failedStatus === 401 || panel.failedStatus === 403)) {
+            panel.forget();
+        } else {
+            panel.finish(saved[panel.key]);
+        }
+    }
 }
 
-// The page builds its tables in its own DOMContentLoaded handler. A timer
-// of 0 runs after all of those handlers have finished, so the tables exist.
+// The page builds its tables in its own DOMContentLoaded handler, and
+// features.js hides the screens that are switched off in a timer after it.
+// A timer inside a timer runs after both, so the tables exist and the menu is settled.
 document.addEventListener('DOMContentLoaded', function () {
-    setTimeout(restoreLoadedPanels, 0);
+    setTimeout(function () {
+        setTimeout(restoreLoadedPanels, 0);
+    }, 0);
 });
 
 // ---------- the handlers the generated buttons call ----------

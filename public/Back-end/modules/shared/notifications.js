@@ -1,13 +1,17 @@
 // notifications.js -- the bell and its popup cards
 // Loaded by: all five dashboards
-// Every unseen alert pops up once per session as its own card, three at a
-// time; opening one marks it read.
+// Every unseen alert pops up once as its own card, three at a time; opening
+// one marks it read. "Once" means once in this browser tab since signing in:
+// the ids are kept in sessionStorage, so a reload does not pop them again.
 let invNotifications = [];
-const poppedNotifications = new Set();
+const poppedNotifications = readPoppedAlerts();
 
 // Alerts that have not had their card yet. The next one comes forward as soon
-// as there is room, so a long list never covers the screen.
+// as there is room, so a long list never covers the screen. When more than
+// POP_MOST_QUEUED arrive together (the first sign-in of the day), only the
+// first three get a card and one summary card stands for the rest.
 const POP_CARDS_AT_ONCE = 3;
+const POP_MOST_QUEUED = 6;
 const POP_RECHECK_MS = 700;
 let popQueue = [];
 let popTimer = null;
@@ -94,7 +98,8 @@ function openNotifications() {
     clearCards();
     popQueue = [];   // the list is open: the alerts are in front of the reader already
 
-    drop.style.display = 'block';
+    // flex, not block: the list inside shrinks to the room left and scrolls (see .notif-drop)
+    drop.style.display = 'flex';
     closeAccountMenu();
     loadNotifications();
 }
@@ -110,7 +115,7 @@ function toggleNotifications(event) {
     const drop = document.getElementById('notif-drop');
     if (!drop) return;
 
-    if (drop.style.display === 'block') closeNotifications();
+    if (drop.style.display === 'flex') closeNotifications();
     else openNotifications();
 }
 
@@ -170,12 +175,36 @@ async function loadNotifications() {
     popNewNotifications(unread);
 }
 
+// the ids of the alerts that already had a card, from this tab's storage
+function readPoppedAlerts() {
+    try {
+        const ids = JSON.parse(sessionStorage.getItem(POPPED_ALERTS_KEY) || '[]');
+        if (Array.isArray(ids)) return new Set(ids);
+    } catch (error) { /* blocked, or not readable */ }
+    return new Set();
+}
+
+function writePoppedAlerts() {
+    try {
+        sessionStorage.setItem(POPPED_ALERTS_KEY, JSON.stringify(Array.from(poppedNotifications)));
+    } catch (error) { /* blocked: they may pop again after a reload */ }
+}
+
 // every unseen alert gets a card, once; they queue up and come forward three at a time
 function popNewNotifications(unread) {
     const fresh = unread.filter((n) => !poppedNotifications.has(n.notification_id));
-    fresh.forEach((n) => poppedNotifications.add(n.notification_id));
+    if (fresh.length === 0) return;
 
-    popQueue = popQueue.concat(fresh);
+    fresh.forEach((n) => poppedNotifications.add(n.notification_id));
+    writePoppedAlerts();
+
+    if (fresh.length > POP_MOST_QUEUED) {
+        // the first three, then one card for all the others
+        popQueue = popQueue.concat(fresh.slice(0, POP_CARDS_AT_ONCE));
+        popQueue.push({ more: fresh.length - POP_CARDS_AT_ONCE });
+    } else {
+        popQueue = popQueue.concat(fresh);
+    }
     showQueuedCards();
 }
 
@@ -193,6 +222,19 @@ function showQueuedCards() {
 
         // an alert read in the meantime (from the bell, say) no longer needs its card
         const queued = popQueue.shift();
+
+        // the summary card for alerts that did not get one of their own
+        if (queued.more) {
+            showCard({
+                tone: 'warning',
+                title: queued.more + ' more alerts',
+                message: 'Open the bell in the top right corner to read them.',
+                onOpen: () => openNotifications(),
+                life: 9000
+            });
+            continue;
+        }
+
         const n = invNotifications.find((item) => item.notification_id === queued.notification_id);
         if (!n || n.is_read) continue;
 
