@@ -281,21 +281,23 @@ function renderAttentionList() {
         const out = p.stock_status === 'Out of Stock';
         const unit = p.unit_name ? ' ' + escapeHtml(p.unit_name) : '';
 
-        return '<li class="attention-row">' +
-            '<div class="attention-who">' +
+        // the whole row is the button (like a clickable table row); it is a
+        // real <button> so the keyboard can reach it too
+        return '<li>' +
+            '<button type="button" class="attention-row" ' +
+                'aria-label="Adjust ' + escapeHtml(p.product_name) + '" ' +
+                'onclick="adjustFromList(' + p.product_id + ')">' +
+            '<span class="attention-who">' +
                 '<span class="attention-name">' + escapeHtml(p.product_name) + '</span>' +
                 '<span class="attention-kind">' + materialKindText(p) + '</span>' +
-            '</div>' +
-            '<div class="attention-figures">' +
+            '</span>' +
+            '<span class="attention-figures">' +
                 '<span class="badge ' + (out ? 'badge-danger' : 'badge-warning') + '" ' +
                     'title="' + (out ? 'Out of stock' : 'Low stock') + '">' +
                     (Number(p.quantity_in_stock) || 0) + unit + '</span>' +
                 '<span class="attention-reorder">Reorder at ' + (Number(p.reorder_point) || 0) + '</span>' +
-            '</div>' +
-            '<button type="button" class="btn btn-sm" aria-label="Adjust ' + escapeHtml(p.product_name) + '" ' +
-                'onclick="adjustFromList(' + p.product_id + ')">' +
-                'Adjust <span aria-hidden="true">&rarr;</span></button>' +
-            '</li>';
+            '</span>' +
+            '</button></li>';
     }).join('');
 
     // more than fit here: the Reorder Point screen has them all
