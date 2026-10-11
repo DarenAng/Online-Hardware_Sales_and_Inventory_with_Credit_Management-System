@@ -118,85 +118,102 @@
                 <!-- ============================================================
                      STOCK ADJUSTMENT -- the form on its own; history is its own screen
                      ============================================================ -->
-                <div class="card" id="panel-adjust" data-panel style="display: none;">
-                    <div class="panel-head">
-                        <div>
-                            <h3>Stock Adjustment</h3>
+                <div id="panel-adjust" data-panel style="display: none;">
+                    <!-- the form on the left, the materials that need stock beside it -->
+                    <div class="pair-layout form-left">
+                        <div class="card pair-form">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Stock Adjustment</h3>
+                                </div>
+                            </div>
+
+                            <form id="adjust-form" class="form-sheet" onsubmit="handleAdjustStock(event)" autocomplete="off">
+                                <!-- WHICH MATERIAL -- typed; the strip below is the only thing that says a
+                                     choice was made, and the form will not send without one -->
+                                <div class="form-group">
+                                    <label for="adjust-material">Material</label>
+                                    <div class="suggest-wrap">
+                                        <input type="text" id="adjust-material" class="form-control"
+                                               autocomplete="off" placeholder="Type a material, brand, or category"
+                                               role="combobox" aria-expanded="false"
+                                               aria-controls="adjust-suggest" aria-autocomplete="list"
+                                               oninput="onAdjustMaterialInput(this.value)"
+                                               onfocus="onAdjustMaterialInput(this.value)"
+                                               onkeydown="onAdjustMaterialKey(event)">
+                                        <input type="hidden" name="productId" value="">
+                                        <button type="button" class="suggest-clear" id="adjust-material-clear"
+                                                onclick="clearAdjustMaterial()" aria-label="Clear the material"
+                                                hidden>&times;</button>
+                                        <ul class="suggest-list" id="adjust-suggest" role="listbox" hidden></ul>
+                                    </div>
+                                    <div class="pick-strip" id="adjust-material-strip" hidden></div>
+                                    <p class="pick-verdict" id="adjust-material-verdict"></p>
+                                </div>
+
+                                <div class="grid-2">
+                                    <div class="form-group">
+                                        <label for="adjust-type">Adjustment type</label>
+                                        <select id="adjust-type" name="adjustmentType" class="form-control"
+                                                onchange="renderAdjustPreview()" required>
+                                            <option value="Add">Add to stock</option>
+                                            <option value="Remove">Remove from stock</option>
+                                            <option value="Recount">Recount, set exact figure</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- COUNTED IN WHAT -- suggests what the shop uses and accepts a new word -->
+                                    <div class="form-group">
+                                        <label for="adjust-unit">Counted in</label>
+                                        <div class="suggest-wrap">
+                                            <input type="text" id="adjust-unit" name="unitName" class="form-control"
+                                                   autocomplete="off" placeholder="pcs, bag, kilogram, box"
+                                                   maxlength="20"
+                                                   role="combobox" aria-expanded="false"
+                                                   aria-controls="unit-suggest" aria-autocomplete="list"
+                                                   oninput="onAdjustUnitInput(this.value)"
+                                                   onfocus="onAdjustUnitInput(this.value)"
+                                                   onkeydown="onAdjustUnitKey(event)">
+                                            <ul class="suggest-list" id="unit-suggest" role="listbox" hidden></ul>
+                                        </div>
+                                        <p class="unit-verdict" id="adjust-unit-verdict"></p>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="adjust-qty">Quantity</label>
+                                        <input type="number" id="adjust-qty" name="quantity" class="form-control"
+                                               min="1" step="0.001" required oninput="renderAdjustPreview()">
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label for="adjust-reason">Reason</label>
+                                        <input type="text" id="adjust-reason" name="reason" class="form-control"
+                                               placeholder="Delivery received, breakage, recount" required>
+                                    </div>
+                                </div>
+
+                                <!-- what this will do to the shelf, before the button -->
+                                <p class="adjust-preview" id="adjust-preview"></p>
+
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-success">Apply Adjustment</button>
+                                    <button type="button" class="btn btn-ghost" onclick="showInventoryHome(event)">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+
+                        <!-- OUT OF STOCK OR LOW -- the same rule as the banner above; drawn by renderAttentionList -->
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Needs attention</h3>
+                                </div>
+                            </div>
+                            <p class="attention-hint">Out of stock or at or below its reorder point. The ones most short come first.</p>
+                            <ul class="attention-list" id="attention-list"></ul>
+                            <div class="attention-more" id="attention-more" hidden></div>
                         </div>
                     </div>
-
-                    <form id="adjust-form" class="form-sheet" onsubmit="handleAdjustStock(event)" autocomplete="off">
-                        <!-- WHICH MATERIAL -- typed; the strip below is the only thing that says a
-                             choice was made, and the form will not send without one -->
-                        <div class="form-group">
-                            <label for="adjust-material">Material</label>
-                            <div class="suggest-wrap">
-                                <input type="text" id="adjust-material" class="form-control"
-                                       autocomplete="off" placeholder="Type a material, brand, or category"
-                                       role="combobox" aria-expanded="false"
-                                       aria-controls="adjust-suggest" aria-autocomplete="list"
-                                       oninput="onAdjustMaterialInput(this.value)"
-                                       onfocus="onAdjustMaterialInput(this.value)"
-                                       onkeydown="onAdjustMaterialKey(event)">
-                                <input type="hidden" name="productId" value="">
-                                <button type="button" class="suggest-clear" id="adjust-material-clear"
-                                        onclick="clearAdjustMaterial()" aria-label="Clear the material"
-                                        hidden>&times;</button>
-                                <ul class="suggest-list" id="adjust-suggest" role="listbox" hidden></ul>
-                            </div>
-                            <div class="pick-strip" id="adjust-material-strip" hidden></div>
-                            <p class="pick-verdict" id="adjust-material-verdict"></p>
-                        </div>
-
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label for="adjust-type">Adjustment type</label>
-                                <select id="adjust-type" name="adjustmentType" class="form-control"
-                                        onchange="renderAdjustPreview()" required>
-                                    <option value="Add">Add to stock</option>
-                                    <option value="Remove">Remove from stock</option>
-                                    <option value="Recount">Recount, set exact figure</option>
-                                </select>
-                            </div>
-
-                            <!-- COUNTED IN WHAT -- suggests what the shop uses and accepts a new word -->
-                            <div class="form-group">
-                                <label for="adjust-unit">Counted in</label>
-                                <div class="suggest-wrap">
-                                    <input type="text" id="adjust-unit" name="unitName" class="form-control"
-                                           autocomplete="off" placeholder="pcs, bag, kilogram, box"
-                                           maxlength="20"
-                                           role="combobox" aria-expanded="false"
-                                           aria-controls="unit-suggest" aria-autocomplete="list"
-                                           oninput="onAdjustUnitInput(this.value)"
-                                           onfocus="onAdjustUnitInput(this.value)"
-                                           onkeydown="onAdjustUnitKey(event)">
-                                    <ul class="suggest-list" id="unit-suggest" role="listbox" hidden></ul>
-                                </div>
-                                <p class="unit-verdict" id="adjust-unit-verdict"></p>
-                            </div>
-
-                            <div class="form-group">
-                                <label for="adjust-qty">Quantity</label>
-                                <input type="number" id="adjust-qty" name="quantity" class="form-control"
-                                       min="1" step="0.001" required oninput="renderAdjustPreview()">
-                            </div>
-
-                            <div class="form-group">
-                                <label for="adjust-reason">Reason</label>
-                                <input type="text" id="adjust-reason" name="reason" class="form-control"
-                                       placeholder="Delivery received, breakage, recount" required>
-                            </div>
-                        </div>
-
-                        <!-- what this will do to the shelf, before the button -->
-                        <p class="adjust-preview" id="adjust-preview"></p>
-
-                        <div class="form-footer">
-                            <button type="submit" class="btn btn-success">Apply Adjustment</button>
-                            <button type="button" class="btn btn-ghost" onclick="showInventoryHome(event)">Cancel</button>
-                        </div>
-                    </form>
                 </div>
 
                 <!-- ============================================================

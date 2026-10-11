@@ -130,13 +130,19 @@
    THE ADJUSTMENT FORM -- two typed boxes and a sentence
    ========================================================================== */
 
-/* the material field is capped so the name and the stock figure read as a pair */
-#adjust-form .suggest-wrap,
-#adjust-form .pick-strip,
-#adjust-form .pick-verdict { max-width: 560px; }
+/* The material box, its strip and its note run the full width of the form
+   (the form is laid out beside the "Needs attention" card, see .pair-layout). */
 
-/* The unit box sits inside the two-column grid, so it takes the column. */
-#adjust-form .grid-2 .suggest-wrap { max-width: none; }
+/* On a wide screen the form gets a little more than the usual narrow column,
+   so the list beside it is not stretched thin. Below 1280px the two stack
+   (general-ui.css), so this only applies above it. */
+@media screen and (min-width: 1280px) {
+    #panel-adjust .pair-layout.form-left { grid-template-columns: clamp(360px, 42%, 680px) minmax(0, 1fr); }
+}
+
+/* "Adjust" scrolls the form to the top of the page when the two are stacked;
+   the top bar stays put over the page, so leave room for it */
+#panel-adjust .pair-form { scroll-margin-top: 80px; }
 
 /* what the typed unit is about to do; a note, not a warning */
 .unit-verdict {
@@ -149,8 +155,8 @@
 .unit-verdict.is-new { color: var(--signal-ink); font-weight: 500; }
 
 /* ==========================================================================
-   WHAT THIS WILL DO TO THE SHELF -- green sensible, amber on or under the
-   reorder point, red below zero
+   WHAT THIS WILL DO TO THE SHELF -- the material, then "40 pcs -> 45 pcs (+5)":
+   green when the shelf goes up, amber when it goes down, red when it cannot be done
    ========================================================================== */
 .adjust-preview {
     margin: 14px 0 0;
@@ -163,9 +169,49 @@
     font-variant-numeric: tabular-nums;
 }
 .adjust-preview:empty { display: none; }
-.adjust-preview.is-good  { border-left-color: var(--ok);     background: var(--ok-dim); }
-.adjust-preview.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
-.adjust-preview.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); }
+.adjust-preview.is-good  { border-left-color: var(--ok);   background: var(--ok-dim); }
+.adjust-preview.is-down  { border-left-color: var(--signal); background: var(--signal-dim); }
+.adjust-preview.is-stop  { border-left-color: var(--stop); background: var(--stop-dim); }
+
+.preview-name   { display: block; font-size: 13px; color: var(--steel); }
+.preview-figures { display: block; font-size: 17px; font-weight: 600; color: var(--ink); }
+.adjust-preview.is-good .preview-figures strong { color: var(--ok-ink); }
+.adjust-preview.is-down .preview-figures strong { color: var(--signal-ink); }
+.adjust-preview.is-stop .preview-figures strong { color: var(--stop-hi); }
+.preview-note   { display: block; margin-top: 4px; font-size: 13px; color: var(--signal-ink); }
+
+/* ==========================================================================
+   NEEDS ATTENTION -- beside the adjustment form: out of stock, then low
+   ========================================================================== */
+.attention-hint { margin: 0 0 12px; font-size: 13.5px; color: var(--steel-soft); }
+.attention-list { list-style: none; margin: 0; padding: 0; }
+
+.attention-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    gap: 14px;
+    padding: 11px 0;
+    border-top: 1px solid var(--line);
+}
+.attention-who { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.attention-name { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.attention-kind { font-size: 13px; color: var(--steel-soft); }
+
+.attention-figures { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.attention-reorder { font-size: 12.5px; color: var(--steel-soft); }
+
+.attention-empty { padding: 14px 0; color: var(--steel); border-top: 1px solid var(--line); }
+.attention-more { margin-top: 12px; }
+
+/* a phone: the name on its own line, the figures and the button under it */
+@media (max-width: 640px) {
+    /* the card heading sits at the left, like the form's (.pair-layout centred it) */
+    #panel-adjust .panel-head { align-items: stretch; }
+
+    .attention-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .attention-who { grid-column: 1 / -1; }
+}
 
 /* ==========================================================================
    SELLING UNITS -- the sizes a material also sells in, on its card

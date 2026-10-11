@@ -62,7 +62,11 @@ function showInventoryHome(event) {
 // Opening a screen fills the dropdowns it needs and nothing else.
 function showAdjust(event) {
     showInventoryPanel('panel-adjust', 'Stock Adjustment', event);
-    ensureInventoryLoaded(true);
+
+    // the "Needs attention" list is drawn from the same material list, so it waits for it
+    if (invLoaded) renderAttentionList();
+    else attentionMessage('Loading materials...');
+    ensureInventoryLoaded(true).then(afterMaterialsLoaded);
     loadUnits(false);
     renderAdjustMaterialVerdict();
     renderAdjustPreview();
@@ -113,6 +117,9 @@ function buildMaterialsPanel() {
             invLoaded = true;
             return invProducts;
         },
+
+        // this load replaces invProducts, so the Stock Adjustment list is redrawn from it
+        onLoaded: () => { if (adjustScreenOpen()) afterMaterialsLoaded(true); },
 
         match: (p, query) => prefixMatch([
             p.product_name, p.category_name, p.supplier_name, p.stock_status
@@ -180,6 +187,154 @@ async function loadStockBanner() {
             '<button type="button" class="btn btn-sm" onclick="showReorder(event)">Review Reorder Point</button></div>';
     } catch (error) {
         box.innerHTML = '';
+    }
+}
+
+// ---------- the "Needs attention" list (Stock Adjustment) ----------
+// The server marks every material Out of Stock, Low Stock or In Stock. It is
+// the same rule that counts the banner above, so the list follows that mark
+// and the two always agree.
+const ATTENTION_SHOWN = 10;
+
+function isShort(p) {
+    return p.stock_status === 'Out of Stock' || p.stock_status === 'Low Stock';
+}
+
+// how far under its reorder point a material is
+function shortBy(p) {
+    return (Number(p.reorder_point) || 0) - (Number(p.quantity_in_stock) || 0);
+}
+
+// out of stock first, then low; inside each, the one furthest under its point first
+function compareShort(a, b) {
+    const aRank = a.stock_status === 'Out of Stock' ? 0 : 1;
+    const bRank = b.stock_status === 'Out of Stock' ? 0 : 1;
+    if (aRank !== bRank) return aRank - bRank;
+    if (shortBy(a) !== shortBy(b)) return shortBy(b) - shortBy(a);
+    return String(a.product_name).localeCompare(String(b.product_name));
+}
+
+// one line of words where the list goes ("Loading...", "Everything is above...")
+function attentionMessage(text) {
+    const list = document.getElementById('attention-list');
+    const more = document.getElementById('attention-more');
+    if (list) list.innerHTML = '<li class="attention-empty">' + escapeHtml(text) + '</li>';
+    if (more) { more.hidden = true; more.innerHTML = ''; }
+}
+
+// whether the Stock Adjustment screen is the one showing
+function adjustScreenOpen() {
+    const panel = document.getElementById('panel-adjust');
+    return !!panel && panel.style.display === 'block';
+}
+
+// Once the materials are in: draw the list, and bring the material picked in the
+// form up to date. Says so when they could not be loaded.
+function afterMaterialsLoaded(loaded) {
+    if (!loaded) {
+        attentionMessage('The materials could not be loaded.');
+        return;
+    }
+
+    refreshPickedMaterial();
+    renderAttentionList();
+}
+
+// The picked material is a copy from an earlier load; swap in the fresh one so the
+// strip and the preview's "before" figure are current. The unit box is left alone,
+// because the clerk may be in the middle of typing it.
+function refreshPickedMaterial() {
+    if (!adjustMaterial) return;
+
+    const fresh = invProducts.find((p) => p.product_id === adjustMaterial.product_id);
+    if (!fresh) return;
+
+    adjustMaterial = fresh;
+    renderAdjustMaterialStrip();
+    renderAdjustUnitVerdict();
+    renderAdjustPreview();
+}
+
+// Somebody else moved stock (a sale, a return, another clerk): while this screen is
+// open, read the materials again so the list, the strip and the banner stay true.
+async function refreshAdjustScreen() {
+    if (!adjustScreenOpen()) return;
+
+    const loaded = await ensureInventoryLoaded(true);
+    if (loaded) afterMaterialsLoaded(true);
+    loadStockBanner();
+}
+
+function renderAttentionList() {
+    const list = document.getElementById('attention-list');
+    const more = document.getElementById('attention-more');
+    if (!list || !more) return;
+
+    const short = invProducts.filter(isShort).sort(compareShort);
+
+    if (short.length === 0) {
+        attentionMessage('Everything is above its reorder point.');
+        return;
+    }
+
+    list.innerHTML = short.slice(0, ATTENTION_SHOWN).map((p) => {
+        const out = p.stock_status === 'Out of Stock';
+        const unit = p.unit_name ? ' ' + escapeHtml(p.unit_name) : '';
+
+        return '<li class="attention-row">' +
+            '<div class="attention-who">' +
+                '<span class="attention-name">' + escapeHtml(p.product_name) + '</span>' +
+                '<span class="attention-kind">' + materialKindText(p) + '</span>' +
+            '</div>' +
+            '<div class="attention-figures">' +
+                '<span class="badge ' + (out ? 'badge-danger' : 'badge-warning') + '" ' +
+                    'title="' + (out ? 'Out of stock' : 'Low stock') + '">' +
+                    (Number(p.quantity_in_stock) || 0) + unit + '</span>' +
+                '<span class="attention-reorder">Reorder at ' + (Number(p.reorder_point) || 0) + '</span>' +
+            '</div>' +
+            '<button type="button" class="btn btn-sm" aria-label="Adjust ' + escapeHtml(p.product_name) + '" ' +
+                'onclick="adjustFromList(' + p.product_id + ')">' +
+                'Adjust <span aria-hidden="true">&rarr;</span></button>' +
+            '</li>';
+    }).join('');
+
+    // more than fit here: the Reorder Point screen has them all
+    if (short.length > ATTENTION_SHOWN) {
+        more.hidden = false;
+        more.innerHTML = '<button type="button" class="btn btn-ghost btn-sm" onclick="showReorder(event)">' +
+            'See all ' + short.length + ' in Reorder Point</button>';
+    } else {
+        more.hidden = true;
+        more.innerHTML = '';
+    }
+}
+
+// "Adjust" on a row: the same pick as choosing it from the suggestion list, for adding stock
+function adjustFromList(productId) {
+    const form = document.getElementById('adjust-form');
+
+    // a quantity and reason typed for another material do not belong to this one
+    if (form && adjustMaterial && adjustMaterial.product_id !== productId) {
+        form.elements.quantity.value = '';
+        form.elements.reason.value = '';
+    }
+
+    const type = document.getElementById('adjust-type');
+    if (type) type.value = 'Add';
+
+    pickAdjustMaterial(productId);       // this also redraws the strip and the preview
+
+    const qty = document.getElementById('adjust-qty');
+    const card = document.querySelector('#panel-adjust .pair-form');
+
+    if (card && qty && window.matchMedia('(max-width: 1279px)').matches) {
+        // stacked layout: the form is above the list, so bring it into view;
+        // preventScroll because that scroll is already taking us there
+        card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        qty.focus({ preventScroll: true });
+    } else if (qty) {
+        // side by side: a plain focus scrolls the box into view on a short screen
+        qty.focus();
     }
 }
 
@@ -577,7 +732,8 @@ function readQuantity(value) {
 }
 
 // ---------- what this will do ----------
-// a Remove that would take the shelf below zero is caught here
+// A strip: the material, then "40 pcs -> 45 pcs (+5)". A Remove that would
+// take the shelf below zero is caught here.
 function renderAdjustPreview() {
     const box = document.getElementById('adjust-preview');
     const form = document.getElementById('adjust-form');
@@ -615,12 +771,27 @@ function renderAdjustPreview() {
         return;
     }
 
+    // the difference from what is on hand: +5, a real minus sign for -3, or none
+    const change = Math.round((after - before) * 1000) / 1000;
+    let changeText = 'no change';
+    if (change > 0) changeText = '+' + change;
+    else if (change < 0) changeText = '−' + Math.abs(change);
+
+    // green when the shelf goes up, amber when it goes down; red is kept for what cannot be done
+    let tone = '';
+    if (change > 0) tone = ' is-good';
+    else if (change < 0) tone = ' is-down';
+
     const reorder = Number(adjustMaterial.reorder_point) || 0;
     const low = after <= reorder;
 
-    box.className = 'adjust-preview ' + (low ? 'is-watch' : 'is-good');
-    box.textContent = adjustMaterial.product_name + ': ' + before + ' to ' + after + ' ' + unit + '.' +
-        (low ? ' That is at or below its reorder point of ' + reorder + ', so the manager is told.' : '');
+    box.className = 'adjust-preview' + tone;
+    box.innerHTML =
+        '<span class="preview-name">' + escapeHtml(adjustMaterial.product_name) + '</span>' +
+        '<span class="preview-figures">' + before + ' ' + escapeHtml(unit) + ' → ' +
+            after + ' ' + escapeHtml(unit) + ' <strong>(' + changeText + ')</strong></span>' +
+        (low ? '<span class="preview-note">That is at or below its reorder point of ' + reorder +
+            ', so the manager is told.</span>' : '');
 }
 
 // ---------- the log ----------
@@ -747,7 +918,7 @@ async function handleAdjustStock(event) {
         // form.reset() would clear the material too; only the stale stock figure must go
         invLoaded = false;
         invUnitsLoaded = false;
-        await ensureInventoryLoaded(true);
+        afterMaterialsLoaded(await ensureInventoryLoaded(true));    // a restocked material drops off the list
         await loadUnits(true);
 
         const again = invProducts.find((m) => m.product_id === data.productId);
@@ -1780,6 +1951,9 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
             'Stock Adjustment': { label: 'Adjustment History', panelId: 'panel-adjust-log',
                                   open: () => showAdjustmentHistory(), key: 'clerk-adjustments' }
         });
+
+        // the Stock Adjustment screen follows stock moved by other people (live-sync.js)
+        onLiveChange(['inventory', 'sales', 'returns'], refreshAdjustScreen);
 
         showInventoryHome();
         loadNotifications();
