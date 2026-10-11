@@ -96,7 +96,34 @@ function modalBodyFits(body) {
     return body.scrollHeight <= body.clientHeight + 1;
 }
 
+// Is someone typing in a box of this card (a text box, a list, a note)?
+function boxBeingTypedIn(modal) {
+    const active = document.activeElement;
+    if (!active || !modal.contains(active)) return null;
+    if (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT') {
+        return active;
+    }
+    return null;
+}
+
+// Laying the pages out moves the card's boxes in and out of the page, and a
+// box that is moved loses the cursor. On a phone that closes the keyboard, and
+// the keyboard opening is itself a resize that lays the pages out again, so
+// the keyboard would never stay open. So while someone types, the pages stay
+// as they are (they are laid out again when the box is left, see 'focusout'
+// below); and when they must be laid out anyway, the cursor is put back.
 function paginateModal(modal, resetPage) {
+    const typing = modal && modal.classList.contains('open') ? boxBeingTypedIn(modal) : null;
+    if (typing && !resetPage) return;
+
+    layoutModalPages(modal, resetPage);
+
+    if (typing && document.activeElement !== typing) {
+        typing.focus({ preventScroll: true });
+    }
+}
+
+function layoutModalPages(modal, resetPage) {
     if (!modal || !modal.classList.contains('open')) {
         if (modal) {
             unpaginateModal(modal);
@@ -268,4 +295,11 @@ if (typeof ResizeObserver === 'function') {
 
 window.addEventListener('resize', () => {
     document.querySelectorAll('.modal.open').forEach((modal) => schedulePaginate(modal, false));
+});
+
+// a box was left: the pages held still while it was typed in, so lay them out
+// now for whatever changed (a message under the box, the keyboard closing)
+document.addEventListener('focusout', (event) => {
+    const modal = event.target.closest ? event.target.closest('.modal.open') : null;
+    if (modal) schedulePaginate(modal, false);
 });
