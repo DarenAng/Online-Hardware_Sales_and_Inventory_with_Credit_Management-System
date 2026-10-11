@@ -555,7 +555,16 @@ let printRestore = null;
 // The status cards over a table (the figure cards and the count chips) stay
 // off the printout. Their figures are read back here as label/value rows, to
 // go in a Totals table at the bottom of the report instead.
-function printTotalRows(container) {
+
+// The count chips count every row loaded, but the printout holds only the rows
+// the filters leave. For these panels the chip counts are taken again from the
+// printed (visible) rows: each says which chip a row belongs to.
+const PRINT_CHIP_STATE = {
+    'mgr-deliveries': (d) => d.fulfilment_state,
+    'mgr-po': (po) => poStage(po)
+};
+
+function printTotalRows(container, panel) {
     const rows = [];
 
     container.querySelectorAll('.kpi-card').forEach((card) => {
@@ -569,17 +578,26 @@ function printTotalRows(container) {
     // a chip reads "3 Completed": the number is in .track-count, the words are the rest
     let chipTotal = 0;
     const chips = container.querySelectorAll('.track-chip');
+    const stateOf = panel ? PRINT_CHIP_STATE[panel.key] : null;
+    let chipRows = 0;
     chips.forEach((chip) => {
         const countBox = chip.querySelector('.track-count');
-        const count = countBox ? Number(countBox.textContent) : 0;
+        let count = countBox ? Number(countBox.textContent) : 0;
+
+        // count the printed rows instead of the chip's own number
+        if (stateOf && panel.state === 'ready') {
+            count = panel.visible.filter((row) => stateOf(row) === chip.dataset.state).length;
+        }
+        if (count === 0) return;   // nothing of this kind is printed
         chipTotal += count;
+        chipRows += 1;
 
         const copy = chip.cloneNode(true);
         const copyCount = copy.querySelector('.track-count');
         if (copyCount) copyCount.remove();
         rows.push([copy.textContent.trim(), String(count)]);
     });
-    if (chips.length > 0) {
+    if (chipRows > 0) {
         rows.push(['Total', String(chipTotal)]);
     }
 
@@ -587,8 +605,8 @@ function printTotalRows(container) {
 }
 
 // puts the Totals table at the bottom of the report; its CSS shows it on paper only
-function addPrintTotals(container) {
-    const rows = printTotalRows(container);
+function addPrintTotals(container, panel) {
+    const rows = printTotalRows(container, panel);
     if (rows.length === 0) return null;
 
     const block = document.createElement('div');
@@ -604,6 +622,10 @@ function addPrintTotals(container) {
 }
 
 function printReport(keys) {
+    // a print still waiting to be put back (a second press) is finished first,
+    // or its Totals table would be added twice
+    if (printRestore) printRestore();
+
     if (!canExportReports()) {
         notifyWarning('Printing a report is a manager action.', 'Not allowed');
         return;
@@ -634,12 +656,16 @@ function printReport(keys) {
     // the whole report each table belongs to (two tables of one report share it);
     // its status cards are hidden by the print CSS and listed as Totals at its foot
     const reports = [];
+    const reportPanels = [];   // the first panel of each report, for its chip counts
     panels.forEach((panel) => {
         const table = document.getElementById(panel.config.tableId);
         const report = table ? table.closest('.panel-view, [data-panel]') : null;
-        if (report && reports.indexOf(report) === -1) reports.push(report);
+        if (report && reports.indexOf(report) === -1) {
+            reports.push(report);
+            reportPanels.push(panel);
+        }
     });
-    const totalBlocks = reports.map(addPrintTotals).filter(Boolean);
+    const totalBlocks = reports.map((report, index) => addPrintTotals(report, reportPanels[index])).filter(Boolean);
 
     document.body.classList.add('is-printing');
 
@@ -668,8 +694,25 @@ function printReport(keys) {
     window.setTimeout(() => { if (printRestore) printRestore(); }, 1500);
 }
 
-// The Sales Summary's two tables, side by side, both read from the one period.
+// The Sales Summary's two tables, both read from the one period. They share
+// one card and the tabs above them show one at a time.
 const INCOME_PANEL_KEYS = ['mgr-income-methods', 'mgr-income-products'];
+
+// A Sales Summary tab: show its table, hide the other, underline the tab.
+function showSummaryTab(paneId) {
+    document.querySelectorAll('.summary-pane').forEach((pane) => {
+        pane.hidden = pane.id !== paneId;
+    });
+    document.querySelectorAll('.summary-tab').forEach((tab) => {
+        const isOpen = tab.getAttribute('data-summary-tab') === paneId;
+        tab.classList.toggle('active', isOpen);
+        tab.setAttribute('aria-selected', isOpen ? 'true' : 'false');
+    });
+
+    // a table that was hidden had no size to measure; measure it now it shows
+    const table = document.querySelector('#' + paneId + ' table');
+    if (table) holdTableHeight(table);
+}
 
 // The one Load Data above fills the figures and both tables for the period.
 async function incomeRows(field) {
@@ -2150,7 +2193,7 @@ function renderTrackLegend(rows) {
         if (count === 0) return '';
 
         const alert = state === 'Pending Cash Collection' ? ' track-chip-alert' : '';
-        return '<button type="button" class="track-chip' + alert + '" ' +
+        return '<button type="button" class="track-chip' + alert + '" data-state="' + state + '" ' +
             'onclick="filterDeliveriesBy(\'' + state + '\')">' +
             '<span class="track-count">' + count + '</span>' + escapeHtml(state) + '</button>';
     }).join('');

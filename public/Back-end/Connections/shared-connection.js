@@ -54,7 +54,9 @@ async function getJson(url) {
             body = null;
         }
         handleAuthFailure(response, body);
-        throw new Error('request failed');
+        const failure = new Error('request failed');
+        failure.status = response.status;   // data-panel.js forgets a table that is no longer allowed
+        throw failure;
     }
     return response.json();
 }

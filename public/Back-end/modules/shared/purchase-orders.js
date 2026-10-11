@@ -1491,7 +1491,7 @@ function renderPurchaseOrderLegend(rows) {
 
         const mine = (poSetup.canDecide && state.status === 'For Approval') ||
                      (poSetup.canReceive && ['Pending', 'PO Accepted', 'On the way'].indexOf(state.status) !== -1);
-        return '<button type="button" class="track-chip' + (mine ? ' track-chip-alert' : '') + '" ' +
+        return '<button type="button" class="track-chip' + (mine ? ' track-chip-alert' : '') + '" data-state="' + state.status + '" ' +
             'onclick="filterPurchaseOrdersBy(\'' + state.status + '\')">' +
             '<span class="track-count">' + count + '</span>' + escapeHtml(state.label) + '</button>';
     }).join('');

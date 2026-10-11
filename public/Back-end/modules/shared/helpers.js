@@ -2,13 +2,16 @@
 // Loaded by: every page
 
 // Where data-panel.js writes down which tables are loaded, so they load again
-// after a reload. Signing out empties it, so the next person starts with
-// closed tables.
+// after a reload, and where notifications.js writes down which alerts have
+// already had their popup card. Signing in or out empties both, so the next
+// person starts with closed tables and sees their alerts pop up.
 const LOADED_PANELS_KEY = 'loadedPanels';
+const POPPED_ALERTS_KEY = 'poppedAlerts';
 
 function forgetLoadedPanels() {
     try {
         sessionStorage.removeItem(LOADED_PANELS_KEY);
+        sessionStorage.removeItem(POPPED_ALERTS_KEY);
     } catch (error) { /* storage is blocked: nothing was kept */ }
 }
 

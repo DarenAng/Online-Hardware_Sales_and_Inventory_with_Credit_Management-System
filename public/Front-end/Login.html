@@ -14,123 +14,153 @@
     <link rel="stylesheet" href="css/modules/login.css">
 </head>
 
-<body class="login-body">
-    <main class="login-card" id="sign-in-card">
-        <div class="login-brand">
+<body class="login-body login-split">
+    <!-- THE LEFT PANEL: who we are and what the system does. Shown on a laptop
+         or larger; on a phone only the card is left, with its own small brand. -->
+    <aside class="login-side">
+        <div class="side-inner">
             <span class="brand-mark">LH</span>
-            <span class="brand-text">
-                <span class="brand-name">Lucelyn Hardware</span>
-                <span class="brand-sub">Sales &amp; Inventory</span>
-            </span>
+            <h1 class="side-name">Lucelyn Hardware</h1>
+            <p class="side-tagline">Sales, inventory and credit in one place.</p>
+            <span class="side-rule" aria-hidden="true"></span>
+
+            <ul class="side-features">
+                <li>
+                    <i class="bi bi-shop" aria-hidden="true"></i>
+                    <span><strong>Point of sale</strong>Ring up a sale in a few taps.</span>
+                </li>
+                <li>
+                    <i class="bi bi-box-seam" aria-hidden="true"></i>
+                    <span><strong>Stock and reorder alerts</strong>Know what to buy before it runs out.</span>
+                </li>
+                <li>
+                    <i class="bi bi-wallet2" aria-hidden="true"></i>
+                    <span><strong>Customer credit</strong>Balances and payments in one record.</span>
+                </li>
+            </ul>
         </div>
+    </aside>
 
-        <h2>Sign in</h2>
-        <form onsubmit="handleLogin(event)">
-            <!-- A refused sign-in is answered here, beside the two boxes it is
-                 about, rather than in a card in the corner of the screen.
-                 role="alert" so a screen reader announces it the moment it is
-                 filled in, and aria-describedby ties it to the password box so
-                 it is read out again when the cursor lands back there. It stays
-                 until the next attempt: nothing on this screen is competing
-                 with it for the space. -->
-            <p class="login-alert" id="login-alert" role="alert" hidden></p>
+    <!-- THE RIGHT PANEL: the sign-in card, and the forgot-password card that
+         takes its place (only one of the two shows at a time) -->
+    <div class="login-pane">
+        <main class="login-card" id="sign-in-card">
+            <div class="login-brand">
+                <span class="brand-mark">LH</span>
+                <span class="brand-text">
+                    <span class="brand-name">Lucelyn Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
+            </div>
 
-            <div class="form-group">
-                <label for="login-email">Email address</label>
-                <div class="icon-field">
-                    <i class="bi bi-envelope field-icon" aria-hidden="true"></i>
-                    <input id="login-email" type="email" name="email" class="form-control"
-                           autocomplete="username" required placeholder="name@hardware.com">
+            <h2>Sign in</h2>
+            <form onsubmit="handleLogin(event)">
+                <!-- A refused sign-in is answered here, beside the two boxes it is
+                     about, rather than in a card in the corner of the screen.
+                     role="alert" so a screen reader announces it the moment it is
+                     filled in, and aria-describedby ties it to the password box so
+                     it is read out again when the cursor lands back there. It stays
+                     until the next attempt: nothing on this screen is competing
+                     with it for the space. -->
+                <p class="login-alert" id="login-alert" role="alert" hidden></p>
+
+                <div class="form-group">
+                    <label for="login-email">Email address</label>
+                    <div class="icon-field">
+                        <i class="bi bi-envelope field-icon" aria-hidden="true"></i>
+                        <input id="login-email" type="email" name="email" class="form-control"
+                               autocomplete="username" required placeholder="name@hardware.com">
+                    </div>
                 </div>
-            </div>
-            <div class="form-group">
-                <label for="login-password">Password</label>
-                <div class="password-field">
-                    <i class="bi bi-lock field-icon" aria-hidden="true"></i>
-                    <input id="login-password" type="password" name="password" class="form-control"
-                           autocomplete="current-password" required placeholder="Your password"
-                           aria-describedby="login-alert">
-                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <div class="password-field">
+                        <i class="bi bi-lock field-icon" aria-hidden="true"></i>
+                        <input id="login-password" type="password" name="password" class="form-control"
+                               autocomplete="current-password" required placeholder="Your password"
+                               aria-describedby="login-alert">
+                        <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                    </div>
                 </div>
+
+                <button type="submit" class="btn btn-accent login-submit">Sign in</button>
+            </form>
+
+            <p class="login-foot">
+                <button type="button" class="login-link" id="forgot-link" onclick="openPasswordReset()">Forgot your password?</button>
+            </p>
+        </main>
+
+        <!-- FORGOT YOUR PASSWORD? -- the second card: the email address, then the
+             six-digit code from the mail and the new password. Drawn by
+             shared/password-reset.js; only one of the two cards shows at a time. -->
+        <main class="login-card" id="reset-card" hidden>
+            <div class="login-brand">
+                <span class="brand-mark">LH</span>
+                <span class="brand-text">
+                    <span class="brand-name">Lucelyn Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
             </div>
 
-            <button type="submit" class="btn btn-accent login-submit">Sign in</button>
-        </form>
+            <h2>Set a new password</h2>
+            <p class="login-lead" id="reset-lead">Type the email address you sign in with. A six-digit
+                code is sent to it; the code and a new password are all this takes.</p>
 
-        <p class="login-foot">
-            <button type="button" class="login-link" id="forgot-link" onclick="openPasswordReset()">Forgot your password?</button>
-        </p>
-    </main>
+            <p class="login-alert" id="reset-alert" role="alert" hidden></p>
 
-    <!-- FORGOT YOUR PASSWORD? -- the second card: the email address, then the
-         six-digit code from the mail and the new password. Drawn by
-         shared/password-reset.js; only one of the two cards shows at a time. -->
-    <main class="login-card" id="reset-card" hidden>
-        <div class="login-brand">
-            <span class="brand-mark">LH</span>
-            <span class="brand-text">
-                <span class="brand-name">Lucelyn Hardware</span>
-                <span class="brand-sub">Sales &amp; Inventory</span>
-            </span>
-        </div>
-
-        <h2>Set a new password</h2>
-        <p class="login-lead" id="reset-lead">Type the email address you sign in with. A six-digit
-            code is sent to it; the code and a new password are all this takes.</p>
-
-        <p class="login-alert" id="reset-alert" role="alert" hidden></p>
-
-        <!-- step 1: where to send the code -->
-        <form id="reset-request-form" onsubmit="handleResetRequest(event)">
-            <div class="form-group">
-                <label for="reset-email">Email address</label>
-                <div class="icon-field">
-                    <i class="bi bi-envelope field-icon" aria-hidden="true"></i>
-                    <input id="reset-email" type="email" name="email" class="form-control"
-                           autocomplete="username" required placeholder="name@hardware.com">
+            <!-- step 1: where to send the code -->
+            <form id="reset-request-form" onsubmit="handleResetRequest(event)">
+                <div class="form-group">
+                    <label for="reset-email">Email address</label>
+                    <div class="icon-field">
+                        <i class="bi bi-envelope field-icon" aria-hidden="true"></i>
+                        <input id="reset-email" type="email" name="email" class="form-control"
+                               autocomplete="username" required placeholder="name@hardware.com">
+                    </div>
                 </div>
-            </div>
-            <button type="submit" class="btn btn-accent login-submit" id="reset-request-btn">Send Code</button>
-        </form>
+                <button type="submit" class="btn btn-accent login-submit" id="reset-request-btn">Send Code</button>
+            </form>
 
-        <!-- step 2: the code and the new password -->
-        <form id="reset-confirm-form" onsubmit="handleResetConfirm(event)" hidden>
-            <div class="form-group">
-                <label for="reset-code">Code from the email <span class="label-hint">six digits</span></label>
-                <input id="reset-code" type="text" name="code" class="form-control reset-code"
-                       inputmode="numeric" autocomplete="one-time-code" maxlength="7"
-                       required placeholder="000000">
-            </div>
-            <div class="form-group">
-                <label for="reset-new-password">New password </label>
-                <div class="icon-field">
-                    <i class="bi bi-lock field-icon" aria-hidden="true"></i>
-                    <input id="reset-new-password" type="password" name="newPassword" class="form-control"
-                           autocomplete="new-password" minlength="8" required>
+            <!-- step 2: the code and the new password -->
+            <form id="reset-confirm-form" onsubmit="handleResetConfirm(event)" hidden>
+                <div class="form-group">
+                    <label for="reset-code">Code from the email <span class="label-hint">six digits</span></label>
+                    <input id="reset-code" type="text" name="code" class="form-control reset-code"
+                           inputmode="numeric" autocomplete="one-time-code" maxlength="7"
+                           required placeholder="000000">
                 </div>
-                <ul class="password-rules" data-rules-for="reset-new-password"></ul>
-            </div>
-            <div class="form-group">
-                <label for="reset-confirm-password">Type it again</label>
-                <div class="icon-field">
-                    <i class="bi bi-lock field-icon" aria-hidden="true"></i>
-                    <input id="reset-confirm-password" type="password" name="confirmPassword" class="form-control"
-                           autocomplete="new-password" minlength="8" required>
+                <div class="form-group">
+                    <label for="reset-new-password">New password </label>
+                    <div class="icon-field">
+                        <i class="bi bi-lock field-icon" aria-hidden="true"></i>
+                        <input id="reset-new-password" type="password" name="newPassword" class="form-control"
+                               autocomplete="new-password" minlength="8" required>
+                    </div>
+                    <ul class="password-rules" data-rules-for="reset-new-password"></ul>
                 </div>
-            </div>
-            <div class="password-reveal">
-                <button type="button" class="password-toggle"
-                        data-password-for="reset-new-password,reset-confirm-password"
-                        aria-pressed="false" aria-controls="reset-new-password reset-confirm-password">Show passwords</button>
-            </div>
-            <button type="submit" class="btn btn-accent login-submit" id="reset-confirm-btn">Save the new password</button>
-        </form>
+                <div class="form-group">
+                    <label for="reset-confirm-password">Type it again</label>
+                    <div class="icon-field">
+                        <i class="bi bi-lock field-icon" aria-hidden="true"></i>
+                        <input id="reset-confirm-password" type="password" name="confirmPassword" class="form-control"
+                               autocomplete="new-password" minlength="8" required>
+                    </div>
+                </div>
+                <div class="password-reveal">
+                    <button type="button" class="password-toggle"
+                            data-password-for="reset-new-password,reset-confirm-password"
+                            aria-pressed="false" aria-controls="reset-new-password reset-confirm-password">Show passwords</button>
+                </div>
+                <button type="submit" class="btn btn-accent login-submit" id="reset-confirm-btn">Save the new password</button>
+            </form>
 
-        <p class="login-foot">
-            <button type="button" class="login-link" onclick="closePasswordReset()">Back to sign in</button>
-            <button type="button" class="login-link" id="reset-again-link" onclick="showResetRequest()" hidden>Send another code</button>
-        </p>
-    </main>
+            <p class="login-foot">
+                <button type="button" class="login-link" onclick="closePasswordReset()">Back to sign in</button>
+                <button type="button" class="login-link" id="reset-again-link" onclick="showResetRequest()" hidden>Send another code</button>
+            </p>
+        </main>
+    </div>
 
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="modules/shared/icons.js"></script>

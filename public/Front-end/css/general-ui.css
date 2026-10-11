@@ -165,10 +165,6 @@ h4 { font-size: 18px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
 
-/* The heading block at the top of a whole screen, above the cards */
-.page-intro { margin-bottom: 20px; }
-.page-intro h2 { margin-bottom: 4px; }
-.page-intro .panel-sub { max-width: 62ch; }
 
 /* ==========================================================================
    BUTTONS
@@ -553,11 +549,24 @@ input[type="number"].form-control:placeholder-shown { text-align: left; }
 /* a note in the narrow column is set a size down, so it does not run the form off the screen */
 .pair-form .detail-note { font-size: 13.5px; line-height: 1.45; padding: 9px 12px; }
 
-@media (max-width: 640px) {
+/* The list shares the screen with the form, so a list of six or seven
+   columns gets tight: its cells carry less padding and its headings may wrap. */
+@media screen and (min-width: 641px) {
+    .pair-layout table th { padding: 11px 8px; white-space: normal; }
+    .pair-layout table td { padding: 12px 8px; }
+    /* a long badge ("Awaiting inspection") goes onto two lines before the table scrolls */
+    .pair-layout table .badge { white-space: normal; }
+}
+
+/* A laptop or smaller: the narrow column would leave the list about 430px,
+   too little for its columns, so the two stack, form first (as on a phone) */
+@media screen and (max-width: 1279px) {
     .pair-layout,
     .pair-layout.form-left { grid-template-columns: 1fr; }
     .pair-form { order: -1; }
     .pair-form .form-footer { margin-top: 20px; }
+    /* stacked, the form would stretch the whole width; keep it a readable size */
+    .pair-layout .form-sheet { max-width: 820px; }
 }
 
 /* ==========================================================================
@@ -859,6 +868,10 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
     border-bottom: 1px solid var(--line);
 }
 .panel-head h3 { margin-bottom: 4px; }
+/* The heading and its description take the room that is left and wrap inside
+   it, so the buttons keep the top-right corner. Without this a long
+   description pushed the buttons onto a line of their own, under it. */
+.panel-head > div:first-child { flex: 1 1 280px; min-width: 0; }
 .panel-sub {
     font-size: 14.5px;
     color: var(--steel);
@@ -981,6 +994,22 @@ table tbody tr.row-filler td { padding: 0; border-bottom: none; }
     color: var(--steel-soft);
     padding: 28px 12px;
     font-size: 14.5px;
+}
+
+/* A smaller laptop or a tablet: the page is narrower than the tables were
+   drawn for, so the cells get less padding and a little less type, and a
+   heading may wrap. Without this the last column slid out of sight behind a
+   scroll bar. The phone has its own cards (responsive.css). */
+@media screen and (min-width: 641px) and (max-width: 1279px) {
+    table th {
+        padding: 11px 10px;
+        font-size: 14px;
+        white-space: normal;
+    }
+    table td {
+        padding: 12px 10px;
+        font-size: 15.5px;
+    }
 }
 
 /* A row you can open. The rule appears on the left, same as everywhere. */
@@ -1698,7 +1727,23 @@ html:has(.modal.open) { overflow: hidden; }
     background: var(--paper);
 }
 .notif-head .eyebrow { margin-bottom: 0; font-weight: 600; color: var(--ink); }
-.notif-list { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; }
+/* The list takes the room the head and foot leave and scrolls inside it. A thin
+   scrollbar stays in view so it is plain there is more below. */
+.notif-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    scrollbar-width: thin;
+    scrollbar-color: var(--steel-soft) transparent;
+}
+.notif-list::-webkit-scrollbar { width: 8px; }
+.notif-list::-webkit-scrollbar-thumb {
+    background: var(--steel-soft);
+    border-radius: 999px;
+}
 
 /* an alert says what happened, who caused it, and when */
 .notif-item {
@@ -1899,15 +1944,23 @@ html:has(.modal.open) { overflow: hidden; }
    ALERT CARDS -- bottom right, clear of the bell and account menu; newest
    nearest the corner
    ========================================================================== */
+/* The padding keeps the cards' shadows inside the deck, which scrolls when
+   the cards are taller than a short screen. */
 .toast-deck {
-    position: fixed; bottom: 20px; right: 20px;
+    position: fixed; bottom: 12px; right: 12px;
     z-index: 1200;
     display: flex; flex-direction: column-reverse; gap: 10px;
-    width: 360px; max-width: calc(100vw - 32px);
+    width: 376px; max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    padding: 8px;
+    overflow-x: hidden; overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
     pointer-events: none;
 }
 .toast-card {
     pointer-events: auto;
+    flex-shrink: 0;   /* a card keeps its height; the deck scrolls instead */
     width: 100%;
     display: grid;
     grid-template-columns: var(--rule) 26px 1fr auto;
@@ -2043,6 +2096,21 @@ html:has(.modal.open) { overflow: hidden; }
    there when a narrow card wraps the button onto a line of its own */
 .toolbar-spacer { flex: 1 1 auto; }
 .toolbar-spacer + .btn { margin-left: auto; }
+
+/* A smaller laptop or a tablet: the boxes are narrower and the gaps smaller,
+   so a search, three filters and two dates stay on one line instead of
+   leaving the last box alone on a second one. (A phone stacks them, below.) */
+@media screen and (min-width: 641px) and (max-width: 1279px) {
+    .panel-toolbar { gap: 8px; }
+    .panel-toolbar .search-wrap { flex: 1 1 140px; min-width: 140px; }
+    .panel-toolbar > .btn { padding-left: 14px; padding-right: 14px; }
+    .toolbar-field select,
+    .toolbar-field input {
+        min-width: 0;
+        padding: 8px 8px;
+        font-size: 14px;
+    }
+}
 
 /* ---- the grid, at a height that does not move ----
    a 44.5px heading plus 52.3px per row (a row carrying a badge); ten on

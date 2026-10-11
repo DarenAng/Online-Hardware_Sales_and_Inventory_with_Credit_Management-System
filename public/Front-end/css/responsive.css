@@ -5,6 +5,7 @@
      up to 1024px   the menu slides in over the page, behind a shade
      up to 640px    each table row becomes a card carrying its column names
      up to 420px    the last of the horizontal padding goes
+     up to 339px    the totals go back to one a row
 
    Everything pressed is at least 44px; fields are 16px so iOS does not zoom.
    ========================================================================== */
@@ -86,6 +87,8 @@
         align-items: stretch;
         gap: 12px;
     }
+    /* one above the other: the heading is as tall as its words, not 280px */
+    .panel-head > div:first-child { flex: 0 0 auto; }
     .panel-actions { width: 100%; }
     .panel-actions .btn { flex: 1 1 auto; }
     .panel-sub { max-width: none; }
@@ -98,8 +101,13 @@
     .form-footer { flex-direction: column; }
     .form-footer .btn { width: 100%; }
 
+    /* the totals sit two to a row, so four of them take two rows, not four;
+       the cards and the figures are a little smaller to fit half the width */
     .kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
-    .kpi-value { font-size: clamp(25.5px, 7vw, 34px); }
+    .kpi-card { padding: 10px 12px; }
+    .kpi-label { font-size: 13px; }
+    .kpi-value { font-size: 21px; }
+    .kpi-note { font-size: 12.5px; }
 
     .filter-row, .track-legend { gap: 6px; }
     .policy-strip { flex-direction: column; align-items: flex-start; }
@@ -271,8 +279,9 @@
     }
     .toast-deck {
         width: auto;
-        left: 10px; right: 10px;
-        bottom: calc(10px + env(safe-area-inset-bottom));
+        left: 2px; right: 2px;
+        bottom: calc(2px + env(safe-area-inset-bottom));
+        max-height: calc(100dvh - 16px);
     }
     .toast-title { font-size: 16px; }
 }
@@ -283,11 +292,19 @@
 @media (max-width: 420px) {
     .content-area { padding-left: 10px; padding-right: 10px; }
     .card { padding: 14px 12px; }
-    .kpi-grid { grid-template-columns: 1fr; }
+    /* small enough that ₱12,345,678.90 still fits half the width */
+    .kpi-value { font-size: 17px; }
     .topbar { gap: 8px; }
     .topbar-title { font-size: 17px; }
     .filter-chip { flex: 1 1 auto; text-align: center; }
     table tbody td { gap: 10px; }
+}
+
+/* ==========================================================================
+   UP TO 339px  --  a very narrow phone: the totals go back to one a row
+   ========================================================================== */
+@media (max-width: 339px) {
+    .kpi-grid { grid-template-columns: 1fr; }
 }
 
 /* ==========================================================================

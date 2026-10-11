@@ -24,7 +24,7 @@ function registerLoginRoutes(app, deps) {
     hashPassword, isHashed, verifyPassword,
     startSession, setSessionCookie, endSession, endSessionsForStaff,
     renewSessionAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
-    LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES, passwordComplaint
+    LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES, SESSION_IDLE_MINUTES, passwordComplaint
   } = deps;
 
   const LOGIN_SELECT =
@@ -318,9 +318,12 @@ function registerLoginRoutes(app, deps) {
 
   // Heartbeat: a page left open makes no requests, so the browser sends this
   // once a minute to stay present. The access check ahead of it refreshes the session.
+  // It also tells the page how long a screen may sit unused (idleMinutes), so
+  // the page and the server use the one setting.
   app.post("/api/heartbeat", (request, response) => {
     response.json({
       ok: true,
+      idleMinutes: SESSION_IDLE_MINUTES,
       staffId: request.actor.staffId,
       serverTime: new Date().toISOString()
     });

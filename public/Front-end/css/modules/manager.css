@@ -15,19 +15,46 @@
 /* Total Purchases: the four figures sit between the filters and the orders */
 #po-totals-kpis:not(:empty) { margin-bottom: 16px; }
 
+/* a smaller laptop: the month and supplier boxes are as wide as their longest
+   name, which pushed Show All Purchases onto a second line; the list that opens
+   still shows the whole name */
+@media screen and (min-width: 641px) and (max-width: 1439px) {
+    /* min-width 0: the toolbar's 150px minimum would otherwise win over the cap */
+    #po-totals-month, #po-totals-supplier { min-width: 0; max-width: 128px; }
+}
+
 #income-period { min-width: 210px; }
 
-.summary-tables {
-    display: grid;
-    /* the payment table has five figures, the best sellers three */
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-    gap: 16px;
-}
-.summary-tables .card { margin-bottom: 0; }
 #report-summary > .card { margin-bottom: 16px; }
-@media (max-width: 1300px) {
-    .summary-tables { grid-template-columns: 1fr; }
+#report-summary > .summary-card { margin-bottom: 0; }
+
+/* The two breakdowns share one card. A row of tabs on top picks which table
+   shows; the open tab is underlined in orange, like the tabs in a popup. */
+.summary-tabs {
+    display: flex;
+    gap: 24px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 16px;
 }
+.summary-tab {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;            /* the underline sits on the grey line */
+    padding: 10px 2px;
+    cursor: pointer;
+    font-family: var(--font-ui);
+    font-size: 15.5px;
+    font-weight: 600;
+    color: var(--steel);
+}
+.summary-tab:hover { color: var(--ink); }
+.summary-tab.active { color: var(--go); border-bottom-color: var(--go); }
+.summary-tab:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+
+/* each table's own heading is for the printout only; on screen the tab names it */
+.summary-pane-title { display: none; }
+.summary-pane[hidden] { display: none; }
 
 /* ==========================================================================
    STOCKS -- the counts over the overview are legend and filter
@@ -38,6 +65,11 @@
 #stock-overview .panel-toolbar .search-wrap { flex-basis: 200px; }
 #stock-reorder .cell-due { font-weight: 600; }
 #reorder-table .badge, #stocks-table .badge { margin-left: 6px; }
+/* eight columns: on a 1280px screen the table is a few pixels wider than its
+   card, so its headings may wrap onto two lines */
+@media screen and (max-width: 1439px) {
+    #reorder-table th { white-space: normal; }
+}
 
 /* Money owed is the only figure in the reports that is a problem rather than
    a fact, so it is the only one that carries a colour. */
@@ -70,7 +102,9 @@
 .print-totals { display: none; }
 
 @media print {
-    .summary-tables { grid-template-columns: 1fr; }
+    /* the printout shows both breakdowns, one under the other, each with its heading */
+    .summary-pane[hidden] { display: block !important; }
+    .summary-pane-title { display: block; font-size: 14px; margin: 16px 0 6px; }
 
     /* the status cards come off the printout; their figures are in the Totals table */
     body.is-printing .kpi-grid,

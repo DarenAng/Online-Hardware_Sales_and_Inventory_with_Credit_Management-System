@@ -76,6 +76,11 @@
     color: var(--steel-soft);
     white-space: nowrap;
 }
+/* a smaller laptop: the narrow catalog box has no room for the line of other
+   sizes on one line, so it wraps under the unit */
+@media (min-width: 641px) and (max-width: 1279px) {
+    .catalog-table .unit-sizes { white-space: normal; }
+}
 .catalog-scroll .pager { padding: 12px 4px 0; }
 
 /* a product already on the order says so on its row */
