@@ -630,6 +630,8 @@
 
             <div class="modal-foot">
                 <button type="button" class="btn btn-accent" id="modal-login-btn" onclick="createLoginAccount()" style="display: none;">Create Login</button>
+                <!-- shown only while the account is held after too many wrong passwords -->
+                <button type="button" class="btn btn-gold" id="modal-hold-btn" onclick="liftUserHold()" style="display: none;">Lift Hold</button>
                 <button type="button" class="btn btn-ghost" id="modal-reset-btn" onclick="resetUserPassword()">Reset Password</button>
                 <button type="button" class="btn btn-danger" id="modal-status-btn" onclick="toggleUserStatus()">Deactivate Account</button>
             </div>

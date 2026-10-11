@@ -33,6 +33,11 @@ function apiResetUserPassword(staffId) {
     return sendJson('/api/users/' + staffId + '/reset-password', 'POST', {});
 }
 
+// POST /api/users/:id/release-hold -- lift a sign-in hold, keep the password
+function apiReleaseHold(staffId) {
+    return sendJson('/api/users/' + staffId + '/release-hold', 'POST', {});
+}
+
 // GET /api/users/email-check -- { taken, roleName } for an address; staffId is
 // the account being edited, whose own address does not count against it
 function apiCheckEmail(email, staffId) {

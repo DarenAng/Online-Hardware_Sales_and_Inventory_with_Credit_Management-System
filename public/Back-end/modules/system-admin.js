@@ -262,7 +262,7 @@ async function openUserModal(staffId) {
         detailRow('Account Status', accountCell(selectedUser) +
             (selectedUser.held_until
                 ? ' <span class="muted">until ' + escapeHtml(whenText(selectedUser.held_until)) +
-                  ' \u2014 resetting the password releases it now</span>'
+                  ' \u2014 Lift Hold lets them sign in again now</span>'
                 : '')) +
         detailRow('Password State', selectedUser.must_change_password ? '<span class="badge badge-warning">Temporary</span>' : '<span class="badge badge-neutral">Set by user</span>') +
         detailRow('Hired On', escapeHtml(selectedUser.staff_created_at)) +
@@ -290,13 +290,16 @@ async function openUserModal(staffId) {
     const hasLogin = Boolean(selectedUser.user_id);
     document.getElementById('modal-login-btn').style.display = hasLogin ? 'none' : 'inline-block';
     document.getElementById('modal-reset-btn').style.display = hasLogin ? 'inline-block' : 'none';
+    // Lift Hold only while the account is held after too many wrong passwords
+    document.getElementById('modal-hold-btn').style.display =
+        hasLogin && selectedUser.held_until ? 'inline-block' : 'none';
 
     // The server refuses every change to the signed-in person's own record
     // (notOwnAccount in server.js), so the buttons are taken away here too.
     const own = isOwnAccount(selectedUser);
     document.getElementById('modal-own-note').style.display = own ? 'block' : 'none';
     document.getElementById('modal-edit-tab').style.display = own ? 'none' : '';
-    ['modal-login-btn', 'modal-reset-btn', 'modal-status-btn'].forEach((id) => {
+    ['modal-login-btn', 'modal-hold-btn', 'modal-reset-btn', 'modal-status-btn'].forEach((id) => {
         const button = document.getElementById(id);
         button.disabled = own;
         button.title = own ? 'Another administrator makes changes to your account' : '';
@@ -463,6 +466,30 @@ async function toggleUserStatus() {
         doneMessage = 'The account is active again.';
     }
     await sendUserRequest(apiSetStaffActive(selectedUser.staff_id, makeActive), doneMessage);
+}
+
+// Lift Hold: the account was held after too many wrong passwords. This lets
+// the person sign in again straight away with the password they already have.
+async function liftUserHold() {
+    if (!selectedUser) return;
+
+    const name = staffName(selectedUser);
+    const yes = await askConfirm(
+        `${name} can sign in again straight away with the password they already have.`,
+        {
+            title: 'Lift the hold on this account?',
+            eyebrow: 'Accounts Management',
+            confirmLabel: 'Lift Hold',
+            detail: [
+                'Their password is not changed.',
+                'They get a full set of tries again before another hold.'
+            ]
+        });
+    if (!yes) return;
+
+    // sendUserRequest shows the server's message, closes the card and reloads the list
+    const result = await sendUserRequest(apiReleaseHold(selectedUser.staff_id));
+    if (result && result.message) notifySuccess(result.message, 'Hold lifted');
 }
 
 async function resetUserPassword() {

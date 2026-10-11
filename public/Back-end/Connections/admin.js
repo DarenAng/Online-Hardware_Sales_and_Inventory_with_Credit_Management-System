@@ -783,6 +783,37 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
+  // Lift a sign-in hold (too many wrong passwords) without touching the
+  // password: the person signs in again with the one they already have, and
+  // gets a full set of tries.
+  app.post("/api/users/:staffId/release-hold", notOwnAccount, async (request, response) => {
+    const staffId = Number(request.params.staffId);
+    try {
+      const [rows] = await db.query("SELECT email FROM users WHERE staff_id = ?", [staffId]);
+      if (rows.length === 0) {
+        return response.status(404).json({ error: "This staff member has no login account." });
+      }
+
+      // only a hold that is still running is lifted
+      const [released] = await db.query(
+        `UPDATE users SET failed_attempts = 0, held_until = NULL
+         WHERE staff_id = ? AND held_until IS NOT NULL AND held_until > NOW()`,
+        [staffId]);
+      if (released.affectedRows === 0) {
+        return response.status(409).json({ error: "This account is not on hold, so there is nothing to lift." });
+      }
+
+      await writeAuditLog(request, "ACCOUNT_RELEASED",
+        `${rows[0].email} released from its sign-in hold by the administrator`,
+        { staff_id: staffId, email: rows[0].email });
+
+      response.json({ message: `The hold is lifted. ${rows[0].email} can sign in again now.` });
+    } catch (error) {
+      console.error("Lifting a hold failed:", error.message);
+      response.status(500).json({ error: "Unable to lift the hold" });
+    }
+  });
+
   // ==========================================
   // AUDIT LOGS -- newest first, filtered by kind, date range and free text
   // ==========================================

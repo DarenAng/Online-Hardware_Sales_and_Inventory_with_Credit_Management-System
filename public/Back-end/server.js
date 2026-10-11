@@ -1906,6 +1906,7 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/users\/\d+\/account\/draft$/,      [ADMIN]],
   ["POST",  /^\/api\/users\/\d+\/account$/,            [ADMIN]],
   ["POST",  /^\/api\/users\/\d+\/reset-password$/,     [ADMIN]],
+  ["POST",  /^\/api\/users\/\d+\/release-hold$/,       [ADMIN]],
 
   ["GET",   /^\/api\/audit-logs$/,                     [ADMIN]],
   ["GET",   /^\/api\/audit-logs\/types$/,              [ADMIN]],
