@@ -143,7 +143,7 @@ async function handleLogin(event) {
         window.location.replace(landingPageFor(result.user));
     } catch (error) {
         notifyError('The server is not answering. Start it with npm start in the project folder, then try again.',
-            'Cannot reach the server', { life: SIGN_IN_MESSAGE_LIFE });
+            'Cannot reach the server');
     }
 }
 

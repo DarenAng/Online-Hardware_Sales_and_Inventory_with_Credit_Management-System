@@ -229,8 +229,7 @@ function showQueuedCards() {
                 tone: 'warning',
                 title: queued.more + ' more alerts',
                 message: 'Open the bell in the top right corner to read them.',
-                onOpen: () => openNotifications(),
-                life: 9000
+                onOpen: () => openNotifications()
             });
             continue;
         }
@@ -244,8 +243,7 @@ function showQueuedCards() {
             message: n.message || '',
             from: n.from_name || 'System',
             when: n.created_at,
-            onOpen: () => openNotification(n.notification_id),
-            life: 9000
+            onOpen: () => openNotification(n.notification_id)
         });
     }
 

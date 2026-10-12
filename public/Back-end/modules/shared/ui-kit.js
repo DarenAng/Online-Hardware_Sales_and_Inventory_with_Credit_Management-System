@@ -10,18 +10,9 @@ const TOAST_LOOK = {
     info:    { mark: '●', title: 'Notice' }
 };
 
-// How long a card stays, by tone: a problem stays long enough to be read
-// twice, a confirmation leaves sooner. Past ~7s a card reads as stuck; a card
-// that must not leave on its own is passed stay: true.
-const TOAST_LIFE = {
-    danger:  7000,   // something failed, and the reason has to be read
-    warning: 5500,   // something needs attention before it fails
-    info:    5000,   // a notice, worth a moment
-    success: 4000    // it worked, and the screen already shows that it did
-};
-
-// the sign-in screen's reader is looking at the keyboard, so its card lasts longer
-const SIGN_IN_MESSAGE_LIFE = 15000;
+// How long a popup card stays on screen: 5 seconds for every kind.
+// A card that must not leave on its own is passed stay: true.
+const TOAST_LIFE = 5000;
 
 // shared furniture built once rather than repeated in five HTML files
 function ensureUiFurniture() {
@@ -131,7 +122,7 @@ function showCard(options) {
 
     deck.appendChild(card);
 
-    const life = options.stay ? 0 : (options.life || TOAST_LIFE[tone] || TOAST_LIFE.info);
+    const life = options.stay ? 0 : TOAST_LIFE;
 
     const remove = () => {
         if (!card.isConnected) return;
