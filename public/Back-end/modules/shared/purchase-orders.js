@@ -2312,7 +2312,7 @@ async function openPurchaseOrderDetail(poId) {
                 items.map((it) => [escapeHtml(it.product_name), escapeHtml(poQuantityText(it))]), [1]);
     }
 
-    // how to reach the supplier, under the materials (the name is in the facts already)
+    // how to reach the supplier, under the order's facts (the name is in the facts already)
     const contact = '<h4 class="detail-subhead">Supplier contact</h4>' +
         '<div class="detail-grid">' +
         detailField('Contact Person', escapeHtml(po.contact_person || 'Not set')) +
@@ -2340,12 +2340,12 @@ async function openPurchaseOrderDetail(poId) {
                 (poCanRefer(po) ? 'Refer to PO' : 'Count In the Delivery') + '</button>';
     }
 
-    // one wide page, never turned: the facts on the left, every material and
-    // the supplier's contact on the right; a very long order scrolls instead
+    // one wide page, never turned: the facts and the supplier's contact on the
+    // left, every material on the right; a very long order scrolls instead
     openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(poStage(po)), 'P' + po.po_id, [
         { label: 'Order', body: '<div class="po-detail-layout">' +
-            '<div class="po-detail-facts">' + summary + '</div>' +
-            '<div class="po-detail-lines"><h4 class="detail-subhead">What is ordered</h4>' + lines + contact + '</div>' +
+            '<div class="po-detail-facts">' + summary + contact + '</div>' +
+            '<div class="po-detail-lines"><h4 class="detail-subhead">What is ordered</h4>' + lines + '</div>' +
           '</div>' }
     ], foot, { wide: 'xl', scroll: true });
 }
