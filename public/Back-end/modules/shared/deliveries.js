@@ -21,6 +21,107 @@ function refundOwesMessage(balance) {
         'settle it at the counter.';
 }
 
+// The progress bar at the top of the card: five steps. The first four follow the
+// delivery's status; the fifth (Paid) follows the money and stands on its own.
+// A step is 'done' (green tick), 'now' (dark, where the delivery is) or '' (not yet).
+function deliveryStepper(d) {
+    const stages = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered'];
+    const names = ['Booked', 'In Transit', 'Out for Delivery', 'Delivered', 'Paid'];
+    // plain descriptions that read fine whether the step is done, current or still ahead
+    const notes = ['Sale made at the counter.', 'Loaded and on the road.', 'Driver is near the customer.',
+        'Goods reach the customer.', ''];
+    const reached = stages.indexOf(d.status);
+
+    // Steps 1 to 4: everything before the status is done and the status itself is "now".
+    // The database does not remember where a Delayed or Failed delivery was, so
+    // only Booked is ticked and the rest stay grey.
+    const states = [];
+    for (let i = 0; i < 4; i++) {
+        if (reached === -1) {
+            states.push(i === 0 ? 'done' : '');
+        } else if (i < reached || d.status === 'Delivered') {
+            states.push('done');
+        } else if (i === reached) {
+            states.push('now');
+        } else {
+            states.push('');
+        }
+    }
+
+    // Step 5: paid once nothing is owed, even before the goods are delivered.
+    // The driver's list can show a negative balance when the customer overpaid, so "<= 0".
+    // (a missing, null or empty balance means "not known", so the payment status decides)
+    const hasBalance = d.balance_due !== undefined && d.balance_due !== null && d.balance_due !== '';
+    let paid;
+    if (hasBalance) {
+        paid = Number(d.balance_due) <= 0;
+    } else {
+        paid = d.payment_status === 'Paid';
+    }
+    states.push(paid ? 'done' : '');
+
+    // the short note under each step
+    if (d.status === 'Delivered' && d.delivered_at) notes[3] = escapeHtml(d.delivered_at);
+    if (paid) {
+        notes[4] = 'Paid in full.';
+    } else if (hasBalance) {
+        notes[4] = peso(d.balance_due) + ' still to collect.';
+    } else {
+        notes[4] = 'Still to collect.';
+    }
+
+    const items = names.map((name, i) =>
+        '<li class="dstep-item ' + states[i] + '">' +
+            '<span class="dstep-dot">' + (states[i] === 'done' ? '&#10003;' : (i + 1)) + '</span>' +
+            '<span class="dstep-text"><span class="dstep-name">' + name + '</span>' +
+            '<span class="dstep-note">' + notes[i] + '</span></span>' +
+        '</li>'
+    ).join('');
+
+    // the one line on the right
+    let summary;
+    let tone = '';
+    if (d.status === 'Pending') {
+        summary = 'Waiting to go out.';
+    } else if (d.status === 'In Transit' || d.status === 'Out for Delivery') {
+        summary = 'On the way.';
+    } else if (d.status === 'Delivered') {
+        summary = paid ? 'This delivery is finished.' : 'Delivered. Cash still to collect.';
+        tone = paid ? 'is-ok' : 'is-warn';
+    } else if (d.status === 'Delayed') {
+        summary = 'Delayed.';
+        tone = 'is-warn';
+    } else if (d.status === 'Failed') {
+        summary = 'Failed.';
+        tone = 'is-fail';
+    } else {
+        // a status this screen does not know: say it as it is rather than leave a gap
+        summary = escapeHtml(d.status || '');
+    }
+
+    // Delayed and Failed also say so under the steps, with the remarks if there are any
+    let message = '';
+    if (d.status === 'Delayed' || d.status === 'Failed') {
+        const late = d.status === 'Delayed';
+        let words;
+        if (d.remarks) {
+            words = d.status + ': ' + escapeHtml(d.remarks);
+        } else if (late) {
+            words = 'This delivery is delayed.';
+        } else {
+            words = 'This delivery is marked failed.';
+        }
+        message = '<p class="dstep-message ' + (late ? 'is-warn' : 'is-fail') + '">' + words + '</p>';
+    }
+
+    // with a message line, a narrow or short card leaves out the summary (it says the same)
+    return '<div class="dstep' + (message ? ' has-message' : '') + '">' +
+        '<div class="dstep-row"><ol class="dstep-list">' + items + '</ol>' +
+        '<div class="dstep-summary ' + tone + '">' + summary + '</div></div>' +
+        message +
+        '</div>';
+}
+
 // One delivery popup for every screen. canUpdate adds the status change with
 // a note (not the cashier); canArchive adds putting a closed delivery away
 // (manager only). The driver sees everything on one page; the other roles
@@ -38,16 +139,10 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
         detailField('Driver', escapeHtml(d.driver_name || 'Unassigned')) +
         detailField('Scheduled', escapeHtml(d.scheduled_date || 'Not set')) +
         detailField('Delivered At', d.delivered_at ? escapeHtml(d.delivered_at) : '<span class="muted">Not yet</span>') +
-        '</div><p class="detail-note">' + escapeHtml(d.delivery_address) + '</p>';
-
-    const stages = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered'];
-    const reached = stages.indexOf(d.status);
-    const timeline = '<ol class="timeline">' + stages.map((stage, i) =>
-        '<li class="' + (i <= reached ? 'done' : '') + '"><span class="timeline-dot"></span>' + stage + '</li>'
-    ).join('') + '</ol>' +
-        (d.status === 'Delayed' || d.status === 'Failed'
-            ? '<p class="detail-note detail-warn">This delivery is marked ' + escapeHtml(d.status) + '.</p>' : '') +
-        (d.remarks ? '<p class="detail-note">' + escapeHtml(d.remarks) + '</p>' : '');
+        '</div><p class="detail-note">' + escapeHtml(d.delivery_address) + '</p>' +
+        // a Delayed or Failed delivery's remarks are already under the progress steps
+        (d.remarks && d.status !== 'Delayed' && d.status !== 'Failed'
+            ? '<p class="detail-note">Remarks: ' + escapeHtml(d.remarks) + '</p>' : '');
 
     let money = detailField('Customer', escapeHtml(d.customer_name)) +
         detailField('Phone', d.customer_phone ? escapeHtml(d.customer_phone) : '<span class="muted">Not set</span>') +
@@ -70,7 +165,6 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
     const pages = [
         { label: 'Route', body: route },
         itemsPage,
-        { label: 'Progress', body: timeline },
         { label: 'Payment', body: '<div class="detail-grid">' + money + '</div>' }
     ];
 
@@ -102,10 +196,16 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
 
         pages.push({ label: 'Update', body: updateBody });
 
-        footActions = next.map((s) =>
-            '<button type="button" class="btn ' + (DELIVERY_STATUS_BUTTON[s] || 'btn-accent') + '" ' +
-                'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'' + s + '\')">' + s + '</button>'
-        ).join('');
+        footActions = next.map((s) => {
+            // The driver collects what is owed before the delivery is closed, so
+            // Delivered becomes Proceed to Payment. Nothing owed: plain Delivered.
+            if (s === 'Delivered' && isDriver && Number(d.balance_due) > 0) {
+                return '<button type="button" class="btn btn-success" ' +
+                    'onclick="proceedToPayment(' + d.delivery_id + ')">Proceed to Payment</button>';
+            }
+            return '<button type="button" class="btn ' + (DELIVERY_STATUS_BUTTON[s] || 'btn-accent') + '" ' +
+                'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'' + s + '\')">' + s + '</button>';
+        }).join('');
     }
 
     // The driver's refund at the door: only on their own delivery, once the
@@ -121,7 +221,7 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
             'onclick="openDriverRefund(' + d.delivery_id + ')">Refund Items</button>' + footActions;
     }
 
-    // The driver gets one page: the route, payment and progress on the left,
+    // The driver gets one page: the route and payment on the left,
     // the goods and the remarks on the right. The items fill their
     // box when they arrive (fillDeliveryItems).
     if (isDriver) {
@@ -131,7 +231,6 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
                     '<h4 class="detail-subhead">Route</h4>' + route +
                     '<h4 class="detail-subhead">Payment</h4><div class="detail-grid">' + money + '</div>' +
                     (owes && goodsAtDoor ? '<p class="detail-note detail-warn">' + refundOwesMessage(d.balance_due) + '</p>' : '') +
-                    '<h4 class="detail-subhead">Progress</h4>' + timeline +
                 '</div>' +
                 '<div class="drec-main">' +
                     '<h4 class="detail-subhead" id="drec-items-title">Items</h4>' +
@@ -142,13 +241,13 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
 
         // scroll: keep the one page and scroll it, rather than split it into pages
         openDetailModal('Delivery #' + d.delivery_id, d.customer_name + ' · ' + d.status, 'D' + d.delivery_id,
-            onePage, footActions, { wide: 'xl', scroll: true });
+            onePage, footActions, { wide: 'xl', scroll: true, top: deliveryStepper(d) });
         fillDeliveryItems(d.delivery_id, itemsPage, onePage);
         return;
     }
 
     openDetailModal('Delivery #' + d.delivery_id, d.customer_name + ' · ' + d.status, 'D' + d.delivery_id,
-        pages, footActions);
+        pages, footActions, { top: deliveryStepper(d) });
     fillDeliveryItems(d.delivery_id, itemsPage, pages);
 }
 
@@ -237,6 +336,17 @@ async function pickDeliveryStatus(deliveryId, status) {
     await sendDeliveryStatus(deliveryId, status, note);
 }
 
+// Proceed to Payment, in the driver's card: the card closes and the Receive
+// Payment card (delivery-personnel.js) opens for the same delivery. The remarks
+// typed in the card go along and are saved when the delivery is marked Delivered.
+function proceedToPayment(deliveryId) {
+    const remarks = document.getElementById('drec-remarks');
+    const note = remarks && remarks.value.trim() ? remarks.value.trim() : null;
+
+    closeModal('detail-modal');
+    openDriverPayment(deliveryId, note);
+}
+
 // ---------- status updates ----------
 async function sendDeliveryStatus(deliveryId, status, remarks) {
     try {
@@ -250,18 +360,22 @@ async function sendDeliveryStatus(deliveryId, status, remarks) {
 
         notifySuccess(result.message);
 
-        // refresh whichever delivery list this page has
-        if (typeof loadDriverDeliveries === 'function' && document.getElementById('dpend-table')) {
-            await loadDriverDeliveries();
-        } else if (typeof loadDeliveries === 'function' && document.getElementById('deliveries-table')) {
-            await loadDeliveries();
-        }
-
-        // the schedule reads the same rows, and a browser is not told about its own writes
-        if (typeof loadDeliverySchedule === 'function' && typeof scheduleRows !== 'undefined' && scheduleRows !== null) {
-            await loadDeliverySchedule(true);
-        }
+        await refreshDeliveryLists();
     } catch (error) {
         notifyOffline();
+    }
+}
+
+// After a change: read again whichever delivery list this page has
+async function refreshDeliveryLists() {
+    if (typeof loadDriverDeliveries === 'function' && document.getElementById('dpend-table')) {
+        await loadDriverDeliveries();
+    } else if (typeof loadDeliveries === 'function' && document.getElementById('deliveries-table')) {
+        await loadDeliveries();
+    }
+
+    // the schedule reads the same rows, and a browser is not told about its own writes
+    if (typeof loadDeliverySchedule === 'function' && typeof scheduleRows !== 'undefined' && scheduleRows !== null) {
+        await loadDeliverySchedule(true);
     }
 }

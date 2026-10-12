@@ -9,24 +9,33 @@
    ========================================================================== */
 /* Money still owed at the door is the one figure a driver must not misread,
    so it is the only red thing on the page and it is set as a figure. */
-#dcod-table .cell-due,
 #drep-table .cell-due {
     font-weight: 700;
     font-size: 15px;
 }
 
 /* ==========================================================================
-   THE PENDING LIST -- a row is opened to move the delivery on
+   THE PENDING LIST -- every active delivery; a row is opened to move it on
    ========================================================================== */
-/* whose delivery a Pending row is: the driver's own, or still up for grabs */
+/* a Pending row nobody has taken yet */
 #dpend-table .owner-tag { margin-left: 4px; }
-#dpend-table .owner-tag.is-mine { font-weight: 700; }
 
 /* ==========================================================================
-   COLLECTING THE MONEY -- the form on the left, the list beside it
-   (.pair-layout in general-ui.css); the amount is set as a figure
+   RECEIVE PAYMENT -- the card opened by Proceed to Payment (#pay-modal in delivery.html)
+   One column; the balance is read out first and the amount is set as a figure
    ========================================================================== */
-#dcod-form input[name="amount"] {
+#pay-form .pay-owed {
+    margin: 0 0 16px;
+    color: var(--steel);
+}
+#pay-form .pay-owed strong {
+    margin-left: 6px;
+    font-family: var(--font-figure);
+    font-size: 19.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--stop);
+}
+#pay-form input[name="amount"] {
     font-family: var(--font-figure);
     font-size: 19.5px;
     font-weight: 600;
@@ -47,7 +56,17 @@
    ON A PHONE
    ========================================================================== */
 @media (max-width: 640px) {
-    #dcod-form input[name="amount"] { font-size: 21.5px; min-height: 52px; }
+    /* big boxes for a thumb */
+    #pay-form input[name="amount"] { font-size: 21.5px; min-height: 52px; }
+    #pay-form .form-control { min-height: 48px; font-size: 16px; }
+
+    /* A delivery's status buttons: big targets, two to a row (a lone one takes the
+       whole row), so the card keeps room for the delivery's details above them */
+    #detail-modal .detail-foot-actions .btn {
+        flex: 1 1 calc(50% - 5px);
+        width: auto;
+        min-height: 48px;
+    }
 
     /* the two dates stay on one line: they are a range, not two questions */
     #panel-report .panel-toolbar {
@@ -59,22 +78,18 @@
 }
 
 /* ==========================================================================
-   A COMPACT ROW ON A PHONE -- Pending and Cash on Delivery
+   A COMPACT ROW ON A PHONE -- the Pending list
    The phone layout in responsive.css gives every value its own line, which
    leaves room for two deliveries a screen. Here a delivery is three lines in
    a small grid (two columns), and the whole row is still the button:
-       Pending:           Customer ........ #ID
-                          Destination (wraps)
-                          Status badges ... Scheduled date
-       Cash on Delivery:  Customer ........ #ID
-                          Method .......... Order total
-                          Status ........... Balance
+       Customer ........ #ID
+       Destination (wraps)
+       Status badges ... Scheduled date
    Only rows that can be opened (row-clickable) are changed; the "Loading..."
    and "nothing here" messages keep the normal layout.
    ========================================================================== */
 @media (max-width: 640px) {
-    #dpend-table .row-clickable,
-    #dcod-table .row-clickable {
+    #dpend-table .row-clickable {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         column-gap: 12px;
@@ -86,8 +101,7 @@
 
     /* every value is a plain block; the column names are dropped, because the
        place on the card says what each value is */
-    #dpend-table .row-clickable td,
-    #dcod-table .row-clickable td {
+    #dpend-table .row-clickable td {
         display: block;
         padding: 0;
         margin: 0;
@@ -96,18 +110,15 @@
         text-align: left;
         font-size: 14.5px;
     }
-    #dpend-table .row-clickable td::before,
-    #dcod-table .row-clickable td::before { display: none; }
+    #dpend-table .row-clickable td::before { display: none; }
 
     /* first line: the customer, then the number */
-    #dpend-table .row-clickable td[data-column="Customer"],
-    #dcod-table .row-clickable td[data-column="Customer"] {
+    #dpend-table .row-clickable td[data-column="Customer"] {
         grid-column: 1;
         grid-row: 1;
         font-size: 17px;
     }
-    #dpend-table .row-clickable td[data-column="ID"],
-    #dcod-table .row-clickable td[data-column="ID"] {
+    #dpend-table .row-clickable td[data-column="ID"] {
         grid-column: 2;
         grid-row: 1;
         text-align: right;
@@ -122,8 +133,7 @@
     }
 
     /* the third line: the badges on the left (they wrap if there are many) ... */
-    #dpend-table .row-clickable td[data-column="Status"],
-    #dcod-table .row-clickable td[data-column="Status"] {
+    #dpend-table .row-clickable td[data-column="Status"] {
         grid-column: 1;
         grid-row: 3;
         display: flex;
@@ -137,32 +147,6 @@
         grid-column: 2;
         grid-row: 3;
         text-align: right;
-    }
-
-    /* Cash on Delivery, second line: how it is paid, and the order total */
-    #dcod-table .row-clickable td[data-column="Method"] {
-        grid-column: 1;
-        grid-row: 2;
-        color: var(--steel-soft);
-    }
-    #dcod-table .row-clickable td[data-column="Order Total"] {
-        grid-column: 2;
-        grid-row: 2;
-        text-align: right;
-        color: var(--steel-soft);
-    }
-    /* third line, right: what is still owed at the door */
-    #dcod-table .row-clickable td[data-column="Balance"] {
-        grid-column: 2;
-        grid-row: 3;
-        text-align: right;
-    }
-    /* the two money figures keep their names, so they are not mixed up */
-    #dcod-table .row-clickable td[data-column="Order Total"]::before,
-    #dcod-table .row-clickable td[data-column="Balance"]::before {
-        display: inline;
-        margin-right: 6px;
-        font-size: 13px;
     }
 }
 

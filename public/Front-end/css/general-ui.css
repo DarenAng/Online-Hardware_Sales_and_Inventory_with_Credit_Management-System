@@ -321,6 +321,18 @@ input[type="number"].form-control {
    from a sale") reads from the left like every other box, until a number is typed */
 input[type="number"].form-control:placeholder-shown { text-align: left; }
 
+/* No up / down arrows inside a number box, on any page: they step by 0.01 and
+   get in the way of typing an amount. A figure is typed. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
 .inline-select { padding: 6px 9px; min-height: 34px; font-size: 15px; min-width: 132px; width: auto; }
 
 /* ==========================================================================
@@ -1257,7 +1269,7 @@ html:has(.modal.open) { overflow: hidden; }
     animation: modal-rise 0.2s cubic-bezier(0.2, 0.7, 0.3, 1);
     overflow: hidden;
 }
-.modal-head, .modal-tabs, .modal-steps, .modal-foot { flex: none; }
+.modal-head, .modal-top, .modal-tabs, .modal-steps, .modal-foot { flex: none; }
 @keyframes modal-rise {
     from { opacity: 0; transform: translateY(14px) scale(0.986); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1365,7 +1377,6 @@ html:has(.modal.open) { overflow: hidden; }
 .modal-pages .detail-note,
 .modal-pages .detail-actions,
 .modal-pages .detail-empty,
-.modal-pages .timeline li,
 .modal-pages tr,
 .modal-pages thead,
 .modal-pages p,
@@ -1405,7 +1416,7 @@ html:has(.modal.open) { overflow: hidden; }
     border-top: 1px solid var(--line);
 }
 /* a foot with nothing to press is not drawn: the x in the corner closes the card */
-.modal-foot[hidden], .modal-steps[hidden] { display: none; }
+.modal-foot[hidden], .modal-steps[hidden], .modal-top[hidden] { display: none; }
 
 /* a record shown whole on a wide card: three fields to a row */
 .detail-grid.detail-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1490,33 +1501,142 @@ html:has(.modal.open) { overflow: hidden; }
 }
 
 /* ---------- how far a delivery has got ---------- */
-.timeline { list-style: none; padding: 6px 0 0; }
-.timeline li {
-    position: relative;
-    padding: 0 0 20px 26px;
-    font-size: 15px;
-    color: var(--steel-soft);
+/* The strip across the top of a card (options.top in detail-modal.js). It sits
+   above the tabs, so it stays in view whichever tab is open. */
+.modal-top {
+    padding: 16px 22px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
 }
-.timeline li:last-child { padding-bottom: 0; }
-.timeline li::before {
-    content: '';
-    position: absolute;
-    left: 5px; top: 16px; bottom: -4px;
-    width: 1px;
-    background: var(--line);
-}
-.timeline li:last-child::before { display: none; }
-.timeline-dot {
-    position: absolute;
-    left: 0; top: 4px;
-    width: 11px; height: 11px;
+
+/* Five steps joined by a line (deliveryStepper in shared/deliveries.js).
+   done = green tick, now = dark circle, nothing = grey outline with its number. */
+.dstep-row { display: flex; align-items: flex-start; gap: 18px; }
+.dstep-list { list-style: none; margin: 0; padding: 0; display: flex; flex: 1; min-width: 0; }
+.dstep-item { flex: 1; position: relative; padding-right: 12px; min-width: 0; }
+.dstep-item:last-child { padding-right: 0; }
+
+/* the circle with its number or tick */
+.dstep-dot {
+    position: relative; z-index: 1;
+    width: 26px; height: 26px;
     border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
     border: 2px solid var(--line);
     background: var(--surface);
+    color: var(--steel-soft);
 }
-.timeline li.done { color: var(--ink); font-weight: 500; }
-.timeline li.done .timeline-dot { border-color: var(--ok); background: var(--ok); }
-.timeline li.done::before { background: var(--ok); }
+.dstep-item.done .dstep-dot { background: var(--ok); border-color: var(--ok); color: var(--surface); }
+.dstep-item.now .dstep-dot {
+    background: var(--chrome); border-color: var(--chrome); color: var(--surface);
+    box-shadow: 0 0 0 4px rgba(27, 31, 36, 0.12);
+}
+
+/* the line from this circle to the next; green once this step is done */
+.dstep-item::before {
+    content: '';
+    position: absolute;
+    top: 12px; left: 26px; right: 0;
+    height: 2px;
+    background: var(--line);
+}
+.dstep-item:last-child::before { display: none; }
+.dstep-item.done::before { background: var(--ok); }
+
+/* the bold name and the short muted note under the circle */
+.dstep-text { display: block; margin-top: 8px; }
+.dstep-name { display: block; font-size: 14px; font-weight: 700; color: var(--ink); }
+.dstep-note { display: block; margin-top: 2px; font-size: 12.5px; line-height: 1.35; color: var(--steel); }
+
+/* the one line on the right */
+.dstep-summary {
+    flex: none;
+    max-width: 190px;
+    align-self: center;
+    text-align: right;
+    font-size: 14px; font-weight: 700;
+    color: var(--steel);
+}
+.dstep-summary.is-ok   { color: var(--ok-ink); }
+.dstep-summary.is-warn { color: var(--signal-ink); }
+.dstep-summary.is-fail { color: var(--stop); }
+
+/* the line under the steps for a Delayed or Failed delivery */
+.dstep-message {
+    margin: 14px 0 0;
+    padding: 10px 13px;
+    border-left: var(--rule) solid var(--line);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 14.5px; font-weight: 600;
+    line-height: 1.5;
+}
+.dstep-message.is-warn { background: var(--signal-dim); color: var(--signal-ink); border-left-color: var(--signal); }
+.dstep-message.is-fail { background: var(--stop-dim);   color: var(--stop);       border-left-color: var(--stop); }
+
+/* a narrow card (a tablet): the steps stack, circle on the left, name and note
+   beside it, a vertical line between the circles, and the summary goes on top.
+   (A short window keeps the row instead: stacking would be too tall for it.) */
+@media (min-width: 641px) and (max-width: 900px) and (min-height: 561px) {
+    .modal-top { padding: 14px 16px; }
+    .dstep-row { flex-direction: column; align-items: stretch; gap: 12px; }
+    .dstep-summary { order: -1; max-width: none; align-self: auto; text-align: left; }
+    .dstep-list { flex-direction: column; }
+    .dstep-item { display: flex; gap: 12px; flex: none; padding: 0 0 14px; }
+    .dstep-item:last-child { padding-bottom: 0; }
+    .dstep-item::before { top: 26px; bottom: 0; left: 12px; right: auto; width: 2px; height: auto; }
+    .dstep-dot { flex: none; }
+    .dstep-text { margin-top: 0; min-width: 0; }
+    .dstep-note { margin-top: 0; }
+}
+
+/* A phone (375px wide) is short as well as narrow, so the steps stay in one row:
+   five small circles joined by a line, the name under each (it wraps to two
+   lines where it must), and no notes. The summary goes above the row. */
+@media (max-width: 640px) and (min-height: 561px) {
+    .modal-top { padding: 12px 12px; }
+    .dstep-row { flex-direction: column; align-items: stretch; gap: 10px; }
+    .dstep-summary { order: -1; max-width: none; align-self: auto; text-align: left; font-size: 13.5px; }
+
+    .dstep-item { padding-right: 0; text-align: center; }
+    .dstep-dot { width: 22px; height: 22px; font-size: 12px; margin: 0 auto; }
+    /* the line runs from the edge of this circle to the edge of the next one */
+    .dstep-item::before { top: 10px; left: calc(50% + 14px); right: calc(-50% + 14px); }
+
+    .dstep-text { margin-top: 5px; }
+    .dstep-name { font-size: 11.5px; line-height: 1.25; }
+    .dstep-note { display: none; }
+    .dstep-message { margin-top: 10px; padding: 8px 11px; font-size: 14px; }
+}
+
+/* A short window (a phone on its side): one slim row, each circle with its name
+   beside it and no notes, so the tabs, the body and the foot buttons keep their room */
+@media (max-height: 560px) {
+    .modal-top { padding: 4px 16px; }
+    .dstep-row { align-items: center; gap: 12px; }
+    .dstep-item { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; padding-right: 6px; }
+    .dstep-item:last-child { flex: 0 0 auto; padding-right: 0; }
+    .dstep-dot { flex: none; width: 22px; height: 22px; font-size: 12px; }
+    .dstep-text { margin-top: 0; }
+    .dstep-name { font-size: 13px; white-space: nowrap; }
+    .dstep-note { display: none; }
+    /* the line sits after the name and stretches to the next circle */
+    .dstep-item::before { position: static; order: 3; flex: 1 1 6px; min-width: 6px; }
+    .dstep-summary { max-width: 130px; font-size: 12.5px; line-height: 1.3; }
+    .dstep-message { margin-top: 4px; padding: 3px 11px; font-size: 13.5px; line-height: 1.3; }
+}
+
+/* Whatever the shape, the strip gives way before the foot buttons do: it takes
+   at most a third of a tall narrow window and a fifth of a short one, and
+   scrolls inside itself past that */
+@media (max-width: 900px), (max-height: 560px) {
+    .modal-top { max-height: 30vh; overflow-y: auto; }
+    /* the message line under the steps says what the summary would */
+    .dstep.has-message .dstep-summary { display: none; }
+}
+@media (max-height: 560px) {
+    .modal-top { max-height: 20vh; }
+}
 
 /* ---------- the question card ---------- */
 .ask-box { max-width: 460px; }

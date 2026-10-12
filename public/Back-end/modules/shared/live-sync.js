@@ -55,8 +55,7 @@ const PANEL_SCOPES = {
     'cash-summary':       ['sales', 'returns'],
 
     // delivery personnel
-    'driver-pending':     ['deliveries'],
-    'driver-cod':         ['deliveries', 'sales']
+    'driver-pending':     ['deliveries', 'sales']
 };
 
 let liveSource = null;

@@ -5,9 +5,9 @@
 // What is in this file, from top to bottom:
 //   - small date helpers (today, first day of the month)
 //   - switching screens (showDeliveryPanel and the show... functions)
-//   - the driver's deliveries: the numbers at the top and the lists
+//   - the driver's deliveries: the one Pending list (every active delivery)
 //   - taking a delivery (the status buttons live in the popup, shared/deliveries.js)
-//   - collecting cash on delivery (COD)
+//   - Receive Payment: the popup that collects the money and marks the delivery Delivered
 //   - refunding items the customer turns away at the door
 //   - the driver's report for a date range
 //   - the page start-up code at the very bottom ("DELIVERY PAGE BOOT")
@@ -45,11 +45,8 @@ function showDeliveryPanel(panelId, title, event) {
     leaveScreenFurniture();
 }
 
-// the default screen; Load Data on either list fills both.
-// Neither unfolds the Delivery Runs list: only the heading's caret does
-// (shared/helpers.js sidebarHeading).
+// the default screen
 function showDeliveryHome(event)   { showDeliveryPanel('panel-pending', 'Pending Deliveries', event); }
-function showDeliveryCod(event)    { showDeliveryPanel('panel-cod', 'Cash on Delivery', event); }
 function showDeliveryReports(event) {
     showDeliveryPanel('panel-report', 'Delivery Reports', event);
 }
@@ -69,64 +66,29 @@ function showDriverReportView(viewId) {
     });
 }
 
-// One query scoped to the driver; the three lists are three views of it,
-// read when the driver asks and re-read after a change.
+// Reads the driver's deliveries from the server. The popups find a delivery in
+// driverDeliveries by its id, so every read keeps this list up to date.
 async function fetchDriverDeliveries() {
     const user = getCurrentUser();
     if (!user) throw new Error('not signed in');
 
     driverDeliveries = await apiGetMyDeliveries(user.staff_id);
-    releaseStaleFocus();
-    fillCodSelect();
     return driverDeliveries;
 }
 
-// one panel's load() fetches; sibling panels redraw from the same rows
-const DRIVER_LISTS = ['driver-pending', 'driver-cod'];
-
-// Load Data on either list reads the run once and fills both, so a delivery
-// the driver has taken is already waiting under Cash on Delivery.
-async function driverRows(key, pick) {
-    const panel = getDataPanel(key);
-
-    if (panel && panel.fromRun) {
-        panel.fromRun = false;
-    } else {
-        await fetchDriverDeliveries();
-
-        for (const other of DRIVER_LISTS) {
-            const sibling = getDataPanel(other);
-            if (!sibling || other === key) continue;
-            sibling.fromRun = true;
-            sibling.open();
-        }
-    }
-
-    return driverDeliveries.filter(pick);
-}
-
-// Re-reads the run after a change (taking a delivery, moving it, a payment)
-// and redraws all three lists from it.
+// Re-reads the list after a change (taking a delivery, moving it, a payment)
+// and redraws it in place: the list stays on screen, it never goes back to "not loaded".
 async function loadDriverDeliveries() {
-    if (!document.getElementById('dpend-table')) return;
+    const panel = getDataPanel('driver-pending');
+    if (!panel) return;
 
-    try {
-        await fetchDriverDeliveries();
-        for (const key of DRIVER_LISTS) {
-            const panel = getDataPanel(key);
-            if (!panel) continue;
-
-            panel.fromRun = true;
-            if (panel.state === 'ready') {
-                await panel.refresh();
-            } else {
-                await panel.open();
-            }
-        }
-    } catch (error) {
-        setPill('dpend-count', 'Offline');
-        notifyOffline();
+    if (panel.state === 'ready') {
+        await panel.refresh();
+    } else {
+        await panel.open();
     }
+
+    if (panel.state === 'error') notifyOffline();
 }
 
 function isMine(d) {
@@ -134,52 +96,24 @@ function isMine(d) {
     return !!user && d.delivery_staff_id != null && Number(d.delivery_staff_id) === Number(user.staff_id);
 }
 
-function isWaiting(d) {
-    return d.status === 'Pending' || d.status === 'In Transit' || d.status === 'Delayed';
+// A delivery is still active until it is Delivered or Failed. That covers
+// Pending, In Transit, Out for Delivery and Delayed.
+function isActive(d) {
+    return d.status !== 'Delivered' && d.status !== 'Failed';
 }
 
-// The delivery the driver clicked into; while set, the Pending list shows it
-// alone. Kept for the tab so a reload stays on the same job.
-const FOCUS_KEY = 'driver-focus-delivery';
-let focusedDeliveryId = null;
-try { focusedDeliveryId = Number(sessionStorage.getItem(FOCUS_KEY)) || null; } catch (error) { /* no storage */ }
-
-function setDeliveryFocus(deliveryId) {
-    focusedDeliveryId = deliveryId;
-    try {
-        if (deliveryId) sessionStorage.setItem(FOCUS_KEY, String(deliveryId));
-        else sessionStorage.removeItem(FOCUS_KEY);
-    } catch (error) { /* no storage */ }
-}
-
-// the focus lets go once the delivery leaves the Pending list (sent out, closed, archived)
-function releaseStaleFocus() {
-    if (!focusedDeliveryId) return;
-    const d = driverDeliveries.find((x) => x.delivery_id === focusedDeliveryId);
-    if (!d || !isMine(d) || !isWaiting(d)) setDeliveryFocus(null);
-}
-
-async function clearDeliveryFocus() {
-    setDeliveryFocus(null);
-    const panel = getDataPanel('driver-pending');
-    if (panel && panel.state === 'ready') {
-        panel.fromRun = true;
-        await panel.refresh();
-    }
-}
-
-// Every waiting delivery that is the driver's own or nobody's yet, so a new
-// booking shows up at once; narrowed to one while the driver is on it.
+// Every active delivery that is the driver's own or nobody's yet, so a new
+// booking shows up at once. The list is always this whole list.
 function pendingForDriver(d) {
-    if (!isWaiting(d)) return false;
-    if (focusedDeliveryId) return d.delivery_id === focusedDeliveryId;
+    if (!isActive(d)) return false;
     return isMine(d) || d.delivery_staff_id == null;
 }
 
 // The Pending list mixes the driver's own deliveries with ones nobody has
-// taken yet; this says which is which on the row itself.
+// taken yet. The driver's own need no tag (the cashier assigned them), so
+// only a delivery nobody has taken is marked.
 function ownerTag(d) {
-    if (isMine(d)) return '<span class="badge badge-neutral owner-tag is-mine">Yours</span>';
+    if (isMine(d)) return '';
     return '<span class="badge badge-neutral owner-tag">Unassigned</span>';
 }
 
@@ -190,9 +124,8 @@ async function openPendingDelivery(deliveryId) {
 
     if (!isMine(d)) {
         const yes = await askConfirm(
-            'Delivery #' + deliveryId + ' to ' + d.customer_name + ' will be assigned to you, ' +
-            'and your list shows this delivery only until you send it out.',
-            { title: 'Take this delivery?', eyebrow: 'Delivery Runs', confirmLabel: 'Take Delivery', tone: 'accent' });
+            'Delivery #' + deliveryId + ' to ' + d.customer_name + ' will be assigned to you.',
+            { title: 'Take this delivery?', eyebrow: 'Deliveries', confirmLabel: 'Take Delivery', tone: 'accent' });
         if (!yes) return;
 
         try {
@@ -210,10 +143,11 @@ async function openPendingDelivery(deliveryId) {
             notifyOffline();
             return;
         }
+
+        // the list is read again so the delivery is now marked as the driver's
+        await loadDriverDeliveries();
     }
 
-    setDeliveryFocus(deliveryId);
-    await loadDriverDeliveries();
     openDriverDetail(deliveryId);
 }
 
@@ -224,20 +158,16 @@ function buildDriverPanels() {
         columns: 5,
         pagerId: 'dpend-pager',
         idField: 'delivery_id',
-        gate: { title: 'Your run is not loaded',
-                text: 'Press Load Data to read the deliveries waiting on you, or type a customer.',
+        gate: { title: 'Your deliveries are not loaded',
+                text: 'Press Load Data to read your deliveries, or type a customer.',
                 button: 'Load Data' },
 
-        load: () => driverRows('driver-pending', pendingForDriver),
+        load: async () => {
+            await fetchDriverDeliveries();
+            return driverDeliveries.filter(pendingForDriver);
+        },
 
         match: (d, query) => prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query),
-
-        onLoaded: () => {
-            const heading = document.getElementById('dpend-heading');
-            if (heading) heading.textContent = focusedDeliveryId ? 'Your Delivery' : 'Waiting to Go Out';
-            const showAll = document.getElementById('dpend-show-all');
-            if (showAll) showAll.hidden = !focusedDeliveryId;
-        },
 
         renderRow: (d, index) =>
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -248,88 +178,55 @@ function buildDriverPanels() {
             '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
             '<td>' + statusBadge(d.status) + ' ' + ownerTag(d) + '</td></tr>'
     });
-
-    // Everything the driver has taken: what is still on the road, whatever its
-    // status, and anything delivered that still has money owed at the door.
-    createDataPanel({
-        key: 'driver-cod',
-        tableId: 'dcod-table',
-        columns: 6,
-        pagerId: 'dcod-pager',
-        idField: 'delivery_id',
-        gate: { title: 'Your run is not loaded',
-                text: 'Press Load Data to read the deliveries you have taken, or type a customer.',
-                button: 'Load Data' },
-
-        load: () => driverRows('driver-cod', (d) =>
-            isMine(d) && ((d.status !== 'Delivered' && d.status !== 'Failed') || Number(d.balance_due) > 0)),
-
-        match: (d, query) => prefixMatch([d.customer_name, '#' + d.delivery_id], query),
-
-        // the pill carries the money rather than the row count
-        onLoaded: (rows) => {
-            const total = sumOf(rows.filter((d) => Number(d.balance_due) > 0), 'balance_due');
-            setPill('dcod-count', peso(total) + ' to collect');
-        },
-
-        renderRow: (d, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openDriverDetail(' + d.delivery_id + ')">' +
-            '<td class="cell-id">#' + d.delivery_id + '</td>' +
-            '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
-            '<td>' + escapeHtml(d.payment_method) + '</td>' +
-            '<td class="cell-num">' + peso(d.final_amount) + '</td>' +
-            '<td class="cell-num' + (Number(d.balance_due) > 0 ? ' cell-due' : '') + '">' +
-                peso(Math.max(Number(d.balance_due) || 0, 0)) + '</td>' +
-            '<td>' + statusBadge(d.status) + '</td></tr>'
-    });
 }
 
-function fillCodSelect() {
-    const select = document.getElementById('dcod-select');
-    if (!select) return;
+// ---------- receive payment ----------
+// Opens from "Proceed to Payment" in a delivery's card (shared/deliveries.js).
+// Recording the payment also marks the delivery Delivered.
+let paymentDeliveryId = null;
+let paymentRemarks = null;     // the note typed in the delivery's card; it goes with Delivered
 
-    const due = driverDeliveries.filter((d) => isMine(d) && Number(d.balance_due) > 0);
+function openDriverPayment(deliveryId, remarks) {
+    const d = driverDeliveries.find((x) => x.delivery_id === deliveryId);
+    if (!d) return;
 
-    if (due.length === 0) {
-        select.innerHTML = '<option value="">Nothing left to collect</option>';
-    } else {
-        select.innerHTML = due.map((d) => '<option value="' + d.delivery_id + '" data-balance="' + d.balance_due + '">' +
-                'Delivery #' + d.delivery_id + ' &middot; ' + escapeHtml(d.customer_name) +
-                ' &middot; ' + peso(d.balance_due) + '</option>').join('');
-    }
+    paymentDeliveryId = deliveryId;
+    paymentRemarks = remarks || null;
 
-    onCodChange();
+    document.getElementById('pay-subtitle').textContent = 'Delivery #' + deliveryId + ' · ' + d.customer_name;
+    document.getElementById('pay-balance').textContent = peso(d.balance_due);
+
+    // the amount starts as the whole balance; the driver can lower it
+    const form = document.getElementById('pay-form');
+    form.elements.amount.value = Number(d.balance_due).toFixed(2);
+    form.elements.paymentMethod.value = 'Cash';
+    form.elements.referenceNo.value = '';
+
+    showModal('pay-modal');
 }
 
-function onCodChange() {
-    const select = document.getElementById('dcod-select');
-    const form = document.getElementById('dcod-form');
-    if (!select || !form) return;
-
-    const option = select.options[select.selectedIndex];
-    form.elements.amount.value = option && option.dataset.balance ? option.dataset.balance : '';
-}
-
-// ---------- cash on delivery ----------
-async function handleCodPayment(event) {
+async function handleDriverPayment(event) {
     event.preventDefault();
     const form = event.target;
 
-    const deliveryId = parseInt(form.elements.deliveryId.value, 10);
     const amount = parseFloat(form.elements.amount.value);
-
-    if (!deliveryId) {
-        notifyWarning('Choose which delivery this money is for.', 'Nothing recorded');
-        return;
-    }
     if (!amount || amount <= 0) {
         notifyWarning('A payment has to be greater than zero.', 'Nothing recorded');
         return;
     }
 
+    // how much was owed before this payment, to say what is left afterwards
+    const d = driverDeliveries.find((x) => x.delivery_id === paymentDeliveryId);
+    const owedBefore = d ? Number(d.balance_due) : 0;
+
+    // The button is off while this sends, so a double tap cannot record the payment twice.
+    const button = document.querySelector('#pay-modal button[type="submit"]');
+    if (button && button.disabled) return;   // already sending
+    if (button) button.disabled = true;
+
+    let paymentRecorded = false;
     try {
-        const response = await apiCollectPayment(deliveryId, {
+        const response = await apiCollectPayment(paymentDeliveryId, {
                 amount: amount,
                 paymentMethod: form.elements.paymentMethod.value,
                 referenceNo: form.elements.referenceNo.value.trim() || null
@@ -337,12 +234,37 @@ async function handleCodPayment(event) {
         const result = await response.json();
 
         if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
+        paymentRecorded = true;
 
-        notifySuccess(result.message);
-        form.elements.referenceNo.value = '';
-        await loadDriverDeliveries();
+        // the money is in, so the delivery is closed out as Delivered
+        const statusResponse = await apiUpdateDeliveryStatus(paymentDeliveryId, 'Delivered', paymentRemarks);
+        const statusResult = await statusResponse.json();
+
+        closeModal('pay-modal');
+
+        if (!statusResponse.ok) {
+            if (handleAuthFailure(statusResponse, statusResult)) return;
+            notifyError('The payment was recorded, but the delivery is not yet marked Delivered. ' +
+                statusResult.error, 'Payment recorded');
+        } else {
+            let message = result.message + ' The delivery is marked Delivered.';
+            const stillOwed = Math.round((owedBefore - amount) * 100) / 100;
+            if (stillOwed > 0) message += ' ' + peso(stillOwed) + ' is still owed.';
+            notifySuccess(message, 'Delivery #' + paymentDeliveryId + ' delivered');
+        }
+
+        await refreshDeliveryLists();
     } catch (error) {
-        notifyOffline();
+        if (paymentRecorded) {
+            closeModal('pay-modal');
+            notifyError('The payment was recorded, but the connection was lost before the delivery was marked ' +
+                'Delivered. Open the delivery and mark it Delivered.', 'Payment recorded');
+            await refreshDeliveryLists();
+        } else {
+            notifyOffline();
+        }
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 

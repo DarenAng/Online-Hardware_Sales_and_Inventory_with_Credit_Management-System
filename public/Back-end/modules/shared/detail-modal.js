@@ -30,7 +30,9 @@ function detailTable(headers, rows, numeric) {
 // done with the record stays in view whichever page is open. The foot is
 // hidden when there are none: the x in the corner closes the card.
 // options.wide: a wide card, for a record shown on one page;
-// wide: 'xl' is wider still, for a record with a table beside its facts
+// wide: 'xl' is wider still, for a record with a table beside its facts;
+// options.top: optional HTML shown across the top of the card, above the tabs,
+// so it stays in view whichever page is open (the delivery's progress steps)
 function openDetailModal(title, subtitle, initials, pages, footActions, options) {
     detailPages = pages;
     detailIndex = 0;
@@ -46,6 +48,13 @@ function openDetailModal(title, subtitle, initials, pages, footActions, options)
     }
     const steps = document.getElementById('detail-steps');
     if (steps) steps.hidden = pages.length < 2;
+
+    // the strip above the tabs: filled when there is something for it, empty and hidden otherwise
+    const top = document.getElementById('detail-top');
+    if (top) {
+        top.innerHTML = settings.top || '';
+        top.hidden = !settings.top;
+    }
 
     document.getElementById('detail-title').textContent = title;
     document.getElementById('detail-subtitle').textContent = subtitle;
