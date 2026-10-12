@@ -1590,10 +1590,10 @@ html:has(.modal.open) { overflow: hidden; }
     .dstep-note { margin-top: 0; }
 }
 
-/* A phone (375px wide) is short as well as narrow, so the steps stay in one row:
+/* A phone (375px wide), whatever its height: the steps stay in one row:
    five small circles joined by a line, the name under each (it wraps to two
    lines where it must), and no notes. The summary goes above the row. */
-@media (max-width: 640px) and (min-height: 561px) {
+@media (max-width: 640px) {
     .modal-top { padding: 12px 12px; }
     .dstep-row { flex-direction: column; align-items: stretch; gap: 10px; }
     .dstep-summary { order: -1; max-width: none; align-self: auto; text-align: left; font-size: 13.5px; }
@@ -1609,9 +1609,9 @@ html:has(.modal.open) { overflow: hidden; }
     .dstep-message { margin-top: 10px; padding: 8px 11px; font-size: 14px; }
 }
 
-/* A short window (a phone on its side): one slim row, each circle with its name
+/* A short, wide window (a phone on its side): one slim row, each circle with its name
    beside it and no notes, so the tabs, the body and the foot buttons keep their room */
-@media (max-height: 560px) {
+@media (max-height: 560px) and (min-width: 641px) {
     .modal-top { padding: 4px 16px; }
     .dstep-row { align-items: center; gap: 12px; }
     .dstep-item { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; padding-right: 6px; }

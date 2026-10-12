@@ -21,18 +21,19 @@ function refundOwesMessage(balance) {
         'settle it at the counter.';
 }
 
-// The progress bar at the top of the card: five steps. The first four follow the
-// delivery's status; the fifth (Paid) follows the money and stands on its own.
+// The progress bar at the top of the card: four steps that follow the delivery's
+// status. Delivered is the last step and also means paid: recording the
+// customer's payment marks the delivery Delivered at the same time.
 // A step is 'done' (green tick), 'now' (dark, where the delivery is) or '' (not yet).
 function deliveryStepper(d) {
     const stages = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered'];
-    const names = ['Booked', 'In Transit', 'Out for Delivery', 'Delivered', 'Paid'];
+    const names = ['Booked', 'In Transit', 'Out for Delivery', 'Delivered'];
     // plain descriptions that read fine whether the step is done, current or still ahead
     const notes = ['Sale made at the counter.', 'Loaded and on the road.', 'Driver is near the customer.',
-        'Goods reach the customer.', ''];
+        'Paid and handed over.'];
     const reached = stages.indexOf(d.status);
 
-    // Steps 1 to 4: everything before the status is done and the status itself is "now".
+    // Everything before the status is done and the status itself is "now".
     // The database does not remember where a Delayed or Failed delivery was, so
     // only Booked is ticked and the rest stay grey.
     const states = [];
@@ -48,7 +49,8 @@ function deliveryStepper(d) {
         }
     }
 
-    // Step 5: paid once nothing is owed, even before the goods are delivered.
+    // Is anything still owed? Only used for the words on a Delivered card
+    // (a part payment still closes the delivery; the counter collects the rest).
     // The driver's list can show a negative balance when the customer overpaid, so "<= 0".
     // (a missing, null or empty balance means "not known", so the payment status decides)
     const hasBalance = d.balance_due !== undefined && d.balance_due !== null && d.balance_due !== '';
@@ -58,17 +60,9 @@ function deliveryStepper(d) {
     } else {
         paid = d.payment_status === 'Paid';
     }
-    states.push(paid ? 'done' : '');
 
-    // the short note under each step
+    // the Delivered step shows when it happened
     if (d.status === 'Delivered' && d.delivered_at) notes[3] = escapeHtml(d.delivered_at);
-    if (paid) {
-        notes[4] = 'Paid in full.';
-    } else if (hasBalance) {
-        notes[4] = peso(d.balance_due) + ' still to collect.';
-    } else {
-        notes[4] = 'Still to collect.';
-    }
 
     const items = names.map((name, i) =>
         '<li class="dstep-item ' + states[i] + '">' +
@@ -86,7 +80,7 @@ function deliveryStepper(d) {
     } else if (d.status === 'In Transit' || d.status === 'Out for Delivery') {
         summary = 'On the way.';
     } else if (d.status === 'Delivered') {
-        summary = paid ? 'This delivery is finished.' : 'Delivered. Cash still to collect.';
+        summary = paid ? 'This delivery is finished.' : 'Delivered. Balance still owed.';
         tone = paid ? 'is-ok' : 'is-warn';
     } else if (d.status === 'Delayed') {
         summary = 'Delayed.';
@@ -132,11 +126,12 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
     const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
     const isDriver = !!user && user.role_name === 'Delivery Personnel';
 
+    // the driver's own card leaves out the sale number and the driver (it is them)
     const route = '<div class="detail-grid">' +
         detailField('Delivery ID', '#' + d.delivery_id) +
-        detailField('Sale', '#' + d.sale_id) +
+        (isDriver ? '' : detailField('Sale', '#' + d.sale_id)) +
         detailField('Status', statusBadge(d.status)) +
-        detailField('Driver', escapeHtml(d.driver_name || 'Unassigned')) +
+        (isDriver ? '' : detailField('Driver', escapeHtml(d.driver_name || 'Unassigned'))) +
         detailField('Scheduled', escapeHtml(d.scheduled_date || 'Not set')) +
         detailField('Delivered At', d.delivered_at ? escapeHtml(d.delivered_at) : '<span class="muted">Not yet</span>') +
         '</div><p class="detail-note">' + escapeHtml(d.delivery_address) + '</p>' +
@@ -197,9 +192,10 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
         pages.push({ label: 'Update', body: updateBody });
 
         footActions = next.map((s) => {
-            // The driver collects what is owed before the delivery is closed, so
-            // Delivered becomes Proceed to Payment. Nothing owed: plain Delivered.
-            if (s === 'Delivered' && isDriver && Number(d.balance_due) > 0) {
+            // The driver collects what is owed on their own delivery before it is closed,
+            // so Delivered becomes Proceed to Payment. Nothing owed: plain Delivered.
+            const mine = typeof isMine === 'function' && isMine(d);
+            if (s === 'Delivered' && isDriver && mine && Number(d.balance_due) > 0) {
                 return '<button type="button" class="btn btn-success" ' +
                     'onclick="proceedToPayment(' + d.delivery_id + ')">Proceed to Payment</button>';
             }

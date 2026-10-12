@@ -2226,7 +2226,7 @@ const FEATURES = [
     routes: [["GET", /^\/api\/deliveries$/], ["GET", /^\/api\/deliveries\/\d+\/items$/],
              ["PATCH", /^\/api\/deliveries\/\d+\/status$/]] },
   { key: "delivery-runs", name: "Delivery Runs", module: "Deliveries",
-    description: "The driver's own round: pending, out for delivery, and cash to collect.",
+    description: "The driver's own round: every active delivery in one list, with the cash collected when it is handed over.",
     available: [DRIVER], defaults: [DRIVER],
     routes: [["GET", /^\/api\/delivery\/list$/], ["GET", /^\/api\/deliveries\/\d+\/items$/],
              ["PATCH", /^\/api\/deliveries\/\d+\/status$/],

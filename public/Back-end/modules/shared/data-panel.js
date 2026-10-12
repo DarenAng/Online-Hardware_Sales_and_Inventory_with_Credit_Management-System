@@ -618,9 +618,8 @@ async function restoreLoadedPanels() {
         panels.push(panel);
     });
 
-    // One at a time. Some tables load together (the driver's two lists): the
-    // first one's load also fills the other, so by its turn it is no longer
-    // closed and is not read a second time.
+    // One at a time. A table whose load also fills another one is no longer
+    // closed by that one's turn, so it is not read a second time.
     for (const panel of panels) {
         if (panel.state !== 'closed') continue;
 

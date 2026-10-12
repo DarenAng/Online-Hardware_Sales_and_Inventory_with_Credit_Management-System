@@ -188,7 +188,10 @@ let paymentRemarks = null;     // the note typed in the delivery's card; it goes
 
 function openDriverPayment(deliveryId, remarks) {
     const d = driverDeliveries.find((x) => x.delivery_id === deliveryId);
-    if (!d) return;
+    if (!d) {
+        notifyWarning('Reload the list and open the delivery again.', 'Delivery not found');
+        return;
+    }
 
     paymentDeliveryId = deliveryId;
     paymentRemarks = remarks || null;
@@ -196,13 +199,26 @@ function openDriverPayment(deliveryId, remarks) {
     document.getElementById('pay-subtitle').textContent = 'Delivery #' + deliveryId + ' · ' + d.customer_name;
     document.getElementById('pay-balance').textContent = peso(d.balance_due);
 
-    // the amount starts as the whole balance; the driver can lower it
+    // the amount starts as the whole balance; the driver can lower it but not go over it
     const form = document.getElementById('pay-form');
+    form.elements.amount.max = Number(d.balance_due).toFixed(2);
     form.elements.amount.value = Number(d.balance_due).toFixed(2);
     form.elements.paymentMethod.value = 'Cash';
     form.elements.referenceNo.value = '';
 
     showModal('pay-modal');
+}
+
+// Cancel and the x: back to the delivery's card, with the remarks put back
+function cancelDriverPayment() {
+    const deliveryId = paymentDeliveryId;
+    const remarks = paymentRemarks;
+
+    closeModal('pay-modal');
+    openDriverDetail(deliveryId);
+
+    const box = document.getElementById('drec-remarks');
+    if (box && remarks) box.value = remarks;
 }
 
 async function handleDriverPayment(event) {
@@ -218,6 +234,16 @@ async function handleDriverPayment(event) {
     // how much was owed before this payment, to say what is left afterwards
     const d = driverDeliveries.find((x) => x.delivery_id === paymentDeliveryId);
     const owedBefore = d ? Number(d.balance_due) : 0;
+    const stillOwed = Math.round((owedBefore - amount) * 100) / 100;
+
+    // A part payment still closes the delivery, so it is asked about before anything is sent
+    if (stillOwed > 0) {
+        const yes = await askConfirm(
+            peso(stillOwed) + ' will still be owed, and Delivery #' + paymentDeliveryId +
+            ' will be closed as Delivered. The rest is collected at the counter.',
+            { title: 'Record a part payment?', eyebrow: 'Delivery', confirmLabel: 'Record Payment', tone: 'accent' });
+        if (!yes) return;
+    }
 
     // The button is off while this sends, so a double tap cannot record the payment twice.
     const button = document.querySelector('#pay-modal button[type="submit"]');
@@ -243,12 +269,12 @@ async function handleDriverPayment(event) {
         closeModal('pay-modal');
 
         if (!statusResponse.ok) {
-            if (handleAuthFailure(statusResponse, statusResult)) return;
-            notifyError('The payment was recorded, but the delivery is not yet marked Delivered. ' +
+            // only an ended session (401) sends the driver to sign in; anything else says what happened
+            if (statusResponse.status === 401) { handleAuthFailure(statusResponse, statusResult); return; }
+            notifyError('The payment was recorded, but the delivery is not yet marked Delivered: ' +
                 statusResult.error, 'Payment recorded');
         } else {
             let message = result.message + ' The delivery is marked Delivered.';
-            const stillOwed = Math.round((owedBefore - amount) * 100) / 100;
             if (stillOwed > 0) message += ' ' + peso(stillOwed) + ' is still owed.';
             notifySuccess(message, 'Delivery #' + paymentDeliveryId + ' delivered');
         }
