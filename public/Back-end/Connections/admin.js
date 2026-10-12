@@ -5,6 +5,8 @@
 // What is in this file:
 //   - staff accounts: create (in 2 steps: review, then confirm), edit,
 //     activate/deactivate, reset password
+//   - sign-in holds: the list of held accounts and lifting one (the
+//     administrator, or a manager given the Lift Sign-in Hold screen)
 //   - the audit trail (who did what, and when)
 //   - backup and recovery: writing a .sql backup file, restoring one,
 //     the daily automatic backup, and the daily archive sweep
@@ -42,7 +44,8 @@ function registerAdminRoutes(app, deps) {
     findPhoneOwner, phoneTakenMessage,
     tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
     sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
-    FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom
+    FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom,
+    HOLD_LIFTED_BY_MANAGER
   } = deps;
 
   // ==========================================
@@ -230,6 +233,43 @@ function registerAdminRoutes(app, deps) {
     } catch (error) {
       console.error("Loading users failed:", error.message);
       response.status(500).json({ error: error.message });
+    }
+  });
+
+  // The accounts on a sign-in hold right now, soonest to end first. This must
+  // stay above "/api/users/:staffId" or Express would read "held" as an id.
+  // The administrator sees every account; a manager (allowed in by the Lift
+  // Sign-in Hold screen) only sees the roles a manager may release.
+  app.get("/api/users/held", async (request, response) => {
+    try {
+      const [rows] = await db.query(
+        `SELECT s.staff_id, s.full_name, r.role_name, u.email,
+                CEIL(TIMESTAMPDIFF(SECOND, NOW(), u.held_until) / 60) AS minutes_left
+         FROM users u
+         JOIN staff s ON s.staff_id = u.staff_id
+         JOIN roles r ON r.role_id = s.role_id
+         WHERE u.held_until IS NOT NULL AND u.held_until > NOW() AND s.is_active = TRUE
+         ORDER BY u.held_until`);
+
+      const held = [];
+      for (const row of rows) {
+        const allowed = request.actor.roleName === ADMIN ||
+                        HOLD_LIFTED_BY_MANAGER.includes(row.role_name);
+        if (allowed) {
+          held.push({
+            staff_id: row.staff_id,
+            full_name: row.full_name,
+            role_name: row.role_name,
+            email: row.email,
+            minutes_left: Number(row.minutes_left)
+          });
+        }
+      }
+
+      response.json(held);
+    } catch (error) {
+      console.error("Loading held accounts failed:", error.message);
+      response.status(500).json({ error: "Unable to load the accounts on hold" });
     }
   });
 
@@ -785,13 +825,33 @@ function registerAdminRoutes(app, deps) {
 
   // Lift a sign-in hold (too many wrong passwords) without touching the
   // password: the person signs in again with the one they already have, and
-  // gets a full set of tries.
+  // gets a full set of tries. The administrator may lift any hold; a manager
+  // (given the Lift Sign-in Hold screen) only on a cashier, clerk or driver.
   app.post("/api/users/:staffId/release-hold", notOwnAccount, async (request, response) => {
     const staffId = Number(request.params.staffId);
     try {
-      const [rows] = await db.query("SELECT email FROM users WHERE staff_id = ?", [staffId]);
+      const [rows] = await db.query(
+        `SELECT u.email, r.role_name, s.is_active
+         FROM users u
+         JOIN staff s ON s.staff_id = u.staff_id
+         JOIN roles r ON r.role_id = s.role_id
+         WHERE u.staff_id = ?`,
+        [staffId]);
       if (rows.length === 0) {
         return response.status(404).json({ error: "This staff member has no login account." });
+      }
+
+      // checked here against the account's real role, never taken from the screen
+      const byAdmin = request.actor.roleName === ADMIN;
+      if (!byAdmin && !HOLD_LIFTED_BY_MANAGER.includes(rows[0].role_name)) {
+        return response.status(403).json({
+          error: "You can only lift the hold on a cashier, an inventory clerk or a delivery driver."
+        });
+      }
+
+      // a deactivated account is not offered to a manager, so it is not lifted for one either
+      if (!byAdmin && !rows[0].is_active) {
+        return response.status(409).json({ error: "This account is deactivated, so there is no hold to lift." });
       }
 
       // only a hold that is still running is lifted
@@ -803,8 +863,15 @@ function registerAdminRoutes(app, deps) {
         return response.status(409).json({ error: "This account is not on hold, so there is nothing to lift." });
       }
 
+      // the trail says who lifted it
+      let by = "the administrator";
+      if (!byAdmin) {
+        const [who] = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [request.actor.staffId]);
+        by = `the manager ${who[0] ? who[0].full_name : request.actor.email}`;
+      }
+
       await writeAuditLog(request, "ACCOUNT_RELEASED",
-        `${rows[0].email} released from its sign-in hold by the administrator`,
+        `${rows[0].email} released from its sign-in hold by ${by}`,
         { staff_id: staffId, email: rows[0].email });
 
       response.json({ message: `The hold is lifted. ${rows[0].email} can sign in again now.` });

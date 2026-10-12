@@ -11,6 +11,8 @@
 //   - reports, stocks, stock movements, the selling price and the reorder policy
 //   - credit: customer limits and extension requests
 //   - deliveries, records (suppliers, customers, products...), archives
+//   - the Lift Sign-in Hold screen: accounts held after wrong passwords, and
+//     lifting one (only on the menu when the administrator switches it on)
 //   - the popups that show one sale, delivery, customer, ... in full
 //   - the page start-up code at the very bottom ("MANAGER PAGE BOOT")
 // ============================================================
@@ -146,6 +148,13 @@ function showRecords(event)       { showRecordType(recordType, event); }
 function showPurchasing(event)    { showPurchaseOrderHistory(event); }
 function showArchives(event)      { showManagerPanel('panel-archives', 'Archives', event); }
 function showQrPayments(event)    { showManagerPanel('panel-qr-payments', 'QR Payments', event); }
+
+// Lift Sign-in Hold: the list is read fresh every time the screen is opened
+function showHeldAccounts(event) {
+    showManagerPanel('panel-holds', 'Lift Sign-in Hold', event);
+    const panel = getDataPanel('mgr-holds');
+    if (panel) panel.open();
+}
 
 // Sales Summary. Named periods count back from today rather than snapping
 // to a calendar month; Custom date opens a popup for two dates.
@@ -2874,6 +2883,94 @@ async function openCustomerDetail(customerId) {
 }
 
 // ==========================================
+// LIFT SIGN-IN HOLD -- accounts held after too many wrong passwords
+// ==========================================
+// The server lists only cashier, clerk and driver accounts, and refuses a
+// lift on anyone else, so nothing here decides who may be released.
+function buildHeldAccountsPanel() {
+    createDataPanel({
+        key: 'mgr-holds',
+        tableId: 'holds-table',
+        columns: 4,
+        pagerId: 'holds-pager',
+        idField: 'staff_id',
+        remember: false,   // read again each time the screen is opened
+        gate: {
+            title: 'Not loaded',
+            text: 'Open this screen to see who is on hold.',
+            button: false
+        },
+        empty: {
+            title: 'All clear',
+            text: 'No accounts are on hold right now.'
+        },
+        load: () => apiGetHeldAccounts(),
+        renderRow: (row, index) =>
+            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                'onclick="openHeldAccount(' + row.staff_id + ')">' +
+            '<td class="cell-name">' + escapeHtml(row.full_name) + '</td>' +
+            '<td>' + escapeHtml(row.role_name) + '</td>' +
+            '<td>' + escapeHtml(row.email) + '</td>' +
+            '<td>' + minutesText(row.minutes_left) + '</td></tr>'
+    });
+}
+
+function minutesText(minutes) {
+    return minutes + (minutes === 1 ? ' minute' : ' minutes');
+}
+
+// A row opens a card with the account and the button that lifts the hold.
+// Pressing "Lift hold" is the confirmation, so there is no second question.
+function openHeldAccount(staffId) {
+    const panel = getDataPanel('mgr-holds');
+    const account = panel ? panel.find(staffId) : null;
+    if (!account) return;
+
+    const body = '<div class="detail-grid">' +
+        detailField('Name', escapeHtml(account.full_name)) +
+        detailField('Role', escapeHtml(account.role_name)) +
+        detailField('Email', escapeHtml(account.email)) +
+        detailField('Hold Ends In', minutesText(account.minutes_left)) +
+        '</div>' +
+        '<p class="detail-note">Lifting the hold lets them sign in again straight away with the ' +
+        'password they already have. Their password is not changed, they get a full set of tries ' +
+        'again, and the change is written to the audit trail in your name.</p>';
+
+    const foot = '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
+        '<button type="button" class="btn btn-accent" id="lift-hold-button" ' +
+        'onclick="liftHeldAccount(' + account.staff_id + ')">Lift hold</button>';
+
+    openDetailModal(account.full_name, account.role_name + ' · on hold',
+        initialsOf(account.full_name), [{ label: 'Account', body: body }], foot);
+}
+
+async function liftHeldAccount(staffId) {
+    // switched off while the request runs, so a double click sends one request
+    const button = document.getElementById('lift-hold-button');
+    if (button) button.disabled = true;
+
+    try {
+        const response = await apiReleaseHeldAccount(staffId);
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Hold not lifted');
+        } else {
+            notifySuccess(result.message, 'Hold lifted');
+        }
+
+        // the card closes and the list is read again either way:
+        // the hold may have ended or been lifted already
+        closeModal('detail-modal');
+        const panel = getDataPanel('mgr-holds');
+        if (panel) await panel.open();
+    } catch (error) {
+        if (button) button.disabled = false;
+        notifyOffline();
+    }
+}
+
+// ==========================================
 // MANAGER PAGE BOOT
 // ==========================================
 if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
@@ -2889,6 +2986,7 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
         buildCreditPanels();
         buildRecordsPanel();
         buildArchivePanel();
+        buildHeldAccountsPanel();
 
         // the schedule follows what the administrator switched on for managers
         configureDeliverySchedule({ showPanel: (panelId, title) => showManagerPanel(panelId, title) });

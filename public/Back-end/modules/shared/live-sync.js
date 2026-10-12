@@ -37,6 +37,7 @@ const PANEL_SCOPES = {
     'mgr-unpaid':         ['sales', 'credit'],
     'mgr-stock-moves':    ['inventory', 'returns'],
     'mgr-loyal':          ['sales', 'credit'],
+    'mgr-holds':          ['staff'],
 
     // inventory clerk
     'clerk-materials':    ['inventory', 'sales', 'returns'],

@@ -102,6 +102,18 @@ function apiArchiveDelivery(deliveryId) {
     return postJson('/api/archives/archive', { module: 'Delivery', recordId: deliveryId });
 }
 
+// ---------- sign-in holds ----------
+
+// GET /api/users/held -- the accounts on a sign-in hold that a manager may lift
+function apiGetHeldAccounts() {
+    return getJson('/api/users/held');
+}
+
+// POST /api/users/:id/release-hold -- lift the hold, keep the password
+function apiReleaseHeldAccount(staffId) {
+    return sendJson('/api/users/' + staffId + '/release-hold', 'POST', {});
+}
+
 // ---------- staff passwords ----------
 
 // GET /api/staff/passwords -- the staff whose password the manager may reset

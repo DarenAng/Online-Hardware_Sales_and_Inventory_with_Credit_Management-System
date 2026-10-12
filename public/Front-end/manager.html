@@ -121,6 +121,8 @@
                     </ul>
                 </li>
                 <li data-feature="archives"><a href="#" data-panel-link="panel-archives" onclick="showArchives(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archives</a></li>
+                <!-- held by grant only (the administrator switches it on), so it starts hidden -->
+                <li data-feature="release-holds" hidden><a href="#" data-panel-link="panel-holds" onclick="showHeldAccounts(event)"><i class="bi bi-unlock nav-icon" aria-hidden="true"></i>Lift Sign-in Hold</a></li>
             </ul>
         </aside>
 
@@ -1134,6 +1136,34 @@
                         </table>
                     </div>
                     <div class="pager is-single" id="archives-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     LIFT SIGN-IN HOLD -- accounts locked out after too many wrong
+                     passwords. Only on the menu when the administrator has switched
+                     it on; the server only lists, and lifts, cashier, clerk and
+                     driver accounts.
+                     ============================================================ -->
+                <div class="card" id="panel-holds" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Lift Sign-in Hold</h3>
+                            <p class="panel-sub">Cashiers, inventory clerks and drivers locked out after too many wrong passwords. Open a row to lift its hold. The list is as of when this screen was opened; press Refresh to update it.</p>
+                        </div>
+                        <div class="panel-actions no-print">
+                            <button type="button" class="btn btn-sm" onclick="dataPanelOpen('mgr-holds')">Refresh</button>
+                        </div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="holds-table">
+                            <thead>
+                                <tr><th>Name</th><th>Role</th><th>Email</th><th>Hold Ends In</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="holds-pager"></div>
                 </div>
 
             </div>

@@ -1897,6 +1897,9 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/users$/,                          [ADMIN]],
   ["GET",   /^\/api\/users\/email-check$/,              [ADMIN]],
   ["GET",   /^\/api\/users\/phone-check$/,              [ADMIN]],
+  // accounts on a sign-in hold; a manager gets in through the Lift Sign-in
+  // Hold screen (see FEATURES), and the route then narrows what is listed
+  ["GET",   /^\/api\/users\/held$/,                    [ADMIN]],
   ["GET",   /^\/api\/users\/\d+$/,                     [ADMIN]],
   // the review step creates nothing but does make a readable password
   ["POST",  /^\/api\/users\/draft$/,                    [ADMIN]],
@@ -1906,6 +1909,7 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/users\/\d+\/account\/draft$/,      [ADMIN]],
   ["POST",  /^\/api\/users\/\d+\/account$/,            [ADMIN]],
   ["POST",  /^\/api\/users\/\d+\/reset-password$/,     [ADMIN]],
+  // (a manager reaches this one the same way, for Cashier, Clerk and Driver accounts only)
   ["POST",  /^\/api\/users\/\d+\/release-hold$/,       [ADMIN]],
 
   ["GET",   /^\/api\/audit-logs$/,                     [ADMIN]],
@@ -2250,10 +2254,21 @@ const FEATURES = [
   { key: "archives", name: "Archives", module: "Records",
     description: "What has been put away, and restoring it.",
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
-    routes: [["GET", /^\/api\/archives$/], ["POST", /^\/api\/archives\/archive$/], ["POST", /^\/api\/archives\/restore$/]] }
+    routes: [["GET", /^\/api\/archives$/], ["POST", /^\/api\/archives\/archive$/], ["POST", /^\/api\/archives\/restore$/]] },
+
+  // --- staff accounts ---
+  // Off for everyone until the administrator switches it on for managers.
+  // Connections/admin.js still refuses a hold on an administrator or a manager.
+  { key: "release-holds", name: "Lift Sign-in Hold", module: "Staff",
+    description: "See the cashiers, inventory clerks and drivers locked out after too many wrong passwords, and let them sign in again. Never for an administrator or another manager.",
+    available: [MANAGER], defaults: [],
+    routes: [["GET", /^\/api\/users\/held$/], ["POST", /^\/api\/users\/\d+\/release-hold$/]] }
 ];
 
 const FEATURE_ROLES = [MANAGER, CLERK, CASHIER, DRIVER];   // the matrix's columns
+
+// the accounts a manager may lift a sign-in hold on (the administrator may lift any)
+const HOLD_LIFTED_BY_MANAGER = [CASHIER, CLERK, DRIVER];
 
 // "available" is the list of dashboards that have a menu entry for the screen.
 // Access Control only offers a switch where flipping it shows or hides
@@ -2905,7 +2920,8 @@ const adminModule = registerAdminRoutes(app, {
   findPhoneOwner, phoneTakenMessage,
   tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
   sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
-  FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom
+  FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom,
+  HOLD_LIFTED_BY_MANAGER
 });
 
 // true for a date written like "2026-09-24" (4 digits - 2 digits - 2 digits)
