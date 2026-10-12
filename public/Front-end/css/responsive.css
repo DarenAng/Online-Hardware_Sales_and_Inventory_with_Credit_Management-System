@@ -123,7 +123,7 @@
     table thead { display: none; }
     table tbody { display: block; }
 
-    /* the card leads with the name, then the reference, then the action */
+    /* the card leads with the name, then the reference */
     table tbody tr {
         display: flex;
         flex-direction: column;
@@ -184,24 +184,6 @@
         margin-bottom: 2px;
     }
     table tbody td.cell-name::before { display: none; }
-
-    /* the action at the bottom, full width; here the cell may wrap */
-    table tbody td.cell-action {
-        order: 10;
-        display: block;
-        text-align: left;
-        white-space: normal;
-        padding: 10px 13px;
-        margin-top: 2px;
-        border-top: 1px solid var(--line);
-    }
-    table tbody td.cell-action::before { display: none; }
-    table tbody td.cell-action .btn {
-        display: block;
-        width: 100%;
-        min-height: 46px;
-    }
-    table tbody td.cell-action .btn + .btn { margin-left: 0; margin-top: 8px; }
 
     table tbody td.cell-num { font-size: 15px; }
     table tbody td.cell-id  { order: -1; font-size: 14px; }

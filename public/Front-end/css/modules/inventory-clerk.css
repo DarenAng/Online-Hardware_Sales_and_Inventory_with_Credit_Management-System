@@ -45,7 +45,10 @@
    full bar is twice the reorder point; the tick is the point itself.
    ========================================================================== */
 .stock-level { display: flex; flex-direction: column; gap: 5px; min-width: 150px; max-width: 240px; }
+/* the column is a value column, so the figure and its bar sit against the right edge */
+td.cell-num .stock-level { margin-left: auto; }
 .stock-level-figure {
+    text-align: right;
     font-family: var(--font-figure);
     font-size: 14.5px;
     font-variant-numeric: tabular-nums;

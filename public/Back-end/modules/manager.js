@@ -2338,7 +2338,8 @@ function buildRecordsPanel() {
                     let style;
                     if (position === 0) {
                         style = 'cell-name';
-                    } else if (typeof value === 'number' || money) {
+                    } else if (RECORD_NUMERIC.indexOf(column[0]) !== -1) {
+                        // a figure (count, quantity or money) sits on the right
                         style = 'cell-num';
                     } else {
                         style = '';
@@ -2911,7 +2912,7 @@ function buildHeldAccountsPanel() {
             '<td class="cell-name">' + escapeHtml(row.full_name) + '</td>' +
             '<td>' + escapeHtml(row.role_name) + '</td>' +
             '<td>' + escapeHtml(row.email) + '</td>' +
-            '<td>' + minutesText(row.minutes_left) + '</td></tr>'
+            '<td class="cell-num">' + minutesText(row.minutes_left) + '</td></tr>'
     });
 }
 

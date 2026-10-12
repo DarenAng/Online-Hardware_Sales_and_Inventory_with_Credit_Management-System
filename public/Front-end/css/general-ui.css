@@ -947,15 +947,10 @@ table tbody tr:nth-child(even) { background: #f7f8f9; }
 
 table th.col-num { text-align: right; }
 table th.col-id  { width: 1%; white-space: nowrap; }
-table th.col-action,
-table td.cell-action { text-align: right; white-space: nowrap; }
-table td.cell-action .btn + .btn { margin-left: 6px; }
 table td.cell-num { font-size: 15.5px; }
 table .badge { font-size: 13.5px; padding: 4px 10px; }
 
-/* a row holding a button or a typed box keeps the height of a row of text,
-   so a table is the same height whether its rows carry actions or not */
-table td.cell-action,
+/* a cell holding a button or a typed box keeps the height of a row of text */
 table td:has(> .btn),
 table td:has(> .form-control),
 table td:has(> input) { padding-top: 6px; padding-bottom: 6px; }

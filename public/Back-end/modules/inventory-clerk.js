@@ -965,7 +965,7 @@ function buildReorderPanel() {
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="askReorderPoint(' + p.product_id + ')" title="Set the reorder point">' +
             '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
-            '<td>' + stockLevelBar(p) + '</td>' +
+            '<td class="cell-num">' + stockLevelBar(p) + '</td>' +
             '<td class="cell-num">' + p.reorder_point + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
             '<td class="cell-num">' + (suggestedOrderOf(p) > 0
                 ? suggestedOrderOf(p) + ' ' + escapeHtml(p.unit_name || '')
@@ -1473,16 +1473,37 @@ function buildInventoryArchivePanel() {
 
         match: (p, query) => prefixMatch([p.product_name, p.category_name], query),
 
-        // a row is pressed to restore the material; restoreMaterial asks first
+        // a row opens a card with the material and the button that restores it
         renderRow: (p, index) =>
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="restoreMaterial(' + p.product_id + ')" title="Restore this material">' +
+                'onclick="openArchivedMaterial(' + p.product_id + ')" title="Open this material">' +
             '<td class="cell-id">#' + p.product_id + '</td>' +
             '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
             '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
             '<td class="cell-num">' + p.quantity_in_stock + '</td>' +
             '<td class="cell-id">' + escapeHtml(p.archived_at || 'Unknown') + '</td></tr>'
     });
+}
+
+// the card for an archived material; its foot holds the Restore button
+function openArchivedMaterial(productId) {
+    const panel = getDataPanel('clerk-archive');
+    const p = panel ? panel.find(productId) : null;
+    if (!p) return;
+
+    const body = '<div class="detail-grid">' +
+        detailField('Material', escapeHtml(p.product_name)) +
+        detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
+        detailField('On Hand', escapeHtml(String(p.quantity_in_stock))) +
+        detailField('Archived On', escapeHtml(p.archived_at || 'Unknown')) +
+        '</div>' +
+        '<p class="detail-note">Restoring puts it back on the material list and makes it sellable again.</p>';
+
+    const foot = '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
+        '<button type="button" class="btn btn-success" id="restore-material-button" onclick="restoreMaterial(' + p.product_id + ')">Restore This Material</button>';
+
+    openDetailModal(p.product_name, (p.category_name || 'Uncategorised') + ' · archived',
+        initialsOf(p.product_name), [{ label: 'Archived Material', body: body }], foot);
 }
 
 async function loadInventoryArchive() {
@@ -1525,16 +1546,26 @@ async function restoreMaterial(productId) {
 
     if (!yes) return;
 
+    // the button stays off while the request is out, so it cannot be sent twice
+    const button = document.getElementById('restore-material-button');
+    if (button) button.disabled = true;
+
     try {
         const response = await apiRestoreMaterial(productId);
         const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
+        if (!response.ok) {
+            if (button) button.disabled = false;
+            if (!handleAuthFailure(response, result)) notifyError(result.error);
+            return;
+        }
 
         notifySuccess('It is back on the material list.', 'Material restored');
+        closeModal('detail-modal');
         invLoaded = false;
         await loadInventoryArchive();
         await loadStockBanner();
     } catch (error) {
+        if (button) button.disabled = false;
         notifyOffline();
     }
 }

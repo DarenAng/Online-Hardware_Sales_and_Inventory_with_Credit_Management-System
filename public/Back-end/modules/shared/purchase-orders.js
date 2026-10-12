@@ -1393,9 +1393,9 @@ function resetPurchaseOrderForm() {
 }
 
 // The history. A row opens the order's card, where the lines are reviewed and
-// the order is confirmed, declined, printed or counted in; an order that is
-// accepted or on its way also has a Refer to PO button that opens the receive
-// sheet. The words below are the ones the Status filter offers, and every
+// the order is confirmed, declined, printed or counted in (an order that is
+// accepted or on its way has its Refer to PO button there, not in the table).
+// The words below are the ones the Status filter offers, and every
 // badge and heading for an order uses the same. They are stages, not the
 // database's status: the database says Pending from the manager's approval
 // until the delivery is counted in, and the supplier's answer and ship date
@@ -1463,17 +1463,6 @@ function poToSend(po) {
     return po.status === 'Pending' && !po.supplier_response && !po.supplier_sent_at;
 }
 
-// the status cell: the badge, and for the clerk a Refer to PO button on an
-// order whose goods are due. The click stays on the button, so the row does
-// not also open the order's card.
-function poStatusCell(po) {
-    if (!(poSetup.canReceive && poCanRefer(po))) return poStatusBadge(po);
-
-    return '<span class="po-status-cell">' + poStatusBadge(po) +
-        '<button type="button" class="btn btn-ghost btn-sm" title="Check the delivery against this order" ' +
-        'onclick="event.stopPropagation(); openReceiveOrder(' + po.po_id + ')">Refer to PO</button></span>';
-}
-
 function poRowTitle(po) {
     if (poSetup.canReceive && poToSend(po)) return 'Print this order and send it to the supplier';
     if (poSetup.canDecide && po.status === 'For Approval') return 'Review this order';
@@ -1538,7 +1527,7 @@ function buildPurchaseOrderPanel() {
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
             '<td class="cell-num">' + po.line_count + '</td>' +
             '<td class="cell-num">' + poValueCell(po) + '</td>' +
-            '<td>' + poStatusCell(po) + '</td></tr>'
+            '<td>' + poStatusBadge(po) + '</td></tr>'
     });
 }
 

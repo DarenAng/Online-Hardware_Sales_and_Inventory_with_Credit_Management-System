@@ -16,10 +16,8 @@
 }
 
 /* ==========================================================================
-   MOVING A DELIVERY ON -- one press, one stage; a row that needs a note is opened
+   THE PENDING LIST -- a row is opened to move the delivery on
    ========================================================================== */
-#dpend-table td.cell-action .btn { min-width: 132px; }
-
 /* whose delivery a Pending row is: the driver's own, or still up for grabs */
 #dpend-table .owner-tag { margin-left: 4px; }
 #dpend-table .owner-tag.is-mine { font-weight: 700; }
@@ -49,9 +47,6 @@
    ON A PHONE
    ========================================================================== */
 @media (max-width: 640px) {
-    /* the stage button is the whole width of the card: a small target is a mis-press */
-    #dpend-table td.cell-action .btn { min-width: 0; min-height: 48px; font-size: 16.5px; }
-
     #dcod-form input[name="amount"] { font-size: 21.5px; min-height: 52px; }
 
     /* the two dates stay on one line: they are a range, not two questions */

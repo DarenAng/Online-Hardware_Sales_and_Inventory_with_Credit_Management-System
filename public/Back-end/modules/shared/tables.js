@@ -16,14 +16,13 @@ function alignTableColumns(table) {
 
     for (let index = 0; index < headerCells.length; index += 1) {
         const header = headerCells[index];
-        header.classList.remove('col-num', 'col-id', 'col-action');
+        header.classList.remove('col-num', 'col-id');
 
         if (!sample) continue;
         const cell = sample.cells[index];
         if (!cell) continue;
 
         if (cell.classList.contains('cell-num')) header.classList.add('col-num');
-        else if (cell.classList.contains('cell-action')) header.classList.add('col-action');
         else if (cell.classList.contains('cell-id')) header.classList.add('col-id');
     }
 
