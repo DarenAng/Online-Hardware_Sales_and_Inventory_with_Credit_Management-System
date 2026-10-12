@@ -1469,32 +1469,6 @@ function poRowTitle(po) {
     return 'Open this order';
 }
 
-// the status counts over the table; each one filters the table to itself
-function renderPurchaseOrderLegend(rows) {
-    const legend = document.getElementById('po-legend');
-    if (!legend) return;
-
-    legend.innerHTML = PO_STATES.map((state) => {
-        const count = rows.filter((po) => poStage(po) === state.status).length;
-        if (count === 0) return '';
-
-        const mine = (poSetup.canDecide && state.status === 'For Approval') ||
-                     (poSetup.canReceive && ['Pending', 'PO Accepted', 'On the way'].indexOf(state.status) !== -1);
-        return '<button type="button" class="track-chip' + (mine ? ' track-chip-alert' : '') + '" data-state="' + state.status + '" ' +
-            'onclick="filterPurchaseOrdersBy(\'' + state.status + '\')">' +
-            '<span class="track-count">' + count + '</span>' + escapeHtml(state.label) + '</button>';
-    }).join('');
-}
-
-function filterPurchaseOrdersBy(status) {
-    const select = document.getElementById('po-status');
-    if (select) select.value = status;
-    // setting a value from here fires no change event, so the Status column
-    // is shown or hidden the way the dropdown would have
-    syncFilteredColumns('po-table');
-    dataPanelFilter(poSetup.key, 'status', status);
-}
-
 function buildPurchaseOrderPanel() {
     createDataPanel({
         key: poSetup.key,
@@ -1515,7 +1489,6 @@ function buildPurchaseOrderPanel() {
         match: (po, query) => prefixMatch([po.supplier_name, po.po_id, '#' + po.po_id], query),
         filter: (po, filters) => filters.status === 'all' || poStage(po) === filters.status,
         sort: (rows) => sortPurchaseOrders(rows),
-        onLoaded: (rows) => renderPurchaseOrderLegend(rows),
 
         renderRow: (po, index) =>
             '<tr class="row-clickable row-reveal' + (poNeedsMe(po) ? ' row-attention' : '') + '" ' +
