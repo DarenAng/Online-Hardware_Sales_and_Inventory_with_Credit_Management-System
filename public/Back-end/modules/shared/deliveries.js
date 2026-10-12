@@ -14,13 +14,6 @@ const NEXT_DELIVERY_STATUS = {
     'Delivered':        []
 };
 
-// said in the popup and again if the refund form is somehow opened anyway
-function refundOwesMessage(balance) {
-    return 'This order still owes ' + peso(balance) + '. A refund at the door is only for orders already ' +
-        'paid in full. Write the refused item in the remarks and the manager or cashier will ' +
-        'settle it at the counter.';
-}
-
 // The progress bar at the top of the card: four steps that follow the delivery's
 // status. Delivered is the last step and also means paid: recording the
 // customer's payment marks the delivery Delivered at the same time.
@@ -126,14 +119,12 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
     const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
     const isDriver = !!user && user.role_name === 'Delivery Personnel';
 
-    // the driver's own card leaves out the sale number and the driver (it is them)
+    // No sale number and no driver on any card. Delivered At only shows once it is Delivered.
     const route = '<div class="detail-grid">' +
         detailField('Delivery ID', '#' + d.delivery_id) +
-        (isDriver ? '' : detailField('Sale', '#' + d.sale_id)) +
         detailField('Status', statusBadge(d.status)) +
-        (isDriver ? '' : detailField('Driver', escapeHtml(d.driver_name || 'Unassigned'))) +
         detailField('Scheduled', escapeHtml(d.scheduled_date || 'Not set')) +
-        detailField('Delivered At', d.delivered_at ? escapeHtml(d.delivered_at) : '<span class="muted">Not yet</span>') +
+        (d.status === 'Delivered' && d.delivered_at ? detailField('Delivered At', escapeHtml(d.delivered_at)) : '') +
         '</div><p class="detail-note">' + escapeHtml(d.delivery_address) + '</p>' +
         // a Delayed or Failed delivery's remarks are already under the progress steps
         (d.remarks && d.status !== 'Delayed' && d.status !== 'Failed'
@@ -210,9 +201,7 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
     const ownDelivery = typeof isMine === 'function' && isMine(d);
     const goodsAtDoor = d.status === 'Out for Delivery' || d.status === 'Delivered';
     const refundOn = typeof holdsFeature !== 'function' || holdsFeature('delivery-refunds');
-    // A refund does not lower the bill, so it is only for an order paid in full
-    const owes = Number(d.balance_due) > 0;
-    if (isDriver && canUpdate && ownDelivery && goodsAtDoor && refundOn && !owes) {
+    if (isDriver && canUpdate && ownDelivery && goodsAtDoor && refundOn) {
         footActions = '<button type="button" class="btn btn-ghost" ' +
             'onclick="openDriverRefund(' + d.delivery_id + ')">Refund Items</button>' + footActions;
     }
@@ -226,7 +215,6 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
                 '<div class="drec-side">' +
                     '<h4 class="detail-subhead">Route</h4>' + route +
                     '<h4 class="detail-subhead">Payment</h4><div class="detail-grid">' + money + '</div>' +
-                    (owes && goodsAtDoor ? '<p class="detail-note detail-warn">' + refundOwesMessage(d.balance_due) + '</p>' : '') +
                 '</div>' +
                 '<div class="drec-main">' +
                     '<h4 class="detail-subhead" id="drec-items-title">Items</h4>' +
@@ -316,6 +304,12 @@ async function pickDeliveryStatus(deliveryId, status) {
 
     closeModal('detail-modal');
 
+    // Delayed needs a reason, so it has its own small popup (#delay-modal)
+    if (status === 'Delayed') {
+        openDelayReason(deliveryId, note);
+        return;
+    }
+
     const yes = await askConfirm(
         status === 'Delivered'
             ? 'Delivery #' + deliveryId + ' is closed out as delivered, with the time recorded now. ' +
@@ -332,6 +326,42 @@ async function pickDeliveryStatus(deliveryId, status) {
     await sendDeliveryStatus(deliveryId, status, note);
 }
 
+// ---------- the reason for a Delayed delivery ----------
+let delayDeliveryId = null;
+
+// The remarks already typed in the card are put in the box to start with.
+function openDelayReason(deliveryId, note) {
+    delayDeliveryId = deliveryId;
+
+    document.getElementById('delay-subtitle').textContent = 'Delivery #' + deliveryId;
+    document.getElementById('delay-reason').value = note || '';
+
+    showModal('delay-modal');
+}
+
+// Mark Delayed: the reason is sent as the remarks with the new status
+async function handleDelayReason(event) {
+    event.preventDefault();
+
+    const reason = document.getElementById('delay-reason').value.trim();
+    if (reason.length < 5) {
+        notifyWarning('Say why it is delayed, in a few words.', 'The reason is required');
+        document.getElementById('delay-reason').focus();
+        return;
+    }
+
+    // The button is off while this sends, so a double tap cannot send it twice.
+    const button = document.querySelector('#delay-modal button[type="submit"]');
+    if (button && button.disabled) return;   // already sending
+    if (button) button.disabled = true;
+
+    // The popup stays open until the change is saved, so a failure keeps the typed reason.
+    const saved = await sendDeliveryStatus(delayDeliveryId, 'Delayed', reason);
+    if (saved) closeModal('delay-modal');
+
+    if (button) button.disabled = false;
+}
+
 // Proceed to Payment, in the driver's card: the card closes and the Receive
 // Payment card (delivery-personnel.js) opens for the same delivery. The remarks
 // typed in the card go along and are saved when the delivery is marked Delivered.
@@ -344,22 +374,26 @@ function proceedToPayment(deliveryId) {
 }
 
 // ---------- status updates ----------
+// Gives back true when the server saved the change, false when it did not.
 async function sendDeliveryStatus(deliveryId, status, remarks) {
+    let saved = false;
     try {
         const response = await apiUpdateDeliveryStatus(deliveryId, status, remarks);
         const result = await response.json();
 
         if (!response.ok) {
             if (!handleAuthFailure(response, result)) notifyError(result.error);
-            return;
+            return false;
         }
 
+        saved = true;
         notifySuccess(result.message);
 
         await refreshDeliveryLists();
     } catch (error) {
         notifyOffline();
     }
+    return saved;
 }
 
 // After a change: read again whichever delivery list this page has

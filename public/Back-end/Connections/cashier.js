@@ -449,6 +449,11 @@ function registerCashierRoutes(app, deps) {
       return response.status(400).json({ error: "A status is required" });
     }
 
+    // a delay has to say why: the reason is saved as the delivery's remarks
+    if (status === "Delayed" && String(remarks || "").trim().length < 5) {
+      return response.status(400).json({ error: "Say why the delivery is delayed (at least 5 characters)." });
+    }
+
     try {
       const [rows] = await db.query(
         "SELECT status, delivery_staff_id FROM deliveries WHERE delivery_id = ? AND is_archived = FALSE",

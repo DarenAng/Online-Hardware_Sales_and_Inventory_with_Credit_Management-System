@@ -650,28 +650,6 @@ input[type="number"] {
     line-height: 1.3;
 }
 
-/* Who is signed in, and as what. The role is the only other uppercase in the
-   system: it is a plate on a door, not a label on a field. */
-.sidebar-header,
-.sidebar-user {
-    padding: 14px 18px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-    background: rgba(0, 0, 0, 0.18);
-}
-.sidebar-header span,
-.sidebar-user span[data-current-user] {
-    display: block;
-    font-size: 18px; font-weight: 600; letter-spacing: -0.01em;
-    overflow-wrap: anywhere;
-}
-.sidebar-eyebrow {
-    display: block;
-    font-size: 11px; font-weight: 600;
-    letter-spacing: 0.13em; text-transform: uppercase;
-    color: var(--brand);
-    margin-bottom: 2px;
-}
-
 .sidebar-nav { list-style: none; padding: 10px 0 28px; }
 .sidebar-nav li a {
     display: block;
@@ -1794,6 +1772,9 @@ html:has(.modal.open) { overflow: hidden; }
     color: var(--steel);
 }
 
+/* the sign-in email can be read but not changed, so its text is gray */
+#me-email { color: var(--steel); }
+
 /* ==========================================================================
    THE ALERT BELL
    ========================================================================== */
@@ -2033,10 +2014,6 @@ html:has(.modal.open) { overflow: hidden; }
 .account-drop-head .avatar { width: 40px; height: 40px; font-size: 15px; }
 .account-drop-name { display: block; font-weight: 600; color: var(--ink); line-height: 1.3; }
 .account-drop-role { display: block; font-size: 14px; font-weight: 500; color: var(--go); }
-.account-drop-mail {
-    display: block; font-size: 13.5px; color: var(--steel);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
 .account-action {
     display: flex; align-items: center; gap: 10px;
     width: 100%;
@@ -2060,10 +2037,12 @@ html:has(.modal.open) { overflow: hidden; }
    nearest the corner
    ========================================================================== */
 /* The padding keeps the cards' shadows inside the deck, which scrolls when
-   the cards are taller than a short screen. */
+   the cards are taller than a short screen.
+   z-index 2500 puts the cards above an open popup (.modal is 2000), so a
+   warning or error raised while a popup is open is not hidden behind it. */
 .toast-deck {
     position: fixed; bottom: 12px; right: 12px;
-    z-index: 1200;
+    z-index: 2500;
     display: flex; flex-direction: column-reverse; gap: 10px;
     width: 376px; max-width: calc(100vw - 24px);
     max-height: calc(100vh - 24px);
@@ -2251,7 +2230,7 @@ html:has(.modal.open) { overflow: hidden; }
 .pager {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-end;   /* Previous and Next sit on the right */
     flex-wrap: wrap;
     gap: 12px;
     padding-top: 14px;
@@ -2261,7 +2240,6 @@ html:has(.modal.open) { overflow: hidden; }
 }
 /* an empty pager (not loaded yet, loading, no match) keeps its room */
 .pager:empty { border-top-color: transparent; }
-.pager.is-single { justify-content: flex-end; }
 
 .pager-info {
     font-family: var(--font-figure);

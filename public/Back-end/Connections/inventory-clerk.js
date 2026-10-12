@@ -1332,9 +1332,8 @@ function registerInventoryRoutes(app, deps) {
 
       try {
         const [deliveries] = await db.query(
-          `SELECT d.status, (s.amount_due - s.amount_paid) AS balance_due
+          `SELECT d.status
            FROM deliveries d
-           JOIN sales s ON s.sale_id = d.sale_id
            WHERE d.sale_id = ? AND d.delivery_staff_id = ? AND d.is_archived = FALSE`,
           [saleId, request.actor.staffId]
         );
@@ -1345,17 +1344,20 @@ function registerInventoryRoutes(app, deps) {
         if (!["Out for Delivery", "Delivered"].includes(deliveries[0].status)) {
           return response.status(409).json({ error: "Refund items once the delivery is out with the customer." });
         }
+      } catch (error) {
+        console.error("Driver refund check failed:", error.message);
+        return response.status(500).json({ error: "Unable to check the refund" });
+      }
+    }
 
-        // A refund report does not lower the bill, so it is only for an order paid in full
-        const balance = Number(deliveries[0].balance_due);
-        if (balance > AMOUNT_SLACK) {
-          return response.status(409).json({
-            error: `This order still owes ₱${balance.toFixed(2)}. A refund at the door is only for orders ` +
-                   "already paid in full. Write the refused item in the delivery's remarks and the manager " +
-                   "or cashier will settle it at the counter."
-          });
-        }
-
+    // A refund on a sale comes off what the customer owes, so whoever files it
+    // (driver or cashier) has it checked against the sale: the item is on it,
+    // that many are left to refund, and no more than was charged for them.
+    // These checks give a friendly message; sp_file_return_report checks the
+    // same again under a lock, and that is the one that cannot be raced.
+    // A refund with no sale named is only a record of cash handed back.
+    if (reportType === "Refunded" && saleId) {
+      try {
         // what the sale holds of this product, and what has already come back
         const [lines] = await db.query(
           `SELECT COALESCE(SUM(quantity), 0) AS sold, COALESCE(SUM(subtotal), 0) AS worth
@@ -1367,6 +1369,16 @@ function registerInventoryRoutes(app, deps) {
            WHERE sale_id = ? AND product_id = ? AND report_type IN ('Refunded', 'Return')`,
           [saleId, productId]
         );
+        // the lines add up to total_amount; the customer paid final_amount, after the discount
+        const [sales] = await db.query(
+          "SELECT total_amount, final_amount FROM sales WHERE sale_id = ?", [saleId]);
+        if (sales.length === 0) {
+          return response.status(400).json({ error: "That sale was not found." });
+        }
+        let afterDiscount = 1;
+        if (Number(sales[0].total_amount) > 0) {
+          afterDiscount = Number(sales[0].final_amount) / Number(sales[0].total_amount);
+        }
 
         const qty = Number(quantity);
         if (!(qty > 0)) {
@@ -1385,8 +1397,8 @@ function registerInventoryRoutes(app, deps) {
           });
         }
 
-        // never more than the customer was charged for those pieces
-        const mostToRefund = Number(lines[0].worth) * qty / sold;
+        // never more than the customer was charged for those pieces (after the discount)
+        const mostToRefund = Number(lines[0].worth) * afterDiscount * qty / sold;
         if (!(Number(refundAmount) > 0) || Number(refundAmount) > mostToRefund + AMOUNT_SLACK) {
           return response.status(400).json({
             error: `The refund must be more than zero and no more than ${mostToRefund.toFixed(2)}, ` +
@@ -1394,7 +1406,7 @@ function registerInventoryRoutes(app, deps) {
           });
         }
       } catch (error) {
-        console.error("Driver refund check failed:", error.message);
+        console.error("Refund check failed:", error.message);
         return response.status(500).json({ error: "Unable to check the refund" });
       }
     }
@@ -1422,10 +1434,10 @@ function registerInventoryRoutes(app, deps) {
 
     try {
       const output = await callProcedure(
-        "CALL sp_file_return_report(?, ?, ?, ?, ?, ?, ?, ?, @report_id, @status_code, @message)",
+        "CALL sp_file_return_report(?, ?, ?, ?, ?, ?, ?, ?, @report_id, @off_balance, @status_code, @message)",
         [productId, saleId || null, reportType, quantity, explanation,
          refundAmount || 0, where, getActorId(request)],
-        ["report_id", "status_code", "message"]
+        ["report_id", "off_balance", "status_code", "message"]
       );
 
       if (output.status_code !== 201) {
@@ -1451,8 +1463,9 @@ function registerInventoryRoutes(app, deps) {
         }
       );
 
+      // offBalance: how much of the refund came off what the customer owes
       response.json({ message: output.message, reportId: output.report_id, disposition: where,
-                      awaitingInspection: where === null });
+                      awaitingInspection: where === null, offBalance: Number(output.off_balance) || 0 });
     } catch (error) {
       console.error("File report failed:", error.message);
       response.status(500).json({ error: "Unable to file the report" });

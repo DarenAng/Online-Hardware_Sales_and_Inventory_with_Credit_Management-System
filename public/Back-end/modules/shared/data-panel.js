@@ -18,7 +18,6 @@
 //       gate: { title, text, button },  // what the closed state says
 //       empty: { title, text },        // optional; a loaded table with no rows
 //       loadOnFilter: false,           // optional; see dataPanelFilter
-//       pagerInfo: false,              // optional; leave out the "Showing 1-8 of 24" caption
 //       inputs: ['sales-from'],        // optional; ids of other boxes that decide what load() reads
 //       remember: false                // optional; do not load this table again after a reload
 //   });
@@ -417,13 +416,12 @@ const dataPanelMethods = {
             return;
         }
 
-        const start = (this.page - 1) * this.pageSize;
-        const slice = this.drawRows(this.page);
+        this.drawRows(this.page);
 
         this.setCount(this.visible.length +
             (this.visible.length === 1 ? ' record' : ' records'));
 
-        this.renderPager(start, slice.length);
+        this.renderPager();
         this.announce();
     },
 
@@ -465,7 +463,7 @@ const dataPanelMethods = {
         holdTableHeight(table);
     },
 
-    renderPager(start, shown) {
+    renderPager() {
         const mount = this.pager();
         if (!mount) return;
 
@@ -478,15 +476,8 @@ const dataPanelMethods = {
             return;
         }
 
-        // a panel can leave the caption out; the empty span keeps the controls on the right
-        const info = this.config.pagerInfo === false
-            ? '<span class="pager-info"></span>'
-            : '<span class="pager-info">Showing ' + (start + 1) + '&ndash;' + (start + shown) +
-                ' of ' + total + '</span>';
-
         mount.classList.remove('is-single');
         mount.innerHTML =
-            info +
             '<div class="pager-controls">' +
                 '<button type="button" class="btn btn-sm" ' +
                         'onclick="dataPanelPrev(\'' + this.key + '\')"' +

@@ -24,15 +24,23 @@
                     <span class="brand-sub">Sales &amp; Inventory</span>
                 </span>
             </a>
-            <div class="sidebar-user">
-                <span class="sidebar-eyebrow">Delivery Personnel</span>
-                <span data-current-user>User</span>
-            </div>
             <!-- data-feature names the screen an item opens; shared/features.js hides
                  the ones switched off for this role and mirrors the counts -->
             <ul class="sidebar-nav">
                 <li data-feature="delivery-runs"><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>Pending</a></li>
-                <li data-feature="delivery-reports"><a href="#" data-panel-link="panel-report" onclick="showDeliveryReports(event)"><i class="bi bi-bar-chart-line nav-icon" aria-hidden="true"></i>Reports</a></li>
+                <!-- A folding heading does two things (shared/helpers.js sidebarHeading): its
+                     words open the module's first screen, its caret alone folds the list -->
+                <li data-sidebar-dropdown data-feature="delivery-reports">
+                    <a href="#reports" onclick="sidebarHeading(event, 'reports-nav', 'reports-dropdown', showDeliveredReport)" class="nav-parent" id="reports-nav"><i class="bi bi-bar-chart-line nav-icon" aria-hidden="true"></i>
+                        Reports <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="reports-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-report-delivered" onclick="showDeliveredReport(event)"><i class="bi bi-box-seam nav-icon" aria-hidden="true"></i>
+                            Deliveries Handled</a></li>
+                        <li><a href="#" data-panel-link="panel-report-payments" onclick="showPaymentsReport(event)"><i class="bi bi-cash-coin nav-icon" aria-hidden="true"></i>
+                            Payments Collected</a></li>
+                    </ul>
+                </li>
                 <!-- drawn by shared/delivery-schedule.js; hidden until features.js hears the role has it -->
                 <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
                     Delivery Schedule</a></li>
@@ -69,6 +77,27 @@
                                        placeholder="Search by customer or destination"
                                        oninput="dataPanelSearchInput('driver-pending', event)" onkeydown="dataPanelSearchKey('driver-pending', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
+                            <div class="toolbar-field">
+                                <label for="dpend-status">Status</label>
+                                <select id="dpend-status" onchange="dataPanelFilter('driver-pending', 'status', this.value)">
+                                    <option value="all">All</option>
+                                    <option value="Pending">Pending</option>
+                                    <option value="In Transit">In Transit</option>
+                                    <option value="Out for Delivery">Out for Delivery</option>
+                                    <option value="Delayed">Delayed</option>
+                                </select>
+                            </div>
+                            <!-- the scheduled day can be ahead of today, so these two boxes are not held to today -->
+                            <div class="toolbar-field toolbar-date">
+                                <label for="dpend-from">From</label>
+                                <input type="date" id="dpend-from" data-any-date title="Scheduled from"
+                                       onchange="dataPanelFilter('driver-pending', 'from', this.value)">
+                            </div>
+                            <div class="toolbar-field toolbar-date">
+                                <label for="dpend-to">To</label>
+                                <input type="date" id="dpend-to" data-any-date title="Scheduled to"
+                                       onchange="dataPanelFilter('driver-pending', 'to', this.value)">
+                            </div>
                         </div>
                         <div class="table-responsive grid-10">
                             <table id="dpend-table">
@@ -82,78 +111,74 @@
                     </div>
                 </div>
 
-                <!-- REPORTS -->
-                <div id="panel-report" data-panel style="display: none;">
+                <!-- REPORT: DELIVERIES HANDLED -- only deliveries that were delivered, by the day they were delivered -->
+                <div id="panel-report-delivered" data-panel style="display: none;">
                     <div class="card">
                         <div class="panel-head">
                             <div>
-                                <h3>Choose Dates</h3>
+                                <h3>Deliveries Handled</h3>
                             </div>
                         </div>
                         <div class="panel-toolbar">
-                            <div class="toolbar-field">
-                                <label for="drep-from">From</label>
-                                <input type="date" id="drep-from" onchange="deliveryDatesPicked()">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="dhand-search"
+                                       placeholder="Search by customer or destination"
+                                       oninput="dataPanelSearchInput('driver-report', event)" onkeydown="dataPanelSearchKey('driver-report', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
-                            <div class="toolbar-field">
-                                <label for="drep-to">To</label>
-                                <input type="date" id="drep-to" onchange="deliveryDatesPicked()">
+                            <div class="toolbar-field toolbar-date">
+                                <label for="dhand-from">From</label>
+                                <input type="date" id="dhand-from" onchange="reportDatesPicked('driver-report', 'dhand-from', 'dhand-to')">
+                            </div>
+                            <div class="toolbar-field toolbar-date">
+                                <label for="dhand-to">To</label>
+                                <input type="date" id="dhand-to" onchange="reportDatesPicked('driver-report', 'dhand-from', 'dhand-to')">
                             </div>
                         </div>
-                        <div class="track-legend" id="drep-legend"></div>
+                        <div class="table-responsive grid-10">
+                            <table id="drep-table">
+                                <thead>
+                                    <tr><th>ID</th><th>Date</th><th>Customer</th><th>Destination</th><th>Order Total</th><th>Balance</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="drep-pager"></div>
                     </div>
+                </div>
 
-                    <!-- one date range feeds both tables; the tabs pick which one shows -->
-                    <nav class="view-nav" aria-label="Report">
-                        <div class="view-nav-group">
-                            <div class="view-nav-tabs" role="tablist">
-                                <button type="button" class="view-tab is-current" role="tab" aria-selected="true"
-                                        data-view-tab="drep-view-deliveries"
-                                        onclick="showDriverReportView('drep-view-deliveries')">Deliveries Handled</button>
-                                <button type="button" class="view-tab" role="tab" aria-selected="false"
-                                        data-view-tab="drep-view-payments"
-                                        onclick="showDriverReportView('drep-view-payments')">Payments Collected</button>
+                <!-- REPORT: PAYMENTS COLLECTED -- by the day each payment was taken -->
+                <div id="panel-report-payments" data-panel style="display: none;">
+                    <div class="card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Payments Collected</h3>
                             </div>
                         </div>
-                    </nav>
-
-                    <section class="panel-view" id="drep-view-deliveries">
-                        <div class="card">
-                            <div class="panel-head">
-                                <div>
-                                    <h3>Deliveries Handled</h3>
-                                </div>
+                        <div class="panel-toolbar">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="dpay-search"
+                                       placeholder="Search by customer, method or reference"
+                                       oninput="dataPanelSearchInput('driver-report-pay', event)" onkeydown="dataPanelSearchKey('driver-report-pay', event)" title="Type one letter or more; it finds words that start with it">
                             </div>
-                            <div class="table-responsive grid-10">
-                                <table id="drep-table">
-                                    <thead>
-                                        <tr><th>ID</th><th>Date</th><th>Customer</th><th>Destination</th><th>Order Total</th><th>Balance</th><th>Status</th></tr>
-                                    </thead>
-                                    <tbody></tbody>
-                                </table>
+                            <div class="toolbar-field toolbar-date">
+                                <label for="dpay-from">From</label>
+                                <input type="date" id="dpay-from" onchange="reportDatesPicked('driver-report-pay', 'dpay-from', 'dpay-to')">
                             </div>
-                            <div class="pager is-single" id="drep-pager"></div>
+                            <div class="toolbar-field toolbar-date">
+                                <label for="dpay-to">To</label>
+                                <input type="date" id="dpay-to" onchange="reportDatesPicked('driver-report-pay', 'dpay-from', 'dpay-to')">
+                            </div>
                         </div>
-                    </section>
-
-                    <section class="panel-view" id="drep-view-payments" hidden>
-                        <div class="card">
-                            <div class="panel-head">
-                                <div>
-                                    <h3>Payments Collected</h3>
-                                </div>
-                            </div>
-                            <div class="table-responsive grid-10">
-                                <table id="drep-pay-table">
-                                    <thead>
-                                        <tr><th>Date</th><th>Sale</th><th>Customer</th><th>Method</th><th>Reference</th><th>Amount</th></tr>
-                                    </thead>
-                                    <tbody></tbody>
-                                </table>
-                            </div>
-                            <div class="pager is-single" id="drep-pay-pager"></div>
+                        <div class="table-responsive grid-10">
+                            <table id="drep-pay-table">
+                                <thead>
+                                    <tr><th>Date</th><th>Customer</th><th>Method</th><th>Reference</th><th>Amount</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
                         </div>
-                    </section>
+                        <div class="pager is-single" id="drep-pay-pager"></div>
+                    </div>
                 </div>
 
             </div>
@@ -266,6 +291,39 @@
             <div class="modal-foot">
                 <button type="button" class="btn btn-ghost" onclick="cancelDriverPayment()">Cancel</button>
                 <button type="submit" class="btn btn-success" form="pay-form">Record Payment</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WHY IS IT DELAYED -- opened by the Delayed button on a delivery's card. The reason is
+         required and is saved as the delivery's remarks. Locked like the other forms that hold typed data. -->
+    <div class="modal" id="delay-modal" data-modal-locked data-modal-scroll>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">DL</div>
+                    <div>
+                        <h3>Mark Delayed</h3>
+                        <span class="modal-role" id="delay-subtitle">Delivery</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('delay-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="delay-form" onsubmit="handleDelayReason(event)" autocomplete="off">
+                    <div class="form-group">
+                        <label for="delay-reason">Reason for the delay
+                            <span class="label-hint">required</span></label>
+                        <textarea id="delay-reason" class="form-control" rows="4" minlength="5" required
+                                  placeholder="Gate closed, customer not around, rain on the route"></textarea>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('delay-modal')">Cancel</button>
+                <button type="submit" class="btn btn-gold" form="delay-form">Mark Delayed</button>
             </div>
         </div>
     </div>

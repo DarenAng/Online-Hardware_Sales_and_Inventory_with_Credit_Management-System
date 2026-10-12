@@ -1,12 +1,13 @@
 # public/database/
 
-Two files to set up, run in the order the names give, and one upgrade file.
+Two files to set up, run in the order the names give, and two upgrade files.
 
 | File | What it is | When you run it |
 |---|---|---|
 | `1-RUN-FIRST-database.sql` | The whole schema — 33 tables (6 of them the server's own: sign-ins, live updates, stored backups), the demo data, and six months of mock trading | Setting up a new machine, or resetting one back to the demo and mock data |
 | `2-RUN-SECOND-stored-procedures.sql` | The 3 views and the 36 stored procedures the app uses | Straight after file 1, and again any time a view or a procedure changes |
 | `3-ADD-qr-payments.sql` | The `qr_payments` table, for a database made before QR payments | Once, on a database that already holds real data; then file 2 (or restart the server) |
+| `4-MIGRATION-refunds-lower-balance.sql` | `sales.refunded_amount`, and the procedures and credit views that use it, so a refund comes off what the customer owes | Once, on a database that already holds real data (safe to repeat); a fresh file 1 + file 2 already has it |
 
 ## In MySQL Workbench
 

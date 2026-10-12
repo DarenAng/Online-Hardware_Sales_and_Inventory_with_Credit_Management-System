@@ -32,9 +32,6 @@ function buildAccountModal() {
             </div>
 
             <div class="modal-body">
-                <p class="cred-note" id="account-admin-note" style="display: none;">As the System
-                    Administrator, your name, phone and email are changed by another administrator
-                    from the staff directory, not from here. Your password is still yours to change.</p>
                 <!-- WHAT A STANDARD USER MAY NOT CHANGE
                      The sign-in email, the password and the role are credentials,
                      and none of them is changed by its own holder from here. A
@@ -44,18 +41,9 @@ function buildAccountModal() {
                      sign-in page (a code sent to the address on file), from a
                      manager for counter, stockroom and delivery staff, or from
                      the administrator. -->
-                <p class="cred-note" id="account-staff-note" style="display: none;">Your sign-in
-                    email and your role are set by the System Administrator, and your password is
-                    not changed from here. To set a new one, sign out and choose "Forgot your
-                    password?" on the sign-in page: a code is sent to your email. If mail is not
-                    working, a manager (for cashiers, clerks and drivers) or the System
-                    Administrator can reset it, and a new one is sent to you. Your name and phone
-                    number are yours to change under Edit Details.</p>
                 <div class="detail-grid" id="account-view"></div>
 
                 <div id="account-edit" style="display: none;">
-                    <p class="cred-note">Your name and phone number. Your role and your sign-in
-                        email are set by the system administrator and are shown here for checking.</p>
                     <form id="account-form" onsubmit="handleSaveMyProfile(event)">
                         <div class="grid-2">
                             <div class="form-group">
@@ -83,7 +71,7 @@ function buildAccountModal() {
                             </div>
                         </div>
                         <div class="form-group">
-                            <label for="me-email">Email <span class="label-hint">your username, changed by the administrator</span></label>
+                            <label for="me-email">Email</label>
                             <input type="email" id="me-email" name="email" class="form-control" readonly
                                    title="Your sign-in email is changed by the System Administrator">
                         </div>
@@ -165,14 +153,6 @@ function showAccountTab(tab) {
     const passwordTab = document.getElementById('account-tab-password');
     if (passwordTab) passwordTab.style.display = canChangeOwnPassword() ? '' : 'none';
 
-    // the administrator's note is about the details, so it sits on the Credentials tab only
-    const note = document.getElementById('account-admin-note');
-    if (note) note.style.display = (tab === 'view' && !canEditOwnDetails()) ? 'block' : 'none';
-
-    // the note is about credentials, so it sits on the Credentials tab only
-    const staffNote = document.getElementById('account-staff-note');
-    if (staffNote) staffNote.style.display = (tab === 'view' && !canChangeOwnPassword()) ? 'block' : 'none';
-
     // Save Changes / Change Password in the foot follow the open tab
     document.querySelectorAll('[data-account-foot]').forEach((group) => {
         group.hidden = group.dataset.accountFoot !== tab;
@@ -246,12 +226,7 @@ function renderMyAccount() {
             ? '<span class="mono">' + escapeHtml(phoneForDisplay(me.phone)) + '</span>'
             : '<span class="muted">Not set</span>') +
         detailRow('Role', escapeHtml(me.role_name)) +
-        detailRow('Account Status', `<span class="badge ${me.is_active ? 'badge-success' : 'badge-danger'}">${me.is_active ? 'Active' : 'Inactive'}</span>`) +
-        detailRow('Hired On', escapeHtml(me.staff_created_at)) +
-        detailRow('Account Created', me.created_at
-            ? escapeHtml(me.created_at) : '<span class="muted">Not available</span>') +
-        detailRow('Last Login', me.last_login
-            ? escapeHtml(me.last_login) : '<span class="muted">Never</span>');
+        detailRow('Account Status', `<span class="badge ${me.is_active ? 'badge-success' : 'badge-danger'}">${me.is_active ? 'Active' : 'Inactive'}</span>`);
 
     const form = document.getElementById('account-form');
     form.elements.firstName.value = me.first_name || '';

@@ -25,10 +25,6 @@
                     <span class="brand-sub">Sales &amp; Inventory</span>
                 </span>
             </a>
-            <div class="sidebar-user">
-                <span class="sidebar-eyebrow">Manager</span>
-                <span data-current-user>User</span>
-            </div>
             <!-- data-feature names the screen an item opens; shared/features.js hides
                  the ones switched off for this role and mirrors the counts.
                  A folding heading does two things (shared/helpers.js sidebarHeading):
@@ -1489,6 +1485,39 @@
                 <button type="button" class="btn btn-ghost" onclick="closeModal('decide-modal')">Cancel</button>
                 <button type="button" class="btn btn-danger" onclick="decideCreditRequest(false)">Decline</button>
                 <button type="button" class="btn btn-success" onclick="decideCreditRequest(true)">Approve</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WHY IS IT DELAYED -- opened by the Delayed button on a delivery's card. The reason is
+         required and is saved as the delivery's remarks. Locked like the other forms that hold typed data. -->
+    <div class="modal" id="delay-modal" data-modal-locked data-modal-scroll>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">DL</div>
+                    <div>
+                        <h3>Mark Delayed</h3>
+                        <span class="modal-role" id="delay-subtitle">Delivery</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('delay-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="delay-form" onsubmit="handleDelayReason(event)" autocomplete="off">
+                    <div class="form-group">
+                        <label for="delay-reason">Reason for the delay
+                            <span class="label-hint">required</span></label>
+                        <textarea id="delay-reason" class="form-control" rows="4" minlength="5" required
+                                  placeholder="Gate closed, customer not around, rain on the route"></textarea>
+                    </div>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('delay-modal')">Cancel</button>
+                <button type="submit" class="btn btn-gold" form="delay-form">Mark Delayed</button>
             </div>
         </div>
     </div>

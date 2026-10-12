@@ -345,6 +345,15 @@ function saleAmountDue(sale) {
     return Number(due) || 0;
 }
 
+// The part of a sale's balance that is penalty. A payment or a refund can
+// leave less owing than the penalty that was charged, and a balance never
+// shows more penalty than it holds.
+function penaltyInBalance(sale) {
+    const penalty = Number(sale.penalty_amount) || 0;
+    const balance = Math.max(Number(sale.balance_due) || 0, 0);
+    return Math.min(penalty, balance);
+}
+
 // "3%" or "2.5%": a penalty rate as it is spoken (per month)
 function penaltyRateWord(rate) {
     const n = Number(rate);

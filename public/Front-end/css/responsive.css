@@ -265,6 +265,11 @@
         bottom: calc(2px + env(safe-area-inset-bottom));
         max-height: calc(100dvh - 16px);
     }
+    /* With a popup open, the cards go to the top so they do not cover its buttons at the bottom */
+    html:has(.modal.open) .toast-deck {
+        top: calc(2px + env(safe-area-inset-top));
+        bottom: auto;
+    }
     .toast-title { font-size: 16px; }
 }
 

@@ -138,7 +138,7 @@ function registerManagerRoutes(app, deps) {
               COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected,
               COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS outstanding,
               -- the part of outstanding that is late-payment penalty rather than goods
-              COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0) - GREATEST(s.final_amount - s.amount_paid, 0)), 0) AS penalties
+              COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0) - GREATEST(s.final_amount - s.refunded_amount - s.amount_paid, 0)), 0) AS penalties
        FROM sales s
        WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}`,
         window
@@ -659,7 +659,7 @@ function registerManagerRoutes(app, deps) {
       const [creditsRows] = await db.query(
         `SELECT COUNT(*) AS open_accounts,
               COALESCE(SUM(GREATEST(amount_due - amount_paid, 0)), 0) AS owed,
-              COALESCE(SUM(GREATEST(amount_due - amount_paid, 0) - GREATEST(final_amount - amount_paid, 0)), 0) AS penalties
+              COALESCE(SUM(GREATEST(amount_due - amount_paid, 0) - GREATEST(final_amount - refunded_amount - amount_paid, 0)), 0) AS penalties
        FROM sales
        WHERE is_archived = FALSE AND payment_status <> 'Paid'`
       );
@@ -1041,7 +1041,8 @@ function registerManagerRoutes(app, deps) {
               (SELECT COUNT(*) FROM customer_credits WHERE penalty_rate IS NOT NULL) AS own_rate_accounts,
               (SELECT COUNT(*) FROM sales s
                WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid' AND s.penalty_amount > 0) AS penalised_sales,
-              (SELECT COALESCE(SUM(s.penalty_amount), 0) FROM sales s
+              (SELECT COALESCE(SUM(LEAST(s.penalty_amount, GREATEST(s.amount_due - s.amount_paid, 0))), 0)
+               FROM sales s
                WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid') AS penalties_owed
          FROM store_settings cfg
          LEFT JOIN staff st ON st.staff_id = cfg.updated_by_staff_id

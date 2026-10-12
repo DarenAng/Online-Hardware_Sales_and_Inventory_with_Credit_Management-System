@@ -52,7 +52,9 @@ SELECT
                 AND s.payment_status <> 'Paid'), 0.00) AS current_credit,
 
     -- how much of that is late-payment penalty rather than goods
-    COALESCE((SELECT SUM(s.penalty_amount)
+    -- (a penalty is shown only up to the balance left on its sale: after a
+    -- payment or a refund the balance can be smaller than the penalty charged)
+    COALESCE((SELECT SUM(LEAST(s.penalty_amount, GREATEST(s.amount_due - s.amount_paid, 0)))
               FROM sales s
               WHERE s.customer_id = c.customer_id
                 AND s.is_archived = FALSE
@@ -2235,11 +2237,21 @@ CREATE PROCEDURE sp_file_return_report (
     IN p_disposition VARCHAR(20),
     IN p_staff_id INT,
     OUT p_report_id INT,
+    -- how much of a refund came off what the customer owes on the sale
+    OUT p_off_balance DECIMAL(12,2),
     OUT p_status_code INT,
     OUT p_message VARCHAR(255)
 )
 PROC_BODY: BEGIN
     DECLARE v_name VARCHAR(150);
+    DECLARE v_due DECIMAL(12,2);
+    DECLARE v_paid DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_final DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_sold DECIMAL(12,3) DEFAULT 0;
+    DECLARE v_taken DECIMAL(12,3) DEFAULT 0;
+    DECLARE v_refunded_before DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_off DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_on_sale BOOLEAN DEFAULT FALSE;
     DECLARE v_before DECIMAL(12,3);
     DECLARE v_change DECIMAL(12,3) DEFAULT 0;
     DECLARE v_notif VARCHAR(20);
@@ -2251,11 +2263,13 @@ PROC_BODY: BEGIN
     BEGIN
         ROLLBACK;
         SET p_report_id = NULL;
+        SET p_off_balance = 0.00;
         SET p_status_code = 500;
         SET p_message = 'Report failed. All changes rolled back.';
     END;
 
     SET p_report_id = NULL;
+    SET p_off_balance = 0.00;
 
     IF p_report_type NOT IN ('Return', 'Damaged', 'Refunded') THEN
         SET p_status_code = 400;
@@ -2313,6 +2327,70 @@ PROC_BODY: BEGIN
     FROM inventory WHERE product_id = p_product_id
     FOR UPDATE;
 
+    -- A refund on a sale is checked against the sale, and this is the real
+    -- guard (the route only words the same refusals nicely). The sale row is
+    -- locked FOR UPDATE first and the figures are read after the lock, so two
+    -- refunds of the same line at the same moment take turns: the second one
+    -- sees the first one's report and is refused if nothing is left to refund.
+    IF p_report_type = 'Refunded' AND p_sale_id IS NOT NULL THEN
+        SET v_due = NULL;
+        SELECT amount_due, amount_paid, final_amount INTO v_due, v_paid, v_final
+        FROM sales WHERE sale_id = p_sale_id
+        FOR UPDATE;
+
+        IF v_due IS NULL THEN
+            ROLLBACK;
+            SET p_status_code = 404;
+            SET p_message = 'That sale was not found.';
+            LEAVE PROC_BODY;
+        END IF;
+
+        -- what the sale holds of this product, and what has already come back
+        SELECT COALESCE(SUM(quantity), 0) INTO v_sold
+        FROM sale_items WHERE sale_id = p_sale_id AND product_id = p_product_id;
+
+        SELECT COALESCE(SUM(quantity), 0) INTO v_taken
+        FROM returned_items
+        WHERE sale_id = p_sale_id AND product_id = p_product_id
+          AND report_type IN ('Refunded', 'Return');
+
+        IF v_sold = 0 THEN
+            ROLLBACK;
+            SET p_status_code = 400;
+            SET p_message = 'That item is not on this sale.';
+            LEAVE PROC_BODY;
+        END IF;
+
+        IF p_quantity > v_sold - v_taken + 0.0005 THEN
+            ROLLBACK;
+            SET p_status_code = 400;
+            SET p_message = IF(v_sold - v_taken <= 0,
+                'That item has already been refunded in full.',
+                CONCAT('Only ', TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM CAST(v_sold - v_taken AS CHAR))),
+                       ' of that item can still be refunded.'));
+            LEAVE PROC_BODY;
+        END IF;
+
+        -- Refunds on one sale never add up to more than the customer was
+        -- charged (final_amount, after the discount). That also means the cash
+        -- handed back can never be more than was paid: cash back only starts
+        -- once the balance is gone, and then it is at most final_amount minus
+        -- what came off the balance, which is at most what the customer paid.
+        SELECT COALESCE(SUM(refund_amount), 0) INTO v_refunded_before
+        FROM returned_items
+        WHERE sale_id = p_sale_id AND report_type = 'Refunded';
+
+        IF v_refunded_before + IFNULL(p_refund_amount, 0) > v_final + 0.01 THEN
+            ROLLBACK;
+            SET p_status_code = 400;
+            SET p_message = CONCAT('Refunds on this sale would come to more than the customer was charged (',
+                                   FORMAT(v_final, 2), '). ', FORMAT(v_refunded_before, 2), ' is refunded already.');
+            LEAVE PROC_BODY;
+        END IF;
+
+        SET v_on_sale = TRUE;
+    END IF;
+
     -- Return to Stock always adds. Write-Off subtracts only when the goods were
     -- still counted as stock (a customer's return was deducted when sold).
     -- Awaiting inspection moves nothing: the clerk's verdict does that.
@@ -2332,6 +2410,24 @@ PROC_BODY: BEGIN
          IFNULL(p_refund_amount, 0.00), v_restock, 'Open', p_staff_id);
 
     SET p_report_id = LAST_INSERT_ID();
+
+    -- A refund on a sale comes off what the customer owes, up to the balance.
+    -- Anything over that is cash handed back, so the bill never falls below
+    -- what has been paid. The sale row is already locked (above), so a payment
+    -- at the same moment cannot be counted twice.
+    IF v_on_sale AND IFNULL(p_refund_amount, 0) > 0 THEN
+        SET v_off = LEAST(p_refund_amount, GREATEST(v_due - v_paid, 0.00));
+
+        IF v_off > 0 THEN
+            -- amount_due is worked out from refunded_amount by the table;
+            -- the status turns Paid when nothing is left to collect
+            UPDATE sales
+            SET refunded_amount = refunded_amount + v_off,
+                payment_status = IF(v_paid >= v_due - v_off, 'Paid', payment_status)
+            WHERE sale_id = p_sale_id;
+        END IF;
+    END IF;
+    SET p_off_balance = v_off;
 
     IF v_change <> 0 THEN
         UPDATE inventory
@@ -2377,6 +2473,16 @@ PROC_BODY: BEGIN
     SET p_message = IF(v_awaiting,
         CONCAT(p_report_type, ' report filed. The goods are set aside for the stockroom to inspect.'),
         CONCAT(p_report_type, ' report filed.'));
+
+    -- say where the money went when the refund was on a sale
+    IF v_on_sale THEN
+        IF v_off > 0 THEN
+            SET p_message = CONCAT(p_message, ' ', FORMAT(v_off, 2), ' came off what the customer owes.');
+        END IF;
+        IF p_refund_amount > v_off THEN
+            SET p_message = CONCAT(p_message, ' ', FORMAT(p_refund_amount - v_off, 2), ' is cash to hand back.');
+        END IF;
+    END IF;
 END //
 
 -- ==========================================
@@ -3392,7 +3498,7 @@ BEGIN
     DECLARE cur CURSOR FOR
         SELECT s.sale_id, s.customer_id,
                TRIM(CONCAT(c.first_name, ' ', c.last_name)),
-               GREATEST(s.final_amount - s.amount_paid, 0.00),
+               GREATEST(s.final_amount - s.refunded_amount - s.amount_paid, 0.00),
                s.amount_due - s.amount_paid,
                COALESCE(cc.penalty_rate, (SELECT penalty_rate FROM store_settings WHERE setting_id = 1), 3.00),
                DATEDIFF(CURDATE(), DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)),
@@ -3403,7 +3509,7 @@ BEGIN
         WHERE s.is_archived = FALSE
           AND s.payment_method = 'Credit'
           AND s.payment_status <> 'Paid'
-          AND s.final_amount - s.amount_paid > 0
+          AND s.final_amount - s.refunded_amount - s.amount_paid > 0
           AND DATE(s.sale_date) < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
           -- a month or part of one past due that has not been charged yet
           AND CEILING(DATEDIFF(CURDATE(), DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) / 30) > s.penalty_months;

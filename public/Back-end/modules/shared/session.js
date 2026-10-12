@@ -609,9 +609,6 @@ function applyCurrentUserToPage(currentUser) {
     document.querySelectorAll('[data-current-role]').forEach((element) => {
         element.textContent = currentUser.role_name || '';
     });
-    document.querySelectorAll('[data-current-email]').forEach((element) => {
-        element.textContent = currentUser.email || 'No email on file';
-    });
 
     const first = (currentUser.first_name || currentUser.email || '?')[0];
     const last = (currentUser.last_name || '')[0] || '';

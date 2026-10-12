@@ -196,6 +196,7 @@ function sidebarHeading(event, navId, listId, openScreen) {
 // DATE FILTERS -- a filter asks about what has happened, so no box in a
 // toolbar can pick a day after today. The limit is read again whenever a box
 // is used, so a page left open overnight moves with the calendar.
+// A box marked data-any-date is left alone (a scheduled date can be in the future).
 // ==========================================
 function todayDateValue() {
     const now = new Date();
@@ -215,14 +216,14 @@ function limitDateFilter(input) {
 }
 
 function limitDateFilters() {
-    document.querySelectorAll('.toolbar-field input[type="date"]').forEach(limitDateFilter);
+    document.querySelectorAll('.toolbar-field input[type="date"]:not([data-any-date])').forEach(limitDateFilter);
 }
 
 document.addEventListener('DOMContentLoaded', limitDateFilters);
 ['focusin', 'input', 'change'].forEach((name) => {
     document.addEventListener(name, (event) => {
         const target = event.target;
-        if (target && target.matches && target.matches('.toolbar-field input[type="date"]')) {
+        if (target && target.matches && target.matches('.toolbar-field input[type="date"]:not([data-any-date])')) {
             limitDateFilter(target);
         }
     }, true);

@@ -9,12 +9,10 @@
 //   - taking a delivery (the status buttons live in the popup, shared/deliveries.js)
 //   - Receive Payment: the popup that collects the money and marks the delivery Delivered
 //   - refunding items the customer turns away at the door
-//   - the driver's report for a date range
+//   - the driver's two reports (Deliveries Handled, Payments Collected), each with its own dates
 //   - the page start-up code at the very bottom ("DELIVERY PAGE BOOT")
 // ============================================================
 let driverDeliveries = [];
-
-const DRIVER_STAGES = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed'];
 
 function dateText(date) {
     const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -47,24 +45,9 @@ function showDeliveryPanel(panelId, title, event) {
 
 // the default screen
 function showDeliveryHome(event)   { showDeliveryPanel('panel-pending', 'Pending Deliveries', event); }
-function showDeliveryReports(event) {
-    showDeliveryPanel('panel-report', 'Delivery Reports', event);
-}
-
-// the tab bar on Reports: one table at a time, both filled by the same load
-function showDriverReportView(viewId) {
-    const panel = document.getElementById('panel-report');
-    if (!panel) return;
-
-    panel.querySelectorAll(':scope > .panel-view').forEach((view) => {
-        view.hidden = view.id !== viewId;
-    });
-    panel.querySelectorAll('[data-view-tab]').forEach((tab) => {
-        const current = tab.dataset.viewTab === viewId;
-        tab.classList.toggle('is-current', current);
-        tab.setAttribute('aria-selected', current ? 'true' : 'false');
-    });
-}
+// the two reports in the sidebar
+function showDeliveredReport(event) { showDeliveryPanel('panel-report-delivered', 'Deliveries Handled', event); }
+function showPaymentsReport(event)  { showDeliveryPanel('panel-report-payments', 'Payments Collected', event); }
 
 // Reads the driver's deliveries from the server. The popups find a delivery in
 // driverDeliveries by its id, so every read keeps this list up to date.
@@ -117,6 +100,12 @@ function ownerTag(d) {
     return '<span class="badge badge-neutral owner-tag">Unassigned</span>';
 }
 
+// A Delayed delivery says why, in small muted words under its status
+function delayedReason(d) {
+    if (d.status !== 'Delayed' || !d.remarks) return '';
+    return '<span class="delay-reason">Delayed: ' + escapeHtml(d.remarks) + '</span>';
+}
+
 // Clicking a delivery nobody has taken claims it for this driver first.
 async function openPendingDelivery(deliveryId) {
     const d = driverDeliveries.find((x) => x.delivery_id === deliveryId);
@@ -158,6 +147,8 @@ function buildDriverPanels() {
         columns: 5,
         pagerId: 'dpend-pager',
         idField: 'delivery_id',
+        // the Status box and the scheduled From / To dates narrow the rows already loaded
+        filters: { status: 'all', from: '', to: '' },
         gate: { title: 'Your deliveries are not loaded',
                 text: 'Press Load Data to read your deliveries, or type a customer.',
                 button: 'Load Data' },
@@ -169,6 +160,19 @@ function buildDriverPanels() {
 
         match: (d, query) => prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query),
 
+        filter: (d, filters) => {
+            if (filters.status !== 'all' && d.status !== filters.status) return false;
+
+            // a date range only keeps deliveries that have a scheduled date inside it
+            if (filters.from || filters.to) {
+                const day = String(d.scheduled_date || '').slice(0, 10);
+                if (!day) return false;
+                if (filters.from && day < filters.from) return false;
+                if (filters.to && day > filters.to) return false;
+            }
+            return true;
+        },
+
         renderRow: (d, index) =>
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openPendingDelivery(' + d.delivery_id + ')">' +
@@ -176,7 +180,7 @@ function buildDriverPanels() {
             '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
             '<td>' + escapeHtml(d.delivery_address) + '</td>' +
             '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
-            '<td>' + statusBadge(d.status) + ' ' + ownerTag(d) + '</td></tr>'
+            '<td>' + statusBadge(d.status) + ' ' + ownerTag(d) + delayedReason(d) + '</td></tr>'
     });
 }
 
@@ -302,21 +306,16 @@ function openDriverDetail(deliveryId) {
 // ---------- refund at the door ----------
 // An item the customer turns away at the door (damaged, wrong item). Each
 // one is filed like a cashier's refund (POST /api/returns): it waits for the
-// stockroom to inspect it. A refund report does not change the sale's own
-// figures, so it is only offered on an order already paid in full.
+// stockroom to inspect it. A refund comes off what the customer still owes;
+// on an order already paid in full it is cash handed back instead.
 const MINIMUM_DOOR_REASON = 10;
 let refundDeliveryId = null;
 let refundLines = [];     // what can still be refunded, one per sale line
+let refundBalance = 0;    // what the order still owed when the form opened
 
 async function openDriverRefund(deliveryId) {
     const d = driverDeliveries.find((x) => x.delivery_id === deliveryId);
     if (!d) return;
-
-    if (Number(d.balance_due) > 0) {
-        closeModal('refund-modal');
-        notifyWarning(refundOwesMessage(d.balance_due), 'Refund not available');
-        return;
-    }
 
     let items;
     try {
@@ -335,6 +334,10 @@ async function openDriverRefund(deliveryId) {
         const ratio = sold > 0 ? Number(it.base_quantity) / sold : 1;
         const leftBase = Number(it.base_quantity) - Number(it.refunded_quantity || 0);
         const left = Math.round((leftBase / ratio) * 1000) / 1000;
+        // the lines add up to the sale total; the customer paid after the discount,
+        // so a refund is worth the price actually charged
+        let afterDiscount = 1;
+        if (Number(it.sale_total) > 0) afterDiscount = Number(it.sale_final) / Number(it.sale_total);
 
         if (left > 0) {
             refundLines.push({
@@ -345,7 +348,7 @@ async function openDriverRefund(deliveryId) {
                 sold: sold,
                 left: left,
                 ratio: ratio,
-                price: Number(it.unit_price)
+                price: Number(it.unit_price) * afterDiscount
             });
         }
     }
@@ -357,14 +360,20 @@ async function openDriverRefund(deliveryId) {
     }
 
     refundDeliveryId = deliveryId;
+    refundBalance = Number(d.balance_due) || 0;
     closeModal('detail-modal');
 
     document.getElementById('refund-subtitle').textContent = 'Delivery #' + deliveryId + ' · ' + d.customer_name;
     document.getElementById('refund-reason').value = '';
 
+    let moneyNote = 'The order is already paid, so the refund is cash handed back to the customer.';
+    if (refundBalance > 0) {
+        moneyNote = 'The order still owes ' + peso(refundBalance) + ', so the refund comes off what the customer ' +
+            'owes. If it is more than that, hand the rest back in cash.';
+    }
     document.getElementById('refund-explain').textContent =
-        'Tick each item the customer turned away and say how many. The order is already paid, so the refund is ' +
-        'cash handed back to the customer. The goods go to the inventory clerk for inspection.';
+        'Tick each item the customer turned away and say how many. ' + moneyNote +
+        ' The goods go to the inventory clerk for inspection.';
 
     document.getElementById('refund-lines').innerHTML = refundLines.map((line, i) =>
         '<div class="refund-line">' +
@@ -396,7 +405,14 @@ function onRefundLineChange() {
         if (picked) total = total + amount;
     });
 
-    document.getElementById('refund-total').textContent = 'Refund total: ' + peso(total);
+    // where the money goes: off the balance first, any rest is cash back
+    let where = ' (cash handed back)';
+    if (refundBalance > 0) {
+        const off = Math.min(total, refundBalance);
+        const back = Math.round((total - off) * 100) / 100;
+        where = ' (' + peso(off) + ' off the balance' + (back > 0 ? ', ' + peso(back) + ' cash handed back' : '') + ')';
+    }
+    document.getElementById('refund-total').textContent = 'Refund total: ' + peso(total) + (total > 0 ? where : '');
 }
 
 async function handleDriverRefund(event) {
@@ -443,6 +459,7 @@ async function handleDriverRefund(event) {
 
     const filed = [];       // names of the items recorded
     const notFiled = [];    // "Name (why)" for each one that was not
+    let offBalance = 0;     // how much of the refunds came off what the customer owes
     try {
         for (const pick of chosen) {
             const name = pick.line.name;
@@ -471,6 +488,7 @@ async function handleDriverRefund(event) {
                     notFiled.push(name + ' (' + result.error + ')');
                 } else {
                     filed.push(name);
+                    offBalance = offBalance + (Number(result.offBalance) || 0);
                 }
             } catch (error) {
                 notFiled.push(name + ' (the connection was lost)');
@@ -481,8 +499,11 @@ async function handleDriverRefund(event) {
 
         if (notFiled.length === 0) {
             closeModal('refund-modal');
+            let paidNote = '';
+            if (offBalance > 0) paidNote = ' ' + peso(offBalance) + ' came off what the customer owes.';
             notifySuccess(filed.length + (filed.length === 1 ? ' item' : ' items') + ' set aside for the stockroom. ' +
-                'The clerk has been asked to inspect ' + (filed.length === 1 ? 'it' : 'them') + '.', 'Refund recorded');
+                'The clerk has been asked to inspect ' + (filed.length === 1 ? 'it' : 'them') + '.' + paidNote,
+                'Refund recorded');
             return;
         }
 
@@ -501,13 +522,13 @@ async function handleDriverRefund(event) {
     }
 }
 
-// The report: one fetch for the range, two data panels reading from it.
-let driverReport = null;
-const DRIVER_REPORT_PANELS = ['driver-report', 'driver-report-pay'];
-
-function reportRange() {
-    const fromBox = document.getElementById('drep-from');
-    const toBox = document.getElementById('drep-to');
+// ---------- the reports ----------
+// Two views, each with its own search box and its own From / To dates. The dates
+// are sent to the server (it sends back the driver's report for that range); the
+// search works on the rows that come back. A box left empty means this month so far.
+function reportRange(fromId, toId) {
+    const fromBox = document.getElementById(fromId);
+    const toBox = document.getElementById(toId);
 
     if (fromBox && !fromBox.value) fromBox.value = monthStartText();
     if (toBox && !toBox.value) toBox.value = todayText();
@@ -515,117 +536,18 @@ function reportRange() {
     return { from: fromBox ? fromBox.value : '', to: toBox ? toBox.value : '' };
 }
 
-function renderReportLegend(data) {
-    const legend = document.getElementById('drep-legend');
-    if (!legend) return;
-
-    if (!data) {
-        legend.innerHTML = '';
-        return;
-    }
-
-    legend.innerHTML = DRIVER_STAGES.map((stage) => {
-        const count = data.deliveries.filter((d) => d.status === stage).length;
-        return '<span class="track-chip"><span class="track-count">' + count + '</span>' + stage + '</span>';
-    }).join('');
-}
-
-// one panel's load() fetches the report; the other reads what arrived
-async function reportRows(key, pick) {
-    const panel = getDataPanel(key);
-
-    if (panel && panel.fromReport) {
-        panel.fromReport = false;
-    } else {
-        await fetchDeliveryReport();
-
-        for (const other of DRIVER_REPORT_PANELS) {
-            const sibling = getDataPanel(other);
-            if (!sibling || other === key || sibling.state !== 'ready') continue;
-            sibling.fromReport = true;
-            sibling.open();
-        }
-    }
-
-    return pick(driverReport);
-}
-
-async function fetchDeliveryReport() {
+async function fetchDeliveryReport(fromId, toId) {
     const user = getCurrentUser();
     if (!user) throw new Error('not signed in');
 
-    const range = reportRange();
-
-    try {
-        driverReport = await apiGetDeliveryReport(user.staff_id, range.from, range.to);
-    } catch (error) {
-        driverReport = null;
-        renderReportLegend(null);
-        throw error;
-    }
-
-    renderReportLegend(driverReport);
-    return driverReport;
-}
-
-function buildReportPanels() {
-    createDataPanel({
-        key: 'driver-report',
-        inputs: ['drep-from', 'drep-to'],
-        tableId: 'drep-table',
-        columns: 7,
-        pagerId: 'drep-pager',
-        idField: 'delivery_id',
-        gate: { title: 'The report is not loaded',
-                text: 'Pick the dates above, or press Load Data for this month so far.',
-                button: 'Load Data' },
-
-        load: () => reportRows('driver-report', (data) => data.deliveries),
-
-        renderRow: (d, index) =>
-            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
-            '<td class="cell-id">#' + d.delivery_id + '</td>' +
-            '<td class="cell-id">' + escapeHtml(String(d.delivered_at || d.scheduled_date || '').slice(0, 10) || 'Not set') + '</td>' +
-            '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
-            '<td>' + escapeHtml(d.delivery_address) + '</td>' +
-            '<td class="cell-num">' + peso(d.final_amount) + '</td>' +
-            '<td class="cell-num' + (Number(d.balance_due) > 0 ? ' cell-due' : '') + '">' + peso(d.balance_due) + '</td>' +
-            '<td>' + statusBadge(d.status) + '</td></tr>'
-    });
-
-    createDataPanel({
-        key: 'driver-report-pay',
-        inputs: ['drep-from', 'drep-to'],
-        tableId: 'drep-pay-table',
-        columns: 6,
-        pagerId: 'drep-pay-pager',
-        idField: 'payment_id',
-        gate: { title: 'The report is not loaded',
-                text: 'Pick the dates above, or press Load Data for this month so far.',
-                button: 'Load Data' },
-
-        load: () => reportRows('driver-report-pay', (data) => data.payments),
-
-        onLoaded: (rows) => {
-            const collected = sumOf(rows, 'amount');
-            setPill('drep-pay-count', peso(collected) + ' collected');
-        },
-
-        renderRow: (p, index) =>
-            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
-            '<td class="cell-id">' + escapeHtml(String(p.payment_date).slice(0, 16)) + '</td>' +
-            '<td class="cell-id">#' + p.sale_id + '</td>' +
-            '<td class="cell-name">' + escapeHtml(p.customer_name) + '</td>' +
-            '<td>' + escapeHtml(p.payment_method) + '</td>' +
-            '<td>' + (p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>') + '</td>' +
-            '<td class="cell-num">' + peso(p.amount) + '</td></tr>'
-    });
+    const range = reportRange(fromId, toId);
+    return await apiGetDeliveryReport(user.staff_id, range.from, range.to);
 }
 
 // the report reloads once both dates are in; one alone waits for the other
-function deliveryDatesPicked() {
-    const from = document.getElementById('drep-from');
-    const to = document.getElementById('drep-to');
+function reportDatesPicked(key, fromId, toId) {
+    const from = document.getElementById(fromId);
+    const to = document.getElementById(toId);
     if (!from || !to || !from.value || !to.value) return;
 
     if (from.value > to.value) {
@@ -634,21 +556,67 @@ function deliveryDatesPicked() {
         return;
     }
 
-    loadDeliveryReport();
+    const panel = getDataPanel(key);
+    if (panel) panel.open();
 }
 
-async function loadDeliveryReport() {
-    const first = getDataPanel('driver-report');
-    if (!first) return;
+function buildReportPanels() {
+    // Deliveries Handled: only deliveries that were delivered. The date is the day it was delivered.
+    createDataPanel({
+        key: 'driver-report',
+        inputs: ['dhand-from', 'dhand-to'],
+        tableId: 'drep-table',
+        columns: 6,
+        pagerId: 'drep-pager',
+        idField: 'delivery_id',
+        gate: { title: 'The report is not loaded',
+                text: 'Pick the dates above, or press Load Data for this month so far.',
+                button: 'Load Data' },
 
-    // a fresh read: the dates may have changed
-    await first.open();
+        load: async () => {
+            const report = await fetchDeliveryReport('dhand-from', 'dhand-to');
+            return report.deliveries.filter((d) => d.status === 'Delivered' && d.delivered_at);
+        },
 
-    const second = getDataPanel('driver-report-pay');
-    if (second && driverReport) {
-        second.fromReport = true;
-        await second.open();
-    }
+        match: (d, query) => prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query),
+
+        renderRow: (d, index) =>
+            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
+            '<td class="cell-id">#' + d.delivery_id + '</td>' +
+            '<td class="cell-id">' + escapeHtml(String(d.delivered_at).slice(0, 10)) + '</td>' +
+            '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
+            '<td>' + escapeHtml(d.delivery_address) + '</td>' +
+            '<td class="cell-num">' + peso(d.final_amount) + '</td>' +
+            '<td class="cell-num' + (Number(d.balance_due) > 0 ? ' cell-due' : '') + '">' + peso(d.balance_due) + '</td></tr>'
+    });
+
+    // Payments Collected: the date is the day the payment was taken
+    createDataPanel({
+        key: 'driver-report-pay',
+        inputs: ['dpay-from', 'dpay-to'],
+        tableId: 'drep-pay-table',
+        columns: 5,
+        pagerId: 'drep-pay-pager',
+        idField: 'payment_id',
+        gate: { title: 'The report is not loaded',
+                text: 'Pick the dates above, or press Load Data for this month so far.',
+                button: 'Load Data' },
+
+        load: async () => {
+            const report = await fetchDeliveryReport('dpay-from', 'dpay-to');
+            return report.payments;
+        },
+
+        match: (p, query) => prefixMatch([p.customer_name, p.payment_method, p.reference_no], query),
+
+        renderRow: (p, index) =>
+            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
+            '<td class="cell-id">' + escapeHtml(String(p.payment_date).slice(0, 16)) + '</td>' +
+            '<td class="cell-name">' + escapeHtml(p.customer_name) + '</td>' +
+            '<td>' + escapeHtml(p.payment_method) + '</td>' +
+            '<td>' + (p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>') + '</td>' +
+            '<td class="cell-num">' + peso(p.amount) + '</td></tr>'
+    });
 }
 
 // ==========================================

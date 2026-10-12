@@ -257,8 +257,7 @@ function renderCatalog(rows, keyword) {
     // one page needs no pager; the count pill already says how many
     let pager = '';
     if (pages > 1) {
-        pager = '<div class="pager"><span class="pager-info">Showing ' + (start + 1) + '&ndash;' +
-              (start + slice.length) + ' of ' + rows.length + '</span>' +
+        pager = '<div class="pager">' +
               '<div class="pager-controls">' +
                   '<button type="button" class="btn btn-sm" onclick="catalogGo(-1)"' +
                       (catalogPage === 1 ? ' disabled' : '') + '>Previous</button>' +
@@ -2253,6 +2252,8 @@ async function openReceipt(saleId) {
             value: peso(s.penalty_amount)
         });
     }
+    // refunds that came off what the customer owed
+    if (Number(s.refunded_amount) > 0) totals.push({ label: 'Refunded', value: '-' + peso(s.refunded_amount) });
     totals.push({ label: 'Tendered', value: peso(s.amount_paid) });
     totals.push({ label: 'Change', value: peso(s.change_given) });
 
@@ -2802,8 +2803,18 @@ async function handleIssueRefund(event) {
         const result = await response.json();
         if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
 
+        // where the money went: off what the customer owes first, the rest is cash to hand back
+        const offBalance = Number(result.offBalance) || 0;
+        const cashBack = Math.round((data.refundAmount - offBalance) * 100) / 100;
+        let balanceNote = '';
+        if (offBalance > 0) {
+            balanceNote = ' ' + peso(offBalance) + ' came off what the customer owes on sale #' + data.saleId + '.';
+        }
+        if (cashBack > 0) {
+            balanceNote = balanceNote + ' Hand back ' + peso(cashBack) + ' in cash.';
+        }
         notifySuccess('The goods are set aside for the stockroom. The clerk has been asked to inspect ' +
-            'them and will put them back on the shelf or write them off.', 'Refund issued');
+            'them and will put them back on the shelf or write them off.' + balanceNote, 'Refund issued');
 
         form.reset();
         // form.reset() knows nothing about the hidden id, the strip or the suggested figure
@@ -2946,8 +2957,6 @@ function buildSalesPanel() {
         pagerId: 'csales-pager',
         idField: 'sale_id',
         filters: { method: 'all', status: 'all' },
-        // no "Showing 1-8 of N" caption: the pager is Previous, Next and the page
-        pagerInfo: false,
 
         gate: {
             title: 'No sales loaded',
@@ -3346,12 +3355,11 @@ function renderCustomerUnpaid() {
             escapeHtml(String(row.sale_date).slice(0, 10)) +
                 ' <span class="muted">' + escapeHtml(row.payment_method) + '</span>',
             '<span class="cell-due">' + peso(row.balance_due) + '</span>' +
-                (Number(row.penalty_amount) > 0
-                    ? '<span class="cell-sub">incl. ' + peso(row.penalty_amount) + ' penalty</span>' : ''),
+                (penaltyInBalance(row) > 0
+                    ? '<span class="cell-sub">incl. ' + peso(penaltyInBalance(row)) + ' penalty</span>' : ''),
             debtDueCell(row)
         ]), [2], {
             empty: 'Nothing is owed on any sale.',
-            noun: 'sale',
             // the row itself opens the payment form for that sale
             rowAttrs: (index) => 'class="row-clickable" title="Take a payment on this sale" ' +
                 'onclick="payCustomerSale(' + customerOpenSales[index].sale_id + ')"'
@@ -3619,8 +3627,7 @@ function renderCustomerHistory() {
                 ? '<span class="cell-due">' + peso(p.balance_due) + '</span>'
                 : '<span class="muted">Paid</span>'
         ]), [2, 3], {
-            empty: emptyHistoryNote('Nothing bought yet.', from, to, status !== 'all' || from || to),
-            noun: 'sale', info: false
+            empty: emptyHistoryNote('Nothing bought yet.', from, to, status !== 'all' || from || to)
         });
 }
 
@@ -3650,8 +3657,7 @@ function renderCustomerPayments() {
             escapeHtml(p.payment_method) +
                 (p.sale_id ? ' <span class="muted">#' + p.sale_id + '</span>' : '')
         ]), [1], {
-            empty: emptyHistoryNote('No payments recorded.', from, to, how !== 'all' || from || to),
-            noun: 'payment', info: false
+            empty: emptyHistoryNote('No payments recorded.', from, to, how !== 'all' || from || to)
         });
 }
 

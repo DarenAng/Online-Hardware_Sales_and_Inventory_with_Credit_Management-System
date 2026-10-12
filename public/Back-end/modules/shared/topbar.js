@@ -45,7 +45,6 @@ function buildTopbarCorner() {
                 <div>
                     <span class="account-drop-name" data-current-fullname>User</span>
                     <span class="account-drop-role" data-current-role>Role</span>
-                    <span class="account-drop-mail" data-current-email>No email</span>
                 </div>
             </div>
             <!-- ONE DOOR, NOT THREE

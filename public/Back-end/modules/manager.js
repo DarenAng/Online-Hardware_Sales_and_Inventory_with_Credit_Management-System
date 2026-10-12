@@ -1977,7 +1977,7 @@ function renderCreditHistory(data) {
             Number(p.balance_due) > 0
                 ? '<span class="cell-due">' + peso(p.balance_due) + '</span>'
                 : '<span class="muted">Paid</span>'
-        ]), [2, 3], { empty: 'Nothing bought yet.', noun: 'sale' });
+        ]), [2, 3], { empty: 'Nothing bought yet.' });
 
     const payments = pagedTable('mgr-payments', ['Date', 'Amount', 'How', 'Against'],
         data.payments.map((p) => [
@@ -1985,7 +1985,7 @@ function renderCreditHistory(data) {
             peso(p.amount),
             escapeHtml(p.payment_method),
             p.sale_id ? '#' + p.sale_id : '<span class="muted">On account</span>'
-        ]), [1], { empty: 'No payments recorded.', noun: 'payment' });
+        ]), [1], { empty: 'No payments recorded.' });
 
     let requests;
     if (data.requests.length === 0) {
@@ -2000,7 +2000,7 @@ function renderCreditHistory(data) {
                     peso(r.requested_limit),
                     escapeHtml(r.status) + (r.decided_by ? ' <span class="muted">' +
                         escapeHtml(r.decided_by) + '</span>' : '')
-                ]), [1, 2], { empty: 'No requests yet.', noun: 'request' }) + '</div>';
+                ]), [1, 2], { empty: 'No requests yet.' }) + '</div>';
     }
 
     box.innerHTML =
@@ -2601,6 +2601,9 @@ async function openSaleDetail(saleId) {
                     '<span class="muted">' + penaltyRateWord(s.penalty_rate) + ' a month for ' + s.penalty_months +
                     (Number(s.penalty_months) === 1 ? ' month' : ' months') + ' overdue, last charged ' +
                     escapeHtml(String(s.penalty_applied_at || '').slice(0, 10)) + '</span>')
+                : '') +
+            (Number(s.refunded_amount) > 0
+                ? detailField('Refunded', peso(s.refunded_amount) + ' <span class="muted">came off what the customer owed</span>')
                 : '') +
             detailField('Amount Due', peso(saleAmountDue(s))) +
             detailField('Amount Paid', peso(s.amount_paid)) +

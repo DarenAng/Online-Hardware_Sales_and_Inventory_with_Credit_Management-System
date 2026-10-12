@@ -364,13 +364,18 @@ CREATE TABLE sales (
     -- month a Credit sale is past its due date still owing: the rate it was
     -- last charged at, how many months have been charged, what they add up
     -- to, and when the last one was. amount_due is the bill with the
-    -- penalty on it, and is what every balance is measured against;
-    -- final_amount stays the sale itself, for the sales figures.
+    -- penalty on it, less any refund, and is what every balance is measured
+    -- against; final_amount stays the sale itself, for the sales figures.
     penalty_rate DECIMAL(5,2) NULL,
     penalty_months INT NOT NULL DEFAULT 0,
     penalty_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     penalty_applied_at TIMESTAMP NULL,
-    amount_due DECIMAL(12,2) AS (total_amount - discount + penalty_amount) STORED,
+    -- The part of the refunds filed on this sale that came off what the
+    -- customer owes (sp_file_return_report). A refund bigger than the balance
+    -- is only taken off up to the balance; the rest is cash handed back, so
+    -- amount_due never falls below amount_paid.
+    refunded_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    amount_due DECIMAL(12,2) AS (total_amount - discount + penalty_amount - refunded_amount) STORED,
     payment_method ENUM('Cash','Cheque','GCash','PayMaya','PayPal','Bank Transfer','COD','Credit') NOT NULL,
     payment_status ENUM('Paid','Partial','Unpaid') NOT NULL DEFAULT 'Paid',
 

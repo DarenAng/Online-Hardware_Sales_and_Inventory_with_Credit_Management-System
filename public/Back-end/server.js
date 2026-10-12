@@ -476,6 +476,37 @@ async function migrateLatePenalties() {
     "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the views and procedures match.");
 }
 
+// A refund on a sale comes off what the customer owes: sales.refunded_amount
+// holds the part of the refunds that did, and amount_due is worked out from it.
+// public/database/4-MIGRATION-refunds-lower-balance.sql does the same by hand.
+// This only does the column. The procedures that use it are checked and loaded
+// again by loadProceduresIfMissing, from what the database holds (see
+// refundRoutinesAreOld), not from anything remembered while this ran.
+async function migrateRefundedAmount() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME, GENERATION_EXPRESSION FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'sales'
+       AND COLUMN_NAME IN ('refunded_amount', 'amount_due')`,
+    [DB_NAME]
+  );
+  const hasRefunded = columns.some((row) => row.COLUMN_NAME === "refunded_amount");
+  const due = columns.find((row) => row.COLUMN_NAME === "amount_due");
+  const dueUsesIt = due && String(due.GENERATION_EXPRESSION).indexOf("refunded_amount") !== -1;
+  if (hasRefunded && dueUsesIt) return;
+  if (!due) return;   // no amount_due yet: migrateLatePenalties could not add it
+
+  if (!hasRefunded) {
+    // placed before amount_due, which is worked out from it
+    await db.query(
+      "ALTER TABLE sales ADD COLUMN refunded_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER penalty_applied_at");
+  }
+  await db.query(
+    `ALTER TABLE sales MODIFY COLUMN amount_due DECIMAL(12,2)
+       AS (total_amount - discount + penalty_amount - refunded_amount) STORED`);
+  console.log("Added sales.refunded_amount: a refund now comes off what the customer owes " +
+    "(amount_due is worked out from it).");
+}
+
 // The proprietor's name on the invoice head. A database made before it
 // has no column, and sp_update_store_settings fails.
 async function migrateProprietorName() {
@@ -836,9 +867,42 @@ function forgetProcedureCount() {
 // The file drops and recreates views and procedures only; no row is touched.
 const PROCEDURES_FILE = path.join(__dirname, "..", "database", "2-RUN-SECOND-stored-procedures.sql");
 
+// A database that has all the procedures can still hold older versions of the
+// ones the refund change rewrote (the column was added by hand, or by an older
+// copy of this server). The text of the new versions has words the old ones do
+// not: v_refunded_before in sp_file_return_report, refunded_amount in
+// sp_apply_late_penalties, least( in the credit view. Two small reads, and
+// once file 2 has been loaded they all pass, so nothing reloads on later starts.
+// Change the words here if those routines change again.
+async function refundRoutinesAreOld() {
+  const [routines] = await db.query(
+    `SELECT ROUTINE_NAME, ROUTINE_DEFINITION FROM information_schema.ROUTINES
+     WHERE ROUTINE_SCHEMA = ?
+       AND ROUTINE_NAME IN ('sp_file_return_report', 'sp_apply_late_penalties')`,
+    [DB_NAME]
+  );
+  for (const row of routines) {
+    const text = String(row.ROUTINE_DEFINITION || "");
+    if (text === "") continue;   // not readable by this user: do not reload on every start
+    if (row.ROUTINE_NAME === "sp_file_return_report" && text.indexOf("v_refunded_before") === -1) return true;
+    if (row.ROUTINE_NAME === "sp_apply_late_penalties" && text.indexOf("refunded_amount") === -1) return true;
+  }
+
+  const [views] = await db.query(
+    `SELECT VIEW_DEFINITION FROM information_schema.VIEWS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'vw_customer_credit_facts'`,
+    [DB_NAME]
+  );
+  const viewText = views.length > 0 ? String(views[0].VIEW_DEFINITION || "").toLowerCase() : "";
+  if (viewText !== "" && viewText.indexOf("least(") === -1) return true;
+
+  return false;
+}
+
 async function loadProceduresIfMissing() {
   const before = await countProcedures();
-  if (before >= EXPECTED_PROCEDURES) return;
+  const older = before >= EXPECTED_PROCEDURES && await refundRoutinesAreOld();
+  if (before >= EXPECTED_PROCEDURES && !older) return;
 
   let sql;
   try {
@@ -848,8 +912,13 @@ async function loadProceduresIfMissing() {
     return;
   }
 
-  console.log(`${before} of ${EXPECTED_PROCEDURES} stored procedures are loaded; ` +
-    "loading public/database/2-RUN-SECOND-stored-procedures.sql now (views and procedures only, no rows).");
+  if (before >= EXPECTED_PROCEDURES) {
+    console.log("The refund procedures in this database are an older version; loading " +
+      "public/database/2-RUN-SECOND-stored-procedures.sql again (views and procedures only, no rows).");
+  } else {
+    console.log(`${before} of ${EXPECTED_PROCEDURES} stored procedures are loaded; ` +
+      "loading public/database/2-RUN-SECOND-stored-procedures.sql now (views and procedures only, no rows).");
+  }
   try {
     await adminModule.runSqlScript(sql);
     forgetProcedureCount();
@@ -895,6 +964,7 @@ async function migrateDatabase() {
   await migratePurchaseOrderApproval();
   await migratePackSizes();
   await migrateLatePenalties();
+  await migrateRefundedAmount();
   await migrateProprietorName();
   await migrateReturnInspection();
   await migrateBankDetails();

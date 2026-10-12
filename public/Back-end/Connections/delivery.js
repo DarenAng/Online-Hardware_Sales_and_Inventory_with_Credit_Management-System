@@ -79,10 +79,12 @@ function registerDeliveryRoutes(app, deps) {
               si.quantity AS base_quantity, u.unit_name AS base_unit,
               si.unit_price, si.subtotal, p.product_name,
               si.product_id, si.sale_id,
+              s.total_amount AS sale_total, s.final_amount AS sale_final,
               (SELECT COALESCE(SUM(r.quantity), 0) FROM returned_items r
                WHERE r.sale_id = si.sale_id AND r.product_id = si.product_id
                  AND r.report_type IN ('Refunded', 'Return')) AS refunded_quantity
        FROM deliveries d
+       JOIN sales s ON s.sale_id = d.sale_id
        JOIN sale_items si ON si.sale_id = d.sale_id
        JOIN products p ON p.product_id = si.product_id
        LEFT JOIN units u ON u.unit_id = p.unit_id
