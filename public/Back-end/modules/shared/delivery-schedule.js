@@ -121,7 +121,7 @@ const SCHEDULE_GROUPS = [
     { key: 'today',    label: 'Today',       tone: 'is-today',    note: 'Due today.' },
     { key: 'tomorrow', label: 'Tomorrow',    tone: '',            note: 'Due tomorrow.' },
     { key: 'later',    label: 'Later',       tone: '',            note: 'Due after tomorrow.' },
-    { key: 'unset',    label: 'No date yet', tone: '',            note: 'Booked without a day to go out on.' }
+    { key: 'unset',    label: 'No date yet', tone: '',            note: 'No day set to go out on yet.' }
 ];
 
 function scheduleDayOf(stamp) {
@@ -258,7 +258,7 @@ function renderDeliverySchedule() {
               '<p>Nothing on the schedule fits the search and filters above.</p></div>'
             : '<div class="empty-state">' +
               '<h4>Nothing is waiting to go out</h4>' +
-              '<p>Every delivery booked has been delivered, or has failed and been closed.</p></div>';
+              '<p>Every delivery has been delivered, or has failed and been closed.</p></div>';
         return;
     }
 

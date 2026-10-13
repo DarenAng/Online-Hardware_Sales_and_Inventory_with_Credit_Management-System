@@ -123,16 +123,19 @@
     table thead { display: none; }
     table tbody { display: block; }
 
-    /* the card leads with the name, then the reference */
+    /* the card leads with the name; the other values sit two to a row
+       (label on top, value under it) so a card is short */
     table tbody tr {
-        display: flex;
-        flex-direction: column;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 12px;
+        row-gap: 8px;
         background: var(--surface);
         border: 1px solid var(--line);
         border-left: var(--rule) solid var(--line);
         border-radius: var(--radius);
-        margin-bottom: 10px;
-        padding: 2px 0;
+        margin-bottom: 8px;
+        padding: 10px 12px;
     }
     table tbody tr:nth-child(even) { background: var(--surface); }
     table tbody tr:last-child { margin-bottom: 0; }
@@ -141,24 +144,24 @@
     table tbody tr.row-clickable { border-left-color: var(--go); }
     table tbody tr.row-clickable:hover { background: var(--surface); }
 
-    /* one line per value: its column on the left, the value on the right */
+    /* one small box per value: its column name on top, the value under it */
     table tbody td {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-        gap: 16px;
-        padding: 7px 13px;
+        display: block;
+        min-width: 0;
+        padding: 0;
         border-bottom: none;
-        text-align: right;
+        text-align: left;
+        font-size: 14.5px;
+        overflow-wrap: anywhere;
     }
 
     table tbody td::before {
         content: attr(data-column);
-        flex: 0 0 auto;
-        font-size: 13.5px;
+        display: block;
+        margin-bottom: 1px;
+        font-size: 12px;
         font-weight: 400;
         color: var(--steel-soft);
-        text-align: left;
     }
 
     /* the hover rule from the desktop table would otherwise take this
@@ -173,24 +176,31 @@
         transition: none;
     }
 
-    /* the name of the record leads the card and needs no label */
+    /* the name of the record leads the card across its full width and needs no label */
     table tbody td.cell-name {
         order: -2;
-        display: block;
-        text-align: left;
-        font-size: 17px;
-        padding: 10px 13px 8px;
+        grid-column: 1 / -1;
+        font-size: 16px;
+        padding-bottom: 6px;
         border-bottom: 1px solid var(--line);
-        margin-bottom: 2px;
     }
     table tbody td.cell-name::before { display: none; }
 
-    table tbody td.cell-num { font-size: 15px; }
-    table tbody td.cell-id  { order: -1; font-size: 14px; }
+    /* numbers stay on the right, with their label */
+    table tbody td.cell-num { text-align: right; font-size: 14.5px; }
+    table tbody td.cell-id  { order: -1; font-size: 13.5px; }
+
+    /* An odd number of values would leave the last one alone on its line
+       with an empty space beside it, so it takes the whole line instead.
+       (The name has a line of its own, so it is not counted.) */
+    table tbody tr:has(td.cell-name) td:last-child:nth-child(even),
+    table tbody tr:not(:has(td.cell-name)) td:last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+    }
 
     /* "Loading..." and "nothing here" span the table and name no column */
     table tbody td:not([data-column]) {
-        display: block;
+        grid-column: 1 / -1;
         text-align: center;
         padding: 22px 13px;
     }
@@ -203,8 +213,8 @@
     }
 
     /* inside a popup the same thing happens, one step smaller */
-    .mini-table tbody tr { margin-bottom: 8px; }
-    .mini-table tbody td { padding: 6px 11px; }
+    .mini-table tbody tr { margin-bottom: 8px; padding: 8px 11px; }
+    .mini-table tbody td { padding: 0; }
 
     /* ---------- popups become sheets ---------- */
     .modal {
@@ -284,7 +294,6 @@
     .topbar { gap: 8px; }
     .topbar-title { font-size: 17px; }
     .filter-chip { flex: 1 1 auto; text-align: center; }
-    table tbody td { gap: 10px; }
 }
 
 /* ==========================================================================

@@ -42,7 +42,7 @@ function registerDeliveryRoutes(app, deps) {
 
     try {
       const [rows] = await db.query(
-        `SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks,
+        `SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks, d.cashier_remarks,
               d.scheduled_date, d.booked_date, d.delivered_at, d.updated_at,
               ${DELIVERY_CONTACT_SQL} AS customer_name,
               ${DELIVERY_PHONE_SQL} AS customer_phone,
@@ -110,7 +110,7 @@ function registerDeliveryRoutes(app, deps) {
 
     try {
       const [rows] = await db.query(
-        `SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks,
+        `SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks, d.cashier_remarks,
               d.scheduled_date, d.booked_date, d.delivered_at, d.updated_at, d.delivery_staff_id,
               ${DELIVERY_CONTACT_SQL} AS customer_name,
               ${DELIVERY_PHONE_SQL} AS customer_phone,
@@ -221,7 +221,7 @@ function registerDeliveryRoutes(app, deps) {
 
     try {
       const [deliveries] = await db.query(
-        `SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks,
+        `SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks, d.cashier_remarks,
               d.scheduled_date, d.booked_date, d.delivered_at,
               ${DELIVERY_CONTACT_SQL} AS customer_name,
               s.final_amount, s.amount_paid, s.payment_method, s.payment_status,

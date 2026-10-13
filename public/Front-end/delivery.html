@@ -118,12 +118,24 @@
                             <div>
                                 <h3>Deliveries Handled</h3>
                             </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-print-report="driver-report"
+                                        onclick="printDriverReport('driver-report')" disabled>Print / PDF</button>
+                            </div>
                         </div>
                         <div class="panel-toolbar">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="dhand-search"
                                        placeholder="Search by customer or destination"
                                        oninput="dataPanelSearchInput('driver-report', event)" onkeydown="dataPanelSearchKey('driver-report', event)" title="Type one letter or more; it finds words that start with it">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="dhand-balance">Balance</label>
+                                <select id="dhand-balance" onchange="dataPanelFilter('driver-report', 'balance', this.value)">
+                                    <option value="all">All</option>
+                                    <option value="paid">Paid in full</option>
+                                    <option value="owing">With balance</option>
+                                </select>
                             </div>
                             <div class="toolbar-field toolbar-date">
                                 <label for="dhand-from">From</label>
@@ -153,12 +165,27 @@
                             <div>
                                 <h3>Payments Collected</h3>
                             </div>
+                            <div class="panel-actions no-print">
+                                <button type="button" class="btn btn-sm" data-print-report="driver-report-pay"
+                                        onclick="printDriverReport('driver-report-pay')" disabled>Print / PDF</button>
+                            </div>
                         </div>
                         <div class="panel-toolbar">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="dpay-search"
                                        placeholder="Search by customer, method or reference"
                                        oninput="dataPanelSearchInput('driver-report-pay', event)" onkeydown="dataPanelSearchKey('driver-report-pay', event)" title="Type one letter or more; it finds words that start with it">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="dpay-method">Method</label>
+                                <select id="dpay-method" onchange="dataPanelFilter('driver-report-pay', 'method', this.value)">
+                                    <option value="all">All</option>
+                                    <option value="Cash">Cash</option>
+                                    <option value="GCash">GCash</option>
+                                    <option value="PayMaya">PayMaya</option>
+                                    <option value="Cheque">Cheque</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                </select>
                             </div>
                             <div class="toolbar-field toolbar-date">
                                 <label for="dpay-from">From</label>

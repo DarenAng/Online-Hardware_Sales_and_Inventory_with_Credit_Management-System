@@ -3,8 +3,12 @@
 let detailPages = [];
 let detailIndex = 0;
 
-function detailField(label, value) {
-    return '<div class="detail-item"><span class="detail-label">' + label +
+// locked: optional; true greys the row out (a fact the reader cannot change here)
+function detailField(label, value, locked) {
+    const lockedClass = locked ? ' is-locked' : '';
+    const lockedTitle = locked ? ' title="Cannot be changed here"' : '';
+
+    return '<div class="detail-item' + lockedClass + '"' + lockedTitle + '><span class="detail-label">' + label +
            '</span><span class="detail-value">' + value + '</span></div>';
 }
 

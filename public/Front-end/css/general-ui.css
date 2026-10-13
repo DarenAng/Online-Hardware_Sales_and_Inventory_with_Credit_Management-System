@@ -1430,6 +1430,18 @@ html:has(.modal.open) { overflow: hidden; }
 /* a badge in a narrow cell wraps its words rather than the cell's edge */
 .detail-value .badge { white-space: normal; }
 
+/* a row the reader cannot change from here (My Account): light grey, greyed words */
+.detail-item.is-locked { background: var(--paper); cursor: not-allowed; }
+.detail-item.is-locked .detail-label,
+.detail-item.is-locked .detail-value { color: var(--steel-soft); }
+
+/* the email in My Account's Edit Details tab is shown, not typed in */
+#account-modal input[readonly] {
+    background: var(--paper);
+    color: var(--steel-soft);
+    cursor: not-allowed;
+}
+
 /* whatever follows the facts stands clear of them */
 .detail-grid + form,
 .detail-grid + .history-split,
@@ -2365,8 +2377,13 @@ html:has(.modal.open) { overflow: hidden; }
     .pager-controls { justify-content: space-between; }
     .pager-controls .btn { flex: 1; }
 
-    /* every field takes the width, and the buttons share a line of their own */
-    .panel-toolbar .toolbar-field { flex: 1 1 100%; }
+    /* the fields sit two to a line (one alone takes the whole line),
+       and the buttons share a line of their own */
+    .panel-toolbar .toolbar-field { flex: 1 1 calc(50% - 5px); min-width: 0; order: 2; }
+    /* the From and To dates come first so they always share a line;
+       the buttons come last */
+    .panel-toolbar .toolbar-date { order: 1; }
+    .panel-toolbar > .btn { order: 3; }
     .panel-toolbar .toolbar-field select,
     .panel-toolbar .toolbar-field input { width: 100%; min-width: 0; }
     .panel-toolbar > .toolbar-spacer { display: none; }
@@ -2569,6 +2586,8 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
     tr { break-inside: avoid; page-break-inside: avoid; }
 
     .badge, .pill { border: 1px solid #999; color: #000 !important; }
+    /* rows just drawn for the printout are not caught at the start of their fade-in */
+    .row-reveal { animation: none !important; opacity: 1 !important; }
     .kpi-card { border: 1px solid #ccc; break-inside: avoid; }
     .kpi-go { display: none; }
     .chart-svg, .chart-single, .chart-key { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

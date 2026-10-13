@@ -507,6 +507,34 @@ async function migrateRefundedAmount() {
     "(amount_due is worked out from it).");
 }
 
+// The cashier's note is kept in deliveries.cashier_remarks, because
+// deliveries.remarks is overwritten by every driver or manager status note.
+// A Pending delivery has not been written over yet, so its remarks are still
+// the cashier's note and are copied over. Older deliveries that already moved
+// on lost the cashier's note, so those stay empty.
+async function migrateCashierRemarks() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'deliveries'
+       AND COLUMN_NAME IN ('delivery_id', 'cashier_remarks', 'booking_remarks')`,
+    [DB_NAME]
+  );
+  const names = columns.map((row) => row.COLUMN_NAME);
+  if (names.indexOf("delivery_id") === -1) return;     // no deliveries table yet
+  if (names.indexOf("cashier_remarks") !== -1) return;  // already added
+
+  // an earlier test version named this column booking_remarks: rename it
+  if (names.indexOf("booking_remarks") !== -1) {
+    await db.query("ALTER TABLE deliveries RENAME COLUMN booking_remarks TO cashier_remarks");
+    console.log("Renamed deliveries.booking_remarks to cashier_remarks.");
+    return;
+  }
+
+  await db.query("ALTER TABLE deliveries ADD COLUMN cashier_remarks TEXT NULL AFTER remarks");
+  await db.query("UPDATE deliveries SET cashier_remarks = remarks WHERE status = 'Pending'");
+  console.log("Added deliveries.cashier_remarks to keep the cashier's note apart from status notes.");
+}
+
 // The proprietor's name on the invoice head. A database made before it
 // has no column, and sp_update_store_settings fails.
 async function migrateProprietorName() {
@@ -965,6 +993,7 @@ async function migrateDatabase() {
   await migratePackSizes();
   await migrateLatePenalties();
   await migrateRefundedAmount();
+  await migrateCashierRemarks();
   await migrateProprietorName();
   await migrateReturnInspection();
   await migrateBankDetails();
@@ -2891,6 +2920,11 @@ app.put("/api/me", notOwnDetailsIfAdmin, async (request, response) => {
     return response.status(403).json({
       error: "Your sign-in email is changed by the System Administrator from the staff directory."
     });
+  }
+
+  // the phone number is required on your own details
+  if (!phone || String(phone).trim() === "") {
+    return response.status(400).json({ error: "A phone number is required" });
   }
 
   const phoneProblem = phoneComplaint(phone);

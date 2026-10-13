@@ -64,6 +64,31 @@
 }
 
 /* ==========================================================================
+   ON PAPER -- Print / PDF on a report (printDriverReport adds these two blocks
+   just before printing and takes them off after). They are never on the screen.
+   ========================================================================== */
+.driver-print-heading,
+.driver-print-totals { display: none; }
+
+@media print {
+    /* the heading block names the report, so the card's own title is not printed twice */
+    body.is-printing .panel-head h3 { display: none; }
+    body.is-printing .driver-print-heading { display: block; margin-bottom: 12px; }
+    body.is-printing .driver-print-heading h2 { font-size: 18px; margin-bottom: 6px; }
+    body.is-printing .driver-print-heading p { margin: 0 0 2px; font-size: 12px; }
+
+    body.is-printing .driver-print-totals {
+        display: block;
+        margin-top: 18px;
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+    body.is-printing .driver-print-totals h3 { font-size: 14px; margin-bottom: 6px; }
+    body.is-printing .driver-print-totals table { width: auto; min-width: 280px; }
+    body.is-printing .driver-print-totals td { padding: 4px 14px 4px 0; }
+}
+
+/* ==========================================================================
    ON A PHONE
    ========================================================================== */
 @media (max-width: 640px) {

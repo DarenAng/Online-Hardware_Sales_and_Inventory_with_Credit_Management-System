@@ -424,6 +424,9 @@ CREATE TABLE deliveries (
     contact_phone VARCHAR(30) NULL,
     status ENUM('Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed') NOT NULL DEFAULT 'Pending',
     remarks TEXT,
+    -- the cashier's note written when the delivery was made; remarks above is
+    -- overwritten by the driver's or manager's latest status note
+    cashier_remarks TEXT NULL,
     -- the day it was written up, kept apart from the day it is meant to arrive
     booked_date DATE NULL,
     -- "Tuesday 2pm", not "Tuesday": the hour matters when moving a delivery

@@ -2716,9 +2716,9 @@ PROC_BODY: BEGIN
     START TRANSACTION;
 
     INSERT INTO deliveries (sale_id, delivery_address, contact_name, contact_phone,
-                            status, remarks, booked_date, scheduled_date)
+                            status, remarks, cashier_remarks, booked_date, scheduled_date)
     VALUES (p_sale_id, p_address, v_contact_name, v_contact_phone,
-            'Pending', p_remarks, v_booked, p_scheduled_date);
+            'Pending', p_remarks, p_remarks, v_booked, p_scheduled_date);
 
     SET p_delivery_id = LAST_INSERT_ID();
 
@@ -2802,14 +2802,15 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- A run moves forward through its stages. It does not skip backwards.
+    -- A run moves forward one stage at a time. Delayed and Failed only
+    -- happen once it is Out for Delivery; a Delayed run goes back out or fails.
     SET v_allowed =
         CASE v_current
-            WHEN 'Pending'          THEN p_status IN ('In Transit', 'Out for Delivery', 'Delayed', 'Failed')
-            WHEN 'In Transit'       THEN p_status IN ('Out for Delivery', 'Delayed', 'Failed')
+            WHEN 'Pending'          THEN p_status IN ('In Transit')
+            WHEN 'In Transit'       THEN p_status IN ('Out for Delivery')
             WHEN 'Out for Delivery' THEN p_status IN ('Delivered', 'Delayed', 'Failed')
-            WHEN 'Delayed'          THEN p_status IN ('In Transit', 'Out for Delivery', 'Failed')
-            WHEN 'Failed'           THEN p_status IN ('Pending', 'In Transit', 'Out for Delivery')
+            WHEN 'Delayed'          THEN p_status IN ('Out for Delivery', 'Failed')
+            WHEN 'Failed'           THEN p_status IN ('Pending')
             ELSE 0
         END;
 

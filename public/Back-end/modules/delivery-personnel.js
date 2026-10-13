@@ -9,7 +9,8 @@
 //   - taking a delivery (the status buttons live in the popup, shared/deliveries.js)
 //   - Receive Payment: the popup that collects the money and marks the delivery Delivered
 //   - refunding items the customer turns away at the door
-//   - the driver's two reports (Deliveries Handled, Payments Collected), each with its own dates
+//   - the driver's two reports (Deliveries Handled, Payments Collected), each with its own dates,
+//     a filter and a Print / PDF button
 //   - the page start-up code at the very bottom ("DELIVERY PAGE BOOT")
 // ============================================================
 let driverDeliveries = [];
@@ -86,7 +87,7 @@ function isActive(d) {
 }
 
 // Every active delivery that is the driver's own or nobody's yet, so a new
-// booking shows up at once. The list is always this whole list.
+// delivery shows up at once. The list is always this whole list.
 function pendingForDriver(d) {
     if (!isActive(d)) return false;
     return isMine(d) || d.delivery_staff_id == null;
@@ -536,11 +537,16 @@ function reportRange(fromId, toId) {
     return { from: fromBox ? fromBox.value : '', to: toBox ? toBox.value : '' };
 }
 
-async function fetchDeliveryReport(fromId, toId) {
+// The dates each report was last read with, by panel key. A printout says
+// these, not whatever the date boxes hold now (they may be changed but not reloaded).
+const loadedReportRanges = {};
+
+async function fetchDeliveryReport(key, fromId, toId) {
     const user = getCurrentUser();
     if (!user) throw new Error('not signed in');
 
     const range = reportRange(fromId, toId);
+    loadedReportRanges[key] = range;
     return await apiGetDeliveryReport(user.staff_id, range.from, range.to);
 }
 
@@ -569,16 +575,24 @@ function buildReportPanels() {
         columns: 6,
         pagerId: 'drep-pager',
         idField: 'delivery_id',
+        // the Balance box narrows the rows already loaded
+        filters: { balance: 'all' },
         gate: { title: 'The report is not loaded',
                 text: 'Pick the dates above, or press Load Data for this month so far.',
                 button: 'Load Data' },
 
         load: async () => {
-            const report = await fetchDeliveryReport('dhand-from', 'dhand-to');
+            const report = await fetchDeliveryReport('driver-report', 'dhand-from', 'dhand-to');
             return report.deliveries.filter((d) => d.status === 'Delivered' && d.delivered_at);
         },
 
         match: (d, query) => prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query),
+
+        filter: (d, filters) => {
+            if (filters.balance === 'paid' && Number(d.balance_due) > 0) return false;
+            if (filters.balance === 'owing' && !(Number(d.balance_due) > 0)) return false;
+            return true;
+        },
 
         renderRow: (d, index) =>
             '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
@@ -598,16 +612,23 @@ function buildReportPanels() {
         columns: 5,
         pagerId: 'drep-pay-pager',
         idField: 'payment_id',
+        // the Method box narrows the rows already loaded
+        filters: { method: 'all' },
         gate: { title: 'The report is not loaded',
                 text: 'Pick the dates above, or press Load Data for this month so far.',
                 button: 'Load Data' },
 
         load: async () => {
-            const report = await fetchDeliveryReport('dpay-from', 'dpay-to');
+            const report = await fetchDeliveryReport('driver-report-pay', 'dpay-from', 'dpay-to');
             return report.payments;
         },
 
         match: (p, query) => prefixMatch([p.customer_name, p.payment_method, p.reference_no], query),
+
+        filter: (p, filters) => {
+            if (filters.method !== 'all' && p.payment_method !== filters.method) return false;
+            return true;
+        },
 
         renderRow: (p, index) =>
             '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
@@ -619,6 +640,141 @@ function buildReportPanels() {
     });
 }
 
+// ---------- printing a report ----------
+// Print / PDF opens the browser's print dialogue; "Save as PDF" is in that dialogue.
+// Every row the filters leave is printed, under a small heading and above a Totals table.
+// What each report needs for its printout:
+const DRIVER_PRINTS = {
+    'driver-report': {
+        title: 'Deliveries Handled', searchId: 'dhand-search',
+        filterName: 'Balance', filterKey: 'balance',
+        filterLabels: { all: 'All', paid: 'Paid in full', owing: 'With balance' }
+    },
+    'driver-report-pay': {
+        title: 'Payments Collected', searchId: 'dpay-search',
+        filterName: 'Method', filterKey: 'method',
+        filterLabels: { all: 'All' }   // a method is printed as its own name
+    }
+};
+
+// set while a printout is on the page; calling it puts the screen back
+let driverPrintRestore = null;
+
+// A Print / PDF button works only when its report is loaded and has rows
+function syncDriverPrintButtons() {
+    document.querySelectorAll('[data-print-report]').forEach((button) => {
+        const panel = getDataPanel(button.dataset.printReport);
+        const ready = !!panel && panel.state === 'ready' && panel.visible.length > 0;
+        button.disabled = !ready;
+        button.title = ready ? 'Print every row shown, or save it as a PDF' : 'Load data first';
+    });
+}
+
+// the lines above the table: report name, driver, dates and the filter chosen
+function driverPrintHeading(key, panel) {
+    const info = DRIVER_PRINTS[key];
+    const user = getCurrentUser();
+    const range = loadedReportRanges[key] || { from: '', to: '' };
+
+    // the filter as the panel holds it, in words
+    const filterValue = panel.filters[info.filterKey];
+    const filterText = info.filterLabels[filterValue] || filterValue;
+
+    let searchLine = '';
+    // the words as they were typed in the search box (panel.query is lower-cased)
+    const searchBox = document.getElementById(info.searchId);
+    if (panel.query && searchBox) searchLine = '<p>Search: ' + escapeHtml(searchBox.value.trim()) + '</p>';
+
+    const block = document.createElement('div');
+    block.className = 'driver-print-heading';
+    block.innerHTML =
+        '<h2>' + escapeHtml(info.title) + '</h2>' +
+        '<p>Driver: ' + escapeHtml(staffName(user)) + '</p>' +
+        '<p>From ' + escapeHtml(range.from) + ' to ' + escapeHtml(range.to) + '</p>' +
+        '<p>' + escapeHtml(info.filterName) + ': ' + escapeHtml(filterText) + '</p>' +
+        searchLine;
+    return block;
+}
+
+// the Totals table for the rows that are printed: [label, value] lines
+function driverPrintTotals(key, rows) {
+    const lines = [];
+    let money = 0;
+
+    if (key === 'driver-report') {
+        let balance = 0;
+        rows.forEach((d) => {
+            money = money + (Number(d.final_amount) || 0);
+            balance = balance + (Number(d.balance_due) || 0);
+        });
+        lines.push(['Deliveries', String(rows.length)]);
+        lines.push(['Order Total', peso(money)]);
+        lines.push(['Balance', peso(balance)]);
+    } else {
+        rows.forEach((p) => { money = money + (Number(p.amount) || 0); });
+        lines.push(['Payments', String(rows.length)]);
+        lines.push(['Amount', peso(money)]);
+    }
+
+    const block = document.createElement('div');
+    block.className = 'driver-print-totals';
+    block.innerHTML = '<h3>Totals</h3><table><tbody>' +
+        lines.map((line) =>
+            '<tr><td>' + escapeHtml(line[0]) + '</td><td class="cell-num">' + escapeHtml(line[1]) + '</td></tr>'
+        ).join('') +
+        '</tbody></table>';
+    return block;
+}
+
+function printDriverReport(key) {
+    // a print still waiting to be put back (a second press) is finished first
+    if (driverPrintRestore) driverPrintRestore();
+
+    const panel = getDataPanel(key);
+    const info = DRIVER_PRINTS[key];
+    if (!panel || !info || panel.state !== 'ready' || panel.visible.length === 0) {
+        notifyWarning('Load the report first. There is nothing on this screen to print yet.', 'Nothing to print');
+        return;
+    }
+
+    // every filtered row goes on paper, not just the page being read
+    const savedPageSize = panel.pageSize;
+    const savedPage = panel.page;
+    panel.pageSize = Math.max(1, panel.visible.length);
+    panel.page = 1;
+    panel.render();
+
+    // the heading goes under the title, the Totals table after the rows
+    const card = document.getElementById(panel.config.tableId).closest('.card');
+    const head = driverPrintHeading(key, panel);
+    const totals = driverPrintTotals(key, panel.visible);
+    card.querySelector('.panel-head').after(head);
+    card.appendChild(totals);
+
+    document.body.classList.add('is-printing');
+
+    // afterprint puts the screen back (no timer: a phone returns from print() at once)
+    driverPrintRestore = () => {
+        if (!driverPrintRestore) return;
+        driverPrintRestore = null;
+        document.body.classList.remove('is-printing');
+        head.remove();
+        totals.remove();
+        panel.pageSize = savedPageSize;
+        if (panel.state === 'ready') {
+            panel.page = savedPage;
+            panel.render();
+        }
+    };
+
+    window.addEventListener('afterprint', function once() {
+        window.removeEventListener('afterprint', once);
+        if (driverPrintRestore) driverPrintRestore();
+    });
+
+    window.print();
+}
+
 // ==========================================
 // DELIVERY PAGE BOOT
 // ==========================================
@@ -626,6 +782,10 @@ if (window.location.pathname.toLowerCase().endsWith('delivery.html')) {
     document.addEventListener('DOMContentLoaded', function () {
         buildDriverPanels();
         buildReportPanels();
+
+        // the Print / PDF buttons follow the reports: on once rows are showing
+        document.addEventListener('datapanel:change', syncDriverPrintButtons);
+        syncDriverPrintButtons();
 
         // the schedule follows what the administrator switched on for this role
         configureDeliverySchedule({ showPanel: (panelId, title) => showDeliveryPanel(panelId, title) });

@@ -21,15 +21,16 @@
 // these routes run.
 // ============================================================
 
-// Where a delivery can go from each status: the next step, plus Delayed and
-// Failed, which can happen at any point on the way. The browser has the same list
+// Where a delivery can go from each status: one step at a time. Delayed and
+// Failed can only happen once the delivery is Out for Delivery; a Delayed
+// delivery goes back out or fails. The browser has the same list
 // (NEXT_DELIVERY_STATUS in modules/shared/deliveries.js) to pick the buttons.
 const NEXT_DELIVERY_STATUS = {
-  "Pending":          ["In Transit", "Delayed", "Failed"],
-  "In Transit":       ["Out for Delivery", "Delayed", "Failed"],
+  "Pending":          ["In Transit"],
+  "In Transit":       ["Out for Delivery"],
   "Out for Delivery": ["Delivered", "Delayed", "Failed"],
-  "Delayed":          ["In Transit", "Out for Delivery", "Failed"],
-  "Failed":           ["Pending", "In Transit", "Out for Delivery"],
+  "Delayed":          ["Out for Delivery", "Failed"],
+  "Failed":           ["Pending"],
   "Delivered":        []
 };
 const ALL_DELIVERY_STATUSES = Object.keys(NEXT_DELIVERY_STATUS);
@@ -423,6 +424,10 @@ function registerCashierRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
+      // keep the cashier's note apart from the later status notes in remarks
+      await db.query("UPDATE deliveries SET cashier_remarks = ? WHERE delivery_id = ?",
+        [remarks || null, output.delivery_id]);
+
       if (driverId) {
         await db.query("UPDATE deliveries SET delivery_staff_id = ? WHERE delivery_id = ?",
           [driverId, output.delivery_id]);
@@ -652,7 +657,7 @@ function registerCashierRoutes(app, deps) {
       );
 
       const [delivery] = await db.query(
-        `SELECT d.delivery_id, d.status, d.delivery_address, d.scheduled_date, d.delivered_at, d.remarks,
+        `SELECT d.delivery_id, d.status, d.delivery_address, d.scheduled_date, d.delivered_at, d.remarks, d.cashier_remarks,
               st.full_name AS driver_name
        FROM deliveries d
        LEFT JOIN staff st ON st.staff_id = d.delivery_staff_id

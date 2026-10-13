@@ -1,16 +1,17 @@
 // deliveries.js -- delivery records
 // Loaded by: manager.html, cashier-dashboard.html, delivery.html
 
-// A delivery goes one step at a time: the next step, plus Delayed and Failed,
-// which can happen at any point on the way. The server checks the same list again (PATCH
-// /api/deliveries/:id/status in Connections/cashier.js), so this only avoids
-// offering a move that would come back refused.
+// A delivery goes one step at a time, so the card shows one button: the next step.
+// Delayed and Failed can only happen once the delivery is Out for Delivery (the
+// driver is at the customer); a Delayed delivery goes back out or fails.
+// The server checks the same list again (PATCH /api/deliveries/:id/status in
+// Connections/cashier.js), so this only avoids offering a move that would come back refused.
 const NEXT_DELIVERY_STATUS = {
-    'Pending':          ['In Transit', 'Delayed', 'Failed'],
-    'In Transit':       ['Out for Delivery', 'Delayed', 'Failed'],
+    'Pending':          ['In Transit'],
+    'In Transit':       ['Out for Delivery'],
     'Out for Delivery': ['Delivered', 'Delayed', 'Failed'],
-    'Delayed':          ['In Transit', 'Out for Delivery', 'Failed'],
-    'Failed':           ['Pending', 'In Transit', 'Out for Delivery'],
+    'Delayed':          ['Out for Delivery', 'Failed'],
+    'Failed':           ['Pending'],
     'Delivered':        []
 };
 
@@ -20,15 +21,17 @@ const NEXT_DELIVERY_STATUS = {
 // A step is 'done' (green tick), 'now' (dark, where the delivery is) or '' (not yet).
 function deliveryStepper(d) {
     const stages = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered'];
-    const names = ['Booked', 'In Transit', 'Out for Delivery', 'Delivered'];
+    const names = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered'];
     // plain descriptions that read fine whether the step is done, current or still ahead
     const notes = ['Sale made at the counter.', 'Loaded and on the road.', 'Driver is near the customer.',
         'Paid and handed over.'];
-    const reached = stages.indexOf(d.status);
+    let reached = stages.indexOf(d.status);
+    // a delivery can only be delayed while it is Out for Delivery, so that is where it stopped
+    if (d.status === 'Delayed') reached = stages.indexOf('Out for Delivery');
 
     // Everything before the status is done and the status itself is "now".
-    // The database does not remember where a Delayed or Failed delivery was, so
-    // only Booked is ticked and the rest stay grey.
+    // The database does not remember where a Failed delivery was, so
+    // only Pending is ticked and the rest stay grey.
     const states = [];
     for (let i = 0; i < 4; i++) {
         if (reached === -1) {
@@ -120,15 +123,21 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
     const isDriver = !!user && user.role_name === 'Delivery Personnel';
 
     // No sale number and no driver on any card. Delivered At only shows once it is Delivered.
-    const route = '<div class="detail-grid">' +
+    const routeGrid = '<div class="detail-grid">' +
         detailField('Delivery ID', '#' + d.delivery_id) +
         detailField('Status', statusBadge(d.status)) +
         detailField('Scheduled', escapeHtml(d.scheduled_date || 'Not set')) +
         (d.status === 'Delivered' && d.delivered_at ? detailField('Delivered At', escapeHtml(d.delivered_at)) : '') +
-        '</div><p class="detail-note">' + escapeHtml(d.delivery_address) + '</p>' +
-        // a Delayed or Failed delivery's remarks are already under the progress steps
-        (d.remarks && d.status !== 'Delayed' && d.status !== 'Failed'
-            ? '<p class="detail-note">Remarks: ' + escapeHtml(d.remarks) + '</p>' : '');
+        detailField('Drop-off Address', escapeHtml(d.delivery_address)) +
+        '</div>';
+
+    // Remarks: the note the cashier wrote for this delivery (muted when there is none).
+    // A Delayed or Failed reason shows under the progress steps instead.
+    const cashierRemarks = d.cashier_remarks ? String(d.cashier_remarks).trim() : '';
+    const routeNotes = cashierRemarks
+        ? '<p class="detail-note">Remarks: ' + escapeHtml(cashierRemarks) + '</p>'
+        : '<p class="detail-note"><span class="muted">No remarks.</span></p>';
+    const route = routeGrid + routeNotes;
 
     let money = detailField('Customer', escapeHtml(d.customer_name)) +
         detailField('Phone', d.customer_phone ? escapeHtml(d.customer_phone) : '<span class="muted">Not set</span>') +
@@ -177,8 +186,7 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
             ? '<p class="detail-note">This delivery is closed. Nothing further can be recorded against it.</p>' + archiveBlock
             : '<div class="form-group"><label>Remarks <span class="label-hint">optional</span></label>' +
               '<textarea class="form-control" id="drec-remarks" rows="3" ' +
-              'placeholder="Gate closed, customer not around, rain on the route"></textarea></div>' +
-              '<p class="detail-note">Type a note here if there is one, then pick the new status below.</p>';
+              'placeholder="Gate closed, customer not around, rain on the route"></textarea></div>';
 
         pages.push({ label: 'Update', body: updateBody });
 

@@ -60,12 +60,12 @@ function buildAccountModal() {
                                 <input type="text" id="me-last" name="lastName" class="form-control" required>
                             </div>
                             <div class="form-group">
-                                <label for="me-phone">Phone <span class="label-hint">optional</span></label>
+                                <label for="me-phone">Phone</label>
                                 <div class="phone-field">
                                     <span class="phone-prefix">+63</span>
                                     <input type="text" id="me-phone" name="phone" class="form-control"
                                            inputmode="numeric" autocomplete="tel"
-                                           maxlength="20" placeholder="9XXXXXXXXX"
+                                           maxlength="20" placeholder="9XXXXXXXXX" required
                                            oninput="onPhoneInput(this)">
                                 </div>
                             </div>
@@ -211,22 +211,28 @@ function renderMyAccount() {
     document.getElementById('account-avatar').textContent =
         ((me.first_name || '?')[0] + (me.last_name || '')[0] || '').toUpperCase();
 
+    // Rows the user cannot change from the Edit Details tab are greyed out.
+    // Staff ID, Full Name (made from the three names), the email, the role and
+    // the status are never editable here; the administrator cannot edit any row.
+    const locked = true;
+    const editableRowsLocked = !canEditOwnDetails();   // the rows the user can edit are locked only for the administrator
+
     document.getElementById('account-view').innerHTML =
-        detailRow('Staff ID', '#' + escapeHtml(me.staff_id)) +
-        detailRow('Full Name', escapeHtml(name)) +
-        detailRow('First Name', escapeHtml(me.first_name)) +
+        detailRow('Staff ID', '#' + escapeHtml(me.staff_id), locked) +
+        detailRow('Full Name', escapeHtml(name), locked) +
+        detailRow('First Name', escapeHtml(me.first_name), editableRowsLocked) +
         detailRow('Middle Name', me.middle_name
             ? escapeHtml(me.middle_name)
-            : '<span class="muted">Not set</span>') +
-        detailRow('Last Name', escapeHtml(me.last_name)) +
+            : '<span class="muted">Not set</span>', editableRowsLocked) +
+        detailRow('Last Name', escapeHtml(me.last_name), editableRowsLocked) +
         detailRow('Username / Email', me.email
             ? escapeHtml(me.email)
-            : '<span class="muted">No login account</span>') +
+            : '<span class="muted">No login account</span>', locked) +
         detailRow('Phone', me.phone
             ? '<span class="mono">' + escapeHtml(phoneForDisplay(me.phone)) + '</span>'
-            : '<span class="muted">Not set</span>') +
-        detailRow('Role', escapeHtml(me.role_name)) +
-        detailRow('Account Status', `<span class="badge ${me.is_active ? 'badge-success' : 'badge-danger'}">${me.is_active ? 'Active' : 'Inactive'}</span>`);
+            : '<span class="muted">Not set</span>', editableRowsLocked) +
+        detailRow('Role', escapeHtml(me.role_name), locked) +
+        detailRow('Account Status', `<span class="badge ${me.is_active ? 'badge-success' : 'badge-danger'}">${me.is_active ? 'Active' : 'Inactive'}</span>`, locked);
 
     const form = document.getElementById('account-form');
     form.elements.firstName.value = me.first_name || '';
@@ -255,6 +261,17 @@ async function handleSaveMyProfile(event) {
 
     if (data.firstName === '' || data.lastName === '') {
         notifyWarning('A first name and a last name are both required.', 'Nothing was saved');
+        return;
+    }
+
+    // the phone number is required, and must be a Philippine number
+    if (data.phone === '') {
+        notifyWarning('A phone number is required.', 'Nothing was saved');
+        return;
+    }
+    const phoneProblem = phoneComplaint(form.elements.phone);
+    if (phoneProblem) {
+        notifyWarning(phoneProblem, 'Nothing was saved');
         return;
     }
 
