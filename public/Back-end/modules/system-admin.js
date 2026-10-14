@@ -2128,7 +2128,14 @@ async function loadDeliveryAreas() {
         const body = await apiGetDeliveryAreas();
         deliveryAreas = body.areas || [];
     } catch (error) {
-        notifyOffline();
+        // error.status is set when the server answered but said no (an older
+        // copy of the server, still running, does not know this list yet)
+        if (error.status) {
+            notifyError('The server answered but did not give the delivery areas. ' +
+                'Restart the server so it runs the latest version, then try again.', 'Delivery areas not read');
+        } else {
+            notifyOffline();
+        }
         return;
     }
     renderDeliveryAreas();

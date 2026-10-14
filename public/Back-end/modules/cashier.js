@@ -2407,7 +2407,10 @@ async function loadDeliveryAreaChoices() {
     } catch (error) {
         deliveryAreaList = [];
         deliveryAreasUnreadable = true;
-        problem = 'The delivery areas could not be read. Check the connection and try again.';
+        // error.status is set when the server answered but said no
+        problem = error.status
+            ? 'The server did not give the delivery areas. Ask the administrator to restart the server.'
+            : 'The delivery areas could not be read. Check the connection and try again.';
     }
 
     select.innerHTML = '<option value="">Choose an area</option>' +
@@ -2751,7 +2754,13 @@ async function attachedAreaIsStillListed() {
         deliveryAreaList = body.areas || [];
         deliveryAreasUnreadable = false;
     } catch (error) {
-        notifyOffline();
+        // error.status is set when the server answered but said no
+        if (error.status) {
+            notifyError('The server answered but did not give the delivery areas, so the sale was stopped. ' +
+                'Nothing has been charged. Ask the administrator to restart the server.', 'Delivery areas not read');
+        } else {
+            notifyOffline();
+        }
         return false;
     }
 
