@@ -1731,7 +1731,7 @@ function renderAutoBackupCard(auto, procedures) {
 
     card.className = 'card auto-backup is-on';
     state.textContent = 'On';
-    text.textContent = `Backs up daily at ${hourText(auto.hour)} and keeps the newest ${auto.keep}.` +
+    text.textContent = `Backs up daily at ${hourText(auto.hour)} and deletes backups older than ${auto.keep} days.` +
         (auto.lastFileName ? ` Latest: ${auto.lastFileName}.` : '');
 }
 
@@ -1740,7 +1740,7 @@ function renderBackupLimits(limits) {
     const note = document.getElementById('backup-limit-note');
     if (!note || !limits) return;
     note.textContent = `${limits.manualCount} of ${limits.manual} manual backups used. ` +
-        `The newest ${limits.automatic} automatic backups are kept.`;
+        `Backups older than ${limits.keepDays} days are deleted automatically.`;
 }
 
 // reads the state without opening the table
@@ -1792,7 +1792,7 @@ function buildBackupPanel() {
         key: 'admin-backups',
         remember: false,   // it loads by itself whenever its screen opens
         tableId: 'backup-table',
-        columns: 5,
+        columns: 6,
         pagerId: 'backup-pager',
         idField: 'fileName',
 
@@ -1830,10 +1830,17 @@ function buildBackupPanel() {
                 '<td><span class="backup-time">' + escapeHtml(when.time) + '</span></td>' +
                 '<td class="cell-id">' + escapeHtml(file.fileName) + '</td>' +
                 '<td>' + kind + '</td>' +
+                '<td>' + backupMadeBy(file) + '</td>' +
                 '<td class="cell-num">' + escapeHtml(formatBytes(file.bytes)) + '</td>' +
                 '</tr>';
         }
     });
+}
+
+// who made a backup, as the server read it from the audit log
+function backupMadeBy(file) {
+    if (file.madeBy) return escapeHtml(file.madeBy);
+    return '<span class="muted">Not recorded</span>';
 }
 
 function openBackupDrawer(index) {
@@ -1849,7 +1856,8 @@ function openBackupDrawer(index) {
         detailRow('Taken At', escapeHtml(when.time)) +
         detailRow('File Name', '<span class="mono">' + escapeHtml(selectedBackup.fileName) + '</span>') +
         detailRow('Size', escapeHtml(formatBytes(selectedBackup.bytes))) +
-        detailRow('Kind', selectedBackup.automatic ? 'Automatic' : 'Manual');
+        detailRow('Kind', selectedBackup.automatic ? 'Automatic' : 'Manual') +
+        detailRow('Made By', backupMadeBy(selectedBackup));
 
     document.getElementById('backup-drawer').classList.add('open');
     document.getElementById('backup-shade').classList.add('open');
@@ -1906,8 +1914,31 @@ async function runBackup() {
     } catch (error) {
         notifyOffline();
     } finally {
-        if (button) { button.disabled = false; button.textContent = 'Run Backup Now'; }
+        backupCooldown(button);
     }
+}
+
+// After a backup the button rests for BACKUP_COOLDOWN_SECONDS, counting down,
+// so it cannot be pressed again and again. The server keeps the same rule.
+const BACKUP_COOLDOWN_SECONDS = 5;
+
+function backupCooldown(button) {
+    if (!button) return;
+
+    let secondsLeft = BACKUP_COOLDOWN_SECONDS;
+    button.disabled = true;
+    button.textContent = 'Wait ' + secondsLeft + 's';
+
+    const timer = setInterval(function () {
+        secondsLeft -= 1;
+        if (secondsLeft > 0) {
+            button.textContent = 'Wait ' + secondsLeft + 's';
+        } else {
+            clearInterval(timer);
+            button.disabled = false;
+            button.textContent = 'Run Backup Now';
+        }
+    }, 1000);
 }
 
 function downloadSelectedBackup() {

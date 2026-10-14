@@ -869,10 +869,10 @@ the server rather than from a sentence written into the page.
 The dump streams each table from MySQL and writes it a hundred rows at a time,
 so a large table is never held in memory whole.
 
-**Old ones are deleted.** The newest `BACKUP_KEEP_DAYS` automatic files (30 by
-default) are kept, and writing a new one deletes the oldest. The copy the system
-takes just before a restore counts as an automatic one too. If the database is
-missing stored procedures, the backup is still written but nothing is deleted,
+**Old ones are deleted.** After each daily backup, every backup older than
+`BACKUP_KEEP_DAYS` days (30 by default) is deleted, automatic and manual alike.
+The newest backup is always kept, even when it is older than that. If the database
+is missing stored procedures, the backup is still written but nothing is deleted,
 so the last good file is never rotated away.
 
 A successful daily backup is not written to the audit trail; a *failure* is,

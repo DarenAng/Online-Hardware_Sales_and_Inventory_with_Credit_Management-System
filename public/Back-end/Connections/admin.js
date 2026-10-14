@@ -1170,10 +1170,10 @@ function registerAdminRoutes(app, deps) {
   const BACKUP_STORE_KIND = String(process.env.HARDWARE_BACKUP_STORE || (IS_VERCEL ? "database" : "folder"))
     .trim().toLowerCase() === "database" ? "database" : "folder";
 
-  // Two kinds, told apart by name: one somebody pressed the button for is kept
-  // until deleted; an automatic one (the daily backup, and the copy taken just
-  // before a restore) carries its own prefix and is the only kind the rotation
-  // may delete.
+  // Two kinds, told apart by name: one somebody pressed the button for, and an
+  // automatic one (the daily backup, and the copy taken just before a restore)
+  // with its own prefix. Both kinds are deleted once they are older than
+  // KEEP_DAYS days (see removeOldBackups).
   const AUTO_PREFIX = "hardware_db_auto_";
 
   // What a backup file name looks like, for example:
@@ -1638,9 +1638,9 @@ function registerAdminRoutes(app, deps) {
   // and writes the day's file once the hour has come; a server that was asleep
   // or restarted catches up on its next check. On Vercel nothing runs between
   // requests, so the daily job (/api/cron/daily, at the hour vercel.json sets)
-  // calls runDailyBackup instead. The newest AUTO_KEEP automatic files are
-  // kept and older ones are deleted. Backups taken by hand are never deleted
-  // by the system, and there can be at most MANUAL_LIMIT of them.
+  // calls runDailyBackup instead. After each daily backup, every backup older
+  // than KEEP_DAYS days (automatic or manual) is deleted; the newest one is
+  // always kept. There can be at most MANUAL_LIMIT manual backups.
   // The hour is the shop's clock (HARDWARE_TIME_ZONE, Asia/Manila on Vercel).
   // ==========================================
   function settingNumber(name, fallback, low, high) {
@@ -1649,7 +1649,7 @@ function registerAdminRoutes(app, deps) {
     return value;
   }
   const AUTO_HOUR = settingNumber("BACKUP_HOUR", 2, 0, 23);
-  const AUTO_KEEP = settingNumber("BACKUP_KEEP_DAYS", 30, 1, 365);
+  const KEEP_DAYS = settingNumber("BACKUP_KEEP_DAYS", 30, 1, 365);
   const MANUAL_LIMIT = settingNumber("BACKUP_MANUAL_LIMIT", 20, 1, 200);
   const AUTO_CHECK_MS = 10 * 60 * 1000;     // how often the day's backup is looked for
   const AUTO_FIRST_CHECK_MS = 60 * 1000;    // a minute after start, so starting stays quick
@@ -1662,16 +1662,38 @@ function registerAdminRoutes(app, deps) {
     return { automatic, manual };
   }
 
-  // removes the oldest automatic backups until AUTO_KEEP remain; never touches a manual one
-  async function rotateAutoBackups() {
-    const names = (await backupNames()).automatic;
-    if (names.length <= AUTO_KEEP) return 0;
+  // the moment a backup was taken, read from its name, so the two kinds sort
+  // together: "hardware_db_auto_2026-09-18_1101.sql" gives "2026-09-18_1101.sql"
+  function backupStamp(name) {
+    return name.replace(/^hardware_db_(backup|auto)_/, "");
+  }
 
-    const doomed = names.slice(0, names.length - AUTO_KEEP);
-    for (const name of doomed) {
-      await backupStore.remove(name);   // already gone is fine
+  // Deletes every backup, automatic or manual, taken more than KEEP_DAYS days
+  // ago. The newest backup is always kept, so a system whose daily backup
+  // stopped for a month still has one to restore from.
+  async function removeOldBackups() {
+    const names = (await backupStore.names()).filter((name) => BACKUP_NAME.test(name));
+    if (names.length === 0) return 0;
+
+    // oldest first; the stamp is year-first, so text order is time order
+    names.sort((left, right) => backupStamp(left).localeCompare(backupStamp(right)));
+    const newest = names[names.length - 1];
+
+    // the first day that is still kept, e.g. "2026-09-14" when today is 2026-10-14
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - KEEP_DAYS);
+    const keepFrom = cutoff.getFullYear() + "-" + twoDigits(cutoff.getMonth() + 1) + "-" + twoDigits(cutoff.getDate());
+
+    let removed = 0;
+    for (const name of names) {
+      if (name === newest) continue;
+      if (backupStamp(name).slice(0, 10) < keepFrom) {
+        await backupStore.remove(name);   // already gone is fine
+        removed += 1;
+      }
     }
-    return doomed.length;
+    if (removed > 0) console.log(`Deleted ${removed} backup(s) older than ${KEEP_DAYS} days.`);
+    return removed;
   }
 
   // A rotation is only safe if what it rolls over is known good. If the
@@ -1707,7 +1729,7 @@ function registerAdminRoutes(app, deps) {
 
     try {
       const summary = await writeBackupFile(AUTO_PREFIX);
-      if (await safeToRotate()) await rotateAutoBackups();
+      if (await safeToRotate()) await removeOldBackups();
 
       autoBackup.lastFileName = summary.fileName;
       autoBackup.lastAt = summary.createdAt;
@@ -1787,7 +1809,7 @@ function registerAdminRoutes(app, deps) {
     if (!autoBackup.enabled) {
       console.log("The daily backup is switched off. Turn it on from the Backup & Recovery screen.");
     } else {
-      console.log(`Daily backup at ${twoDigits(AUTO_HOUR)}:00, keeping the last ${AUTO_KEEP}. ` +
+      console.log(`Daily backup at ${twoDigits(AUTO_HOUR)}:00, deleting backups older than ${KEEP_DAYS} days. ` +
         `Up to ${MANUAL_LIMIT} backups taken by hand are kept until deleted.`);
     }
 
@@ -2014,6 +2036,43 @@ function registerAdminRoutes(app, deps) {
         return right.createdAt.localeCompare(left.createdAt);
       });
 
+      // Who made each backup, read from the audit log. A manual backup is
+      // logged as BACKUP with its file name first; the copy taken just before
+      // a restore is named at the end of the RESTORE entry ("... before it is <file>").
+      const madeBy = {};
+      try {
+        const [logs] = await db.query(
+          `SELECT a.action, a.details, s.full_name
+           FROM audit_logs a
+           LEFT JOIN staff s ON s.staff_id = a.staff_id
+           WHERE a.action IN ('BACKUP', 'RESTORE')`
+        );
+        for (const log of logs) {
+          const details = String(log.details || "");
+          let fileName = null;
+          if (log.action === "BACKUP") {
+            fileName = details.split(" ")[0];
+          } else {
+            const found = /before it is (\S+)/.exec(details);
+            if (found) fileName = found[1];
+          }
+          if (fileName) madeBy[fileName] = log.full_name || "A removed account";
+        }
+      } catch (error) {
+        console.error("Reading who made the backups failed:", error.message);
+      }
+
+      // the daily backup is made by the system itself, not by a person
+      for (const file of files) {
+        if (madeBy[file.fileName]) {
+          file.madeBy = madeBy[file.fileName];
+        } else if (file.automatic) {
+          file.madeBy = "System (daily backup)";
+        } else {
+          file.madeBy = null;   // made before this was recorded
+        }
+      }
+
       // Read from the store rather than this copy's memory: on Vercel the
       // daily job ran on another copy of the server.
       autoBackup.enabled = await backupStore.readSwitch();
@@ -2026,7 +2085,7 @@ function registerAdminRoutes(app, deps) {
           enabled: autoBackup.enabled,
           schedule: "daily",
           hour: AUTO_HOUR,
-          keep: AUTO_KEEP,
+          keep: KEEP_DAYS,
           lastFileName: lastAuto ? lastAuto.fileName : autoBackup.lastFileName,
           lastAt: lastAuto ? lastAuto.createdAt : autoBackup.lastAt,
           lastError: lastError,
@@ -2035,7 +2094,7 @@ function registerAdminRoutes(app, deps) {
           store: BACKUP_STORE_KIND
         },
         limits: {
-          automatic: AUTO_KEEP,
+          keepDays: KEEP_DAYS,
           manual: MANUAL_LIMIT,
           manualCount: names.manual.length
         },
@@ -2065,7 +2124,7 @@ function registerAdminRoutes(app, deps) {
 
       if (enabled) {
         await writeAuditLog(request, "AUTO_BACKUP_ON",
-          `Daily backup switched on (at ${twoDigits(AUTO_HOUR)}:00, keeping the last ${AUTO_KEEP})`);
+          `Daily backup switched on (at ${twoDigits(AUTO_HOUR)}:00, deleting backups older than ${KEEP_DAYS} days)`);
         // on Vercel the daily job does it; a copy of the server may stop once this answer is sent
         if (!IS_VERCEL) dailyBackupCheck();
         response.json({
@@ -2085,9 +2144,27 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
+  // Run Backup Now may not be pressed again and again: one backup at a time,
+  // then a rest of BACKUP_COOLDOWN_MS before the next. (The button counts the
+  // same five seconds down; this stops anyone sending the request directly.)
+  const BACKUP_COOLDOWN_MS = 5000;
+  let manualBackupRunning = false;
+  let lastManualBackupAt = 0;
+
   // Run Backup Now. Backups taken by hand are kept until deleted, so there is
   // a limit to them: at the limit, an old one has to be deleted first.
   app.post("/api/backups", requireRole(ADMIN), async (request, response) => {
+    if (manualBackupRunning) {
+      return response.status(429).json({ error: "A backup is already being saved. Wait for it to finish." });
+    }
+    const waitMs = lastManualBackupAt + BACKUP_COOLDOWN_MS - Date.now();
+    if (waitMs > 0) {
+      return response.status(429).json({
+        error: `Wait ${Math.ceil(waitMs / 1000)} more second(s) before running another backup.`
+      });
+    }
+
+    manualBackupRunning = true;
     try {
       const names = await backupNames();
       if (names.manual.length >= MANUAL_LIMIT) {
@@ -2108,6 +2185,10 @@ function registerAdminRoutes(app, deps) {
     } catch (error) {
       console.error("Backup failed:", error.message);
       response.status(500).json({ error: "Unable to create the backup: " + error.message });
+    } finally {
+      // the five seconds start once this backup has finished
+      manualBackupRunning = false;
+      lastManualBackupAt = Date.now();
     }
   });
 

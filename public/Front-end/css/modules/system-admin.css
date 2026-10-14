@@ -17,6 +17,40 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* AUDIT LOGS -- every row is one line, so every page of ten is the same
+   height and Previous / Next stay in the same place. A long detail ends in
+   "..."; clicking the row opens the whole entry. (A phone shows cards instead.) */
+@media (min-width: 641px) {
+    #logs-table {
+        table-layout: fixed;   /* the columns keep the widths below */
+        min-width: 960px;      /* a narrow screen scrolls sideways rather than squeezing */
+    }
+    #logs-table td {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    /* a little less padding, so the Detail column gets more room */
+    #logs-table th,
+    #logs-table td { padding-left: 10px; padding-right: 10px; }
+    #logs-table th:nth-child(1) { width: 150px; }   /* Timestamp */
+    #logs-table th:nth-child(2) { width: 160px; }   /* User */
+    #logs-table th:nth-child(3) { width: 180px; }   /* Role */
+    #logs-table th:nth-child(4) { width: 120px; }   /* IP Address */
+    #logs-table th:nth-child(5) { width: 130px; }   /* Action Type */
+    /* Detail takes the rest of the width */
+}
+
+/* On a phone an audit card shows only the name, the date and time, the
+   action type and the detail; Role and IP Address are in the full entry
+   that opens when the card is tapped. */
+@media (max-width: 640px) {
+    #logs-table td:nth-child(3),   /* Role */
+    #logs-table td:nth-child(4) {  /* IP Address */
+        display: none;
+    }
+}
+
 /* the safe tile and the destructive one should not look alike */
 #panel-maintenance .tile .btn { margin-top: 2px; }
 

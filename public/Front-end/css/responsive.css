@@ -152,6 +152,8 @@
         border-bottom: none;
         text-align: left;
         font-size: 14.5px;
+        /* a long value (a file name) wraps inside its half instead of running into the next one */
+        white-space: normal;
         overflow-wrap: anywhere;
     }
 
@@ -175,6 +177,8 @@
         transform: none;
         transition: none;
     }
+    /* a phone counts a tapped card as hovered; its first label must not vanish */
+    table tbody tr.row-clickable:hover td:first-child::before { transform: none; }
 
     /* the name of the record leads the card across its full width and needs no label */
     table tbody td.cell-name {
@@ -187,8 +191,8 @@
     table tbody td.cell-name::before { display: none; }
 
     /* numbers stay on the right, with their label */
-    table tbody td.cell-num { text-align: right; font-size: 14.5px; }
-    table tbody td.cell-id  { order: -1; font-size: 13.5px; }
+    table tbody td.cell-num { text-align: right; font-size: 14.5px; white-space: nowrap; }
+    table tbody td.cell-id  { order: -1; font-size: 13.5px; white-space: normal; }
 
     /* An odd number of values would leave the last one alone on its line
        with an empty space beside it, so it takes the whole line instead.
