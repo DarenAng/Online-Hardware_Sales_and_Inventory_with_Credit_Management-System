@@ -149,15 +149,11 @@
                 </div>
 
                 <!-- ACCESS CONTROL -- one table: the roles down the left, the modules
-                     across the top, a checkbox for each. Nothing is saved until Save. -->
+                     across the top, a checkbox for each. A click saves straight away. -->
                 <div class="card" id="panel-features" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
                             <h3>Access Control</h3>
-                        </div>
-                        <div class="panel-actions">
-                            <button type="button" class="btn btn-success" id="features-save-btn"
-                                    onclick="saveFeatureMatrix()" disabled title="Nothing has changed yet">Save Screens</button>
                         </div>
                     </div>
 
@@ -168,9 +164,8 @@
                             <tbody><tr><td class="table-empty">Loading the roles</td></tr></tbody>
                         </table>
                     </div>
-                    <p class="access-hint">A tick gives the role every screen of that module. A dash means only some of
-                        its screens are on; ticking it turns them all on. A grey box is a module that role's
-                        dashboard does not have.</p>
+                    <p class="access-hint">A tick gives the role every screen of that module; a click saves it at once.
+                        A dash means only some of its screens are on; ticking it turns them all on.</p>
                 </div>
 
                 <!-- AUDIT LOGS -->

@@ -81,10 +81,10 @@ function showMaintenance(event) {
 }
 function showStoreSettings(event) { showPanel('panel-store', event); loadStoreSettingsForm(); }
 
-// one small request, read on opening; not re-read over unsaved changes
+// one small request, read on opening; not re-read while a click is saving
 function showAccessControl(event) {
     showPanel('panel-features', event);
-    if (featureMatrixChanges().length === 0) loadFeatureMatrix();
+    if (!featureSaving) loadFeatureMatrix();
 }
 
 // ==========================================
@@ -1255,12 +1255,11 @@ async function restoreSelectedAccount() {
 
 // Access control: one table, the roles down the left and the modules across
 // the top. A box stands for every screen of that module the role's dashboard
-// can draw. The page keeps each screen's on/off for each role; nothing is
-// saved until Save reads the changes back, and the server is still told one
-// screen at a time.
+// can draw. A click saves at once: the server is told one screen at a time,
+// and each is written to the audit trail.
 let featureMatrix = null;       // what /api/features last answered
-let featureBaseline = {};       // "screen key|role id" -> on, as loaded
-let featureDraft = {};          // "screen key|role id" -> on, as it is now
+let featureState = {};          // "screen key|role id" -> on, as saved
+let featureSaving = false;      // true while a click is being saved
 
 async function loadFeatureMatrix() {
     const table = document.getElementById('features-matrix');
@@ -1299,180 +1298,110 @@ function renderFeatureMatrix() {
     const roles = featureMatrix.roles || [];
     const modules = featureModules();
 
-    // what each role has for each screen now; the draft starts as a copy
-    featureBaseline = {};
+    // what each role has for each screen now
+    featureState = {};
     (featureMatrix.features || []).forEach((feature) => {
         roles.forEach((role) => {
             const cell = feature.roles[role.role_name];
-            if (cell && cell.available) featureBaseline[feature.key + '|' + role.role_id] = cell.held;
+            if (cell && cell.available) featureState[feature.key + '|' + role.role_id] = cell.held;
         });
     });
-    featureDraft = Object.assign({}, featureBaseline);
 
     table.querySelector('thead tr').innerHTML = '<th>Role</th>' +
         modules.map((module) => '<th>' + escapeHtml(module) + '</th>').join('');
 
     // one row per role, one box per module
     table.querySelector('tbody').innerHTML = roles.map((role) => {
-        const boxes = modules.map((module) => {
-            const screens = moduleScreensFor(module, role.role_name);
-            if (screens.length === 0) {
-                return '<td><input type="checkbox" class="access-box" disabled' +
-                    ' title="' + escapeHtml(role.role_name + ' has no ' + module + ' screens') + '"' +
-                    ' aria-label="' + escapeHtml(module + ' for ' + role.role_name + ', not available') + '"></td>';
-            }
-            return '<td><input type="checkbox" class="access-box"' +
-                ' data-module="' + escapeHtml(module) + '"' +
-                ' data-role="' + escapeHtml(String(role.role_id)) + '"' +
-                ' data-role-name="' + escapeHtml(role.role_name) + '"' +
-                ' aria-label="' + escapeHtml(module + ' for ' + role.role_name) + '"' +
-                ' onchange="onModuleBoxChange(this)"></td>';
-        }).join('');
+        const boxes = modules.map((module) => '<td><input type="checkbox" class="access-box"' +
+            ' data-module="' + escapeHtml(module) + '"' +
+            ' data-role="' + escapeHtml(String(role.role_id)) + '"' +
+            ' data-role-name="' + escapeHtml(role.role_name) + '"' +
+            ' aria-label="' + escapeHtml(module + ' for ' + role.role_name) + '"' +
+            ' onchange="onModuleBoxChange(this)"></td>').join('');
         return '<tr><td class="access-role">' + escapeHtml(role.role_name) + '</td>' + boxes + '</tr>';
     }).join('');
 
     syncModuleBoxes();
-    syncFeatureSaveButton();
 }
 
 // Each box shows its screens: ticked when all are on, a dash when only some
 // are, empty when none are. Hovering it lists the screens and which are on.
-// A cell changed since the table was drawn is tinted until it is saved.
 function syncModuleBoxes() {
-    document.querySelectorAll('#features-matrix .access-box[data-module]').forEach((box) => {
+    document.querySelectorAll('#features-matrix .access-box').forEach((box) => {
         const screens = moduleScreensFor(box.dataset.module, box.dataset.roleName);
-        let on = 0;
-        let changed = false;
-        const lines = [];
+        if (screens.length === 0) {
+            box.checked = false;
+            box.indeterminate = false;
+            box.title = box.dataset.roleName + ' has no ' + box.dataset.module + ' screens';
+            return;
+        }
 
+        let on = 0;
+        const lines = [];
         screens.forEach((feature) => {
-            const id = feature.key + '|' + box.dataset.role;
-            if (featureDraft[id]) on += 1;
-            if (featureDraft[id] !== featureBaseline[id]) changed = true;
-            lines.push(feature.name + ': ' + (featureDraft[id] ? 'on' : 'off'));
+            const isOn = featureState[feature.key + '|' + box.dataset.role];
+            if (isOn) on += 1;
+            lines.push(feature.name + ': ' + (isOn ? 'on' : 'off'));
         });
 
         box.checked = on === screens.length;
         box.indeterminate = on > 0 && on < screens.length;
         box.title = lines.join('\n');
-        box.parentElement.classList.toggle('is-changed', changed);
     });
 }
 
-// a tick turns on every screen of the module for that role; no tick turns them all off
-function onModuleBoxChange(box) {
-    moduleScreensFor(box.dataset.module, box.dataset.roleName).forEach((feature) => {
-        featureDraft[feature.key + '|' + box.dataset.role] = box.checked;
-    });
-    syncModuleBoxes();
-    syncFeatureSaveButton();
-}
+// A tick turns on every screen of the module for that role; no tick turns
+// them all off. Saved straight away.
+async function onModuleBoxChange(box) {
+    const roleName = box.dataset.roleName;
+    const module = box.dataset.module;
+    const screens = moduleScreensFor(module, roleName);
 
-// every screen whose on/off differs from what was loaded
-function featureMatrixChanges() {
-    if (!featureMatrix) return [];
-
-    const changes = [];
-    for (const feature of featureMatrix.features || []) {
-        for (const role of featureMatrix.roles || []) {
-            const id = feature.key + '|' + role.role_id;
-            if (!(id in featureBaseline) || featureDraft[id] === featureBaseline[id]) continue;
-
-            changes.push({
-                key: feature.key,
-                name: feature.name,
-                roleId: Number(role.role_id),
-                roleName: role.role_name,
-                byDefault: Boolean(feature.roles[role.role_name].byDefault),
-                granted: featureDraft[id]
-            });
-        }
-    }
-    return changes;
-}
-
-function syncFeatureSaveButton() {
-    const button = document.getElementById('features-save-btn');
-    if (!button) return;
-    const changes = featureMatrixChanges();
-    button.disabled = changes.length === 0;
-    button.title = changes.length === 0 ? 'Nothing has changed yet' : '';
-}
-
-// Read back first; crimson when anything is being taken away.
-async function saveFeatureMatrix() {
-    const changes = featureMatrixChanges();
-    if (changes.length === 0) {
-        notifyInfo('Nothing on this screen has been changed, so there is nothing to save.', 'No changes');
+    // a module this role's dashboard does not have: nothing to switch on
+    if (screens.length === 0) {
+        box.checked = false;
+        notifyInfo(roleName + ' does not have any ' + module + ' screens, so there is nothing to switch on.',
+            'Not available');
         return;
     }
 
-    // one line per change, e.g. "Cashier: Income switched on"
-    let takesAway = false;
-    const lines = [];
-    for (const change of changes) {
-        let what;
-        if (change.granted && change.byDefault) {
-            what = ' switched back on';
-        } else if (change.granted) {
-            what = ' switched on';
-        } else if (change.byDefault) {
-            what = ' switched off';
-            takesAway = true;
-        } else {
-            what = ' taken back off';
-            takesAway = true;
-        }
-        lines.push(change.roleName + ': ' + change.name + what);
+    // one click at a time; a click made while one is saving is put back
+    if (featureSaving) {
+        syncModuleBoxes();
+        return;
     }
 
-    const ask = takesAway ? askDanger : askConfirm;
-    const yes = await ask(
-        'Every signed-in screen of these roles follows at once. Each line is written to the audit trail in your name.',
-        {
-            title: takesAway ? 'Switch screens off for a role?' : 'Change the screens by role?',
-            eyebrow: 'Access Control',
-            confirmLabel: 'Save screens',
-            detail: lines.concat(takesAway
-                ? ['Somebody may be on one of these screens now. Their page goes back to its first screen and says why.']
-                : [])
-        });
+    const turnOn = box.checked;
+    const toChange = screens.filter((feature) => featureState[feature.key + '|' + box.dataset.role] !== turnOn);
+    if (toChange.length === 0) {
+        syncModuleBoxes();
+        return;
+    }
 
-    if (!yes) return;
-
-    const button = document.getElementById('features-save-btn');
-    if (button) { button.disabled = true; button.textContent = 'Saving...'; }
-
+    featureSaving = true;
     let saved = 0;
-    let stopped = false;
-
-    for (const change of changes) {
-        try {
-            const response = await apiSetScreenSwitch(change.key, change.roleId, change.granted);
+    try {
+        for (const feature of toChange) {
+            const response = await apiSetScreenSwitch(feature.key, Number(box.dataset.role), turnOn);
             const body = await response.json();
-
             if (!response.ok) {
-                if (!handleAuthFailure(response, body)) notifyError(body.error, 'Screens not saved');
-                stopped = true;
+                if (!handleAuthFailure(response, body)) notifyError(body.error, 'Not saved');
                 break;
             }
+            featureState[feature.key + '|' + box.dataset.role] = turnOn;
             saved += 1;
-        } catch (error) {
-            notifyOffline();
-            stopped = true;
-            break;
         }
+    } catch (error) {
+        notifyOffline();
+    } finally {
+        featureSaving = false;
+        syncModuleBoxes();
     }
 
-    if (button) { button.textContent = 'Save Screens'; }
-
-    if (saved > 0) {
-        notifySuccess(saved + ' ' + (saved === 1 ? 'change' : 'changes') + ' to the screens by role ' +
-            (stopped ? 'were saved before one was refused.' : 'saved and written to the audit trail.'),
-            stopped ? 'Partly saved' : 'Screens saved');
+    if (saved === toChange.length) {
+        notifySuccess(roleName + ': ' + module + (turnOn ? ' switched on.' : ' switched off.') +
+            ' Their signed-in screens follow at once.', 'Saved');
     }
-
-    await loadFeatureMatrix();
 }
 
 // The audit trail. The row carries time, person, role, machine and kind;
@@ -2186,7 +2115,7 @@ async function loadStoreSettingsForm() {
     markFormClean(form, document.getElementById('store-save-btn'));
 }
 
-// ---------- the header and footer lines: added, moved and removed here ----------
+// ---------- the header and footer lines: added, moved (header only) and removed here ----------
 function receiptLineList(kind) {
     return document.getElementById('store-' + kind + '-lines');
 }
@@ -2204,18 +2133,28 @@ function renderReceiptLines(kind, lines) {
     if (!list) return;
 
     const values = Array.isArray(lines) ? lines : [];
-    list.innerHTML = values.map((line, index) =>
-        '<div class="line-row">' +
+    list.innerHTML = values.map((line, index) => {
+        // The header lines can be put in a different order. The footer lines
+        // have no arrows: the footer always prints at the bottom of the
+        // receipt, in the order the lines were added.
+        let arrows = '';
+        if (kind === 'header') {
+            arrows =
+                '<button type="button" class="btn btn-ghost btn-sm" title="Move up" aria-label="Move up"' +
+                    (index === 0 ? ' disabled' : '') + ' onclick="moveReceiptLine(\'' + kind + '\', ' + index + ', -1)">&uarr;</button>' +
+                '<button type="button" class="btn btn-ghost btn-sm" title="Move down" aria-label="Move down"' +
+                    (index === values.length - 1 ? ' disabled' : '') + ' onclick="moveReceiptLine(\'' + kind + '\', ' + index + ', 1)">&darr;</button>';
+        }
+
+        return '<div class="line-row">' +
             '<input type="text" class="form-control" name="' + kind + 'Line_' + index + '" data-untracked' +
                 ' maxlength="' + RECEIPT_LINE_LENGTH + '" value="' + escapeHtml(line) + '"' +
                 ' aria-label="' + (kind === 'header' ? 'Header' : 'Footer') + ' line ' + (index + 1) + '">' +
-            '<button type="button" class="btn btn-ghost btn-sm" title="Move up" aria-label="Move up"' +
-                (index === 0 ? ' disabled' : '') + ' onclick="moveReceiptLine(\'' + kind + '\', ' + index + ', -1)">&uarr;</button>' +
-            '<button type="button" class="btn btn-ghost btn-sm" title="Move down" aria-label="Move down"' +
-                (index === values.length - 1 ? ' disabled' : '') + ' onclick="moveReceiptLine(\'' + kind + '\', ' + index + ', 1)">&darr;</button>' +
+            arrows +
             '<button type="button" class="btn btn-ghost btn-sm line-remove" title="Remove" aria-label="Remove"' +
                 ' onclick="removeReceiptLine(\'' + kind + '\', ' + index + ')">&times;</button>' +
-        '</div>').join('');
+        '</div>';
+    }).join('');
 }
 
 // the lines as typed, empty ones kept, so a box just added stays on screen
@@ -2674,12 +2613,12 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
         keepSavedLogRole();
         buildBackupPanel();
 
-        // a switch thrown by another administrator reaches this matrix, unless it has unsaved changes
+        // a switch thrown by another administrator reaches this matrix, unless a click is saving
         if (typeof onLiveChange === 'function') {
             onLiveChange(['features'], function () {
                 const panel = document.getElementById('panel-features');
                 if (!panel || panel.style.display === 'none') return;
-                if (featureMatrixChanges().length > 0) return;
+                if (featureSaving) return;
                 loadFeatureMatrix();
             });
         }

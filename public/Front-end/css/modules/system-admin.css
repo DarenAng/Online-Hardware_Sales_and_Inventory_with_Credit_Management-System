@@ -133,8 +133,7 @@
 
 /* ==========================================================================
    ACCESS CONTROL -- one table: the roles down the left, the modules across
-   the top, a checkbox where the two meet. A grey (disabled) box is a module
-   that role's dashboard does not have.
+   the top, a checkbox where the two meet. A click saves at once.
    ========================================================================== */
 .access-table th,
 .access-table td { text-align: center; vertical-align: middle; }
@@ -147,9 +146,6 @@
     accent-color: var(--go);
     cursor: pointer;
 }
-.access-box:disabled { cursor: not-allowed; opacity: 0.45; }
-/* a cell whose box was changed and is not saved yet */
-.access-table td.is-changed { background: var(--signal-dim); }
 .access-hint { margin: 12px 0 0; font-size: 13px; color: var(--steel); }
 
 /* ==========================================================================
