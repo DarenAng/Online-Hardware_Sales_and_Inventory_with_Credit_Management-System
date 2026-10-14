@@ -250,7 +250,16 @@ function apiRequestResetCode(email) {
     });
 }
 
-// POST /api/password-reset/confirm -- the code and the new password
+// POST /api/password-reset/verify -- is this the code in the email?
+function apiVerifyResetCode(email, code) {
+    return fetch('/api/password-reset/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email, code: code })
+    });
+}
+
+// POST /api/password-reset/confirm -- the code and the new password; signs in
 function apiConfirmResetCode(email, code, newPassword) {
     return fetch('/api/password-reset/confirm', {
         method: 'POST',

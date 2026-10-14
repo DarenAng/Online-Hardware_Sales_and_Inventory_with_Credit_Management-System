@@ -8,7 +8,8 @@
 //   POST /api/heartbeat                "I am still here" ping from an open page
 //   POST /api/change-password          choose your own password on first sign-in
 //   POST /api/password-reset/request   "Forgot your password?" - email a 6-digit code
-//   POST /api/password-reset/confirm   type the code and a new password
+//   POST /api/password-reset/verify    check the code before the new password is asked for
+//   POST /api/password-reset/confirm   the code and a new password; signs the person in
 // ============================================================
 
 const crypto = require("crypto");
@@ -83,24 +84,51 @@ function registerLoginRoutes(app, deps) {
   // the password.
   // ==========================================
 
-  // one more wrong password; true when this one tipped the account into a hold
-  async function countWrongPassword(user) {
-    const attempts = Number(user.failed_attempts || 0) + 1;
+  // Every try is counted BEFORE its password is looked at, in one statement
+  // the database runs for one request at a time. Guesses sent side by side
+  // each take their own place in the count, and once LOGIN_MAX_ATTEMPTS places
+  // are taken no further guess is checked at all (0 rows changed = refused).
+  // A hold that has run out counts as no hold: the count starts again at 1,
+  // so the account gets a full set of tries. SET runs left to right, so
+  // failed_attempts still sees the old held_until before it is cleared.
+  // true when this try was counted and may go on to have its password checked.
+  async function countTry(user) {
+    const [counted] = await db.query(
+      `UPDATE users
+       SET failed_attempts = IF(held_until IS NULL, failed_attempts + 1, 1),
+           held_until = NULL
+       WHERE user_id = ?
+         AND (held_until <= NOW() OR (held_until IS NULL AND failed_attempts < ?))`,
+      [user.user_id, LOGIN_MAX_ATTEMPTS]);
+    return counted.affectedRows > 0;
+  }
 
-    if (attempts >= LOGIN_MAX_ATTEMPTS) {
-      await db.query(
-        `UPDATE users
-         SET failed_attempts = ?, held_until = DATE_ADD(NOW(), INTERVAL ? MINUTE)
-         WHERE user_id = ?`,
-        [attempts, LOGIN_HOLD_MINUTES, user.user_id]);
-      return true;
-    }
+  // a correct password on an account that cannot sign in is not a wrong guess
+  async function clearTries(userId) {
+    await db.query("UPDATE users SET failed_attempts = 0 WHERE user_id = ?", [userId]);
+  }
 
-    // the old, finished hold is cleared with it, or the next read would wipe this count too
-    await db.query(
-      "UPDATE users SET failed_attempts = ?, held_until = NULL WHERE user_id = ?",
-      [attempts, user.user_id]);
-    return false;
+  // The hold itself, set only once the count is full. Only the first request
+  // to get here changes anything, so the hold is logged and the screens are
+  // signed out once, however many guesses arrived together. true for that first one.
+  async function holdAccount(user, email, attempts, request) {
+    const [held] = await db.query(
+      `UPDATE users SET held_until = DATE_ADD(NOW(), INTERVAL ? MINUTE)
+       WHERE user_id = ? AND held_until IS NULL AND failed_attempts >= ?`,
+      [LOGIN_HOLD_MINUTES, user.user_id, LOGIN_MAX_ATTEMPTS]);
+    if (held.affectedRows === 0) return false;
+
+    await writeAuditLog(
+      { staffId: user.staff_id, roleName: user.role_name, request: request },
+      "ACCOUNT_HELD",
+      `${email} held for ${LOGIN_HOLD_MINUTES} minutes after ` +
+        `${LOGIN_MAX_ATTEMPTS} wrong passwords in a row`,
+      { email: String(email), attempts: attempts, hold_minutes: LOGIN_HOLD_MINUTES }
+    );
+    // whoever is at the screen is signed out too: the guesses may be theirs
+    await endSessionsForStaff(user.staff_id, null,
+      "This account was held after too many wrong passwords, so this screen was signed out.");
+    return true;
   }
 
   // seconds -> whole minutes, rounded up, and never less than 1
@@ -116,6 +144,29 @@ function registerLoginRoutes(app, deps) {
     return `This account is held after ${LOGIN_MAX_ATTEMPTS} wrong passwords in a row. ` +
       `Try again in ${minutes} minute${minutes === 1 ? "" : "s"}, or set a new password with ` +
       `"Forgot your password?" below, which releases it now.`;
+  }
+
+  // whole minutes left on the hold as the database has it now; a hold that is
+  // only just being set (or not yet) is the full hold time
+  async function heldMinutesNow(user) {
+    const [rows] = await db.query(
+      "SELECT TIMESTAMPDIFF(SECOND, NOW(), held_until) AS seconds FROM users WHERE user_id = ?",
+      [user.user_id]);
+    if (rows[0] && rows[0].seconds !== null && Number(rows[0].seconds) > 0) {
+      return minutesLeft(rows[0].seconds);
+    }
+    return LOGIN_HOLD_MINUTES;
+  }
+
+  // the 423 answer for a held account, with the same audit entry as always
+  async function refuseHeld(user, email, request, response, minutes) {
+    await writeAuditLog(
+      { staffId: user.staff_id, roleName: user.role_name, request: request },
+      "LOGIN_FAILURE",
+      `Sign-in refused for ${email}: the account is held for ${minutes} more minute(s)`,
+      { email: String(email), reason: "held", held_until: user.held_until }
+    );
+    return response.status(423).json({ error: heldMessage(minutes), heldMinutes: minutes });
   }
 
   // the stored hash while the account is still on its system-made password; null once chosen
@@ -210,19 +261,21 @@ function registerLoginRoutes(app, deps) {
       // a held account is refused before the password is even looked at, so
       // nothing learned from the reply says whether the guess was right
       if (user.held_until) {
-        const minutes = minutesLeft(user.held_for_seconds);
-        await writeAuditLog(
-          { staffId: user.staff_id, roleName: user.role_name, request: request },
-          "LOGIN_FAILURE",
-          `Sign-in refused for ${email}: the account is held for ${minutes} more minute(s)`,
-          { email: String(email), reason: "held", held_until: user.held_until }
-        );
-        return response.status(423).json({ error: heldMessage(minutes), heldMinutes: minutes });
+        return await refuseHeld(user, email, request, response, minutesLeft(user.held_for_seconds));
+      }
+
+      // The try is counted before the password is checked. No place left in
+      // the count means the account is held (or about to be, by a guess still
+      // being checked), so this one is refused unchecked.
+      if (!(await countTry(user))) {
+        await holdAccount(user, email, LOGIN_MAX_ATTEMPTS, request);
+        return await refuseHeld(user, email, request, response, await heldMinutesNow(user));
       }
 
       if (!(await passwordMatches(user, password))) {
-        const nowHeld = await countWrongPassword(user);
-        const attempts = Number(user.failed_attempts || 0) + 1;
+        // how many places the count has taken, this one included
+        const [counts] = await db.query("SELECT failed_attempts FROM users WHERE user_id = ?", [user.user_id]);
+        const attempts = Math.min(Math.max(Number(counts[0] ? counts[0].failed_attempts : 0), 1), LOGIN_MAX_ATTEMPTS);
 
         await writeAuditLog(
           { staffId: user.staff_id, roleName: user.role_name, request: request },
@@ -231,17 +284,8 @@ function registerLoginRoutes(app, deps) {
           { email: String(email), reason: "wrong_password", attempts: attempts }
         );
 
-        if (nowHeld) {
-          await writeAuditLog(
-            { staffId: user.staff_id, roleName: user.role_name, request: request },
-            "ACCOUNT_HELD",
-            `${email} held for ${LOGIN_HOLD_MINUTES} minutes after ` +
-              `${LOGIN_MAX_ATTEMPTS} wrong passwords in a row`,
-            { email: String(email), attempts: attempts, hold_minutes: LOGIN_HOLD_MINUTES }
-          );
-          // whoever is at the screen is signed out too: the guesses may be theirs
-          await endSessionsForStaff(user.staff_id, null,
-            "This account was held after too many wrong passwords, so this screen was signed out.");
+        if (attempts >= LOGIN_MAX_ATTEMPTS) {
+          await holdAccount(user, email, attempts, request);
           return response.status(423).json({
             error: heldMessage(LOGIN_HOLD_MINUTES), heldMinutes: LOGIN_HOLD_MINUTES
           });
@@ -268,6 +312,7 @@ function registerLoginRoutes(app, deps) {
       delete user.password;   // never let the hash leave the server
 
       if (!user.is_active) {
+        await clearTries(user.user_id);
         await writeAuditLog(
           { staffId: user.staff_id, roleName: user.role_name, request: request },
           "LOGIN_FAILURE",
@@ -507,6 +552,76 @@ function registerLoginRoutes(app, deps) {
     });
   });
 
+  // true when the code is the one waiting for this account (still in time and
+  // with tries left). Every check counts as a try, so the code cannot be guessed
+  // by asking over and over. user may be null: the reply then takes as long.
+  async function resetCodeMatches(request, user, code) {
+    if (!user) {
+      // as long as a wrong code takes, so the reply says nothing about the address
+      await verifyPassword(code, await decoyHash);
+      return false;
+    }
+
+    const [codes] = await db.query(
+      `SELECT reset_id, code_hash FROM password_resets
+       WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?
+       ORDER BY reset_id DESC LIMIT 1`,
+      [user.user_id, RESET_MAX_TRIES]);
+
+    if (codes.length === 0) {
+      await verifyPassword(code, await decoyHash);
+      return false;
+    }
+
+    // the try is counted before the code is looked at, and only while tries
+    // are left, so guesses sent side by side cannot get past the limit
+    const [counted] = await db.query(
+      "UPDATE password_resets SET attempts = attempts + 1 WHERE reset_id = ? AND attempts < ?",
+      [codes[0].reset_id, RESET_MAX_TRIES]);
+
+    if (counted.affectedRows === 0 || !(await verifyPassword(code, codes[0].code_hash))) {
+      await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
+        "PASSWORD_RESET_WRONG_CODE",
+        `A wrong password reset code was typed for ${user.email}`,
+        { email: user.email });
+      return false;
+    }
+    return true;
+  }
+
+  // step 2: the code alone is checked, before the new password is asked for.
+  // The code is not used up here; the next step sends it again with the password.
+  app.post("/api/password-reset/verify", async (request, response) => {
+    const body = request.body || {};
+    const email = String(body.email || "").trim();
+    const code = String(body.code || "").replace(/\s+/g, "");   // remove any spaces
+
+    if (!looksLikeEmail(email)) {
+      return response.status(400).json({ error: "Type the email address you sign in with." });
+    }
+    if (!/^\d{6}$/.test(code)) {   // must be exactly 6 digits
+      return response.status(400).json({ error: "The code is the six digits in the email." });
+    }
+
+    try {
+      const user = await findLoginByEmail(email);
+
+      if (!(await resetCodeMatches(request, user, code))) {
+        return response.status(400).json({ error: RESET_BAD_CODE });
+      }
+      if (!user.is_active) {
+        return response.status(403).json({ error: "This account is deactivated" });
+      }
+
+      response.json({ message: "Code accepted. Now type the password you want." });
+    } catch (error) {
+      console.error("Checking a password reset code failed:", error.message);
+      response.status(500).json({ error: "Unable to check the code" });
+    }
+  });
+
+  // step 3: the code again with the new password; once it is saved the
+  // person is signed in with it
   app.post("/api/password-reset/confirm", async (request, response) => {
     const body = request.body || {};
     const email = String(body.email || "").trim();
@@ -527,34 +642,7 @@ function registerLoginRoutes(app, deps) {
     try {
       const user = await findLoginByEmail(email);
 
-      if (!user) {
-        // as long as a wrong code takes, so the reply says nothing about the address
-        await verifyPassword(code, await decoyHash);
-        return response.status(400).json({ error: RESET_BAD_CODE });
-      }
-
-      const [codes] = await db.query(
-        `SELECT reset_id, code_hash FROM password_resets
-         WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?
-         ORDER BY reset_id DESC LIMIT 1`,
-        [user.user_id, RESET_MAX_TRIES]);
-
-      if (codes.length === 0) {
-        await verifyPassword(code, await decoyHash);
-        return response.status(400).json({ error: RESET_BAD_CODE });
-      }
-
-      // the try is counted before the code is looked at, and only while tries
-      // are left, so guesses sent side by side cannot get past the limit
-      const [counted] = await db.query(
-        "UPDATE password_resets SET attempts = attempts + 1 WHERE reset_id = ? AND attempts < ?",
-        [codes[0].reset_id, RESET_MAX_TRIES]);
-
-      if (counted.affectedRows === 0 || !(await verifyPassword(code, codes[0].code_hash))) {
-        await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
-          "PASSWORD_RESET_WRONG_CODE",
-          `A wrong password reset code was typed for ${user.email}`,
-          { email: user.email });
+      if (!(await resetCodeMatches(request, user, code))) {
         return response.status(400).json({ error: RESET_BAD_CODE });
       }
 
@@ -581,10 +669,25 @@ function registerLoginRoutes(app, deps) {
       await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
         "PASSWORD_RESET_BY_CODE",
         `${user.email} set a new password with a code sent to their email; ` +
-          "every session was ended and any sign-in hold released",
+          "every other session was ended and any sign-in hold released",
         { email: user.email });
 
-      response.json({ message: "Your password was changed. Sign in with the new one." });
+      // signed in at once with the new password, as a normal sign-in would be
+      await recordSignIn(user.user_id);
+      await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
+        "LOGIN",
+        `${user.email} signed in after setting a new password`);
+
+      delete user.password;   // never let the hash leave the server
+      user.must_change_password = 0;
+      user.failed_attempts = 0;
+      user.held_until = null;
+      user.held_for_seconds = null;
+
+      const token = await startSession(user);
+      setSessionCookie(response, token);
+
+      response.json({ message: "Your password was changed.", user: user });
     } catch (error) {
       console.error("Password reset failed:", error.message);
       response.status(500).json({ error: "Unable to reset the password" });

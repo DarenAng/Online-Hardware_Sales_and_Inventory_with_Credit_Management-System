@@ -56,6 +56,11 @@ const registerQrPaymentRoutes = require("./Connections/qr-payments").registerQrP
 
 const app = express();
 
+// Express matches routes without caring about letter case by default, so
+// /API/backups would reach the same route as /api/backups. Turning this on
+// makes "/API/..." match no route at all.
+app.set("case sensitive routing", true);
+
 // the port the website runs on (http://localhost:3000)
 const port = Number(process.env.HARDWARE_PORT) || 3000;
 
@@ -96,6 +101,25 @@ async function hashLegacyPasswords() {
       [await hashPassword(row.password), row.user_id]);
   }
   console.log(`Hashed ${plain.length} password(s) that were stored as readable text.`);
+}
+
+// The password in the seed file ("admin123") is public. An administrator
+// account still using it is open to anyone who has read that file, so the
+// server says so when it starts. This only warns: no row is changed, because
+// the owner may have a reason, and a changed password is theirs to choose.
+async function warnIfAdminPasswordIsDefault() {
+  try {
+    const [rows] = await db.query(
+      "SELECT password FROM users WHERE email = 'admin@hardware.com'");
+    if (rows.length === 0) return;
+    if (await verifyPassword("admin123", rows[0].password)) {
+      console.warn("WARNING: admin@hardware.com still uses the password from the seed file " +
+        "(admin123). Sign in and change it now: anyone who has read the project files can sign in as the administrator.");
+    }
+  } catch (error) {
+    // a warning that cannot be worked out must never stop the server starting
+    console.warn("Could not check the administrator's password:", error.message);
+  }
 }
 
 async function migrateSignInHold() {
@@ -481,7 +505,7 @@ async function migrateLatePenalties() {
 // public/database/4-MIGRATION-refunds-lower-balance.sql does the same by hand.
 // This only does the column. The procedures that use it are checked and loaded
 // again by loadProceduresIfMissing, from what the database holds (see
-// refundRoutinesAreOld), not from anything remembered while this ran.
+// routinesAreOld), not from anything remembered while this ran.
 async function migrateRefundedAmount() {
   const [columns] = await db.query(
     `SELECT COLUMN_NAME, GENERATION_EXPRESSION FROM information_schema.COLUMNS
@@ -773,6 +797,43 @@ async function migrateQrPayments() {
   console.log("Added the qr_payments table for GCash and Maya payments by QR code.");
 }
 
+// Four rules the database itself enforces, so a bug in a procedure or a hand
+// edit cannot leave a negative figure behind: stock on hand, a sale's discount
+// and amount paid, and a refund amount. Every flow already refuses these
+// before it writes (the procedures check them), so this is the last guard.
+// Each rule has a name so it is added only once. MySQL 8.0.16 and later
+// enforce CHECK; an older MySQL accepts the line and ignores it.
+// public/database/1-RUN-FIRST-database.sql has the same four for new installs.
+const CHECK_RULES = [
+  ["inventory", "chk_inventory_stock_not_negative", "quantity_in_stock >= 0"],
+  ["sales", "chk_sales_discount_not_negative", "discount >= 0"],
+  ["sales", "chk_sales_amount_paid_not_negative", "amount_paid >= 0"],
+  ["returned_items", "chk_returned_items_refund_not_negative", "refund_amount >= 0"]
+];
+
+async function migrateCheckConstraints() {
+  for (const [table, name, rule] of CHECK_RULES) {
+    const [found] = await db.query(
+      `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+       WHERE CONSTRAINT_SCHEMA = ? AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?
+         AND CONSTRAINT_TYPE = 'CHECK'`,
+      [DB_NAME, table, name]
+    );
+    if (found.length > 0) continue;   // already there
+
+    // The table, name and rule above are fixed text, not user input.
+    try {
+      await db.query(`ALTER TABLE ${table} ADD CONSTRAINT ${name} CHECK (${rule})`);
+      console.log(`Added the rule "${rule}" to the ${table} table.`);
+    } catch (error) {
+      // Usually a row that already breaks the rule. Start-up goes on without
+      // this rule; fix the row, then restart to add it.
+      console.warn(`Could not add the rule "${rule}" to the ${table} table (${error.message}). ` +
+        "Fix the rows that break it, then restart the server.");
+    }
+  }
+}
+
 // The tables the server keeps for itself, so that any copy of it can answer
 // any request (Vercel runs many): who is signed in, the live-update log,
 // account drafts waiting for a second look, backups when there is no disk to
@@ -896,24 +957,85 @@ function forgetProcedureCount() {
 const PROCEDURES_FILE = path.join(__dirname, "..", "database", "2-RUN-SECOND-stored-procedures.sql");
 
 // A database that has all the procedures can still hold older versions of the
-// ones the refund change rewrote (the column was added by hand, or by an older
+// ones that were rewritten later (the column was added by hand, or by an older
 // copy of this server). The text of the new versions has words the old ones do
 // not: v_refunded_before in sp_file_return_report, refunded_amount in
-// sp_apply_late_penalties, least( in the credit view. Two small reads, and
-// once file 2 has been loaded they all pass, so nothing reloads on later starts.
-// Change the words here if those routines change again.
-async function refundRoutinesAreOld() {
+// sp_apply_late_penalties, least( in the credit view. A second word in each of
+// two procedures marks the payment and refund checks: "nothing to refund" only
+// the newest sp_file_return_report has, "already paid in full" only the newest
+// sp_record_credit_payment. The routines that were made safe against two
+// people at once carry a word the old ones lack: FOR UPDATE in
+// sp_restore_archive and sp_update_delivery_status, "AND status = 'Open'" in
+// sp_resolve_return_report, "refund instead" in sp_archive_record,
+// p_driver_staff_id in sp_create_delivery, and p_qr_payment_id in
+// sp_create_sale_transaction and sp_record_credit_payment ("kept for the down
+// payment" there is the reference a payment may not borrow). The business
+// rules carry a word of their own: "Discount cannot be negative" in
+// sp_create_sale_transaction (it also holds COD to the credit hold and
+// limit), and "Add and Remove need a quantity" in sp_adjust_stock. Every
+// procedure with an EXIT HANDLER must also have GET DIAGNOSTICS (checked once
+// for all of them below). A few small reads, and once file 2 has been loaded
+// they all pass, so nothing reloads on later starts.
+// Add a word here whenever a routine is rewritten and a database already holds
+// the old one.
+async function routinesAreOld() {
+  // [routine, a word only its newest version contains]
+  const newestWords = [
+    ["sp_file_return_report", "v_refunded_before"],
+    ["sp_file_return_report", "nothing to refund"],
+    ["sp_apply_late_penalties", "refunded_amount"],
+    ["sp_record_credit_payment", "already paid in full"],
+    ["sp_record_credit_payment", "p_qr_payment_id"],
+    ["sp_record_credit_payment", "kept for the down payment"],
+    ["sp_create_sale_transaction", "p_qr_payment_id"],
+    ["sp_create_sale_transaction", "Discount cannot be negative"],
+    ["sp_adjust_stock", "Add and Remove need a quantity"],
+    ["sp_resolve_return_report", "AND status = 'Open'"],
+    ["sp_archive_record", "refund instead"],
+    ["sp_restore_archive", "FOR UPDATE"],
+    ["sp_create_delivery", "p_driver_staff_id"],
+    ["sp_update_delivery_status", "FOR UPDATE"]
+  ];
+
   const [routines] = await db.query(
     `SELECT ROUTINE_NAME, ROUTINE_DEFINITION FROM information_schema.ROUTINES
      WHERE ROUTINE_SCHEMA = ?
-       AND ROUTINE_NAME IN ('sp_file_return_report', 'sp_apply_late_penalties')`,
+       AND ROUTINE_NAME IN ('sp_file_return_report', 'sp_apply_late_penalties', 'sp_record_credit_payment',
+                            'sp_create_sale_transaction', 'sp_resolve_return_report', 'sp_archive_record',
+                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',
+                            'sp_adjust_stock')`,
     [DB_NAME]
   );
   for (const row of routines) {
     const text = String(row.ROUTINE_DEFINITION || "");
     if (text === "") continue;   // not readable by this user: do not reload on every start
-    if (row.ROUTINE_NAME === "sp_file_return_report" && text.indexOf("v_refunded_before") === -1) return true;
-    if (row.ROUTINE_NAME === "sp_apply_late_penalties" && text.indexOf("refunded_amount") === -1) return true;
+    for (const [name, word] of newestWords) {
+      if (row.ROUTINE_NAME === name && text.indexOf(word) === -1) return true;
+    }
+  }
+
+  // Every procedure's EXIT HANDLER now reads the real error with GET DIAGNOSTICS.
+  // A routine that has a handler but no GET DIAGNOSTICS is from before that, so
+  // one check covers all of them. (LIKE is not case sensitive here.)
+  // Only the procedures file 2 itself creates are looked at: a leftover one that
+  // file 2 no longer makes would never be fixed by loading it, and would make
+  // the file load again on every start.
+  let ownNames = [];
+  try {
+    const fileText = fs.readFileSync(PROCEDURES_FILE, "utf8");
+    ownNames = [...fileText.matchAll(/^CREATE PROCEDURE (w+)/gm)].map((match) => match[1]);
+  } catch (error) {
+    // file 2 cannot be read, so loading it is not possible either
+  }
+  if (ownNames.length > 0) {
+    const [oldHandlers] = await db.query(
+      `SELECT COUNT(*) AS n FROM information_schema.ROUTINES
+       WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE' AND ROUTINE_NAME IN (?)
+         AND ROUTINE_DEFINITION LIKE '%EXIT HANDLER%'
+         AND ROUTINE_DEFINITION NOT LIKE '%GET DIAGNOSTICS%'`,
+      [DB_NAME, ownNames]
+    );
+    if (oldHandlers[0].n > 0) return true;
   }
 
   const [views] = await db.query(
@@ -929,7 +1051,7 @@ async function refundRoutinesAreOld() {
 
 async function loadProceduresIfMissing() {
   const before = await countProcedures();
-  const older = before >= EXPECTED_PROCEDURES && await refundRoutinesAreOld();
+  const older = before >= EXPECTED_PROCEDURES && await routinesAreOld();
   if (before >= EXPECTED_PROCEDURES && !older) return;
 
   let sql;
@@ -941,7 +1063,7 @@ async function loadProceduresIfMissing() {
   }
 
   if (before >= EXPECTED_PROCEDURES) {
-    console.log("The refund procedures in this database are an older version; loading " +
+    console.log("Some stored procedures in this database are an older version; loading " +
       "public/database/2-RUN-SECOND-stored-procedures.sql again (views and procedures only, no rows).");
   } else {
     console.log(`${before} of ${EXPECTED_PROCEDURES} stored procedures are loaded; ` +
@@ -1002,8 +1124,10 @@ async function migrateDatabase() {
   await migrateSupplierResponse();
   await migrateSupplierQuote();
   await migrateQrPayments();
+  await migrateCheckConstraints();
   await loadProceduresIfMissing();
   await hashLegacyPasswords();
+  await warnIfAdminPasswordIsDefault();
 }
 
 // Two copies starting together (Vercel waking several at once) would both
@@ -1059,7 +1183,17 @@ app.use(async (request, response, next) => {
 // PayMongo signs the exact bytes it sends, so its webhook is read raw: this
 // comes before express.json(), which would parse the body and lose them.
 app.use("/api/paymongo/webhook", express.raw({ type: "*/*", limit: "1mb" }));
-app.use(express.json({ limit: "50mb" }));
+
+// Every route reads JSON with the default limit (100 kb), far more than any form
+// sends, so one huge body cannot be pushed at a route to use up memory. The one
+// exception is the restore upload, a whole .sql file: it is skipped here and
+// read by its own route in Connections/admin.js, which has a 50 MB limit and
+// only after the administrator check has passed.
+const smallJson = express.json();
+app.use((request, response, next) => {
+  if (request.method === "POST" && request.path === "/api/restore") return next();
+  smallJson(request, response, next);
+});
 
 app.get("/", (request, response) => {
   response.redirect("/Login.html");
@@ -1215,6 +1349,11 @@ app.use("/vendor", express.static(path.join(PUBLIC_DIR, "vendor")));         // 
 // HELPERS
 // ==========================================
 
+// What the browser is told when a stored procedure fails inside the database
+const PROCEDURE_FAILED_SENTENCE =
+  "Something went wrong on the server and the change was not saved. Please try again; " +
+  "if it keeps happening, tell the administrator.";
+
 // runs a stored procedure and reads its OUT values on the same connection
 async function callProcedure(sql, params, outputNames) {
   const connection = await db.getConnection();
@@ -1229,7 +1368,16 @@ async function callProcedure(sql, params, outputNames) {
     }
     const selectList = parts.join(", ");
     const [rows] = await connection.query(`SELECT ${selectList}`);
-    return rows[0];
+    const output = rows[0];
+
+    // A 500 from a procedure is its EXIT HANDLER speaking: the message holds the
+    // real MySQL error number and text. That belongs in the server log, not on
+    // the screen, so the browser gets one plain sentence instead.
+    if (Number(output.status_code) === 500 && output.message !== undefined) {
+      console.error(output.message);
+      output.message = PROCEDURE_FAILED_SENTENCE;
+    }
+    return output;
   } finally {
     connection.release();
   }
@@ -1687,7 +1835,13 @@ function readCookie(request, name) {
     const split = part.indexOf("=");
     if (split === -1) continue;
     if (part.slice(0, split).trim() === name) {
-      return decodeURIComponent(part.slice(split + 1).trim());
+      // a broken %-escape (sid=%E0%A4%A) makes decodeURIComponent throw, which
+      // would turn into a 500; a cookie nobody could have been given is no cookie
+      try {
+        return decodeURIComponent(part.slice(split + 1).trim());
+      } catch (error) {
+        return null;
+      }
     }
   }
   return null;
@@ -1979,9 +2133,10 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/login$/,                          PUBLIC],
   // the daily job (Vercel Cron); the route checks CRON_SECRET itself
   ["GET",   /^\/api\/cron\/daily$/,                    PUBLIC],
-  // "Forgot your password?": a code by email, then the code and a new password.
-  // Nobody is signed in yet, so both are open; the routes ration the codes.
+  // "Forgot your password?": a code by email, the code checked, then a new password.
+  // Nobody is signed in yet, so all three are open; the routes ration the codes.
   ["POST",  /^\/api\/password-reset\/request$/,         PUBLIC],
+  ["POST",  /^\/api\/password-reset\/verify$/,          PUBLIC],
   ["POST",  /^\/api\/password-reset\/confirm$/,         PUBLIC],
   ["POST",  /^\/api\/logout$/,                         SIGNED_IN],
   ["POST",  /^\/api\/change-password$/,                SIGNED_IN],
@@ -2553,7 +2708,14 @@ function findRule(method, pathname) {
 }
 
 app.use(async (request, response, next) => {
-  if (!request.path.startsWith("/api/")) return next();
+  // A path like /API/backups is still an API call, so the check below must
+  // not be skipped just because the letters are in a different case. Only the
+  // exact lowercase /api/ is real; any other case is refused outright. Only
+  // the first five letters are compared: the rest of the path may have capital
+  // letters (a supplier-order code is mixed case).
+  const lower = request.path.toLowerCase();
+  if (lower.startsWith("/api/") && !request.path.startsWith("/api/")) return response.status(404).json({ error: "Not found" });
+  if (!lower.startsWith("/api/")) return next();
 
   const allowed = findRule(request.method, request.path);
 
@@ -3028,6 +3190,7 @@ const adminModule = registerAdminRoutes(app, {
   findPhoneOwner, phoneTakenMessage,
   tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
   sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
+  loadProceduresIfMissing,
   FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom,
   HOLD_LIFTED_BY_MANAGER
 });
@@ -3188,11 +3351,27 @@ app.get("/api/archives", async (request, response) => {
   }
 });
 
+// Who may archive a kind of record, and who may bring it back. One list for
+// both routes, so a role that cannot put a record away cannot restore it
+// either (the route rule above lets a clerk reach both routes, so the kind of
+// record is checked here). The procedure holds the rules for each kind.
+const ARCHIVE_ROLES = {
+  Inventory: [CLERK, ADMIN, MANAGER],
+  Sales: MANAGEMENT,
+  Delivery: MANAGEMENT,
+  Staff: [ADMIN]
+};
+
 app.post("/api/archives/restore", async (request, response) => {
   const { module, recordId } = request.body;
 
   if (!module || !recordId) {
     return response.status(400).json({ error: "Module and record id are required" });
+  }
+
+  const allowed = ARCHIVE_ROLES[module];
+  if (!allowed || !allowed.includes(request.actor.roleName)) {
+    return response.status(403).json({ error: `Your role cannot restore ${module} records.` });
   }
 
   try {
@@ -3220,14 +3399,7 @@ app.post("/api/archives/archive", async (request, response) => {
     return response.status(400).json({ error: "Module and record id are required" });
   }
 
-  // who may ask; the procedure holds the rules for each kind
-  const whoMayArchive = {
-    Inventory: [CLERK, ADMIN, MANAGER],
-    Sales: MANAGEMENT,
-    Delivery: MANAGEMENT,
-    Staff: [ADMIN]
-  };
-  const allowed = whoMayArchive[module];
+  const allowed = ARCHIVE_ROLES[module];
   if (!allowed || !allowed.includes(request.actor.roleName)) {
     return response.status(403).json({ error: `Your role cannot archive ${module} records.` });
   }
@@ -3241,6 +3413,13 @@ app.post("/api/archives/archive", async (request, response) => {
 
     if (output.status_code !== 200) {
       return response.status(output.status_code).json({ error: output.message });
+    }
+
+    // An archived staff member can no longer work, so any screen they have
+    // open is signed out; it reads this reason on its next request.
+    if (module === "Staff") {
+      await endSessionsForStaff(recordId, null,
+        "Your account was archived by the System Administrator.");
     }
 
     response.json({ message: output.message });

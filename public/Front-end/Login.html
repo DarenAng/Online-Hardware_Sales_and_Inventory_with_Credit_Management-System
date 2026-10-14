@@ -92,7 +92,7 @@
         </main>
 
         <!-- FORGOT YOUR PASSWORD? -- the second card: the email address, then the
-             six-digit code from the mail and the new password. Drawn by
+             six-digit code from the mail, then the new password. Drawn by
              shared/password-reset.js; only one of the two cards shows at a time. -->
         <main class="login-card" id="reset-card" hidden>
             <div class="login-brand">
@@ -122,14 +122,19 @@
                 <button type="submit" class="btn btn-accent login-submit" id="reset-request-btn">Send Code</button>
             </form>
 
-            <!-- step 2: the code and the new password -->
-            <form id="reset-confirm-form" onsubmit="handleResetConfirm(event)" hidden>
+            <!-- step 2: the code from the mail, checked before anything else -->
+            <form id="reset-code-form" onsubmit="handleResetVerify(event)" hidden>
                 <div class="form-group">
                     <label for="reset-code">Code from the email <span class="label-hint">six digits</span></label>
                     <input id="reset-code" type="text" name="code" class="form-control reset-code"
                            inputmode="numeric" autocomplete="one-time-code" maxlength="7"
                            required placeholder="000000">
                 </div>
+                <button type="submit" class="btn btn-accent login-submit" id="reset-verify-btn">Verify Code</button>
+            </form>
+
+            <!-- step 3: the new password, once the code is accepted -->
+            <form id="reset-confirm-form" onsubmit="handleResetConfirm(event)" hidden>
                 <div class="form-group">
                     <label for="reset-new-password">New password </label>
                     <div class="icon-field">

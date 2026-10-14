@@ -1,14 +1,16 @@
 // password-reset.js -- "Forgot your password?" on the sign-in page
 // Loaded by: Login.html
 //
-// Two steps on a second card: the address the code goes to, then the code
-// from the mail with the new password. The server answers the first step the
-// same way whether or not the address has an account, so this screen never
-// says which it was either. Nothing here signs anybody in: once the password
-// is saved the person is sent back to the sign-in card to use it.
+// Three steps on a second card: the address the code goes to, then the code
+// from the mail (checked by the server before going on), then the new
+// password. The server answers the first step the same way whether or not the
+// address has an account, so this screen never says which it was either. Once
+// the new password is saved the person is signed in with it and taken to
+// their own screen.
 
-// the address the code was sent to, kept for the second step
+// the address the code was sent to, and the code once it is accepted
 let resetEmail = '';
+let resetCode = '';
 
 function resetCard(name) {
     const signIn = document.getElementById('sign-in-card');
@@ -23,6 +25,24 @@ function showResetAlert(message, tone) {
     box.textContent = message || '';
     box.classList.toggle('is-good', tone === 'good');
     box.hidden = !message;
+}
+
+// shows one of the three forms: 'request', 'code' or 'password'
+function showResetStep(step) {
+    const request = document.getElementById('reset-request-form');
+    const code = document.getElementById('reset-code-form');
+    const confirm = document.getElementById('reset-confirm-form');
+    const again = document.getElementById('reset-again-link');
+
+    if (request) request.hidden = step !== 'request';
+    if (code) code.hidden = step !== 'code';
+    if (confirm) confirm.hidden = step !== 'password';
+    if (again) again.hidden = step === 'request';
+}
+
+function setResetLead(text) {
+    const lead = document.getElementById('reset-lead');
+    if (lead) lead.textContent = text;
 }
 
 // from the link under the sign-in form; the address already typed there is carried over
@@ -44,19 +64,30 @@ function closePasswordReset() {
 
 // step 1 again, for a code that did not arrive or ran out
 function showResetRequest() {
-    const request = document.getElementById('reset-request-form');
+    const code = document.getElementById('reset-code-form');
     const confirm = document.getElementById('reset-confirm-form');
-    const again = document.getElementById('reset-again-link');
-    const lead = document.getElementById('reset-lead');
+    if (code) code.reset();
+    if (confirm) confirm.reset();
+    resetCode = '';
 
-    if (request) request.hidden = false;
-    if (confirm) { confirm.hidden = true; confirm.reset(); }
-    if (again) again.hidden = true;
-    if (lead) {
-        lead.textContent = 'Type the email address you sign in with. A six-digit code is sent to it; ' +
-            'the code and a new password are all this takes.';
-    }
+    showResetStep('request');
+    setResetLead('Type the email address you sign in with. A six-digit code is sent to it; ' +
+        'the code and a new password are all this takes.');
     showResetAlert('');
+}
+
+// the code step, shown after a code is sent or when the code stops working
+function showResetCodeStep() {
+    resetCode = '';
+    showResetStep('code');
+    setResetLead('Look in the mailbox for ' + resetEmail + ' (and its spam folder). ' +
+        'Type the code from the mail, then press Verify Code.');
+
+    const code = document.getElementById('reset-code');
+    if (code) {
+        code.value = '';
+        code.focus();
+    }
 }
 
 function setBusy(buttonId, busy, idleText, busyText) {
@@ -66,6 +97,7 @@ function setBusy(buttonId, busy, idleText, busyText) {
     button.textContent = busy ? busyText : idleText;
 }
 
+// step 1: send the code
 async function handleResetRequest(event) {
     event.preventDefault();
 
@@ -91,23 +123,8 @@ async function handleResetRequest(event) {
         }
 
         resetEmail = email;
-
-        const request = document.getElementById('reset-request-form');
-        const confirm = document.getElementById('reset-confirm-form');
-        const again = document.getElementById('reset-again-link');
-        const lead = document.getElementById('reset-lead');
-
-        if (request) request.hidden = true;
-        if (confirm) confirm.hidden = false;
-        if (again) again.hidden = false;
-        if (lead) {
-            lead.textContent = 'Look in the mailbox for ' + email + ' (and its spam folder). ' +
-                'Type the code from the mail, then the password you want.';
-        }
+        showResetCodeStep();
         showResetAlert(result.message, 'good');
-
-        const code = document.getElementById('reset-code');
-        if (code) code.focus();
     } catch (error) {
         showResetAlert('The server is not answering. Start it with npm start in the project folder, then try again.');
     } finally {
@@ -115,19 +132,54 @@ async function handleResetRequest(event) {
     }
 }
 
-async function handleResetConfirm(event) {
+// step 2: check the code before the new password is asked for
+async function handleResetVerify(event) {
     event.preventDefault();
 
     const form = event.currentTarget;
     const code = form.elements.code.value.replace(/\s+/g, '');
-    const newPassword = form.elements.newPassword.value;
-    const confirmPassword = form.elements.confirmPassword.value;
 
     if (!/^\d{6}$/.test(code)) {
         showResetAlert('The code is the six digits in the email.');
         form.elements.code.focus();
         return;
     }
+
+    setBusy('reset-verify-btn', true, 'Verify Code', 'Checking...');
+
+    try {
+        const response = await apiVerifyResetCode(resetEmail, code);
+        const result = await response.json();
+
+        if (!response.ok) {
+            showResetAlert(result.error || 'That code was not accepted.');
+            form.elements.code.value = '';
+            form.elements.code.focus();
+            return;
+        }
+
+        resetCode = code;
+        showResetStep('password');
+        setResetLead('Code accepted for ' + resetEmail + '. Type the password you want, twice.');
+        showResetAlert(result.message || 'Code accepted.', 'good');
+
+        const password = document.getElementById('reset-new-password');
+        if (password) password.focus();
+    } catch (error) {
+        showResetAlert('The server is not answering. Start it with npm start in the project folder, then try again.');
+    } finally {
+        setBusy('reset-verify-btn', false, 'Verify Code', 'Checking...');
+    }
+}
+
+// step 3: save the new password, then go straight in
+async function handleResetConfirm(event) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const newPassword = form.elements.newPassword.value;
+    const confirmPassword = form.elements.confirmPassword.value;
+
     const complaint = passwordComplaint(newPassword);
     if (complaint) {
         showResetAlert(complaint);
@@ -144,26 +196,24 @@ async function handleResetConfirm(event) {
     setBusy('reset-confirm-btn', true, 'Save the new password', 'Saving...');
 
     try {
-        const response = await apiConfirmResetCode(resetEmail, code, newPassword);
+        const response = await apiConfirmResetCode(resetEmail, resetCode, newPassword);
         const result = await response.json();
 
         if (!response.ok) {
+            if (response.status === 400 && String(result.error || '').indexOf('code') !== -1) {
+                // the code ran out in the meantime: back to the code step
+                form.reset();
+                showPasswordRules();
+                showResetCodeStep();
+            }
             showResetAlert(result.error || 'The password was not changed.');
-            form.elements.code.value = '';
-            form.elements.code.focus();
             return;
         }
 
-        // back to the sign-in card, with the address filled in and the news beside it
-        form.reset();
-        showPasswordRules();
-        const email = document.getElementById('login-email');
-        if (email) email.value = resetEmail;
-        resetCard('sign-in');
-        showLoginAlert(result.message || 'Your password was changed. Sign in with the new one.', 'good');
-
-        const password = document.getElementById('login-password');
-        if (password) password.focus();
+        // signed in by the server: straight to this person's own screen
+        forgetLoadedPanels();   // a new sign-in starts with closed tables
+        localStorage.setItem('currentUser', JSON.stringify(result.user));
+        window.location.replace(landingPageFor(result.user));
     } catch (error) {
         showResetAlert('The server is not answering. Start it with npm start in the project folder, then try again.');
     } finally {
