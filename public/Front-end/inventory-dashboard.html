@@ -46,6 +46,23 @@
                     </ul>
                 </li>
                 <li data-feature="damage-report"><a href="#" data-panel-link="panel-report" onclick="showDamageReport(event)"><i class="bi bi-clipboard-plus nav-icon" aria-hidden="true"></i>Make a Report</a></li>
+                <!-- Records: to look at only; adding one is the manager's -->
+                <li data-sidebar-dropdown data-feature="records">
+                    <a href="#records" onclick="sidebarHeading(event, 'records-nav', 'records-dropdown', showClerkRecords)" class="nav-parent" id="records-nav"
+                       data-panel-link="panel-records"><i class="bi bi-folder2-open nav-icon" aria-hidden="true"></i>
+                        Records <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="records-dropdown" class="nav-sub" style="display: none;">
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="supplier"
+                               onclick="showClerkRecordType('supplier', event)"><i class="bi bi-building nav-icon" aria-hidden="true"></i>Suppliers</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="product"
+                               onclick="showClerkRecordType('product', event)"><i class="bi bi-tag nav-icon" aria-hidden="true"></i>Products</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="category"
+                               onclick="showClerkRecordType('category', event)"><i class="bi bi-grid nav-icon" aria-hidden="true"></i>Categories</a></li>
+                        <li><a href="#" data-panel-link="panel-records" data-panel-view="unit"
+                               onclick="showClerkRecordType('unit', event)"><i class="bi bi-rulers nav-icon" aria-hidden="true"></i>Units</a></li>
+                    </ul>
+                </li>
                 <li data-feature="archives"><a href="#" data-panel-link="panel-archive" onclick="showInventoryArchive(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
                 <!-- drawn by shared/delivery-schedule.js; hidden until features.js hears the role has it -->
                 <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
@@ -151,7 +168,7 @@
                                     <div class="form-group">
                                         <label for="adjust-type">Adjustment type</label>
                                         <select id="adjust-type" name="adjustmentType" class="form-control"
-                                                onchange="renderAdjustPreview()" required>
+                                                onchange="renderAdjustUnitVerdict(); renderAdjustPreview()" required>
                                             <option value="Add">Add to stock</option>
                                             <option value="Remove">Remove from stock</option>
                                             <option value="Recount">Recount, set exact figure</option>
@@ -178,7 +195,7 @@
                                     <div class="form-group">
                                         <label for="adjust-qty">Quantity</label>
                                         <input type="number" id="adjust-qty" name="quantity" class="form-control"
-                                               min="1" step="0.001" required oninput="renderAdjustPreview()">
+                                               min="0" step="0.001" required oninput="renderAdjustPreview()">
                                     </div>
 
                                     <div class="form-group">
@@ -569,7 +586,7 @@
                                        min="0.001" step="0.001" value="1" required>
                             </div>
                             <div class="form-group">
-                                <label for="report-sale">Sale ID <span class="label-hint">optional</span></label>
+                                <label for="report-sale">Sale ID <span class="label-hint">optional, but a Refunded report needs one</span></label>
                                 <input type="number" id="report-sale" name="saleId" class="form-control" min="1" placeholder="Leave blank if not from a sale">
                             </div>
                             <div class="form-group" id="refund-field">
@@ -621,6 +638,39 @@
                         </table>
                     </div>
                     <div class="pager is-single" id="arch-pager"></div>
+                </div>
+
+                <!-- RECORDS: suppliers, products, categories and units, to look at only -->
+                <div class="card" id="panel-records" data-panel data-view="supplier" style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3 id="records-title">Suppliers</h3>
+                        </div>
+                        <div class="panel-actions">
+                        </div>
+                    </div>
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="records-search"
+                                   placeholder="Search these records"
+                                   oninput="dataPanelSearchInput('clerk-records', event)" onkeydown="dataPanelSearchKey('clerk-records', event)" title="Type one letter or more; it finds words that start with it">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="records-sort">Sort by</label>
+                            <!-- options follow the kind of record (inventory-clerk.js fillClerkRecordSort) -->
+                            <select id="records-sort" onchange="dataPanelFilter('clerk-records', 'sort', this.value)"></select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+                    <div class="table-responsive grid-10">
+                        <table id="records-table">
+                            <thead>
+                                <tr></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="records-pager"></div>
                 </div>
 
             </div>

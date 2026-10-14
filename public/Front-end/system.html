@@ -495,16 +495,19 @@
                     <div class="grid-2">
                         <div class="form-group">
                             <label for="create-first">First name <span class="req">*</span></label>
-                            <input type="text" id="create-first" name="firstName" class="form-control" maxlength="100" required>
+                            <input type="text" id="create-first" name="firstName" class="form-control" maxlength="100" required oninput="onNameInput(this)">
+                            <span class="field-error name-error" id="create-first-error" hidden></span>
                         </div>
                         <div class="form-group">
                             <label for="create-middle">Middle name</label>
                             <input type="text" id="create-middle" name="middleName" class="form-control"
-                                   maxlength="100" placeholder="Dela Cruz">
+                                   maxlength="100" placeholder="Dela Cruz" oninput="onNameInput(this)">
+                            <span class="field-error name-error" id="create-middle-error" hidden></span>
                         </div>
                         <div class="form-group">
                             <label for="create-last">Last name <span class="req">*</span></label>
-                            <input type="text" id="create-last" name="lastName" class="form-control" maxlength="100" required>
+                            <input type="text" id="create-last" name="lastName" class="form-control" maxlength="100" required oninput="onNameInput(this)">
+                            <span class="field-error name-error" id="create-last-error" hidden></span>
                         </div>
                         <div class="form-group">
                             <label for="create-phone">Phone <span class="req">*</span></label>
@@ -571,16 +574,19 @@
                         <div class="grid-2">
                             <div class="form-group">
                                 <label for="edit-first">First name <span class="req">*</span></label>
-                                <input type="text" id="edit-first" name="firstName" class="form-control" required>
+                                <input type="text" id="edit-first" name="firstName" class="form-control" required oninput="onNameInput(this)">
+                                <span class="field-error name-error" id="edit-first-error" hidden></span>
                             </div>
                             <div class="form-group">
                                 <label for="edit-middle">Middle name</label>
                                 <input type="text" id="edit-middle" name="middleName" class="form-control"
-                                       maxlength="100" placeholder="Dela Cruz">
+                                       maxlength="100" placeholder="Dela Cruz" oninput="onNameInput(this)">
+                                <span class="field-error name-error" id="edit-middle-error" hidden></span>
                             </div>
                             <div class="form-group">
                                 <label for="edit-last">Last name <span class="req">*</span></label>
-                                <input type="text" id="edit-last" name="lastName" class="form-control" required>
+                                <input type="text" id="edit-last" name="lastName" class="form-control" required oninput="onNameInput(this)">
+                                <span class="field-error name-error" id="edit-last-error" hidden></span>
                             </div>
                             <div class="form-group">
                                 <label for="edit-phone">Phone</label>

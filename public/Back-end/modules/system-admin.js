@@ -282,6 +282,7 @@ async function openUserModal(staffId) {
     form.elements.firstName.value = selectedUser.first_name;
     form.elements.middleName.value = selectedUser.middle_name || '';
     form.elements.lastName.value = selectedUser.last_name;
+    hideNameErrors(form);
     phoneFill(form.elements.phone, selectedUser.phone);
     setPhoneError(form.elements.phone, '');
     form.elements.email.value = selectedUser.email || '';
@@ -379,6 +380,14 @@ async function handleUpdateUser(event) {
     if (empty) {
         notifyWarning('Fill in every field marked with *.', 'Fill in the form');
         empty.focus();
+        return;
+    }
+
+    const badName = firstBadName(form);
+    if (badName) {
+        notifyWarning(nameBoxLabel(form, badName) + ' can only have letters. Take out any numbers or symbols.',
+            'Check the name');
+        badName.focus();
         return;
     }
 
@@ -757,6 +766,12 @@ function clearCreateForm() {
 
     setPhoneError(form.elements.phone, '');
     setEmailError(form.elements.email, '');
+    hideNameErrors(form);
+}
+
+// the "Letters only" lines under the name boxes, put away
+function hideNameErrors(form) {
+    form.querySelectorAll('.name-error').forEach((box) => { box.hidden = true; });
 }
 
 function cancelCreateAccount() {
@@ -939,6 +954,47 @@ function creatingCard(review) {
 
 // One press of Create: the form is checked here, the server checks it again
 // and makes the password, and the account is created straight away.
+// ---------- names: letters only ----------
+// First, middle and last name take letters only. Letters with accents (é, ñ)
+// count, and spaces between words stay. Numbers and symbols are taken out as
+// they are typed or pasted, and a line under the box says why.
+const NAME_LETTERS = /^[\p{L}\p{M}]+( [\p{L}\p{M}]+)*$/u;
+
+function onNameInput(input) {
+    const typed = input.value;
+    const cleaned = typed.replace(/[^\p{L}\p{M} ]/gu, '');   // keep letters, accents and spaces
+    const box = document.getElementById(input.id + '-error');
+
+    if (cleaned !== typed) {
+        // keep the cursor where it was, less the characters taken out
+        const cursor = Math.max(0, input.selectionStart - (typed.length - cleaned.length));
+        input.value = cleaned;
+        input.setSelectionRange(cursor, cursor);
+        if (box) {
+            box.textContent = 'Letters only. Numbers and symbols cannot be typed here.';
+            box.hidden = false;
+        }
+    } else if (box) {
+        box.hidden = true;
+    }
+}
+
+// the first name box on this form that is not letters only, or null
+// (a name saved before this rule can still hold a number)
+function firstBadName(form) {
+    for (const field of ['firstName', 'middleName', 'lastName']) {
+        const input = form.elements[field];
+        const value = input.value.trim().replace(/\s+/g, ' ');
+        if (value !== '' && !NAME_LETTERS.test(value)) return input;
+    }
+    return null;
+}
+
+function nameBoxLabel(form, input) {
+    const label = form.querySelector('label[for="' + input.id + '"]');
+    return label ? label.childNodes[0].textContent.trim() : 'This name';
+}
+
 async function handleCreateUser(event) {
     event.preventDefault();
     const form = event.target;
@@ -950,6 +1006,14 @@ async function handleCreateUser(event) {
         const name = label ? label.childNodes[0].textContent.trim() : 'This field';
         notifyWarning(name + ' is required.', 'Fill in the form');
         empty.focus();
+        return;
+    }
+
+    const badName = firstBadName(form);
+    if (badName) {
+        notifyWarning(nameBoxLabel(form, badName) + ' can only have letters. Take out any numbers or symbols.',
+            'Check the name');
+        badName.focus();
         return;
     }
 

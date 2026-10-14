@@ -37,8 +37,11 @@ function showInventoryPanel(panelId, title, event) {
     // a screen opened from another (the order form, from Purchase Orders) lights its menu entry
     const opened = document.getElementById(panelId);
     const litId = (opened && opened.getAttribute('data-panel-of')) || panelId;
+    // a link naming a view (Records: Suppliers, Products...) lights only for that view
+    const view = opened ? opened.dataset.view : undefined;
     document.querySelectorAll('[data-panel-link]').forEach((link) => {
-        link.classList.toggle('active', link.dataset.panelLink === litId);
+        const wanted = link.dataset.panelView;
+        link.classList.toggle('active', link.dataset.panelLink === litId && (!wanted || wanted === view));
     });
 
     const heading = document.getElementById('inv-page-title');
@@ -685,6 +688,22 @@ function pickAdjustUnit(name) {
     renderAdjustPreview();
 }
 
+// Why a different unit cannot be filed, in the words of sp_adjust_stock; ''
+// when it can. Only called when the typed unit differs from the current one.
+function adjustUnitProblem() {
+    const form = document.getElementById('adjust-form');
+    const type = form ? form.elements.adjustmentType.value : '';
+    const sizes = adjustMaterial && Array.isArray(adjustMaterial.selling_units) ? adjustMaterial.selling_units : [];
+
+    if (type !== 'Recount') {
+        return 'A different unit can only be set on a Recount. Leave Counted in empty, or choose Recount.';
+    }
+    if (sizes.length > 0) {
+        return 'This material has selling sizes set up, so its unit cannot change. Fix the selling sizes first.';
+    }
+    return '';
+}
+
 // says what the typed unit is about to do before the button is pressed
 function renderAdjustUnitVerdict() {
     const box = document.getElementById('adjust-unit-verdict');
@@ -706,6 +725,15 @@ function renderAdjustUnitVerdict() {
     const known = invUnits.some((u) => String(u.name).toLowerCase() === typed.toLowerCase());
     const current = adjustMaterial ? String(adjustMaterial.unit_name || '') : '';
     const changing = adjustMaterial && current.toLowerCase() !== typed.toLowerCase();
+
+    // the same rule as sp_adjust_stock: a different unit is only for a Recount,
+    // and not for a material that already has a unit and also sells in other sizes
+    const unitProblem = changing && current !== '' ? adjustUnitProblem() : '';
+    if (unitProblem) {
+        box.className = 'unit-verdict is-stop';
+        box.textContent = unitProblem;
+        return;
+    }
 
     if (!known) {
         box.className = 'unit-verdict is-new';
@@ -733,6 +761,16 @@ function readQuantity(value) {
     return Number.isFinite(number) ? Math.round(number * 1000) / 1000 : NaN;
 }
 
+// Add and Remove move the shelf, so a quantity of nothing is not an adjustment
+// (fractions are fine); a recount may find the shelf empty, so it may be 0.
+// Returns the words to show, or '' when the quantity is fine.
+function adjustQuantityProblem(type, quantity) {
+    if (type === 'Recount') {
+        return quantity < 0 ? 'A recount cannot be below zero.' : '';
+    }
+    return quantity <= 0 ? 'Add and Remove need a quantity greater than zero.' : '';
+}
+
 // ---------- what this will do ----------
 // A strip: the material, then "40 pcs -> 45 pcs (+5)". A Remove that would
 // take the shelf below zero is caught here.
@@ -749,15 +787,17 @@ function renderAdjustPreview() {
         return;
     }
 
-    // a movement of nothing is not an adjustment
-    if (quantity < 1) {
+    const type = form.elements.adjustmentType.value;
+
+    // the same rule, in the same words, as the server and sp_adjust_stock
+    const quantityProblem = adjustQuantityProblem(type, quantity);
+    if (quantityProblem) {
         box.className = 'adjust-preview is-stop';
-        box.textContent = 'The quantity has to be at least 1.';
+        box.textContent = quantityProblem;
         return;
     }
 
     const before = Number(adjustMaterial.quantity_in_stock) || 0;
-    const type = form.elements.adjustmentType.value;
     const unit = (adjustUnitBox() && adjustUnitBox().value.trim()) || adjustMaterial.unit_name || '';
 
     let after = before;
@@ -876,9 +916,11 @@ async function handleAdjustStock(event) {
         reason: form.elements.reason.value.trim()
     };
 
-    if (!Number.isFinite(data.quantity) || data.quantity < 1) {
-        notifyWarning('Enter a quantity of at least 1. Nothing moves on the shelf otherwise.',
-            'Quantity too small');
+    const quantityProblem = Number.isFinite(data.quantity)
+        ? adjustQuantityProblem(data.adjustmentType, data.quantity)
+        : 'Enter a quantity.';
+    if (quantityProblem) {
+        notifyWarning(quantityProblem, 'Quantity not allowed');
         const qty = document.getElementById('adjust-qty');
         if (qty) { qty.focus(); qty.select(); }
         return;
@@ -889,6 +931,13 @@ async function handleAdjustStock(event) {
     // changing the unit re-reads every figure on the shelf, so it is read back first
     const current = String(adjustMaterial.unit_name || '');
     if (unit !== '' && current !== '' && unit.toLowerCase() !== current.toLowerCase()) {
+        // the server refuses these too; saying it here saves a round trip
+        const unitProblem = adjustUnitProblem();
+        if (unitProblem) {
+            notifyWarning(unitProblem, 'Unit not changed');
+            return;
+        }
+
         const yes = await askConfirm(
             adjustMaterial.product_name + ' is counted in ' + current + ' and you are filing this in ' + unit + '.',
             {
@@ -897,8 +946,8 @@ async function handleAdjustStock(event) {
                 confirmLabel: 'Count it in ' + unit,
                 tone: 'danger',
                 detail: [
-                    'The ' + adjustMaterial.quantity_in_stock + ' already on the shelf will be read as ' +
-                        unit + ' from now on, not converted.',
+                    'The ' + adjustMaterial.quantity_in_stock + ' ' + current + ' on the shelf is replaced by the ' +
+                        'count you typed, in ' + unit + '. Nothing is converted.',
                     'Every screen that shows this material will say ' + unit + '.',
                     'Entries already in the log keep saying ' + current + ', because that is what they counted.'
                 ]
@@ -1506,6 +1555,176 @@ function openArchivedMaterial(productId) {
         initialsOf(p.product_name), [{ label: 'Archived Material', body: body }], foot);
 }
 
+// ---------- records: suppliers, products, categories and units ----------
+// To look at only. Adding a supplier, a category or a unit is the manager's
+// (the server refuses it for any other role), so there is no Add button here.
+let clerkRecordType = 'supplier';
+
+const CLERK_RECORD_COLUMNS = {
+    supplier: [['name', 'Supplier'], ['contact_person', 'Contact'], ['contact_number', 'Number'], ['email', 'Email'], ['product_count', 'Products']],
+    product:  [['name', 'Product'], ['category_name', 'Category'], ['brand_name', 'Brand'], ['price', 'Price'], ['quantity_in_stock', 'On Hand']],
+    category: [['name', 'Category'], ['product_count', 'Products'], ['total_stock', 'Total Stock']],
+    unit:     [['name', 'Unit'], ['product_count', 'Products']]
+};
+
+const CLERK_RECORD_TITLES = {
+    supplier: 'Suppliers', product: 'Products', category: 'Categories', unit: 'Units'
+};
+
+// the columns that hold a figure: right-aligned, and sortable by size
+const CLERK_RECORD_NUMERIC = ['product_count', 'price', 'quantity_in_stock', 'total_stock'];
+
+function showClerkRecords(event) { showClerkRecordType(clerkRecordType, event); }
+
+function showClerkRecordType(type, event) {
+    if (!CLERK_RECORD_COLUMNS[type]) type = 'supplier';
+    const changed = type !== clerkRecordType;
+    clerkRecordType = type;
+
+    const card = document.getElementById('panel-records');
+    if (card) card.dataset.view = type;
+    showInventoryPanel('panel-records', 'Records', event);
+
+    const title = document.getElementById('records-title');
+    if (title) title.textContent = CLERK_RECORD_TITLES[type];
+
+    writeClerkRecordHeaders();
+    if (changed) fillClerkRecordSort();
+
+    const panel = getDataPanel('clerk-records');
+    if (!panel || !changed) return;
+
+    // a table already open loads the new kind at once; a closed one stays closed
+    if (panel.state === 'ready') panel.open();
+    else panel.reset();
+}
+
+function writeClerkRecordHeaders() {
+    const table = document.getElementById('records-table');
+    if (!table) return;
+
+    const columns = CLERK_RECORD_COLUMNS[clerkRecordType];
+    table.querySelector('thead tr').innerHTML = columns.map((column) => {
+        const style = CLERK_RECORD_NUMERIC.indexOf(column[0]) !== -1 ? ' class="cell-num"' : '';
+        return '<th' + style + '>' + column[1] + '</th>';
+    }).join('');
+
+    const panel = getDataPanel('clerk-records');
+    if (panel) panel.config.columns = columns.length;
+}
+
+// Products sort by All (name), Category or Brand; the others by name
+function fillClerkRecordSort() {
+    const select = document.getElementById('records-sort');
+    if (!select) return;
+
+    let options;
+    if (clerkRecordType === 'product') {
+        options = [['name-asc', 'All'], ['category_name-asc', 'Category'], ['brand_name-asc', 'Brand']];
+    } else {
+        options = [['name-asc', 'Name, A to Z'], ['name-desc', 'Name, Z to A']];
+    }
+
+    select.innerHTML = options.map((option) =>
+        '<option value="' + option[0] + '">' + escapeHtml(option[1]) + '</option>').join('');
+    select.value = 'name-asc';
+    // set without loading: a closed table stays closed
+    const panel = getDataPanel('clerk-records');
+    if (panel) panel.setFilter('sort', 'name-asc');
+}
+
+function sortClerkRecordRows(rows, order) {
+    const value = String(order || 'name-asc');
+    const descending = value.endsWith('-desc');
+    const key = value.replace(/-(asc|desc)$/, '');
+
+    return rows.sort((a, b) => {
+        const byName = String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
+        let result = byName;
+        if (key === 'category_name' || key === 'brand_name') {
+            // A to Z by category or brand, the ones not set last, then by name
+            const first = String(a[key] || '');
+            const second = String(b[key] || '');
+            if (first === '' && second !== '') result = 1;
+            else if (second === '' && first !== '') result = -1;
+            else result = first.localeCompare(second) || byName;
+        }
+        return descending ? -result : result;
+    });
+}
+
+function buildClerkRecordsPanel() {
+    createDataPanel({
+        key: 'clerk-records',
+        remember: false,   // which kind of record it holds is not kept, so it opens closed
+        tableId: 'records-table',
+        columns: 5,
+        pagerId: 'records-pager',
+        gate: {
+            title: 'No records loaded',
+            text: 'Press Load Data to see these records.',
+            button: 'Load Data'
+        },
+        filters: { sort: 'name-asc' },
+        load: () => apiGetRecords(clerkRecordType),
+        match: (row, query) => prefixMatch(Object.values(row), query),
+        sort: (rows, filters) => sortClerkRecordRows(rows, filters.sort),
+
+        // a row opens a card with the whole record
+        renderRow: (row, index) =>
+            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                'onclick="openClerkRecord(' + index + ')" title="Open this record">' +
+            CLERK_RECORD_COLUMNS[clerkRecordType].map((column, position) => {
+                const value = row[column[0]];
+                let shown;
+                if (column[0] === 'price') shown = peso(value);
+                else if (value === null || value === undefined || value === '') shown = '<span class="muted">Not set</span>';
+                else shown = escapeHtml(value);
+
+                let style = '';
+                if (position === 0) style = 'cell-name';
+                else if (CLERK_RECORD_NUMERIC.indexOf(column[0]) !== -1) style = 'cell-num';
+
+                return '<td class="' + style + '">' + shown + '</td>';
+            }).join('') + '</tr>'
+    });
+}
+
+// the fields a record's card shows, in order
+const CLERK_RECORD_FIELDS = {
+    supplier: [['contact_person', 'Contact Person'], ['contact_number', 'Contact Number'], ['email', 'Email'],
+               ['address', 'Address'], ['product_count', 'Products']],
+    product:  [['category_name', 'Category'], ['brand_name', 'Brand'], ['unit_name', 'Unit'],
+               ['supplier_name', 'Supplier'], ['price', 'Price'], ['quantity_in_stock', 'On Hand'],
+               ['reorder_point', 'Reorder Point'], ['status', 'Status']],
+    category: [['product_count', 'Products'], ['total_stock', 'Total Stock']],
+    unit:     [['product_count', 'Products']]
+};
+
+function openClerkRecord(index) {
+    const panel = getDataPanel('clerk-records');
+    const row = panel ? panel.visible[index] : null;
+    if (!row) return;
+
+    const fields = CLERK_RECORD_FIELDS[clerkRecordType].map((field) => {
+        const value = row[field[0]];
+        let shown;
+        if (value === null || value === undefined || value === '') shown = '<span class="muted">Not set</span>';
+        else if (field[0] === 'price') shown = peso(value);
+        else if (field[0] === 'status') shown = statusBadge(String(value));
+        else shown = escapeHtml(value);
+        return detailField(field[1], shown);
+    }).join('');
+
+    const body = '<div class="detail-grid">' +
+        detailField('Record ID', '#' + row.id) +
+        detailField('Name', escapeHtml(row.name)) +
+        fields + '</div>';
+
+    const kind = CLERK_RECORD_TITLES[clerkRecordType].replace(/ies$/, 'y').replace(/s$/, '');
+    openDetailModal(row.name, kind + ' record', initialsOf(row.name), [{ label: 'Details', body: body }]);
+}
+
 async function loadInventoryArchive() {
     const panel = getDataPanel('clerk-archive');
     if (panel && panel.state !== 'closed') await panel.refresh();
@@ -1963,6 +2182,9 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         buildClerkPurchaseOrderPanel();
         buildReturnsPanel();
         buildInventoryArchivePanel();
+        buildClerkRecordsPanel();
+        writeClerkRecordHeaders();
+        fillClerkRecordSort();
 
         // the schedule follows what the administrator switched on for this role
         configureDeliverySchedule({ showPanel: (panelId, title) => showInventoryPanel(panelId, title) });

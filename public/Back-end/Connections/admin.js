@@ -22,6 +22,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");   // the same as fs, but works with "await"
 const crypto = require("crypto");
 const zlib = require("zlib");
+const express = require("express");   // only for the restore upload's own JSON limit
 const mailer = require("../mailer");
 const { splitSqlStatements } = require("../sql-script");
 const isMailConfigured = mailer.isMailConfigured;
@@ -41,12 +42,21 @@ function registerAdminRoutes(app, deps) {
     db, callProcedure, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
     requireRole, publishChange, ADMIN, USER_SELECT, withPresence, notOwnAccount,
     endSessionsForStaff, hashPassword, generatePassword, phoneComplaint, cleanPhone, cleanMiddleName,
-    findPhoneOwner, phoneTakenMessage,
+    findPhoneOwner, phoneTakenMessage, nameComplaint,
     tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, DB_NAME, sqlValue,
     sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
+    loadProceduresIfMissing,
     FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom,
     HOLD_LIFTED_BY_MANAGER
   } = deps;
+
+  // the first name, middle name and last name, checked in that order; the
+  // sentence about the first bad one, or null when all three are letters only
+  function staffNameProblem(firstName, middleName, lastName) {
+    return nameComplaint("First name", firstName) ||
+           nameComplaint("Middle name", middleName) ||
+           nameComplaint("Last name", lastName);
+  }
 
   // ==========================================
   // LOOKUPS
@@ -332,6 +342,10 @@ function registerAdminRoutes(app, deps) {
       return response.status(400).json({ error: "Name, phone, role and email are required" });
     }
 
+    // names are letters only: no numbers, no symbols
+    const createNameProblem = staffNameProblem(firstName, middleName, lastName);
+    if (createNameProblem) return response.status(400).json({ error: createNameProblem });
+
     // the email is where the password goes, so an address that cannot receive one is refused
     const address = String(email).trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
@@ -478,6 +492,10 @@ function registerAdminRoutes(app, deps) {
     if (!firstName || !lastName || !roleId) {
       return response.status(400).json({ error: "Name and role are required" });
     }
+
+    // names are letters only: no numbers, no symbols
+    const editNameProblem = staffNameProblem(firstName, middleName, lastName);
+    if (editNameProblem) return response.status(400).json({ error: editNameProblem });
 
     const phoneProblem = phoneComplaint(phone);
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
@@ -1831,12 +1849,12 @@ function registerAdminRoutes(app, deps) {
     try {
       const output = await callProcedure(
         "CALL sp_sweep_archives(@deliveries, @materials)", [],
-        ["deliveries", "materials"]);
+        ["deliveries", "materials", "err_no", "err_text"]);
 
       const deliveries = Number(output.deliveries) || 0;
       const materials = Number(output.materials) || 0;
       if (deliveries < 0) {
-        console.error("Archive sweep failed inside the database; see the MySQL log.");
+        console.error(`Archive sweep failed inside the database (${output.err_no}): ${output.err_text}`);
         return;
       }
       if (deliveries > 0 || materials > 0) {
@@ -2016,7 +2034,7 @@ function registerAdminRoutes(app, deps) {
 
   // The list, the daily backup's state and the limits. The folder's path on
   // the server is not sent: it is no business of a browser's.
-  app.get("/api/backups", async (request, response) => {
+  app.get("/api/backups", requireRole(ADMIN), async (request, response) => {
     try {
       const names = await backupNames();
 
@@ -2193,7 +2211,7 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  app.get("/api/backups/:fileName", async (request, response) => {
+  app.get("/api/backups/:fileName", requireRole(ADMIN), async (request, response) => {
     const name = request.params.fileName;
 
     if (!BACKUP_NAME.test(name)) {
@@ -2236,10 +2254,15 @@ function registerAdminRoutes(app, deps) {
 
   // A backup taken without procedures restores without error and leaves the
   // system unable to save, so the count is taken AFTER the restore and reported
-  // with the success. Returns "" when all is well.
+  // with the success. A backup made before the procedures were last changed
+  // brings the old ones back, and the server's calls would then fail until the
+  // next start-up; so the same check the server runs at start-up is run now,
+  // and file 2 is loaded again straight away if anything is missing or old.
+  // Returns "" when all is well.
   async function restoreShortfall() {
     try {
       forgetProcedureCount();                  // force a fresh count
+      await loadProceduresIfMissing();
       const total = await countProcedures();
       if (total >= EXPECTED_PROCEDURES) return "";
 
@@ -2280,7 +2303,10 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  app.post("/api/restore", requireRole(ADMIN), async (request, response) => {
+  // The one route that takes a big body: the .sql file the administrator picked.
+  // server.js leaves it alone and it is read here, after the role check, with a
+  // 50 MB limit instead of the default 100 kb.
+  app.post("/api/restore", requireRole(ADMIN), express.json({ limit: "50mb" }), async (request, response) => {
     const sql = request.body && request.body.sql;
 
     if (typeof sql !== "string" || sql.trim() === "") {

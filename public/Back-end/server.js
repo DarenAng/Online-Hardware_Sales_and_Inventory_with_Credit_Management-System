@@ -1507,6 +1507,19 @@ function cleanMiddleName(value) {
   return trimmed.slice(0, 100);
 }
 
+// A staff name is letters only (accents such as é and ñ count as letters),
+// with single spaces between words. No numbers, no symbols.
+// The sentence to say about a bad name, or null when it is fine.
+// Example: nameComplaint("First name", "Juan2") -> "First name can only have letters..."
+function nameComplaint(label, value) {
+  const name = String(value || "").trim().replace(/\s+/g, " ");
+  if (name === "") return null;   // a required name is checked as missing elsewhere
+  if (!/^[\p{L}\p{M}]+( [\p{L}\p{M}]+)*$/u.test(name)) {
+    return `${label} can only have letters (accents like é and ñ are fine). No numbers or symbols.`;
+  }
+  return null;
+}
+
 // A search matches the start of a field (LIKE 'text%'). % and _ are escaped.
 // Example: searchPrefix("50%") -> "50\\%%"  (the user's % is not a wildcard)
 function searchPrefix(text) {
@@ -2506,8 +2519,8 @@ const FEATURES = [
 
   // --- records ---
   { key: "records", name: "Records", module: "Records",
-    description: "Suppliers, customers, products, categories and units.",
-    available: [MANAGER], defaults: [MANAGER],
+    description: "Suppliers, customers, products, categories and units. The clerk sees suppliers, products, categories and units, and cannot add any.",
+    available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
     routes: [] },
   { key: "archives", name: "Archives", module: "Records",
     description: "What has been put away, and restoring it.",
@@ -3187,7 +3200,7 @@ const adminModule = registerAdminRoutes(app, {
   db, callProcedure, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
   requireRole, publishChange, ADMIN, USER_SELECT, withPresence, notOwnAccount,
   endSessionsForStaff, hashPassword, generatePassword, phoneComplaint, cleanPhone, cleanMiddleName,
-  findPhoneOwner, phoneTakenMessage,
+  findPhoneOwner, phoneTakenMessage, nameComplaint,
   tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
   sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
   loadProceduresIfMissing,
