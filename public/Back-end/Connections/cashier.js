@@ -41,7 +41,7 @@ const QR_METHODS = ["GCash", "PayMaya"];
 function registerCashierRoutes(app, deps) {
   const {
     db, callProcedure, getActorId, DRIVER, CASHIER, isDateText, SALE_CUSTOMER_SQL,
-    phoneComplaint, cleanPhone, qrPayments
+    phoneComplaint, cleanPhone, qrPayments, readDeliveryAreas
   } = deps;
 
   // ==========================================
@@ -365,13 +365,20 @@ function registerCashierRoutes(app, deps) {
   });
 
   app.post("/api/deliveries", async (request, response) => {
-    const { saleId, address, scheduledDate, remarks, contactName, contactPhone } = request.body;
+    const { saleId, area, street, scheduledDate, remarks, contactName, contactPhone } = request.body;
     // optional: empty leaves the delivery open for any driver to take
     const driverId = request.body.driverStaffId ? Number(request.body.driverStaffId) : null;
 
-    if (!saleId || !address) {
-      return response.status(400).json({ error: "A sale and a delivery address are required" });
+    if (!saleId) {
+      return response.status(400).json({ error: "A sale is required" });
     }
+
+    // the address is two parts: a house number and street typed by the cashier
+    // (many spaces become one), and an area chosen from the administrator's list
+    if (typeof street !== "string") {
+      return response.status(400).json({ error: "Enter the house number and street (3 to 120 characters)." });
+    }
+    const streetText = street.trim().replace(/\s+/g, " ");
 
     if (!String(contactPhone || "").trim()) {
       return response.status(400).json({ error: "A delivery needs a phone number the driver can call" });
@@ -393,6 +400,25 @@ function registerCashierRoutes(app, deps) {
     const phone = cleanPhone(contactPhone);
 
     try {
+      // The area must be one on the saved list. The list's own spelling is what
+      // is kept, so "antipolo city" typed in another letter case saves as listed.
+      const savedAreas = await readDeliveryAreas();
+      if (savedAreas.length === 0) {
+        return response.status(400).json({
+          error: "No delivery area is set. Ask the administrator to add one in System Admin › Receipt Maintenance."
+        });
+      }
+      const wantedArea = String(area || "").trim().toLowerCase();
+      const listedArea = savedAreas.find((saved) => saved.trim().toLowerCase() === wantedArea);
+      if (!listedArea) {
+        return response.status(400).json({ error: "Choose a delivery area from the list." });
+      }
+      if (streetText.length < 3 || streetText.length > 120) {
+        return response.status(400).json({ error: "Enter the house number and street (3 to 120 characters)." });
+      }
+      // the street first, then the area, as one line of text
+      const address = streetText + ", " + listedArea;
+
       // checked before booking, so a bad pick never leaves a half-made delivery
       let driverName = null;
       if (driverId) {

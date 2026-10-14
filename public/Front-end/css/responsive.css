@@ -216,6 +216,24 @@
         padding: 0;
     }
 
+    /* the receipt's item lines are printed paper, not records: they stay a
+       plain table (item on the left, amount on the right) on a phone too */
+    .receipt-paper .rc-items { display: table; }
+    .receipt-paper .rc-items tbody { display: table-row-group; }
+    .receipt-paper .rc-items tbody tr {
+        display: table-row;
+        border: none;
+        background: none;
+        margin: 0;
+        padding: 0;
+    }
+    .receipt-paper .rc-items tbody td {
+        display: table-cell;
+        padding: 4px 0;
+        text-align: left;
+    }
+    .receipt-paper .rc-items tbody td.rc-amt { text-align: right; }
+
     /* inside a popup the same thing happens, one step smaller */
     .mini-table tbody tr { margin-bottom: 8px; padding: 8px 11px; }
     .mini-table tbody td { padding: 0; }

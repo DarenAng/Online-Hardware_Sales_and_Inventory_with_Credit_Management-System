@@ -390,11 +390,6 @@
                                         <input type="text" id="store-title" name="title" class="form-control"
                                                maxlength="40" placeholder="Sales Invoice" required>
                                     </div>
-                                    <div class="form-group">
-                                        <label for="store-paid-label">Fully paid stamp <span class="req">*</span></label>
-                                        <input type="text" id="store-paid-label" name="paidLabel" class="form-control"
-                                               maxlength="40" placeholder="PAID IN FULL" required>
-                                    </div>
                                 </div>
 
                                 <span class="store-subhead">Show on the receipt</span>
@@ -437,6 +432,28 @@
                                 <button type="button" class="btn btn-ghost" onclick="resetStoreForm()">Reset</button>
                             </div>
                         </form>
+                    </div>
+
+                    <!-- DELIVERY AREA -- the places the shop delivers to. Every add or remove is
+                         saved at once, so this card stands apart from the store form above,
+                         which has its own Save button -->
+                    <div class="card delivery-area-card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Delivery Area</h3>
+                            </div>
+                        </div>
+
+                        <p class="area-help">The cashier can only send a delivery to one of these places.
+                            Write each one on a single line, such as Brgy. San Isidro, Antipolo City.</p>
+
+                        <form class="area-add" onsubmit="handleAddDeliveryArea(event)" autocomplete="off" novalidate>
+                            <input type="text" id="area-input" class="form-control" maxlength="150"
+                                   placeholder="Brgy. San Isidro, Antipolo City" aria-label="New delivery area">
+                            <button type="submit" class="btn btn-success" id="area-add-btn">Add</button>
+                        </form>
+
+                        <ul class="area-list" id="area-list"></ul>
                     </div>
 
                     <div class="card store-preview-card">

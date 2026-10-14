@@ -703,11 +703,22 @@
                         </div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="dl-address">Delivery address</label>
-                        <input type="text" id="dl-address" name="address" class="form-control"
-                               placeholder="Street, barangay, city" required>
+                    <!-- the address is a place from the administrator's list (System Admin,
+                         Delivery Area) plus the house number and street typed here -->
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="dl-area">Delivery area</label>
+                            <select id="dl-area" name="area" class="form-control" required>
+                                <option value="">Choose an area</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="dl-street">House no. / Street</label>
+                            <input type="text" id="dl-street" name="street" class="form-control"
+                                   minlength="3" maxlength="120" placeholder="House no., street" required>
+                        </div>
                     </div>
+                    <p class="delivery-verdict is-stop" id="delivery-area-note"></p>
 
                     <div class="form-group">
                         <label for="dl-scheduled">Scheduled for</label>

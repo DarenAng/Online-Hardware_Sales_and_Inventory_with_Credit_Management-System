@@ -79,7 +79,7 @@ function showMaintenance(event) {
     const panel = getDataPanel('admin-backups');
     if (panel) panel.open(); else loadAutoBackupState();
 }
-function showStoreSettings(event) { showPanel('panel-store', event); loadStoreSettingsForm(); }
+function showStoreSettings(event) { showPanel('panel-store', event); loadStoreSettingsForm(); loadDeliveryAreas(); }
 
 // one small request, read on opening; not re-read while a click is saving
 function showAccessControl(event) {
@@ -2100,7 +2100,6 @@ async function loadStoreSettingsForm() {
     form.elements.paperWidth.value = String(layout.paperWidth);
     form.elements.fontSize.value = String(layout.fontSize);
     form.elements.title.value = layout.title;
-    form.elements.paidLabel.value = layout.paidLabel;
     RECEIPT_SWITCHES.forEach((name) => {
         const box = form.elements['show_' + name];
         if (box) box.checked = receiptShows(layout, name);
@@ -2113,6 +2112,121 @@ async function loadStoreSettingsForm() {
 
     showStoreVerdict('');
     markFormClean(form, document.getElementById('store-save-btn'));
+}
+
+// ---------- Delivery Area: the places the shop delivers to ----------
+// The cashier can only pick from this list when making a delivery. Every add
+// or remove is saved at once (there is no Save button), so the list is shown
+// again from what the server answers. It is a plain list, not a table, so each
+// place can hold its own remove button.
+let deliveryAreas = [];
+const AREA_MIN_LENGTH = 3;
+const AREA_MAX_LENGTH = 150;
+
+async function loadDeliveryAreas() {
+    try {
+        const body = await apiGetDeliveryAreas();
+        deliveryAreas = body.areas || [];
+    } catch (error) {
+        notifyOffline();
+        return;
+    }
+    renderDeliveryAreas();
+}
+
+function renderDeliveryAreas() {
+    const list = document.getElementById('area-list');
+    if (!list) return;
+
+    if (deliveryAreas.length === 0) {
+        list.innerHTML = '<li class="area-empty">No delivery area yet. ' +
+            'Deliveries cannot be made until at least one area is added.</li>';
+        return;
+    }
+
+    list.innerHTML = deliveryAreas.map((area, index) =>
+        '<li>' +
+            '<span class="area-text">' + escapeHtml(area) + '</span>' +
+            '<button type="button" class="btn btn-ghost btn-sm area-remove" title="Remove this area" ' +
+                'aria-label="Remove ' + escapeHtml(area) + '" onclick="removeDeliveryArea(' + index + ')">&times;</button>' +
+        '</li>').join('');
+}
+
+// While one add or remove is running, Add and every x are switched off, so a
+// second click cannot start another change before the first one is answered.
+let areaBusy = false;
+
+function setAreaBusy(busy) {
+    areaBusy = busy;
+
+    const button = document.getElementById('area-add-btn');
+    if (button) button.disabled = busy;
+    document.querySelectorAll('.area-remove').forEach((remove) => { remove.disabled = busy; });
+}
+
+// Sends one change (add or remove) and shows the list the server answers with.
+// "send" starts the request. Gives back true when the server made the change.
+async function changeDeliveryArea(send, title) {
+    if (areaBusy) return false;
+    setAreaBusy(true);
+
+    let changed = false;
+    let refused = false;
+    try {
+        const response = await send();
+        const result = await response.json();
+
+        if (!response.ok) {
+            refused = true;
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not saved');
+        } else {
+            deliveryAreas = result.areas;
+            notifySuccess(result.message, title);
+            changed = true;
+        }
+    } catch (error) {
+        notifyOffline();
+    }
+
+    renderDeliveryAreas();
+    setAreaBusy(false);
+
+    // refused: another administrator may have changed the list, so read it again
+    if (refused) await loadDeliveryAreas();
+    return changed;
+}
+
+async function handleAddDeliveryArea(event) {
+    event.preventDefault();
+
+    const box = document.getElementById('area-input');
+    if (!box || areaBusy) return;
+
+    // many spaces become one, like the server does
+    const area = box.value.trim().replace(/\s+/g, ' ');
+
+    if (area.length < AREA_MIN_LENGTH || area.length > AREA_MAX_LENGTH) {
+        notifyError('A delivery area is ' + AREA_MIN_LENGTH + ' to ' + AREA_MAX_LENGTH + ' characters, ' +
+                    'such as Brgy. San Isidro, Antipolo City.', 'Not added');
+        box.focus();
+        return;
+    }
+    if (deliveryAreas.some((saved) => saved.toLowerCase() === area.toLowerCase())) {
+        notifyError(area + ' is already on the list.', 'Not added');
+        box.focus();
+        return;
+    }
+
+    const added = await changeDeliveryArea(() => apiAddDeliveryArea(area), 'Delivery area added');
+    if (added) box.value = '';
+    box.focus();
+}
+
+async function removeDeliveryArea(index) {
+    const area = deliveryAreas[index];
+    if (area === undefined) return;
+
+    await changeDeliveryArea(() => apiRemoveDeliveryArea(area), 'Delivery area removed');
 }
 
 // ---------- the header and footer lines: added, moved (header only) and removed here ----------
@@ -2210,7 +2324,8 @@ function readReceiptLayout(form) {
         paperWidth: Number(form.elements.paperWidth.value),
         fontSize: Number(form.elements.fontSize.value),
         title: form.elements.title.value.trim(),
-        paidLabel: form.elements.paidLabel.value.trim(),
+        // not a box on the form: the fixed wording the server sends, so the preview shows it
+        paidLabel: receiptLayoutOf(storeSettings).paidLabel,
         headerLines: readReceiptLines('header'),
         footerLines: readReceiptLines('footer'),
         show: show
@@ -2520,7 +2635,6 @@ function previewPartsFor(box, form, name) {
         case 'bankAccountNumber':
         case 'show_bank':         return { parts: firstFound(all('.rc-bank'), all('.rc-foot')) };
         case 'title':             return { parts: firstFound(all('.rc-line'), all('.rc-no')) };
-        case 'paidLabel':         return { parts: all('.rc-foot') };
         case 'show_item_count':   return { parts: all('.rc-due') };
         case 'invoiceNote':
         case 'show_note':         return { parts: firstFound(all('.rc-note'), all('.rc-foot')) };

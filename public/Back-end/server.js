@@ -665,6 +665,48 @@ async function migrateReceiptLayout() {
     [JSON.stringify(DEFAULT_RECEIPT_LAYOUT)]);
 }
 
+// The places the shop delivers to, kept in System Admin as a JSON list of
+// one-line texts in store_settings.delivery_areas. The cashier must pick one
+// when making a delivery. NULL means the list is empty, so no value is filled in.
+async function migrateDeliveryAreas() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'delivery_areas'`,
+    [DB_NAME]
+  );
+  if (columns.length === 0) {
+    await db.query("ALTER TABLE store_settings ADD COLUMN delivery_areas TEXT NULL AFTER receipt_layout");
+    console.log("Added store_settings.delivery_areas for the places the shop delivers to.");
+  }
+}
+
+// The text saved in store_settings.delivery_areas as a plain array of texts.
+// Nothing saved yet, or a value that is not a list, reads as an empty list.
+function deliveryAreasFrom(savedText) {
+  if (!savedText) {
+    return [];
+  }
+
+  try {
+    const list = JSON.parse(savedText);
+    if (Array.isArray(list)) {
+      return list.filter((area) => typeof area === "string");
+    }
+  } catch (error) {
+    // not valid JSON: treat it as no list
+  }
+  return [];
+}
+
+// The saved delivery areas, read from the database.
+async function readDeliveryAreas() {
+  const [rows] = await db.query("SELECT delivery_areas FROM store_settings WHERE setting_id = 1");
+  if (rows.length === 0) {
+    return [];
+  }
+  return deliveryAreasFrom(rows[0].delivery_areas);
+}
+
 // The codes behind "Forgot your password?". Only the scrypt hash of a code is
 // kept, never the code. A database made before it has no table, and asking
 // for a code fails.
@@ -1120,6 +1162,7 @@ async function migrateDatabase() {
   await migrateReturnInspection();
   await migrateBankDetails();
   await migrateReceiptLayout();
+  await migrateDeliveryAreas();
   await migratePasswordResets();
   await migrateSupplierResponse();
   await migrateSupplierQuote();
@@ -2044,10 +2087,11 @@ function scopeOf(pathname) {
   if (/^\/api\/(users|roles|staff)/.test(pathname)) return "staff";
   if (/^\/api\/(inventory|purchase-orders|stocks|units|materials|suppliers|categories)/.test(pathname)) return "inventory";
   if (/^\/api\/returns/.test(pathname)) return "returns";
-  if (/^\/api\/deliveries|^\/api\/delivery/.test(pathname)) return "deliveries";
+  // "delivery/" with its slash, so /api/delivery-areas is not taken for a delivery
+  if (/^\/api\/(deliveries|delivery\/)/.test(pathname)) return "deliveries";
   if (/^\/api\/(credit|customers)/.test(pathname)) return "credit";
   if (/^\/api\/sales/.test(pathname)) return "sales";
-  if (/^\/api\/(backups|restore|store-settings)/.test(pathname)) return "system";
+  if (/^\/api\/(backups|restore|store-settings|delivery-areas)/.test(pathname)) return "system";
   if (/^\/api\/archives/.test(pathname)) return "archives";
   if (/^\/api\/notifications/.test(pathname)) return "notifications";
   // a screen switched on or off for a role changes every menu that role has open
@@ -2317,6 +2361,12 @@ const ACCESS_RULES = [
   // every dashboard prints an invoice, so reading is open; changing is the administrator's
   ["GET",   /^\/api\/store-settings$/,                 SIGNED_IN],
   ["PUT",   /^\/api\/store-settings$/,                 [ADMIN]],
+  // where the shop delivers to: the administrator keeps the list, and whoever
+  // makes a delivery (cashier, manager) reads it to pick from
+  ["GET",   /^\/api\/delivery-areas$/,                 [ADMIN, MANAGER, CASHIER]],
+  // one area at a time, so two people changing the list never overwrite each other
+  ["POST",  /^\/api\/delivery-areas$/,                 [ADMIN]],
+  ["DELETE", /^\/api\/delivery-areas$/,                [ADMIN]],
 
   // --- notifications ---
   ["GET",   /^\/api\/notifications$/,                  SIGNED_IN],
@@ -2912,7 +2962,8 @@ function receiptLayoutFrom(raw) {
     paperWidth: [58, 80].includes(Number(stored.paperWidth)) ? Number(stored.paperWidth) : DEFAULT_RECEIPT_LAYOUT.paperWidth,
     fontSize: [11, 12, 13].includes(Number(stored.fontSize)) ? Number(stored.fontSize) : DEFAULT_RECEIPT_LAYOUT.fontSize,
     title: text(stored.title, DEFAULT_RECEIPT_LAYOUT.title, 40),
-    paidLabel: text(stored.paidLabel, DEFAULT_RECEIPT_LAYOUT.paidLabel, 40),
+    // fixed wording, not a setting: it only prints on a sale that is fully paid
+    paidLabel: DEFAULT_RECEIPT_LAYOUT.paidLabel,
     headerLines: lines(stored.headerLines, DEFAULT_RECEIPT_LAYOUT.headerLines),
     footerLines: lines(stored.footerLines, DEFAULT_RECEIPT_LAYOUT.footerLines),
     show: show
@@ -3205,7 +3256,7 @@ const adminModule = registerAdminRoutes(app, {
   sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
   loadProceduresIfMissing,
   FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom,
-  HOLD_LIFTED_BY_MANAGER
+  HOLD_LIFTED_BY_MANAGER, readDeliveryAreas, deliveryAreasFrom
 });
 
 // true for a date written like "2026-09-24" (4 digits - 2 digits - 2 digits)
@@ -3260,7 +3311,7 @@ const qrPayments = registerQrPaymentRoutes(app, {
 // ==========================================
 registerCashierRoutes(app, {
   db, callProcedure, getActorId, DRIVER, CASHIER, isDateText, SALE_CUSTOMER_SQL,
-  phoneComplaint, cleanPhone, qrPayments
+  phoneComplaint, cleanPhone, qrPayments, readDeliveryAreas
 });
 
 // ==========================================

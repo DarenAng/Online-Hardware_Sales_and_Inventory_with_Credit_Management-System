@@ -2833,6 +2833,9 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
    set in the figure face at receipt widths, as it comes off the printer
    ========================================================================== */
 .receipt-box { max-width: 420px; }
+/* The receipt's "Text size" setting sets the font size on .receipt-paper
+   (applyReceiptPaper in format.js). Every size below is in em, so it grows
+   and shrinks with that setting; 1em is the size picked (Normal = 12px). */
 .receipt-paper {
     box-sizing: border-box;
     margin: 0 auto;
@@ -2847,14 +2850,14 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 .rc-shop {
     display: block;
     font-family: var(--font-ui);
-    font-size: 19.5px; font-weight: 700;
+    font-size: 1.625em; font-weight: 700;
     letter-spacing: 0.02em;
     text-transform: uppercase;
 }
 /* the proprietor, under the registered name */
 .rc-prop {
     display: block;
-    font-size: 12px;
+    font-size: 1em;
     font-weight: 600;
     letter-spacing: 0.02em;
     color: var(--ink);
@@ -2862,14 +2865,14 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 /* the registered address and TIN, small but present */
 .rc-addr {
     display: block;
-    font-size: 11px;
+    font-size: 0.92em;
     line-height: 1.4;
     color: var(--steel);
 }
 .rc-line {
     display: block;
     margin-top: 4px;
-    font-size: 12px;
+    font-size: 1em;
     font-weight: 600;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -2877,34 +2880,35 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 }
 .rc-no {
     display: block; margin-top: 5px;
-    font-size: 14px; font-weight: 600; letter-spacing: 0.06em;
+    font-size: 1.17em; font-weight: 600; letter-spacing: 0.06em;
 }
 .rc-meta {
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 2px 12px;
-    font-size: 12px;
+    font-size: 1em;
 }
 .rc-meta span:nth-child(odd)  { color: var(--steel-soft); }
 .rc-meta span:nth-child(even) { text-align: right; overflow-wrap: anywhere; }
 
 .rc-rule { border-top: 1px dashed var(--steel-soft); margin: 11px 0; }
 
-.rc-items { width: 100%; margin: 0; }
-.rc-items td { border: none; padding: 4px 0; font-size: 12.5px; vertical-align: top; }
-.rc-qty { color: var(--steel-soft); font-size: 11px; }
+/* font-size 1em: the print rule "table { font-size: 11px }" must not shrink the item lines */
+.rc-items { width: 100%; margin: 0; font-size: 1em; }
+.rc-items td { border: none; padding: 4px 0; font-size: 1.04em; vertical-align: top; }
+.rc-qty { color: var(--steel-soft); font-size: 0.88em; }
 .rc-amt { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
-.rc-totals div { display: flex; justify-content: space-between; padding: 2px 0; font-size: 12.5px; }
+.rc-totals div { display: flex; justify-content: space-between; padding: 2px 0; font-size: 1.04em; }
 .rc-totals span:last-child { font-variant-numeric: tabular-nums; }
-.rc-due { font-weight: 700; font-size: 15px !important; padding: 5px 0 !important; }
+.rc-due { font-weight: 700; font-size: 1.25em !important; padding: 5px 0 !important; }
 
 /* THE TAX BLOCK -- set apart from the money above it; same tabular figures */
 .rc-tax div {
     display: flex;
     justify-content: space-between;
     padding: 2px 0;
-    font-size: 12px;
+    font-size: 1em;
     color: var(--steel);
 }
 .rc-tax span:last-child {
@@ -2914,7 +2918,7 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 
 .rc-note {
     text-align: center;
-    font-size: 11px;
+    font-size: 0.92em;
     line-height: 1.45;
     color: var(--steel);
     margin-top: 8px;
@@ -2925,26 +2929,26 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 .rc-bank-head {
     margin: 0 0 3px;
     text-align: center;
-    font-size: 11.5px;
+    font-size: 0.96em;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
 }
-.rc-bank div { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; font-size: 12px; }
+.rc-bank div { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; font-size: 1em; }
 .rc-bank span:first-child { color: var(--steel-soft); }
 .rc-bank span:last-child { text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.rc-bank-note { margin: 5px 0 0; text-align: center; font-size: 11px; line-height: 1.45; color: var(--steel); }
+.rc-bank-note { margin: 5px 0 0; text-align: center; font-size: 0.92em; line-height: 1.45; color: var(--steel); }
 
 .rc-foot {
     text-align: center;
     font-weight: 700;
     letter-spacing: 0.08em;
-    font-size: 13px;
+    font-size: 1.08em;
     margin-top: 4px;
 }
 .rc-thanks {
     text-align: center;
-    font-size: 12px;
+    font-size: 1em;
     color: var(--steel-soft);
     margin-top: 8px;
 }

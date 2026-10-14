@@ -344,6 +344,10 @@ CREATE TABLE store_settings (
     -- stamp, the shop's own header and footer lines, and what is shown. Set in
     -- Receipt Maintenance; the server fills it with its defaults on first start.
     receipt_layout TEXT NULL,
+    -- the places the shop delivers to, as a JSON list of one-line texts such as
+    -- "Brgy. San Isidro, Antipolo City". Kept in System Admin; NULL is an empty
+    -- list, and the cashier can make no delivery until one area is added.
+    delivery_areas TEXT NULL,
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by_staff_id INT NULL,
     CONSTRAINT chk_store_settings_single_row CHECK (setting_id = 1),

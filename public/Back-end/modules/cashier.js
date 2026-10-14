@@ -2089,6 +2089,11 @@ async function handleCheckout(event, viaQr) {
         return;
     }
 
+    // An attached delivery goes to an area on the administrator's list, which
+    // may have changed since it was attached. It is read again before any money
+    // is taken, so the sale is never saved with a delivery that cannot be created.
+    if (pendingDelivery && !(await attachedAreaIsStillListed())) return;
+
     // Asked before anything is sent: the amount due, the method, and the change
     // or the balance that goes on the account. Paying by QR is its own
     // confirmation (the customer pays the code), except that a balance left on
@@ -2372,7 +2377,66 @@ function fillDeliveryFromCustomer() {
 
     fields.contactName.value = account ? account.name : typedCustomerName();
     phoneFill(fields.contactPhone, account && account.phone ? account.phone : '');
-    fields.address.value = account && account.address ? account.address : '';
+
+    // The saved address only helps pick the area: the area on the list that
+    // appears in it is chosen. The house number and street stay for the cashier.
+    chooseDeliveryArea(fields, areaInAddress(account && account.address ? account.address : ''));
+    fields.street.value = '';
+}
+
+// The places the shop delivers to (System Admin, Delivery Area). They are read
+// each time the form opens, so a change made there since is right here.
+let deliveryAreaList = [];
+// true when the last read of the list failed, so the form says "connection"
+// and not "no area is set"
+let deliveryAreasUnreadable = false;
+
+async function loadDeliveryAreaChoices() {
+    const select = document.getElementById('dl-area');
+    const note = document.getElementById('delivery-area-note');
+    if (!select) return;
+
+    let problem = '';
+    try {
+        const body = await apiGetDeliveryAreas();
+        deliveryAreaList = body.areas || [];
+        deliveryAreasUnreadable = false;
+        if (deliveryAreaList.length === 0) {
+            problem = 'No delivery area is set. Ask the administrator to add one in System Admin › Receipt Maintenance.';
+        }
+    } catch (error) {
+        deliveryAreaList = [];
+        deliveryAreasUnreadable = true;
+        problem = 'The delivery areas could not be read. Check the connection and try again.';
+    }
+
+    select.innerHTML = '<option value="">Choose an area</option>' +
+        deliveryAreaList.map((area) =>
+            '<option value="' + escapeHtml(area) + '">' + escapeHtml(area) + '</option>').join('');
+    if (note) note.textContent = problem;
+}
+
+// The area on the list whose text appears in the address (any letter case), or ''.
+// When more than one appears ("Antipolo" and "Brgy. San Isidro, Antipolo City"),
+// the longest is the most exact one.
+function areaInAddress(address) {
+    const text = String(address || '').toLowerCase();
+    if (text === '') return '';
+
+    let found = '';
+    for (const area of deliveryAreaList) {
+        if (text.includes(area.toLowerCase()) && area.length > found.length) {
+            found = area;
+        }
+    }
+    return found;
+}
+
+// selects an area in the box; one no longer on the list leaves "Choose an area"
+function chooseDeliveryArea(fields, area) {
+    const wanted = String(area || '').toLowerCase();
+    const found = deliveryAreaList.find((listed) => listed.toLowerCase() === wanted);
+    fields.area.value = found || '';
 }
 
 // The driver box: type to search the active drivers, pick one from the list.
@@ -2507,14 +2571,26 @@ function onDriverKey(event) {
     if (event.key === 'Escape' || event.key === 'Tab') hideDriverSuggestions();
 }
 
-function openDeliveryForm() {
+// true while the form waits for the area list, so a double click does not open it twice
+let deliveryFormOpening = false;
+
+async function openDeliveryForm() {
     const fields = deliveryFormFields();
-    if (!fields) return;
+    if (!fields || deliveryFormOpening) return;
+
+    // the area box is filled before anything is chosen in it
+    deliveryFormOpening = true;
+    try {
+        await loadDeliveryAreaChoices();
+    } finally {
+        deliveryFormOpening = false;
+    }
 
     if (pendingDelivery) {
         fields.contactName.value = pendingDelivery.contactName;
         phoneFill(fields.contactPhone, pendingDelivery.contactPhone);
-        fields.address.value = pendingDelivery.address;
+        chooseDeliveryArea(fields, pendingDelivery.area);
+        fields.street.value = pendingDelivery.street;
         fields.scheduledDate.value = pendingDelivery.scheduledDate;
         fields.remarks.value = pendingDelivery.remarks;
     } else {
@@ -2561,13 +2637,29 @@ function saveDeliveryForm(event) {
     const contactName = fields.contactName.value.trim();
     const contactPhone = phoneToStore(fields.contactPhone);
     const phoneProblem = phoneComplaint(fields.contactPhone);
-    const address = fields.address.value.trim();
+    const area = fields.area.value;
+    // many spaces become one, like the server does
+    const street = fields.street.value.trim().replace(/\s+/g, ' ');
     const scheduledDate = fields.scheduledDate.value;
 
     if (contactName === '') { complain('A delivery needs somebody to ask for at the gate.'); fields.contactName.focus(); return; }
     if (contactPhone === '') { complain('A driver who cannot ring ahead is a driver who comes back with the goods.'); fields.contactPhone.focus(); return; }
     if (phoneProblem) { complain(phoneProblem); fields.contactPhone.focus(); return; }
-    if (address === '') { complain('A delivery needs somewhere to go.'); fields.address.focus(); return; }
+
+    // with no area on the list, no delivery can be attached at all; the note
+    // above the address already says why and what to do, so this stays short
+    if (deliveryAreaList.length === 0) {
+        complain(deliveryAreasUnreadable
+            ? 'A delivery cannot be attached until the delivery areas can be read.'
+            : 'A delivery cannot be attached until a delivery area is set.');
+        return;
+    }
+    if (area === '') { complain('Choose the area the delivery goes to.'); fields.area.focus(); return; }
+    if (street.length < 3 || street.length > 120) {
+        complain('Enter the house number and street (3 to 120 characters).');
+        fields.street.focus();
+        return;
+    }
 
     // a slot in the past is almost always a typing slip in the year or month
     if (scheduledDate && new Date(scheduledDate).getTime() < Date.now() - 60000) {
@@ -2589,7 +2681,10 @@ function saveDeliveryForm(event) {
     pendingDelivery = {
         contactName: contactName,
         contactPhone: contactPhone,
-        address: address,
+        area: area,
+        street: street,
+        // shown on the strip and the confirm card: the street, then the area
+        address: street + ', ' + area,
         scheduledDate: scheduledDate,
         remarks: fields.remarks.value.trim(),
         driverId: driverId,
@@ -2649,6 +2744,26 @@ function renderDeliveryAttached() {
         '</p>';
 }
 
+// true when the area of the attached delivery is still on the list; if not, says what to do
+async function attachedAreaIsStillListed() {
+    try {
+        const body = await apiGetDeliveryAreas();
+        deliveryAreaList = body.areas || [];
+        deliveryAreasUnreadable = false;
+    } catch (error) {
+        notifyOffline();
+        return false;
+    }
+
+    const wanted = String(pendingDelivery.area).toLowerCase();
+    if (deliveryAreaList.some((area) => area.toLowerCase() === wanted)) return true;
+
+    notifyWarning('The delivery area "' + pendingDelivery.area + '" is no longer on the list. ' +
+        'Press Edit Delivery and choose the area again, or remove the delivery. Nothing has been charged.',
+        'Delivery area changed');
+    return false;
+}
+
 // posted once the sale exists; a failure here does not undo the sale
 async function bookAttachedDelivery(saleId) {
     if (!pendingDelivery) return true;
@@ -2658,7 +2773,8 @@ async function bookAttachedDelivery(saleId) {
     try {
         const response = await apiBookDelivery({
                 saleId: saleId,
-                address: d.address,
+                area: d.area,
+                street: d.street,
                 contactName: d.contactName,
                 contactPhone: d.contactPhone,
                 scheduledDate: d.scheduledDate || null,
@@ -2669,10 +2785,10 @@ async function bookAttachedDelivery(saleId) {
 
         if (!response.ok) {
             if (!handleAuthFailure(response, result)) {
-                notifyError('Sale #' + saleId + ' went through, but the delivery did not book: ' +
+                notifyError('Sale #' + saleId + ' went through, but its delivery was not created: ' +
                     (result.error || 'the server refused it') +
-                    '. Book it again from this sale once that is sorted.',
-                    'Sale saved, delivery not booked');
+                    '. The sale is saved and paid as rung up; tell the manager so the delivery is arranged.',
+                    'Sale saved, delivery not created');
             }
             return false;
         }
@@ -2681,7 +2797,8 @@ async function bookAttachedDelivery(saleId) {
         return true;
     } catch (error) {
         notifyError('Sale #' + saleId + ' went through, but the delivery could not be sent to the ' +
-            'server. Nothing is booked for it yet.', 'Sale saved, delivery not booked');
+            'server, so no delivery exists for it yet. Tell the manager so it is arranged.',
+            'Sale saved, delivery not created');
         return false;
     }
 }

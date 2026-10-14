@@ -171,6 +171,24 @@
 .store-layout .card { margin-bottom: 0; }
 .store-layout .card:has(> .form-sheet) { max-width: none; }
 .store-layout .form-sheet { max-width: none; }
+
+/* DELIVERY AREA -- a card under the form, in the left column; the preview
+   beside them runs down both rows. The places are a plain list, not a table. */
+.store-layout .store-preview-card { grid-column: 2; grid-row: 1 / span 2; }
+.area-help { margin: 0 0 12px; font-size: 14px; line-height: 1.5; color: var(--steel); }
+.area-add { display: flex; gap: 8px; margin-bottom: 12px; }
+.area-add .form-control { flex: 1; min-width: 0; }
+.area-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.area-list li {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 8px 6px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+.area-list .area-text { min-width: 0; font-size: 15px; overflow-wrap: anywhere; }
+.area-list .area-remove { flex: none; color: var(--stop); }
+.area-list li.area-empty { display: block; padding: 10px 12px; font-size: 14.5px; line-height: 1.5; color: var(--steel); border-style: dashed; }
 .store-preview-card {
     /* below the sticky top bar (its height is measured into --topbar-h by system-admin.js) */
     position: sticky; top: calc(var(--topbar-h, 62px) + 16px);
@@ -299,6 +317,7 @@
 @media (max-width: 1100px) {
     .store-layout { grid-template-columns: 1fr; }
     .store-preview-card { position: static; max-height: none; }
+    .store-layout .store-preview-card { grid-column: auto; grid-row: auto; }
 }
 
 /* the TIN box says whether it is happy as it is filled in, like the phone box */
