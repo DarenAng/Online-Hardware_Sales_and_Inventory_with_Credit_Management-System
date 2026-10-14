@@ -1631,7 +1631,10 @@ const IDLE_ENDED_REASON =
 
 // When a sign-in that was used at "now" runs out: the idle time later, but
 // never past SESSION_HOURS after it started. expires_at holds this.
-function sessionExpiry(startedAt, now) {
+// A Cashier is never signed out for being idle: the counter screen waits
+// between customers, so only SESSION_HOURS applies.
+function sessionExpiry(startedAt, now, roleName) {
+  if (roleName === CASHIER) return startedAt + SESSION_MS;
   return Math.min(now + SESSION_IDLE_MS, startedAt + SESSION_MS);
 }
 
@@ -1657,7 +1660,7 @@ async function startSession(user) {
        (token_hash, staff_id, user_id, role_id, role_name, email, started_at, last_seen, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [tokenHash(token), user.staff_id, user.user_id, user.role_id, user.role_name, user.email,
-     now, now, sessionExpiry(now, now)]);
+     now, now, sessionExpiry(now, now, user.role_name)]);
   return token;
 }
 
@@ -1728,11 +1731,12 @@ async function sessionState(request) {
   // those asks with X-Background: 1 when nobody has touched the page lately.
   // Such an ask still shows the person is at a screen (last_seen), but it
   // does not keep the sign-in alive (expires_at); only real use does.
-  const background = request.headers["x-background"] === "1";
+  // A Cashier's expiry does not depend on use, so any ask may write it.
+  const background = request.headers["x-background"] === "1" && row.role_name !== CASHIER;
 
   let lastSeen = Number(row.last_seen);
   let expiresAt = Number(row.expires_at);
-  const newExpiry = sessionExpiry(startedAt, now);
+  const newExpiry = sessionExpiry(startedAt, now, row.role_name);
 
   // both are written at most twice a minute
   const seenIsOld = now - lastSeen > SESSION_TOUCH_MS;

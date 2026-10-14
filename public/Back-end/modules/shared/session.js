@@ -291,7 +291,8 @@ function initializeSession() {
     applyCurrentUserToPage(currentUser);
     applyAccessMarks(currentUser);
     startHeartbeat();
-    startIdleWatch();
+    // a Cashier is never signed out for being idle (sessionExpiry in server.js)
+    if (currentUser.role_name !== 'Cashier') startIdleWatch();
     holdAgainstBack();
 
     if (typeof startLiveSync === 'function') startLiveSync();
