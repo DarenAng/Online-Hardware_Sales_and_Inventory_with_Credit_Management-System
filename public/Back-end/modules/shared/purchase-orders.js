@@ -1524,8 +1524,8 @@ async function refreshPurchaseOrders() {
 async function loadPurchaseOrders() { await refreshPurchaseOrders(); }
 
 // ---------- total purchases ----------
-// What the shop has spent on orders, one month at a time (this month when it
-// opens), narrowed further by supplier, or by two dates instead of a month.
+// What the shop has spent on orders: by month (this month when it opens), by
+// year, or all time, narrowed further by supplier, or by two dates instead.
 // A cancelled order was never bought, so it is never listed or counted; the
 // order's status is not shown here. The figures add up what the table lists.
 const PO_TOTALS_KEY = 'po-totals';
@@ -1569,9 +1569,18 @@ function renderPurchaseTotalsSuppliers(rows) {
     select.value = names.has(current) ? current : 'all';
 }
 
+// this year as the order dates write it: "2026"
+function poThisYear() {
+    return String(new Date().getFullYear());
+}
+
+// "3 orders", "1 order"
+function poOrderCount(count) {
+    return count + (count === 1 ? ' order' : ' orders');
+}
+
 // every month that has an order, newest first, and this month even when it
-// has none; each says how many orders it holds. This month is the one Clear
-// goes back to.
+// has none; each says how many orders it holds
 function renderPurchaseTotalsMonths(rows) {
     const select = document.getElementById('po-totals-month');
     if (!select) return;
@@ -1587,22 +1596,91 @@ function renderPurchaseTotalsMonths(rows) {
     const panel = getDataPanel(PO_TOTALS_KEY);
     const current = panel ? panel.filters.month : poThisMonth();
 
-    select.innerHTML = '<option value="all">Every month</option>' +
-        months.map((month) => {
-            const count = counts.get(month);
-            return '<option value="' + month + '"' + (month === poThisMonth() ? ' selected' : '') + '>' +
-                escapeHtml(poMonthLabel(month)) + ' (' + count + (count === 1 ? ' order' : ' orders') + ')</option>';
-        }).join('');
-    select.value = counts.has(current) ? current : 'all';
+    select.innerHTML = months.map((month) =>
+        '<option value="' + month + '">' + escapeHtml(poMonthLabel(month)) +
+        ' (' + poOrderCount(counts.get(month)) + ')</option>').join('');
+    select.value = counts.has(current) ? current : poThisMonth();
 }
 
-// Show All Purchases: every month and every supplier, no dates, cancelled
+// the same for years: every year with an order, and this year even when empty
+function renderPurchaseTotalsYears(rows) {
+    const select = document.getElementById('po-totals-year');
+    if (!select) return;
+
+    const counts = new Map();
+    counts.set(poThisYear(), 0);
+    rows.forEach((po) => {
+        const year = String(po.order_date).slice(0, 4);
+        counts.set(year, (counts.get(year) || 0) + 1);
+    });
+    const years = Array.from(counts.keys()).sort().reverse();
+
+    const panel = getDataPanel(PO_TOTALS_KEY);
+    const current = panel ? panel.filters.year : poThisYear();
+
+    select.innerHTML = years.map((year) =>
+        '<option value="' + year + '">' + year + ' (' + poOrderCount(counts.get(year)) + ')</option>').join('');
+    select.value = counts.has(current) ? current : poThisYear();
+}
+
+// The Period box decides which second box shows: Month for Every Month,
+// Year for Every Year, and neither for All Time.
+function syncPurchaseTotalsPeriod() {
+    const panel = getDataPanel(PO_TOTALS_KEY);
+    const period = panel ? panel.filters.period : 'month';
+
+    const select = document.getElementById('po-totals-period');
+    if (select) select.value = period;
+
+    const monthField = document.getElementById('po-totals-month-field');
+    const yearField = document.getElementById('po-totals-year-field');
+    if (monthField) monthField.hidden = period !== 'month';
+    if (yearField) yearField.hidden = period !== 'year';
+}
+
+// a period, month or year replaces any dates typed, and the dates replace them
+function clearPurchaseTotalsDates(panel) {
+    ['po-totals-from', 'po-totals-to'].forEach((id) => {
+        const box = document.getElementById(id);
+        if (box) box.value = '';
+    });
+    panel.filters.from = '';
+    panel.filters.to = '';
+}
+
+function purchaseTotalsPeriod(value) {
+    const panel = getDataPanel(PO_TOTALS_KEY);
+    if (!panel) return;
+    clearPurchaseTotalsDates(panel);
+
+    // the month or year starts on the one the box already shows
+    const month = document.getElementById('po-totals-month');
+    const year = document.getElementById('po-totals-year');
+    panel.filters.month = month && month.value ? month.value : poThisMonth();
+    panel.filters.year = year && year.value ? year.value : poThisYear();
+
+    dataPanelFilter(PO_TOTALS_KEY, 'period', value);
+    syncPurchaseTotalsPeriod();
+}
+
+function purchaseTotalsMonth(value) {
+    const panel = getDataPanel(PO_TOTALS_KEY);
+    if (!panel) return;
+    clearPurchaseTotalsDates(panel);
+    dataPanelFilter(PO_TOTALS_KEY, 'month', value);
+}
+
+function purchaseTotalsYear(value) {
+    const panel = getDataPanel(PO_TOTALS_KEY);
+    if (!panel) return;
+    clearPurchaseTotalsDates(panel);
+    dataPanelFilter(PO_TOTALS_KEY, 'year', value);
+}
+
+// Show All Purchases: all time and every supplier, no dates, cancelled
 // orders still left out (they were never bought); loads the list if needed
 function purchaseTotalsShowAll() {
-    const boxes = {
-        'po-totals-from': '', 'po-totals-to': '',
-        'po-totals-month': 'all', 'po-totals-supplier': 'all'
-    };
+    const boxes = { 'po-totals-from': '', 'po-totals-to': '', 'po-totals-supplier': 'all' };
     Object.keys(boxes).forEach((id) => {
         const box = document.getElementById(id);
         if (box) box.value = boxes[id];
@@ -1610,24 +1688,11 @@ function purchaseTotalsShowAll() {
 
     const panel = getDataPanel(PO_TOTALS_KEY);
     if (!panel) return;
-    Object.assign(panel.filters, { month: 'all', supplier: 'all', from: '', to: '' });
+    Object.assign(panel.filters, { period: 'all', supplier: 'all', from: '', to: '' });
+    syncPurchaseTotalsPeriod();
     panel.page = 1;
     if (panel.state === 'ready') panel.apply();
     else if (panel.state !== 'loading') panel.open();   // a load already running applies these when it lands
-}
-
-// a month replaces any dates typed, and the dates replace the month
-function purchaseTotalsMonth(value) {
-    ['po-totals-from', 'po-totals-to'].forEach((id) => {
-        const box = document.getElementById(id);
-        if (box) box.value = '';
-    });
-
-    const panel = getDataPanel(PO_TOTALS_KEY);
-    if (!panel) return;
-    panel.filters.from = '';
-    panel.filters.to = '';
-    dataPanelFilter(PO_TOTALS_KEY, 'month', value);
 }
 
 function renderPurchaseTotalsFigures() {
@@ -1644,10 +1709,10 @@ function renderPurchaseTotalsFigures() {
     const average = orders.length === 0 ? 0 : total / orders.length;
     const shown = (text) => ready ? text : '—';
 
-    const month = panel ? panel.filters.month : null;
-    const covers = (month && month !== 'all')
-        ? 'ordered in ' + escapeHtml(poMonthLabel(month))
-        : 'the orders the filters leave in';
+    const f = panel ? panel.filters : {};
+    let covers = 'the orders the filters leave in';
+    if (f.period === 'month' && f.month) covers = 'ordered in ' + escapeHtml(poMonthLabel(f.month));
+    else if (f.period === 'year' && f.year) covers = 'ordered in ' + escapeHtml(f.year);
 
     const kpis = [
         ['Total Purchases', shown(peso(total)), covers],
@@ -1674,8 +1739,9 @@ function buildPurchaseTotalsPanel() {
         pageSize: 8,            // the manager's Reports tab: eight a page, like the other reports
         pagerId: 'po-totals-pager',
         idField: 'po_id',
-        filters: { month: poThisMonth(), supplier: 'all', from: '', to: '' },
-        inputs: ['po-totals-from', 'po-totals-to', 'po-totals-month', 'po-totals-supplier'],
+        // period: 'month' (the month box), 'year' (the year box) or 'all'
+        filters: { period: 'month', month: poThisMonth(), year: poThisYear(), supplier: 'all', from: '', to: '' },
+        inputs: ['po-totals-from', 'po-totals-to', 'po-totals-period', 'po-totals-month', 'po-totals-year', 'po-totals-supplier'],
 
         gate: {
             title: 'Total purchases not loaded',
@@ -1685,14 +1751,15 @@ function buildPurchaseTotalsPanel() {
         // shown when the default month (this one) holds nothing
         empty: {
             title: 'Nothing ordered this month',
-            text: 'No purchase order was raised this month. Pick another month above, or Every month.'
+            text: 'No purchase order was raised this month. Pick another month above, or Every Year or All Time.'
         },
 
         load: () => apiGetPurchaseOrders(),
 
         filter: (po, f) => {
             const day = String(po.order_date).slice(0, 10);
-            if (f.month && f.month !== 'all' && day.slice(0, 7) !== f.month) return false;
+            if (f.period === 'month' && day.slice(0, 7) !== f.month) return false;
+            if (f.period === 'year' && day.slice(0, 4) !== f.year) return false;
             if (po.status === 'Cancelled') return false;
             if (f.supplier !== 'all' && String(po.supplier_id) !== String(f.supplier)) return false;
             if (f.from && day < f.from) return false;
@@ -1701,11 +1768,13 @@ function buildPurchaseTotalsPanel() {
         },
         sort: (rows) => rows.sort((a, b) =>
             String(b.order_date).localeCompare(String(a.order_date)) || (Number(b.po_id) - Number(a.po_id))),
-        // the month and supplier lists count only what the report can list
+        // the month, year and supplier lists count only what the report can list
         onLoaded: (rows) => {
             const bought = rows.filter((po) => po.status !== 'Cancelled');
             renderPurchaseTotalsSuppliers(bought);
             renderPurchaseTotalsMonths(bought);
+            renderPurchaseTotalsYears(bought);
+            syncPurchaseTotalsPeriod();
         },
 
         renderRow: (po, index) =>
@@ -1717,8 +1786,10 @@ function buildPurchaseTotalsPanel() {
             '<td class="cell-num">' + peso(poOrderValue(po)) + '</td></tr>'
     });
 
-    // before anything loads, the Month box already names this month
+    // before anything loads, the Month and Year boxes already name this month and year
     renderPurchaseTotalsMonths([]);
+    renderPurchaseTotalsYears([]);
+    syncPurchaseTotalsPeriod();
 
     // the figures follow the table: every load, filter and Clear redraws them
     document.addEventListener('datapanel:change', (event) => {
@@ -1744,11 +1815,10 @@ function purchaseTotalsDates() {
     panel.filters.from = from.value;
     panel.filters.to = to.value;
 
-    // dates typed stand in for the month
+    // dates typed stand in for the period, so it moves to All Time
     if (from.value || to.value) {
-        panel.filters.month = 'all';
-        const month = document.getElementById('po-totals-month');
-        if (month) month.value = 'all';
+        panel.filters.period = 'all';
+        syncPurchaseTotalsPeriod();
     }
     panel.page = 1;
     if (panel.state === 'ready') panel.apply();

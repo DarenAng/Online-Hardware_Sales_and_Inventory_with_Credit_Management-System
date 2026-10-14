@@ -576,7 +576,7 @@
                         <div class="panel-head">
                             <div>
                                 <h3>Total Purchases</h3>
-                                <p class="panel-sub">Every purchase order in a month, and what they add up to. It starts on this month; the figures follow the filters below.</p>
+                                <p class="panel-sub">Every purchase order in a month, a year or all time, and what they add up to. It starts on this month; the figures follow the filters below.</p>
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -587,12 +587,25 @@
                         </div>
     
                         <div class="panel-toolbar no-print">
+                            <!-- the period first; the box beside it picks which month or year
+                                 (purchaseTotalsPeriod), and All Time needs neither -->
                             <div class="toolbar-field">
+                                <label for="po-totals-period">Period</label>
+                                <select id="po-totals-period" onchange="purchaseTotalsPeriod(this.value)">
+                                    <option value="month">Every Month</option>
+                                    <option value="year">Every Year</option>
+                                    <option value="all">All Time</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field" id="po-totals-month-field">
                                 <label for="po-totals-month">Month</label>
                                 <!-- filled from the loaded orders (renderPurchaseTotalsMonths) -->
-                                <select id="po-totals-month" onchange="purchaseTotalsMonth(this.value)">
-                                    <option value="all">Every month</option>
-                                </select>
+                                <select id="po-totals-month" onchange="purchaseTotalsMonth(this.value)"></select>
+                            </div>
+                            <div class="toolbar-field" id="po-totals-year-field" hidden>
+                                <label for="po-totals-year">Year</label>
+                                <!-- filled from the loaded orders (renderPurchaseTotalsYears) -->
+                                <select id="po-totals-year" onchange="purchaseTotalsYear(this.value)"></select>
                             </div>
                             <div class="toolbar-field toolbar-date">
                                 <label for="po-totals-from">From</label>
