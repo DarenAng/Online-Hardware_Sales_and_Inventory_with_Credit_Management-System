@@ -132,151 +132,30 @@
 #modal-status-btn { min-width: 168px; }
 
 /* ==========================================================================
-   ACCESS CONTROL -- two columns: the roles down the left, the picked
-   role's screens as a list of switches on the right. Each row reads left to
-   right: the screen and what it does, the state it is in (grey, amber or
-   crimson), then the switch (orange, an action) on the right-hand edge.
+   ACCESS CONTROL -- one table: the roles down the left, the modules across
+   the top, a checkbox where the two meet. A grey (disabled) box is a module
+   that role's dashboard does not have.
    ========================================================================== */
-.access-layout {
-    display: grid;
-    grid-template-columns: 236px minmax(0, 1fr);
-    gap: 22px;
-    align-items: start;
-}
-.access-screens { min-width: 0; }
-
-.access-roles {
-    position: sticky;
-    top: 74px;
-    padding-right: 22px;
-    border-right: 1px solid var(--line);
-}
-.role-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.role-pick {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-areas: "name mark";
-    align-items: center;
-    column-gap: 8px;
-    text-align: left;
-    padding: 10px 12px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-left: var(--rule) solid var(--line);
-    border-radius: 0 var(--radius) var(--radius) 0;
-    cursor: pointer;
-    font: inherit;
-    transition: border-color 0.12s, background 0.12s;
-}
-.role-pick:hover { border-color: var(--steel-soft); }
-.role-pick:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
-.role-pick.active {
-    background: var(--go-dim);
-    border-color: var(--go);
-    border-left-color: var(--go);
-}
-.role-pick-name { grid-area: name; font-size: 15px; font-weight: 600; color: var(--ink); }
-.role-pick.active .role-pick-name { color: var(--go-hi); }
-.role-pick-mark {
-    grid-area: mark;
-    font-size: 23.5px; line-height: 1;
-    color: var(--signal);
-}
-.role-pick-mark[hidden] { display: none; }
-.feature-strip[hidden] { display: none; }
-/* the screens this role's dashboard can draw: a group per module, each
-   screen a row of the same three columns -- name, state, checkbox -- so
-   every checkbox sits on one vertical line */
-.feature-line { display: flex; flex-direction: column; gap: 18px; }
-.feature-group {
-    display: flex; flex-direction: column;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    overflow: hidden;
-}
-.feature-module {
-    padding: 7px 14px;
-    background: var(--paper);
-    border-bottom: 1px solid var(--line);
-    font-size: 12px; font-weight: 600;
-    letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--steel);
-}
-
-.feature-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 118px 40px;
-    align-items: center;
-    column-gap: 14px;
-    margin: 0;
-    padding: 10px 14px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--line);
-    cursor: pointer;
-    transition: background 0.12s;
-}
-.feature-row:last-child { border-bottom: none; }
-.feature-row:hover { background: var(--paper); }
-.feature-row:has(.feature-box:focus-visible) { outline: 2px solid var(--signal); outline-offset: -2px; }
-.feature-row-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.feature-row-name { font-size: 14.5px; font-weight: 600; color: var(--ink); }
-.feature-row .feature-desc { margin-top: 0; }
-.feature-row .feature-state { justify-self: end; }
-.feature-row .feature-box {
-    justify-self: center;
-    width: 20px; height: 20px;
+.access-table th,
+.access-table td { text-align: center; vertical-align: middle; }
+.access-table th:first-child,
+.access-table td:first-child { text-align: left; }
+.access-role { font-weight: 600; color: var(--ink); white-space: nowrap; }
+.access-box {
+    width: 18px; height: 18px;
     margin: 0;
     accent-color: var(--go);
     cursor: pointer;
 }
-
-.feature-state {
-    display: inline-block;
-    min-width: 54px;
-    white-space: nowrap;
-    padding: 1px 7px;
-    border-radius: 999px;
-    font-family: var(--font-figure);
-    font-size: 12px; font-weight: 600;
-    text-align: center;
-    background: var(--paper-2); color: var(--steel);
-}
-.feature-state.is-granted { background: var(--signal-dim); color: var(--signal-ink); }
-.feature-state.is-revoked { background: var(--stop-dim); color: var(--stop); }
-.feature-state.is-unavailable { background: transparent; color: var(--steel-soft); min-width: 0; }
-.feature-state[hidden], .feature-row[hidden], .feature-group[hidden] { display: none; }
-
-#panel-features .panel-toolbar { margin-bottom: 16px; }
-#features-no-match[hidden] { display: none; }
+.access-box:disabled { cursor: not-allowed; opacity: 0.45; }
+/* a cell whose box was changed and is not saved yet */
+.access-table td.is-changed { background: var(--signal-dim); }
+.access-hint { margin: 12px 0 0; font-size: 13px; color: var(--steel); }
 
 /* ==========================================================================
    ON A PHONE
    ========================================================================== */
-/* the roles go above the screens once there is no room beside them, as a
-   row of buttons rather than a column */
-@media (max-width: 900px) {
-    .access-layout { grid-template-columns: 1fr; }
-    .access-roles {
-        position: static;
-        padding-right: 0;
-        border-right: none;
-        padding-bottom: 14px;
-        border-bottom: 1px solid var(--line);
-    }
-    .role-list { flex-direction: row; flex-wrap: wrap; }
-    .role-pick { flex: 1 1 160px; border-radius: var(--radius); border-left-width: 1px; }
-    .role-pick.active { border-left-color: var(--go); }
-}
-
 @media (max-width: 640px) {
-    /* the state word drops under the name so the row fits a phone */
-    .feature-row { grid-template-columns: minmax(0, 1fr) 40px; row-gap: 4px; }
-    .feature-row .feature-desc { display: none; }
-    .feature-row .feature-row-text { grid-column: 1; grid-row: 1; }
-    .feature-row .feature-state { grid-column: 1; grid-row: 2; justify-self: start; }
-    .feature-row .feature-box { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
-    .role-pick { flex-basis: 100%; }
-
     /* the whole footer of the user popup is destructive-adjacent; each
        button gets its own line so none of them is pressed by accident */
     #user-modal .modal-foot .btn { width: 100%; }

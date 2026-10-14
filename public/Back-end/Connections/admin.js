@@ -2164,8 +2164,9 @@ function registerAdminRoutes(app, deps) {
   });
 
   // Run Backup Now may not be pressed again and again: one backup at a time,
-  // then a rest of BACKUP_COOLDOWN_MS before the next. (The button counts the
-  // same five seconds down; this stops anyone sending the request directly.)
+  // then a rest of BACKUP_COOLDOWN_MS before the next. (The page covers the
+  // screen with a loading card while one runs; this stops anyone sending the
+  // request directly.)
   const BACKUP_COOLDOWN_MS = 5000;
   let manualBackupRunning = false;
   let lastManualBackupAt = 0;
@@ -2238,6 +2239,14 @@ function registerAdminRoutes(app, deps) {
 
     if (!BACKUP_NAME.test(name)) {
       return response.status(400).json({ error: "That is not a backup file name." });
+    }
+    // only a backup made by hand can be deleted; the system removes its own
+    // once they are older than KEEP_DAYS days
+    if (AUTO_NAME.test(name)) {
+      return response.status(403).json({
+        error: "That backup was made by the system, so it cannot be deleted. " +
+               "The system removes it by itself once it is old enough."
+      });
     }
 
     try {

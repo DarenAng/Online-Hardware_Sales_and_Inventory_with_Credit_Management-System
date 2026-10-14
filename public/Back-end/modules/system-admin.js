@@ -1253,246 +1253,141 @@ async function restoreSelectedAccount() {
     }
 }
 
-// Access control: a role is picked at the top and its screens are one line
-// of switches. Every role's line is drawn and all but the picked one hidden,
-// so a change made under one role survives looking at another. Same
-// baseline and read-back-first flow: nothing is saved until Save reads the
-// changes back.
+// Access control: one table, the roles down the left and the modules across
+// the top. A box stands for every screen of that module the role's dashboard
+// can draw. The page keeps each screen's on/off for each role; nothing is
+// saved until Save reads the changes back, and the server is still told one
+// screen at a time.
 let featureMatrix = null;       // what /api/features last answered
-let featureRoleId = null;       // the role whose line is showing
-
-function featureCellState(cell) {
-    if (!cell.available) return 'unavailable';
-    if (cell.held === cell.byDefault) return 'default';
-    return cell.held ? 'granted' : 'revoked';
-}
-
-// the word beside a switch only when it differs from the role's default
-function featureStateWord(state, on) {
-    if (state === 'unavailable' || state === 'default') return '';
-    return on ? 'switched on' : 'switched off';
-}
-
-// "on" that agrees with the default is by role; otherwise a grant or a revocation
-function featureStateOf(byDefault, on) {
-    if (on === byDefault) return 'default';
-    return on ? 'granted' : 'revoked';
-}
+let featureBaseline = {};       // "screen key|role id" -> on, as loaded
+let featureDraft = {};          // "screen key|role id" -> on, as it is now
 
 async function loadFeatureMatrix() {
-    const mount = document.getElementById('features-matrix');
-    if (!mount) return;
+    const table = document.getElementById('features-matrix');
+    if (!table) return;
 
     try {
         featureMatrix = await apiGetScreenSwitches();
     } catch (error) {
-        mount.innerHTML = '<p class="table-empty">Cannot read the screens. Is the server running?</p>';
+        table.querySelector('tbody').innerHTML =
+            '<tr><td class="table-empty">Cannot read the screens. Is the server running?</td></tr>';
         return;
     }
 
     renderFeatureMatrix();
 }
 
-// The roles down the right-hand column, one button each; the first is
-// picked until somebody chooses. Each carries how many of its screens are
-// on, and a mark once something on it has been changed and not yet saved.
-function renderFeatureRoleList(roles) {
-    const list = document.getElementById('features-role');
-    if (!list) return;
-
-    if (!roles.some((role) => role.role_id === featureRoleId)) {
-        featureRoleId = roles.length > 0 ? roles[0].role_id : null;
-    }
-
-    list.innerHTML = roles.map((role) =>
-        '<button type="button" class="role-pick' + (role.role_id === featureRoleId ? ' active' : '') + '"' +
-            ' role="tab" aria-selected="' + (role.role_id === featureRoleId ? 'true' : 'false') + '"' +
-            ' data-role="' + escapeHtml(String(role.role_id)) + '"' +
-            ' onclick="selectFeatureRole(' + Number(role.role_id) + ')">' +
-            '<span class="role-pick-name">' + escapeHtml(role.role_name) + '</span>' +
-            '<span class="role-pick-mark" title="Changed, not yet saved" hidden>&bull;</span>' +
-        '</button>').join('');
+// the module names, in the order their screens come
+function featureModules() {
+    const modules = [];
+    (featureMatrix.features || []).forEach((feature) => {
+        if (!modules.includes(feature.module)) modules.push(feature.module);
+    });
+    return modules;
 }
 
-function selectFeatureRole(value) {
-    featureRoleId = Number(value);
-    showFeatureRole();
-}
-
-// all but the picked role's line are hidden, not removed: their switches keep their changes
-function showFeatureRole() {
-    document.querySelectorAll('#features-matrix .feature-strip').forEach((strip) => {
-        strip.hidden = Number(strip.dataset.role) !== featureRoleId;
-    });
-    document.querySelectorAll('#features-role .role-pick').forEach((button) => {
-        const picked = Number(button.dataset.role) === featureRoleId;
-        button.classList.toggle('active', picked);
-        button.setAttribute('aria-selected', picked ? 'true' : 'false');
-    });
-    syncFeatureRoleNote();
-    filterFeatureScreens();
-}
-
-// whether each role carries unsaved changes
-function syncFeatureRoleNote() {
-    const mount = document.getElementById('features-matrix');
-    // the switches as they were when the screen was drawn
-    let before = {};
-    if (mount && mount.dataset.baseline) {
-        before = JSON.parse(mount.dataset.baseline);
-    }
-
-    document.querySelectorAll('#features-matrix .feature-strip').forEach((strip) => {
-        const boxes = strip.querySelectorAll('.feature-box');
-        let unsaved = false;    // has any switch been flipped since the screen was drawn?
-        for (const box of boxes) {
-            if (before[box.dataset.feature + '|' + box.dataset.role] !== box.checked) unsaved = true;
-        }
-
-        const pick = document.querySelector('#features-role .role-pick[data-role="' + strip.dataset.role + '"]');
-        if (pick) {
-            const mark = pick.querySelector('.role-pick-mark');
-            if (mark) mark.hidden = !unsaved;
-        }
-    });
+// the screens of one module that one role's dashboard can draw
+function moduleScreensFor(module, roleName) {
+    return (featureMatrix.features || []).filter((feature) =>
+        feature.module === module && feature.roles[roleName] && feature.roles[roleName].available);
 }
 
 function renderFeatureMatrix() {
-    const mount = document.getElementById('features-matrix');
-    if (!mount || !featureMatrix) return;
+    const table = document.getElementById('features-matrix');
+    if (!table || !featureMatrix) return;
 
     const roles = featureMatrix.roles || [];
-    const features = featureMatrix.features || [];
+    const modules = featureModules();
 
-    renderFeatureRoleList(roles);
+    // what each role has for each screen now; the draft starts as a copy
+    featureBaseline = {};
+    (featureMatrix.features || []).forEach((feature) => {
+        roles.forEach((role) => {
+            const cell = feature.roles[role.role_name];
+            if (cell && cell.available) featureBaseline[feature.key + '|' + role.role_id] = cell.held;
+        });
+    });
+    featureDraft = Object.assign({}, featureBaseline);
 
-    const modules = [];
-    features.forEach((feature) => { if (!modules.includes(feature.module)) modules.push(feature.module); });
+    table.querySelector('thead tr').innerHTML = '<th>Role</th>' +
+        modules.map((module) => '<th>' + escapeHtml(module) + '</th>').join('');
 
-    // one line per role: the screens its dashboard can draw, grouped under the module name
-    mount.innerHTML = roles.map((role) => {
-        const line = modules.map((module) => {
-            const chips = features
-                .filter((feature) => feature.module === module &&
-                    (feature.roles[role.role_name] || { available: false }).available)
-                .map((feature) => {
-                const cell = feature.roles[role.role_name];
-                const state = featureCellState(cell);
-                let who;
-                if (cell.overridden && cell.grantedBy) {
-                    who = (cell.held ? 'Granted' : 'Switched off') + ' by ' + cell.grantedBy +
-                          (cell.updatedAt ? ' ' + whenText(cell.updatedAt) : '') + '. ';
-                } else {
-                    who = '';
-                }
-
-                // one row: the screen and what it does, then the state it is in
-                // and the checkbox; every row shares the same three columns, so the
-                // checkboxes line up down the right-hand edge.
-                return '<label class="feature-row"' + (who ? ' title="' + escapeHtml(who.trim()) + '"' : '') +
-                    ' data-search="' + escapeHtml((feature.name + ' ' + feature.module + ' ' + (feature.description || '')).toLowerCase()) + '">' +
-                    '<span class="feature-row-text">' +
-                        '<span class="feature-row-name">' + escapeHtml(feature.name) + '</span>' +
-                        '<span class="feature-desc">' + escapeHtml(feature.description || '') + '</span>' +
-                    '</span>' +
-                    '<span class="feature-state is-' + state + '"' + (featureStateWord(state, cell.held) ? '' : ' hidden') + '>' +
-                        featureStateWord(state, cell.held) + '</span>' +
-                    '<input type="checkbox" class="feature-box" data-feature="' + escapeHtml(feature.key) + '"' +
-                        ' data-role="' + escapeHtml(String(role.role_id)) + '"' +
-                        ' data-role-name="' + escapeHtml(role.role_name) + '"' +
-                        ' data-default="' + (cell.byDefault ? '1' : '') + '"' +
-                        (cell.held ? ' checked' : '') +
-                        ' aria-label="' + escapeHtml(feature.name + ' for ' + role.role_name) + '"' +
-                        ' onchange="onFeatureBoxChange(this)">' +
-                '</label>';
-            });
-            if (chips.length === 0) return '';
-            return '<div class="feature-group">' +
-                '<span class="feature-module">' + escapeHtml(module) + '</span>' +
-                chips.join('') + '</div>';
+    // one row per role, one box per module
+    table.querySelector('tbody').innerHTML = roles.map((role) => {
+        const boxes = modules.map((module) => {
+            const screens = moduleScreensFor(module, role.role_name);
+            if (screens.length === 0) {
+                return '<td><input type="checkbox" class="access-box" disabled' +
+                    ' title="' + escapeHtml(role.role_name + ' has no ' + module + ' screens') + '"' +
+                    ' aria-label="' + escapeHtml(module + ' for ' + role.role_name + ', not available') + '"></td>';
+            }
+            return '<td><input type="checkbox" class="access-box"' +
+                ' data-module="' + escapeHtml(module) + '"' +
+                ' data-role="' + escapeHtml(String(role.role_id)) + '"' +
+                ' data-role-name="' + escapeHtml(role.role_name) + '"' +
+                ' aria-label="' + escapeHtml(module + ' for ' + role.role_name) + '"' +
+                ' onchange="onModuleBoxChange(this)"></td>';
         }).join('');
-
-        return '<div class="feature-strip" data-role="' + escapeHtml(String(role.role_id)) + '"' +
-            (role.role_id === featureRoleId ? '' : ' hidden') + '>' +
-            '<div class="feature-line">' +
-                (line || '<span class="muted">This role\'s dashboard has no screens to switch.</span>') +
-            '</div>' +
-        '</div>';
+        return '<tr><td class="access-role">' + escapeHtml(role.role_name) + '</td>' + boxes + '</tr>';
     }).join('');
 
-    mount.dataset.baseline = readFeatureMatrix();
-
-    showFeatureRole();
+    syncModuleBoxes();
     syncFeatureSaveButton();
 }
 
-// The search box narrows the role's list to the screens whose name, module
-// or description holds what was typed; a module left with nothing goes too.
-function filterFeatureScreens(query) {
-    const input = document.getElementById('features-search');
-    const wanted = String(query === undefined ? (input ? input.value : '') : query).trim().toLowerCase();
+// Each box shows its screens: ticked when all are on, a dash when only some
+// are, empty when none are. Hovering it lists the screens and which are on.
+// A cell changed since the table was drawn is tinted until it is saved.
+function syncModuleBoxes() {
+    document.querySelectorAll('#features-matrix .access-box[data-module]').forEach((box) => {
+        const screens = moduleScreensFor(box.dataset.module, box.dataset.roleName);
+        let on = 0;
+        let changed = false;
+        const lines = [];
 
-    document.querySelectorAll('#features-matrix .feature-group').forEach((group) => {
-        let shown = 0;
-        group.querySelectorAll('.feature-row').forEach((row) => {
-            const match = wanted === '' || startsAWord(row.dataset.search || '', wanted);
-            row.hidden = !match;
-            if (match) shown += 1;
+        screens.forEach((feature) => {
+            const id = feature.key + '|' + box.dataset.role;
+            if (featureDraft[id]) on += 1;
+            if (featureDraft[id] !== featureBaseline[id]) changed = true;
+            lines.push(feature.name + ': ' + (featureDraft[id] ? 'on' : 'off'));
         });
-        group.hidden = shown === 0;
-    });
 
-    // "no match" only for the role on screen
-    const strip = document.querySelector('#features-matrix .feature-strip:not([hidden])');
-    const none = document.getElementById('features-no-match');
-    if (none) {
-        none.hidden = !strip || wanted === '' ||
-            strip.querySelector('.feature-group:not([hidden])') !== null;
-    }
+        box.checked = on === screens.length;
+        box.indeterminate = on > 0 && on < screens.length;
+        box.title = lines.join('\n');
+        box.parentElement.classList.toggle('is-changed', changed);
+    });
 }
 
-function readFeatureMatrix() {
-    const cells = {};
-    document.querySelectorAll('#features-matrix .feature-box').forEach((box) => {
-        cells[box.dataset.feature + '|' + box.dataset.role] = box.checked;
+// a tick turns on every screen of the module for that role; no tick turns them all off
+function onModuleBoxChange(box) {
+    moduleScreensFor(box.dataset.module, box.dataset.roleName).forEach((feature) => {
+        featureDraft[feature.key + '|' + box.dataset.role] = box.checked;
     });
-    return JSON.stringify(cells);
-}
-
-function onFeatureBoxChange(box) {
-    const state = featureStateOf(Boolean(box.dataset.default), box.checked);
-    const word = box.parentElement.querySelector('.feature-state');
-    if (word) {
-        word.className = 'feature-state is-' + state;
-        word.textContent = featureStateWord(state, box.checked);
-        word.hidden = word.textContent === '';
-    }
-    syncFeatureRoleNote();
+    syncModuleBoxes();
     syncFeatureSaveButton();
 }
 
+// every screen whose on/off differs from what was loaded
 function featureMatrixChanges() {
-    const mount = document.getElementById('features-matrix');
-    if (!mount || !mount.dataset.baseline) return [];
+    if (!featureMatrix) return [];
 
-    const before = JSON.parse(mount.dataset.baseline || '{}');
     const changes = [];
+    for (const feature of featureMatrix.features || []) {
+        for (const role of featureMatrix.roles || []) {
+            const id = feature.key + '|' + role.role_id;
+            if (!(id in featureBaseline) || featureDraft[id] === featureBaseline[id]) continue;
 
-    document.querySelectorAll('#features-matrix .feature-box').forEach((box) => {
-        const id = box.dataset.feature + '|' + box.dataset.role;
-        if (before[id] === box.checked) return;
-
-        const feature = (featureMatrix.features || []).find((f) => f.key === box.dataset.feature);
-        changes.push({
-            key: box.dataset.feature,
-            name: feature ? feature.name : box.dataset.feature,
-            roleId: Number(box.dataset.role),
-            roleName: box.dataset.roleName,
-            byDefault: Boolean(box.dataset.default),
-            granted: box.checked
-        });
-    });
-
+            changes.push({
+                key: feature.key,
+                name: feature.name,
+                roleId: Number(role.role_id),
+                roleName: role.role_name,
+                byDefault: Boolean(feature.roles[role.role_name].byDefault),
+                granted: featureDraft[id]
+            });
+        }
+    }
     return changes;
 }
 
@@ -1944,6 +1839,13 @@ function openBackupDrawer(index) {
         detailRow('Kind', selectedBackup.automatic ? 'Automatic' : 'Manual') +
         detailRow('Made By', backupMadeBy(selectedBackup));
 
+    // only a backup made by hand can be deleted; the system's own ones stay
+    // until the system removes them after the days it keeps them
+    const deleteButton = document.getElementById('backup-delete-btn');
+    if (deleteButton) deleteButton.hidden = Boolean(selectedBackup.automatic);
+    const autoNote = document.getElementById('backup-auto-note');
+    if (autoNote) autoNote.hidden = !selectedBackup.automatic;
+
     document.getElementById('backup-drawer').classList.add('open');
     document.getElementById('backup-shade').classList.add('open');
 }
@@ -1976,19 +1878,28 @@ async function runBackup() {
     if (!yes) return;
 
     const button = document.getElementById('run-backup-btn');
-    if (button) { button.disabled = true; button.textContent = 'Saving...'; }
+    if (button) button.disabled = true;
 
-    notifyInfo('Writing every table, view and procedure to a new .sql file.', 'Backup running');
+    // a loading card covers the screen while the backup is written
+    showWorking({
+        title: 'Backing up data',
+        eyebrow: 'Backup',
+        message: 'Please wait while the system saves a copy of everything. Do not close this page.',
+        steps: ['Reading every table, view and procedure', 'Writing the backup file', 'Writing it in the audit trail']
+    });
 
+    let body = null;
     try {
         const response = await apiMakeBackup();
-        const body = await response.json();
+        body = await response.json();
 
         if (!response.ok) {
+            hideWorking();
             if (!handleAuthFailure(response, body)) notifyError(body.error, 'Backup failed');
             return;
         }
 
+        await finishWorking('Backup saved');
         notifySuccess(
             `${body.fileName} holds ${body.rowCount} rows across ${body.tableCount} tables, ` +
             `${body.viewCount} views and ${body.procedureCount} procedures (${formatBytes(body.bytes)}).`,
@@ -1997,33 +1908,11 @@ async function runBackup() {
         const panel = getDataPanel('admin-backups');
         if (panel) await panel.open();
     } catch (error) {
+        hideWorking();
         notifyOffline();
     } finally {
-        backupCooldown(button);
+        if (button) button.disabled = false;
     }
-}
-
-// After a backup the button rests for BACKUP_COOLDOWN_SECONDS, counting down,
-// so it cannot be pressed again and again. The server keeps the same rule.
-const BACKUP_COOLDOWN_SECONDS = 5;
-
-function backupCooldown(button) {
-    if (!button) return;
-
-    let secondsLeft = BACKUP_COOLDOWN_SECONDS;
-    button.disabled = true;
-    button.textContent = 'Wait ' + secondsLeft + 's';
-
-    const timer = setInterval(function () {
-        secondsLeft -= 1;
-        if (secondsLeft > 0) {
-            button.textContent = 'Wait ' + secondsLeft + 's';
-        } else {
-            clearInterval(timer);
-            button.disabled = false;
-            button.textContent = 'Run Backup Now';
-        }
-    }, 1000);
 }
 
 function downloadSelectedBackup() {
@@ -2076,7 +1965,7 @@ async function restoreSelectedBackup() {
 }
 
 async function deleteSelectedBackup() {
-    if (!selectedBackup) return;
+    if (!selectedBackup || selectedBackup.automatic) return;
 
     const fileName = selectedBackup.fileName;
 

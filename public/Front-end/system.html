@@ -148,9 +148,8 @@
                     <div class="pager is-single" id="archive-pager"></div>
                 </div>
 
-                <!-- ACCESS CONTROL -- the roles down the left, the picked role's screens
-                     on the right. Every role's switches are kept in the page so a change
-                     made under one role survives looking at another before Save. -->
+                <!-- ACCESS CONTROL -- one table: the roles down the left, the modules
+                     across the top, a checkbox for each. Nothing is saved until Save. -->
                 <div class="card" id="panel-features" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -162,29 +161,16 @@
                         </div>
                     </div>
 
-                    <div class="panel-toolbar">
-                        <div class="search-wrap">
-                            <input type="search" id="features-search" class="form-control search-input"
-                                   placeholder="Search screens by name or module"
-                                   oninput="filterFeatureScreens(this.value)">
-                        </div>
+                    <!-- drawn by system-admin.js renderFeatureMatrix -->
+                    <div class="table-responsive">
+                        <table class="access-table" id="features-matrix">
+                            <thead><tr><th>Role</th></tr></thead>
+                            <tbody><tr><td class="table-empty">Loading the roles</td></tr></tbody>
+                        </table>
                     </div>
-
-                    <div class="access-layout">
-                        <aside class="access-roles" aria-label="Roles">
-                            <span class="eyebrow">Roles</span>
-                            <div class="role-list" id="features-role" role="tablist" aria-label="Pick a role">
-                                <p class="muted">Loading the roles</p>
-                            </div>
-                        </aside>
-
-                        <div class="access-screens">
-                            <div id="features-matrix" class="feature-strips" aria-live="polite">
-                                <p class="table-empty">Loading the screens</p>
-                            </div>
-                            <p class="table-empty" id="features-no-match" hidden>No screen matches that search.</p>
-                        </div>
-                    </div>
+                    <p class="access-hint">A tick gives the role every screen of that module. A dash means only some of
+                        its screens are on; ticking it turns them all on. A grey box is a module that role's
+                        dashboard does not have.</p>
                 </div>
 
                 <!-- AUDIT LOGS -->
@@ -696,12 +682,16 @@
                 Restoring replaces everything currently in the system with the contents of this
                 file. Anything recorded since it was taken is lost.
             </p>
+            <p class="detail-note" id="backup-auto-note" hidden>
+                This backup was made by the system, so it cannot be deleted. The system removes it by
+                itself once it is older than the days it keeps backups.
+            </p>
         </div>
 
         <div class="drawer-foot">
             <button type="button" class="btn" onclick="downloadSelectedBackup()">Download</button>
             <button type="button" class="btn btn-gold" onclick="restoreSelectedBackup()">Restore</button>
-            <button type="button" class="btn btn-danger" onclick="deleteSelectedBackup()">Delete</button>
+            <button type="button" class="btn btn-danger" id="backup-delete-btn" onclick="deleteSelectedBackup()">Delete</button>
         </div>
     </aside>
 
