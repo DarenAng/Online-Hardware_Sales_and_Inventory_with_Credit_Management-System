@@ -2371,13 +2371,19 @@ function fillRecordSort() {
     const select = document.getElementById('records-sort');
     if (!select) return;
 
-    const options = [['name-asc', 'Name, A to Z'], ['name-desc', 'Name, Z to A']];
-    RECORD_COLUMNS[recordType].slice(1).forEach((column) => {
-        if (RECORD_NUMERIC.indexOf(column[0]) !== -1) {
-            options.push([column[0] + '-desc', column[1] + ', highest first']);
-            options.push([column[0] + '-asc', column[1] + ', lowest first']);
-        }
-    });
+    let options;
+    if (recordType === 'product') {
+        // products group by category or brand; All keeps them by name
+        options = [['name-asc', 'All'], ['category_name-asc', 'Category'], ['brand_name-asc', 'Brand']];
+    } else {
+        options = [['name-asc', 'Name, A to Z'], ['name-desc', 'Name, Z to A']];
+        RECORD_COLUMNS[recordType].slice(1).forEach((column) => {
+            if (RECORD_NUMERIC.indexOf(column[0]) !== -1) {
+                options.push([column[0] + '-desc', column[1] + ', highest first']);
+                options.push([column[0] + '-asc', column[1] + ', lowest first']);
+            }
+        });
+    }
 
     select.innerHTML = options.map((option) =>
         '<option value="' + option[0] + '">' + escapeHtml(option[1]) + '</option>').join('');
@@ -2401,6 +2407,14 @@ function sortRecordRows(rows, order) {
         let result;
         if (key === 'name') {
             result = String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
+        } else if (key === 'category_name' || key === 'brand_name') {
+            // A to Z by category or brand, the ones not set last, then by name
+            const first = String(a[key] || '');
+            const second = String(b[key] || '');
+            if (first === '' && second !== '') result = 1;
+            else if (second === '' && first !== '') result = -1;
+            else result = first.localeCompare(second) ||
+                          String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
         } else {
             result = (Number(a[key]) || 0) - (Number(b[key]) || 0) ||
                      String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
