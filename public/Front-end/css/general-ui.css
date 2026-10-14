@@ -2384,6 +2384,19 @@ html:has(.modal.open) { overflow: hidden; }
        the buttons come last */
     .panel-toolbar .toolbar-date { order: 1; }
     .panel-toolbar > .btn { order: 3; }
+
+    /* An iPhone draws a date box at its own width and ignores the width it is
+       given, so the box ran past the edge of the screen. Without its built-in
+       look it keeps to its width like any other box. */
+    input[type="date"] {
+        -webkit-appearance: none;
+        appearance: none;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+    /* without the built-in look the iPhone centres the date; keep it on the left */
+    input[type="date"]::-webkit-date-and-time-value { text-align: left; }
     .panel-toolbar .toolbar-field select,
     .panel-toolbar .toolbar-field input { width: 100%; min-width: 0; }
     .panel-toolbar > .toolbar-spacer { display: none; }

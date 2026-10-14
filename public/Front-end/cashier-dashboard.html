@@ -398,11 +398,11 @@
                                    placeholder="Search by reference, receipt, cashier, or message"
                                    oninput="dataPanelSearchInput('cqr', event)" onkeydown="dataPanelSearchKey('cqr', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
-                        <div class="toolbar-field">
+                        <div class="toolbar-field toolbar-date">
                             <label for="cqr-from">From</label>
                             <input type="date" id="cqr-from" onchange="reloadQrPayments('cqr')">
                         </div>
-                        <div class="toolbar-field">
+                        <div class="toolbar-field toolbar-date">
                             <label for="cqr-to">To</label>
                             <input type="date" id="cqr-to" onchange="reloadQrPayments('cqr')">
                         </div>
@@ -941,11 +941,11 @@
                     <h4 class="history-head">Purchase History
                         <span class="history-total" id="customer-history-total"></span></h4>
                     <div class="history-filters">
-                        <div class="toolbar-field">
+                        <div class="toolbar-field toolbar-date">
                             <label for="hist-from">From</label>
                             <input type="date" id="hist-from" onchange="renderCustomerHistory()">
                         </div>
-                        <div class="toolbar-field">
+                        <div class="toolbar-field toolbar-date">
                             <label for="hist-to">To</label>
                             <input type="date" id="hist-to" onchange="renderCustomerHistory()">
                         </div>
@@ -964,11 +964,11 @@
                     <h4 class="history-head">Credit &amp; Payments
                         <span class="history-total" id="customer-payments-total"></span></h4>
                     <div class="history-filters">
-                        <div class="toolbar-field">
+                        <div class="toolbar-field toolbar-date">
                             <label for="pay-from">From</label>
                             <input type="date" id="pay-from" onchange="renderCustomerPayments()">
                         </div>
-                        <div class="toolbar-field">
+                        <div class="toolbar-field toolbar-date">
                             <label for="pay-to">To</label>
                             <input type="date" id="pay-to" onchange="renderCustomerPayments()">
                         </div>

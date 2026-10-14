@@ -308,11 +308,11 @@
                                 </select>
                             </div>
 
-                            <div class="toolbar-field">
+                            <div class="toolbar-field toolbar-date">
                                 <label for="sales-from">From</label>
                                 <input type="date" id="sales-from" onchange="reloadSales()">
                             </div>
-                            <div class="toolbar-field">
+                            <div class="toolbar-field toolbar-date">
                                 <label for="sales-to">To</label>
                                 <input type="date" id="sales-to" onchange="reloadSales()">
                             </div>
@@ -523,11 +523,11 @@
                                     <option value="all">Every month</option>
                                 </select>
                             </div>
-                            <div class="toolbar-field">
+                            <div class="toolbar-field toolbar-date">
                                 <label for="po-totals-from">From</label>
                                 <input type="date" id="po-totals-from" onchange="purchaseTotalsDates()">
                             </div>
-                            <div class="toolbar-field">
+                            <div class="toolbar-field toolbar-date">
                                 <label for="po-totals-to">To</label>
                                 <input type="date" id="po-totals-to" onchange="purchaseTotalsDates()">
                             </div>
@@ -1016,11 +1016,11 @@
                                    placeholder="Search by reference, receipt, cashier, or message"
                                    oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
-                        <div class="toolbar-field">
+                        <div class="toolbar-field toolbar-date">
                             <label for="mqr-from">From</label>
                             <input type="date" id="mqr-from" onchange="reloadQrPayments('mqr')">
                         </div>
-                        <div class="toolbar-field">
+                        <div class="toolbar-field toolbar-date">
                             <label for="mqr-to">To</label>
                             <input type="date" id="mqr-to" onchange="reloadQrPayments('mqr')">
                         </div>
