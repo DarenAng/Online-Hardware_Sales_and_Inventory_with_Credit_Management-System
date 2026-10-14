@@ -120,7 +120,9 @@ function escapeHtml(value) {
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
+        .replace(/"/g, '&quot;')
+        // a ' ends an attribute written with single quotes (title='...')
+        .replace(/'/g, '&#39;');
 }
 
 

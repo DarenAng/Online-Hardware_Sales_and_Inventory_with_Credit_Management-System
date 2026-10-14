@@ -1609,12 +1609,12 @@ function registerManagerRoutes(app, deps) {
     try {
       const output = await callProcedure(
         "CALL sp_apply_late_penalties(@applied, @total)", [],
-        ["applied", "total"]);
+        ["applied", "total", "err_no", "err_text"]);
 
       const applied = Number(output.applied) || 0;
       const total = Number(output.total) || 0;
       if (applied < 0) {
-        console.error("Late-payment sweep failed inside the database; see the MySQL log.");
+        console.error(`Late-payment sweep failed inside the database (${output.err_no}): ${output.err_text}`);
         return;
       }
       if (applied > 0) {

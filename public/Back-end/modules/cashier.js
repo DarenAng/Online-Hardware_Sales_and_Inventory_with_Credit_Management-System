@@ -1879,17 +1879,37 @@ function renderCreditVerdict(totals) {
 
     const t = totals || cartTotals();
 
-    if (!t.onCredit) { box.textContent = ''; box.className = 'credit-verdict'; return; }
+    if (!t.onAccount) { box.textContent = ''; box.className = 'credit-verdict'; return; }
 
     if (!selectedCustomerCredit) {
         box.className = 'credit-verdict is-watch';
-        box.textContent = 'A credit sale is settled later, so it has to be booked against a named customer.';
+        box.textContent = t.onCredit
+            ? 'A credit sale is settled later, so it has to be booked against a named customer.'
+            : 'A COD order is paid on delivery, so it needs a named customer.';
         return;
     }
 
     const c = selectedCustomerCredit;
     const available = Number(c.available_credit) || 0;
     const name = c.customer_name;
+
+    // a COD order goes on the account for the whole bill, so it meets the same hold and limit
+    if (!t.onCredit) {
+        if (c.standing === 'Hold') {
+            box.className = 'credit-verdict is-stop';
+            box.innerHTML = escapeHtml(name) + ' is <strong>on hold</strong>, so a COD order cannot be placed. ' +
+                'Take the full ' + peso(t.due) + ' now, or ask a manager to lift the hold.';
+        } else if (t.onBook > available) {
+            box.className = 'credit-verdict is-stop';
+            box.innerHTML = 'This COD order is over the limit by <strong>' + peso(t.onBook - available) + '</strong>. ' +
+                'Take payment now, or ask for a higher limit from <kbd>Customers Record</kbd>.';
+        } else {
+            box.className = 'credit-verdict is-good';
+            box.innerHTML = peso(t.onBook) + ' goes on ' + escapeHtml(name) + "'s account until delivery, leaving " +
+                peso(available - t.onBook) + ' of their limit.';
+        }
+        return;
+    }
 
     if (t.onBook === 0) {
         box.className = 'credit-verdict is-good';

@@ -512,13 +512,22 @@ function registerInventoryRoutes(app, deps) {
   app.post("/api/inventory/adjust", async (request, response) => {
     const { productId, adjustmentType, quantity, reason, unitName } = request.body;
 
-    if (!productId || !adjustmentType || quantity === undefined || !reason) {
+    if (!productId || !adjustmentType || quantity === undefined || quantity === null || quantity === "" || !reason) {
       return response.status(400).json({ error: "Product, type, quantity and reason are all required" });
     }
 
-    // nothing moves for 0, so it is not recorded
-    if (!Number.isFinite(Number(quantity)) || Number(quantity) < 1) {
-      return response.status(400).json({ error: "The quantity has to be at least 1" });
+    // Add and Remove move the shelf, so 0 is not an adjustment (fractions are
+    // fine: 0.5 kg). A recount may find the shelf empty, so it may be 0.
+    // The same words are in sp_adjust_stock and in the Stock Adjustment form.
+    if (!Number.isFinite(Number(quantity))) {
+      return response.status(400).json({ error: "The quantity must be a number." });
+    }
+    if (adjustmentType === "Recount") {
+      if (Number(quantity) < 0) {
+        return response.status(400).json({ error: "A recount cannot be below zero." });
+      }
+    } else if (Number(quantity) <= 0) {
+      return response.status(400).json({ error: "Add and Remove need a quantity greater than zero." });
     }
 
     // capped at the column width; empty means "keep what this material is counted in"
@@ -1320,6 +1329,21 @@ function registerInventoryRoutes(app, deps) {
       });
     }
 
+    // A refund amount, when one is sent, is a real number of zero or more. A
+    // negative one would add money back onto the customer's bill. The
+    // procedure checks the same again.
+    if (refundAmount !== undefined && refundAmount !== null && refundAmount !== "") {
+      const amountSent = Number(refundAmount);
+      if (!Number.isFinite(amountSent) || amountSent < 0) {
+        return response.status(400).json({ error: "The refund amount must be a number, zero or more." });
+      }
+    }
+
+    // A refund is money going back against a sale, so it has to name the sale.
+    if (reportType === "Refunded" && !saleId) {
+      return response.status(400).json({ error: "A refund must be filed against a sale." });
+    }
+
     const isDriver = request.actor && request.actor.roleName === DRIVER;
 
     // A driver refunds at the customer's door, and only on a delivery they
@@ -1355,7 +1379,7 @@ function registerInventoryRoutes(app, deps) {
     // that many are left to refund, and no more than was charged for them.
     // These checks give a friendly message; sp_file_return_report checks the
     // same again under a lock, and that is the one that cannot be raced.
-    // A refund with no sale named is only a record of cash handed back.
+    // (A refund with no sale named is refused above.)
     if (reportType === "Refunded" && saleId) {
       try {
         // what the sale holds of this product, and what has already come back

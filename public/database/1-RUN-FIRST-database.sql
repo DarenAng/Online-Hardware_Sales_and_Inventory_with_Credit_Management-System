@@ -220,7 +220,9 @@ CREATE TABLE inventory (
     -- a fraction: nails by the kilo, wire by the metre
     quantity_in_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE
+    FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    -- the shelf can never hold less than nothing
+    CONSTRAINT chk_inventory_stock_not_negative CHECK (quantity_in_stock >= 0)
 );
 CREATE TABLE product_units (
     product_unit_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -392,7 +394,10 @@ CREATE TABLE sales (
     archived_at TIMESTAMP NULL,
     archived_by_staff_id INT NULL,
     FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE RESTRICT ON UPDATE CASCADE,
-    FOREIGN KEY (cashier_staff_id) REFERENCES staff(staff_id) ON DELETE RESTRICT ON UPDATE CASCADE
+    FOREIGN KEY (cashier_staff_id) REFERENCES staff(staff_id) ON DELETE RESTRICT ON UPDATE CASCADE,
+    -- a negative discount would raise the bill, a negative payment would lower what was paid
+    CONSTRAINT chk_sales_discount_not_negative CHECK (discount >= 0),
+    CONSTRAINT chk_sales_amount_paid_not_negative CHECK (amount_paid >= 0)
 );
 
 CREATE TABLE sale_items (
@@ -468,7 +473,9 @@ CREATE TABLE returned_items (
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (reported_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
-    FOREIGN KEY (inspected_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+    FOREIGN KEY (inspected_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
+    -- a negative refund would be money taken from the customer
+    CONSTRAINT chk_returned_items_refund_not_negative CHECK (refund_amount >= 0)
 );
 
 -- Every GCash or Maya payment attempt made by QR code, whatever became of it,
@@ -594,8 +601,10 @@ INSERT INTO staff (staff_id, first_name, middle_name, last_name, phone, role_id,
 (5, 'Delivery', 'Dela Cruz', 'User',    '+639170000005', 5, TRUE);
 UPDATE staff SET created_at = '2026-01-05 08:00:00' WHERE staff_id BETWEEN 1 AND 5;
 
+-- Every seeded account, the administrator's too, must pick a new password at
+-- the first sign-in; "admin123" is public in this file.
 INSERT INTO users (staff_id, email, password, must_change_password) VALUES
-(1, 'admin@hardware.com', 'admin123', FALSE),
+(1, 'admin@hardware.com', 'admin123', TRUE),
 (2, 'manager@hardware.com', 'manager123', TRUE),
 (3, 'clerk@hardware.com', 'clerk123', TRUE),
 (4, 'cashier@hardware.com', 'cashier123', TRUE),

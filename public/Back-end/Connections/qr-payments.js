@@ -15,11 +15,12 @@
 // (offline). Both answer the same three calls, and nothing outside this file
 // knows which one is in use.
 //
-// Every attempt is a row in qr_payments, written through three procedures:
-// made (pending), what became of it (paid, failed, expired, cancelled), and
-// the sale it was recorded on. cashier.js asks verifyForMoney() before a sale
-// or a payment is saved against a QR payment: the browser's word that it was
-// paid is never taken.
+// Every attempt is a row in qr_payments, written through procedures: made
+// (pending), what became of it (paid, failed, expired, cancelled), and the
+// sale it was recorded on (set inside sp_create_sale_transaction and
+// sp_record_credit_payment, in the same transaction as the money). cashier.js
+// asks verifyForMoney() first for a friendly message; the browser's word that
+// it was paid is never taken, and the database refuses a payment used twice.
 // ============================================================
 
 const os = require("os");
@@ -458,8 +459,9 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
   // ---------- for cashier.js: money recorded against a QR payment ----------
 
   // In this server, two sales sent at the same moment with one payment are
-  // stopped here; the procedure that links the payment stops them again in
-  // the database.
+  // stopped here with a friendly message. The database is the real guard: the
+  // sale and payment procedures lock the qr_payments row and tie it to the sale
+  // inside their own transaction.
   const claiming = new Set();
 
   // Checked with the provider again before anything is saved. Gives back
@@ -486,23 +488,27 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
     }
   }
 
-  async function recordUsed(qrPaymentId, saleId, actorId) {
-    const output = await callProcedure(
-      "CALL sp_link_qr_payment_to_sale(?, ?, ?, @status_code, @message)",
-      [qrPaymentId, saleId, actorId || null],
-      ["status_code", "message"]
-    );
-    if (output.status_code === 200) publishChange("qr-payments", `qr-payment ${qrPaymentId} linked`, null);
-    return output;
+  // The sale or payment procedure has tied the QR payment to the sale by now;
+  // this only tells the open QR Payments screens to look again.
+  function announceUsed(qrPaymentId) {
+    publishChange("qr-payments", `qr-payment ${qrPaymentId} linked`, null);
   }
 
-  // the money came in and the sale did not save: the row says a refund is owed
+  // The money came in and the sale did not save: the row says a refund is owed.
+  // Gives back "QR_USED" when the refusal was because the payment is already
+  // recorded on another sale (this try lost the race to it), so the till does
+  // not offer the payment for another try; otherwise null.
   async function recordUnsaved(qrPaymentId, actorId) {
     try {
+      // a payment that is already recorded on a sale is not unsaved, so it
+      // gets no refund note
+      const row = await readRow(qrPaymentId);
+      if (row && row.sale_id !== null) return "QR_USED";
       await setResult(qrPaymentId, "paid", null, UNSAVED_NOTE, actorId);
     } catch (error) {
       console.error(`Noting QR payment #${qrPaymentId} as unsaved failed:`, error.message);
     }
+    return null;
   }
 
   // the lines for the terminal at start-up
@@ -515,6 +521,18 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
     } else {
       lines.push(`QR payments: PayMongo, ${provider.mode === "test" ? "TEST MODE (no real money)" : "LIVE (real money)"}.`);
     }
+    // Online, the simulation charges nobody, yet the till records the sale as
+    // paid. PAYMENT_PROVIDER unset (or any value that is not "paymongo") ends
+    // up as sim, which is exactly what provider.name tells.
+    if (process.env.VERCEL && provider.name === "sim") {
+      lines.push("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+      lines.push("WARNING: this server is on Vercel but QR payments are SIMULATED.");
+      lines.push("A GCash or Maya QR code takes no real money: pressing Pay on the");
+      lines.push("simulated page marks it paid. Set PAYMENT_PROVIDER=paymongo (and the");
+      lines.push("PayMongo keys) in the Vercel environment before real customers pay.");
+      lines.push("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    }
+
     let where = " (this PC on the Wi-Fi; the phone must be on the same network).";
     if (process.env.HARDWARE_SITE_URL) where = " (HARDWARE_SITE_URL).";
     else if (process.env.VERCEL) where = " (this Vercel project's address).";
@@ -522,7 +540,7 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
     return lines;
   }
 
-  return { verifyForMoney, recordUsed, recordUnsaved, QrPaymentError, describe };
+  return { verifyForMoney, announceUsed, recordUnsaved, QrPaymentError, describe };
 }
 
 module.exports = { registerQrPaymentRoutes, qrRefusal, summarize, UNSAVED_NOTE, QR_MINUTES };

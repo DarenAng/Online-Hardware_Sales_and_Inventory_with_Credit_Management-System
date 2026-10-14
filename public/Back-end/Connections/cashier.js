@@ -168,19 +168,6 @@ function registerCashierRoutes(app, deps) {
   const REFERENCE_REQUIRED = ["Cheque", "Bank Transfer"];
   const REFERENCE_OPTIONAL = ["GCash", "PayMaya", "PayPal"];
 
-  // The money is saved by now and is not undone over the link: a failure here
-  // is logged, and the sale still carries the payment's reference.
-  async function linkQrPayment(qr, saleId, request) {
-    try {
-      const linked = await qrPayments.recordUsed(qr.id, saleId, getActorId(request));
-      if (linked.status_code !== 200) {
-        console.error(`QR payment #${qr.id} was not linked to sale #${saleId}: ${linked.message}`);
-      }
-    } catch (error) {
-      console.error(`Linking QR payment #${qr.id} to sale #${saleId} failed:`, error.message);
-    }
-  }
-
   // Ring up a sale. The procedure deducts stock, checks the limit and standing,
   // and decides paid, part paid or on the book. downPaymentMethod is how the
   // money on a Credit sale actually arrived.
@@ -190,6 +177,12 @@ function registerCashierRoutes(app, deps) {
 
     if (!paymentMethod || !Array.isArray(items) || items.length === 0) {
       return response.status(400).json({ error: "A payment method and at least one item are required" });
+    }
+
+    // a negative discount would raise the bill above the item prices; refused
+    // before any QR payment below is checked or spent on it
+    if (Number(discount) < 0) {
+      return response.status(400).json({ error: "Discount cannot be negative." });
     }
 
     // A walk-in is a sale with no customer and no name. A name is only ever a
@@ -283,9 +276,9 @@ function registerCashierRoutes(app, deps) {
 
     try {
       const output = await callProcedure(
-        "CALL sp_create_sale_transaction(?, ?, ?, ?, ?, ?, ?, ?, @sale_id, @status_code, @message)",
+        "CALL sp_create_sale_transaction(?, ?, ?, ?, ?, ?, ?, ?, ?, @sale_id, @status_code, @message)",
         [customerId || null, null, getActorId(request), discount || 0, amountPaid || 0,
-         paymentMethod, JSON.stringify(items), downMethod],
+         paymentMethod, JSON.stringify(items), downMethod, qr ? qr.id : null],
         ["sale_id", "status_code", "message"]
       );
 
@@ -293,11 +286,14 @@ function registerCashierRoutes(app, deps) {
         // Refused (an item ran out) after the customer paid: the row stays
         // paid and says a refund is owed, written before the till is answered.
         // The payment can still be used on the next try.
-        if (qr) await qrPayments.recordUnsaved(qr.id, getActorId(request));
-        return response.status(output.status_code).json({ error: output.message });
+        let code;
+        if (qr) code = await qrPayments.recordUnsaved(qr.id, getActorId(request));
+        return response.status(output.status_code).json({ error: output.message, code: code || undefined });
       }
       saleId = output.sale_id;
-      if (qr) await linkQrPayment(qr, saleId, request);
+      // the procedure has tied the QR payment to the sale in its own transaction;
+      // this only tells the open QR Payments screens
+      if (qr) qrPayments.announceUsed(qr.id);
 
       // The sale exists by now and is not undone over its reference: a failure
       // here is said on the screen, and the invoice prints without it.
@@ -309,7 +305,12 @@ function registerCashierRoutes(app, deps) {
             [output.sale_id, keptReference, getActorId(request)],
             ["status_code", "message"]
           );
-          if (saved.status_code !== 200) referenceNote = saved.message;
+          if (saved.status_code === 500) {
+            // callProcedure already logged why; the screen is told what still stands
+            referenceNote = "The sale was saved, but its reference was not. Write it on the invoice by hand.";
+          } else if (saved.status_code !== 200) {
+            referenceNote = saved.message;
+          }
         } catch (error) {
           console.error("Saving the sale reference failed:", error.message);
           referenceNote = "The sale was saved, but its reference was not. Write it on the invoice by hand.";
@@ -415,8 +416,8 @@ function registerCashierRoutes(app, deps) {
       const booked = saleRows.length > 0 ? saleRows[0].sale_day : null;
 
       const output = await callProcedure(
-        "CALL sp_create_delivery(?, ?, ?, ?, ?, ?, ?, ?, @delivery_id, @status_code, @message)",
-        [saleId, address, scheduled, remarks || null, contact, phone, booked, getActorId(request)],
+        "CALL sp_create_delivery(?, ?, ?, ?, ?, ?, ?, ?, ?, @delivery_id, @status_code, @message)",
+        [saleId, address, scheduled, remarks || null, contact, phone, booked, getActorId(request), driverId],
         ["delivery_id", "status_code", "message"]
       );
 
@@ -424,14 +425,8 @@ function registerCashierRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      // keep the cashier's note apart from the later status notes in remarks
-      await db.query("UPDATE deliveries SET cashier_remarks = ? WHERE delivery_id = ?",
-        [remarks || null, output.delivery_id]);
-
-      if (driverId) {
-        await db.query("UPDATE deliveries SET delivery_staff_id = ? WHERE delivery_id = ?",
-          [driverId, output.delivery_id]);
-      }
+      // the procedure keeps the cashier's note apart from the later status notes
+      // and assigns the driver in the same transaction as the delivery itself
 
       response.json({
         message: driverId
@@ -706,18 +701,19 @@ function registerCashierRoutes(app, deps) {
 
     try {
       const output = await callProcedure(
-        "CALL sp_record_credit_payment(?, ?, ?, ?, ?, @status_code, @message)",
-        [request.params.saleId, amount, paymentMethod, reference, getActorId(request)],
+        "CALL sp_record_credit_payment(?, ?, ?, ?, ?, ?, @status_code, @message)",
+        [request.params.saleId, amount, paymentMethod, reference, getActorId(request), qr ? qr.id : null],
         ["status_code", "message"]
       );
 
       if (output.status_code !== 200) {
         // the customer paid and nothing was recorded: said on the row first
-        if (qr) await qrPayments.recordUnsaved(qr.id, getActorId(request));
-        return response.status(output.status_code).json({ error: output.message });
+        let code;
+        if (qr) code = await qrPayments.recordUnsaved(qr.id, getActorId(request));
+        return response.status(output.status_code).json({ error: output.message, code: code || undefined });
       }
       recorded = true;
-      if (qr) await linkQrPayment(qr, request.params.saleId, request);
+      if (qr) qrPayments.announceUsed(qr.id);
 
       response.json({ message: output.message, reference: qr ? qr.reference : null });
     } catch (error) {

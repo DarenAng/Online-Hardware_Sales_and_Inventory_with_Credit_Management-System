@@ -119,14 +119,18 @@ PROC_BODY: BEGIN
     DECLARE v_restock BOOLEAN DEFAULT FALSE;
     DECLARE v_where VARCHAR(20);
     DECLARE v_awaiting BOOLEAN DEFAULT FALSE;
+    DECLARE v_voided BOOLEAN DEFAULT FALSE;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
+        -- first, before anything clears it: the real error, for the server log
+        GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_report_id = NULL;
         SET p_off_balance = 0.00;
         SET p_status_code = 500;
-        SET p_message = 'Report failed. All changes rolled back.';
+        -- the server logs this and sends the browser a plain sentence instead
+        SET p_message = CONCAT('sp_file_return_report failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
     SET p_report_id = NULL;
@@ -141,6 +145,21 @@ PROC_BODY: BEGIN
     IF p_quantity IS NULL OR p_quantity <= 0 THEN
         SET p_status_code = 400;
         SET p_message = 'Quantity must be greater than zero.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    -- A refund is money going back against a sale, so it must name the sale.
+    -- Without one, nothing checks the amount against what was charged.
+    IF p_report_type = 'Refunded' AND p_sale_id IS NULL THEN
+        SET p_status_code = 400;
+        SET p_message = 'A refund must be filed against a sale.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    -- a negative refund would put money back on the customer's bill
+    IF p_refund_amount IS NOT NULL AND p_refund_amount < 0 THEN
+        SET p_status_code = 400;
+        SET p_message = 'The refund amount cannot be negative.';
         LEAVE PROC_BODY;
     END IF;
 
@@ -195,7 +214,8 @@ PROC_BODY: BEGIN
     -- sees the first one's report and is refused if nothing is left to refund.
     IF p_report_type = 'Refunded' AND p_sale_id IS NOT NULL THEN
         SET v_due = NULL;
-        SELECT amount_due, amount_paid, final_amount INTO v_due, v_paid, v_final
+        SELECT amount_due, amount_paid, final_amount, is_archived
+        INTO v_due, v_paid, v_final, v_voided
         FROM sales WHERE sale_id = p_sale_id
         FOR UPDATE;
 
@@ -203,6 +223,15 @@ PROC_BODY: BEGIN
             ROLLBACK;
             SET p_status_code = 404;
             SET p_message = 'That sale was not found.';
+            LEAVE PROC_BODY;
+        END IF;
+
+        -- a voided sale was cancelled and its stock put back; refunding it
+        -- would pay out money that was never taken
+        IF v_voided THEN
+            ROLLBACK;
+            SET p_status_code = 409;
+            SET p_message = 'That sale was voided; there is nothing to refund.';
             LEAVE PROC_BODY;
         END IF;
 
@@ -387,6 +416,8 @@ BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
+        -- first, before anything clears it: the real error, for the server log
+        GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_applied = -1;
         SET p_total = 0.00;

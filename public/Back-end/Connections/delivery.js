@@ -190,8 +190,8 @@ function registerDeliveryRoutes(app, deps) {
       }
 
       const output = await callProcedure(
-        "CALL sp_record_credit_payment(?, ?, ?, ?, ?, @status_code, @message)",
-        [rows[0].sale_id, amount, paymentMethod, referenceNo || null, getActorId(request)],
+        "CALL sp_record_credit_payment(?, ?, ?, ?, ?, ?, @status_code, @message)",
+        [rows[0].sale_id, amount, paymentMethod, referenceNo || null, getActorId(request), null],
         ["status_code", "message"]
       );
 

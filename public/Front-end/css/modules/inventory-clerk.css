@@ -156,6 +156,7 @@ td.cell-num .stock-level { margin-left: auto; }
 }
 .unit-verdict:empty { display: none; }
 .unit-verdict.is-new { color: var(--signal-ink); font-weight: 500; }
+.unit-verdict.is-stop { color: var(--stop-hi); font-weight: 500; }
 
 /* ==========================================================================
    WHAT THIS WILL DO TO THE SHELF -- the material, then "40 pcs -> 45 pcs (+5)":
