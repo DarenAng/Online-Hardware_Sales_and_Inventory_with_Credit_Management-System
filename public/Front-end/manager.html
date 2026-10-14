@@ -372,7 +372,8 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="mqr-status">Status</label>
-                                <select id="mqr-status" onchange="dataPanelFilter('mqr', 'status', this.value)">
+                                <select id="mqr-status" data-filter-table="mqr-table" data-hides-column="4"
+                                        onchange="dataPanelFilter('mqr', 'status', this.value)">
                                     <option value="all">Every status</option>
                                     <option value="paid">Paid</option>
                                     <option value="failed">Failed</option>

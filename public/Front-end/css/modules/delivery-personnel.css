@@ -17,8 +17,8 @@
 /* ==========================================================================
    THE PENDING LIST -- every active delivery; a row is opened to move it on
    ========================================================================== */
-/* a Pending row nobody has taken yet */
-#dpend-table .owner-tag { margin-left: 4px; }
+/* a Pending row nobody has taken yet: tagged beside the customer's name */
+#dpend-table .owner-tag { margin-left: 4px; vertical-align: middle; }
 
 /* why a Delayed delivery is delayed: small muted words under its status */
 .delay-reason {
@@ -179,7 +179,8 @@
         flex-wrap: wrap;
         gap: 6px;
     }
-    #dpend-table .owner-tag { margin-left: 0; }
+    /* a Status filter hides the column (tables.js); the rule above would show it again */
+    #dpend-table .row-clickable td.col-hidden { display: none; }
 
     /* ... and the date on the right */
     #dpend-table .row-clickable td[data-column="Scheduled"] {

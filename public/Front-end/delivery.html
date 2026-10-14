@@ -79,7 +79,9 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="dpend-status">Status</label>
-                                <select id="dpend-status" onchange="dataPanelFilter('driver-pending', 'status', this.value)">
+                                <select id="dpend-status" data-filter-table="dpend-table" data-hides-column="5"
+                                        data-keeps-column-for="Delayed"
+                                        onchange="dataPanelFilter('driver-pending', 'status', this.value)">
                                     <option value="all">All</option>
                                     <option value="Pending">Pending</option>
                                     <option value="In Transit">In Transit</option>

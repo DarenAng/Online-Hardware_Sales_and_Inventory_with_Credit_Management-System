@@ -178,10 +178,11 @@ function buildDriverPanels() {
             '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openPendingDelivery(' + d.delivery_id + ')">' +
             '<td class="cell-id">#' + d.delivery_id + '</td>' +
-            '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
+            // the Unassigned tag sits by the name, so it stays when a Status filter hides that column
+            '<td class="cell-name">' + escapeHtml(d.customer_name) + ' ' + ownerTag(d) + '</td>' +
             '<td>' + escapeHtml(d.delivery_address) + '</td>' +
             '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
-            '<td>' + statusBadge(d.status) + ' ' + ownerTag(d) + delayedReason(d) + '</td></tr>'
+            '<td>' + statusBadge(d.status) + delayedReason(d) + '</td></tr>'
     });
 }
 
