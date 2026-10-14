@@ -26,13 +26,6 @@ function qrStatusBadge(status) {
         escapeHtml(QR_STATUS_WORDS[status] || status) + '</span>';
 }
 
-// test money, a simulation, or real money: said on every row
-function qrModeBadge(row) {
-    if (row.provider === 'sim') return '<span class="badge badge-warning">Simulation</span>';
-    if (row.mode === 'test') return '<span class="badge badge-warning">Test</span>';
-    return '<span class="badge badge-success">Live</span>';
-}
-
 function qrSaleNumber(saleId) {
     return 'OR-' + String(saleId).padStart(6, '0');
 }
@@ -42,13 +35,13 @@ const qrPanels = new Map();
 
 function buildQrPaymentsPanel(options) {
     const p = options.prefix;
-    const state = { options: options, summary: null, badge: null, staff: new Map() };
+    const state = { options: options, summary: null, staff: new Map() };
     qrPanels.set(options.key, state);
 
     createDataPanel({
         key: options.key,
         tableId: p + '-table',
-        columns: 9,
+        columns: 8,
         pagerId: p + '-pager',
         idField: 'id',
         filters: { status: 'all' },
@@ -69,7 +62,6 @@ function buildQrPaymentsPanel(options) {
         load: async () => {
             const answer = await apiGetQrPayments(qrPaymentsQuery(state));
             state.summary = answer.summary;
-            state.badge = answer.badge;
             answer.rows.forEach((row) => {
                 if (row.cashierName) state.staff.set(String(row.staffId), row.cashierName);
             });
@@ -95,8 +87,7 @@ function buildQrPaymentsPanel(options) {
             '<td class="cell-id">' + (row.reference ? escapeHtml(row.reference) : '<span class="muted">None</span>') + '</td>' +
             '<td class="cell-id">' + (row.saleId ? qrSaleNumber(row.saleId) : '<span class="muted">None</span>') + '</td>' +
             '<td class="cell-name">' + escapeHtml(row.cashierName || 'Unknown') + '</td>' +
-            '<td>' + (row.errorMessage ? escapeHtml(row.errorMessage) : '') + '</td>' +
-            '<td>' + qrModeBadge(row) + '</td></tr>'
+            '<td>' + (row.errorMessage ? escapeHtml(row.errorMessage) : '') + '</td></tr>'
     });
 
     renderQrPaymentTiles(state);
@@ -140,13 +131,6 @@ function renderQrPaymentTiles(state) {
         tile('Expired', value(s && s.expired), 'Not paid in time') +
         tile('Cancelled', value(s && s.cancelled), 'Closed by the cashier') +
         tile('Success Rate', s ? escapeHtml(rate) : '—', 'Paid, of finished attempts');
-
-    // the whole list is test money while the badge is up
-    const badge = document.getElementById(state.options.prefix + '-badge');
-    if (badge) {
-        badge.hidden = !state.badge;
-        badge.textContent = state.badge || '';
-    }
 }
 
 // the manager's "Cashier" picker: everyone seen so far, kept across periods
@@ -183,7 +167,6 @@ function openQrPaymentRow(key, id) {
         detailField('Made', escapeHtml(String(row.createdAt || ''))) +
         detailField('Closed', row.closedAt ? escapeHtml(String(row.closedAt)) : '<span class="muted">Still open</span>') +
         detailField('Reference', row.reference ? escapeHtml(row.reference) : '<span class="muted">None</span>') +
-        detailField('Money', qrModeBadge(row)) +
         '</div>' +
         (row.errorMessage ? '<p class="detail-note' + (row.status === 'paid' ? ' detail-warn' : '') + '">' +
             escapeHtml(row.errorMessage) + '</p>' : '') +
@@ -199,13 +182,12 @@ function openQrPaymentRow(key, id) {
 // reference of each code paid towards it. Empty when there were none.
 function qrPaymentsOfSaleHtml(list) {
     if (!Array.isArray(list) || list.length === 0) return '';
-    return detailTable(['QR Payment', 'Wallet', 'Amount', 'Status', 'Reference', 'Money'],
+    return detailTable(['QR Payment', 'Wallet', 'Amount', 'Status', 'Reference'],
         list.map((q) => [
             '#' + q.qr_payment_id,
             escapeHtml(QR_WALLET_WORDS[q.wallet] || q.wallet),
             peso(q.amount),
             qrStatusBadge(q.status),
-            q.provider_payment_id ? escapeHtml(q.provider_payment_id) : '<span class="muted">None</span>',
-            qrModeBadge({ provider: q.provider, mode: q.mode })
+            q.provider_payment_id ? escapeHtml(q.provider_payment_id) : '<span class="muted">None</span>'
         ]), [2]);
 }

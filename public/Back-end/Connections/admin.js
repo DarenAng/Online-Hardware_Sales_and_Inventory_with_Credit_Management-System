@@ -42,7 +42,7 @@ function registerAdminRoutes(app, deps) {
     requireRole, publishChange, ADMIN, USER_SELECT, withPresence, notOwnAccount,
     endSessionsForStaff, hashPassword, generatePassword, phoneComplaint, cleanPhone, cleanMiddleName,
     findPhoneOwner, phoneTakenMessage,
-    tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
+    tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, DB_NAME, sqlValue,
     sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
     FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom,
     HOLD_LIFTED_BY_MANAGER
@@ -886,7 +886,7 @@ function registerAdminRoutes(app, deps) {
   // ==========================================
   // the WHERE clause both the table and the export use, from the query string
   function auditLogFilter(query) {
-    const actionType = String(query.actionType || "all").toUpperCase();
+    const role = String(query.role || "all").trim();
     const search = String(query.search || "").trim();
     const from = String(query.from || "").trim();
     const to = String(query.to || "").trim();
@@ -894,9 +894,10 @@ function registerAdminRoutes(app, deps) {
     const where = [];
     const params = [];
 
-    if (actionType !== "ALL" && AUDIT_TYPES.includes(actionType)) {
-      where.push("l.action_type = ?");
-      params.push(actionType);
+    // the role the person held when the entry was written, the same one the Role column shows
+    if (role !== "" && role !== "all") {
+      where.push("COALESCE(l.role_name, r.role_name, 'System') = ?");
+      params.push(role);
     }
 
     // a date is inclusive of the whole day
@@ -917,7 +918,7 @@ function registerAdminRoutes(app, deps) {
     if (where.length > 0) {
       filter = ` WHERE ${where.join(" AND ")}`;
     }
-    return { filter, params, from, to, actionType };
+    return { filter, params, from, to, role };
   }
 
   async function auditLogRows(query, limit) {
@@ -961,13 +962,13 @@ function registerAdminRoutes(app, deps) {
     SECURITY: "Security", PAYMENT: "Payment", ACCESS: "Access", OTHER: "Other"
   };
 
-  // the filters as one line under the title, e.g. "From 2026-09-01 to 2026-09-30, Sign in only"
+  // the filters as one line under the title, e.g. "From 2026-09-01 to 2026-09-30, Manager entries only"
   function exportFilterText(chosen, search) {
     const parts = [];
     if (chosen.from) parts.push("from " + chosen.from);
     if (chosen.to) parts.push("to " + chosen.to);
-    if (chosen.actionType !== "ALL" && AUDIT_TYPE_LABELS[chosen.actionType]) {
-      parts.push(AUDIT_TYPE_LABELS[chosen.actionType] + " entries only");
+    if (chosen.role !== "" && chosen.role !== "all") {
+      parts.push(chosen.role + " entries only");
     }
     if (search) parts.push(`matching "${search}"`);
     if (parts.length === 0) return "All entries";

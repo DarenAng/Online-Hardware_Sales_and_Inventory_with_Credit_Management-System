@@ -37,7 +37,6 @@
                         <li data-feature="pos"><a href="#" data-panel-link="panel-pos" onclick="showRegister(event)"><i class="bi bi-cart-plus nav-icon" aria-hidden="true"></i>New Transaction</a></li>
                         <li data-feature="deliveries"><a href="#" data-panel-link="panel-delivery" onclick="showCashierDeliveries(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>Deliveries</a></li>
                         <li data-feature="refunds"><a href="#" data-panel-link="panel-refund" onclick="showRefunds(event)"><i class="bi bi-arrow-counterclockwise nav-icon" aria-hidden="true"></i>Refunds</a></li>
-                        <li data-feature="qr-payments"><a href="#" data-panel-link="panel-qrpayments" onclick="showQrPayments(event)"><i class="bi bi-qr-code-scan nav-icon" aria-hidden="true"></i>QR Payments</a></li>
                     </ul>
                 </li>
                 <li data-feature="credit"><a href="#" data-panel-link="panel-customers" onclick="showCustomers(event)"><i class="bi bi-person-vcard nav-icon" aria-hidden="true"></i>Customers Record</a></li>
@@ -375,63 +374,6 @@
                     <div class="pager is-single" id="csales-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     QR PAYMENTS -- every GCash and Maya payment tried by QR code and
-                     how it ended (shared/qr-payments.js). The cashier's own here;
-                     the server decides whose rows come back.
-                     ============================================================ -->
-                <div class="card" id="panel-qrpayments" data-panel style="display: none;">
-                    <div class="panel-head">
-                        <div>
-                            <h3>QR Payments</h3>
-                        </div>
-                        <div class="panel-actions">
-                            <span class="badge badge-warning" id="cqr-badge" hidden></span>
-                        </div>
-                    </div>
-
-                    <div class="kpi-grid qr-kpis" id="cqr-kpis"></div>
-
-                    <div class="panel-toolbar">
-                        <div class="search-wrap">
-                            <input type="search" class="form-control search-input" id="cqr-search"
-                                   placeholder="Search by reference, receipt, cashier, or message"
-                                   oninput="dataPanelSearchInput('cqr', event)" onkeydown="dataPanelSearchKey('cqr', event)" title="Type one letter or more; it finds words that start with it">
-                        </div>
-                        <div class="toolbar-field toolbar-date">
-                            <label for="cqr-from">From</label>
-                            <input type="date" id="cqr-from" onchange="reloadQrPayments('cqr')">
-                        </div>
-                        <div class="toolbar-field toolbar-date">
-                            <label for="cqr-to">To</label>
-                            <input type="date" id="cqr-to" onchange="reloadQrPayments('cqr')">
-                        </div>
-                        <div class="toolbar-field">
-                            <label for="cqr-status">Status</label>
-                            <select id="cqr-status" onchange="dataPanelFilter('cqr', 'status', this.value)">
-                                <option value="all">Every status</option>
-                                <option value="paid">Paid</option>
-                                <option value="failed">Failed</option>
-                                <option value="expired">Expired</option>
-                                <option value="cancelled">Cancelled</option>
-                                <option value="pending">Waiting</option>
-                            </select>
-                        </div>
-                        <div class="toolbar-spacer"></div>
-                    </div>
-
-                    <div class="table-responsive grid-10">
-                        <table id="cqr-table">
-                            <thead>
-                                <tr><th>Time</th><th>Amount</th><th>Wallet</th><th>Status</th><th>Reference</th>
-                                    <th>Sale</th><th>Cashier</th><th>Message</th><th>Money</th></tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                    <div class="pager is-single" id="cqr-pager"></div>
-                </div>
-
             </div>
         </main>
     </div>
@@ -491,7 +433,8 @@
 
                 <form id="checkout-form" onsubmit="handleCheckout(event)" autocomplete="off">
                     <!-- THE CUSTOMER -- empty is a walk-in. A name has to be a customer picked
-                         from the list: the till opens no account (Customers Record does). -->
+                         from the list; a name nobody has gets an Add Customer button, which
+                         opens the Customers Record form and puts the new account on the sale. -->
                     <div class="form-group">
                         <label for="customer-name">Customer <span class="label-hint">empty is a walk-in</span></label>
                         <div class="suggest-wrap">
@@ -510,6 +453,8 @@
                             <ul class="suggest-list" id="customer-suggest" role="listbox" hidden></ul>
                         </div>
                         <p class="customer-verdict" id="customer-verdict"></p>
+                        <button type="button" class="btn btn-sm customer-add-btn" id="customer-add-btn"
+                                onclick="addCustomerFromPayment()" hidden>Add Customer</button>
                     </div>
 
                     <div class="credit-strip" id="credit-strip" style="display: none;"></div>
@@ -1049,7 +994,6 @@
     <script src="modules/shared/features.js"></script>
     <script src="modules/shared/deliveries.js"></script>
     <script src="modules/shared/delivery-schedule.js"></script>
-    <script src="modules/shared/qr-payments.js"></script>
     <script src="connections/cashier-connection.js"></script>
     <script src="modules/cashier.js"></script>
 </body>

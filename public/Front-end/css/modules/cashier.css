@@ -563,6 +563,8 @@
 }
 .customer-verdict.is-good { color: var(--ok-ink); font-weight: 500; }
 .customer-verdict.is-stop { color: var(--stop-hi); font-weight: 500; }
+/* Add Customer, under the line that says the name matches nobody */
+.customer-add-btn { margin-top: 8px; }
 
 /* Under the order: Proceed to Payment takes the row, Clear sits beside it */
 .order-summary .order-actions { flex-wrap: nowrap; margin-top: 0; }

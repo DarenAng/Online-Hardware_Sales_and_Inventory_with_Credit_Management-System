@@ -207,22 +207,9 @@
                         </div>
 
                         <div class="toolbar-field">
-                            <label for="logs-type">Action type</label>
-                            <select id="logs-type" onchange="refreshAuditLogs()">
-                                <option value="all">Every type</option>
-                                <option value="CREATE">Create</option>
-                                <option value="UPDATE">Update</option>
-                                <option value="DELETE">Delete / archive</option>
-                                <option value="VOID">Void</option>
-                                <option value="PAYMENT">Payment</option>
-                                <option value="RESTORE">Restore</option>
-                                <option value="BACKUP">Backup</option>
-                                <option value="SECURITY">Password / security</option>
-                                <option value="ACCESS">Access granted / revoked</option>
-                                <option value="LOGIN">Sign in</option>
-                                <option value="LOGOUT">Sign out</option>
-                                <option value="LOGIN_FAILURE">Failed sign-in</option>
-                                <option value="OTHER">Everything else</option>
+                            <label for="logs-role">Role</label>
+                            <select id="logs-role" data-log-role-filter onchange="refreshAuditLogs()">
+                                <option value="all">Every role</option>
                             </select>
                         </div>
 

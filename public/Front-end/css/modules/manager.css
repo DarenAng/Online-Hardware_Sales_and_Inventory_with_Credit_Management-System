@@ -78,6 +78,17 @@
 #loyal-table .cell-due { font-weight: 600; }
 
 /* ==========================================================================
+   SALES TRANSACTIONS AND QR PAYMENTS -- two tabs of one report. The tabs
+   stand where the heading would be; the heading is only printed.
+   ========================================================================== */
+.report-tabs { margin-bottom: 0; }
+.report-print-title { display: none; }
+
+@media print {
+    .report-print-title { display: block; }
+}
+
+/* ==========================================================================
    DELIVERY TRACKING -- the stage counts above the table are legend and summary
    ========================================================================== */
 #panel-deliveries .track-legend { margin-bottom: 16px; }

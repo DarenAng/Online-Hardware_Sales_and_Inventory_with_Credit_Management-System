@@ -42,10 +42,9 @@
                     <ul id="reports-dropdown" class="nav-sub" style="display: none;">
                         <li data-feature="income"><a href="#" data-panel-link="panel-reports" data-panel-view="report-summary"
                                onclick="showReport('report-summary', event)"><i class="bi bi-graph-up nav-icon" aria-hidden="true"></i>Sales Summary</a></li>
-                        <li data-feature="sales"><a href="#" data-panel-link="panel-reports" data-panel-view="report-sales"
-                               onclick="showReport('report-sales', event)"><i class="bi bi-receipt-cutoff nav-icon" aria-hidden="true"></i>Sales Transactions</a></li>
-                        <li data-feature="qr-payments"><a href="#" data-panel-link="panel-qr-payments"
-                               onclick="showQrPayments(event)"><i class="bi bi-qr-code-scan nav-icon" aria-hidden="true"></i>QR Payments</a></li>
+                        <!-- QR Payments is the second tab of Sales Transactions -->
+                        <li data-feature="sales, qr-payments"><a href="#" data-panel-link="panel-reports" data-panel-view="report-sales"
+                               onclick="showSalesTransactions(event)"><i class="bi bi-receipt-cutoff nav-icon" aria-hidden="true"></i>Sales Transactions</a></li>
                         <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-reports" data-panel-view="report-purchases"
                                onclick="showReport('report-purchases', event)"><i class="bi bi-bag nav-icon" aria-hidden="true"></i>Total Purchases</a></li>
                         <li data-feature="reports"><a href="#" data-panel-link="panel-reports" data-panel-view="report-unpaid"
@@ -153,6 +152,8 @@
                                         onclick="showReport('report-summary', event)">Sales Summary</button>
                                 <button type="button" class="view-tab" role="tab" data-view-tab="report-sales" data-feature="sales"
                                         onclick="showReport('report-sales', event)">Sales Transactions</button>
+                                <button type="button" class="view-tab" role="tab" data-view-tab="report-qr" data-feature="qr-payments"
+                                        onclick="showReport('report-qr', event)">QR Payments</button>
                             </div>
                         </div>
                         <div class="view-nav-group">
@@ -264,11 +265,18 @@
                         </div>
                     </section>
 
-                    <!-- SALES TRANSACTIONS -->
+                    <!-- SALES TRANSACTIONS -- with QR Payments as its second tab -->
                     <section class="panel-view card" id="report-sales" hidden>
                         <div class="panel-head">
                             <div>
-                                <h3>Sales Transactions</h3>
+                                <div class="tab-header report-tabs" role="tablist">
+                                    <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-feature="sales"
+                                            onclick="showReport('report-sales', event)">Sales Transactions</button>
+                                    <button type="button" class="tab-btn" role="tab" aria-selected="false" data-feature="qr-payments"
+                                            onclick="showReport('report-qr', event)">QR Payments</button>
+                                </div>
+                                <!-- the tabs are not printed, so this names the printout -->
+                                <h3 class="report-print-title">Sales Transactions</h3>
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -329,6 +337,69 @@
                             </table>
                         </div>
                         <div class="pager is-single" id="sales-pager"></div>
+                    </section>
+
+                    <!-- QR PAYMENTS -- the second tab of Sales Transactions: every GCash and
+                         Maya payment tried by QR code and how it ended (shared/qr-payments.js).
+                         Everyone's here; the server decides whose rows come back. -->
+                    <section class="panel-view card" id="report-qr" data-view-of="report-sales" hidden>
+                        <div class="panel-head">
+                            <div>
+                                <div class="tab-header report-tabs" role="tablist">
+                                    <button type="button" class="tab-btn" role="tab" aria-selected="false" data-feature="sales"
+                                            onclick="showReport('report-sales', event)">Sales Transactions</button>
+                                    <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-feature="qr-payments"
+                                            onclick="showReport('report-qr', event)">QR Payments</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="kpi-grid qr-kpis" id="mqr-kpis"></div>
+
+                        <div class="panel-toolbar">
+                            <div class="search-wrap">
+                                <input type="search" class="form-control search-input" id="mqr-search"
+                                       placeholder="Search by reference, receipt, cashier, or message"
+                                       oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" title="Type one letter or more; it finds words that start with it">
+                            </div>
+                            <div class="toolbar-field toolbar-date">
+                                <label for="mqr-from">From</label>
+                                <input type="date" id="mqr-from" onchange="reloadQrPayments('mqr')">
+                            </div>
+                            <div class="toolbar-field toolbar-date">
+                                <label for="mqr-to">To</label>
+                                <input type="date" id="mqr-to" onchange="reloadQrPayments('mqr')">
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="mqr-status">Status</label>
+                                <select id="mqr-status" onchange="dataPanelFilter('mqr', 'status', this.value)">
+                                    <option value="all">Every status</option>
+                                    <option value="paid">Paid</option>
+                                    <option value="failed">Failed</option>
+                                    <option value="expired">Expired</option>
+                                    <option value="cancelled">Cancelled</option>
+                                    <option value="pending">Waiting</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="mqr-staff">Cashier</label>
+                                <select id="mqr-staff" onchange="reloadQrPayments('mqr')">
+                                    <option value="all">Everyone</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
+                        </div>
+
+                        <div class="table-responsive grid-10">
+                            <table id="mqr-table">
+                                <thead>
+                                    <tr><th>Time</th><th>Amount</th><th>Wallet</th><th>Status</th><th>Reference</th>
+                                        <th>Sale</th><th>Cashier</th><th>Message</th></tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                        <div class="pager is-single" id="mqr-pager"></div>
                     </section>
 
                     <!-- RECEIVABLES -->
@@ -991,69 +1062,6 @@
                         </table>
                     </div>
                     <div class="pager is-single" id="deliveries-pager"></div>
-                </div>
-
-                <!-- ============================================================
-                     QR PAYMENTS -- every GCash and Maya payment tried by QR code and
-                     how it ended (shared/qr-payments.js). Everyone's here;
-                     the server decides whose rows come back.
-                     ============================================================ -->
-                <div class="card" id="panel-qr-payments" data-panel style="display: none;">
-                    <div class="panel-head">
-                        <div>
-                            <h3>QR Payments</h3>
-                        </div>
-                        <div class="panel-actions">
-                            <span class="badge badge-warning" id="mqr-badge" hidden></span>
-                        </div>
-                    </div>
-
-                    <div class="kpi-grid qr-kpis" id="mqr-kpis"></div>
-
-                    <div class="panel-toolbar">
-                        <div class="search-wrap">
-                            <input type="search" class="form-control search-input" id="mqr-search"
-                                   placeholder="Search by reference, receipt, cashier, or message"
-                                   oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" title="Type one letter or more; it finds words that start with it">
-                        </div>
-                        <div class="toolbar-field toolbar-date">
-                            <label for="mqr-from">From</label>
-                            <input type="date" id="mqr-from" onchange="reloadQrPayments('mqr')">
-                        </div>
-                        <div class="toolbar-field toolbar-date">
-                            <label for="mqr-to">To</label>
-                            <input type="date" id="mqr-to" onchange="reloadQrPayments('mqr')">
-                        </div>
-                        <div class="toolbar-field">
-                            <label for="mqr-status">Status</label>
-                            <select id="mqr-status" onchange="dataPanelFilter('mqr', 'status', this.value)">
-                                <option value="all">Every status</option>
-                                <option value="paid">Paid</option>
-                                <option value="failed">Failed</option>
-                                <option value="expired">Expired</option>
-                                <option value="cancelled">Cancelled</option>
-                                <option value="pending">Waiting</option>
-                            </select>
-                        </div>
-                        <div class="toolbar-field">
-                            <label for="mqr-staff">Cashier</label>
-                            <select id="mqr-staff" onchange="reloadQrPayments('mqr')">
-                                <option value="all">Everyone</option>
-                            </select>
-                        </div>
-                        <div class="toolbar-spacer"></div>
-                    </div>
-
-                    <div class="table-responsive grid-10">
-                        <table id="mqr-table">
-                            <thead>
-                                <tr><th>Time</th><th>Amount</th><th>Wallet</th><th>Status</th><th>Reference</th>
-                                    <th>Sale</th><th>Cashier</th><th>Message</th><th>Money</th></tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                    <div class="pager is-single" id="mqr-pager"></div>
                 </div>
 
                 <!-- ============================================================

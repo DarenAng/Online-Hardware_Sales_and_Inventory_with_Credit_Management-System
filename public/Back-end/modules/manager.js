@@ -26,6 +26,7 @@ let policyProduct = null;
 // the view showing on each tabbed screen; opening the screen again goes back to it
 let reportView = 'report-summary';
 let stockView = 'stock-overview';
+let salesTab = 'report-sales';   // Sales Transactions or its QR Payments tab, whichever was last open
 
 // eight rows keeps a report card above the fold on a 1366x768 laptop, so the
 // Reports screen never scrolls; the pager turns the rest
@@ -55,9 +56,12 @@ function showManagerPanel(panelId, title, event) {
 // A link that names a view inside a screen (an income table) is marked only
 // when the screen is showing that view. A panel with data-panel-of (an
 // order's document, Total Purchases) marks the screen it belongs to.
+// A view with data-view-of (QR Payments) lights the entry of the view it is a tab of.
 function markPanelLinks(panelId) {
     const panel = document.getElementById(panelId);
-    const view = panel ? panel.dataset.view : undefined;
+    let view = panel ? panel.dataset.view : undefined;
+    const viewBox = view ? document.getElementById(view) : null;
+    if (viewBox && viewBox.dataset.viewOf) view = viewBox.dataset.viewOf;
     const owner = (panel && panel.getAttribute('data-panel-of')) || panelId;
 
     document.querySelectorAll('[data-panel-link]').forEach((link) => {
@@ -127,6 +131,7 @@ function showReports(event) { showReport(reportView, event); }
 function showReport(reportId, event) {
     const shown = showPanelView('panel-reports', reportId, 'Reports', event);
     if (shown) reportView = shown;
+    if (shown === 'report-sales' || shown === 'report-qr') salesTab = shown;
 }
 
 // Stocks: the whole inventory, the reorder alerts and the stock movements
@@ -147,7 +152,16 @@ function showCreditRequests(event) { showManagerPanel('panel-credit-requests', '
 function showRecords(event)       { showRecordType(recordType, event); }
 function showPurchasing(event)    { showPurchaseOrderHistory(event); }
 function showArchives(event)      { showManagerPanel('panel-archives', 'Archives', event); }
-function showQrPayments(event)    { showManagerPanel('panel-qr-payments', 'QR Payments', event); }
+// Sales Transactions and QR Payments are two tabs of one report. The menu entry
+// opens the one last looked at, or QR Payments when Sales is switched off.
+function showSalesTransactions(event) {
+    const panel = document.getElementById('panel-reports');
+    let wanted = salesTab;
+    if (panel && !viewOffered(panel, wanted)) {
+        wanted = wanted === 'report-qr' ? 'report-sales' : 'report-qr';
+    }
+    showReport(wanted, event);
+}
 
 // Lift Sign-in Hold: the list is read fresh every time the screen is opened
 function showHeldAccounts(event) {

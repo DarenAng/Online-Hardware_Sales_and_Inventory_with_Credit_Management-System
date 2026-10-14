@@ -114,6 +114,15 @@ async function loadRoles() {
             const users = getDataPanel('admin-users');
             if (users) setBoxValue(select, users.filters.roleId);
         });
+
+        // the audit trail keeps the role's name as it was at the time, so it filters by name
+        document.querySelectorAll('[data-log-role-filter]').forEach((select) => {
+            const chosen = select.value;
+            select.innerHTML = '<option value="all">Every role</option>' + systemRoles
+                .map((role) => `<option value="${escapeHtml(role.role_name)}">${escapeHtml(role.role_name)}</option>`)
+                .join('');
+            setBoxValue(select, chosen);
+        });
     } catch (error) {
         console.error('Unable to load roles:', error);
     }
@@ -162,7 +171,7 @@ function filterDirectory(name, value) {
 // 1-based to match the <th> order in system.html; tables.js re-applies them
 // on every redraw.
 const DIRECTORY_COLUMN = { role: 4, status: 5 };
-const LOG_COLUMN = { type: 5 };
+const LOG_COLUMN = { role: 3 };
 
 function selectValue(id) {
     const select = document.getElementById(id);
@@ -180,7 +189,7 @@ function syncDirectoryColumns() {
 // the date boxes are left out: a range still leaves a different timestamp per row
 function syncLogColumns() {
     const hidden = [];
-    if (selectValue('logs-type') !== 'all') hidden.push(LOG_COLUMN.type);
+    if (selectValue('logs-role') !== 'all') hidden.push(LOG_COLUMN.role);
 
     setHiddenColumns(document.getElementById('logs-table'), hidden);
 }
@@ -1544,8 +1553,8 @@ const AUDIT_LABEL = {
 function auditLogQuery() {
     const parts = [];
 
-    const type = document.getElementById('logs-type');
-    if (type && type.value !== 'all') parts.push('actionType=' + encodeURIComponent(type.value));
+    const role = document.getElementById('logs-role');
+    if (role && role.value !== 'all') parts.push('role=' + encodeURIComponent(role.value));
 
     const from = document.getElementById('logs-from');
     if (from && from.value) parts.push('from=' + encodeURIComponent(from.value));
@@ -1556,7 +1565,19 @@ function auditLogQuery() {
     return parts.length ? '?' + parts.join('&') : '';
 }
 
-// the type box and the two date boxes narrow the query itself
+// A role picked before a reload is put back as an option straight away, so the
+// table loads again with it before the role list arrives from the server.
+function keepSavedLogRole() {
+    const select = document.getElementById('logs-role');
+    const saved = (readLoadedPanels()[thisPageName()] || {})['admin-logs'];
+    const role = saved && saved.inputs ? saved.inputs['logs-role'] : '';
+
+    if (!select || !role || role === 'all') return;
+    select.add(new Option(role, role));
+    select.value = role;
+}
+
+// the role box and the two date boxes narrow the query itself
 async function refreshAuditLogs() {
     syncLogColumns();
 
@@ -1567,7 +1588,7 @@ async function refreshAuditLogs() {
 function buildLogsPanel() {
     createDataPanel({
         key: 'admin-logs',
-        inputs: ['logs-type', 'logs-from', 'logs-to'],
+        inputs: ['logs-role', 'logs-from', 'logs-to'],
         tableId: 'logs-table',
         columns: 6,
         pagerId: 'logs-pager',
@@ -1575,7 +1596,7 @@ function buildLogsPanel() {
 
         gate: {
             title: 'The audit trail is not loaded',
-            text: 'Pick a date range or an action type, then press Load Data. ' +
+            text: 'Pick a date range or a role, then press Load Data. ' +
                   'Nothing is read from the trail until you ask for it.',
             button: 'Load Data'
         },
@@ -2697,6 +2718,7 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
         buildUsersPanel();
         buildArchivePanel();
         buildLogsPanel();
+        keepSavedLogRole();
         buildBackupPanel();
 
         // a switch thrown by another administrator reaches this matrix, unless it has unsaved changes

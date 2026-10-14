@@ -88,11 +88,6 @@ function showSalesReport(event) {
     showCashierPanel('panel-salesreport', 'Sales Report', event);
 }
 
-// the cashier's own QR codes; a row that paid for a sale opens its invoice
-function showQrPayments(event) {
-    showCashierPanel('panel-qrpayments', 'QR Payments', event);
-}
-
 // ---------- product catalog ----------
 async function ensureCatalogLoaded(force) {
     if (catalogLoaded && !force) return true;
@@ -853,6 +848,11 @@ function renderCustomerVerdict() {
     const typed = typedCustomerName();
     const id = selectedCustomerId();
 
+    // Add Customer shows only for a name that matches nobody
+    const addButton = document.getElementById('customer-add-btn');
+    const offerAdd = !id && typed !== '' && canAddCustomers();
+    if (addButton) addButton.hidden = !offerAdd;
+
     if (id) {
         box.className = 'customer-verdict is-good';
         box.textContent = 'On the books. This sale goes on their record.';
@@ -865,10 +865,30 @@ function renderCustomerVerdict() {
         return;
     }
 
-    // a name that matches nobody is a stop, not a new account
+    // a name that matches nobody is a stop until the account is opened
     box.className = 'customer-verdict is-stop';
-    box.textContent = 'Not a customer on the books. Add them under Customers Record first, then pick them here, ' +
-        'or clear the box for a walk-in.';
+    if (offerAdd) {
+        box.textContent = 'Not a customer on the books. Press Add Customer to open their account, ' +
+            'or clear the box for a walk-in.';
+    } else {
+        box.textContent = 'Not a customer on the books. Add them under Customers Record first, then pick them here, ' +
+            'or clear the box for a walk-in.';
+    }
+}
+
+// opening an account needs the Customers Record screen (POST /api/customers is part of it)
+function canAddCustomers() {
+    return typeof holdsFeature !== 'function' || holdsFeature('credit');
+}
+
+// Add Customer from the payment form: the form opens over it with the typed
+// name filled in, and the new account is put on the sale once it is saved.
+function addCustomerFromPayment() {
+    openAddCustomer();
+    addCustomerForSale = true;
+
+    const form = document.getElementById('add-customer-form');
+    if (form) form.elements.name.value = typedCustomerName();
 }
 
 // kept under the old name because the boot sequence and the catalog loader call it
@@ -1462,7 +1482,7 @@ async function collectQrPayment(amount, what, method, purpose, saleId) {
             return qrPaidUnused;
         }
         notifyWarning('A QR payment of ' + peso(qrPaidUnused.amount) + ' (' + qrPaidUnused.reference +
-            ') was taken but never recorded. It is listed under QR Payments as needing a refund.',
+            ') was taken but never recorded. The manager\'s QR Payments list shows it as needing a refund.',
             'An earlier QR payment is unused');
     }
 
@@ -1703,7 +1723,7 @@ async function cancelQrPayment(reason) {
     if (!ended) {
         // the server did not answer; the code is left to run out on its own
         notifyWarning('The server could not be reached to cancel the QR code. It closes by itself when ' +
-            'its time runs out; check QR Payments before taking the money another way.', 'Not cancelled');
+            'its time runs out; ask the customer whether it went through before taking the money another way.', 'Not cancelled');
     } else {
         notifyInfo(reason || 'The QR payment was cancelled, so nothing was recorded.', 'QR payment cancelled');
     }
@@ -1755,7 +1775,7 @@ function keepUnusedQr(qr, result) {
     qrPaidUnused = qr;
     return ' The customer\'s QR payment of ' + peso(qr.amount) + ' (' + qr.reference + ') is kept: ' +
         'put things right and press Pay by QR again, and it is used without a new code. ' +
-        'Until then QR Payments lists it as needing a refund.';
+        'Until then the manager\'s QR Payments list shows it as needing a refund.';
 }
 
 function onPaymentMethodChange(method) {
@@ -3821,7 +3841,11 @@ async function handleLimitRequest(event) {
 // The one place an account is opened (the till no longer opens one from a
 // typed name). Name is required; the server refuses a name already on the
 // books, any case, and gives the account a credit limit of zero.
+let addCustomerForSale = false;   // opened from the payment form: the new account goes on the sale
+
 function openAddCustomer() {
+    addCustomerForSale = false;
+
     const form = document.getElementById('add-customer-form');
     if (!form) return;
 
@@ -3837,7 +3861,10 @@ function openAddCustomer() {
     setTimeout(() => form.elements.name.focus(), 60);
 }
 
-function cancelAddCustomer() { closeModal('add-customer-modal'); }
+function cancelAddCustomer() {
+    addCustomerForSale = false;
+    closeModal('add-customer-modal');
+}
 
 async function handleAddCustomer(event) {
     if (event && typeof event.preventDefault === 'function') event.preventDefault();
@@ -3887,6 +3914,14 @@ async function handleAddCustomer(event) {
 
         // the register's customer box reads the book afresh, and the list shows the new account
         customerDirectoryLoaded = false;
+
+        // opened from the payment form: the new account is the sale's customer
+        if (addCustomerForSale) {
+            addCustomerForSale = false;
+            await loadCustomerDirectory(true);
+            await pickCustomer(Number(result.customerId));
+        }
+
         const panel = getDataPanel('cash-credit');
         if (panel) {
             if (panel.state === 'closed' || panel.state === 'error') await panel.open();
@@ -3969,7 +4004,6 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
         buildCustomerPanel();
         buildDeliveryPanel();
         buildSalesPanel();
-        buildQrPaymentsPanel({ key: 'cqr', prefix: 'cqr', openSale: openReceipt, byStaff: false });
         buildRefundPanel();
 
         // the schedule follows what the administrator switched on for this role

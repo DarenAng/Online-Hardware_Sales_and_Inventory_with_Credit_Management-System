@@ -131,11 +131,6 @@ function registerQrPaymentRoutes(app, deps) {
   const provider = pickProvider();
   if (typeof provider.registerRoutes === "function") provider.registerRoutes(app, db);
 
-  // what the screens show beside every code: test money, a simulation, or nothing
-  let badge = null;
-  if (provider.name === "sim") badge = "SIMULATION";
-  else if (provider.mode === "test") badge = "TEST MODE";
-
   const baseUrl = siteBaseUrl(port);
 
   const ROW_SQL = `
@@ -314,7 +309,6 @@ function registerQrPaymentRoutes(app, deps) {
         // seconds left by the database's clock, so a till whose clock is off still counts down right
         secondsLeft: Number(row.seconds_left),
         mode: provider.mode,
-        badge: badge,
         amount: amount,
         wallet: wallet
       });
@@ -341,7 +335,6 @@ function registerQrPaymentRoutes(app, deps) {
       const answer = shape(row);
       answer.secondsLeft = row.status === "pending" ? Number(row.seconds_left) : 0;
       if (row.checkError) answer.checkError = row.checkError;
-      answer.badge = badge;
       response.json(answer);
     } catch (error) {
       console.error("QR payment check failed:", error.message);
@@ -408,7 +401,7 @@ function registerQrPaymentRoutes(app, deps) {
       const summary = summarize(rows);
       const listed = status === "all" ? rows : rows.filter((row) => row.status === status);
 
-      response.json({ rows: listed.map(shape), summary: summary, badge: badge });
+      response.json({ rows: listed.map(shape), summary: summary });
     } catch (error) {
       console.error("QR payments list failed:", error.message);
       response.status(500).json({ error: "Unable to read the QR payments." });
