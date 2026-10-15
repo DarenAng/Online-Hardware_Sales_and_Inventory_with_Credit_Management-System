@@ -31,6 +31,13 @@ function apiGetDailySummary(staffId) {
     return getJson('/api/cashier/summary?staffId=' + staffId);
 }
 
+// GET /api/sales?days=3 -- every cashier's sales from today and the two days
+// before, newest first (the Refunds screen picks a receipt from these).
+// A voided sale is left out.
+function apiGetRecentSales() {
+    return getJson('/api/sales?days=3');
+}
+
 // GET /api/credit/open-sales -- every sale that still owes money
 function apiGetOpenSales() {
     return getJson('/api/credit/open-sales');

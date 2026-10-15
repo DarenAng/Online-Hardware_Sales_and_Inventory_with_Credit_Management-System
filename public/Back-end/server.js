@@ -610,6 +610,38 @@ async function migrateReturnInspection() {
     "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
 }
 
+// Goods missing from a supplier's delivery: a returned_items row of type
+// Missing, with the purchase order it is about in po_id. A database made
+// before this has neither, and filing a report fails.
+// public/database/5-MIGRATION-missing-delivery-reports.sql does the same by hand.
+// This only does the table. The procedures that use it are loaded again by
+// loadProceduresIfMissing (see routinesAreOld).
+async function migrateMissingReports() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'returned_items'
+       AND COLUMN_NAME IN ('report_type', 'po_id')`,
+    [DB_NAME]
+  );
+  const type = columns.find((row) => row.COLUMN_NAME === "report_type");
+  if (!type) return;   // no returned_items table yet
+  const hasPo = columns.some((row) => row.COLUMN_NAME === "po_id");
+  const hasMissing = String(type.COLUMN_TYPE).indexOf("'Missing'") !== -1;
+  if (hasMissing && hasPo) return;
+
+  if (!hasMissing) {
+    await db.query(
+      "ALTER TABLE returned_items MODIFY COLUMN report_type ENUM('Return', 'Damaged', 'Refunded', 'Missing') NOT NULL DEFAULT 'Return'");
+  }
+  if (!hasPo) {
+    await db.query(
+      `ALTER TABLE returned_items ADD COLUMN po_id INT NULL AFTER sale_id,
+         ADD FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE RESTRICT ON UPDATE CASCADE`);
+  }
+  console.log("Added the Missing report type and returned_items.po_id: the clerk can now report goods " +
+    "missing from a delivery. Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+}
+
 // The account a customer sends a bank transfer to: shown at the till and
 // printed on the invoice. A database made before it has none of the columns,
 // and the store settings read and sp_update_store_bank_details fail.
@@ -947,7 +979,7 @@ async function migrateServerTables() {
 }
 
 // a named figure so adding a procedure changes one number, not two
-const EXPECTED_PROCEDURES = 36;
+const EXPECTED_PROCEDURES = 37;
 
 // Nearly every write goes through a stored procedure, so a database with the
 // tables but not the procedures (file 1 run, file 2 not) reads fine and
@@ -1008,7 +1040,9 @@ const PROCEDURES_FILE = path.join(__dirname, "..", "database", "2-RUN-SECOND-sto
 // sp_record_credit_payment. The routines that were made safe against two
 // people at once carry a word the old ones lack: FOR UPDATE in
 // sp_restore_archive and sp_update_delivery_status, "AND status = 'Open'" in
-// sp_resolve_return_report, "refund instead" in sp_archive_record,
+// sp_resolve_return_report (and "v_type = 'Missing'", which closes a report of
+// goods missing from a delivery), p_inside_batch in sp_file_return_report (it
+// can file one item of a many-item report), "refund instead" in sp_archive_record,
 // p_driver_staff_id in sp_create_delivery, and p_qr_payment_id in
 // sp_create_sale_transaction and sp_record_credit_payment ("kept for the down
 // payment" there is the reference a payment may not borrow). The business
@@ -1025,6 +1059,8 @@ async function routinesAreOld() {
   const newestWords = [
     ["sp_file_return_report", "v_refunded_before"],
     ["sp_file_return_report", "nothing to refund"],
+    ["sp_file_return_report", "p_inside_batch"],
+    ["sp_file_return_report", "is already received, so its delivery"],
     ["sp_apply_late_penalties", "refunded_amount"],
     ["sp_record_credit_payment", "already paid in full"],
     ["sp_record_credit_payment", "p_qr_payment_id"],
@@ -1033,6 +1069,7 @@ async function routinesAreOld() {
     ["sp_create_sale_transaction", "Discount cannot be negative"],
     ["sp_adjust_stock", "Add and Remove need a quantity"],
     ["sp_resolve_return_report", "AND status = 'Open'"],
+    ["sp_resolve_return_report", "v_type = 'Missing'"],
     ["sp_archive_record", "refund instead"],
     ["sp_restore_archive", "FOR UPDATE"],
     ["sp_create_delivery", "p_driver_staff_id"],
@@ -1160,6 +1197,7 @@ async function migrateDatabase() {
   await migrateCashierRemarks();
   await migrateProprietorName();
   await migrateReturnInspection();
+  await migrateMissingReports();
   await migrateBankDetails();
   await migrateReceiptLayout();
   await migrateDeliveryAreas();
@@ -2331,6 +2369,8 @@ const ACCESS_RULES = [
   // the driver files a refund at the customer's door; the route checks it is
   // a delivery they took, and only the one report type (see inventory-clerk.js)
   ["POST",  /^\/api\/returns$/,                        [CLERK, CASHIER, DRIVER]],
+  // the clerk's Make a Report: several items, one report, filed together
+  ["POST",  /^\/api\/returns\/batch$/,                 [CLERK]],
   ["POST",  /^\/api\/returns\/\d+\/resolve$/,          [CLERK]],
 
   // --- credit management ---
@@ -2444,7 +2484,9 @@ const FEATURES = [
   { key: "refunds", name: "Refunds", module: "Point of Sale",
     description: "Take a sold item back and refund it at the counter; the stockroom inspects it before it can be sold again.",
     available: [CASHIER], defaults: [CASHIER],
-    routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/]] },
+    // the screen's "Sales in the Past 3 Days" list and a receipt's items
+    routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/],
+             ["GET", /^\/api\/sales$/], ["GET", /^\/api\/sales\/\d+$/]] },
   { key: "sales-report", name: "Sales Report", module: "Point of Sale",
     description: "The cashier's own sales, by day and by method.",
     available: [CASHIER], defaults: [CASHIER],
@@ -2505,9 +2547,11 @@ const FEATURES = [
              ["DELETE", /^\/api\/inventory\/products\/\d+\/units\/\d+$/],
              ["PUT", /^\/api\/inventory\/products\/\d+\/pack$/]] },
   { key: "stock-adjustment", name: "Stock Adjustment", module: "Inventory",
-    description: "Correct a stock figure by hand, and open a record for a material the shop has never stocked.",
+    description: "Correct a stock figure by hand, open a record for a material the shop has never stocked, and check a delivery against its purchase order.",
     available: [CLERK], defaults: [CLERK],
-    routes: [["POST", /^\/api\/inventory\/adjust$/], ["POST", /^\/api\/materials$/]] },
+    // the two purchase order reads are for the delivery check; Purchase Orders holds them too
+    routes: [["POST", /^\/api\/inventory\/adjust$/], ["POST", /^\/api\/materials$/],
+             ["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/]] },
   { key: "adjustment-history", name: "Adjustment History", module: "Inventory",
     description: "Every correction made, by whom and why.",
     available: [CLERK], defaults: [CLERK],
@@ -2529,9 +2573,11 @@ const FEATURES = [
     available: [CLERK], defaults: [CLERK],
     routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/], ["POST", /^\/api\/returns\/\d+\/resolve$/]] },
   { key: "damage-report", name: "Make a Report", module: "Inventory",
-    description: "Report damaged goods and take them off the shelf.",
+    description: "Report damaged goods and take them off the shelf, or goods missing from a delivery.",
     available: [CLERK], defaults: [CLERK],
-    routes: [["POST", /^\/api\/returns$/]] },
+    // the two purchase order reads are for picking the order the missing goods were on
+    routes: [["POST", /^\/api\/returns$/], ["POST", /^\/api\/returns\/batch$/],
+             ["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/]] },
   { key: "purchase-orders", name: "Purchase Orders", module: "Inventory",
     description: "Orders to suppliers: the clerk raises one, the manager confirms it and counts the delivery in.",
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],

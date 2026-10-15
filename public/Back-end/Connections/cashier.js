@@ -3,7 +3,7 @@
 // Loaded by: server.js only (from the connections folder). Never sent to a browser.
 //
 // Routes in this file:
-//   GET   /api/sales                       the list of sales, with filters (a cashier gets only their own)
+//   GET   /api/sales                       the list of sales, with filters (a cashier gets only their own); days=3 for the past three days
 //   POST  /api/sales                       ring up a new sale
 //   POST  /api/deliveries                  book a delivery for a sale
 //   PATCH /api/deliveries/:id/status       move a delivery to its next status
@@ -86,12 +86,19 @@ function registerCashierRoutes(app, deps) {
       where.push("s.is_archived = FALSE");
     }
 
+    // days=3 is the Refunds screen's list: today and the two days before.
+    // Only that exact list (not voided sales) is shown for every cashier.
+    const days = parseInt(request.query.days, 10);
+    const recentList = days === 3 && status === "all";
+
     // A cashier's Sales Report is their own sales and no one else's: the staff
     // id comes from the session, never from the request, so a query string
     // cannot widen it. The manager's view of every sale is unchanged. (One
     // sale is still opened by its number, GET /api/sales/:id, from a refund
-    // or a customer's card, whoever rang it up.)
-    if (request.actor && request.actor.roleName === CASHIER) {
+    // or a customer's card, whoever rang it up.) The Refunds screen's
+    // recent list shows every cashier's sales, since a customer may bring a
+    // refund to any counter.
+    if (request.actor && request.actor.roleName === CASHIER && !recentList) {
       where.push("s.cashier_staff_id = ?");
       params.push(request.actor.staffId);
     }
@@ -130,11 +137,18 @@ function registerCashierRoutes(app, deps) {
     if (isDateText(from)) { where.push("s.sale_date >= ?"); params.push(`${from} 00:00:00`); }
     if (isDateText(to))   { where.push("s.sale_date <= ?"); params.push(`${to} 23:59:59`); }
 
+    // days=3 means today and the two days before it. CURDATE() is the
+    // database's own date, so the days follow the time zone the server set.
+    if (recentList) {
+      where.push("s.sale_date >= CURDATE() - INTERVAL ? DAY");
+      params.push(days - 1);
+    }
+
     try {
       const [rows] = await db.query(
         `SELECT s.sale_id, s.sale_date, s.total_amount, s.discount, s.final_amount,
               s.amount_paid, s.change_given, s.payment_method, s.payment_status, s.reference_no,
-              s.cashier_staff_id, s.is_archived,
+              s.cashier_staff_id, s.is_archived, s.refunded_amount,
               GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due,
               ${PAYMENT_GROUP_SQL} AS payment_group,
               ${SALE_STATUS_SQL} AS transaction_status,
@@ -147,7 +161,7 @@ function registerCashierRoutes(app, deps) {
        JOIN staff st ON st.staff_id = s.cashier_staff_id
        LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE
        WHERE ${where.join(" AND ")}
-       ORDER BY s.sale_date DESC`,
+       ORDER BY s.sale_date DESC, s.sale_id DESC`,
         params
       );
       response.json(rows);
@@ -654,12 +668,21 @@ function registerCashierRoutes(app, deps) {
       }
 
       // quantity and unit_name are what the customer was charged for (2 sacks);
-      // base_quantity and base_unit are what left the shelf (50 kg)
+      // base_quantity and base_unit are what left the shelf (50 kg).
+      // refunded_quantity and refunded_amount are what has already been
+      // refunded of this product on this sale, counted in base_unit (the
+      // Refunds screen shows it beside each line).
       const [items] = await db.query(
         `SELECT COALESCE(si.sold_quantity, si.quantity) AS quantity,
               COALESCE(si.sold_unit, u.unit_name) AS unit_name,
               si.quantity AS base_quantity, u.unit_name AS base_unit,
-              si.unit_price, si.subtotal, p.product_name
+              si.unit_price, si.subtotal, p.product_name, si.product_id,
+              (SELECT COALESCE(SUM(r.quantity), 0) FROM returned_items r
+                WHERE r.sale_id = si.sale_id AND r.product_id = si.product_id
+                  AND r.report_type IN ('Refunded', 'Return')) AS refunded_quantity,
+              (SELECT COALESCE(SUM(r.refund_amount), 0) FROM returned_items r
+                WHERE r.sale_id = si.sale_id AND r.product_id = si.product_id
+                  AND r.report_type IN ('Refunded', 'Return')) AS refunded_amount
        FROM sale_items si
        JOIN products p ON p.product_id = si.product_id
        LEFT JOIN units u ON u.unit_id = p.unit_id

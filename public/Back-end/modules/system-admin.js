@@ -2745,6 +2745,7 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
         }
 
         showAccountsList();
+        unfoldSidebarAtOpenScreen();
 
         // the receipt preview sticks below the top bar, whatever height that bar has
         syncTopbarHeight();

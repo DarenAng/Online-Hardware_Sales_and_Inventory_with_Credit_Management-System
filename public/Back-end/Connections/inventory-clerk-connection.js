@@ -31,6 +31,11 @@ function apiSaveReorderPoint(productId, reorderPoint) {
     return sendJson('/api/inventory/reorder/' + productId, 'PUT', { reorderPoint: reorderPoint });
 }
 
+// POST /api/returns/batch -- file one report for several items (or goods missing from a delivery)
+function apiFileReportItems(data) {
+    return sendJson('/api/returns/batch', 'POST', data);
+}
+
 // POST /api/returns/:id/resolve -- after inspecting: back to stock, or write off
 function apiResolveReturn(reportId, disposition, note) {
     return sendJson('/api/returns/' + reportId + '/resolve', 'POST', {

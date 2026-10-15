@@ -716,10 +716,11 @@ function registerManagerRoutes(app, deps) {
                     ' on sale #', p.sale_id, ' by ', p.payment_method)
       FROM credit_payments p LEFT JOIN customers c ON c.customer_id = p.customer_id
       UNION ALL
-      SELECT CASE ri.report_type WHEN 'Damaged' THEN 'DAMAGE' WHEN 'Refunded' THEN 'REFUND' ELSE 'RETURN' END,
+      SELECT CASE ri.report_type WHEN 'Damaged' THEN 'DAMAGE' WHEN 'Refunded' THEN 'REFUND' WHEN 'Missing' THEN 'MISSING' ELSE 'RETURN' END,
              ri.return_date, ri.reported_by_staff_id, ri.return_id,
              CONCAT(pr.product_name, ' x', ${qty("ri.quantity")},
                     IF(ri.sale_id IS NULL, '', CONCAT(' from sale #', ri.sale_id)),
+                    IF(ri.po_id IS NULL, '', CONCAT(' missing from purchase order #', ri.po_id)),
                     IF(ri.reason IS NULL OR ri.reason = '', '', CONCAT(': ', ri.reason)),
                     ' (', ri.status, ')')
       FROM returned_items ri JOIN products pr ON pr.product_id = ri.product_id

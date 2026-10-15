@@ -288,38 +288,28 @@
                         <div class="card">
                             <div class="panel-head">
                                 <div>
-                                    <h3>Refunds Issued</h3>
+                                    <h3>Sales in the Past 3 Days</h3>
                                 </div>
                             </div>
 
                             <div class="panel-toolbar">
                                 <div class="search-wrap">
-                                    <input type="search" class="form-control search-input" id="refund-search"
-                                           placeholder="Search by product or reason"
-                                           oninput="dataPanelSearchInput('cash-refunds', event)" onkeydown="dataPanelSearchKey('cash-refunds', event)" title="Type one letter or more; it finds words that start with it">
-                                </div>
-                                <div class="toolbar-field">
-                                    <label for="refund-disposition">Goods went</label>
-                                    <select id="refund-disposition" data-filter-table="refund-table" data-hides-column="5"
-                                            onchange="dataPanelFilter('cash-refunds', 'disposition', this.value)">
-                                        <option value="all">Any</option>
-                                        <option value="awaiting">Awaiting inspection</option>
-                                        <option value="Return to Stock">Back on shelf</option>
-                                        <option value="Write-Off">Written off</option>
-                                    </select>
+                                    <input type="search" class="form-control search-input" id="recent-sales-search"
+                                           placeholder="Search by receipt number or customer"
+                                           oninput="dataPanelSearchInput('cash-recent-sales', event)" onkeydown="dataPanelSearchKey('cash-recent-sales', event)" title="Type one letter or more; it finds words that start with it">
                                 </div>
                                 <div class="toolbar-spacer"></div>
                             </div>
 
                             <div class="table-responsive grid-8">
-                                <table id="refund-table">
+                                <table id="recent-sales-table">
                                     <thead>
-                                        <tr><th>ID</th><th>Product</th><th>Qty</th><th>Amount</th><th>Goods Went</th><th>Filed</th><th>Status</th></tr>
+                                        <tr><th>Receipt</th><th>Date &amp; Time</th><th>Customer</th><th>Items</th><th>Total</th><th>Payment</th></tr>
                                     </thead>
                                     <tbody></tbody>
                                 </table>
                             </div>
-                            <div class="pager is-single" id="refund-pager"></div>
+                            <div class="pager is-single" id="recent-sales-pager"></div>
                         </div>
                     </div>
                 </div>

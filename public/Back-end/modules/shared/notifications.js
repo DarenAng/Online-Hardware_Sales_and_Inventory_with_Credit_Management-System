@@ -34,7 +34,7 @@ const NOTIF_ABOUT = {
     'Low Stock':        ['Stock alert',       'A material has fallen to its reorder point.'],
     'Damage Report':    ['Returns report',    'Damaged goods were reported and taken off the shelf.'],
     'Refund Report':    ['Returns report',    'A refund was filed at the counter.'],
-    'Purchase Order':   ['Purchase order',    'An order to a supplier was raised, confirmed or declined.'],
+    'Purchase Order':   ['Purchase order',    'An order to a supplier was raised, confirmed or declined, or its delivery came up short.'],
     'Stock Adjustment': ['Stock adjustment',  'A stock figure was corrected by hand.'],
     'Delivery':         ['Delivery',          'A delivery was booked and needs a driver.'],
     'Credit Request':   ['Credit request',    'A cashier asked for a higher credit limit for a customer, and a manager has to decide it.'],

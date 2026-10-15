@@ -250,3 +250,59 @@ td.cell-num .stock-level { margin-left: auto; }
 @media (max-width: 640px) {
     .unit-size-fields { grid-template-columns: 1fr; }
 }
+
+/* ==========================================================================
+   MAKE A REPORT -- several items in one report, and goods missing from a delivery
+   ========================================================================== */
+/* a part of the form can be put away with the hidden attribute */
+.form-group[hidden] { display: none; }
+
+/* "Items in this report": one line per material, a quantity box on each */
+.report-items { margin-top: 12px; }
+.report-items-head {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--steel);
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+}
+.report-items-empty {
+    margin: 10px 0 0;
+    font-size: 14px;
+    color: var(--steel-soft);
+}
+.report-line {
+    display: grid;
+    grid-template-columns: 2fr 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--line);
+}
+/* a refund or plain return also asks how much was refunded on each item */
+.report-line.has-refund { grid-template-columns: 2fr 1fr 1fr auto; }
+.report-line .recv-qty { width: 100%; max-width: 150px; }
+
+/* the purchase order's checklist: tick, material, ordered, how many are missing */
+.report-po-table { margin-top: 10px; }
+.report-po-table .recv-qty { display: inline-block; width: 110px; }
+.report-po-table th.report-tick,
+.report-po-table td.report-tick { width: 44px; text-align: center; }
+
+/* the delivery check on Stock Adjustment */
+.check-summary {
+    margin: 14px 0 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+}
+.check-summary.is-short { color: var(--signal-ink); }
+.check-summary.is-complete { color: var(--steel); }
+#detail-page .recv-qty { display: inline-block; width: 100px; }
+#detail-page .recv-verdict { display: inline-block; }
+
+@media (max-width: 640px) {
+    .report-line,
+    .report-line.has-refund { grid-template-columns: 1fr; gap: 8px; }
+    .report-line .recv-qty { max-width: none; }
+}

@@ -2,7 +2,7 @@
 -- 2-RUN-SECOND-stored-procedures.sql
 -- Lucelyn Hardware - Sales & Inventory with Credit Management
 --
--- The 3 views and the 36 stored procedures. Runs after 1-RUN-FIRST because
+-- The 3 views and the 37 stored procedures. Runs after 1-RUN-FIRST because
 -- the tables must exist. Safe to re-run at any time: it drops and recreates
 -- the views and procedures and touches no row. If the server starts with
 -- "PROCEDURE does not exist", this file is what fixes it.
@@ -207,6 +207,7 @@ DROP PROCEDURE IF EXISTS sp_create_purchase_order //
 DROP PROCEDURE IF EXISTS sp_decide_purchase_order //
 DROP PROCEDURE IF EXISTS sp_receive_purchase_order //
 DROP PROCEDURE IF EXISTS sp_file_return_report //
+DROP PROCEDURE IF EXISTS sp_file_return_reports //
 DROP PROCEDURE IF EXISTS sp_resolve_return_report //
 DROP PROCEDURE IF EXISTS sp_create_delivery //
 DROP PROCEDURE IF EXISTS sp_update_delivery_status //
@@ -2589,8 +2590,13 @@ PROC_BODY: BEGIN
 END //
 
 -- ==========================================
--- 18. FILE A DAMAGE, REFUND, OR RETURN REPORT
+-- 18. FILE A DAMAGE, REFUND, RETURN, OR MISSING-GOODS REPORT
 -- ==========================================
+-- A Missing report is about a supplier's delivery that came up short: it
+-- names the purchase order, is checked against what that order lists for the
+-- product, and never moves the shelf (the goods never arrived). It has no
+-- disposition, no sale and no refund, and stays Open until the clerk closes
+-- it with sp_resolve_return_report (the supplier made it good).
 CREATE PROCEDURE sp_file_return_report (
     IN p_product_id INT,
     IN p_sale_id INT,
@@ -2602,6 +2608,12 @@ CREATE PROCEDURE sp_file_return_report (
     -- report may leave it NULL: the goods wait for the clerk to inspect them
     -- (sp_resolve_return_report), and nothing moves on the shelf until then.
     IN p_disposition VARCHAR(20),
+    -- the purchase order a Missing report is about (ignored for the others)
+    IN p_po_id INT,
+    -- TRUE when sp_file_return_reports has already started the transaction:
+    -- this procedure then leaves START TRANSACTION, COMMIT and the manager's
+    -- notification to it, so a report of several items is all or nothing
+    IN p_inside_batch BOOLEAN,
     IN p_staff_id INT,
     OUT p_report_id INT,
     -- how much of a refund came off what the customer owes on the sale
@@ -2626,6 +2638,10 @@ PROC_BODY: BEGIN
     DECLARE v_where VARCHAR(20);
     DECLARE v_awaiting BOOLEAN DEFAULT FALSE;
     DECLARE v_voided BOOLEAN DEFAULT FALSE;
+    DECLARE v_missing BOOLEAN DEFAULT FALSE;
+    DECLARE v_po_status VARCHAR(20);
+    DECLARE v_ordered DECIMAL(12,3) DEFAULT 0;
+    DECLARE v_told DECIMAL(12,3) DEFAULT 0;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -2642,9 +2658,9 @@ PROC_BODY: BEGIN
     SET p_report_id = NULL;
     SET p_off_balance = 0.00;
 
-    IF p_report_type NOT IN ('Return', 'Damaged', 'Refunded') THEN
+    IF p_report_type NOT IN ('Return', 'Damaged', 'Refunded', 'Missing') THEN
         SET p_status_code = 400;
-        SET p_message = 'Type must be Return, Damaged, or Refunded.';
+        SET p_message = 'Type must be Return, Damaged, Refunded, or Missing.';
         LEAVE PROC_BODY;
     END IF;
 
@@ -2652,6 +2668,22 @@ PROC_BODY: BEGIN
         SET p_status_code = 400;
         SET p_message = 'Quantity must be greater than zero.';
         LEAVE PROC_BODY;
+    END IF;
+
+    -- Goods that never arrived have no sale, no refund and no shelf to go to;
+    -- every other type has no purchase order.
+    SET v_missing = (p_report_type = 'Missing');
+    IF v_missing THEN
+        SET p_sale_id = NULL;
+        SET p_refund_amount = 0.00;
+        SET p_disposition = NULL;
+        IF p_po_id IS NULL THEN
+            SET p_status_code = 400;
+            SET p_message = 'A missing-goods report must name the purchase order.';
+            LEAVE PROC_BODY;
+        END IF;
+    ELSE
+        SET p_po_id = NULL;
     END IF;
 
     -- A refund is money going back against a sale, so it must name the sale.
@@ -2684,7 +2716,8 @@ PROC_BODY: BEGIN
     -- else (damage found in the stockroom) is filed by the person who judged it
     SET v_awaiting = (v_where IS NULL AND p_report_type = 'Refunded');
 
-    IF NOT v_awaiting AND (v_where IS NULL OR v_where NOT IN ('Return to Stock', 'Write-Off')) THEN
+    -- (goods that never arrived have nowhere to go)
+    IF NOT v_awaiting AND NOT v_missing AND (v_where IS NULL OR v_where NOT IN ('Return to Stock', 'Write-Off')) THEN
         SET p_status_code = 400;
         SET p_message = 'Say where the goods go: Return to Stock, or Write-Off.';
         LEAVE PROC_BODY;
@@ -2703,11 +2736,67 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
+    -- Everything below happens in one transaction (or the batch's own).
+    IF NOT p_inside_batch THEN
+        START TRANSACTION;
+    END IF;
+
+    -- Missing goods are checked against the purchase order, and this is the
+    -- real guard. The order row is locked first, before the shelf row below,
+    -- so two reports at the same moment take turns and lock in the same order.
+    -- Only an approved order still waiting for its delivery can have goods
+    -- missing: receiving corrects the order's lines to what arrived, so after
+    -- that there is nothing left to compare. The quantity cannot be more than
+    -- the order lists for the product, counting what earlier Missing reports
+    -- already said.
+    IF v_missing THEN
+        SET v_po_status = NULL;
+        SELECT status INTO v_po_status FROM purchase_orders WHERE po_id = p_po_id FOR UPDATE;
+
+        IF v_po_status IS NULL THEN
+            ROLLBACK;
+            SET p_status_code = 404;
+            SET p_message = 'That purchase order was not found.';
+            LEAVE PROC_BODY;
+        END IF;
+
+        IF v_po_status <> 'Pending' THEN
+            ROLLBACK;
+            SET p_status_code = 409;
+            SET p_message = IF(v_po_status = 'Received',
+                CONCAT('Purchase order #', p_po_id, ' is already received, so its delivery cannot be reported missing any more.'),
+                CONCAT('Purchase order #', p_po_id, ' is cancelled or still waiting for the manager, so no delivery is due from it.'));
+            LEAVE PROC_BODY;
+        END IF;
+
+        SELECT COALESCE(SUM(quantity), 0) INTO v_ordered
+        FROM purchase_order_items WHERE po_id = p_po_id AND product_id = p_product_id;
+
+        IF v_ordered = 0 THEN
+            ROLLBACK;
+            SET p_status_code = 400;
+            SET p_message = CONCAT('That item is not on purchase order #', p_po_id, '.');
+            LEAVE PROC_BODY;
+        END IF;
+
+        SELECT COALESCE(SUM(quantity), 0) INTO v_told
+        FROM returned_items
+        WHERE po_id = p_po_id AND product_id = p_product_id AND report_type = 'Missing';
+
+        IF p_quantity > v_ordered - v_told + 0.0005 THEN
+            ROLLBACK;
+            SET p_status_code = 400;
+            SET p_message = IF(v_ordered - v_told <= 0,
+                CONCAT('That item is already reported missing in full on purchase order #', p_po_id, '.'),
+                CONCAT('Only ', TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM CAST(v_ordered - v_told AS CHAR))),
+                       ' of that item can be reported missing on purchase order #', p_po_id, '.'));
+            LEAVE PROC_BODY;
+        END IF;
+    END IF;
+
     -- The shelf row is read FOR UPDATE inside the transaction, the same as in
     -- sp_adjust_stock: a report and an adjustment on the same material at the
     -- same moment cannot both read the old figure and write over each other.
-    START TRANSACTION;
-
     SET v_before = 0;
     SELECT COALESCE(quantity_in_stock, 0) INTO v_before
     FROM inventory WHERE product_id = p_product_id
@@ -2790,7 +2879,8 @@ PROC_BODY: BEGIN
     -- Return to Stock always adds. Write-Off subtracts only when the goods were
     -- still counted as stock (a customer's return was deducted when sold).
     -- Awaiting inspection moves nothing: the clerk's verdict does that.
-    IF v_awaiting THEN
+    -- Missing goods never reached the shelf, so nothing moves.
+    IF v_missing OR v_awaiting THEN
         SET v_change = 0;
     ELSEIF v_restock THEN
         SET v_change = p_quantity;
@@ -2799,10 +2889,10 @@ PROC_BODY: BEGIN
     END IF;
 
     INSERT INTO returned_items
-        (product_id, sale_id, report_type, quantity, reason, disposition,
+        (product_id, sale_id, po_id, report_type, quantity, reason, disposition,
          refund_amount, restocked, status, reported_by_staff_id)
     VALUES
-        (p_product_id, p_sale_id, p_report_type, p_quantity, TRIM(p_reason), v_where,
+        (p_product_id, p_sale_id, p_po_id, p_report_type, p_quantity, TRIM(p_reason), v_where,
          IFNULL(p_refund_amount, 0.00), v_restock, 'Open', p_staff_id);
 
     SET p_report_id = LAST_INSERT_ID();
@@ -2838,13 +2928,25 @@ PROC_BODY: BEGIN
                     ' - ', LEFT(TRIM(p_reason), 120)), p_staff_id);
     END IF;
 
-    SET v_notif = IF(p_report_type = 'Refunded', 'Refund Report', 'Damage Report');
+    -- the manager is told once per report; a report of several items is told
+    -- by sp_file_return_reports, once for all of them
+    IF NOT p_inside_batch THEN
+        IF v_missing THEN
+            INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id)
+            VALUES (2, 'Purchase Order', CONCAT('Missing from delivery: ', v_name),
+                    CONCAT(p_quantity, ' unit(s) did not arrive on purchase order #', p_po_id, ': ',
+                           LEFT(TRIM(p_reason), 110)),
+                    p_product_id, p_staff_id);
+        ELSE
+            SET v_notif = IF(p_report_type = 'Refunded', 'Refund Report', 'Damage Report');
 
-    INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id)
-    VALUES (2, v_notif, CONCAT(p_report_type, ' filed for ', v_name),
-            CONCAT(p_quantity, ' unit(s), ', IF(v_awaiting, 'awaiting the clerk''s inspection', v_where),
-                   ': ', LEFT(TRIM(p_reason), 110)),
-            p_product_id, p_staff_id);
+            INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id)
+            VALUES (2, v_notif, CONCAT(p_report_type, ' filed for ', v_name),
+                    CONCAT(p_quantity, ' unit(s), ', IF(v_awaiting, 'awaiting the clerk''s inspection', v_where),
+                           ': ', LEFT(TRIM(p_reason), 110)),
+                    p_product_id, p_staff_id);
+        END IF;
+    END IF;
 
     -- the clerk is asked to look at what came back
     IF v_awaiting THEN
@@ -2857,9 +2959,12 @@ PROC_BODY: BEGIN
 
     INSERT INTO audit_logs (staff_id, action, action_type, details)
     VALUES (p_staff_id, UPPER(REPLACE(p_report_type, ' ', '_')), 'CREATE',
-            CONCAT(v_name, ' x', p_quantity, ' (report #', p_report_id, ')'));
+            CONCAT(v_name, ' x', p_quantity, ' (report #', p_report_id,
+                   IF(v_missing, CONCAT(', purchase order #', p_po_id), ''), ')'));
 
-    COMMIT;
+    IF NOT p_inside_batch THEN
+        COMMIT;
+    END IF;
 
     IF v_change < 0 THEN
         CALL sp_raise_stock_alert(p_product_id, p_staff_id);
@@ -2868,7 +2973,7 @@ PROC_BODY: BEGIN
     SET p_status_code = 201;
     SET p_message = IF(v_awaiting,
         CONCAT(p_report_type, ' report filed. The goods are set aside for the stockroom to inspect.'),
-        CONCAT(p_report_type, ' report filed.'));
+        IF(v_missing, 'Missing-goods report filed.', CONCAT(p_report_type, ' report filed.')));
 
     -- say where the money went when the refund was on a sale
     IF v_on_sale THEN
@@ -2878,6 +2983,139 @@ PROC_BODY: BEGIN
         IF p_refund_amount > v_off THEN
             SET p_message = CONCAT(p_message, ' ', FORMAT(p_refund_amount - v_off, 2), ' is cash to hand back.');
         END IF;
+    END IF;
+END //
+
+-- ==========================================
+-- 18b. FILE ONE REPORT FOR SEVERAL ITEMS AT ONCE
+-- ==========================================
+-- The Make a Report screen lists the items first and files them together:
+-- one type, one reason, one sale or purchase order, each item with its own
+-- quantity (and refund). Every item goes through sp_file_return_report, in
+-- one transaction: if any item is refused, nothing is filed. The manager is
+-- told once for the whole report.
+--   p_items: [ { "product_id": 12, "quantity": 2, "refund_amount": 0 }, ... ]
+-- p_report_ids: the new report numbers, comma separated, in the order listed.
+CREATE PROCEDURE sp_file_return_reports (
+    IN p_items JSON,
+    IN p_sale_id INT,
+    IN p_report_type VARCHAR(20),
+    IN p_reason TEXT,
+    IN p_disposition VARCHAR(20),
+    IN p_po_id INT,
+    IN p_staff_id INT,
+    OUT p_report_ids VARCHAR(1000),
+    OUT p_off_balance DECIMAL(12,2),
+    OUT p_status_code INT,
+    OUT p_message VARCHAR(255)
+)
+PROC_BODY: BEGIN
+    DECLARE v_count INT DEFAULT 0;
+    DECLARE v_i INT DEFAULT 0;
+    DECLARE v_product INT;
+    DECLARE v_qty DECIMAL(12,3);
+    DECLARE v_refund DECIMAL(12,2);
+    DECLARE v_report INT;
+    DECLARE v_off DECIMAL(12,2);
+    DECLARE v_code INT;
+    DECLARE v_text VARCHAR(255);
+    DECLARE v_name VARCHAR(150);
+    DECLARE v_first_product INT;
+    DECLARE v_names VARCHAR(1000) DEFAULT '';
+    DECLARE v_ids VARCHAR(1000) DEFAULT '';
+    DECLARE v_off_total DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_refund_total DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_notif VARCHAR(20);
+    DECLARE v_title VARCHAR(150);
+
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        -- first, before anything clears it: the real error, for the server log
+        GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
+        ROLLBACK;
+        SET p_report_ids = NULL;
+        SET p_off_balance = 0.00;
+        SET p_status_code = 500;
+        -- the server logs this and sends the browser a plain sentence instead
+        SET p_message = CONCAT('sp_file_return_reports failed (', @err_no, '): ', LEFT(@err_text, 180));
+    END;
+
+    SET p_report_ids = NULL;
+    SET p_off_balance = 0.00;
+
+    SET v_count = IFNULL(JSON_LENGTH(p_items), 0);
+    IF v_count < 1 OR v_count > 50 THEN
+        SET p_status_code = 400;
+        SET p_message = 'A report needs between 1 and 50 items.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    START TRANSACTION;
+
+    WHILE v_i < v_count DO
+        SET v_product = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items, CONCAT('$[', v_i, '].product_id'))), 'null');
+        SET v_qty     = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items, CONCAT('$[', v_i, '].quantity'))), 'null');
+        SET v_refund  = IFNULL(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items, CONCAT('$[', v_i, '].refund_amount'))), 'null'), 0);
+
+        CALL sp_file_return_report(v_product, p_sale_id, p_report_type, v_qty, p_reason, v_refund,
+                                   p_disposition, p_po_id, TRUE, p_staff_id,
+                                   v_report, v_off, v_code, v_text);
+
+        IF v_code <> 201 THEN
+            -- one refused item undoes the ones before it; say which one
+            ROLLBACK;
+            SET v_name = NULL;
+            SELECT product_name INTO v_name FROM products WHERE product_id = v_product;
+            SET p_status_code = v_code;
+            SET p_message = LEFT(CONCAT(IFNULL(CONCAT(v_name, ': '), ''), v_text,
+                                        ' Nothing was filed.'), 255);
+            LEAVE PROC_BODY;
+        END IF;
+
+        IF v_i = 0 THEN
+            SET v_first_product = v_product;
+        END IF;
+        SET v_ids = CONCAT(v_ids, IF(v_i = 0, '', ','), v_report);
+        SET v_off_total = v_off_total + v_off;
+        SET v_refund_total = v_refund_total + IF(p_report_type = 'Refunded', v_refund, 0);
+        SET v_name = NULL;
+        SELECT product_name INTO v_name FROM products WHERE product_id = v_product;
+        IF CHAR_LENGTH(v_names) < 150 THEN
+            SET v_names = CONCAT(v_names, IF(v_i = 0, '', ', '), LEFT(v_name, 60), ' x',
+                              TRIM(TRAILING '.' FROM TRIM(TRAILING '0' FROM CAST(v_qty AS CHAR))));
+        END IF;
+
+        SET v_i = v_i + 1;
+    END WHILE;
+
+    -- one alert to the manager for the whole report
+    IF p_report_type = 'Missing' THEN
+        SET v_notif = 'Purchase Order';
+        SET v_title = CONCAT('Missing from delivery: purchase order #', p_po_id);
+    ELSE
+        SET v_notif = IF(p_report_type = 'Refunded', 'Refund Report', 'Damage Report');
+        SET v_title = CONCAT(p_report_type, ' filed for ', v_count, ' item(s)');
+    END IF;
+
+    INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id)
+    VALUES (2, v_notif, v_title,
+            CONCAT(LEFT(v_names, 150), IF(CHAR_LENGTH(v_names) >= 150, ' and more', ''), '. ',
+                   LEFT(TRIM(p_reason), 70)),
+            IF(v_count = 1, v_first_product, NULL), p_staff_id);
+
+    COMMIT;
+
+    SET p_report_ids = v_ids;
+    SET p_off_balance = v_off_total;
+    SET p_status_code = 201;
+    SET p_message = IF(p_report_type = 'Missing',
+        CONCAT('Missing-goods report filed for ', v_count, ' item(s) on purchase order #', p_po_id, '.'),
+        CONCAT(p_report_type, ' report filed for ', v_count, ' item(s).'));
+    IF v_off_total > 0 THEN
+        SET p_message = CONCAT(p_message, ' ', FORMAT(v_off_total, 2), ' came off what the customer owes.');
+    END IF;
+    IF v_refund_total > v_off_total THEN
+        SET p_message = CONCAT(p_message, ' ', FORMAT(v_refund_total - v_off_total, 2), ' is cash to hand back.');
     END IF;
 END //
 
@@ -2947,8 +3185,10 @@ PROC_BODY: BEGIN
 
     SET v_verdict = NULLIF(TRIM(IFNULL(p_disposition, '')), '');
 
-    -- already decided at filing: closing it is all there is to do
-    IF v_where IS NOT NULL THEN
+    -- already decided at filing: closing it is all there is to do. A report of
+    -- goods missing from a delivery has no goods to inspect: it is closed when
+    -- the supplier has made it good, and the shelf is not touched.
+    IF v_where IS NOT NULL OR v_type = 'Missing' THEN
         UPDATE returned_items
         SET status = 'Resolved',
             inspected_by_staff_id = p_staff_id,

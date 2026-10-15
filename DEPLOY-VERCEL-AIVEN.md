@@ -79,7 +79,7 @@ The code that makes this work: `vercel.json`, `api/index.js`,
    ```
 
    It should say `Connected to MySQL database "hardware_db"` and
-   `All 36 stored procedures are loaded`. Sign in at http://localhost:3000.
+   `All 37 stored procedures are loaded`. Sign in at http://localhost:3000.
    The first start also creates the six server tables.
 
 ## Part 2: the app on Vercel
@@ -136,7 +136,7 @@ a running deployment keeps the values it started with.
 | Symptom | Where to look |
 |---|---|
 | Every page says the session ended, or sign-in fails with a 500 | Vercel → Logs. `DATABASE CONNECTION FAILED` means a wrong `DB_*` value or `DB_SSL_CA`. `self-signed certificate` means `DB_SSL_CA` is missing or cut short. |
-| "This database has N of 36 stored procedures" | Load file 2: `node scripts/load-sql.js --env .env.aiven public/database/2-RUN-SECOND-stored-procedures.sql` |
+| "This database has N of 37 stored procedures" | Load file 2: `node scripts/load-sql.js --env .env.aiven public/database/2-RUN-SECOND-stored-procedures.sql` |
 | Dates or "today's sales" are off by 8 hours | `HARDWARE_TIME_ZONE` was changed; remove it, or set `Asia/Manila` |
 | The daily job shows 401 in the logs | `CRON_SECRET` was added after the deploy: redeploy |
 | `/Back-end/...` or `/database/...` opens in a browser | It should not: those return 404. If they open, the Output Directory was changed from `vercel-static` in the Vercel settings. |

@@ -5,14 +5,15 @@
 // What is in this file, from top to bottom:
 //   - switching screens (showRegister, showRefunds, showCustomers, ...)
 //   - the product catalog on the left of the till, with search and filters
-//   - refunds: picking the product, the amount, and filing the refund
+//   - refunds: picking the product, the amount, and filing the refund; the
+//     sales of the past three days beside the form, to refund from
 //   - the customer box: typing a name, suggestions, picking a customer
 //   - the cart: adding lines, sizes (e.g. sack / kg), quantities, totals
 //   - the Payment window (Proceed to Payment): the customer, cash, cheque,
 //     e-wallet, bank transfer, credit or COD
 //   - checkout (handleCheckout) and the printed receipt
 //   - booking a delivery for the sale
-//   - the lists: deliveries, refunds, sales report
+//   - the lists: deliveries, recent sales (for refunds), sales report
 //   - the customer credit screen: adding a customer, the card with its
 //     history tabs, asking for a higher limit, and payments taken from a
 //     customer's card (or from the register, with Credit Payment)
@@ -27,8 +28,8 @@ let lastReceipt = null;
 // eight rows is what fits above the fold on the counter machine
 const CASHIER_ROWS_PER_PAGE = 8;
 
-// eight a page keeps the form and the log on one screen without scrolling
-const REFUND_ROWS_PER_PAGE = 8;
+// eight a page keeps the form and the list of recent sales on one screen without scrolling
+const RECENT_SALES_ROWS_PER_PAGE = 8;
 
 // the customer book, read once and searched in memory behind the typing box
 let customerDirectory = [];
@@ -68,7 +69,6 @@ function showRegister(event) {
 
 function showCashierHome(event) {
     showRegister(event);
-    document.querySelectorAll('[data-panel-link]').forEach((link) => link.classList.remove('active'));
 }
 
 // tracking only; empty until the search box or Load Data asks
@@ -76,10 +76,12 @@ function showCashierDeliveries(event) {
     showCashierPanel('panel-delivery', 'Delivery Tracking', event);
 }
 
-// the refund form's product box needs the catalogue; the list waits to be asked
+// the refund form's product box needs the catalogue; the recent sales are read
+// again every time this screen opens, so a sale just rung up is in the list
 function showRefunds(event) {
     showCashierPanel('panel-refund', 'Refunds', event);
     loadCatalogOptions();
+    loadRecentSales();
 }
 
 function showCustomers(event) { showCashierPanel('panel-customers', 'Customers Record', event); }
@@ -2988,128 +2990,174 @@ async function handleIssueRefund(event) {
         refundAmountSuggested = null;
         onReturnReasonInput();
         catalogLoaded = false;
-        await loadRefunds();
+        await loadRecentSales();
     } catch (error) {
         notifyOffline();
     }
 }
 
-// where the goods went, as a badge; nowhere yet while the stockroom has them
-function refundWentTo(row) {
-    if (row.disposition) return row.disposition;
-    if (row.status === 'Open') return null;
-    return row.restocked ? 'Return to Stock' : 'Write-Off';   // older records
-}
-
-function dispositionBadge(row) {
-    const where = refundWentTo(row);
-    if (where === null) return '<span class="badge badge-warning">Awaiting inspection</span>';
-
-    if (where === 'Return to Stock') {
-        return '<span class="badge badge-success">Back on shelf</span>';
-    } else {
-        return '<span class="badge badge-danger">Written off</span>';
-    }
-}
-
-// Refunds issued: clearable, because the history is context rather than the task.
-function buildRefundPanel() {
+// Sales in the Past 3 Days (beside the refund form): the receipts a refund can
+// be made from. The server sends every cashier's sales (a customer can bring a
+// refund to any counter) from today and the
+// two days before, newest first. A voided sale is left out: it did not happen,
+// so there is nothing to refund on it. The list reads on its own whenever the
+// Refunds screen opens (showRefunds), so there is no Load Data button.
+function buildRecentSalesPanel() {
     createDataPanel({
-        key: 'cash-refunds',
-        tableId: 'refund-table',
-        columns: 7,
-        // a log rather than a worklist, so it pages longer
-        pageSize: REFUND_ROWS_PER_PAGE,
-        pagerId: 'refund-pager',
-        idField: 'return_id',
-        filters: { disposition: 'all' },
+        key: 'cash-recent-sales',
+        tableId: 'recent-sales-table',
+        columns: 6,
+        pageSize: RECENT_SALES_ROWS_PER_PAGE,
+        pagerId: 'recent-sales-pager',
+        idField: 'sale_id',
+        // it is small and is read again on every visit, so it is not remembered
+        remember: false,
 
         gate: {
-            title: 'No refunds loaded',
-            text: 'Search for a product, or press Load Data to read the refunds on record.',
+            title: 'No sales loaded',
+            text: 'The sales of the past three days are read when this screen opens.',
             button: 'Load Data'
         },
 
-        // damage reports from the stockroom are a clerk's business; this is refunds
-        load: async () => {
-            const all = await apiGetReturns();
-            return all.filter((r) => r.report_type === 'Refunded');
+        empty: {
+            title: 'No sales in the past 3 days',
+            text: 'A refund needs a receipt number. For an older sale, type its number in the form.'
         },
+
+        load: () => apiGetRecentSales(),
 
         match: (row, query) => prefixMatch([
-            row.product_name, row.reason, row.status, row.return_id, '#' + row.return_id
+            row.customer_name, row.sale_id, '#' + row.sale_id, 'OR-' + String(row.sale_id).padStart(6, '0')
         ], query),
 
-        filter: (row, filters) => {
-            if (filters.disposition === 'all') return true;
-            const where = refundWentTo(row);
-            if (filters.disposition === 'awaiting') return where === null;
-            return where === filters.disposition;
-        },
-
         renderRow: (row, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 12) * 24 + 'ms" ' +
-            'onclick="openRefundDetail(' + row.return_id + ')">' +
-            '<td class="cell-id">#' + row.return_id + '</td>' +
-            '<td class="cell-name">' + escapeHtml(row.product_name) + '</td>' +
-            '<td class="cell-num">' + escapeHtml(qtyText(row.quantity, row.unit_name)) + '</td>' +
-            '<td class="cell-num cell-due">' + peso(row.refund_amount) + '</td>' +
-            '<td>' + dispositionBadge(row) + '</td>' +
-            '<td class="cell-id">' + escapeHtml(String(row.return_date).slice(0, 10)) + '</td>' +
-            '<td>' + statusBadge(row.status) + '</td></tr>'
+            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
+            'onclick="openRecentSale(' + row.sale_id + ')">' +
+            '<td class="cell-id">#' + row.sale_id + '</td>' +
+            '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 16)) + '</td>' +
+            '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
+            '<td class="cell-num">' + row.item_count + '</td>' +
+            '<td class="cell-num">' + peso(row.final_amount) +
+                (Number(row.refunded_amount) > 0
+                    ? '<span class="cell-sub">refunded ' + peso(row.refunded_amount) + '</span>' : '') + '</td>' +
+            '<td>' + statusBadge(row.payment_status) +
+                '<span class="cell-sub">' + escapeHtml(row.payment_method) + '</span></td></tr>'
     });
 }
 
-function clearRefundPanel() {
-    const panel = getDataPanel('cash-refunds');
-    if (panel) panel.reset();
-
-    const search = document.getElementById('refund-search');
-    if (search) search.value = '';
-
-    const where = document.getElementById('refund-disposition');
-    if (where) where.value = 'all';
-}
-
-async function loadRefunds() {
-    const panel = getDataPanel('cash-refunds');
+// reads the list now: opens it the first time, reads it again after that
+async function loadRecentSales() {
+    const panel = getDataPanel('cash-recent-sales');
     if (!panel) return;
-    if (panel.state === 'closed') await panel.open();
-    else await panel.refresh();
+    if (panel.state === 'ready') await panel.refresh();
+    else await panel.open();
 }
 
-function openRefundDetail(returnId) {
-    const panel = getDataPanel('cash-refunds');
-    const r = panel ? panel.find(returnId) : null;
-    if (!r) return;
+// the receipt open in the popup: its lines, and the line the cashier pressed
+let recentSale = null;
 
-    const body = '<div class="detail-grid">' +
-        detailField('Refund ID', '#' + r.return_id) +
-        detailField('Product', escapeHtml(r.product_name)) +
-        detailField('Quantity', escapeHtml(qtyText(r.quantity, r.unit_name))) +
-        detailField('Amount', peso(r.refund_amount)) +
-        detailField('Goods Went', dispositionBadge(r)) +
-        detailField('Status', statusBadge(r.status)) +
+async function openRecentSale(saleId) {
+    let data;
+    try { data = await apiGetSale(saleId); }
+    catch (error) {
+        notifyWarning('The receipt could not be opened. Check the connection and try again.', 'Receipt unavailable');
+        return;
+    }
+
+    const s = data.sale;
+    recentSale = { saleId: s.sale_id, items: data.items, picked: -1 };
+
+    const facts = '<div class="detail-grid">' +
+        detailField('Date', escapeHtml(String(s.sale_date).slice(0, 16))) +
+        detailField('Customer', escapeHtml(s.customer_name)) +
+        detailField('Rung Up By', escapeHtml(s.cashier_name)) +
+        detailField('Total', peso(s.final_amount)) +
+        detailField('Payment', escapeHtml(s.payment_method) + ' ' + statusBadge(s.payment_status)) +
+        detailField('Refunded Already', Number(s.refunded_amount) > 0
+            ? peso(s.refunded_amount) : '<span class="muted">Nothing yet</span>') +
         '</div>';
 
-    const ctx = '<div class="detail-grid">' +
-        detailField('Issued By', escapeHtml(r.reported_by)) +
-        detailField('Issued On', escapeHtml(r.return_date)) +
-        detailField('From Sale', r.sale_id ? '#' + r.sale_id : '<span class="muted">Not from a sale</span>') +
-        detailField('Inspected', r.inspected_by
-            ? escapeHtml(r.inspected_by) + ' <span class="muted">' + escapeHtml(String(r.inspected_at || '').slice(0, 16)) + '</span>'
-            : '<span class="muted">Not yet, the stockroom has it</span>') +
-        '</div>' +
-        '<p class="detail-note"><strong>Remarks</strong></p>' +
-        '<p class="detail-note">' + escapeHtml(r.reason || 'No reason was recorded.') + '</p>' +
-        (r.inspection_note
-            ? '<p class="detail-note"><strong>Inspection</strong></p>' +
-              '<p class="detail-note">' + escapeHtml(r.inspection_note) + '</p>' : '');
+    const body = facts +
+        '<h4 class="detail-subhead">Items</h4>' +
+        '<p class="detail-note" id="recent-sale-pick">Press an item to fill the Product box with it.</p>' +
+        recentSaleItemsTable();
 
-    openDetailModal('Refund #' + r.return_id, r.product_name, 'R' + r.return_id, [
-        { label: 'Refund', body: body },
-        { label: 'Details', body: ctx }
+    openDetailModal('Receipt #' + s.sale_id, s.customer_name + ' · ' + String(s.sale_date).slice(0, 16),
+        'R' + s.sale_id, [{ label: 'Receipt', body: body }],
+        '<button type="button" class="btn btn-success" onclick="refundFromRecentSale()">Refund from this receipt</button>',
+        { wide: true });
+}
+
+// the lines of the open receipt; the pressed line is shaded
+function recentSaleItemsTable() {
+    const rows = recentSale.items.map((it) => [
+        escapeHtml(it.product_name),
+        escapeHtml(qtyText(it.quantity, it.unit_name)),
+        peso(it.unit_price),
+        peso(it.subtotal),
+        Number(it.refunded_quantity) > 0
+            ? escapeHtml(qtyText(it.refunded_quantity, it.base_unit)) +
+              '<span class="cell-sub">' + peso(it.refunded_amount) + '</span>'
+            : '<span class="muted">None</span>'
     ]);
+
+    return pagedTable('recent-sale-items', ['Product', 'Qty', 'Unit Price', 'Total', 'Refunded'], rows,
+        [1, 2, 3, 4], {
+            empty: 'This receipt has no items.',
+            pageSize: 8,
+            rowAttrs: (index) => 'class="row-clickable" title="Refund this item" ' +
+                'onclick="pickRecentSaleItem(' + index + ')"' +
+                (index === recentSale.picked ? ' style="background: var(--go-dim);"' : '')
+        });
+}
+
+// pressing a line chooses it; pressing it again lets it go
+function pickRecentSaleItem(index) {
+    if (!recentSale) return;
+
+    recentSale.picked = recentSale.picked === index ? -1 : index;
+
+    const hint = document.getElementById('recent-sale-pick');
+    if (hint) {
+        hint.textContent = recentSale.picked === -1
+            ? 'Press an item to fill the Product box with it.'
+            : 'Chosen: ' + recentSale.items[index].product_name + '. It goes into the Product box.';
+    }
+    pagedTableGo('recent-sale-items', 0);
+}
+
+// puts the receipt number (and the pressed item) into the refund form, closes
+// the popup, and moves the cursor to the next box still empty
+async function refundFromRecentSale() {
+    if (!recentSale) return;
+    const form = document.getElementById('refund-form');
+    if (!form) return;
+
+    const line = recentSale.picked === -1 ? null : recentSale.items[recentSale.picked];
+    form.elements.saleId.value = recentSale.saleId;
+    closeModal('detail-modal');
+
+    if (line) {
+        await ensureCatalogLoaded(false);
+        // the product may be gone from the catalogue (archived): say so
+        if (catalog.some((p) => p.product_id === line.product_id)) {
+            pickRefundProduct(line.product_id);
+        } else {
+            clearRefundProduct();
+            notifyWarning(line.product_name + ' cannot be picked here, it may have been archived. ' +
+                'Type the product by hand.', 'Product not filled in');
+        }
+    } else if (refundProduct && !recentSale.items.some((it) => it.product_id === refundProduct.product_id)) {
+        // a product chosen earlier that is not on this receipt would be refunded against it
+        clearRefundProduct();
+    }
+
+    let next = document.getElementById('return-reason');
+    if (!refundProduct) next = refundProductBox();
+    else if (!(Number(form.elements.quantity.value) > 0)) next = form.elements.quantity;
+    else if (!(Number(form.elements.refundAmount.value) > 0)) next = form.elements.refundAmount;
+
+    if (next) next.focus();
 }
 
 // Sales report. The server sends a cashier their own sales and no others, so
@@ -4150,7 +4198,7 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
         buildCustomerPanel();
         buildDeliveryPanel();
         buildSalesPanel();
-        buildRefundPanel();
+        buildRecentSalesPanel();
 
         // the schedule follows what the administrator switched on for this role
         configureDeliverySchedule({ showPanel: (panelId, title) => showCashierPanel(panelId, title) });
@@ -4164,7 +4212,7 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
             'Delivery':       { label: 'Delivery Tracking', panelId: 'panel-delivery',
                                 open: () => showCashierDeliveries(), key: 'cash-deliveries' },
             'Refund Report':  { label: 'Refunds', panelId: 'panel-refund',
-                                open: () => showRefunds(), key: 'cash-refunds' },
+                                open: () => showRefunds() },
             'Credit Request': creditAlert,
             'Late Penalty':   creditAlert
         });
@@ -4175,6 +4223,7 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
         renderRefundProductVerdict();
         renderDeliveryAttached();
         showCashierHome();
+        unfoldSidebarAtOpenScreen();
         // the customer book is fetched the first time somebody types; the store
         // details are read on arrival because they head every receipt
         loadStoreSettings(false);

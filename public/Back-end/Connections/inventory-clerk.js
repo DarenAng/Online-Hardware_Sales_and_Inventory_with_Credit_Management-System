@@ -1275,11 +1275,18 @@ function registerInventoryRoutes(app, deps) {
   // RETURNS, DAMAGE AND REFUND REPORTS
   app.get("/api/returns", async (request, response) => {
     try {
+      // goods missing from a supplier delivery are the stockroom business;
+      // the counter list (the cashier) does not carry them
+      let hideMissing = "";
+      if (request.actor && request.actor.roleName === CASHIER) {
+        hideMissing = "WHERE r.report_type <> 'Missing'";
+      }
+
       const [rows] = await db.query(
         `SELECT r.return_id, r.report_type, r.quantity, r.reason, r.refund_amount,
-              r.restocked, r.disposition, r.status, r.return_date, r.sale_id,
+              r.restocked, r.disposition, r.status, r.return_date, r.sale_id, r.po_id,
               r.inspected_at, r.inspection_note,
-              (r.status = 'Open' AND r.disposition IS NULL) AS awaiting_inspection,
+              (r.status = 'Open' AND r.disposition IS NULL AND r.report_type <> 'Missing') AS awaiting_inspection,
               p.product_id, p.product_name, u.unit_name,
               COALESCE(s.full_name, 'Unknown') AS reported_by,
               i.full_name AS inspected_by
@@ -1288,6 +1295,7 @@ function registerInventoryRoutes(app, deps) {
        LEFT JOIN units u ON u.unit_id = p.unit_id
        LEFT JOIN staff s ON s.staff_id = r.reported_by_staff_id
        LEFT JOIN staff i ON i.staff_id = r.inspected_by_staff_id
+       ${hideMissing}
        ORDER BY FIELD(r.status, 'Open', 'Resolved'), r.disposition IS NOT NULL, r.return_id DESC`
       );
       response.json(rows);
@@ -1310,12 +1318,69 @@ function registerInventoryRoutes(app, deps) {
   const QUANTITY_SLACK = 0.0005;
   const AMOUNT_SLACK = 0.01;
 
+  // A refund on a sale is checked against the sale: the item is on it, that
+  // many are left to refund, and no more than was charged for them. Gives back
+  // the sentence to show when something is wrong, or "" when it is fine.
+  // These checks give a friendly message; sp_file_return_report checks the
+  // same again under a lock, and that is the one that cannot be raced.
+  async function refundProblem(saleId, productId, quantity, refundAmount) {
+    // what the sale holds of this product, and what has already come back
+    const [lines] = await db.query(
+      `SELECT COALESCE(SUM(quantity), 0) AS sold, COALESCE(SUM(subtotal), 0) AS worth
+       FROM sale_items WHERE sale_id = ? AND product_id = ?`,
+      [saleId, productId]
+    );
+    const [taken] = await db.query(
+      `SELECT COALESCE(SUM(quantity), 0) AS refunded FROM returned_items
+       WHERE sale_id = ? AND product_id = ? AND report_type IN ('Refunded', 'Return')`,
+      [saleId, productId]
+    );
+    // the lines add up to total_amount; the customer paid final_amount, after the discount
+    const [sales] = await db.query(
+      "SELECT total_amount, final_amount FROM sales WHERE sale_id = ?", [saleId]);
+    if (sales.length === 0) {
+      return "That sale was not found.";
+    }
+    let afterDiscount = 1;
+    if (Number(sales[0].total_amount) > 0) {
+      afterDiscount = Number(sales[0].final_amount) / Number(sales[0].total_amount);
+    }
+
+    const qty = Number(quantity);
+    if (!(qty > 0)) {
+      return "Quantity must be greater than zero.";
+    }
+
+    const sold = Number(lines[0].sold);
+    const left = sold - Number(taken[0].refunded);
+    if (sold === 0) {
+      return "That item is not on this sale.";
+    }
+    if (qty > left + QUANTITY_SLACK) {
+      return left <= 0 ? "That item has already been refunded in full."
+                       : `Only ${left} of that item can still be refunded.`;
+    }
+
+    // never more than the customer was charged for those pieces (after the discount)
+    const mostToRefund = Number(lines[0].worth) * afterDiscount * qty / sold;
+    if (!(Number(refundAmount) > 0) || Number(refundAmount) > mostToRefund + AMOUNT_SLACK) {
+      return `The refund must be more than zero and no more than ${mostToRefund.toFixed(2)}, ` +
+             "what the customer was charged for those pieces.";
+    }
+    return "";
+  }
+
   app.post("/api/returns", async (request, response) => {
     const { productId, saleId, reportType, quantity, reason, refundAmount,
             disposition, restock } = request.body;
 
     if (!productId || !reportType || !quantity) {
       return response.status(400).json({ error: "Product, type and quantity are all required" });
+    }
+
+    // goods missing from a delivery are filed by the clerk, from Make a Report
+    if (reportType === "Missing") {
+      return response.status(400).json({ error: "Goods missing from a delivery are filed from the Make a Report screen." });
     }
 
     let explanation = "";
@@ -1382,52 +1447,9 @@ function registerInventoryRoutes(app, deps) {
     // (A refund with no sale named is refused above.)
     if (reportType === "Refunded" && saleId) {
       try {
-        // what the sale holds of this product, and what has already come back
-        const [lines] = await db.query(
-          `SELECT COALESCE(SUM(quantity), 0) AS sold, COALESCE(SUM(subtotal), 0) AS worth
-           FROM sale_items WHERE sale_id = ? AND product_id = ?`,
-          [saleId, productId]
-        );
-        const [taken] = await db.query(
-          `SELECT COALESCE(SUM(quantity), 0) AS refunded FROM returned_items
-           WHERE sale_id = ? AND product_id = ? AND report_type IN ('Refunded', 'Return')`,
-          [saleId, productId]
-        );
-        // the lines add up to total_amount; the customer paid final_amount, after the discount
-        const [sales] = await db.query(
-          "SELECT total_amount, final_amount FROM sales WHERE sale_id = ?", [saleId]);
-        if (sales.length === 0) {
-          return response.status(400).json({ error: "That sale was not found." });
-        }
-        let afterDiscount = 1;
-        if (Number(sales[0].total_amount) > 0) {
-          afterDiscount = Number(sales[0].final_amount) / Number(sales[0].total_amount);
-        }
-
-        const qty = Number(quantity);
-        if (!(qty > 0)) {
-          return response.status(400).json({ error: "Quantity must be greater than zero." });
-        }
-
-        const sold = Number(lines[0].sold);
-        const left = sold - Number(taken[0].refunded);
-        if (sold === 0) {
-          return response.status(400).json({ error: "That item is not on this sale." });
-        }
-        if (qty > left + QUANTITY_SLACK) {
-          return response.status(400).json({
-            error: left <= 0 ? "That item has already been refunded in full."
-                             : `Only ${left} of that item can still be refunded.`
-          });
-        }
-
-        // never more than the customer was charged for those pieces (after the discount)
-        const mostToRefund = Number(lines[0].worth) * afterDiscount * qty / sold;
-        if (!(Number(refundAmount) > 0) || Number(refundAmount) > mostToRefund + AMOUNT_SLACK) {
-          return response.status(400).json({
-            error: `The refund must be more than zero and no more than ${mostToRefund.toFixed(2)}, ` +
-                   "what the customer was charged for those pieces."
-          });
+        const problem = await refundProblem(saleId, productId, quantity, refundAmount);
+        if (problem !== "") {
+          return response.status(400).json({ error: problem });
         }
       } catch (error) {
         console.error("Refund check failed:", error.message);
@@ -1458,7 +1480,7 @@ function registerInventoryRoutes(app, deps) {
 
     try {
       const output = await callProcedure(
-        "CALL sp_file_return_report(?, ?, ?, ?, ?, ?, ?, ?, @report_id, @off_balance, @status_code, @message)",
+        "CALL sp_file_return_report(?, ?, ?, ?, ?, ?, ?, NULL, FALSE, ?, @report_id, @off_balance, @status_code, @message)",
         [productId, saleId || null, reportType, quantity, explanation,
          refundAmount || 0, where, getActorId(request)],
         ["report_id", "off_balance", "status_code", "message"]
@@ -1492,6 +1514,156 @@ function registerInventoryRoutes(app, deps) {
                       awaitingInspection: where === null, offBalance: Number(output.off_balance) || 0 });
     } catch (error) {
       console.error("File report failed:", error.message);
+      response.status(500).json({ error: "Unable to file the report" });
+    }
+  });
+
+  // Make a Report: one report for several items at once. The body has the
+  // type, the reason, the sale (a refund) or the purchase order (goods missing
+  // from a delivery), and the list of items, each with its own quantity (and
+  // refund). The procedure files them all in one transaction: if one item is
+  // refused, nothing is filed. Only the clerk can reach this route.
+  const REPORT_TYPES = ["Return", "Damaged", "Refunded", "Missing"];
+  const MOST_REPORT_ITEMS = 50;
+
+  app.post("/api/returns/batch", async (request, response) => {
+    const body = request.body || {};
+    const reportType = body.reportType;
+
+    if (!REPORT_TYPES.includes(reportType)) {
+      return response.status(400).json({ error: "Pick the type of report." });
+    }
+
+    let explanation = "";
+    if (typeof body.reason === "string") {
+      explanation = body.reason.trim();
+    }
+    if (explanation.length < MINIMUM_RETURN_REASON) {
+      return response.status(400).json({
+        error: "Say what happened, in a sentence. A write-off queried three months " +
+               "from now has to be explainable from this line alone."
+      });
+    }
+
+    // the items: each material once, with a quantity above zero
+    const sent = Array.isArray(body.items) ? body.items : [];
+    if (sent.length === 0) {
+      return response.status(400).json({ error: "Add at least one item to the report." });
+    }
+    if (sent.length > MOST_REPORT_ITEMS) {
+      return response.status(400).json({ error: "A report can hold at most " + MOST_REPORT_ITEMS + " items." });
+    }
+
+    const items = [];
+    const seen = [];
+    for (const line of sent) {
+      const productId = Number(line.productId);
+      const quantity = Math.round(Number(line.quantity) * 1000) / 1000;
+      let refund = 0;
+      if (line.refundAmount !== undefined && line.refundAmount !== null && line.refundAmount !== "") {
+        refund = Number(line.refundAmount);
+      }
+
+      if (!Number.isInteger(productId) || productId <= 0) {
+        return response.status(400).json({ error: "An item in the report has no material." });
+      }
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        return response.status(400).json({ error: "Every item needs a quantity greater than zero." });
+      }
+      if (!Number.isFinite(refund) || refund < 0) {
+        return response.status(400).json({ error: "The refund amount must be a number, zero or more." });
+      }
+      // a refund amount goes only with a refund or a plain return
+      if (reportType !== "Refunded" && reportType !== "Return") {
+        refund = 0;
+      }
+      if (seen.includes(productId)) {
+        return response.status(400).json({ error: "A material can be listed only once in a report." });
+      }
+      seen.push(productId);
+      items.push({ product_id: productId, quantity: quantity, refund_amount: refund });
+    }
+    // always filed in the same order, so two reports at once lock the shelf rows
+    // in the same order and cannot wait on each other
+    items.sort((a, b) => a.product_id - b.product_id);
+
+    // goods missing from a delivery name their purchase order; a refund names
+    // its sale; the others may name a sale or leave it out
+    let poId = null;
+    let saleId = null;
+    if (reportType === "Missing") {
+      poId = Number(body.poId);
+      if (!Number.isInteger(poId) || poId <= 0) {
+        return response.status(400).json({ error: "Pick the purchase order the goods were missing from." });
+      }
+    } else if (body.saleId) {
+      saleId = Number(body.saleId);
+      if (!Number.isInteger(saleId) || saleId <= 0) {
+        return response.status(400).json({ error: "The sale number must be a whole number." });
+      }
+    }
+    if (reportType === "Refunded" && !saleId) {
+      return response.status(400).json({ error: "A refund must be filed against a sale." });
+    }
+
+    // where the goods go. "Put back on the shelf: no" means they cannot be
+    // sold, so they are written off. A refund the clerk does not decide waits
+    // for inspection (no word). Missing goods have nowhere to go.
+    let where = null;
+    if (reportType !== "Missing") {
+      if (RETURN_DISPOSITIONS.includes(body.disposition)) {
+        where = body.disposition;
+      } else if (body.restock === true) {
+        where = "Return to Stock";
+      } else if (reportType !== "Refunded") {
+        where = "Write-Off";
+      }
+    }
+
+    try {
+      // a refund is checked against its sale, item by item, for a friendly message
+      if (reportType === "Refunded") {
+        for (const item of items) {
+          const problem = await refundProblem(saleId, item.product_id, item.quantity, item.refund_amount);
+          if (problem !== "") {
+            const [names] = await db.query("SELECT product_name FROM products WHERE product_id = ?", [item.product_id]);
+            const label = names.length > 0 ? names[0].product_name + ": " : "";
+            return response.status(400).json({ error: label + problem + " Nothing was filed." });
+          }
+        }
+      }
+
+      const output = await callProcedure(
+        "CALL sp_file_return_reports(?, ?, ?, ?, ?, ?, ?, @report_ids, @off_balance, @status_code, @message)",
+        [JSON.stringify(items), saleId, reportType, explanation, where, poId, getActorId(request)],
+        ["report_ids", "off_balance", "status_code", "message"]
+      );
+
+      if (output.status_code !== 201) {
+        return response.status(output.status_code).json({ error: output.message });
+      }
+
+      const reportIds = String(output.report_ids).split(",").map(Number);
+      await writeAuditLog(
+        request,
+        reportType === "Refunded" ? "REFUND" : "RETURN",
+        `${reportType} report for ${items.length} item(s): #${reportIds.join(", #")}` +
+          (poId ? `, purchase order #${poId}` : ""),
+        {
+          report_ids: reportIds,
+          report_type: reportType,
+          po_id: poId,
+          sale_id: saleId,
+          disposition: where,
+          items: items,
+          reason: explanation
+        }
+      );
+
+      response.json({ message: output.message, reportIds: reportIds, filed: reportIds.length,
+                      disposition: where, offBalance: Number(output.off_balance) || 0 });
+    } catch (error) {
+      console.error("File report (several items) failed:", error.message);
       response.status(500).json({ error: "Unable to file the report" });
     }
   });

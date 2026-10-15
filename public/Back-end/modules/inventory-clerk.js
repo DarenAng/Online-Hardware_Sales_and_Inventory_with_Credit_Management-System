@@ -8,6 +8,8 @@
 //   - stock adjustment: pick a material and a unit, see a preview, save
 //   - adjustment history and reorder points
 //   - returns and damage reports: inspect, return to stock or write off
+//   - Make a Report: several items in one report, or goods missing from a delivery
+//     (checked against its purchase order, here and from Stock Adjustment)
 //   - the material archive
 //   - popups: one material (with its selling sizes and delivery pack),
 //     one adjustment, one return
@@ -56,7 +58,6 @@ function showInventoryPanel(panelId, title, event) {
 
 function showInventoryHome(event) {
     showInventoryPanel('panel-inventory', 'Inventory Management', event);
-    document.querySelectorAll('[data-panel-link]').forEach((link) => link.classList.remove('active'));
 
     // the material list keeps whatever it had loaded; the banner is one small query
     loadStockBanner();
@@ -81,7 +82,11 @@ function showAdjustmentHistory(event) {
 
 function showReorder(event) { showInventoryPanel('panel-reorder', 'Reorder Point Settings', event); }
 function showReturns(event) { showInventoryPanel('panel-returns', 'Returned Items', event); }
-function showDamageReport(event) { showInventoryPanel('panel-report', 'Make a Report', event); renderReportMaterialVerdict(); }
+function showDamageReport(event) {
+    showInventoryPanel('panel-report', 'Make a Report', event);
+    renderReportMaterialVerdict();
+    renderReportItems();
+}
 function showInventoryArchive(event) { showInventoryPanel('panel-archive', 'Archive', event); }
 
 // ---------- the material list ----------
@@ -1187,13 +1192,15 @@ function buildReturnsPanel() {
     });
 }
 
-// a refund from the counter the clerk has not looked at yet
+// a refund from the counter the clerk has not looked at yet (goods that never
+// arrived have nothing to inspect)
 function returnAwaiting(row) {
-    return row.status === 'Open' && !row.disposition;
+    return row.status === 'Open' && !row.disposition && row.report_type !== 'Missing';
 }
 
 // older records have no disposition; read it back off the restocked flag
 function returnWentTo(row) {
+    if (row.report_type === 'Missing') return 'Missing';
     if (row.disposition) return row.disposition;
     if (returnAwaiting(row)) return null;
     return row.restocked ? 'Return to Stock' : 'Write-Off';
@@ -1202,6 +1209,7 @@ function returnWentTo(row) {
 function returnDispositionBadge(row) {
     const where = returnWentTo(row);
     if (where === null) return '<span class="badge badge-warning">Awaiting inspection</span>';
+    if (where === 'Missing') return '<span class="badge badge-neutral">Never arrived</span>';
 
     if (where === 'Return to Stock') {
         return '<span class="badge badge-success">Back on shelf</span>';
@@ -1220,7 +1228,7 @@ function renderReturnFilters(rows) {
     if (!box) return;
 
     // the worklist first: what the counter took back and nobody has looked at
-    const types = ['To inspect', 'All', 'Damaged', 'Refunded', 'Return'];
+    const types = ['To inspect', 'All', 'Damaged', 'Refunded', 'Return', 'Missing'];
 
     box.innerHTML = types.map((type) => {
         let count;
@@ -1234,7 +1242,7 @@ function renderReturnFilters(rows) {
 
         return '<button type="button" class="filter-chip' + (returnFilter === type ? ' active' : '') +
             (type === 'To inspect' && count > 0 ? ' track-chip-alert' : '') +
-            '" onclick="setReturnFilter(\'' + type + '\')">' + type +
+            '" onclick="setReturnFilter(\'' + type + '\')">' + statusWord(type) +
             ' <span class="chip-count">' + count + '</span></button>';
     }).join('');
 }
@@ -1249,8 +1257,16 @@ function setReturnFilter(type) {
 }
 
 async function resolveReturn(reportId) {
-    const yes = await askConfirm(
-        'Report #' + reportId + ' moves out of the open list. The stock it already moved stays where it is.',
+    const panel = getDataPanel('clerk-returns');
+    const r = panel ? panel.find(reportId) : null;
+
+    let words = 'Report #' + reportId + ' moves out of the open list. The stock it already moved stays where it is.';
+    if (r && r.report_type === 'Missing') {
+        words = 'Report #' + reportId + ' moves out of the open list. Use this once the supplier has made the ' +
+            'missing goods good. Stock does not change here: the goods are counted in when they are received.';
+    }
+
+    const yes = await askConfirm(words,
         { title: 'Mark this report resolved?', eyebrow: 'Returned Items', confirmLabel: 'Mark resolved' });
 
     if (!yes) return;
@@ -1318,11 +1334,22 @@ async function sendReturnVerdict(reportId, verdict, note) {
     }
 }
 
-// ---------- the report's material: typed and picked, like Stock Adjustment's ----------
-let reportMaterial = null;
+// ---------- Make a Report ----------
+// One report can hold several items. Most types list materials (typed and
+// picked, like Stock Adjustment's), each with its own quantity. A "Missing
+// from delivery" report names a purchase order instead: its items come up as
+// a checklist, and every ticked one goes into the report. One press of File
+// Report files them all, or none of them if one is refused.
+let reportItems = [];          // the materials listed so far: { productId, name, unit, onHand, quantity, refund }
 let reportSuggestHighlight = -1;
+let reportPo = null;           // the purchase order chosen for a Missing report: { po, items }
+let reportPoTicks = {};        // product id -> quantity, to tick when the checklist is drawn
 
 function reportMaterialBox() { return document.getElementById('report-material'); }
+function reportTypeNow() {
+    const box = document.getElementById('report-type');
+    return box ? box.value : 'Damaged';
+}
 
 async function onReportMaterialInput(value) {
     const text = String(value || '').trim();
@@ -1330,11 +1357,6 @@ async function onReportMaterialInput(value) {
     if (clear) clear.hidden = text === '';
 
     if (!invLoaded && text !== '') await ensureInventoryLoaded(false);
-
-    // typing on after a choice unmakes it
-    if (reportMaterial && String(reportMaterial.product_name).trim() !== text) {
-        setReportMaterial(null);
-    }
 
     renderReportSuggestions(text);
     renderReportMaterialVerdict();
@@ -1349,8 +1371,7 @@ function renderReportSuggestions(text) {
     reportSuggestHighlight = -1;
 
     let found = [];
-    const chosen = reportMaterial && String(reportMaterial.product_name).trim().toLowerCase() === query;
-    if (query !== '' && invProducts.length > 0 && !chosen) found = findMaterials(query);
+    if (query !== '' && invProducts.length > 0) found = findMaterials(query);
 
     list.innerHTML = materialSuggestHtml(found, 'report-suggest-', 'pickReportMaterial');
     list.hidden = found.length === 0;
@@ -1393,18 +1414,13 @@ function onReportMaterialKey(event) {
     if (event.key === 'Escape') hideReportSuggestions();
 }
 
+// a picked material goes onto the list; the box empties, ready for the next one
 function pickReportMaterial(productId) {
     const found = invProducts.find((p) => p.product_id === productId);
     if (!found) return;
 
-    const box = reportMaterialBox();
-    if (box) box.value = found.product_name;
-
-    const clear = document.getElementById('report-material-clear');
-    if (clear) clear.hidden = false;
-
-    hideReportSuggestions();
-    setReportMaterial(found);
+    addReportItem(found);
+    clearReportMaterial();
 }
 
 function clearReportMaterial(keepFocus) {
@@ -1415,17 +1431,8 @@ function clearReportMaterial(keepFocus) {
     if (clear) clear.hidden = true;
 
     hideReportSuggestions();
-    setReportMaterial(null);
-    if (box && keepFocus !== false) box.focus();
-}
-
-function setReportMaterial(product) {
-    reportMaterial = product || null;
-
-    const form = document.getElementById('report-form');
-    if (form) form.elements.productId.value = product ? String(product.product_id) : '';
-
     renderReportMaterialVerdict();
+    if (box && keepFocus !== false) box.focus();
 }
 
 function renderReportMaterialVerdict() {
@@ -1433,14 +1440,6 @@ function renderReportMaterialVerdict() {
     if (!box) return;
 
     const typed = reportMaterialBox() ? reportMaterialBox().value.trim() : '';
-
-    if (reportMaterial) {
-        box.className = 'pick-verdict';
-        box.textContent = Number(reportMaterial.quantity_in_stock) + ' ' +
-            (reportMaterial.unit_name || '') + ' on hand.';
-        return;
-    }
-
     const list = document.getElementById('report-suggest');
     const listOpen = list && !list.hidden;
 
@@ -1452,55 +1451,528 @@ function renderReportMaterialVerdict() {
     box.textContent = 'Nothing matches "' + typed + '". Try a name, brand, or category.';
 }
 
-function onReportTypeChange(type) {
-    const field = document.getElementById('refund-field');
-    if (field) field.style.display = type === 'Damaged' ? 'none' : 'block';
+// ---------- the materials listed in this report ----------
+function addReportItem(product) {
+    if (reportItems.some((item) => item.productId === product.product_id)) {
+        notifyWarning(product.product_name + ' is already in this report. Change its quantity in the list.', 'Already listed');
+        return;
+    }
 
-    const form = document.getElementById('report-form');
-    if (form) form.elements.restock.value = type === 'Damaged' ? 'false' : 'true';
+    reportItems.push({
+        productId: product.product_id,
+        name: product.product_name,
+        unit: product.unit_name || '',
+        onHand: Number(product.quantity_in_stock),
+        quantity: '1',
+        refund: ''
+    });
+    renderReportItems();
 }
 
+function removeReportItem(index) {
+    reportItems.splice(index, 1);
+    renderReportItems();
+}
+
+// typing in a box only remembers the figure; the list is not drawn again, so the cursor stays
+function setReportItemField(index, field, value) {
+    if (reportItems[index]) reportItems[index][field] = value;
+}
+
+function renderReportItems() {
+    const box = document.getElementById('report-items');
+    if (!box) return;
+
+    if (reportItems.length === 0) {
+        box.innerHTML = '<p class="report-items-empty">No materials in this report yet. Type one above to add it.</p>';
+        return;
+    }
+
+    // a refund amount goes with each item of a refund or a plain return
+    const type = reportTypeNow();
+    const withRefund = type === 'Refunded' || type === 'Return';
+
+    box.innerHTML = '<div class="report-items-head">Items in this report ' +
+        '<span class="chip-count">' + reportItems.length + '</span></div>' +
+        reportItems.map((item, index) =>
+            '<div class="report-line' + (withRefund ? ' has-refund' : '') + '">' +
+                '<div>' +
+                    '<div class="recv-name">' + escapeHtml(item.name) + '</div>' +
+                    '<div class="recv-meta">' + item.onHand + ' ' + escapeHtml(item.unit) + ' on hand</div>' +
+                '</div>' +
+                '<div>' +
+                    '<label class="recv-meta" for="report-qty-' + index + '">Quantity' +
+                        (item.unit ? ' (' + escapeHtml(item.unit) + ')' : '') + '</label>' +
+                    '<input type="number" class="form-control recv-qty" id="report-qty-' + index + '" ' +
+                           'min="0.001" step="0.001" value="' + escapeHtml(item.quantity) + '" ' +
+                           'oninput="setReportItemField(' + index + ', \'quantity\', this.value)">' +
+                '</div>' +
+                (withRefund
+                    ? '<div>' +
+                          '<label class="recv-meta" for="report-refund-' + index + '">Refund amount</label>' +
+                          '<input type="number" class="form-control recv-qty" id="report-refund-' + index + '" ' +
+                                 'min="0" step="0.01" placeholder="0.00" value="' + escapeHtml(item.refund) + '" ' +
+                                 'oninput="setReportItemField(' + index + ', \'refund\', this.value)">' +
+                      '</div>'
+                    : '') +
+                '<button type="button" class="btn btn-sm btn-danger" ' +
+                        'onclick="removeReportItem(' + index + ')">Remove</button>' +
+            '</div>').join('');
+}
+
+// ---------- the purchase orders a delivery can be checked against ----------
+// Approved orders still waiting for their delivery. Receiving an order
+// corrects its lines to what arrived, so a received order has nothing left to
+// check a delivery against.
+let poChoices = [];
+
+async function loadPoChoices() {
+    const rows = await apiGetPurchaseOrders();
+    poChoices = rows.filter((po) => po.status === 'Pending');
+    return poChoices;
+}
+
+// the <option> rows of a purchase order box; the order with this id is selected
+function poChoiceOptions(selectedId) {
+    return poChoices.map((po) =>
+        '<option value="' + po.po_id + '"' + (po.po_id === selectedId ? ' selected' : '') + '>' +
+        escapeHtml('PO #' + po.po_id + ' · ' + po.supplier_name + ' · ' +
+                   poWhen(po.order_date).slice(0, 10) + ' · ' + poStatusWord(poStage(po))) +
+        '</option>').join('');
+}
+
+// ---------- Missing from delivery: the purchase order and its checklist ----------
+function setReportPoVerdict(text, isStop) {
+    const box = document.getElementById('report-po-verdict');
+    if (!box) return;
+    box.className = isStop ? 'pick-verdict is-stop' : 'pick-verdict';
+    box.textContent = text;
+}
+
+async function loadReportPoChoices() {
+    const select = document.getElementById('report-po');
+    if (!select) return;
+
+    try {
+        await loadPoChoices();
+    } catch (error) {
+        setReportPoVerdict('The purchase orders could not be loaded. Try again.', true);
+        return;
+    }
+
+    select.innerHTML = '<option value="">Choose a purchase order</option>' +
+        poChoiceOptions(reportPo ? reportPo.po.po_id : null);
+    setReportPoVerdict(poChoices.length === 0
+        ? 'There is no approved purchase order waiting for its delivery.' : '', false);
+}
+
+async function onReportPoChange(value) {
+    reportPo = null;
+    reportPoTicks = {};
+    renderReportPoLines();
+
+    const poId = parseInt(value, 10);
+    if (!poId) return;
+
+    try {
+        const items = await apiGetPurchaseOrderItems(poId);
+        // another order may have been chosen while this one was loading
+        const select = document.getElementById('report-po');
+        if (select && parseInt(select.value, 10) !== poId) return;
+
+        reportPo = { po: poChoices.find((po) => po.po_id === poId), items: items };
+        renderReportPoLines();
+    } catch (error) {
+        setReportPoVerdict('That purchase order could not be opened. Try again.', true);
+    }
+}
+
+// The order's items as a checklist: tick the ones that did not arrive, and
+// say how many.
+function renderReportPoLines() {
+    const box = document.getElementById('report-po-lines');
+    if (!box) return;
+
+    if (!reportPo) {
+        box.innerHTML = '';
+        return;
+    }
+    if (reportPo.items.length === 0) {
+        box.innerHTML = '<p class="report-items-empty">This order has no items.</p>';
+        return;
+    }
+
+    setReportPoVerdict('Tick every item that did not arrive and say how many.', false);
+
+    box.innerHTML = '<div class="table-responsive"><table class="mini-table report-po-table">' +
+        '<thead><tr>' +
+            '<th class="report-tick"><input type="checkbox" id="report-po-all" ' +
+                'onchange="tickAllReportPo(this.checked)" aria-label="Tick every item"></th>' +
+            '<th>Material</th><th class="col-num">Ordered</th><th class="col-num">Missing</th>' +
+        '</tr></thead><tbody>' +
+        reportPo.items.map((item, index) => {
+            const ticked = reportPoTicks[item.product_id] !== undefined;
+            const howMany = ticked ? reportPoTicks[item.product_id] : item.quantity;
+            return '<tr>' +
+                '<td class="report-tick"><input type="checkbox" id="report-po-tick-' + index + '"' +
+                    (ticked ? ' checked' : '') + ' onchange="tickReportPo(' + index + ', this.checked)" ' +
+                    'aria-label="Missing: ' + escapeHtml(item.product_name) + '"></td>' +
+                '<td>' + escapeHtml(item.product_name) + '</td>' +
+                '<td class="cell-num">' + escapeHtml(poQuantityText(item)) + '</td>' +
+                '<td class="cell-num"><input type="number" class="form-control recv-qty" ' +
+                    'id="report-po-qty-' + index + '" min="0.001" step="0.001" value="' + howMany + '"' +
+                    (ticked ? '' : ' disabled') + ' aria-label="How many missing: ' + escapeHtml(item.product_name) + '"> ' +
+                    '<span class="muted">' + escapeHtml(item.unit_name || '') + '</span></td>' +
+                '</tr>';
+        }).join('') +
+        '</tbody></table></div>';
+}
+
+function tickReportPo(index, on) {
+    const box = document.getElementById('report-po-qty-' + index);
+    if (box) box.disabled = !on;
+    if (on && reportPo) reportPoTicks[reportPo.items[index].product_id] = box ? box.value : 1;
+    else if (reportPo) delete reportPoTicks[reportPo.items[index].product_id];
+}
+
+function tickAllReportPo(on) {
+    if (!reportPo) return;
+    reportPo.items.forEach((item, index) => {
+        const tick = document.getElementById('report-po-tick-' + index);
+        if (tick) tick.checked = on;
+        tickReportPo(index, on);
+    });
+}
+
+// ---------- the report type decides which parts of the form show ----------
+function showReportSections(type) {
+    const missing = type === 'Missing';
+
+    document.getElementById('report-po-field').hidden = !missing;
+    document.getElementById('report-material-field').hidden = missing;
+    document.getElementById('report-sale-field').hidden = missing;
+    document.getElementById('report-restock-field').hidden = missing;
+
+    const form = document.getElementById('report-form');
+    if (form) {
+        form.elements.restock.value = type === 'Damaged' ? 'false' : 'true';
+        form.elements.reason.placeholder = missing
+            ? 'What did not arrive, and what the supplier or driver said'
+            : 'What happened to the item';
+    }
+
+    // the refund box shows on a refund or a plain return
+    renderReportItems();
+}
+
+function onReportTypeChange(type) {
+    showReportSections(type);
+    if (type === 'Missing') loadReportPoChoices();
+}
+
+// From the delivery check on Stock Adjustment: Make a Report opens on
+// Missing from delivery, the order chosen and the short items ticked.
+async function startMissingReport(po, items, shortLines) {
+    const form = document.getElementById('report-form');
+    if (!form) return;
+
+    form.elements.reportType.value = 'Missing';
+    showReportSections('Missing');
+
+    reportPo = { po: po, items: items };
+    reportPoTicks = {};
+    shortLines.forEach((line) => { reportPoTicks[line.item.product_id] = line.shortBase; });
+
+    await loadReportPoChoices();
+    renderReportPoLines();
+
+    if (form.elements.reason.value.trim() === '') {
+        form.elements.reason.value = 'Short on the delivery for purchase order #' + po.po_id + '.';
+    }
+}
+
+// ---------- File Report ----------
 async function handleFileReport(event) {
     event.preventDefault();
     const form = event.target;
+    const type = form.elements.reportType.value;
+    const reason = form.elements.reason.value.trim();
 
     const data = {
-        productId: parseInt(form.elements.productId.value, 10),
-        saleId: form.elements.saleId.value ? parseInt(form.elements.saleId.value, 10) : null,
-        reportType: form.elements.reportType.value,
-        quantity: readQuantity(form.elements.quantity.value),
-        reason: form.elements.reason.value.trim(),
-        refundAmount: parseFloat(form.elements.refundAmount.value) || 0,
-        restock: form.elements.restock.value === 'true'
+        reportType: type,
+        reason: reason,
+        items: []
     };
 
-    if (!reportMaterial || !data.productId) {
-        notifyWarning('Type the material\'s name and choose it from the list.', 'No material chosen');
-        renderReportMaterialVerdict();
-        return;
+    if (type === 'Missing') {
+        if (!reportPo) {
+            notifyWarning('Choose the purchase order the goods were missing from.', 'No purchase order');
+            return;
+        }
+        data.poId = reportPo.po.po_id;
+
+        reportPo.items.forEach((item, index) => {
+            const tick = document.getElementById('report-po-tick-' + index);
+            const howMany = document.getElementById('report-po-qty-' + index);
+            if (tick && tick.checked) {
+                data.items.push({ productId: item.product_id, quantity: readQuantity(howMany ? howMany.value : '') });
+            }
+        });
+        if (data.items.length === 0) {
+            notifyWarning('Tick at least one item that did not arrive.', 'Nothing to report');
+            return;
+        }
+    } else {
+        data.saleId = form.elements.saleId.value ? parseInt(form.elements.saleId.value, 10) : null;
+        data.restock = form.elements.restock.value === 'true';
+
+        if (reportItems.length === 0) {
+            notifyWarning('Type a material\'s name and choose it from the list to add it to the report.', 'No material chosen');
+            renderReportMaterialVerdict();
+            return;
+        }
+        // a refund amount goes only with a refund or a plain return; a value typed
+        // while one of those was chosen is not sent for a damage report
+        const withRefund = type === 'Refunded' || type === 'Return';
+        reportItems.forEach((item) => {
+            data.items.push({
+                productId: item.productId,
+                quantity: readQuantity(item.quantity),
+                refundAmount: withRefund ? (parseFloat(item.refund) || 0) : 0
+            });
+        });
     }
-    if (data.reason === '') { notifyWarning('Say why this is being recorded.', 'A reason is required'); return; }
-    if (!data.quantity || data.quantity <= 0) {
-        notifyWarning('Quantity must be greater than zero.', 'Nothing was filed');
+
+    if (reason === '') { notifyWarning('Say why this is being recorded.', 'A reason is required'); return; }
+    if (data.items.some((item) => !item.quantity || item.quantity <= 0)) {
+        notifyWarning('Every item needs a quantity greater than zero.', 'Nothing was filed');
         return;
     }
 
+    // a double press must not file the report twice
+    const button = form.querySelector('[type="submit"]');
+    if (button) button.disabled = true;
+
     try {
-        const response = await apiFileReturn(data);
+        const response = await apiFileReportItems(data);
         const result = await response.json();
         if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
 
         notifySuccess(result.message + ' The manager has been notified.', 'Report filed');
         form.reset();
+        reportItems = [];
+        reportPo = null;
+        reportPoTicks = {};
         clearReportMaterial(false);
         onReportTypeChange(form.elements.reportType.value);
+        renderReportPoLines();
         // the stock figures have moved; the next search reads them afresh
         invLoaded = false;
         await loadStockBanner();
         await loadNotifications();
     } catch (error) {
         notifyOffline();
+    } finally {
+        if (button) button.disabled = false;
     }
+}
+
+// ---------- Stock Adjustment: check a delivery against its purchase order ----------
+// Read only: nothing here moves stock. Stock comes in when the delivery is
+// received on its purchase order. What is short can be reported from here.
+let poCheck = { poId: null, po: null, items: [] };
+
+async function openPoCheck() {
+    poCheck = { poId: null, po: null, items: [] };
+    showPoCheckCard('<p class="detail-note">Loading the purchase orders...</p>');
+
+    try {
+        await loadPoChoices();
+    } catch (error) {
+        redrawPoCheck('<p class="detail-note detail-warn">The purchase orders could not be loaded. Close this and try again.</p>');
+        return;
+    }
+    redrawPoCheck(poCheckPage());
+}
+
+// the card's one page; the card is still the open one while detailPages holds it
+let poCheckPageObject = null;
+
+function showPoCheckCard(body) {
+    poCheckPageObject = { label: 'Check', body: body };
+
+    // Make a Report is left out when the administrator has switched that screen off
+    const reportButton = holdsFeature('damage-report')
+        ? '<button type="button" class="btn btn-success" id="po-check-report" onclick="reportShortFromCheck()" disabled>Make a Report</button>'
+        : '';
+
+    openDetailModal('Check a Purchase Order', 'Compare a delivery with its order', 'PO',
+        [poCheckPageObject],
+        reportButton +
+        '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Close</button>',
+        { wide: true, scroll: true });
+}
+
+// true while this card is the one open: it may have been closed, or another
+// card opened, while a purchase order was loading
+function poCheckIsOpen() {
+    const modal = document.getElementById('detail-modal');
+    return Boolean(modal && modal.classList.contains('open') &&
+                   poCheckPageObject && detailPages[0] === poCheckPageObject);
+}
+
+// draws the card's page again without opening it again
+function redrawPoCheck(body) {
+    if (!poCheckIsOpen()) return;
+    poCheckPageObject.body = body;
+    renderDetailPage();
+    updatePoCheckSummary();
+}
+
+function poCheckPage() {
+    let html = '<p class="detail-note">This only compares the delivery with the order. It does not change ' +
+        'the stock. When the delivery is counted in, press Receive on the purchase order.</p>' +
+        '<div class="form-group">' +
+            '<label for="check-po">Purchase order</label>' +
+            '<select id="check-po" class="form-control" onchange="onPoCheckPick(this.value)">' +
+                '<option value="">Choose a purchase order</option>' + poChoiceOptions(poCheck.poId) +
+            '</select>' +
+        '</div>';
+
+    if (poChoices.length === 0) {
+        html += '<p class="detail-note">There is no approved purchase order waiting for its delivery.</p>';
+    }
+    if (poCheck.po) html += poCheckLines();
+    return html;
+}
+
+async function onPoCheckPick(value) {
+    const poId = parseInt(value, 10);
+    poCheck = { poId: poId || null, po: null, items: [] };
+
+    if (poId) {
+        poCheck.po = poChoices.find((po) => po.po_id === poId) || null;
+        try {
+            const items = await apiGetPurchaseOrderItems(poId);
+            // the card may have been closed, or another order chosen, while this one was loading
+            if (!poCheckIsOpen() || poCheck.poId !== poId) return;
+            poCheck.items = items;
+        } catch (error) {
+            redrawPoCheck(poCheckPage() + '<p class="detail-note detail-warn">That purchase order could not be opened. Try again.</p>');
+            return;
+        }
+    }
+    redrawPoCheck(poCheckPage());
+}
+
+// the order's items: what was ordered, a box for what arrived, and the check
+function poCheckLines() {
+    if (poCheck.items.length === 0) return '<p class="detail-empty">This order has no items.</p>';
+
+    const rows = poCheck.items.map((item, index) => {
+        const pack = recvPackOf(item);
+        const unit = pack ? pack.name : (item.unit_name || '');
+        return [
+            escapeHtml(item.product_name),
+            escapeHtml(poQuantityText(item)),
+            '<input type="number" class="form-control recv-qty" id="check-arrived-' + index + '" ' +
+                   'min="0" step="1" value="' + recvOrderedCount(item) + '" ' +
+                   'oninput="updatePoCheckLine(' + index + ')" ' +
+                   'aria-label="Arrived: ' + escapeHtml(item.product_name) + '"> ' +
+                   '<span class="muted">' + escapeHtml(unit) + '</span>',
+            '<span class="recv-verdict is-exact" id="check-result-' + index + '">As ordered</span>'
+        ];
+    });
+
+    return detailTable(['Material', 'Ordered', 'Arrived', 'Check'], rows, [1, 2]) +
+        '<p class="check-summary" id="check-summary" aria-live="polite"></p>';
+}
+
+// What one line came to: how many arrived against how many were ordered.
+// "short" is in the line's own count (packs for a line ordered in packs);
+// "shortBase" is the same in the material's unit, which is what a report holds.
+function poCheckLineState(index) {
+    const item = poCheck.items[index];
+    const field = document.getElementById('check-arrived-' + index);
+    const ordered = recvOrderedCount(item);
+    const pack = recvPackOf(item);
+
+    const typed = field ? field.value.trim() : '';
+    const arrived = typed === '' ? ordered : Math.max(0, Number(typed) || 0);
+    const short = typed === '' ? 0 : Math.max(0, ordered - arrived);
+
+    return {
+        item: item,
+        ordered: ordered,
+        arrived: arrived,
+        blank: typed === '',
+        short: short,
+        shortBase: pack ? Math.round(short * pack.size * 1000) / 1000 : short
+    };
+}
+
+function updatePoCheckLine(index) {
+    const result = document.getElementById('check-result-' + index);
+    if (result) {
+        const state = poCheckLineState(index);
+        const pack = recvPackOf(state.item);
+        const unit = pack ? pack.name : (state.item.unit_name || '');
+
+        if (state.blank) {
+            result.className = 'recv-verdict is-exact';
+            result.textContent = 'Type how many arrived.';
+        } else if (state.short > 0) {
+            result.className = 'recv-verdict is-short';
+            result.textContent = 'Short by ' + qtyText(state.short, unit) +
+                (pack ? ' (' + qtyText(state.shortBase, state.item.unit_name || '') + ')' : '');
+        } else if (state.arrived > state.ordered) {
+            result.className = 'recv-verdict is-over';
+            result.textContent = qtyText(state.arrived - state.ordered, unit) + ' more than ordered';
+        } else {
+            result.className = 'recv-verdict is-exact';
+            result.textContent = 'As ordered';
+        }
+    }
+    updatePoCheckSummary();
+}
+
+// "Complete" or "N items short"; Make a Report works only when something is short
+function updatePoCheckSummary() {
+    const summary = document.getElementById('check-summary');
+    const button = document.getElementById('po-check-report');
+
+    let shortCount = 0;
+    poCheck.items.forEach((item, index) => {
+        if (poCheckLineState(index).short > 0) shortCount++;
+    });
+
+    if (summary) {
+        if (shortCount === 0) {
+            summary.className = 'check-summary is-complete';
+            summary.textContent = 'Complete: every item arrived as ordered.';
+        } else {
+            summary.className = 'check-summary is-short';
+            summary.textContent = shortCount + (shortCount === 1 ? ' item short.' : ' items short.');
+        }
+    }
+    if (button) button.disabled = shortCount === 0;
+}
+
+// Make a Report: closes the card and opens the report with what is short
+function reportShortFromCheck() {
+    const shortLines = [];
+    poCheck.items.forEach((item, index) => {
+        const state = poCheckLineState(index);
+        if (state.short > 0) shortLines.push(state);
+    });
+    if (shortLines.length === 0 || !poCheck.po) return;
+
+    const po = poCheck.po;
+    const items = poCheck.items;
+
+    closeModal('detail-modal');
+    showDamageReport();
+    startMissingReport(po, items, shortLines);
 }
 
 // ---------- archive ----------
@@ -2117,14 +2589,20 @@ function openReturnDetail(returnId) {
     const r = panel ? panel.find(returnId) : null;
     if (!r) return;
 
+    const missing = r.report_type === 'Missing';
+
     const report = '<div class="detail-grid">' +
         detailField('Report ID', '#' + r.return_id) +
         detailField('Type', statusBadge(r.report_type)) +
         detailField('Material', escapeHtml(r.product_name)) +
-        detailField('Quantity', r.quantity + ' ' + escapeHtml(r.unit_name || '')) +
-        detailField('Refund Amount', peso(r.refund_amount)) +
+        detailField(missing ? 'Quantity Missing' : 'Quantity', r.quantity + ' ' + escapeHtml(r.unit_name || '')) +
+        // goods that never arrived have no sale and no refund
+        (missing ? detailField('Purchase Order', '#' + r.po_id) : detailField('Refund Amount', peso(r.refund_amount))) +
         detailField('Status', statusBadge(r.status)) +
-        '</div>';
+        '</div>' +
+        (missing && r.status === 'Open'
+            ? '<p class="detail-note">These goods were ordered but never arrived. Mark the report resolved once the supplier has made it good.</p>'
+            : '');
 
     const awaiting = returnAwaiting(r);
 
@@ -2152,11 +2630,13 @@ function openReturnDetail(returnId) {
     const context = '<div class="detail-grid">' +
         detailField('Filed By', escapeHtml(r.reported_by)) +
         detailField('Filed On', escapeHtml(r.return_date)) +
-        detailField('From Sale', r.sale_id ? '#' + r.sale_id : '<span class="muted">Not from a sale</span>') +
+        (missing
+            ? detailField('Purchase Order', '#' + r.po_id)
+            : detailField('From Sale', r.sale_id ? '#' + r.sale_id : '<span class="muted">Not from a sale</span>')) +
         detailField('Goods Went', returnDispositionBadge(r)) +
         detailField('Inspected', r.inspected_by
             ? escapeHtml(r.inspected_by) + ' <span class="muted">' + escapeHtml(String(r.inspected_at || '').slice(0, 16)) + '</span>'
-            : '<span class="muted">' + (awaiting ? 'Not yet' : 'Decided when filed') + '</span>') +
+            : '<span class="muted">' + (awaiting ? 'Not yet' : (missing ? 'Nothing to inspect' : 'Decided when filed')) + '</span>') +
         '</div>' +
         '<p class="detail-note">' + escapeHtml(r.reason || 'No reason given.') + '</p>' +
         (r.inspection_note
@@ -2211,6 +2691,7 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         onLiveChange(['inventory', 'sales', 'returns'], refreshAdjustScreen);
 
         showInventoryHome();
+        unfoldSidebarAtOpenScreen();
         loadNotifications();
     });
 

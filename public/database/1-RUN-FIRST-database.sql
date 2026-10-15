@@ -458,7 +458,10 @@ CREATE TABLE returned_items (
     return_id INT AUTO_INCREMENT PRIMARY KEY,
     product_id INT NOT NULL,
     sale_id INT NULL,
-    report_type ENUM('Return', 'Damaged', 'Refunded') NOT NULL DEFAULT 'Return',
+    -- Missing: goods a supplier's delivery did not bring. It names the
+    -- purchase order here, and never moves the shelf: the goods never came.
+    po_id INT NULL,
+    report_type ENUM('Return', 'Damaged', 'Refunded', 'Missing') NOT NULL DEFAULT 'Return',
     quantity DECIMAL(12,3) NOT NULL,
     reason TEXT NOT NULL,
     -- Where the goods go. NULL is a refund the cashier took back that the
@@ -476,6 +479,7 @@ CREATE TABLE returned_items (
     return_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE SET NULL ON UPDATE CASCADE,
+    FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE RESTRICT ON UPDATE CASCADE,
     FOREIGN KEY (reported_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (inspected_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
     -- a negative refund would be money taken from the customer

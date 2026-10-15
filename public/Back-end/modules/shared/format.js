@@ -70,7 +70,7 @@ function qtyText(value, unit) {
 function statusBadge(text, label) {
     const good = ['Paid', 'Delivered', 'In Stock', 'Active', 'Received'];
     const bad = ['Unpaid', 'Failed', 'Out of Stock', 'Inactive', 'Cancelled'];
-    const warn = ['Partial', 'Low Stock', 'Delayed', 'Pending', 'For Approval', 'In Transit', 'Out for Delivery'];
+    const warn = ['Partial', 'Low Stock', 'Delayed', 'Pending', 'For Approval', 'In Transit', 'Out for Delivery', 'Missing'];
     // a purchase order the supplier has taken on: in hand, not yet at the store
     const info = ['PO Accepted', 'On the way'];
 
@@ -84,7 +84,7 @@ function statusBadge(text, label) {
 }
 
 // how a stored status is said on screen; the stored value is unchanged
-const STATUS_WORDS = { 'For Approval': 'Waiting for confirmation' };
+const STATUS_WORDS = { 'For Approval': 'Waiting for confirmation', 'Missing': 'Missing from delivery' };
 
 function statusWord(text) {
     return STATUS_WORDS[text] || text;

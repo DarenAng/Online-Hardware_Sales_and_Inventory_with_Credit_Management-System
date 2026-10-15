@@ -139,6 +139,10 @@
                                 <div>
                                     <h3>Stock Adjustment</h3>
                                 </div>
+                                <div class="panel-actions">
+                                    <!-- compares a delivery with its purchase order; moves no stock -->
+                                    <button type="button" class="btn btn-ghost" onclick="openPoCheck()">Check a Purchase Order</button>
+                                </div>
                             </div>
 
                             <form id="adjust-form" class="form-sheet" onsubmit="handleAdjustStock(event)" autocomplete="off">
@@ -527,6 +531,7 @@
                                 <option value="awaiting">Awaiting inspection</option>
                                 <option value="Return to Stock">Back on shelf</option>
                                 <option value="Write-Off">Written off</option>
+                                <option value="Missing">Never arrived</option>
                             </select>
                         </div>
                         <div class="toolbar-spacer"></div>
@@ -557,49 +562,54 @@
                                     <option value="Damaged">Damaged item</option>
                                     <option value="Refunded">Refunded item</option>
                                     <option value="Return">Plain return</option>
+                                    <option value="Missing">Missing from delivery</option>
                                 </select>
                             </div>
-                            <!-- WHICH MATERIAL -- typed and picked from the list, like Stock Adjustment;
-                                 text that matches nothing is not a choice -->
-                            <div class="form-group">
-                                <label for="report-material">Material</label>
-                                <div class="suggest-wrap">
-                                    <input type="text" id="report-material" class="form-control"
-                                           autocomplete="off" placeholder="Type a material, brand, or category"
-                                           role="combobox" aria-expanded="false"
-                                           aria-controls="report-suggest" aria-autocomplete="list"
-                                           oninput="onReportMaterialInput(this.value)"
-                                           onfocus="onReportMaterialInput(this.value)"
-                                           onblur="hideReportSuggestions()"
-                                           onkeydown="onReportMaterialKey(event)">
-                                    <input type="hidden" name="productId" value="">
-                                    <button type="button" class="suggest-clear" id="report-material-clear"
-                                            onclick="clearReportMaterial()" aria-label="Clear the material"
-                                            hidden>&times;</button>
-                                    <ul class="suggest-list" id="report-suggest" role="listbox" hidden></ul>
-                                </div>
-                                <p class="pick-verdict" id="report-material-verdict"></p>
-                            </div>
-                            <div class="form-group">
-                                <label for="report-qty">Quantity</label>
-                                <input type="number" id="report-qty" name="quantity" class="form-control"
-                                       min="0.001" step="0.001" value="1" required>
-                            </div>
-                            <div class="form-group">
+                            <div class="form-group" id="report-sale-field">
                                 <label for="report-sale">Sale ID <span class="label-hint">optional, but a Refunded report needs one</span></label>
                                 <input type="number" id="report-sale" name="saleId" class="form-control" min="1" placeholder="Leave blank if not from a sale">
                             </div>
-                            <div class="form-group" id="refund-field">
-                                <label for="report-refund">Refund amount</label>
-                                <input type="number" id="report-refund" name="refundAmount" class="form-control" min="0" step="0.01" value="0">
+                        </div>
+
+                        <!-- MISSING FROM DELIVERY -- pick the purchase order; its items come up as a
+                             checklist, and every ticked one goes into this one report -->
+                        <div class="form-group" id="report-po-field" hidden>
+                            <label for="report-po">Purchase order</label>
+                            <select id="report-po" class="form-control" onchange="onReportPoChange(this.value)">
+                                <option value="">Choose a purchase order</option>
+                            </select>
+                            <p class="pick-verdict" id="report-po-verdict"></p>
+                            <div id="report-po-lines"></div>
+                        </div>
+
+                        <!-- EVERY OTHER TYPE -- typed and picked from the list, like Stock Adjustment;
+                             each material picked is added to the list below, with its own quantity -->
+                        <div class="form-group" id="report-material-field">
+                            <label for="report-material">Add a material</label>
+                            <div class="suggest-wrap">
+                                <input type="text" id="report-material" class="form-control"
+                                       autocomplete="off" placeholder="Type a material, brand, or category"
+                                       role="combobox" aria-expanded="false"
+                                       aria-controls="report-suggest" aria-autocomplete="list"
+                                       oninput="onReportMaterialInput(this.value)"
+                                       onfocus="onReportMaterialInput(this.value)"
+                                       onblur="hideReportSuggestions()"
+                                       onkeydown="onReportMaterialKey(event)">
+                                <button type="button" class="suggest-clear" id="report-material-clear"
+                                        onclick="clearReportMaterial()" aria-label="Clear the material"
+                                        hidden>&times;</button>
+                                <ul class="suggest-list" id="report-suggest" role="listbox" hidden></ul>
                             </div>
-                            <div class="form-group">
-                                <label for="report-restock">Put back on the shelf</label>
-                                <select id="report-restock" name="restock" class="form-control">
-                                    <option value="false">No, keep it off stock</option>
-                                    <option value="true">Yes, item is resalable</option>
-                                </select>
-                            </div>
+                            <p class="pick-verdict" id="report-material-verdict"></p>
+                            <div id="report-items" class="report-items" aria-live="polite"></div>
+                        </div>
+
+                        <div class="form-group" id="report-restock-field">
+                            <label for="report-restock">Put back on the shelf</label>
+                            <select id="report-restock" name="restock" class="form-control">
+                                <option value="false">No, keep it off stock</option>
+                                <option value="true">Yes, item is resalable</option>
+                            </select>
                         </div>
                         <div class="form-group">
                             <label for="report-reason">Reason</label>

@@ -800,6 +800,7 @@ if (window.location.pathname.toLowerCase().endsWith('delivery.html')) {
         });
 
         showDeliveryHome();
+        unfoldSidebarAtOpenScreen();
         loadNotifications();
     });
 }

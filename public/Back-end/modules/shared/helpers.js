@@ -179,6 +179,25 @@ function toggleSidebarMenu(navId, listId, event, force) {
     heading.setAttribute('aria-expanded', String(open));
 }
 
+// When a page first opens, the menu shows where the user is: the list that
+// holds the lit (open) screen is unfolded. A lit screen with no list above
+// it (Make a Report, Pending) is left as it is.
+function unfoldSidebarAtOpenScreen() {
+    const links = document.querySelectorAll('.sidebar-nav .nav-sub a.active');
+    for (const link of links) {
+        const item = link.closest('li');
+        if (item && item.hidden) continue;
+
+        const module = link.closest('li[data-sidebar-dropdown]');
+        if (!module || module.hidden) continue;
+
+        const heading = module.querySelector(':scope > .nav-parent');
+        const list = module.querySelector(':scope > .nav-sub');
+        if (heading && list) toggleSidebarMenu(heading.id, list.id, null, true);
+        return;
+    }
+}
+
 // A folding heading is one control: pressing anywhere on it, the words or the
 // caret, folds or unfolds the list beneath. Unfolding it also opens the first
 // screen in the list (one the role still has), so a press always lands

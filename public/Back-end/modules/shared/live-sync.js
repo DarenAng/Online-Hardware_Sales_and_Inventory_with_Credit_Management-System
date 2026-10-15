@@ -51,7 +51,7 @@ const PANEL_SCOPES = {
     'cash-credit':        ['credit', 'sales'],
     'cash-deliveries':    ['deliveries', 'sales'],
     'cash-sales':         ['sales', 'deliveries'],
-    'cash-refunds':       ['returns'],
+    'cash-recent-sales':  ['sales', 'returns'],
     'cash-summary':       ['sales', 'returns'],
 
     // delivery personnel

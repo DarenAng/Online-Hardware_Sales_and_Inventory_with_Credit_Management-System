@@ -38,7 +38,7 @@ public/database/2-RUN-SECOND-stored-procedures.sql
 The names give the order. `1-RUN-FIRST-database.sql` drops and rebuilds
 `hardware_db`, creates the 33 tables, loads the demo data, and then six months
 of mock trading on top of it (see *Mock data* below).
-`2-RUN-SECOND-stored-procedures.sql` loads the 3 views and the 36 stored
+`2-RUN-SECOND-stored-procedures.sql` loads the 3 views and the 37 stored
 procedures; the tables have to exist before it will run.
 
 Run them in MySQL Workbench or the `mysql` command line. Those two honour the
@@ -186,7 +186,7 @@ On startup you should see three lines:
 
 ```
 Connected to MySQL database "hardware_db" on localhost.
-All 36 stored procedures are loaded.
+All 37 stored procedures are loaded.
 Server running at http://localhost:3000
 ```
 

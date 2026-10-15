@@ -150,6 +150,7 @@ function leaveWithdrawnScreen() {
 
     if (typeof featuresSetup.home === 'function') {
         featuresSetup.home();
+        if (typeof unfoldSidebarAtOpenScreen === 'function') unfoldSidebarAtOpenScreen();
     } else {
         const brand = document.querySelector('.sidebar-brand');
         if (brand) brand.click();

@@ -39,7 +39,9 @@
 -- database name (it is "defaultdb" unless you made another).
 --
 -- File 2 holds the same procedures and views; run it after any later change
--- to them.
+-- to them. It now holds a newer sp_file_return_report (two more parameters,
+-- for Missing reports; see 5-MIGRATION-missing-delivery-reports.sql), so on a
+-- database that already has that, run file 2 again after this file.
 -- ==========================================================================
 
 USE hardware_db;

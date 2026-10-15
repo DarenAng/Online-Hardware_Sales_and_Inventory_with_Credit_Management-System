@@ -814,6 +814,7 @@ const ACTIVITY_KINDS = {
     SALE: 'Sale',
     PAYMENT: 'Credit payment',
     DAMAGE: 'Damage report',
+    MISSING: 'Missing from delivery',
     REFUND: 'Refund report',
     RETURN: 'Return report',
     STOCK_ADJUST: 'Stock adjustment',
@@ -1223,7 +1224,7 @@ function buildStockPanels() {
 
 // Stock Movements: the stock side of the activity log -- what staff filed that
 // moved or will move goods on the shelf
-const STOCK_MOVE_KINDS = ['STOCK_ADJUST', 'DAMAGE', 'RETURN', 'PURCHASE_ORDER', 'PO_CONFIRMED', 'PO_DECLINED'];
+const STOCK_MOVE_KINDS = ['STOCK_ADJUST', 'DAMAGE', 'MISSING', 'RETURN', 'PURCHASE_ORDER', 'PO_CONFIRMED', 'PO_DECLINED'];
 
 function buildStockMovesPanel() {
     createDataPanel({
@@ -3058,6 +3059,7 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
         syncExportButtons();
 
         showReports();
+        unfoldSidebarAtOpenScreen();
         loadNotifications();
     });
 }
