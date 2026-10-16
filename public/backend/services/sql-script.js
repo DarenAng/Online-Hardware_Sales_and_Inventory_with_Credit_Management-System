@@ -106,4 +106,4 @@ function splitSqlStatements(sql) {
   return statements;
 }
 
-module.exports = { splitSqlStatements };
+module.exports = { splitSqlStatements: splitSqlStatements };

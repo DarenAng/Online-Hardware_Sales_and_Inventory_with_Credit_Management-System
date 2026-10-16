@@ -14,7 +14,7 @@
 //       canDecide: true,                // may this page confirm or decline (the manager's)
 //       canReceive: true,               // may this page count a delivery in (the clerk's)
 //       showPanel: showManagerPanel,    // (panelId, title) -- the page's own
-//       afterChange: () => {}           // optional; caches to drop after a write
+//       afterChange: function () {}     // optional; caches to drop after a write
 //   });
 //   buildPurchaseOrderPanel();
 
@@ -29,6 +29,28 @@ const poSetup = {
     gateText: 'Press Load Data for every order raised, or filter to the ones still pending.',
     afterChange: null
 };
+
+// The material in a list of materials with this product id, or undefined when there is none.
+function poFindProduct(products, productId) {
+    for (let i = 0; i < products.length; i++) {
+        if (products[i].product_id === productId) return products[i];
+    }
+    return undefined;
+}
+
+// true when the object has this key of its own (not one that every object inherits)
+function poHas(object, key) {
+    return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+// The items of a list that are not empty (not blank, 0, null or undefined), in the same order.
+function poKeepFilled(items) {
+    const kept = [];
+    for (let i = 0; i < items.length; i++) {
+        if (items[i]) kept.push(items[i]);
+    }
+    return kept;
+}
 
 function configurePurchaseOrders(options) {
     Object.assign(poSetup, options || {});
@@ -204,21 +226,24 @@ function makeSuggestInputHtml(id, field, attributes) {
 // used first
 function makeKnownValues(field) {
     const column = MAKE_SUGGEST_COLUMN[field];
-    const found = new Map();   // lower-case spelling -> { value, count }
+    const found = [];          // one { value, count } for each spelling, in the order first seen
+    const byKey = {};          // "k:" + lower-case spelling -> the same { value, count }
 
-    for (const p of poMaterials) {
-        const value = String(p[column] || '').trim();
+    for (let i = 0; i < poMaterials.length; i++) {
+        const value = String(poMaterials[i][column] || '').trim();
         if (value === '') continue;
-        const key = value.toLowerCase();
-        if (found.has(key)) {
-            found.get(key).count += 1;
+        const key = 'k:' + value.toLowerCase();
+        if (byKey[key]) {
+            byKey[key].count += 1;
         } else {
-            found.set(key, { value: value, count: 1 });
+            byKey[key] = { value: value, count: 1 };
+            found.push(byKey[key]);
         }
     }
 
-    return Array.from(found.values()).sort((a, b) =>
-        (b.count - a.count) || a.value.localeCompare(b.value));
+    return found.sort(function (a, b) {
+        return (b.count - a.count) || a.value.localeCompare(b.value);
+    });
 }
 
 // An empty box offers the common ones; typed text offers the ones that start
@@ -230,7 +255,7 @@ function makeSuggest(id, field) {
 
     // the list is normally in hand by now; if not, offer again once it arrives
     if (!poMaterialsLoaded) {
-        ensurePoMaterials(false).then((ok) => {
+        ensurePoMaterials(false).then(function (ok) {
             if (ok && document.activeElement === box) makeSuggest(id, field);
         });
     }
@@ -242,8 +267,16 @@ function makeSuggest(id, field) {
     if (query === '') {
         matches = known;
     } else {
-        const starts = known.filter((k) => k.value.toLowerCase().startsWith(query));
-        const words = known.filter((k) => !k.value.toLowerCase().startsWith(query) && startsAWord(k.value, query));
+        const starts = [];
+        const words = [];
+        for (let i = 0; i < known.length; i++) {
+            if (known[i].value.toLowerCase().startsWith(query)) {
+                starts.push(known[i]);
+            }
+            if (!known[i].value.toLowerCase().startsWith(query) && startsAWord(known[i].value, query)) {
+                words.push(known[i]);
+            }
+        }
         matches = starts.concat(words);
     }
     matches = matches.slice(0, MAKE_SUGGEST_LIMIT);
@@ -257,15 +290,19 @@ function makeSuggest(id, field) {
     // one list open at a time: the others (a material's, another box's) close first
     hideAllMatSuggestions(box.closest('.suggest-wrap'));
 
-    list.innerHTML = matches.map((m, i) =>
-        '<li class="suggest-item" role="option" aria-selected="false" id="' + list.id + '-' + i + '" ' +
+    let itemsHtml = '';
+    for (let i = 0; i < matches.length; i++) {
+        const m = matches[i];
+        itemsHtml += '<li class="suggest-item" role="option" aria-selected="false" id="' + list.id + '-' + i + '" ' +
             'data-value="' + escapeHtml(m.value) + '" ' +
             'onclick="makeSuggestPick(\'' + id + '\', \'' + field + '\', this)">' +
             '<span class="suggest-line">' +
                 '<span class="suggest-name">' + escapeHtml(m.value) + '</span>' +
                 '<span class="suggest-figure">' + m.count + ' material' + (m.count === 1 ? '' : 's') + '</span>' +
             '</span>' +
-        '</li>').join('');
+        '</li>';
+    }
+    list.innerHTML = itemsHtml;
     list.hidden = false;
     box.setAttribute('aria-expanded', 'true');
     box.removeAttribute('aria-activedescendant');
@@ -318,7 +355,9 @@ function makeSuggestKey(id, field, event) {
     }
 
     let at = -1;
-    items.forEach((item, i) => { if (item.classList.contains('is-active')) at = i; });
+    for (let i = 0; i < items.length; i++) {
+        if (items[i].classList.contains('is-active')) at = i;
+    }
 
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
@@ -328,10 +367,10 @@ function makeSuggestKey(id, field, event) {
         } else {
             at = (at + step + items.length) % items.length;
         }
-        items.forEach((item, i) => {
-            item.classList.toggle('is-active', i === at);
-            item.setAttribute('aria-selected', i === at ? 'true' : 'false');
-        });
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === at);
+            items[i].setAttribute('aria-selected', i === at ? 'true' : 'false');
+        }
         if (box) box.setAttribute('aria-activedescendant', items[at].id);
         if (items[at].scrollIntoView) items[at].scrollIntoView({ block: 'nearest' });
         return;
@@ -378,7 +417,7 @@ async function matInput(id, value) {
     // typing after a choice unmakes the choice
     let chosen;
     if (state.productId) {
-        chosen = poMaterials.find((p) => p.product_id === state.productId);
+        chosen = poFindProduct(poMaterials, state.productId);
     } else {
         chosen = null;
     }
@@ -401,7 +440,7 @@ function renderMatSuggestions(id, text) {
     const query = String(text || '').trim().toLowerCase();
     state.highlight = -1;
 
-    const hide = () => {
+    const hide = function () {
         list.hidden = true;
         list.innerHTML = '';
         if (box) box.setAttribute('aria-expanded', 'false');
@@ -417,18 +456,23 @@ function renderMatSuggestions(id, text) {
     } else {
         // the products whose name, category or brand starts with what was typed (at most 7)
         matches = [];
-        for (const p of choices) {
-            if (prefixMatch([p.product_name, p.category_name, p.brand_name], typed)) {
-                matches.push(p);
+        for (let i = 0; i < choices.length; i++) {
+            if (prefixMatch([choices[i].product_name, choices[i].category_name, choices[i].brand_name], typed)) {
+                matches.push(choices[i]);
             }
         }
         matches = matches.slice(0, 7);
     }
 
-    const exact = matches.some((p) => p.product_name.toLowerCase() === query);
+    let exact = false;
+    for (let i = 0; i < matches.length; i++) {
+        if (matches[i].product_name.toLowerCase() === query) exact = true;
+    }
 
-    const rows = matches.map((p) =>
-        '<li class="suggest-item" role="option" onmousedown="event.preventDefault()" ' +
+    let rows = '';
+    for (let i = 0; i < matches.length; i++) {
+        const p = matches[i];
+        rows += '<li class="suggest-item" role="option" onmousedown="event.preventDefault()" ' +
             'onclick="matPick(\'' + id + '\', ' + p.product_id + ')">' +
             '<span class="suggest-line">' +
                 '<span class="suggest-name">' + escapeHtml(p.product_name) + '</span>' +
@@ -437,7 +481,8 @@ function renderMatSuggestions(id, text) {
             '</span>' +
             '<span class="suggest-note">' + escapeHtml(p.category_name || 'No category') +
                 ' · ' + peso(p.price) + '</span>' +
-        '</li>').join('');
+        '</li>';
+    }
 
     // the way out of the list, unless the list is only being read down or the
     // typed name is already a material
@@ -467,8 +512,9 @@ function renderMatSuggestions(id, text) {
 function matHeadHtml(id, browsing, count) {
     if (!browsing) return '';
 
-    const line = (text) =>
-        '<li class="suggest-head" role="presentation">' + escapeHtml(text) + '</li>';
+    const line = function (text) {
+        return '<li class="suggest-head" role="presentation">' + escapeHtml(text) + '</li>';
+    };
 
     if (poMaterialsFailed) {
         return '<li class="suggest-item is-retry" role="option" onmousedown="event.preventDefault()" ' +
@@ -510,8 +556,11 @@ function hideMatSuggestions(id) {
 // caret reads that, and a box left claiming to be open with nothing under it
 // is how a working picker looks broken.
 function hideAllMatSuggestions(except) {
-    document.querySelectorAll('.suggest-list[id$="-list"]').forEach((list) => {
-        if (except && except.contains(list)) return;   // the box just clicked keeps its list
+    const lists = document.querySelectorAll('.suggest-list[id$="-list"]');
+    for (let i = 0; i < lists.length; i++) {
+        const list = lists[i];
+        if (except && except.contains(list)) continue;   // the box just clicked keeps its list
+        // /-list$/ matches "-list" at the very end of the id (taken off to get the box's id)
         const id = list.id.replace(/-list$/, '');
         // a material box is "<id>-box"; the New material card's boxes carry the id itself
         const box = document.getElementById(id + '-box') || document.getElementById(id);
@@ -522,7 +571,7 @@ function hideAllMatSuggestions(except) {
             box.setAttribute('aria-expanded', 'false');
             box.removeAttribute('aria-activedescendant');
         }
-    });
+    }
 }
 
 function matKey(id, event) {
@@ -545,7 +594,9 @@ function matKey(id, event) {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
         state.highlight = ((state.highlight === undefined ? -1 : state.highlight) + step + items.length) % items.length;
-        items.forEach((item, i) => item.classList.toggle('is-active', i === state.highlight));
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === state.highlight);
+        }
         const active = items[state.highlight];
         if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
         return;
@@ -568,12 +619,18 @@ function matIsOrderLine(id) { return String(id).indexOf('po-mat-') === 0; }
 
 function matChoices(id) {
     if (!matIsOrderLine(id)) return poMaterials;
-    if (poSupplier) return poMaterials.filter((p) => p.supplier_id === poSupplier.id);
+    if (poSupplier) {
+        const supplied = [];
+        for (let i = 0; i < poMaterials.length; i++) {
+            if (poMaterials[i].supplier_id === poSupplier.id) supplied.push(poMaterials[i]);
+        }
+        return supplied;
+    }
     return [];
 }
 
 function matPick(id, productId) {
-    const product = matChoices(id).find((p) => p.product_id === productId);
+    const product = poFindProduct(matChoices(id), productId);
     if (!product) return;
 
     const state = matState(id);
@@ -621,16 +678,17 @@ function renderMatDesc(id) {
     const box = document.getElementById(id + '-desc');
     if (!box) return;
 
-    const hide = () => { box.hidden = true; box.innerHTML = ''; };
-    const strip = (facts, price, per) =>
-        '<span class="mat-desc-line">' + escapeHtml(facts.filter(Boolean).join(' \u00B7 ')) + '</span>' +
-        '<span class="mat-desc-price">' + peso(price) +
-            '<span class="mat-desc-per">/ ' + escapeHtml(per) + '</span></span>';
+    const hide = function () { box.hidden = true; box.innerHTML = ''; };
+    const strip = function (facts, price, per) {
+        return '<span class="mat-desc-line">' + escapeHtml(poKeepFilled(facts).join(' \u00B7 ')) + '</span>' +
+            '<span class="mat-desc-price">' + peso(price) +
+                '<span class="mat-desc-per">/ ' + escapeHtml(per) + '</span></span>';
+    };
 
     const state = matState(id);
     let product;
     if (state.productId) {
-        product = poMaterials.find((p) => p.product_id === state.productId);
+        product = poFindProduct(poMaterials, state.productId);
     } else {
         product = null;
     }
@@ -655,7 +713,7 @@ function renderMatDesc(id) {
     const make = document.getElementById(id + '-make');
     if (!make || make.hidden || state.newName === '') { hide(); return; }
 
-    const field = (suffix) => {
+    const field = function (suffix) {
         const element = document.getElementById(id + '-' + suffix);
         return element ? element.value.trim() : '';
     };
@@ -677,7 +735,7 @@ function renderMatVerdict(id) {
     const newMode = make && !make.hidden;
 
     if (state.productId) {
-        const product = poMaterials.find((p) => p.product_id === state.productId);
+        const product = poFindProduct(poMaterials, state.productId);
         box.className = 'pick-verdict';
 
         if (product) {
@@ -711,7 +769,7 @@ function matValue(id) {
     const state = matState(id);
     const make = document.getElementById(id + '-make');
     const newMode = make && !make.hidden;
-    const field = (suffix) => {
+    const field = function (suffix) {
         const element = document.getElementById(id + '-' + suffix);
         return element ? element.value.trim() : '';
     };
@@ -762,8 +820,13 @@ async function onSupplierInput(value) {
     // a name typed out in full is the same answer as one taken from the list;
     // the server matches it anyway
     if (!poSupplier && typed !== '') {
-        poSupplier = poSuppliers.find((s) =>
-            String(s.name).toLowerCase() === typed.toLowerCase()) || null;
+        poSupplier = null;
+        for (let i = 0; i < poSuppliers.length; i++) {
+            if (String(poSuppliers[i].name).toLowerCase() === typed.toLowerCase()) {
+                poSupplier = poSuppliers[i];
+                break;
+            }
+        }
     }
 
     renderSupplierSuggestions(typed);
@@ -785,7 +848,7 @@ function renderSupplierSuggestions(text) {
     const query = String(text || '').trim().toLowerCase();
     poSupplierHighlight = -1;
 
-    const hide = () => {
+    const hide = function () {
         list.hidden = true;
         list.innerHTML = '';
         if (box) box.setAttribute('aria-expanded', 'false');
@@ -793,7 +856,11 @@ function renderSupplierSuggestions(text) {
 
     if (searchText(query) === '') { hide(); return; }
 
-    const matches = poSuppliers.filter((s) => startsAWord(s.name, query)).slice(0, 6);
+    const startsWithQuery = [];
+    for (let i = 0; i < poSuppliers.length; i++) {
+        if (startsAWord(poSuppliers[i].name, query)) startsWithQuery.push(poSuppliers[i]);
+    }
+    const matches = startsWithQuery.slice(0, 6);
 
     if (matches.length === 1 && String(matches[0].name).toLowerCase() === query) {
         hide();
@@ -801,14 +868,18 @@ function renderSupplierSuggestions(text) {
     }
     if (matches.length === 0) { hide(); return; }
 
-    list.innerHTML = matches.map((s) =>
-        '<li class="suggest-item" role="option" onmousedown="event.preventDefault()" ' +
+    let supplierItems = '';
+    for (let i = 0; i < matches.length; i++) {
+        const s = matches[i];
+        supplierItems += '<li class="suggest-item" role="option" onmousedown="event.preventDefault()" ' +
             'onclick="pickSupplier(' + s.id + ')">' +
             '<span class="suggest-name">' + escapeHtml(s.name) + '</span>' +
             '<span class="suggest-note">' +
                 escapeHtml(s.contact_person || 'No contact on file') +
                 ' · ' + s.product_count + ' material(s) supplied</span>' +
-        '</li>').join('');
+        '</li>';
+    }
+    list.innerHTML = supplierItems;
 
     list.hidden = false;
     if (box) box.setAttribute('aria-expanded', 'true');
@@ -828,7 +899,9 @@ function onSupplierKey(event) {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
         poSupplierHighlight = (poSupplierHighlight + step + items.length) % items.length;
-        items.forEach((item, i) => item.classList.toggle('is-active', i === poSupplierHighlight));
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === poSupplierHighlight);
+        }
         return;
     }
 
@@ -846,7 +919,13 @@ function onSupplierKey(event) {
 }
 
 function pickSupplier(supplierId) {
-    poSupplier = poSuppliers.find((s) => s.id === supplierId) || null;
+    poSupplier = null;
+    for (let i = 0; i < poSuppliers.length; i++) {
+        if (poSuppliers[i].id === supplierId) {
+            poSupplier = poSuppliers[i];
+            break;
+        }
+    }
     poSupplierCommitted = true;
 
     const box = document.getElementById('po-supplier');
@@ -880,8 +959,9 @@ function renderPoLinesGate() {
     if (open && supplierId !== poLinesSupplierId) {
         // has any line already got a material picked?
         let picked = false;
-        for (const row of document.querySelectorAll('.po-line')) {
-            if (matState(row.dataset.picker).productId) {
+        const lineRows = document.querySelectorAll('.po-line');
+        for (let i = 0; i < lineRows.length; i++) {
+            if (matState(lineRows[i].dataset.picker).productId) {
                 picked = true;
             }
         }
@@ -903,7 +983,9 @@ function renderPoLinesGate() {
 }
 
 function resetPurchaseLines() {
-    Object.keys(matPickers).forEach((key) => { if (matIsOrderLine(key)) delete matPickers[key]; });
+    for (const key in matPickers) {
+        if (matIsOrderLine(key)) delete matPickers[key];
+    }
 
     const lines = document.getElementById('po-lines');
     if (lines) lines.innerHTML = '';
@@ -929,9 +1011,9 @@ function renderSupplierRoster() {
 
     // the suppliers that match the search, sorted A to Z
     const rows = [];
-    for (const s of poSuppliers) {
-        if (prefixMatch([s.name, s.contact_person], query)) {
-            rows.push(s);
+    for (let i = 0; i < poSuppliers.length; i++) {
+        if (prefixMatch([poSuppliers[i].name, poSuppliers[i].contact_person], query)) {
+            rows.push(poSuppliers[i]);
         }
     }
     rows.sort(function (a, b) {
@@ -947,9 +1029,11 @@ function renderSupplierRoster() {
         return;
     }
 
-    list.innerHTML = rows.map((s) => {
+    let rosterHtml = '';
+    for (let i = 0; i < rows.length; i++) {
+        const s = rows[i];
         const active = poSupplier && poSupplier.id === s.id;
-        return '<li class="po-roster-item' + (active ? ' is-active' : '') + '" role="button" tabindex="0" ' +
+        rosterHtml += '<li class="po-roster-item' + (active ? ' is-active' : '') + '" role="button" tabindex="0" ' +
                 'onclick="chooseSupplierFromRoster(' + s.id + ')" ' +
                 'onkeydown="if (event.key === \'Enter\' || event.key === \' \') { event.preventDefault(); chooseSupplierFromRoster(' + s.id + '); }">' +
             '<span class="po-roster-line">' +
@@ -960,7 +1044,8 @@ function renderSupplierRoster() {
             '<span class="po-roster-sub">' + escapeHtml(s.contact_person || 'No contact on file') +
                 (s.contact_number ? ' · ' + escapeHtml(s.contact_number) : '') + '</span>' +
         '</li>';
-    }).join('');
+    }
+    list.innerHTML = rosterHtml;
 }
 
 function chooseSupplierFromRoster(supplierId) {
@@ -1071,7 +1156,12 @@ function addPurchaseLine(fromButton) {
 
 // the lines as they were added, oldest first (the page shows them newest first)
 function poLineRows() {
-    return Array.from(document.querySelectorAll('.po-line')).reverse();
+    const found = document.querySelectorAll('.po-line');
+    const rows = [];
+    for (let i = found.length - 1; i >= 0; i--) {
+        rows.push(found[i]);
+    }
+    return rows;
 }
 
 // A material delivered in a pack (a box of 20 kilogram) is ordered in that
@@ -1080,7 +1170,7 @@ function poLineRows() {
 // printed order reads "20 box".
 function poLinePack(row) {
     const state = matState(row.dataset.picker);
-    const product = state.productId ? poMaterials.find((p) => p.product_id === state.productId) : null;
+    const product = state.productId ? poFindProduct(poMaterials, state.productId) : null;
     if (!product || !product.pack_name || !(Number(product.pack_size) > 0)) return null;
     return { name: product.pack_name, size: Number(product.pack_size), unit: product.unit_name || 'unit' };
 }
@@ -1095,14 +1185,14 @@ function poLinePricing(row) {
     const pack = poLineIn(row);
     let product;
     if (state.productId) {
-        product = poMaterials.find((p) => p.product_id === state.productId);
+        product = poFindProduct(poMaterials, state.productId);
     } else {
         product = null;
     }
 
     const make = document.getElementById(id + '-make');
     const isNew = Boolean(make) && !make.hidden && state.newName !== '';
-    const field = (suffix) => {
+    const field = function (suffix) {
         const element = document.getElementById(id + '-' + suffix);
         return element ? element.value.trim() : '';
     };
@@ -1181,7 +1271,9 @@ function renderPoTotals() {
     let goods = 0;
     let priced = 0;
 
-    poLineRows().forEach((row, position) => {
+    const lineRows = poLineRows();
+    for (let position = 0; position < lineRows.length; position++) {
+        const row = lineRows[position];
         const index = row.id.replace('po-line-', '');
         const qty = parseInt(row.querySelector('.po-qty').value, 10) || 0;
         const pack = poLineIn(row);
@@ -1216,7 +1308,7 @@ function renderPoTotals() {
             amountBox.className = 'pick-verdict po-line-amount' + (unpriced ? ' is-stop' : '');
             amountBox.textContent = unpriced ? 'No price on file for this one.' : '';
         }
-    });
+    }
 
     const count = document.getElementById('po-line-count');
     if (count) {
@@ -1265,12 +1357,13 @@ async function handleCreatePurchaseOrder(event) {
     const rows = poLineRows();
     const items = [];
 
-    for (const row of rows) {
+    for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
         const picked = matValue(row.dataset.picker);
 
         // a material picked under another company cannot be on this order
         if (picked.ok && !picked.isNew &&
-            !matChoices(row.dataset.picker).some((p) => p.product_id === picked.productId)) {
+            !poFindProduct(matChoices(row.dataset.picker), picked.productId)) {
             notifyWarning('A line names a material ' + company + ' does not supply. ' +
                 'Pick one from their list, or add it as new.', 'Order not sent');
             const field = document.getElementById(row.dataset.picker + '-box');
@@ -1333,7 +1426,7 @@ async function handleCreatePurchaseOrder(event) {
         });
     }
 
-    const detail = (id) => {
+    const detail = function (id) {
         const element = document.getElementById(id);
         return element ? element.value.trim() : '';
     };
@@ -1376,13 +1469,15 @@ function resetPurchaseOrderForm() {
     const box = document.getElementById('po-supplier');
     if (box) box.value = '';
 
-    ['po-supplier-contact', 'po-supplier-number', 'po-supplier-email', 'po-supplier-address']
-        .forEach((id) => {
-            const field = document.getElementById(id);
-            if (field) field.value = '';
-        });
+    const detailIds = ['po-supplier-contact', 'po-supplier-number', 'po-supplier-email', 'po-supplier-address'];
+    for (let i = 0; i < detailIds.length; i++) {
+        const field = document.getElementById(detailIds[i]);
+        if (field) field.value = '';
+    }
 
-    Object.keys(matPickers).forEach((key) => delete matPickers[key]);
+    for (const key in matPickers) {
+        delete matPickers[key];
+    }
 
     const lines = document.getElementById('po-lines');
     if (lines) lines.innerHTML = '';
@@ -1427,7 +1522,13 @@ function poCanRefer(po) {
 }
 
 function poStatusWord(stage) {
-    const state = PO_STATES.find((s) => s.status === stage);
+    let state = null;
+    for (let i = 0; i < PO_STATES.length; i++) {
+        if (PO_STATES[i].status === stage) {
+            state = PO_STATES[i];
+            break;
+        }
+    }
     return state ? state.label : statusWord(stage);
 }
 
@@ -1443,10 +1544,11 @@ function poNeedsMe(po) {
 }
 
 function sortPurchaseOrders(rows) {
-    return rows.sort((a, b) =>
-        (Number(poNeedsMe(b)) - Number(poNeedsMe(a))) ||
-        String(b.order_date).localeCompare(String(a.order_date)) ||
-        (Number(b.po_id) - Number(a.po_id)));
+    return rows.sort(function (a, b) {
+        return (Number(poNeedsMe(b)) - Number(poNeedsMe(a))) ||
+            String(b.order_date).localeCompare(String(a.order_date)) ||
+            (Number(b.po_id) - Number(a.po_id));
+    });
 }
 
 // the figure an order is worth: the invoice once received, the priced lines
@@ -1484,14 +1586,22 @@ function buildPurchaseOrderPanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetPurchaseOrders(),
+        load: function () {
+            return apiGetPurchaseOrders();
+        },
 
-        match: (po, query) => prefixMatch([po.supplier_name, po.po_id, '#' + po.po_id], query),
-        filter: (po, filters) => filters.status === 'all' || poStage(po) === filters.status,
-        sort: (rows) => sortPurchaseOrders(rows),
+        match: function (po, query) {
+            return prefixMatch([po.supplier_name, po.po_id, '#' + po.po_id], query);
+        },
+        filter: function (po, filters) {
+            return filters.status === 'all' || poStage(po) === filters.status;
+        },
+        sort: function (rows) {
+            return sortPurchaseOrders(rows);
+        },
 
-        renderRow: (po, index) =>
-            '<tr class="row-clickable row-reveal' + (poNeedsMe(po) ? ' row-attention' : '') + '" ' +
+        renderRow: function (po, index) {
+            return '<tr class="row-clickable row-reveal' + (poNeedsMe(po) ? ' row-attention' : '') + '" ' +
                 'style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'title="' + poRowTitle(po) + '" ' +
                 'onclick="openPurchaseOrderDetail(' + po.po_id + ')">' +
@@ -1500,7 +1610,8 @@ function buildPurchaseOrderPanel() {
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
             '<td class="cell-num">' + po.line_count + '</td>' +
             '<td class="cell-num">' + poValueCell(po) + '</td>' +
-            '<td>' + poStatusBadge(po) + '</td></tr>'
+            '<td>' + poStatusBadge(po) + '</td></tr>';
+        }
     });
 }
 
@@ -1558,15 +1669,33 @@ function renderPurchaseTotalsSuppliers(rows) {
     const select = document.getElementById('po-totals-supplier');
     if (!select) return;
 
-    const names = new Map();
-    rows.forEach((po) => names.set(String(po.supplier_id), po.supplier_name));
-    const sorted = Array.from(names.entries()).sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+    // each supplier once: its id (as text) and name, in the order first seen
+    const sorted = [];
+    const nameOf = {};          // supplier id (as text) -> supplier name
+    for (let i = 0; i < rows.length; i++) {
+        const supplierKey = String(rows[i].supplier_id);
+        if (poHas(nameOf, supplierKey)) {
+            nameOf[supplierKey] = rows[i].supplier_name;
+            for (let j = 0; j < sorted.length; j++) {
+                if (sorted[j][0] === supplierKey) sorted[j][1] = rows[i].supplier_name;
+            }
+        } else {
+            nameOf[supplierKey] = rows[i].supplier_name;
+            sorted.push([supplierKey, rows[i].supplier_name]);
+        }
+    }
+    sorted.sort(function (a, b) {
+        return String(a[1]).localeCompare(String(b[1]));
+    });
 
     const current = select.value;
-    select.innerHTML = '<option value="all">Every supplier</option>' +
-        sorted.map((entry) => '<option value="' + escapeHtml(entry[0]) + '">' +
-            escapeHtml(entry[1]) + '</option>').join('');
-    select.value = names.has(current) ? current : 'all';
+    let supplierOptions = '';
+    for (let i = 0; i < sorted.length; i++) {
+        supplierOptions += '<option value="' + escapeHtml(sorted[i][0]) + '">' +
+            escapeHtml(sorted[i][1]) + '</option>';
+    }
+    select.innerHTML = '<option value="all">Every supplier</option>' + supplierOptions;
+    select.value = poHas(nameOf, current) ? current : 'all';
 }
 
 // this year as the order dates write it: "2026"
@@ -1585,21 +1714,30 @@ function renderPurchaseTotalsMonths(rows) {
     const select = document.getElementById('po-totals-month');
     if (!select) return;
 
-    const counts = new Map();
-    counts.set(poThisMonth(), 0);
-    rows.forEach((po) => {
-        const month = String(po.order_date).slice(0, 7);
-        counts.set(month, (counts.get(month) || 0) + 1);
-    });
-    const months = Array.from(counts.keys()).sort().reverse();
+    const months = [poThisMonth()];       // every month that has an order, this month first
+    const counts = {};                    // month -> how many orders it holds
+    counts[poThisMonth()] = 0;
+    for (let i = 0; i < rows.length; i++) {
+        const month = String(rows[i].order_date).slice(0, 7);
+        if (!poHas(counts, month)) {
+            counts[month] = 0;
+            months.push(month);
+        }
+        counts[month] = counts[month] + 1;
+    }
+    months.sort();
+    months.reverse();
 
     const panel = getDataPanel(PO_TOTALS_KEY);
     const current = panel ? panel.filters.month : poThisMonth();
 
-    select.innerHTML = months.map((month) =>
-        '<option value="' + month + '">' + escapeHtml(poMonthLabel(month)) +
-        ' (' + poOrderCount(counts.get(month)) + ')</option>').join('');
-    select.value = counts.has(current) ? current : poThisMonth();
+    let monthOptions = '';
+    for (let i = 0; i < months.length; i++) {
+        monthOptions += '<option value="' + months[i] + '">' + escapeHtml(poMonthLabel(months[i])) +
+            ' (' + poOrderCount(counts[months[i]]) + ')</option>';
+    }
+    select.innerHTML = monthOptions;
+    select.value = poHas(counts, current) ? current : poThisMonth();
 }
 
 // the same for years: every year with an order, and this year even when empty
@@ -1607,20 +1745,29 @@ function renderPurchaseTotalsYears(rows) {
     const select = document.getElementById('po-totals-year');
     if (!select) return;
 
-    const counts = new Map();
-    counts.set(poThisYear(), 0);
-    rows.forEach((po) => {
-        const year = String(po.order_date).slice(0, 4);
-        counts.set(year, (counts.get(year) || 0) + 1);
-    });
-    const years = Array.from(counts.keys()).sort().reverse();
+    const years = [poThisYear()];         // every year that has an order, this year first
+    const counts = {};                    // year -> how many orders it holds
+    counts[poThisYear()] = 0;
+    for (let i = 0; i < rows.length; i++) {
+        const year = String(rows[i].order_date).slice(0, 4);
+        if (!poHas(counts, year)) {
+            counts[year] = 0;
+            years.push(year);
+        }
+        counts[year] = counts[year] + 1;
+    }
+    years.sort();
+    years.reverse();
 
     const panel = getDataPanel(PO_TOTALS_KEY);
     const current = panel ? panel.filters.year : poThisYear();
 
-    select.innerHTML = years.map((year) =>
-        '<option value="' + year + '">' + year + ' (' + poOrderCount(counts.get(year)) + ')</option>').join('');
-    select.value = counts.has(current) ? current : poThisYear();
+    let yearOptions = '';
+    for (let i = 0; i < years.length; i++) {
+        yearOptions += '<option value="' + years[i] + '">' + years[i] + ' (' + poOrderCount(counts[years[i]]) + ')</option>';
+    }
+    select.innerHTML = yearOptions;
+    select.value = poHas(counts, current) ? current : poThisYear();
 }
 
 // The Period box decides which second box shows: Month for Every Month,
@@ -1640,10 +1787,11 @@ function syncPurchaseTotalsPeriod() {
 
 // a period, month or year replaces any dates typed, and the dates replace them
 function clearPurchaseTotalsDates(panel) {
-    ['po-totals-from', 'po-totals-to'].forEach((id) => {
-        const box = document.getElementById(id);
+    const dateIds = ['po-totals-from', 'po-totals-to'];
+    for (let i = 0; i < dateIds.length; i++) {
+        const box = document.getElementById(dateIds[i]);
         if (box) box.value = '';
-    });
+    }
     panel.filters.from = '';
     panel.filters.to = '';
 }
@@ -1681,10 +1829,10 @@ function purchaseTotalsYear(value) {
 // orders still left out (they were never bought); loads the list if needed
 function purchaseTotalsShowAll() {
     const boxes = { 'po-totals-from': '', 'po-totals-to': '', 'po-totals-supplier': 'all' };
-    Object.keys(boxes).forEach((id) => {
+    for (const id in boxes) {
         const box = document.getElementById(id);
         if (box) box.value = boxes[id];
-    });
+    }
 
     const panel = getDataPanel(PO_TOTALS_KEY);
     if (!panel) return;
@@ -1704,10 +1852,16 @@ function renderPurchaseTotalsFigures() {
     const panel = getDataPanel(PO_TOTALS_KEY);
     const ready = panel && panel.state === 'ready';
     const orders = ready ? panel.visible : [];
-    const total = orders.reduce((sum, po) => sum + poOrderValue(po), 0);
-    const units = orders.reduce((sum, po) => sum + (Number(po.total_units) || 0), 0);
+    let total = 0;
+    let units = 0;
+    for (let i = 0; i < orders.length; i++) {
+        total = total + poOrderValue(orders[i]);
+        units = units + (Number(orders[i].total_units) || 0);
+    }
     const average = orders.length === 0 ? 0 : total / orders.length;
-    const shown = (text) => ready ? text : '—';
+    const shown = function (text) {
+        return ready ? text : '—';
+    };
 
     const f = panel ? panel.filters : {};
     let covers = 'the orders the filters leave in';
@@ -1721,12 +1875,15 @@ function renderPurchaseTotalsFigures() {
         ['Average Order', shown(peso(average)), 'per purchase order']
     ];
 
-    grid.innerHTML = kpis.map((k) =>
-        '<div class="kpi-card">' +
+    let cards = '';
+    for (let i = 0; i < kpis.length; i++) {
+        const k = kpis[i];
+        cards += '<div class="kpi-card">' +
         '<span class="kpi-label">' + k[0] + '</span>' +
         '<span class="kpi-value">' + escapeHtml(k[1]) + '</span>' +
-        '<span class="kpi-note">' + k[2] + '</span></div>'
-    ).join('');
+        '<span class="kpi-note">' + k[2] + '</span></div>';
+    }
+    grid.innerHTML = cards;
 }
 
 function buildPurchaseTotalsPanel() {
@@ -1754,9 +1911,11 @@ function buildPurchaseTotalsPanel() {
             text: 'No purchase order was raised this month. Pick another month above, or Every Year or All Time.'
         },
 
-        load: () => apiGetPurchaseOrders(),
+        load: function () {
+            return apiGetPurchaseOrders();
+        },
 
-        filter: (po, f) => {
+        filter: function (po, f) {
             const day = String(po.order_date).slice(0, 10);
             if (f.period === 'month' && day.slice(0, 7) !== f.month) return false;
             if (f.period === 'year' && day.slice(0, 4) !== f.year) return false;
@@ -1766,24 +1925,31 @@ function buildPurchaseTotalsPanel() {
             if (f.to && day > f.to) return false;
             return true;
         },
-        sort: (rows) => rows.sort((a, b) =>
-            String(b.order_date).localeCompare(String(a.order_date)) || (Number(b.po_id) - Number(a.po_id))),
+        sort: function (rows) {
+            return rows.sort(function (a, b) {
+                return String(b.order_date).localeCompare(String(a.order_date)) || (Number(b.po_id) - Number(a.po_id));
+            });
+        },
         // the month, year and supplier lists count only what the report can list
-        onLoaded: (rows) => {
-            const bought = rows.filter((po) => po.status !== 'Cancelled');
+        onLoaded: function (rows) {
+            const bought = [];
+            for (let i = 0; i < rows.length; i++) {
+                if (rows[i].status !== 'Cancelled') bought.push(rows[i]);
+            }
             renderPurchaseTotalsSuppliers(bought);
             renderPurchaseTotalsMonths(bought);
             renderPurchaseTotalsYears(bought);
             syncPurchaseTotalsPeriod();
         },
 
-        renderRow: (po, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+        renderRow: function (po, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'title="Open this order" onclick="openPurchaseOrderDetail(' + po.po_id + ')">' +
             '<td class="cell-id">#' + po.po_id + '</td>' +
             '<td class="cell-name">' + escapeHtml(po.supplier_name) + '</td>' +
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
-            '<td class="cell-num">' + peso(poOrderValue(po)) + '</td></tr>'
+            '<td class="cell-num">' + peso(poOrderValue(po)) + '</td></tr>';
+        }
     });
 
     // before anything loads, the Month and Year boxes already name this month and year
@@ -1792,7 +1958,7 @@ function buildPurchaseTotalsPanel() {
     syncPurchaseTotalsPeriod();
 
     // the figures follow the table: every load, filter and Clear redraws them
-    document.addEventListener('datapanel:change', (event) => {
+    document.addEventListener('datapanel:change', function (event) {
         if (event.detail && event.detail.key === PO_TOTALS_KEY) renderPurchaseTotalsFigures();
     });
     renderPurchaseTotalsFigures();
@@ -1848,10 +2014,12 @@ async function printPurchaseOrder(poId) {
     printPurchaseOrderNow();
 }
 
-// only the order's document reaches the paper (purchase-orders.css)
+// only the order's document reaches the paper (the styles are in the Purchase
+// orders section at the end of css/shared/responsive.css, with css/pages/manager.css
+// and css/pages/inventory-dashboard.css)
 function printPurchaseOrderNow() {
     document.body.classList.add('printing-po');
-    const done = () => {
+    const done = function () {
         document.body.classList.remove('printing-po');
         window.removeEventListener('afterprint', done);
     };
@@ -1889,14 +2057,16 @@ function renderPurchaseOrderDocument() {
     // add up the quantities and the costs of all the lines
     let units = 0;
     let goods = 0;
-    for (const item of items) {
-        units = units + Number(item.quantity || 0);
-        goods = goods + Number(item.line_cost || 0);
+    for (let i = 0; i < items.length; i++) {
+        units = units + Number(items[i].quantity || 0);
+        goods = goods + Number(items[i].line_cost || 0);
     }
     const ordered = String(order.order_date || '').slice(0, 10);
 
-    const lines = items.map((item, index) =>
-        '<tr>' +
+    let lines = '';
+    for (let index = 0; index < items.length; index++) {
+        const item = items[index];
+        lines += '<tr>' +
             '<td class="num">' + (index + 1) + '</td>' +
             '<td><strong>' + escapeHtml(item.product_name) + '</strong>' +
                 (item.brand_name ? '<br><span class="po-doc-party-line">' +
@@ -1907,7 +2077,8 @@ function renderPurchaseOrderDocument() {
                 '<br><span class="po-doc-party-line">per ' +
                 escapeHtml(item.unit_name || 'unit') + '</span></td>' +
             '<td class="num">' + peso(item.line_cost) + '</td>' +
-        '</tr>').join('');
+        '</tr>';
+    }
 
     box.innerHTML =
         '<div class="po-doc-actions no-print">' +
@@ -2041,8 +2212,10 @@ function renderReceiveSheet() {
             (poReceiving.order ? ' · ' + poReceiving.order.supplier_name : '');
     }
 
-    box.innerHTML = poReceiving.items.map((item, index) =>
-        '<div class="recv-line" data-recv-index="' + index + '" data-product="' + item.product_id + '">' +
+    let sheet = '';
+    for (let index = 0; index < poReceiving.items.length; index++) {
+        const item = poReceiving.items[index];
+        sheet += '<div class="recv-line" data-recv-index="' + index + '" data-product="' + item.product_id + '">' +
             '<div>' +
                 '<div class="recv-name">' + escapeHtml(item.product_name) + '</div>' +
                 '<div class="recv-meta">' + escapeHtml(item.category_name || 'No category') + '</div>' +
@@ -2066,7 +2239,9 @@ function renderReceiveSheet() {
                        'value="' + recvOrderedCost(item) + '">' +
             '</div>' +
             '<div class="recv-verdict is-exact" id="recv-verdict-' + index + '">As ordered</div>' +
-        '</div>').join('');
+        '</div>';
+    }
+    box.innerHTML = sheet;
 
     const extras = document.getElementById('recv-extras');
     if (extras) extras.innerHTML = '';
@@ -2076,13 +2251,16 @@ function renderReceiveSheet() {
 // ordered in packs, per unit otherwise.
 function receiveLineAmounts() {
     if (!poReceiving) return [];
-    return poReceiving.items.map((item, index) => {
+    const amounts = [];
+    for (let index = 0; index < poReceiving.items.length; index++) {
+        const item = poReceiving.items[index];
         const qtyField = document.getElementById('recv-qty-' + index);
         const costField = document.getElementById('recv-cost-' + index);
         const counted = Math.max(0, parseInt(qtyField ? qtyField.value : recvOrderedCount(item), 10) || 0);
         const cost = Math.max(0, parseFloat(costField ? costField.value : 0) || 0);
-        return { counted: counted, cost: cost, amount: counted * cost };
-    });
+        amounts.push({ counted: counted, cost: cost, amount: counted * cost });
+    }
+    return amounts;
 }
 
 // a line ordered in packs is counted in at the door in packs
@@ -2179,19 +2357,22 @@ async function submitReceiveOrder() {
     if (!poReceiving) return;
 
     const amounts = receiveLineAmounts();
-    const received = poReceiving.items.map((item, index) => {
-        const counted = amounts[index].counted;
+    const received = [];
+    for (let i = 0; i < poReceiving.items.length; i++) {
+        const item = poReceiving.items[i];
+        const counted = amounts[i].counted;
         const pack = recvPackOf(item);
-        return {
+        received.push({
             productId: item.product_id,
             // packs at the door become the unit on the shelf, and a cost per pack a cost per unit
             quantity: pack ? Math.round(counted * pack.size) : counted,
-            unitCost: pack ? Math.round(amounts[index].cost / pack.size * 100) / 100 : amounts[index].cost
-        };
-    });
+            unitCost: pack ? Math.round(amounts[i].cost / pack.size * 100) / 100 : amounts[i].cost
+        });
+    }
     const extras = document.querySelectorAll('#recv-extras .recv-line');
 
-    for (const row of extras) {
+    for (let e = 0; e < extras.length; e++) {
+        const row = extras[e];
         const index = row.id.replace('recv-extra-', '');
         const picked = matValue(row.dataset.picker);
 
@@ -2224,8 +2405,11 @@ async function submitReceiveOrder() {
         });
     }
 
-    const short = received.filter((line, i) =>
-        i < poReceiving.items.length && line.quantity < poReceiving.items[i].quantity).length;
+    // how many ordered lines came in under what was ordered
+    let short = 0;
+    for (let i = 0; i < received.length; i++) {
+        if (i < poReceiving.items.length && received[i].quantity < poReceiving.items[i].quantity) short++;
+    }
 
     const yes = await askConfirm(
         'The figures on this sheet go straight onto the shelf, and purchase order #' +
@@ -2246,7 +2430,9 @@ async function submitReceiveOrder() {
         poReceiving = null;
         poMaterialsLoaded = false;
 
-        Object.keys(matPickers).forEach((key) => delete matPickers[key]);
+        for (const key in matPickers) {
+            delete matPickers[key];
+        }
 
         showPurchaseOrderHistory();
         await refreshPurchaseOrders();
@@ -2361,9 +2547,12 @@ async function openPurchaseOrderDetail(poId) {
         '</div>';
 
     // the lines themselves, so an order is read before it is confirmed
-    const priced = items.some((item) => Number(item.unit_cost) > 0);
+    let priced = false;
+    for (let i = 0; i < items.length; i++) {
+        if (Number(items[i].unit_cost) > 0) priced = true;
+    }
     // a price the supplier corrected from the link shows the shop's own struck through
-    const unitCostCell = (it) => {
+    const unitCostCell = function (it) {
         const original = it.original_unit_cost;
         if (original === null || original === undefined || Number(original) === Number(it.unit_cost)) {
             return peso(it.unit_cost);
@@ -2372,14 +2561,20 @@ async function openPurchaseOrderDetail(poId) {
             ' <span class="po-answer is-warn">supplier\'s price</span>';
     };
     let lines;
+    const lineRows = [];
     if (priced) {
-        lines = detailTable(['Material', 'Qty', 'Unit Cost', 'Line Cost'],
-                items.map((it) => [
-                    escapeHtml(it.product_name), escapeHtml(poQuantityText(it)), unitCostCell(it), peso(it.line_cost)
-                ]), [1, 2, 3]);
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            lineRows.push([
+                escapeHtml(it.product_name), escapeHtml(poQuantityText(it)), unitCostCell(it), peso(it.line_cost)
+            ]);
+        }
+        lines = detailTable(['Material', 'Qty', 'Unit Cost', 'Line Cost'], lineRows, [1, 2, 3]);
     } else {
-        lines = detailTable(['Material', 'Qty'],
-                items.map((it) => [escapeHtml(it.product_name), escapeHtml(poQuantityText(it))]), [1]);
+        for (let i = 0; i < items.length; i++) {
+            lineRows.push([escapeHtml(items[i].product_name), escapeHtml(poQuantityText(items[i]))]);
+        }
+        lines = detailTable(['Material', 'Qty'], lineRows, [1]);
     }
 
     // how to reach the supplier, under the order's facts (the name is in the facts already)
@@ -2454,7 +2649,9 @@ async function decidePurchaseOrder(poId, approve) {
             placeholder: 'Say what the clerk should do instead',
             confirmLabel: 'Decline the order',
             tone: 'danger',
-            check: (value) => String(value).trim().length < 5 ? 'Give a reason the clerk can act on.' : null
+            check: function (value) {
+                return String(value).trim().length < 5 ? 'Give a reason the clerk can act on.' : null;
+            }
         });
         if (asked === false || asked === null) return;
         note = String(asked).trim();

@@ -256,7 +256,7 @@ function requireRole(roles) {
       if (request.actor) {
         who = request.actor.roleName;
       }
-      return response.status(403).json({ error: `A ${who} cannot use this feature.` });
+      return response.status(403).json({ error: "A " + who + " cannot use this feature." });
     }
     next();   // allowed: go on to the real route
   };
@@ -278,7 +278,8 @@ function notOwnAccount(request, response, next) {
 
 // finds who may use a route; null means no rule (so it is refused)
 function findRule(method, pathname) {
-  for (const rule of ACCESS_RULES) {
+  for (let ruleIndex = 0; ruleIndex < ACCESS_RULES.length; ruleIndex++) {
+    const rule = ACCESS_RULES[ruleIndex];
     const ruleMethod = rule[0];
     const pattern = rule[1];
     const allowed = rule[2];
@@ -315,8 +316,8 @@ async function accessHook(request, response, next) {
                    request.path.startsWith("/api/password-reset/");
 
   if (isWrite && !isSignIn && (await proceduresAreMissing())) {
-    console.error(`Refused ${request.method} ${request.path}: ` +
-      `${proceduresLoadedCount()} of ${EXPECTED_PROCEDURES} stored procedures are loaded.`);
+    console.error("Refused " + request.method + " " + request.path + ": " +
+      proceduresLoadedCount() + " of " + EXPECTED_PROCEDURES + " stored procedures are loaded.");
     return response.status(503).json({ error: procedureAdvice() });
   }
 
@@ -348,39 +349,42 @@ async function accessHook(request, response, next) {
     try {
       held = await heldFeatures(session.roleName);
     } catch (error) {
-      held = { held: new Set(), granted: new Set() };
+      // (held and granted are objects of screen keys, the same shape heldFeatures() gives back)
+      held = { held: {}, granted: {} };
     }
 
     // the screens using this route that the role still has switched on
     const stillHeld = [];
-    for (const feature of covering) {
-      if (held.held.has(feature.key)) {
+    for (let featureIndex = 0; featureIndex < covering.length; featureIndex++) {
+      const feature = covering[featureIndex];
+      if (held.held[feature.key] === true) {
         stillHeld.push(feature);
       }
     }
     if (stillHeld.length === 0) {
       return response.status(403).json({
-        error: `${covering[0].name} has been switched off for ${session.roleName} accounts. ` +
+        error: covering[0].name + " has been switched off for " + session.roleName + " accounts. " +
                "The System Administrator turns screens on and off under Access Control."
       });
     }
 
     // was one of those screens given to the role by the administrator?
     let givenByGrant = false;
-    for (const feature of stillHeld) {
-      if (held.granted.has(feature.key)) {
+    for (let featureIndex = 0; featureIndex < stillHeld.length; featureIndex++) {
+      const feature = stillHeld[featureIndex];
+      if (held.granted[feature.key] === true) {
         givenByGrant = true;
       }
     }
 
     if (!byRole && !givenByGrant) {
       return response.status(403).json({
-        error: `A ${session.roleName} cannot use this feature.`
+        error: "A " + session.roleName + " cannot use this feature."
       });
     }
   } else if (!byRole) {
     return response.status(403).json({
-      error: `A ${session.roleName} cannot use this feature.`
+      error: "A " + session.roleName + " cannot use this feature."
     });
   }
 
@@ -392,7 +396,8 @@ async function accessHook(request, response, next) {
   // frozen the moment the answer is sent (Vercel), and the screen that made
   // the write never sees an older version than its own change.
   let changesNothing = false;
-  for (const pattern of CHANGES_NOTHING) {
+  for (let patternIndex = 0; patternIndex < CHANGES_NOTHING.length; patternIndex++) {
+    const pattern = CHANGES_NOTHING[patternIndex];
     if (pattern.test(request.path)) {
       changesNothing = true;
     }
@@ -401,13 +406,17 @@ async function accessHook(request, response, next) {
   const scope = scopeOf(request.path);
   if (request.method !== "GET" && request.method !== "HEAD" && !changesNothing && scope) {
     const sendAnswer = response.end;
-    response.end = function (...args) {
+    response.end = function () {
+      // the arguments response.end was called with, passed on unchanged
+      const endArguments = arguments;
       response.end = sendAnswer;
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        return sendAnswer.apply(response, args);
+        return sendAnswer.apply(response, endArguments);
       }
-      recordChange(scope, `${request.method} ${request.path}`, request.headers["x-client-id"] || null)
-        .finally(() => sendAnswer.apply(response, args));
+      recordChange(scope, request.method + " " + request.path, request.headers["x-client-id"] || null)
+        .finally(function () {
+          sendAnswer.apply(response, endArguments);
+        });
       return response;
     };
   }
@@ -415,4 +424,4 @@ async function accessHook(request, response, next) {
   next();
 }
 
-module.exports = { requireRole, notOwnAccount, accessHook };
+module.exports = { requireRole: requireRole, notOwnAccount: notOwnAccount, accessHook: accessHook };

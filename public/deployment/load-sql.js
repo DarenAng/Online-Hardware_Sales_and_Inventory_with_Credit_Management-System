@@ -18,8 +18,10 @@ const fs = require("fs");
 const path = require("path");
 const dotenv = require("dotenv");
 const mysql = require("mysql2/promise");
-const { splitSqlStatements } = require("../backend/services/sql-script");
-const { cleanCertificate } = require("../backend/database/connection");
+const sqlScript = require("../backend/services/sql-script");
+const splitSqlStatements = sqlScript.splitSqlStatements;
+const connectionFile = require("../backend/database/connection");
+const cleanCertificate = connectionFile.cleanCertificate;
 
 const ROOT = path.join(__dirname, "..", "..");
 
@@ -27,10 +29,17 @@ function readArguments(argv) {
   const options = { env: ".env", database: null, yes: false, files: [] };
   for (let i = 0; i < argv.length; i++) {
     const word = argv[i];
-    if (word === "--env") options.env = argv[++i];
-    else if (word === "--database") options.database = argv[++i];
-    else if (word === "--yes") options.yes = true;
-    else options.files.push(word);
+    if (word === "--env") {
+      i += 1;                       // the word after --env is the file name
+      options.env = argv[i];
+    } else if (word === "--database") {
+      i += 1;                       // the word after --database is the database name
+      options.database = argv[i];
+    } else if (word === "--yes") {
+      options.yes = true;
+    } else {
+      options.files.push(word);
+    }
   }
   return options;
 }
@@ -54,20 +63,24 @@ async function main() {
 
   const envPath = path.resolve(ROOT, options.env);
   if (!fs.existsSync(envPath)) {
-    console.error(`No settings file at ${envPath}.`);
+    console.error("No settings file at " + envPath + ".");
     process.exit(1);
   }
   dotenv.config({ path: envPath, override: true, quiet: true });
 
   // read every file first, so a missing one stops us before anything runs
-  const scripts = options.files.map((file) => {
+  const scripts = [];
+  for (let fileIndex = 0; fileIndex < options.files.length; fileIndex++) {
+    const file = options.files[fileIndex];
     const fullPath = path.resolve(process.cwd(), file);
-    return { file: file, sql: fs.readFileSync(fullPath, "utf8") };
-  });
+    scripts.push({ file: file, sql: fs.readFileSync(fullPath, "utf8") });
+  }
 
-  for (const script of scripts) {
+  for (let scriptIndex = 0; scriptIndex < scripts.length; scriptIndex++) {
+    const script = scripts[scriptIndex];
+    // the words "drop database" with any white space between them
     if (/drop\s+database/i.test(script.sql) && !options.yes) {
-      console.error(`${script.file} drops a whole database and puts the demo data back.`);
+      console.error(script.file + " drops a whole database and puts the demo data back.");
       console.error("Add --yes if that is what you want. Nothing was run.");
       process.exit(1);
     }
@@ -82,31 +95,32 @@ async function main() {
     password: process.env.DB_PASSWORD || "",
     ssl: sslOptions()
   });
-  console.log(`Connected to ${host}:${port}${sslOptions() ? " over SSL" : ""}.`);
+  console.log("Connected to " + host + ":" + port + (sslOptions() ? " over SSL" : "") + ".");
 
   try {
     await connection.query("SET FOREIGN_KEY_CHECKS = 0");
     if (options.database) {
-      await connection.query(`CREATE DATABASE IF NOT EXISTS ${mysql.escapeId(options.database)}`);
-      await connection.query(`USE ${mysql.escapeId(options.database)}`);
+      await connection.query("CREATE DATABASE IF NOT EXISTS " + mysql.escapeId(options.database));
+      await connection.query("USE " + mysql.escapeId(options.database));
     }
 
-    for (const script of scripts) {
+    for (let scriptIndex = 0; scriptIndex < scripts.length; scriptIndex++) {
+      const script = scripts[scriptIndex];
       const statements = splitSqlStatements(script.sql);
-      console.log(`${script.file}: ${statements.length} statements`);
+      console.log(script.file + ": " + statements.length + " statements");
 
       for (let i = 0; i < statements.length; i++) {
         try {
           await connection.query(statements[i]);
         } catch (error) {
-          console.error(`\nStatement ${i + 1} of ${script.file} failed: ${error.message}`);
+          console.error("\nStatement " + (i + 1) + " of " + script.file + " failed: " + error.message);
           console.error(statements[i].slice(0, 300));
           process.exitCode = 1;
           return;
         }
-        if ((i + 1) % 100 === 0) process.stdout.write(`  ${i + 1}...\r`);
+        if ((i + 1) % 100 === 0) process.stdout.write("  " + (i + 1) + "...\r");
       }
-      console.log(`  done.          `);
+      console.log("  done.          ");
     }
 
     await connection.query("SET FOREIGN_KEY_CHECKS = 1");
@@ -115,7 +129,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch(function (error) {
   console.error("Failed:", error.message);
   process.exit(1);
 });

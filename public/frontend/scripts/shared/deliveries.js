@@ -60,13 +60,14 @@ function deliveryStepper(d) {
     // the Delivered step shows when it happened
     if (d.status === 'Delivered' && d.delivered_at) notes[3] = escapeHtml(d.delivered_at);
 
-    const items = names.map((name, i) =>
-        '<li class="dstep-item ' + states[i] + '">' +
+    let items = '';
+    for (let i = 0; i < names.length; i++) {
+        items += '<li class="dstep-item ' + states[i] + '">' +
             '<span class="dstep-dot">' + (states[i] === 'done' ? '&#10003;' : (i + 1)) + '</span>' +
-            '<span class="dstep-text"><span class="dstep-name">' + name + '</span>' +
+            '<span class="dstep-text"><span class="dstep-name">' + names[i] + '</span>' +
             '<span class="dstep-note">' + notes[i] + '</span></span>' +
-        '</li>'
-    ).join('');
+        '</li>';
+    }
 
     // the one line on the right
     let summary;
@@ -180,7 +181,11 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
     let updateBody = '';
     if (canUpdate) {
         // only the driver at the door can say Delivered; the procedure refuses anyone else
-        const next = (NEXT_DELIVERY_STATUS[d.status] || []).filter((s) => isDriver || s !== 'Delivered');
+        const allowed = NEXT_DELIVERY_STATUS[d.status] || [];
+        const next = [];
+        for (let i = 0; i < allowed.length; i++) {
+            if (isDriver || allowed[i] !== 'Delivered') next.push(allowed[i]);
+        }
 
         updateBody = next.length === 0
             ? '<p class="detail-note">This delivery is closed. Nothing further can be recorded against it.</p>' + archiveBlock
@@ -190,17 +195,19 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
 
         pages.push({ label: 'Update', body: updateBody });
 
-        footActions = next.map((s) => {
+        for (let i = 0; i < next.length; i++) {
+            const s = next[i];
             // The driver collects what is owed on their own delivery before it is closed,
             // so Delivered becomes Proceed to Payment. Nothing owed: plain Delivered.
             const mine = typeof isMine === 'function' && isMine(d);
             if (s === 'Delivered' && isDriver && mine && Number(d.balance_due) > 0) {
-                return '<button type="button" class="btn btn-success" ' +
+                footActions += '<button type="button" class="btn btn-success" ' +
                     'onclick="proceedToPayment(' + d.delivery_id + ')">Proceed to Payment</button>';
+            } else {
+                footActions += '<button type="button" class="btn ' + (DELIVERY_STATUS_BUTTON[s] || 'btn-accent') + '" ' +
+                    'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'' + s + '\')">' + s + '</button>';
             }
-            return '<button type="button" class="btn ' + (DELIVERY_STATUS_BUTTON[s] || 'btn-accent') + '" ' +
-                'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'' + s + '\')">' + s + '</button>';
-        }).join('');
+        }
     }
 
     // The driver's refund at the door: only on their own delivery, once the
@@ -256,7 +263,8 @@ async function fillDeliveryItems(deliveryId, page, pages) {
         // count the pieces: a measured item (like 2.5 kg of nails) counts as 1 piece
         let pieces = 0;
         const rows = [];
-        for (const it of items) {
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
             if (isMeasuredUnit(it.unit_name)) {
                 pieces = pieces + 1;
             } else {

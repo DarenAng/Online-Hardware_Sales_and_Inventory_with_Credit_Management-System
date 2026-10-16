@@ -29,13 +29,16 @@ function wordStartSearch(columns, text, params) {
 
   // "%" then the separator then the text; the separator is escaped as well, since "_" is a wildcard
   const patterns = [atStart];
-  for (const separator of WORD_SEPARATORS) {
+  for (let separatorIndex = 0; separatorIndex < WORD_SEPARATORS.length; separatorIndex++) {
+    const separator = WORD_SEPARATORS[separatorIndex];
     patterns.push("%" + separator.replace(/[\\%_]/g, "\\$&") + atStart);
   }
 
   const tests = [];
-  for (const column of columns) {
-    for (const pattern of patterns) {
+  for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+    const column = columns[columnIndex];
+    for (let patternIndex = 0; patternIndex < patterns.length; patternIndex++) {
+      const pattern = patterns[patternIndex];
       tests.push(column + " LIKE ?");
       params.push(pattern);
     }
@@ -48,4 +51,8 @@ function isDateText(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
 
-module.exports = { searchPrefix, wordStartSearch, isDateText };
+module.exports = {
+  searchPrefix: searchPrefix,
+  wordStartSearch: wordStartSearch,
+  isDateText: isDateText
+};

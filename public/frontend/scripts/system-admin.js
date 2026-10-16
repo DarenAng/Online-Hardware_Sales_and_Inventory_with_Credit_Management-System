@@ -32,15 +32,18 @@ const ADMIN_TITLES = {
 function showPanel(panelId, event) {
     if (event) event.preventDefault();
 
-    document.querySelectorAll('[data-panel]').forEach((panel) => {
+    const allPanels = document.querySelectorAll('[data-panel]');
+    for (let i = 0; i < allPanels.length; i++) {
+        const panel = allPanels[i];
         panel.style.display = panel.id === panelId ? 'block' : 'none';
-    });
+    }
 
     const opened = document.getElementById(panelId);
     const linkedTo = (opened && opened.getAttribute('data-panel-of')) || panelId;
-    document.querySelectorAll('[data-panel-link]').forEach((link) => {
-        link.classList.toggle('active', link.dataset.panelLink === linkedTo);
-    });
+    const links = document.querySelectorAll('[data-panel-link]');
+    for (let i = 0; i < links.length; i++) {
+        links[i].classList.toggle('active', links[i].dataset.panelLink === linkedTo);
+    }
 
     const heading = document.getElementById('admin-page-title');
     if (heading) heading.textContent = ADMIN_TITLES[panelId] || 'System Administration';
@@ -99,30 +102,40 @@ async function loadRoles() {
 
         systemRoles = await response.json();
 
-        const options = systemRoles
-            .map((role) => `<option value="${role.role_id}">${escapeHtml(role.role_name)}</option>`)
-            .join('');
+        let options = '';
+        for (let i = 0; i < systemRoles.length; i++) {
+            const role = systemRoles[i];
+            options += '<option value="' + role.role_id + '">' + escapeHtml(role.role_name) + '</option>';
+        }
 
-        document.querySelectorAll('[data-role-select]').forEach((select) => {
-            select.innerHTML = options;
-        });
+        const roleSelects = document.querySelectorAll('[data-role-select]');
+        for (let i = 0; i < roleSelects.length; i++) {
+            roleSelects[i].innerHTML = options;
+        }
 
-        document.querySelectorAll('[data-role-filter]').forEach((select) => {
+        const roleFilters = document.querySelectorAll('[data-role-filter]');
+        for (let i = 0; i < roleFilters.length; i++) {
+            const select = roleFilters[i];
             select.innerHTML = '<option value="all">Every role</option>' + options;
 
             // a role chosen before the list arrived (a table loaded again after a reload) stays shown
             const users = getDataPanel('admin-users');
             if (users) setBoxValue(select, users.filters.roleId);
-        });
+        }
 
         // the audit trail keeps the role's name as it was at the time, so it filters by name
-        document.querySelectorAll('[data-log-role-filter]').forEach((select) => {
+        let nameOptions = '';
+        for (let i = 0; i < systemRoles.length; i++) {
+            const roleName = escapeHtml(systemRoles[i].role_name);
+            nameOptions += '<option value="' + roleName + '">' + roleName + '</option>';
+        }
+        const logFilters = document.querySelectorAll('[data-log-role-filter]');
+        for (let i = 0; i < logFilters.length; i++) {
+            const select = logFilters[i];
             const chosen = select.value;
-            select.innerHTML = '<option value="all">Every role</option>' + systemRoles
-                .map((role) => `<option value="${escapeHtml(role.role_name)}">${escapeHtml(role.role_name)}</option>`)
-                .join('');
+            select.innerHTML = '<option value="all">Every role</option>' + nameOptions;
             setBoxValue(select, chosen);
-        });
+        }
     } catch (error) {
         console.error('Unable to load roles:', error);
     }
@@ -214,28 +227,32 @@ function buildUsersPanel() {
             button: 'Load Data'
         },
 
-        load: () => {
+        load: function () {
             const status = currentStatusFilter();
             const query = status === 'all' ? '' : '?status=' + encodeURIComponent(status);
             return apiGetStaff(query);
         },
 
-        match: (user, query) => prefixMatch(userSearchFields(user), query),
+        match: function (user, query) {
+            return prefixMatch(userSearchFields(user), query);
+        },
 
-        filter: (user, filters) => {
+        filter: function (user, filters) {
             if (filters.roleId !== 'all' && String(user.role_id) !== String(filters.roleId)) return false;
             return true;
         },
 
-        renderRow: (user, index) => `
-            <tr class="row-clickable row-reveal" style="animation-delay: ${(index % 10) * 28}ms"
-                onclick="openUserModal(${user.staff_id})" title="Click to view full details">
-                <td class="cell-id">#${escapeHtml(user.staff_id)}</td>
-                <td class="cell-name">${escapeHtml(staffName(user))}</td>
-                <td>${user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>'}</td>
-                <td>${escapeHtml(user.role_name)}</td>
-                <td>${accountCell(user)}</td>
-            </tr>`
+        renderRow: function (user, index) {
+            return '\n' +
+                '            <tr class="row-clickable row-reveal" style="animation-delay: ' + ((index % 10) * 28) + 'ms"\n' +
+                '                onclick="openUserModal(' + user.staff_id + ')" title="Click to view full details">\n' +
+                '                <td class="cell-id">#' + escapeHtml(user.staff_id) + '</td>\n' +
+                '                <td class="cell-name">' + escapeHtml(staffName(user)) + '</td>\n' +
+                '                <td>' + (user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>') + '</td>\n' +
+                '                <td>' + escapeHtml(user.role_name) + '</td>\n' +
+                '                <td>' + accountCell(user) + '</td>\n' +
+                '            </tr>';
+        }
     });
 }
 
@@ -309,11 +326,12 @@ async function openUserModal(staffId) {
     const own = isOwnAccount(selectedUser);
     document.getElementById('modal-own-note').style.display = own ? 'block' : 'none';
     document.getElementById('modal-edit-tab').style.display = own ? 'none' : '';
-    ['modal-login-btn', 'modal-hold-btn', 'modal-reset-btn', 'modal-status-btn'].forEach((id) => {
-        const button = document.getElementById(id);
+    const buttonIds = ['modal-login-btn', 'modal-hold-btn', 'modal-reset-btn', 'modal-status-btn'];
+    for (let i = 0; i < buttonIds.length; i++) {
+        const button = document.getElementById(buttonIds[i]);
         button.disabled = own;
         button.title = own ? 'Another administrator makes changes to your account' : '';
-    });
+    }
 
     showUserTab('view');
     showModal('user-modal');
@@ -426,9 +444,9 @@ async function handleUpdateUser(event) {
     const emailChanged = data.email !== String(selectedUser.email || '').trim().toLowerCase();
     const signsOut = Boolean(selectedUser.user_id) && (roleChanged || emailChanged);
 
-    let consequence = `${name} stays signed in.`;
+    let consequence = name + ' stays signed in.';
     if (signsOut) {
-        consequence = `${name} is signed out now and must sign in again.`;
+        consequence = name + ' is signed out now and must sign in again.';
         if (roleChanged) consequence += ' Their menu and permissions become the new role at once.';
         if (emailChanged) consequence += ' They sign in with the new email address.';
     }
@@ -459,13 +477,13 @@ async function toggleUserStatus() {
 
     let yes;
     if (makeActive) {
-        yes = await askConfirm(`${name} will be able to sign in again straight away.`, {
+        yes = await askConfirm(name + ' will be able to sign in again straight away.', {
                 title: 'Activate this account?',
                 eyebrow: 'Accounts Management',
                 confirmLabel: 'Activate'
             });
     } else {
-        yes = await askDanger(`${name} loses access to the system.`, {
+        yes = await askDanger(name + ' loses access to the system.', {
                 title: 'Deactivate this account?',
                 eyebrow: 'Accounts Management',
                 confirmLabel: 'Deactivate the account',
@@ -493,7 +511,7 @@ async function liftUserHold() {
 
     const name = staffName(selectedUser);
     const yes = await askConfirm(
-        `${name} can sign in again straight away with the password they already have.`,
+        name + ' can sign in again straight away with the password they already have.',
         {
             title: 'Lift the hold on this account?',
             eyebrow: 'Accounts Management',
@@ -526,7 +544,7 @@ async function resetUserPassword() {
     // nobody types the new password: the server makes it and sends it
     const name = staffName(selectedUser);
     const yes = await askDanger(
-        `A new password is made for ${name} and sent to ${selectedUser.email}. ` +
+        'A new password is made for ' + name + ' and sent to ' + selectedUser.email + '. ' +
         'The one they have now stops working the moment you confirm.',
         {
             title: 'Reset this password?',
@@ -552,14 +570,14 @@ async function resetUserPassword() {
 // the same two outcomes as a first password, worded for a reset
 async function reportResetPassword(result, email, name) {
     if (result.emailed) {
-        notifySuccess(`A new password was emailed to ${email}. ` +
-            `${name} must change it the next time they sign in.`, 'Password reset');
+        notifySuccess('A new password was emailed to ' + email + '. ' +
+            name + ' must change it the next time they sign in.', 'Password reset');
         return;
     }
 
     await askConfirm(
-        `The password was reset, but the new one could not be sent. Read it out to ` +
-        `${name} now: it is not shown again after this card.`,
+        'The password was reset, but the new one could not be sent. Read it out to ' +
+        name + ' now: it is not shown again after this card.',
         {
             title: 'The password was not sent',
             eyebrow: 'Accounts Management',
@@ -578,19 +596,22 @@ async function reportResetPassword(result, email, name) {
 
 // Save is off until something in the form differs from what the record said.
 // Spaces at the ends do not count: the server trims them.
+// (a WeakMap: it remembers one text per form element, and forgets the form with the page)
 const formBaselines = new WeakMap();
 
 function formValues(form) {
     const values = {};
-    Array.from(form.elements).forEach((field) => {
-        if (!field.name || field.disabled) return;
-        if (field.hasAttribute('data-untracked')) return;   // the receipt's line boxes: see below
+    const fields = form.elements;
+    for (let i = 0; i < fields.length; i++) {
+        const field = fields[i];
+        if (!field.name || field.disabled) continue;
+        if (field.hasAttribute('data-untracked')) continue;   // the receipt's line boxes: see below
         if (field.type === 'checkbox') {
             values[field.name] = field.checked;
-            return;
+            continue;
         }
         values[field.name] = String(field.value === undefined ? '' : field.value).trim();
-    });
+    }
 
     // The receipt's header and footer boxes are numbered as they are drawn, and
     // a box added but left empty is no change; what counts is the lines that
@@ -623,7 +644,9 @@ function syncSaveButton(form, button) {
 
 function watchFormEdits(form, button) {
     if (!form || !button) return;
-    const update = () => syncSaveButton(form, button);
+    const update = function () {
+        syncSaveButton(form, button);
+    };
     form.addEventListener('input', update);
     form.addEventListener('change', update);
 }
@@ -651,8 +674,11 @@ function fieldValueText(field, value) {
     if (field.type === 'checkbox') return value ? 'Yes' : 'No';
     if (field.type === 'email') value = String(value).toLowerCase();   // the server stores it so
     if (field.tagName === 'SELECT') {
-        const option = Array.from(field.options).find((item) => item.value === String(value));
-        if (option) return clipValue(option.textContent.trim());
+        for (let i = 0; i < field.options.length; i++) {
+            if (field.options[i].value === String(value)) {
+                return clipValue(field.options[i].textContent.trim());
+            }
+        }
     }
     return value === '' ? '(empty)' : clipValue(value);
 }
@@ -665,14 +691,14 @@ function formChangeLines(form, skip) {
     const after = JSON.parse(formValues(form));
     const lines = [];
 
-    Object.keys(after).forEach((name) => {
-        if (before[name] === after[name] || (skip && skip(name))) return;
+    for (const name in after) {
+        if (before[name] === after[name] || (skip && skip(name))) continue;
         const field = form.elements[name];
-        if (!field) return;
+        if (!field) continue;
         const was = fieldValueText(field, before[name] === undefined ? '' : before[name]);
         const now = fieldValueText(field, after[name]);
         if (was !== now) lines.push(fieldLabelText(form, field) + ': ' + was + ' \u2192 ' + now);
-    });
+    }
     return lines;
 }
 
@@ -771,7 +797,10 @@ function clearCreateForm() {
 
 // the "Letters only" lines under the name boxes, put away
 function hideNameErrors(form) {
-    form.querySelectorAll('.name-error').forEach((box) => { box.hidden = true; });
+    const boxes = form.querySelectorAll('.name-error');
+    for (let i = 0; i < boxes.length; i++) {
+        boxes[i].hidden = true;
+    }
 }
 
 function cancelCreateAccount() {
@@ -782,6 +811,8 @@ function cancelCreateAccount() {
 // ==========================================
 // THE EMAIL BOX -- an address and nothing else, and one no other account uses
 // ==========================================
+// matches name@domain.tld: letters, digits and . _ % + - before the @, then a domain
+// of letters, digits and hyphens split by dots, ending in a dot and 2 or more letters
 const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 
 function emailComplaint(value) {
@@ -903,21 +934,24 @@ async function checkPhoneFree(input) {
 
 // what a required box says when it was left empty
 function firstEmptyRequired(form) {
-    return Array.from(form.querySelectorAll('[required]'))
-        .find((field) => String(field.value || '').trim() === '');
+    const fields = form.querySelectorAll('[required]');
+    for (let i = 0; i < fields.length; i++) {
+        if (String(fields[i].value || '').trim() === '') return fields[i];
+    }
+    return undefined;
 }
 
 // Emailed is a corner card; not emailed keeps the password on screen in a dialog.
 async function reportFirstPassword(result, email, name) {
     if (result.emailed) {
-        notifySuccess(`The first password was emailed to ${email}. ` +
-            `${name} must change it the first time they sign in.`, 'Account created');
+        notifySuccess('The first password was emailed to ' + email + '. ' +
+            name + ' must change it the first time they sign in.', 'Account created');
         return;
     }
 
     await askConfirm(
-        `The account exists, but the password could not be sent. Read it out to ` +
-        `${name} now: it is not shown again after this card.`,
+        'The account exists, but the password could not be sent. Read it out to ' +
+        name + ' now: it is not shown again after this card.',
         {
             title: 'The password was not sent',
             eyebrow: 'Accounts Management',
@@ -941,13 +975,13 @@ function creatingCard(review) {
         title: 'Creating the account',
         eyebrow: 'Accounts Management',
         message: review.willEmail
-            ? `This can take a few seconds while the mail goes out.`
-            : `Mail is not set up, so the password comes back to this screen.`,
+            ? 'This can take a few seconds while the mail goes out.'
+            : 'Mail is not set up, so the password comes back to this screen.',
         steps: review.willEmail
-            ? [`Saving ${review.fullName}'s account`,
-               `Emailing the first password to ${review.email}`,
+            ? ['Saving ' + review.fullName + '\'s account',
+               'Emailing the first password to ' + review.email,
                'Writing it in the audit trail']
-            : [`Saving ${review.fullName}'s account`,
+            : ['Saving ' + review.fullName + '\'s account',
                'Writing it in the audit trail']
     };
 }
@@ -958,10 +992,12 @@ function creatingCard(review) {
 // First, middle and last name take letters only. Letters with accents (é, ñ)
 // count, and spaces between words stay. Numbers and symbols are taken out as
 // they are typed or pasted, and a line under the box says why.
+// matches words made only of letters and accent marks, with single spaces between the words
 const NAME_LETTERS = /^[\p{L}\p{M}]+( [\p{L}\p{M}]+)*$/u;
 
 function onNameInput(input) {
     const typed = input.value;
+    // takes out everything that is not a letter, an accent mark or a space
     const cleaned = typed.replace(/[^\p{L}\p{M} ]/gu, '');   // keep letters, accents and spaces
     const box = document.getElementById(input.id + '-error');
 
@@ -982,8 +1018,9 @@ function onNameInput(input) {
 // the first name box on this form that is not letters only, or null
 // (a name saved before this rule can still hold a number)
 function firstBadName(form) {
-    for (const field of ['firstName', 'middleName', 'lastName']) {
-        const input = form.elements[field];
+    const fields = ['firstName', 'middleName', 'lastName'];
+    for (let i = 0; i < fields.length; i++) {
+        const input = form.elements[fields[i]];
         const value = input.value.trim().replace(/\s+/g, ' ');
         if (value !== '' && !NAME_LETTERS.test(value)) return input;
     }
@@ -1092,12 +1129,14 @@ async function createLoginAccount() {
     const email = await askInput({
         title: 'Create a login',
         eyebrow: 'Accounts Management',
-        message: `${name} has a staff record but no way to sign in yet. The first password is sent to this address.`,
+        message: name + ' has a staff record but no way to sign in yet. The first password is sent to this address.',
         label: 'Email address',
         type: 'email',
         placeholder: 'name@example.com',
         confirmLabel: 'Create Login',
-        check: (value) => emailComplaint(value)
+        check: function (value) {
+            return emailComplaint(value);
+        }
     });
 
     if (email === false || email === null) return;
@@ -1146,19 +1185,25 @@ function buildArchivePanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetStaff('?status=inactive'),
+        load: function () {
+            return apiGetStaff('?status=inactive');
+        },
 
-        match: (user, query) => prefixMatch(userSearchFields(user), query),
+        match: function (user, query) {
+            return prefixMatch(userSearchFields(user), query);
+        },
 
-        renderRow: (user, index) => `
-            <tr class="row-clickable row-reveal" style="animation-delay: ${(index % 10) * 28}ms"
-                onclick="openRestoreCard(${user.staff_id})" title="Click to open the restoration card">
-                <td class="cell-id">#${escapeHtml(user.staff_id)}</td>
-                <td class="cell-name">${escapeHtml(staffName(user))}</td>
-                <td>${user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>'}</td>
-                <td>${escapeHtml(user.role_name)}</td>
-                <td>${user.archived_at ? escapeHtml(user.archived_at) : '<span class="muted">Not recorded</span>'}</td>
-            </tr>`
+        renderRow: function (user, index) {
+            return '\n' +
+                '            <tr class="row-clickable row-reveal" style="animation-delay: ' + ((index % 10) * 28) + 'ms"\n' +
+                '                onclick="openRestoreCard(' + user.staff_id + ')" title="Click to open the restoration card">\n' +
+                '                <td class="cell-id">#' + escapeHtml(user.staff_id) + '</td>\n' +
+                '                <td class="cell-name">' + escapeHtml(staffName(user)) + '</td>\n' +
+                '                <td>' + (user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>') + '</td>\n' +
+                '                <td>' + escapeHtml(user.role_name) + '</td>\n' +
+                '                <td>' + (user.archived_at ? escapeHtml(user.archived_at) : '<span class="muted">Not recorded</span>') + '</td>\n' +
+                '            </tr>';
+        }
     });
 }
 
@@ -1219,7 +1264,7 @@ async function restoreSelectedAccount() {
     const name = staffName(user);
 
     const yes = await askConfirm(
-        `${name} goes back on the active staff list as a ${user.role_name}.`,
+        name + ' goes back on the active staff list as a ' + user.role_name + '.',
         {
             title: 'Restore this account?',
             eyebrow: 'Archived Accounts',
@@ -1279,16 +1324,24 @@ async function loadFeatureMatrix() {
 // the module names, in the order their screens come
 function featureModules() {
     const modules = [];
-    (featureMatrix.features || []).forEach((feature) => {
-        if (!modules.includes(feature.module)) modules.push(feature.module);
-    });
+    const features = featureMatrix.features || [];
+    for (let i = 0; i < features.length; i++) {
+        if (!modules.includes(features[i].module)) modules.push(features[i].module);
+    }
     return modules;
 }
 
 // the screens of one module that one role's dashboard can draw
 function moduleScreensFor(module, roleName) {
-    return (featureMatrix.features || []).filter((feature) =>
-        feature.module === module && feature.roles[roleName] && feature.roles[roleName].available);
+    const features = featureMatrix.features || [];
+    const screens = [];
+    for (let i = 0; i < features.length; i++) {
+        const feature = features[i];
+        if (feature.module === module && feature.roles[roleName] && feature.roles[roleName].available) {
+            screens.push(feature);
+        }
+    }
+    return screens;
 }
 
 function renderFeatureMatrix() {
@@ -1300,26 +1353,38 @@ function renderFeatureMatrix() {
 
     // what each role has for each screen now
     featureState = {};
-    (featureMatrix.features || []).forEach((feature) => {
-        roles.forEach((role) => {
-            const cell = feature.roles[role.role_name];
-            if (cell && cell.available) featureState[feature.key + '|' + role.role_id] = cell.held;
-        });
-    });
+    const features = featureMatrix.features || [];
+    for (let f = 0; f < features.length; f++) {
+        const feature = features[f];
+        for (let r = 0; r < roles.length; r++) {
+            const cell = feature.roles[roles[r].role_name];
+            if (cell && cell.available) featureState[feature.key + '|' + roles[r].role_id] = cell.held;
+        }
+    }
 
-    table.querySelector('thead tr').innerHTML = '<th>Role</th>' +
-        modules.map((module) => '<th>' + escapeHtml(module) + '</th>').join('');
+    let headers = '<th>Role</th>';
+    for (let m = 0; m < modules.length; m++) {
+        headers += '<th>' + escapeHtml(modules[m]) + '</th>';
+    }
+    table.querySelector('thead tr').innerHTML = headers;
 
     // one row per role, one box per module
-    table.querySelector('tbody').innerHTML = roles.map((role) => {
-        const boxes = modules.map((module) => '<td><input type="checkbox" class="access-box"' +
-            ' data-module="' + escapeHtml(module) + '"' +
-            ' data-role="' + escapeHtml(String(role.role_id)) + '"' +
-            ' data-role-name="' + escapeHtml(role.role_name) + '"' +
-            ' aria-label="' + escapeHtml(module + ' for ' + role.role_name) + '"' +
-            ' onchange="onModuleBoxChange(this)"></td>').join('');
-        return '<tr><td class="access-role">' + escapeHtml(role.role_name) + '</td>' + boxes + '</tr>';
-    }).join('');
+    let rows = '';
+    for (let r = 0; r < roles.length; r++) {
+        const role = roles[r];
+        let boxes = '';
+        for (let m = 0; m < modules.length; m++) {
+            const module = modules[m];
+            boxes += '<td><input type="checkbox" class="access-box"' +
+                ' data-module="' + escapeHtml(module) + '"' +
+                ' data-role="' + escapeHtml(String(role.role_id)) + '"' +
+                ' data-role-name="' + escapeHtml(role.role_name) + '"' +
+                ' aria-label="' + escapeHtml(module + ' for ' + role.role_name) + '"' +
+                ' onchange="onModuleBoxChange(this)"></td>';
+        }
+        rows += '<tr><td class="access-role">' + escapeHtml(role.role_name) + '</td>' + boxes + '</tr>';
+    }
+    table.querySelector('tbody').innerHTML = rows;
 
     syncModuleBoxes();
 }
@@ -1327,27 +1392,30 @@ function renderFeatureMatrix() {
 // Each box shows its screens: ticked when all are on, a dash when only some
 // are, empty when none are. Hovering it lists the screens and which are on.
 function syncModuleBoxes() {
-    document.querySelectorAll('#features-matrix .access-box').forEach((box) => {
+    const boxes = document.querySelectorAll('#features-matrix .access-box');
+    for (let b = 0; b < boxes.length; b++) {
+        const box = boxes[b];
         const screens = moduleScreensFor(box.dataset.module, box.dataset.roleName);
         if (screens.length === 0) {
             box.checked = false;
             box.indeterminate = false;
             box.title = box.dataset.roleName + ' has no ' + box.dataset.module + ' screens';
-            return;
+            continue;
         }
 
         let on = 0;
         const lines = [];
-        screens.forEach((feature) => {
+        for (let s = 0; s < screens.length; s++) {
+            const feature = screens[s];
             const isOn = featureState[feature.key + '|' + box.dataset.role];
             if (isOn) on += 1;
             lines.push(feature.name + ': ' + (isOn ? 'on' : 'off'));
-        });
+        }
 
         box.checked = on === screens.length;
         box.indeterminate = on > 0 && on < screens.length;
         box.title = lines.join('\n');
-    });
+    }
 }
 
 // A tick turns on every screen of the module for that role; no tick turns
@@ -1372,7 +1440,10 @@ async function onModuleBoxChange(box) {
     }
 
     const turnOn = box.checked;
-    const toChange = screens.filter((feature) => featureState[feature.key + '|' + box.dataset.role] !== turnOn);
+    const toChange = [];
+    for (let i = 0; i < screens.length; i++) {
+        if (featureState[screens[i].key + '|' + box.dataset.role] !== turnOn) toChange.push(screens[i]);
+    }
     if (toChange.length === 0) {
         syncModuleBoxes();
         return;
@@ -1381,7 +1452,8 @@ async function onModuleBoxChange(box) {
     featureSaving = true;
     let saved = 0;
     try {
-        for (const feature of toChange) {
+        for (let i = 0; i < toChange.length; i++) {
+            const feature = toChange[i];
             const response = await apiSetScreenSwitch(feature.key, Number(box.dataset.role), turnOn);
             const body = await response.json();
             if (!response.ok) {
@@ -1489,27 +1561,31 @@ function buildLogsPanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetAuditLogs(auditLogQuery()),
+        load: function () {
+            return apiGetAuditLogs(auditLogQuery());
+        },
 
-        match: (log, query) => prefixMatch([
-            log.staff_name, log.role_name, log.action, log.details, log.ip_address
-        ], query),
+        match: function (log, query) {
+            return prefixMatch([
+                log.staff_name, log.role_name, log.action, log.details, log.ip_address
+            ], query);
+        },
 
-        renderRow: (log, index) => {
+        renderRow: function (log, index) {
             const tone = AUDIT_TONE[log.action_type] || 'badge-neutral';
             const label = AUDIT_LABEL[log.action_type] || log.action_type;
 
-            return `
-            <tr class="row-clickable row-reveal" style="animation-delay: ${(index % 10) * 28}ms"
-                onclick="openLogEntry(${log.log_id})" title="Click to read the full entry">
-                <td class="cell-id">${escapeHtml(log.created_at)}</td>
-                <td class="cell-name">${escapeHtml(log.staff_name)}${
-                    log.staff_id ? ' <span class="muted">#' + escapeHtml(log.staff_id) + '</span>' : ''}</td>
-                <td>${escapeHtml(log.role_name)}</td>
-                <td class="cell-id">${log.ip_address ? escapeHtml(log.ip_address) : '<span class="muted">Not recorded</span>'}</td>
-                <td><span class="badge ${tone}">${escapeHtml(label)}</span></td>
-                <td>${escapeHtml(log.details || log.action)}</td>
-            </tr>`;
+            return '\n' +
+                '            <tr class="row-clickable row-reveal" style="animation-delay: ' + ((index % 10) * 28) + 'ms"\n' +
+                '                onclick="openLogEntry(' + log.log_id + ')" title="Click to read the full entry">\n' +
+                '                <td class="cell-id">' + escapeHtml(log.created_at) + '</td>\n' +
+                '                <td class="cell-name">' + escapeHtml(log.staff_name) +
+                    (log.staff_id ? ' <span class="muted">#' + escapeHtml(log.staff_id) + '</span>' : '') + '</td>\n' +
+                '                <td>' + escapeHtml(log.role_name) + '</td>\n' +
+                '                <td class="cell-id">' + (log.ip_address ? escapeHtml(log.ip_address) : '<span class="muted">Not recorded</span>') + '</td>\n' +
+                '                <td><span class="badge ' + tone + '">' + escapeHtml(label) + '</span></td>\n' +
+                '                <td>' + escapeHtml(log.details || log.action) + '</td>\n' +
+                '            </tr>';
         }
     });
 }
@@ -1572,12 +1648,13 @@ function formatBytes(bytes) {
 }
 
 function backupTakenAt(fileName) {
+    // finds _YYYY-MM-DD_HHMM in the file name: year, month, day, hour, minute
     const parts = /_(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})/.exec(fileName);
     if (!parts) return { day: fileName, time: '' };
 
     const date = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
     const day = date.toLocaleDateString('en-PH', { day: 'numeric', month: 'long', year: 'numeric' });
-    return { day: day, time: `${parts[4]}:${parts[5]}` };
+    return { day: day, time: parts[4] + ':' + parts[5] };
 }
 
 // "02:00" for an hour of the day
@@ -1618,8 +1695,8 @@ function renderAutoBackupCard(auto, procedures) {
     if (procedures && procedures.loaded < procedures.expected) {
         card.className = 'card auto-backup is-bad';
         state.textContent = 'Read this';
-        text.textContent = `Only ${procedures.loaded} of ${procedures.expected} stored procedures are loaded, ` +
-            `so backups cannot run. Run 2-RUN-SECOND-stored-procedures.sql, then reload.`;
+        text.textContent = 'Only ' + procedures.loaded + ' of ' + procedures.expected + ' stored procedures are loaded, ' +
+            'so backups cannot run. Run 2-RUN-SECOND-stored-procedures.sql, then reload.';
         return;
     }
 
@@ -1633,23 +1710,23 @@ function renderAutoBackupCard(auto, procedures) {
     if (auto.lastError) {
         card.className = 'card auto-backup is-bad';
         state.textContent = 'Failing';
-        text.textContent = `Last daily backup failed: ${auto.lastError}. ` +
-            `Take one by hand until it is fixed.`;
+        text.textContent = 'Last daily backup failed: ' + auto.lastError + '. ' +
+            'Take one by hand until it is fixed.';
         return;
     }
 
     card.className = 'card auto-backup is-on';
     state.textContent = 'On';
-    text.textContent = `Backs up daily at ${hourText(auto.hour)} and deletes backups older than ${auto.keep} days.` +
-        (auto.lastFileName ? ` Latest: ${auto.lastFileName}.` : '');
+    text.textContent = 'Backs up daily at ' + hourText(auto.hour) + ' and deletes backups older than ' + auto.keep + ' days.' +
+        (auto.lastFileName ? ' Latest: ' + auto.lastFileName + '.' : '');
 }
 
 // the limits under Saved Backups, from the server
 function renderBackupLimits(limits) {
     const note = document.getElementById('backup-limit-note');
     if (!note || !limits) return;
-    note.textContent = `${limits.manualCount} of ${limits.manual} manual backups used. ` +
-        `Backups older than ${limits.keepDays} days are deleted automatically.`;
+    note.textContent = limits.manualCount + ' of ' + limits.manual + ' manual backups used. ' +
+        'Backups older than ' + limits.keepDays + ' days are deleted automatically.';
 }
 
 // reads the state without opening the table
@@ -1711,16 +1788,18 @@ function buildBackupPanel() {
             button: 'Load Data'
         },
 
-        load: async () => {
+        load: async function () {
             const body = await apiGetBackups();
             renderAutoBackupCard(body.auto, body.procedures);
             renderBackupLimits(body.limits);
             return body.files || [];
         },
 
-        match: (file, query) => prefixMatch([file.fileName], query),
+        match: function (file, query) {
+            return prefixMatch([file.fileName], query);
+        },
 
-        renderRow: (file, index) => {
+        renderRow: function (file, index) {
             const when = backupTakenAt(file.fileName);
 
             let kind;
@@ -1830,8 +1909,8 @@ async function runBackup() {
 
         await finishWorking('Backup saved');
         notifySuccess(
-            `${body.fileName} holds ${body.rowCount} rows across ${body.tableCount} tables, ` +
-            `${body.viewCount} views and ${body.procedureCount} procedures (${formatBytes(body.bytes)}).`,
+            body.fileName + ' holds ' + body.rowCount + ' rows across ' + body.tableCount + ' tables, ' +
+            body.viewCount + ' views and ' + body.procedureCount + ' procedures (' + formatBytes(body.bytes) + ').',
             'Backup saved');
 
         const panel = getDataPanel('admin-backups');
@@ -1858,7 +1937,7 @@ async function restoreSelectedBackup() {
     const when = backupTakenAt(fileName);
 
     const yes = await askDanger(
-        `Everything in the system will be replaced by the data as it stood on ${when.day} at ${when.time}.`,
+        'Everything in the system will be replaced by the data as it stood on ' + when.day + ' at ' + when.time + '.',
         {
             title: 'Restore this backup?',
             eyebrow: 'Recovery',
@@ -1943,13 +2022,14 @@ async function handleRestoreFile(event) {
 
     event.target.value = '';
 
+    // a name that ends in .sql (capitals allowed)
     if (!/\.sql$/i.test(file.name)) {
         notifyWarning('A backup is a .sql file. ' + file.name + ' is not one.', 'Wrong kind of file');
         return;
     }
 
     const yes = await askDanger(
-        `Everything in the system will be replaced by whatever ${file.name} contains.`,
+        'Everything in the system will be replaced by whatever ' + file.name + ' contains.',
         {
             title: 'Restore from this file?',
             eyebrow: 'Recovery',
@@ -1999,6 +2079,7 @@ const TIN_BASE_DIGITS = 9;
 const TIN_BRANCH_DIGITS = 5;
 
 function tinDigits(value) {
+    // keeps the digits only (takes out everything that is not 0 to 9)
     return String(value === null || value === undefined ? '' : value)
         .replace(/\D/g, '')
         .slice(0, TIN_BASE_DIGITS + TIN_BRANCH_DIGITS);
@@ -2006,7 +2087,11 @@ function tinDigits(value) {
 
 function tinFormat(digits) {
     const parts = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9), digits.slice(9)];
-    return parts.filter((part) => part !== '').join('-');
+    const used = [];
+    for (let i = 0; i < parts.length; i++) {
+        if (parts[i] !== '') used.push(parts[i]);
+    }
+    return used.join('-');
 }
 
 // oninput on the TIN box; rewrites rather than blocks so paste works
@@ -2031,10 +2116,11 @@ function tinComplaint(value) {
     if (digits.length !== TIN_BASE_DIGITS &&
         digits.length !== TIN_BASE_DIGITS + 3 &&
         digits.length !== TIN_BASE_DIGITS + TIN_BRANCH_DIGITS) {
-        return `A TIN is ${TIN_BASE_DIGITS} digits and a branch code, ` +
-               `written 000-000-000-00000. That one has ${digits.length} digits.`;
+        return 'A TIN is ' + TIN_BASE_DIGITS + ' digits and a branch code, ' +
+               'written 000-000-000-00000. That one has ' + digits.length + ' digits.';
     }
 
+    // the first nine digits are all zeros
     if (/^0+$/.test(digits.slice(0, TIN_BASE_DIGITS))) {
         return '000-000-000 is the placeholder, not a TIN. Enter the number on the ' +
                'shop\'s BIR certificate of registration.';
@@ -2100,10 +2186,11 @@ async function loadStoreSettingsForm() {
     form.elements.paperWidth.value = String(layout.paperWidth);
     form.elements.fontSize.value = String(layout.fontSize);
     form.elements.title.value = layout.title;
-    RECEIPT_SWITCHES.forEach((name) => {
+    for (let i = 0; i < RECEIPT_SWITCHES.length; i++) {
+        const name = RECEIPT_SWITCHES[i];
         const box = form.elements['show_' + name];
         if (box) box.checked = receiptShows(layout, name);
-    });
+    }
     renderReceiptLines('header', layout.headerLines);
     renderReceiptLines('footer', layout.footerLines);
 
@@ -2151,12 +2238,16 @@ function renderDeliveryAreas() {
         return;
     }
 
-    list.innerHTML = deliveryAreas.map((area, index) =>
-        '<li>' +
+    let html = '';
+    for (let index = 0; index < deliveryAreas.length; index++) {
+        const area = deliveryAreas[index];
+        html += '<li>' +
             '<span class="area-text">' + escapeHtml(area) + '</span>' +
             '<button type="button" class="btn btn-ghost btn-sm area-remove" title="Remove this area" ' +
                 'aria-label="Remove ' + escapeHtml(area) + '" onclick="removeDeliveryArea(' + index + ')">&times;</button>' +
-        '</li>').join('');
+        '</li>';
+    }
+    list.innerHTML = html;
 }
 
 // While one add or remove is running, Add and every x are switched off, so a
@@ -2168,7 +2259,10 @@ function setAreaBusy(busy) {
 
     const button = document.getElementById('area-add-btn');
     if (button) button.disabled = busy;
-    document.querySelectorAll('.area-remove').forEach((remove) => { remove.disabled = busy; });
+    const removes = document.querySelectorAll('.area-remove');
+    for (let i = 0; i < removes.length; i++) {
+        removes[i].disabled = busy;
+    }
 }
 
 // Sends one change (add or remove) and shows the list the server answers with.
@@ -2218,13 +2312,19 @@ async function handleAddDeliveryArea(event) {
         box.focus();
         return;
     }
-    if (deliveryAreas.some((saved) => saved.toLowerCase() === area.toLowerCase())) {
+    let alreadyThere = false;
+    for (let i = 0; i < deliveryAreas.length; i++) {
+        if (deliveryAreas[i].toLowerCase() === area.toLowerCase()) alreadyThere = true;
+    }
+    if (alreadyThere) {
         notifyError(area + ' is already on the list.', 'Not added');
         box.focus();
         return;
     }
 
-    const added = await changeDeliveryArea(() => apiAddDeliveryArea(area), 'Delivery area added');
+    const added = await changeDeliveryArea(function () {
+        return apiAddDeliveryArea(area);
+    }, 'Delivery area added');
     if (added) box.value = '';
     box.focus();
 }
@@ -2233,7 +2333,9 @@ async function removeDeliveryArea(index) {
     const area = deliveryAreas[index];
     if (area === undefined) return;
 
-    await changeDeliveryArea(() => apiRemoveDeliveryArea(area), 'Delivery area removed');
+    await changeDeliveryArea(function () {
+        return apiRemoveDeliveryArea(area);
+    }, 'Delivery area removed');
 }
 
 // ---------- the header and footer lines: added, moved (header only) and removed here ----------
@@ -2244,9 +2346,14 @@ function receiptLineList(kind) {
 function readReceiptLines(kind) {
     const list = receiptLineList(kind);
     if (!list) return [];
-    return Array.from(list.querySelectorAll('input'))
-        .map((input) => input.value.trim())
-        .filter((value) => value !== '');
+    // the text of every box, trimmed, leaving out the empty ones
+    const inputs = list.querySelectorAll('input');
+    const lines = [];
+    for (let i = 0; i < inputs.length; i++) {
+        const value = inputs[i].value.trim();
+        if (value !== '') lines.push(value);
+    }
+    return lines;
 }
 
 function renderReceiptLines(kind, lines) {
@@ -2254,7 +2361,10 @@ function renderReceiptLines(kind, lines) {
     if (!list) return;
 
     const values = Array.isArray(lines) ? lines : [];
-    list.innerHTML = values.map((line, index) => {
+    let html = '';
+    for (let index = 0; index < values.length; index++) {
+        const line = values[index];
+
         // The header lines can be put in a different order. The footer lines
         // have no arrows: the footer always prints at the bottom of the
         // receipt, in the order the lines were added.
@@ -2267,7 +2377,7 @@ function renderReceiptLines(kind, lines) {
                     (index === values.length - 1 ? ' disabled' : '') + ' onclick="moveReceiptLine(\'' + kind + '\', ' + index + ', 1)">&darr;</button>';
         }
 
-        return '<div class="line-row">' +
+        html += '<div class="line-row">' +
             '<input type="text" class="form-control" name="' + kind + 'Line_' + index + '" data-untracked' +
                 ' maxlength="' + RECEIPT_LINE_LENGTH + '" value="' + escapeHtml(line) + '"' +
                 ' aria-label="' + (kind === 'header' ? 'Header' : 'Footer') + ' line ' + (index + 1) + '">' +
@@ -2275,13 +2385,21 @@ function renderReceiptLines(kind, lines) {
             '<button type="button" class="btn btn-ghost btn-sm line-remove" title="Remove" aria-label="Remove"' +
                 ' onclick="removeReceiptLine(\'' + kind + '\', ' + index + ')">&times;</button>' +
         '</div>';
-    }).join('');
+    }
+    list.innerHTML = html;
 }
 
 // the lines as typed, empty ones kept, so a box just added stays on screen
 function typedReceiptLines(kind) {
     const list = receiptLineList(kind);
-    return list ? Array.from(list.querySelectorAll('input')).map((input) => input.value) : [];
+    const lines = [];
+    if (list) {
+        const inputs = list.querySelectorAll('input');
+        for (let i = 0; i < inputs.length; i++) {
+            lines.push(inputs[i].value);
+        }
+    }
+    return lines;
 }
 
 function receiptLinesChanged(kind, lines, focusIndex) {
@@ -2323,10 +2441,11 @@ function removeReceiptLine(kind, index) {
 // everything about the layout, as it is sent to the server
 function readReceiptLayout(form) {
     const show = {};
-    RECEIPT_SWITCHES.forEach((name) => {
+    for (let i = 0; i < RECEIPT_SWITCHES.length; i++) {
+        const name = RECEIPT_SWITCHES[i];
         const box = form.elements['show_' + name];
         show[name] = box ? box.checked : true;
-    });
+    }
     return {
         paperWidth: Number(form.elements.paperWidth.value),
         fontSize: Number(form.elements.fontSize.value),
@@ -2351,11 +2470,18 @@ function onRegistrationChange(value) {
 const BANK_FIELDS = ['bankName', 'bankAccountName', 'bankAccountNumber'];
 
 function bankComplaint(form) {
-    const values = BANK_FIELDS.map((name) => form.elements[name].value.trim());
-    if (values.some((value) => value === '')) {
-        return 'The bank, the account name and the account number are all required.';
+    const values = [];
+    for (let i = 0; i < BANK_FIELDS.length; i++) {
+        values.push(form.elements[BANK_FIELDS[i]].value.trim());
+    }
+    for (let i = 0; i < values.length; i++) {
+        if (values[i] === '') {
+            return 'The bank, the account name and the account number are all required.';
+        }
     }
     const number = values[2];
+    // digits, with spaces or dashes allowed in the middle, starting and ending on a digit;
+    // and at least 6 digits once everything that is not a digit is taken out
     if (!/^[0-9][0-9 -]*[0-9]$/.test(number) || number.replace(/\D/g, '').length < 6) {
         return 'An account number is digits, with spaces or dashes where the bank prints them.';
     }
@@ -2368,8 +2494,14 @@ function onBankInput() {
     const note = document.getElementById('store-bank-note');
     if (!form || !note || !form.elements.bankName) return;
 
-    const values = BANK_FIELDS.map((name) => form.elements[name].value.trim());
-    const numberBad = values[2] !== '' && bankComplaint(form) !== null && values.every((v) => v !== '');
+    const values = [];
+    let allFilled = true;
+    for (let i = 0; i < BANK_FIELDS.length; i++) {
+        const value = form.elements[BANK_FIELDS[i]].value.trim();
+        values.push(value);
+        if (value === '') allFilled = false;
+    }
+    const numberBad = values[2] !== '' && bankComplaint(form) !== null && allFilled;
     form.elements.bankAccountNumber.classList.toggle('is-bad', numberBad);
 
     note.className = numberBad ? 'store-bank-note is-stop' : 'store-bank-note';
@@ -2445,17 +2577,21 @@ async function handleSaveStoreSettings(event) {
 
     // the rate is only part of a VAT shop; a shop becoming VAT lists the rate it starts on
     const becomesVat = registrationChanged && registration === 'VAT';
-    const changes = formChangeLines(form, (name) => name === 'vatRate' && (registration !== 'VAT' || becomesVat));
+    const changes = formChangeLines(form, function (name) {
+        return name === 'vatRate' && (registration !== 'VAT' || becomesVat);
+    });
     if (becomesVat) changes.push('VAT rate: \u2014 \u2192 ' + (parseFloat(form.elements.vatRate.value) || 0) + '%');
 
     const saved = JSON.parse(formBaselines.get(form) || '{}');
-    [['header', 'Header lines'], ['footer', 'Footer lines']].forEach((entry) => {
+    const lineKinds = [['header', 'Header lines'], ['footer', 'Footer lines']];
+    for (let i = 0; i < lineKinds.length; i++) {
+        const entry = lineKinds[i];
         const now = readReceiptLines(entry[0]);
         const was = saved[entry[0] + 'Lines'] || [];
-        if (JSON.stringify(now) === JSON.stringify(was)) return;
+        if (JSON.stringify(now) === JSON.stringify(was)) continue;
         changes.push(entry[1] + ': ' + (was.length ? clipValue(was.join(' | ')) : '(none)') +
             ' \u2192 ' + (now.length ? clipValue(now.join(' | ')) : '(none)'));
-    });
+    }
 
     const yes = await askConfirm(consequence, {
         title: 'Save these changes?',
@@ -2584,46 +2720,77 @@ function renderStorePreview() {
 // Each box is matched to the part of the receipt it draws. After a pause in
 // typing, the preview scrolls that part into view -- inside the preview, never
 // the page, so the box being typed in stays where it is -- and washes it with
-// a colour that fades (.rc-flash in system-admin.css). A box whose part is not
+// a colour that fades (.rc-flash in system.css). A box whose part is not
 // drawn (a switch turned off, an empty line) shows the place it was.
 const PREVIEW_FOLLOW_DELAY = 200;     // quiet needed after a keystroke before the preview moves
-const PREVIEW_FLASH_MS = 1100;        // as long as the fade in system-admin.css
+const PREVIEW_FLASH_MS = 1100;        // as long as the fade in system.css
 
 let previewFollowTimer = null;
 let previewFlashTimer = null;
 
 // the receipt's parts for a box: { parts: [elements] }, or { whole: true }
 function previewPartsFor(box, form, name) {
-    const all = (selector) => Array.from(box.querySelectorAll(selector));
-    const firstFound = (...lists) => lists.find((list) => list.length > 0) || [];
+    // every element of the preview that matches the selector, as a list
+    function all(selector) {
+        const found = box.querySelectorAll(selector);
+        const list = [];
+        for (let i = 0; i < found.length; i++) {
+            list.push(found[i]);
+        }
+        return list;
+    }
+
+    // the first of the lists that has something in it, or an empty list
+    function firstFound() {
+        for (let i = 0; i < arguments.length; i++) {
+            if (arguments[i].length > 0) return arguments[i];
+        }
+        return [];
+    }
 
     // address (when there is one), TIN, then the shop's own lines, all one class
     const headLines = all('.rc-head .rc-addr');
     const lead = form.elements.address.value.trim() ? 1 : 0;
 
     // a row of the meta grid is two cells: the label, then the value
-    const metaRow = (label) => {
+    function metaRow(label) {
         const cells = all('.rc-meta > span');
-        const at = cells.findIndex((cell, index) => index % 2 === 0 && cell.textContent === label);
+        let at = -1;
+        for (let index = 0; index < cells.length; index++) {
+            if (index % 2 === 0 && cells[index].textContent === label) {
+                at = index;
+                break;
+            }
+        }
         return at < 0 ? [] : [cells[at], cells[at + 1]];
-    };
+    }
 
     // the nth line typed counts only the lines before it that are not empty
-    const lineRank = (kind, index) => {
+    function lineRank(kind, index) {
         const typed = typedReceiptLines(kind);
         if (index < 0 || !typed[index] || typed[index].trim() === '') return -1;
-        return typed.slice(0, index).filter((line) => line.trim() !== '').length;
-    };
+        let rank = 0;
+        for (let i = 0; i < index; i++) {
+            if (typed[i].trim() !== '') rank++;
+        }
+        return rank;
+    }
 
     const metaOf = { show_cashier: 'Cashier', show_customer: 'Customer', show_payment: 'Payment', show_reference: 'Reference' };
+    // a box name like headerLine_0 or footerLine_-1: the kind, then the position
     const line = /^(header|footer)Line_(-?\d+)$/.exec(name);
 
     if (line) {
         const rank = lineRank(line[1], parseInt(line[2], 10));
         if (line[1] === 'header') {
-            return { parts: firstFound(rank < 0 ? [] : [headLines[lead + 1 + rank]].filter(Boolean), all('.rc-head')) };
+            let ownLine = [];
+            if (rank >= 0 && headLines[lead + 1 + rank]) ownLine = [headLines[lead + 1 + rank]];
+            return { parts: firstFound(ownLine, all('.rc-head')) };
         }
-        return { parts: firstFound(rank < 0 ? [] : [all('.rc-thanks')[rank]].filter(Boolean), all('.rc-thanks').slice(-1), all('.rc-foot')) };
+        const thanks = all('.rc-thanks');
+        let ownThanks = [];
+        if (rank >= 0 && thanks[rank]) ownThanks = [thanks[rank]];
+        return { parts: firstFound(ownThanks, thanks.slice(-1), all('.rc-foot')) };
     }
 
     if (metaOf[name]) return { parts: firstFound(metaRow(metaOf[name]), all('.rc-meta'), all('.rc-head')) };
@@ -2653,7 +2820,10 @@ function previewPartsFor(box, form, name) {
 
 function clearPreviewFlash() {
     clearTimeout(previewFlashTimer);
-    document.querySelectorAll('#store-preview.rc-flash, #store-preview .rc-flash').forEach((node) => node.classList.remove('rc-flash'));
+    const flashing = document.querySelectorAll('#store-preview.rc-flash, #store-preview .rc-flash');
+    for (let i = 0; i < flashing.length; i++) {
+        flashing[i].classList.remove('rc-flash');
+    }
 }
 
 // Scrolls the preview's own stage, not the page; nothing moves when the part is already in view.
@@ -2686,14 +2856,18 @@ function followPreview(name) {
     void box.offsetWidth;   // a reflow between the class going and coming back, so the fade starts again
     if (!found.whole) scrollPreviewTo(parts[0]);
 
-    parts.forEach((part) => part.classList.add('rc-flash'));
+    for (let i = 0; i < parts.length; i++) {
+        parts[i].classList.add('rc-flash');
+    }
     previewFlashTimer = setTimeout(clearPreviewFlash, PREVIEW_FLASH_MS);
 }
 
 // typing waits for a pause; a switch or a list is followed at once
 function queuePreviewFollow(name, atOnce) {
     clearTimeout(previewFollowTimer);
-    previewFollowTimer = setTimeout(() => followPreview(name), atOnce ? 0 : PREVIEW_FOLLOW_DELAY);
+    previewFollowTimer = setTimeout(function () {
+        followPreview(name);
+    }, atOnce ? 0 : PREVIEW_FOLLOW_DELAY);
 }
 
 function followFormEvent(event) {
@@ -2754,14 +2928,14 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
         // the preview redraws as the boxes are typed into
         const storeForm = document.getElementById('store-form');
         if (storeForm) {
-            storeForm.addEventListener('input', (event) => {
+            storeForm.addEventListener('input', function (event) {
                 if (event.target && event.target.classList && event.target.id !== 'store-tin') {
                     event.target.classList.remove('is-bad');
                 }
                 renderStorePreview();
                 followFormEvent(event);
             });
-            storeForm.addEventListener('change', (event) => {
+            storeForm.addEventListener('change', function (event) {
                 renderStorePreview();
                 followFormEvent(event);
             });

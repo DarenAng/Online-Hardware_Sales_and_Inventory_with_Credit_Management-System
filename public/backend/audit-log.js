@@ -114,7 +114,9 @@ function fieldChanges(before, after) {
 
   const changes = {};
 
-  for (const field of Object.keys(after)) {
+  const fields = Object.keys(after);
+  for (let fieldIndex = 0; fieldIndex < fields.length; fieldIndex++) {
+    const field = fields[fieldIndex];
     let was = before[field];
     let now = after[field];
     if (was === undefined) was = null;
@@ -143,9 +145,9 @@ async function writeAuditLog(context, action, details, metadata) {
 
   try {
     await db.query(
-      `INSERT INTO audit_logs
-         (staff_id, role_name, ip_address, action, action_type, details, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      "INSERT INTO audit_logs " +
+      "(staff_id, role_name, ip_address, action, action_type, details, metadata) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?)",
       [who.staffId, who.roleName, who.ip, action, actionTypeOf(action),
        details || null, auditMetadata(metadata)]
     );
@@ -154,4 +156,9 @@ async function writeAuditLog(context, action, details, metadata) {
   }
 }
 
-module.exports = { clientIp, AUDIT_TYPES, fieldChanges, writeAuditLog };
+module.exports = {
+  clientIp: clientIp,
+  AUDIT_TYPES: AUDIT_TYPES,
+  fieldChanges: fieldChanges,
+  writeAuditLog: writeAuditLog
+};

@@ -163,9 +163,14 @@ function apiOpenLiveUpdates() {
 
     function emit(type, data) {
         const event = { data: JSON.stringify(data || {}) };
-        (listeners[type] || []).forEach((handler) => {
-            try { handler(event); } catch (error) { console.error(error); }
-        });
+        const handlers = listeners[type] || [];
+        for (let i = 0; i < handlers.length; i++) {
+            try {
+                handlers[i](event);
+            } catch (error) {
+                console.error(error);
+            }
+        }
     }
 
     async function ask() {
@@ -180,7 +185,12 @@ function apiOpenLiveUpdates() {
 
             // signed out: somebody signed in elsewhere, the account was held, or it simply expired
             if (response.status === 401) {
-                const body = await response.json().catch(() => ({}));
+                let body = {};
+                try {
+                    body = await response.json();
+                } catch (error) {
+                    body = {};
+                }
                 closed = true;
                 emit('evicted', { reason: body.error });
                 return;
@@ -197,12 +207,16 @@ function apiOpenLiveUpdates() {
             } else if (first) {
                 // what changed while this page was away, each scope once
                 const scopes = [];
-                (body.changes || []).forEach((change) => {
-                    if (scopes.indexOf(change.scope) === -1) scopes.push(change.scope);
-                });
+                const changes = body.changes || [];
+                for (let i = 0; i < changes.length; i++) {
+                    if (scopes.indexOf(changes[i].scope) === -1) scopes.push(changes[i].scope);
+                }
                 emit('hello', { version: body.version, caughtUp: true, scopes: scopes });
             } else {
-                (body.changes || []).forEach((change) => emit('change', change));
+                const changes = body.changes || [];
+                for (let i = 0; i < changes.length; i++) {
+                    emit('change', changes[i]);
+                }
             }
             first = false;
             liveLastVersion = body.version;
@@ -230,10 +244,11 @@ function apiOpenLiveUpdates() {
     ask();
 
     return {
-        addEventListener(type, handler) {
-            (listeners[type] = listeners[type] || []).push(handler);
+        addEventListener: function (type, handler) {
+            if (!listeners[type]) listeners[type] = [];
+            listeners[type].push(handler);
         },
-        close() {
+        close: function () {
             closed = true;
             if (timer) clearTimeout(timer);
             timer = null;

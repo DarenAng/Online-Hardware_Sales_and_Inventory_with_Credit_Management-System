@@ -20,5 +20,5 @@ function recordCreditPayment(params) {
 }
 
 module.exports = {
-  recordCreditPayment
+  recordCreditPayment: recordCreditPayment
 };

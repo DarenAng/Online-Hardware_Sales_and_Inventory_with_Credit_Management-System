@@ -54,7 +54,8 @@ const passwords = require("../services/passwords");
 const hashPassword = passwords.hashPassword;
 const verifyPassword = passwords.verifyPassword;
 
-// the same rule, for the administrator's own profile screen
+// Refuses an administrator changing their own details from the My Account
+// screen: another administrator makes those changes.
 function notOwnDetailsIfAdmin(request, response, next) {
   if (request.actor && request.actor.roleName === ADMIN) {
     return response.status(403).json({
@@ -83,53 +84,53 @@ function notOwnCredentials(request, response, next) {
 
 // RECORDS: one route, five record types
 const RECORD_QUERIES = {
-  supplier: `SELECT sup.supplier_id AS id, sup.supplier_name AS name, sup.contact_person,
-                    sup.contact_number, sup.email, sup.address,
-                    COUNT(p.product_id) AS product_count
-             FROM suppliers sup
-             LEFT JOIN products p ON p.supplier_id = sup.supplier_id AND p.is_archived = FALSE
-             GROUP BY sup.supplier_id, sup.supplier_name, sup.contact_person,
-                      sup.contact_number, sup.email, sup.address
-             ORDER BY sup.supplier_name`,
-  customer: `SELECT c.customer_id AS id, TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS name,
-                    c.first_name, c.last_name, c.phone, c.address, c.created_at,
-                    COALESCE(v.credit_limit, 0) AS credit_limit,
-                    COALESCE(v.total_purchase, 0) AS total_purchase,
-                    COALESCE(v.current_credit, 0) AS current_credit,
-                    COUNT(s.sale_id) AS purchase_count
-             FROM customers c
-             LEFT JOIN vw_customer_credit v ON v.customer_id = c.customer_id
-             LEFT JOIN sales s ON s.customer_id = c.customer_id AND s.is_archived = FALSE
-             GROUP BY c.customer_id, c.first_name, c.last_name, c.phone, c.address, c.created_at,
-                      v.credit_limit, v.total_purchase, v.current_credit
-             ORDER BY c.first_name`,
-  product: `SELECT p.product_id AS id, p.product_name AS name, p.price, p.reorder_point, p.status,
-                   b.brand_name, c.category_name, u.unit_name, sup.supplier_name,
-                   COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, p.created_at
-            FROM products p
-            LEFT JOIN brands b ON b.brand_id = p.brand_id
-            LEFT JOIN categories c ON c.category_id = p.category_id
-            LEFT JOIN units u ON u.unit_id = p.unit_id
-            LEFT JOIN suppliers sup ON sup.supplier_id = p.supplier_id
-            LEFT JOIN inventory i ON i.product_id = p.product_id
-            WHERE p.is_archived = FALSE ORDER BY p.product_name`,
-  category: `SELECT c.category_id AS id, c.category_name AS name,
-                    COUNT(p.product_id) AS product_count,
-                    COALESCE(SUM(i.quantity_in_stock), 0) AS total_stock
-             FROM categories c
-             LEFT JOIN products p ON p.category_id = c.category_id AND p.is_archived = FALSE
-             LEFT JOIN inventory i ON i.product_id = p.product_id
-             GROUP BY c.category_id, c.category_name ORDER BY c.category_name`,
-  brand: `SELECT b.brand_id AS id, b.brand_name AS name,
-                 COUNT(p.product_id) AS product_count
-          FROM brands b
-          LEFT JOIN products p ON p.brand_id = b.brand_id AND p.is_archived = FALSE
-          GROUP BY b.brand_id, b.brand_name ORDER BY b.brand_name`,
-  unit: `SELECT u.unit_id AS id, u.unit_name AS name,
-                COUNT(p.product_id) AS product_count
-         FROM units u
-         LEFT JOIN products p ON p.unit_id = u.unit_id AND p.is_archived = FALSE
-         GROUP BY u.unit_id, u.unit_name ORDER BY u.unit_name`
+  supplier: "SELECT sup.supplier_id AS id, sup.supplier_name AS name, sup.contact_person,\n" +
+    "                    sup.contact_number, sup.email, sup.address,\n" +
+    "                    COUNT(p.product_id) AS product_count\n" +
+    "             FROM suppliers sup\n" +
+    "             LEFT JOIN products p ON p.supplier_id = sup.supplier_id AND p.is_archived = FALSE\n" +
+    "             GROUP BY sup.supplier_id, sup.supplier_name, sup.contact_person,\n" +
+    "                      sup.contact_number, sup.email, sup.address\n" +
+    "             ORDER BY sup.supplier_name",
+  customer: "SELECT c.customer_id AS id, TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS name,\n" +
+    "                    c.first_name, c.last_name, c.phone, c.address, c.created_at,\n" +
+    "                    COALESCE(v.credit_limit, 0) AS credit_limit,\n" +
+    "                    COALESCE(v.total_purchase, 0) AS total_purchase,\n" +
+    "                    COALESCE(v.current_credit, 0) AS current_credit,\n" +
+    "                    COUNT(s.sale_id) AS purchase_count\n" +
+    "             FROM customers c\n" +
+    "             LEFT JOIN vw_customer_credit v ON v.customer_id = c.customer_id\n" +
+    "             LEFT JOIN sales s ON s.customer_id = c.customer_id AND s.is_archived = FALSE\n" +
+    "             GROUP BY c.customer_id, c.first_name, c.last_name, c.phone, c.address, c.created_at,\n" +
+    "                      v.credit_limit, v.total_purchase, v.current_credit\n" +
+    "             ORDER BY c.first_name",
+  product: "SELECT p.product_id AS id, p.product_name AS name, p.price, p.reorder_point, p.status,\n" +
+    "                   b.brand_name, c.category_name, u.unit_name, sup.supplier_name,\n" +
+    "                   COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, p.created_at\n" +
+    "            FROM products p\n" +
+    "            LEFT JOIN brands b ON b.brand_id = p.brand_id\n" +
+    "            LEFT JOIN categories c ON c.category_id = p.category_id\n" +
+    "            LEFT JOIN units u ON u.unit_id = p.unit_id\n" +
+    "            LEFT JOIN suppliers sup ON sup.supplier_id = p.supplier_id\n" +
+    "            LEFT JOIN inventory i ON i.product_id = p.product_id\n" +
+    "            WHERE p.is_archived = FALSE ORDER BY p.product_name",
+  category: "SELECT c.category_id AS id, c.category_name AS name,\n" +
+    "                    COUNT(p.product_id) AS product_count,\n" +
+    "                    COALESCE(SUM(i.quantity_in_stock), 0) AS total_stock\n" +
+    "             FROM categories c\n" +
+    "             LEFT JOIN products p ON p.category_id = c.category_id AND p.is_archived = FALSE\n" +
+    "             LEFT JOIN inventory i ON i.product_id = p.product_id\n" +
+    "             GROUP BY c.category_id, c.category_name ORDER BY c.category_name",
+  brand: "SELECT b.brand_id AS id, b.brand_name AS name,\n" +
+    "                 COUNT(p.product_id) AS product_count\n" +
+    "          FROM brands b\n" +
+    "          LEFT JOIN products p ON p.brand_id = b.brand_id AND p.is_archived = FALSE\n" +
+    "          GROUP BY b.brand_id, b.brand_name ORDER BY b.brand_name",
+  unit: "SELECT u.unit_id AS id, u.unit_name AS name,\n" +
+    "                COUNT(p.product_id) AS product_count\n" +
+    "         FROM units u\n" +
+    "         LEFT JOIN products p ON p.unit_id = u.unit_id AND p.is_archived = FALSE\n" +
+    "         GROUP BY u.unit_id, u.unit_name ORDER BY u.unit_name"
 };
 
 // Who may archive a kind of record, and who may bring it back. One list for
@@ -152,7 +153,8 @@ function sameSecret(given, expected) {
 // adminModule and managerModule are what registerAdminRoutes and registerManagerRoutes
 // gave back; the daily job runs their sweeps.
 function registerSharedRoutes(app, deps) {
-  const { adminModule, managerModule } = deps;
+  const adminModule = deps.adminModule;
+  const managerModule = deps.managerModule;
 
   // ==========================================
   // THE LIVE CHANNEL
@@ -163,7 +165,7 @@ function registerSharedRoutes(app, deps) {
   // also marks the person present. A browser further behind than the log is
   // told so (gap) and offered a reload.
   // ==========================================
-  app.get("/api/events/poll", async (request, response) => {
+  app.get("/api/events/poll", async function (request, response) {
     const since = parseInt(request.query.since, 10);
 
     try {
@@ -181,14 +183,16 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  app.get("/api/events/status", async (request, response) => {
+  app.get("/api/events/status", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT COUNT(*) AS connections, COUNT(DISTINCT staff_id) AS people
-         FROM user_sessions
-         WHERE ended_reason IS NULL AND expires_at > ? AND last_seen > ?`,
+      const rowsResult = await db.query(
+        "SELECT COUNT(*) AS connections, COUNT(DISTINCT staff_id) AS people\n" +
+          "         FROM user_sessions\n" +
+          "         WHERE ended_reason IS NULL AND expires_at > ? AND last_seen > ?",
         [Date.now(), Date.now() - PRESENCE_WINDOW_MS]);
-      const [logged] = await db.query("SELECT COUNT(*) AS total FROM live_changes");
+      const rows = rowsResult[0];
+      const loggedResult = await db.query("SELECT COUNT(*) AS total FROM live_changes");
+      const logged = loggedResult[0];
 
       response.json({
         version: await latestChangeVersion(),
@@ -209,7 +213,7 @@ function registerSharedRoutes(app, deps) {
   // ==========================================
   // What the signed-in person is, for the screens to shape themselves around.
   // A convenience for the page and never a permission.
-  app.get("/api/me/access", (request, response) => {
+  app.get("/api/me/access", function (request, response) {
     const actor = request.actor;
 
     response.json({
@@ -226,13 +230,14 @@ function registerSharedRoutes(app, deps) {
 
   // What this person's menu holds. A convenience
   // for the page; the access hook reads the same table for itself.
-  app.get("/api/me/features", async (request, response) => {
+  app.get("/api/me/features", async function (request, response) {
     try {
       const features = await featuresOf(request.actor.roleName);
 
       // the keys of the screens this person has switched on
       const heldKeys = [];
-      for (const feature of features) {
+      for (let featureIndex = 0; featureIndex < features.length; featureIndex++) {
+        const feature = features[featureIndex];
         if (feature.held) {
           heldKeys.push(feature.key);
         }
@@ -249,9 +254,10 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  app.get("/api/me", async (request, response) => {
+  app.get("/api/me", async function (request, response) {
     try {
-      const [rows] = await db.query(`${USER_SELECT} WHERE s.staff_id = ?`, [request.actor.staffId]);
+      const rowsResult = await db.query(USER_SELECT + " WHERE s.staff_id = ?", [request.actor.staffId]);
+      const rows = rowsResult[0];
 
       if (rows.length === 0) {
         return response.status(404).json({ error: "Your staff record was not found." });
@@ -264,8 +270,12 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  app.put("/api/me", notOwnDetailsIfAdmin, async (request, response) => {
-    const { firstName, middleName, lastName, phone, email } = request.body;
+  app.put("/api/me", notOwnDetailsIfAdmin, async function (request, response) {
+    const firstName = request.body.firstName;
+    const middleName = request.body.middleName;
+    const lastName = request.body.lastName;
+    const phone = request.body.phone;
+    const email = request.body.email;
     const actor = request.actor;
 
     if (!firstName || !lastName) {
@@ -291,7 +301,8 @@ function registerSharedRoutes(app, deps) {
     try {
       // a new phone number must not belong to another staff member; keeping
       // the one on file is always fine
-      const [mine] = await db.query("SELECT phone FROM staff WHERE staff_id = ?", [actor.staffId]);
+      const mineResult = await db.query("SELECT phone FROM staff WHERE staff_id = ?", [actor.staffId]);
+      const mine = mineResult[0];
       const oldPhone = mine[0] ? mine[0].phone : null;
       if (cleanPhone(phone) !== oldPhone) {
         const phoneOwner = await findPhoneOwner(phone, actor.staffId);
@@ -311,9 +322,10 @@ function registerSharedRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      await writeAuditLog(request, "UPDATE_OWN_PROFILE", `${actor.email} updated their own details`);
+      await writeAuditLog(request, "UPDATE_OWN_PROFILE", actor.email + " updated their own details");
 
-      const [rows] = await db.query(`${USER_SELECT} WHERE s.staff_id = ?`, [actor.staffId]);
+      const rowsResult = await db.query(USER_SELECT + " WHERE s.staff_id = ?", [actor.staffId]);
+      const rows = rowsResult[0];
       response.json({ message: "Your details were saved.", user: rows[0] });
     } catch (error) {
       console.error("Profile update failed:", error.message);
@@ -321,8 +333,9 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  app.post("/api/me/password", notOwnCredentials, async (request, response) => {
-    const { currentPassword, newPassword } = request.body;
+  app.post("/api/me/password", notOwnCredentials, async function (request, response) {
+    const currentPassword = request.body.currentPassword;
+    const newPassword = request.body.newPassword;
     const actor = request.actor;
 
     if (typeof currentPassword !== "string" || currentPassword === "") {
@@ -341,7 +354,8 @@ function registerSharedRoutes(app, deps) {
     }
 
     try {
-      const [rows] = await db.query("SELECT password FROM users WHERE staff_id = ?", [actor.staffId]);
+      const rowsResult = await db.query("SELECT password FROM users WHERE staff_id = ?", [actor.staffId]);
+      const rows = rowsResult[0];
 
       if (rows.length === 0) {
         return response.status(404).json({ error: "This account has no login yet." });
@@ -357,7 +371,7 @@ function registerSharedRoutes(app, deps) {
       );
 
       await writeAuditLog(request, "CHANGE_OWN_PASSWORD",
-        `${actor.email} changed their own password; every other session on the old one was ended`);
+        actor.email + " changed their own password; every other session on the old one was ended");
 
       await renewSessionAfterPasswordChange(request, response);
       response.json({ message: "Your password was changed." });
@@ -367,7 +381,7 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  app.get("/api/records/:type", async (request, response) => {
+  app.get("/api/records/:type", async function (request, response) {
     const sql = RECORD_QUERIES[request.params.type];
 
     if (!sql) {
@@ -375,7 +389,8 @@ function registerSharedRoutes(app, deps) {
     }
 
     try {
-      const [rows] = await db.query(sql);
+      const rowsResult = await db.query(sql);
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Records failed:", error.message);
@@ -384,14 +399,15 @@ function registerSharedRoutes(app, deps) {
   });
 
   // ARCHIVES
-  app.get("/api/archives", async (request, response) => {
+  app.get("/api/archives", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT module, record_id, record_name, detail, archived_at,
-                COALESCE(archived_by, 'System') AS archived_by
-         FROM vw_archives
-         ORDER BY archived_at DESC, module`
+      const rowsResult = await db.query(
+        "SELECT module, record_id, record_name, detail, archived_at,\n" +
+          "                COALESCE(archived_by, 'System') AS archived_by\n" +
+          "         FROM vw_archives\n" +
+          "         ORDER BY archived_at DESC, module"
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Archives failed:", error.message);
@@ -399,8 +415,9 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  app.post("/api/archives/restore", async (request, response) => {
-    const { module, recordId } = request.body;
+  app.post("/api/archives/restore", async function (request, response) {
+    const module = request.body.module;
+    const recordId = request.body.recordId;
 
     if (!module || !recordId) {
       return response.status(400).json({ error: "Module and record id are required" });
@@ -408,7 +425,7 @@ function registerSharedRoutes(app, deps) {
 
     const allowed = ARCHIVE_ROLES[module];
     if (!allowed || !allowed.includes(request.actor.roleName)) {
-      return response.status(403).json({ error: `Your role cannot restore ${module} records.` });
+      return response.status(403).json({ error: "Your role cannot restore " + module + " records." });
     }
 
     try {
@@ -427,8 +444,9 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  app.post("/api/archives/archive", async (request, response) => {
-    const { module, recordId } = request.body;
+  app.post("/api/archives/archive", async function (request, response) {
+    const module = request.body.module;
+    const recordId = request.body.recordId;
 
     if (!module || !recordId) {
       return response.status(400).json({ error: "Module and record id are required" });
@@ -436,7 +454,7 @@ function registerSharedRoutes(app, deps) {
 
     const allowed = ARCHIVE_ROLES[module];
     if (!allowed || !allowed.includes(request.actor.roleName)) {
-      return response.status(403).json({ error: `Your role cannot archive ${module} records.` });
+      return response.status(403).json({ error: "Your role cannot archive " + module + " records." });
     }
 
     try {
@@ -469,30 +487,32 @@ function registerSharedRoutes(app, deps) {
   // the same work runs on the timers started above.
   // ==========================================
 
-  app.get("/api/cron/daily", async (request, response) => {
+  app.get("/api/cron/daily", async function (request, response) {
     const secret = process.env.CRON_SECRET;
     if (!secret) {
       return response.status(503).json({ error: "CRON_SECRET is not set, so the daily job is switched off." });
     }
-    if (!sameSecret(request.headers.authorization || "", `Bearer ${secret}`)) {
+    if (!sameSecret(request.headers.authorization || "", "Bearer " + secret)) {
       return response.status(401).json({ error: "Not allowed" });
     }
 
     // each step on its own, so one failing does not stop the rest
     const steps = {
-      penalties: () => managerModule.runPenaltySweep(),
-      archives: () => adminModule.runArchiveSweep(),
-      backup: () => adminModule.runDailyBackup(),
-      sessions: () => removeExpiredSessions(),
-      housekeeping: () => adminModule.removeExpiredDrafts()
+      penalties: function () { return managerModule.runPenaltySweep(); },
+      archives: function () { return adminModule.runArchiveSweep(); },
+      backup: function () { return adminModule.runDailyBackup(); },
+      sessions: function () { return removeExpiredSessions(); },
+      housekeeping: function () { return adminModule.removeExpiredDrafts(); }
     };
     const report = {};
-    for (const name of Object.keys(steps)) {
+    const stepNames = Object.keys(steps);
+    for (let nameIndex = 0; nameIndex < stepNames.length; nameIndex++) {
+      const name = stepNames[nameIndex];
       try {
         await steps[name]();
         report[name] = "ok";
       } catch (error) {
-        console.error(`Daily job, ${name}:`, error.message);
+        console.error("Daily job, " + name + ":", error.message);
         report[name] = "failed: " + error.message;
       }
     }
@@ -501,4 +521,4 @@ function registerSharedRoutes(app, deps) {
   });
 }
 
-module.exports = { registerSharedRoutes };
+module.exports = { registerSharedRoutes: registerSharedRoutes };

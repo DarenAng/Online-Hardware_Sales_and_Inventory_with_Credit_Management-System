@@ -70,8 +70,9 @@ document.addEventListener('click', function (event) {
     // the password boxes this button shows or hides
     const inputs = [];
     if (named) {
-        for (const id of named.split(',')) {
-            const input = document.getElementById(id.trim());
+        const ids = named.split(',');
+        for (let i = 0; i < ids.length; i++) {
+            const input = document.getElementById(ids[i].trim());
             if (input) inputs.push(input);
         }
     } else if (field) {
@@ -82,7 +83,9 @@ document.addEventListener('click', function (event) {
     if (inputs.length === 0) return;
 
     const showing = inputs[0].type === 'text';
-    inputs.forEach((input) => { input.type = showing ? 'password' : 'text'; });
+    for (let i = 0; i < inputs.length; i++) {
+        inputs[i].type = showing ? 'password' : 'text';
+    }
 
     const word = showing ? 'Show' : 'Hide';
     const noun = inputs.length > 1 ? 'passwords' : 'password';
@@ -90,7 +93,14 @@ document.addEventListener('click', function (event) {
     toggle.setAttribute('aria-pressed', String(!showing));
     toggle.setAttribute('aria-label', word + ' ' + noun);
 
-    const back = inputs.find((input) => input.value === '') || inputs[inputs.length - 1];
+    // focus the first empty box, or the last box when none is empty
+    let back = inputs[inputs.length - 1];
+    for (let i = 0; i < inputs.length; i++) {
+        if (inputs[i].value === '') {
+            back = inputs[i];
+            break;
+        }
+    }
     back.focus();
     const end = back.value.length;
     try { back.setSelectionRange(end, end); } catch (error) { /* not every type allows it */ }
@@ -100,8 +110,12 @@ function switchTab(tabId, event) {
     const tabContents = document.querySelectorAll('.tab-content');
     const tabBtns = document.querySelectorAll('.tab-btn');
 
-    tabContents.forEach(content => content.classList.remove('active'));
-    tabBtns.forEach(btn => btn.classList.remove('active'));
+    for (let i = 0; i < tabContents.length; i++) {
+        tabContents[i].classList.remove('active');
+    }
+    for (let i = 0; i < tabBtns.length; i++) {
+        tabBtns[i].classList.remove('active');
+    }
 
     const target = document.getElementById(tabId);
     if (target) target.classList.add('active');
@@ -162,16 +176,18 @@ function toggleSidebarMenu(navId, listId, event, force) {
     const open = force === undefined ? list.style.display !== 'block' : force;
 
     if (open) {
-        document.querySelectorAll('.sidebar-nav li[data-sidebar-dropdown]').forEach((item) => {
+        const items = document.querySelectorAll('.sidebar-nav li[data-sidebar-dropdown]');
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
             const otherList = item.querySelector(':scope > .nav-sub');
             const otherHeading = item.querySelector(':scope > .nav-parent');
-            if (!otherList || otherList === list) return;
+            if (!otherList || otherList === list) continue;
             otherList.style.display = 'none';
             if (otherHeading) {
                 otherHeading.classList.remove('is-open');
                 otherHeading.setAttribute('aria-expanded', 'false');
             }
-        });
+        }
     }
 
     list.style.display = open ? 'block' : 'none';
@@ -184,7 +200,8 @@ function toggleSidebarMenu(navId, listId, event, force) {
 // it (Make a Report, Pending) is left as it is.
 function unfoldSidebarAtOpenScreen() {
     const links = document.querySelectorAll('.sidebar-nav .nav-sub a.active');
-    for (const link of links) {
+    for (let i = 0; i < links.length; i++) {
+        const link = links[i];
         const item = link.closest('li');
         if (item && item.hidden) continue;
 
@@ -237,15 +254,21 @@ function limitDateFilter(input) {
 }
 
 function limitDateFilters() {
-    document.querySelectorAll('.toolbar-field input[type="date"]:not([data-any-date])').forEach(limitDateFilter);
+    const inputs = document.querySelectorAll('.toolbar-field input[type="date"]:not([data-any-date])');
+    for (let i = 0; i < inputs.length; i++) {
+        limitDateFilter(inputs[i]);
+    }
+}
+
+// Whenever a date box is used, its limit is applied again.
+function onDateFilterUsed(event) {
+    const target = event.target;
+    if (target && target.matches && target.matches('.toolbar-field input[type="date"]:not([data-any-date])')) {
+        limitDateFilter(target);
+    }
 }
 
 document.addEventListener('DOMContentLoaded', limitDateFilters);
-['focusin', 'input', 'change'].forEach((name) => {
-    document.addEventListener(name, (event) => {
-        const target = event.target;
-        if (target && target.matches && target.matches('.toolbar-field input[type="date"]:not([data-any-date])')) {
-            limitDateFilter(target);
-        }
-    }, true);
-});
+document.addEventListener('focusin', onDateFilterUsed, true);
+document.addEventListener('input', onDateFilterUsed, true);
+document.addEventListener('change', onDateFilterUsed, true);

@@ -25,7 +25,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
 function copyFolder(from, to) {
   fs.cpSync(path.join(ROOT, from), path.join(OUT, to), { recursive: true });
-  console.log(`copied ${from} -> /${to}/`);
+  console.log("copied " + from + " -> /" + to + "/");
 }
 
 copyFolder("public/frontend/css", "css");

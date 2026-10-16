@@ -16,7 +16,14 @@ function deliveryAreasFrom(savedText) {
   try {
     const list = JSON.parse(savedText);
     if (Array.isArray(list)) {
-      return list.filter((area) => typeof area === "string");
+      // keep only the texts
+      const areas = [];
+      for (let i = 0; i < list.length; i++) {
+        if (typeof list[i] === "string") {
+          areas.push(list[i]);
+        }
+      }
+      return areas;
     }
   } catch (error) {
     // not valid JSON: treat it as no list
@@ -26,7 +33,8 @@ function deliveryAreasFrom(savedText) {
 
 // The saved delivery areas, read from the database.
 async function readDeliveryAreas() {
-  const [rows] = await db.query("SELECT delivery_areas FROM store_settings WHERE setting_id = 1");
+  const result = await db.query("SELECT delivery_areas FROM store_settings WHERE setting_id = 1");
+  const rows = result[0];
   if (rows.length === 0) {
     return [];
   }
@@ -79,27 +87,54 @@ function receiptLayoutFrom(raw) {
   }
   if (!stored || typeof stored !== "object") stored = {};
 
-  const lines = (value, fallback) => {
-    if (!Array.isArray(value)) return fallback.slice();
-    return value
-      .map((line) => String(line === null || line === undefined ? "" : line).trim().replace(/\s+/g, " ").slice(0, 80))
-      .filter((line) => line !== "")
-      .slice(0, 10);
+  // text trimmed, each run of white space made one space, cut to max characters
+  const tidy = function (value, max) {
+    let textValue = value;
+    if (value === null || value === undefined) textValue = "";
+    return String(textValue).trim().replace(/\s+/g, " ").slice(0, max);
   };
-  const text = (value, fallback, max) => {
-    const cleaned = String(value === null || value === undefined ? "" : value).trim().replace(/\s+/g, " ").slice(0, max);
-    return cleaned === "" ? fallback : cleaned;
+  // a list of lines: each tidied to 80 characters, empty ones dropped, at most 10 kept
+  const lines = function (value, fallback) {
+    if (!Array.isArray(value)) return fallback.slice();
+    const kept = [];
+    for (let i = 0; i < value.length; i++) {
+      const line = tidy(value[i], 80);
+      if (line !== "") {
+        kept.push(line);
+      }
+    }
+    return kept.slice(0, 10);
+  };
+  const text = function (value, fallback, max) {
+    const cleaned = tidy(value, max);
+    if (cleaned === "") return fallback;
+    return cleaned;
   };
 
   const show = {};
-  for (const key of Object.keys(DEFAULT_RECEIPT_LAYOUT.show)) {
+  const showKeys = Object.keys(DEFAULT_RECEIPT_LAYOUT.show);
+  for (let keyIndex = 0; keyIndex < showKeys.length; keyIndex++) {
+    const key = showKeys[keyIndex];
     const wanted = stored.show && stored.show[key];
-    show[key] = typeof wanted === "boolean" ? wanted : DEFAULT_RECEIPT_LAYOUT.show[key];
+    if (typeof wanted === "boolean") {
+      show[key] = wanted;
+    } else {
+      show[key] = DEFAULT_RECEIPT_LAYOUT.show[key];
+    }
+  }
+
+  let paperWidth = DEFAULT_RECEIPT_LAYOUT.paperWidth;
+  if ([58, 80].includes(Number(stored.paperWidth))) {
+    paperWidth = Number(stored.paperWidth);
+  }
+  let fontSize = DEFAULT_RECEIPT_LAYOUT.fontSize;
+  if ([11, 12, 13].includes(Number(stored.fontSize))) {
+    fontSize = Number(stored.fontSize);
   }
 
   return {
-    paperWidth: [58, 80].includes(Number(stored.paperWidth)) ? Number(stored.paperWidth) : DEFAULT_RECEIPT_LAYOUT.paperWidth,
-    fontSize: [11, 12, 13].includes(Number(stored.fontSize)) ? Number(stored.fontSize) : DEFAULT_RECEIPT_LAYOUT.fontSize,
+    paperWidth: paperWidth,
+    fontSize: fontSize,
     title: text(stored.title, DEFAULT_RECEIPT_LAYOUT.title, 40),
     // fixed wording, not a setting: it only prints on a sale that is fully paid
     paidLabel: DEFAULT_RECEIPT_LAYOUT.paidLabel,
@@ -110,5 +145,9 @@ function receiptLayoutFrom(raw) {
 }
 
 module.exports = {
-  DEFAULT_STORE_SETTINGS, DEFAULT_RECEIPT_LAYOUT, receiptLayoutFrom, deliveryAreasFrom, readDeliveryAreas
+  DEFAULT_STORE_SETTINGS: DEFAULT_STORE_SETTINGS,
+  DEFAULT_RECEIPT_LAYOUT: DEFAULT_RECEIPT_LAYOUT,
+  receiptLayoutFrom: receiptLayoutFrom,
+  deliveryAreasFrom: deliveryAreasFrom,
+  readDeliveryAreas: readDeliveryAreas
 };

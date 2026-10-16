@@ -28,7 +28,10 @@ const QRCode = require("qrcode");
 const qrPaymentProcedures = require("../database/procedures/qr-payment-procedures");
 
 // how long a code can be paid; QR_PAYMENT_MINUTES in .env
-const QR_MINUTES = Number(process.env.QR_PAYMENT_MINUTES) > 0 ? Number(process.env.QR_PAYMENT_MINUTES) : 10;
+let QR_MINUTES = 10;
+if (Number(process.env.QR_PAYMENT_MINUTES) > 0) {
+  QR_MINUTES = Number(process.env.QR_PAYMENT_MINUTES);
+}
 
 const WALLETS = ["GCash", "PayMaya"];
 const PURPOSES = ["sale", "credit_payment"];
@@ -42,7 +45,7 @@ function pickProvider() {
   const chosen = String(process.env.PAYMENT_PROVIDER || "sim").trim().toLowerCase();
   if (chosen === "paymongo") return require("../services/qr-provider-paymongo");
   if (chosen !== "sim") {
-    console.warn(`PAYMENT_PROVIDER=${chosen} is not known (use paymongo or sim); using sim.`);
+    console.warn("PAYMENT_PROVIDER=" + chosen + " is not known (use paymongo or sim); using sim.");
   }
   return require("../services/qr-provider-sim");
 }
@@ -53,14 +56,24 @@ function pickProvider() {
 function lanAddress() {
   const found = [];
   const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const item of interfaces[name] || []) {
+  const names = Object.keys(interfaces);
+  for (let nameIndex = 0; nameIndex < names.length; nameIndex++) {
+    const items = interfaces[names[nameIndex]] || [];
+    for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
+      const item = items[itemIndex];
       const v4 = item.family === "IPv4" || item.family === 4;
       if (v4 && !item.internal) found.push(item.address);
     }
   }
-  const rank = (address) => (address.startsWith("192.168.") ? 0 : address.startsWith("10.") ? 1 : 2);
-  found.sort((a, b) => rank(a) - rank(b));
+  // 0 = tried first (192.168.x.x), 1 = then 10.x.x.x, 2 = everything else
+  const rank = function (address) {
+    if (address.startsWith("192.168.")) return 0;
+    if (address.startsWith("10.")) return 1;
+    return 2;
+  };
+  found.sort(function (a, b) {
+    return rank(a) - rank(b);
+  });
   return found[0] || null;
 }
 
@@ -69,8 +82,8 @@ function siteBaseUrl(port) {
   if (site) return site;
   // on Vercel, the project's own address (its production domain, else this deployment's)
   const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  if (vercelHost) return `https://${vercelHost}`;
-  return `http://${lanAddress() || "localhost"}:${port}`;
+  if (vercelHost) return "https://" + vercelHost;
+  return "http://" + (lanAddress() || "localhost") + ":" + port;
 }
 
 // An error carrying the HTTP status to answer with and a short code the till
@@ -96,20 +109,20 @@ function qrRefusal(row, amountNow, wallet) {
   }
   if (row.status !== "paid") {
     return { status: 409, code: "QR_NOT_PAID",
-      message: `This QR payment has not been paid (it is ${row.status}), so nothing was recorded.` };
+      message: "This QR payment has not been paid (it is " + row.status + "), so nothing was recorded." };
   }
   if (Math.round(Number(row.amount) * 100) !== Math.round(Number(amountNow) * 100)) {
     return { status: 409, code: "QR_AMOUNT",
-      message: `The QR payment was for ${pesoText(row.amount)} but ${pesoText(amountNow)} is being taken now. ` +
+      message: "The QR payment was for " + pesoText(row.amount) + " but " + pesoText(amountNow) + " is being taken now. " +
                "Nothing was recorded." };
   }
   if (wallet && row.wallet !== wallet) {
     return { status: 409, code: "QR_WALLET",
-      message: `The QR payment was made with ${row.wallet}, not ${wallet}. Nothing was recorded.` };
+      message: "The QR payment was made with " + row.wallet + ", not " + wallet + ". Nothing was recorded." };
   }
   if (row.sale_id !== null && row.sale_id !== undefined) {
     return { status: 409, code: "QR_USED",
-      message: `This QR payment is already recorded on OR-${String(row.sale_id).padStart(6, "0")}. ` +
+      message: "This QR payment is already recorded on OR-" + String(row.sale_id).padStart(6, "0") + ". " +
                "One payment cannot pay for two things." };
   }
   return null;
@@ -119,7 +132,8 @@ function qrRefusal(row, amountNow, wallet) {
 // that have finished: one still waiting has not failed yet.
 function summarize(rows) {
   const counts = { attempts: rows.length, pending: 0, paid: 0, failed: 0, expired: 0, cancelled: 0 };
-  for (const row of rows) {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex];
     if (counts[row.status] !== undefined) counts[row.status] += 1;
   }
   const finished = counts.attempts - counts.pending;
@@ -128,22 +142,27 @@ function summarize(rows) {
 }
 
 function registerQrPaymentRoutes(app, deps) {
-  const { db, getActorId, publishChange, isDateText, CASHIER, port } = deps;
+  const db = deps.db;
+  const getActorId = deps.getActorId;
+  const publishChange = deps.publishChange;
+  const isDateText = deps.isDateText;
+  const CASHIER = deps.CASHIER;
+  const port = deps.port;
 
   const provider = pickProvider();
   if (typeof provider.registerRoutes === "function") provider.registerRoutes(app, db);
 
   const baseUrl = siteBaseUrl(port);
 
-  const ROW_SQL = `
-    SELECT q.*, st.full_name AS cashier_name,
-           (q.status = 'pending' AND q.expires_at <= NOW()) AS is_due,
-           GREATEST(TIMESTAMPDIFF(SECOND, NOW(), q.expires_at), 0) AS seconds_left
-    FROM qr_payments q
-    LEFT JOIN staff st ON st.staff_id = q.created_by_staff_id`;
+  const ROW_SQL = "\n    SELECT q.*, st.full_name AS cashier_name,\n" +
+    "           (q.status = 'pending' AND q.expires_at <= NOW()) AS is_due,\n" +
+    "           GREATEST(TIMESTAMPDIFF(SECOND, NOW(), q.expires_at), 0) AS seconds_left\n" +
+    "    FROM qr_payments q\n" +
+    "    LEFT JOIN staff st ON st.staff_id = q.created_by_staff_id";
 
   async function readRow(id) {
-    const [rows] = await db.query(`${ROW_SQL} WHERE q.qr_payment_id = ?`, [id]);
+    const rowsResult = await db.query(ROW_SQL + " WHERE q.qr_payment_id = ?", [id]);
+    const rows = rowsResult[0];
     return rows[0] || null;
   }
 
@@ -176,27 +195,28 @@ function registerQrPaymentRoutes(app, deps) {
       [id, status, paymentId || null, errorMessage || null, actorId || null]
     );
     if (Number(output.changed) === 1) {
-      publishChange("qr-payments", `qr-payment ${id} ${status}`, null);
+      publishChange("qr-payments", "qr-payment " + id + " " + status, null);
     }
     return output;
   }
 
   // One look at the provider for a code still waiting, shared by everyone
   // asking about it at that moment (the till, the cancel, a sale).
-  const checking = new Map();
+  // (an object: payment id -> the look in progress)
+  const checking = {};
 
   function refresh(row, actorId) {
     if (!row || row.status !== "pending") return Promise.resolve(row);
     const id = row.qr_payment_id;
-    if (checking.has(id)) return checking.get(id);
+    if (checking[id] !== undefined) return checking[id];
 
-    const work = (async () => {
+    const work = (async function () {
       let state;
       try {
         state = await provider.getStatus(row.provider_intent_id);
       } catch (error) {
         // the provider cannot be asked just now; the row stays as it is
-        console.error(`Checking QR payment #${id} failed:`, error.message);
+        console.error("Checking QR payment #" + id + " failed:", error.message);
         row.checkError = error.message;
         return row;
       }
@@ -207,17 +227,21 @@ function registerQrPaymentRoutes(app, deps) {
         // Out of time. It is closed at the provider first, then asked once
         // more: a customer who paid as the clock ran out has still paid.
         await provider.cancel(row.provider_intent_id);
-        const last = await provider.getStatus(row.provider_intent_id).catch(() => state);
+        const last = await provider.getStatus(row.provider_intent_id).catch(function () {
+          return state;
+        });
         if (last.status === "paid") {
           await setResult(id, "paid", last.providerPaymentId, null, actorId);
         } else {
-          await setResult(id, "expired", null, `Not paid within ${QR_MINUTES} minutes.`, actorId);
+          await setResult(id, "expired", null, "Not paid within " + QR_MINUTES + " minutes.", actorId);
         }
       }
       return readRow(id);
-    })().finally(() => checking.delete(id));
+    })().finally(function () {
+      delete checking[id];
+    });
 
-    checking.set(id, work);
+    checking[id] = work;
     return work;
   }
 
@@ -227,7 +251,7 @@ function registerQrPaymentRoutes(app, deps) {
   }
 
   // ---------- make a code ----------
-  app.post("/api/qr-payments", async (request, response) => {
+  app.post("/api/qr-payments", async function (request, response) {
     const body = request.body || {};
     const amount = Math.round(Number(body.amount) * 100) / 100;
     const wallet = body.wallet;
@@ -253,22 +277,24 @@ function registerQrPaymentRoutes(app, deps) {
       // customer is asked to pay anything
       if (purpose === "credit_payment") {
         if (!saleId) return response.status(400).json({ error: "Say which sale the payment is for." });
-        const [sales] = await db.query(
-          `SELECT GREATEST(amount_due - amount_paid, 0) AS balance, is_archived
-           FROM sales WHERE sale_id = ?`, [saleId]);
+        const salesResult = await db.query(
+          "SELECT GREATEST(amount_due - amount_paid, 0) AS balance, is_archived\n" +
+            "           FROM sales WHERE sale_id = ?", [saleId]);
+        const sales = salesResult[0];
         if (sales.length === 0 || sales[0].is_archived) {
           return response.status(404).json({ error: "That sale is not on record." });
         }
         if (amount > Number(sales[0].balance) + 0.004) {
           return response.status(400).json({
-            error: `Only ${pesoText(sales[0].balance)} is owed on OR-${String(saleId).padStart(6, "0")}.`
+            error: "Only " + pesoText(sales[0].balance) + " is owed on OR-" + String(saleId).padStart(6, "0") + "."
           });
         }
-        description = `Payment on OR-${String(saleId).padStart(6, "0")}`;
+        description = "Payment on OR-" + String(saleId).padStart(6, "0");
       }
 
-      const [shop] = await db.query("SELECT store_name FROM store_settings LIMIT 1");
-      if (shop.length > 0 && shop[0].store_name) description = `${shop[0].store_name}: ${description}`;
+      const shopResult = await db.query("SELECT store_name FROM store_settings LIMIT 1");
+      const shop = shopResult[0];
+      if (shop.length > 0 && shop[0].store_name) description = shop[0].store_name + ": " + description;
     } catch (error) {
       console.error("QR payment checks failed:", error.message);
       return response.status(500).json({ error: "Unable to make the QR code. Try again." });
@@ -276,7 +302,12 @@ function registerQrPaymentRoutes(app, deps) {
 
     let made;
     try {
-      made = await provider.createPayment({ amount, wallet, description, returnUrl: baseUrl + "/pay/done" });
+      made = await provider.createPayment({
+        amount: amount,
+        wallet: wallet,
+        description: description,
+        returnUrl: baseUrl + "/pay/done"
+      });
     } catch (error) {
       console.error("Making a QR payment failed:", error.message);
       return response.status(error.httpStatus >= 400 && error.httpStatus < 500 ? 400 : 502)
@@ -287,7 +318,7 @@ function registerQrPaymentRoutes(app, deps) {
       const output = await qrPaymentProcedures.createQrPayment(
         [provider.name, provider.mode, made.providerIntentId, amount, wallet, purpose,
          Math.round(QR_MINUTES * 60), getActorId(request),
-         purpose === "credit_payment" ? `for OR-${String(saleId).padStart(6, "0")}` : "for a sale"]
+         purpose === "credit_payment" ? "for OR-" + String(saleId).padStart(6, "0") : "for a sale"]
       );
       if (output.status_code !== 201) {
         // not on record, so it must not be payable either
@@ -297,7 +328,7 @@ function registerQrPaymentRoutes(app, deps) {
 
       const row = await readRow(output.qr_payment_id);
       const qrImage = await QRCode.toDataURL(made.payUrl, { margin: 1, width: 260 });
-      publishChange("qr-payments", `qr-payment ${row.qr_payment_id} pending`, request.headers["x-client-id"] || null);
+      publishChange("qr-payments", "qr-payment " + row.qr_payment_id + " pending", request.headers["x-client-id"] || null);
 
       response.status(201).json({
         id: row.qr_payment_id,
@@ -323,7 +354,7 @@ function registerQrPaymentRoutes(app, deps) {
   });
 
   // ---------- is it paid? ----------
-  app.get("/api/qr-payments/:id", async (request, response) => {
+  app.get("/api/qr-payments/:id", async function (request, response) {
     try {
       let row = await readRow(Number(request.params.id));
       if (!row || !mayTouch(request, row)) {
@@ -343,7 +374,7 @@ function registerQrPaymentRoutes(app, deps) {
   // ---------- the cashier gives up ----------
   // Looked at once more first: a payment that already went through is
   // answered as paid, and the till records it instead of abandoning it.
-  app.post("/api/qr-payments/:id/cancel", async (request, response) => {
+  app.post("/api/qr-payments/:id/cancel", async function (request, response) {
     try {
       let row = await readRow(Number(request.params.id));
       if (!row || !mayTouch(request, row)) {
@@ -354,7 +385,9 @@ function registerQrPaymentRoutes(app, deps) {
       if (row.status === "pending") {
         await provider.cancel(row.provider_intent_id);
         // closed at the provider, so this last look settles it
-        const last = await provider.getStatus(row.provider_intent_id).catch(() => ({ status: "pending" }));
+        const last = await provider.getStatus(row.provider_intent_id).catch(function () {
+          return { status: "pending" };
+        });
         if (last.status === "paid") {
           await setResult(row.qr_payment_id, "paid", last.providerPaymentId, null, getActorId(request));
         } else {
@@ -370,7 +403,7 @@ function registerQrPaymentRoutes(app, deps) {
   });
 
   // ---------- the record of every attempt ----------
-  app.get("/api/qr-payments", async (request, response) => {
+  app.get("/api/qr-payments", async function (request, response) {
     const status = String(request.query.status || "all");
     const from = String(request.query.from || "");
     const to = String(request.query.to || "");
@@ -381,25 +414,37 @@ function registerQrPaymentRoutes(app, deps) {
 
     const where = [];
     const params = [];
-    if (isDateText(from)) { where.push("q.created_at >= ?"); params.push(`${from} 00:00:00`); }
-    if (isDateText(to))   { where.push("q.created_at <= ?"); params.push(`${to} 23:59:59`); }
+    if (isDateText(from)) { where.push("q.created_at >= ?"); params.push(from + " 00:00:00"); }
+    if (isDateText(to))   { where.push("q.created_at <= ?"); params.push(to + " 23:59:59"); }
     if (staff)            { where.push("q.created_by_staff_id = ?"); params.push(staff); }
-    const whereSql = where.length > 0 ? "WHERE " + where.join(" AND ") : "";
+    let whereSql = "";
+    if (where.length > 0) {
+      whereSql = "WHERE " + where.join(" AND ");
+    }
 
     try {
       // Codes left waiting past their time (a till closed with one on screen)
       // are settled before the list is read, so it never shows them pending.
-      const [due] = await db.query(
-        `${ROW_SQL} WHERE q.status = 'pending' AND q.expires_at <= NOW() ORDER BY q.qr_payment_id LIMIT 20`);
-      for (const row of due) await refresh(row, null);
+      const dueResult = await db.query(
+        ROW_SQL + " WHERE q.status = 'pending' AND q.expires_at <= NOW() ORDER BY q.qr_payment_id LIMIT 20");
+      const due = dueResult[0];
+      for (let dueIndex = 0; dueIndex < due.length; dueIndex++) {
+        await refresh(due[dueIndex], null);
+      }
 
-      const [rows] = await db.query(`${ROW_SQL} ${whereSql} ORDER BY q.created_at DESC, q.qr_payment_id DESC LIMIT 1000`,
+      const rowsResult = await db.query(ROW_SQL + " " + whereSql + " ORDER BY q.created_at DESC, q.qr_payment_id DESC LIMIT 1000",
         params);
+      const rows = rowsResult[0];
       // the tiles count the whole period; the status filter narrows the list only
       const summary = summarize(rows);
-      const listed = status === "all" ? rows : rows.filter((row) => row.status === status);
+      const listed = [];
+      for (let i = 0; i < rows.length; i++) {
+        if (status === "all" || rows[i].status === status) {
+          listed.push(shape(rows[i]));
+        }
+      }
 
-      response.json({ rows: listed.map(shape), summary: summary });
+      response.json({ rows: listed, summary: summary });
     } catch (error) {
       console.error("QR payments list failed:", error.message);
       response.status(500).json({ error: "Unable to read the QR payments." });
@@ -410,7 +455,7 @@ function registerQrPaymentRoutes(app, deps) {
   // The till's own checking is what confirms a payment; PayMongo cannot reach
   // a server on localhost. When the server is reachable, this catches what the
   // till would miss: a payment made after the code was closed on our side.
-  app.post("/api/paymongo/webhook", async (request, response) => {
+  app.post("/api/paymongo/webhook", async function (request, response) {
     if (typeof provider.parseWebhook !== "function") {
       return response.status(404).json({ error: "Webhooks are only used with PayMongo." });
     }
@@ -424,7 +469,8 @@ function registerQrPaymentRoutes(app, deps) {
     }
 
     try {
-      const [rows] = await db.query(`${ROW_SQL} WHERE q.provider_intent_id = ?`, [event.intentId || ""]);
+      const rowsResult = await db.query(ROW_SQL + " WHERE q.provider_intent_id = ?", [event.intentId || ""]);
+      const rows = rowsResult[0];
       const row = rows[0];
       // not one of ours (another app on the same PayMongo account): acknowledged, ignored
       if (row && event.type === "payment.paid" && row.status !== "paid") {
@@ -442,15 +488,15 @@ function registerQrPaymentRoutes(app, deps) {
   });
 
   // ---------- where the customer's phone lands ----------
-  app.get("/pay/done", (request, response) => {
+  app.get("/pay/done", function (request, response) {
     response.set("Cache-Control", "no-store");
-    response.send(`<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Thank you</title>
-<style>body{margin:0;font-family:system-ui,sans-serif;background:#f4f5f7;color:#1f2933}
-.card{max-width:420px;margin:48px auto;background:#fff;border-radius:14px;padding:28px 20px;
-box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style></head>
-<body><div class="card"><h2>You can return to the cashier</h2>
-<p>The cashier's screen shows whether the payment went through.</p></div></body></html>`);
+    response.send("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n" +
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Thank you</title>\n" +
+      "<style>body{margin:0;font-family:system-ui,sans-serif;background:#f4f5f7;color:#1f2933}\n" +
+      ".card{max-width:420px;margin:48px auto;background:#fff;border-radius:14px;padding:28px 20px;\n" +
+      "box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style></head>\n" +
+      "<body><div class=\"card\"><h2>You can return to the cashier</h2>\n" +
+      "<p>The cashier's screen shows whether the payment went through.</p></div></body></html>");
   });
 
   // ---------- for cashier.js: money recorded against a QR payment ----------
@@ -459,7 +505,8 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
   // stopped here with a friendly message. The database is the real guard: the
   // sale and payment procedures lock the qr_payments row and tie it to the sale
   // inside their own transaction.
-  const claiming = new Set();
+  // (an object: payment id -> true while that payment is being recorded)
+  const claiming = {};
 
   // Checked with the provider again before anything is saved. Gives back
   // { id, reference, release } or throws a QrPaymentError. release() must be
@@ -469,18 +516,24 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
     if (!Number.isInteger(id) || id <= 0) {
       throw new QrPaymentError(400, "That QR payment number is not valid.", "QR_UNKNOWN");
     }
-    if (claiming.has(id)) {
+    if (claiming[id] === true) {
       throw new QrPaymentError(409, "This QR payment is being recorded on another sale right now.", "QR_USED");
     }
-    claiming.add(id);
+    claiming[id] = true;
 
     try {
       const row = await refresh(await readRow(id), actorId);
       const refusal = qrRefusal(row, amountNow, wallet);
       if (refusal) throw new QrPaymentError(refusal.status, refusal.message, refusal.code);
-      return { id: id, reference: row.provider_payment_id, release: () => claiming.delete(id) };
+      return {
+        id: id,
+        reference: row.provider_payment_id,
+        release: function () {
+          delete claiming[id];
+        }
+      };
     } catch (error) {
-      claiming.delete(id);
+      delete claiming[id];
       throw error;
     }
   }
@@ -488,7 +541,7 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
   // The sale or payment procedure has tied the QR payment to the sale by now;
   // this only tells the open QR Payments screens to look again.
   function announceUsed(qrPaymentId) {
-    publishChange("qr-payments", `qr-payment ${qrPaymentId} linked`, null);
+    publishChange("qr-payments", "qr-payment " + qrPaymentId + " linked", null);
   }
 
   // The money came in and the sale did not save: the row says a refund is owed.
@@ -503,7 +556,7 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
       if (row && row.sale_id !== null) return "QR_USED";
       await setResult(qrPaymentId, "paid", null, UNSAVED_NOTE, actorId);
     } catch (error) {
-      console.error(`Noting QR payment #${qrPaymentId} as unsaved failed:`, error.message);
+      console.error("Noting QR payment #" + qrPaymentId + " as unsaved failed:", error.message);
     }
     return null;
   }
@@ -512,11 +565,11 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
   function describe() {
     const lines = [];
     if (provider.problem) {
-      lines.push(`QR payments: ${provider.problem}`);
+      lines.push("QR payments: " + provider.problem);
     } else if (provider.name === "sim") {
       lines.push("QR payments: SIMULATION (PAYMENT_PROVIDER=sim): no PayMongo, no real money.");
     } else {
-      lines.push(`QR payments: PayMongo, ${provider.mode === "test" ? "TEST MODE (no real money)" : "LIVE (real money)"}.`);
+      lines.push("QR payments: PayMongo, " + (provider.mode === "test" ? "TEST MODE (no real money)" : "LIVE (real money)") + ".");
     }
     // Online, the simulation charges nobody, yet the till records the sale as
     // paid. PAYMENT_PROVIDER unset (or any value that is not "paymongo") ends
@@ -533,11 +586,23 @@ box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style>
     let where = " (this PC on the Wi-Fi; the phone must be on the same network).";
     if (process.env.HARDWARE_SITE_URL) where = " (HARDWARE_SITE_URL).";
     else if (process.env.VERCEL) where = " (this Vercel project's address).";
-    lines.push(`Phones reach this app at ${baseUrl}${where}`);
+    lines.push("Phones reach this app at " + baseUrl + where);
     return lines;
   }
 
-  return { verifyForMoney, announceUsed, recordUnsaved, QrPaymentError, describe };
+  return {
+    verifyForMoney: verifyForMoney,
+    announceUsed: announceUsed,
+    recordUnsaved: recordUnsaved,
+    QrPaymentError: QrPaymentError,
+    describe: describe
+  };
 }
 
-module.exports = { registerQrPaymentRoutes, qrRefusal, summarize, UNSAVED_NOTE, QR_MINUTES };
+module.exports = {
+  registerQrPaymentRoutes: registerQrPaymentRoutes,
+  qrRefusal: qrRefusal,
+  summarize: summarize,
+  UNSAVED_NOTE: UNSAVED_NOTE,
+  QR_MINUTES: QR_MINUTES
+};

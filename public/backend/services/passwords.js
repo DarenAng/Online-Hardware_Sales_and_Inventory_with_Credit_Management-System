@@ -19,7 +19,7 @@ const SCRYPT_PARAMS = { N: 16384, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 async function hashPassword(plainText) {
   const salt = crypto.randomBytes(16).toString("hex");
   const derived = await scrypt(plainText, salt, SCRYPT_KEYLEN, SCRYPT_PARAMS);
-  return `scrypt$${salt}$${derived.toString("hex")}`;
+  return "scrypt$" + salt + "$" + derived.toString("hex");
 }
 
 function isHashed(stored) {
@@ -71,4 +71,9 @@ async function verifyPassword(plainText, stored) {
   return crypto.timingSafeEqual(derived, expectedBytes);   // constant time
 }
 
-module.exports = { hashPassword, isHashed, generatePassword, verifyPassword };
+module.exports = {
+  hashPassword: hashPassword,
+  isHashed: isHashed,
+  generatePassword: generatePassword,
+  verifyPassword: verifyPassword
+};

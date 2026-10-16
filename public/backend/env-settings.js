@@ -12,4 +12,4 @@ function numberSetting(value, defaultValue) {
   return defaultValue;
 }
 
-module.exports = { numberSetting };
+module.exports = { numberSetting: numberSetting };

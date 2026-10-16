@@ -82,12 +82,12 @@ function updateStoreBankDetails(params) {
 }
 
 module.exports = {
-  createStaffAccount,
-  updateStaffAccount,
-  setStaffStatus,
-  createLoginForStaff,
-  resetUserPassword,
-  sweepArchives,
-  updateStoreSettings,
-  updateStoreBankDetails
+  createStaffAccount: createStaffAccount,
+  updateStaffAccount: updateStaffAccount,
+  setStaffStatus: setStaffStatus,
+  createLoginForStaff: createLoginForStaff,
+  resetUserPassword: resetUserPassword,
+  sweepArchives: sweepArchives,
+  updateStoreSettings: updateStoreSettings,
+  updateStoreBankDetails: updateStoreBankDetails
 };

@@ -26,14 +26,14 @@ const express = require("express");
 // registerRoutes(app, db), and they go in qr_sim_intents. Without one (the
 // UI test stub, which runs no MySQL) they are kept in memory instead.
 let db = null;
-const memory = new Map();   // intent id -> intent
+const memory = {};   // intent id -> intent
 
 // a day is far longer than any code lasts; a server left running for weeks
 // should not keep every one
 const FORGET_AFTER_MS = 24 * 60 * 60 * 1000;
 
 function randomId(prefix) {
-  return `${prefix}_sim_${crypto.randomBytes(8).toString("hex")}`;
+  return prefix + "_sim_" + crypto.randomBytes(8).toString("hex");
 }
 
 // a row of qr_sim_intents in the shape the code below reads
@@ -56,7 +56,11 @@ function intentFrom(row) {
 const store = {
   async forgetBefore(time) {
     if (!db) {
-      for (const [id, old] of memory) if (old.createdAt < time) memory.delete(id);
+      for (const id in memory) {
+        if (memory[id].createdAt < time) {
+          delete memory[id];
+        }
+      }
       return;
     }
     await db.query("DELETE FROM qr_sim_intents WHERE created_at < ?", [time]);
@@ -64,13 +68,13 @@ const store = {
 
   async add(intent) {
     if (!db) {
-      memory.set(intent.id, Object.assign({}, intent));
+      memory[intent.id] = Object.assign({}, intent);
       return;
     }
     await db.query(
-      `INSERT INTO qr_sim_intents
-         (intent_id, token, amount, wallet, description, return_url, status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      "INSERT INTO qr_sim_intents\n" +
+        "         (intent_id, token, amount, wallet, description, return_url, status, created_at)\n" +
+        "       VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
       [intent.id, intent.token, intent.amount, intent.wallet, String(intent.description).slice(0, 255),
        intent.returnUrl, intent.status, intent.createdAt]);
   },
@@ -79,33 +83,44 @@ const store = {
   async find(field, value) {
     const wanted = String(value || "");
     if (!db) {
-      for (const intent of memory.values()) {
+      for (const id in memory) {
+        const intent = memory[id];
         if (intent[field] === wanted) return Object.assign({}, intent);
       }
       return null;
     }
-    const [rows] = await db.query(
-      `SELECT * FROM qr_sim_intents WHERE ${field === "token" ? "token" : "intent_id"} = ?`, [wanted]);
+    const rowsResult = await db.query(
+      "SELECT * FROM qr_sim_intents WHERE " + (field === "token" ? "token" : "intent_id") + " = ?", [wanted]);
+    const rows = rowsResult[0];
     return intentFrom(rows[0]);
   },
 
   // only a code still waiting can be settled, and only once: true if this one was
   async settle(id, status, paymentId, errorMessage) {
     if (!db) {
-      const intent = memory.get(String(id || ""));
+      const key = String(id || "");
+      let intent;
+      if (Object.prototype.hasOwnProperty.call(memory, key)) {
+        intent = memory[key];
+      }
       if (!intent || intent.status !== "pending") return false;
-      Object.assign(intent, { status, paymentId, errorMessage });
+      Object.assign(intent, { status: status, paymentId: paymentId, errorMessage: errorMessage });
       return true;
     }
-    const [result] = await db.query(
-      `UPDATE qr_sim_intents SET status = ?, payment_id = ?, error_message = ?
-       WHERE intent_id = ? AND status = 'pending'`,
+    const queryResult = await db.query(
+      "UPDATE qr_sim_intents SET status = ?, payment_id = ?, error_message = ?\n" +
+        "       WHERE intent_id = ? AND status = 'pending'",
       [status, paymentId, errorMessage, String(id || "")]);
+    const result = queryResult[0];
     return result.affectedRows === 1;
   }
 };
 
-async function createPayment({ amount, wallet, description, returnUrl }) {
+async function createPayment(options) {
+  const amount = options.amount;
+  const wallet = options.wallet;
+  const description = options.description;
+  const returnUrl = options.returnUrl;
   const now = Date.now();
   await store.forgetBefore(now - FORGET_AFTER_MS);
 
@@ -125,7 +140,7 @@ async function createPayment({ amount, wallet, description, returnUrl }) {
 
   // the page lives on this app, at the same address the customer returns to
   const origin = new URL(returnUrl).origin;
-  return { providerIntentId: intent.id, payUrl: `${origin}/pay-sim/${intent.token}`, status: "pending" };
+  return { providerIntentId: intent.id, payUrl: origin + "/pay-sim/" + intent.token, status: "pending" };
 }
 
 async function getStatus(providerIntentId) {
@@ -146,36 +161,39 @@ async function cancel(providerIntentId) {
 }
 
 function escapeHtml(text) {
-  return String(text).replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  const replacements = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+  // each of & < > " ' is swapped for its safe html form
+  return String(text).replace(/[&<>"']/g, function (c) {
+    return replacements[c];
+  });
 }
 
 const WALLET_WORDS = { GCash: "GCash", PayMaya: "Maya" };
 
 // a phone-sized page with nothing to load from elsewhere
 function page(title, body) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="robots" content="noindex"><title>${escapeHtml(title)}</title>
-<style>
-  body { margin: 0; font-family: system-ui, sans-serif; background: #f4f5f7; color: #1f2933; }
-  .banner { background: #b45309; color: #fff; text-align: center; padding: 12px 16px; font-weight: 700; letter-spacing: .04em; }
-  .card { max-width: 420px; margin: 24px auto; background: #fff; border-radius: 14px; padding: 24px 20px;
-          box-shadow: 0 2px 10px rgba(0,0,0,.08); text-align: center; }
-  .amount { font-size: 2.2rem; font-weight: 700; margin: 8px 0; }
-  .muted { color: #616e7c; font-size: .95rem; }
-  form { margin: 0; }
-  button { width: 100%; padding: 14px; font-size: 1.05rem; border: 0; border-radius: 10px; margin-top: 12px; cursor: pointer; }
-  .pay { background: #15803d; color: #fff; } .fail { background: #e4e7eb; color: #9b1c1c; }
-</style></head><body>
-<div class="banner">SIMULATION &ndash; no real money moves</div>
-<div class="card">${body}</div></body></html>`;
+  return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n" +
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" +
+    "<meta name=\"robots\" content=\"noindex\"><title>" + escapeHtml(title) + "</title>\n" +
+    "<style>\n" +
+    "  body { margin: 0; font-family: system-ui, sans-serif; background: #f4f5f7; color: #1f2933; }\n" +
+    "  .banner { background: #b45309; color: #fff; text-align: center; padding: 12px 16px; font-weight: 700; letter-spacing: .04em; }\n" +
+    "  .card { max-width: 420px; margin: 24px auto; background: #fff; border-radius: 14px; padding: 24px 20px;\n" +
+    "          box-shadow: 0 2px 10px rgba(0,0,0,.08); text-align: center; }\n" +
+    "  .amount { font-size: 2.2rem; font-weight: 700; margin: 8px 0; }\n" +
+    "  .muted { color: #616e7c; font-size: .95rem; }\n" +
+    "  form { margin: 0; }\n" +
+    "  button { width: 100%; padding: 14px; font-size: 1.05rem; border: 0; border-radius: 10px; margin-top: 12px; cursor: pointer; }\n" +
+    "  .pay { background: #15803d; color: #fff; } .fail { background: #e4e7eb; color: #9b1c1c; }\n" +
+    "</style></head><body>\n" +
+    "<div class=\"banner\">SIMULATION &ndash; no real money moves</div>\n" +
+    "<div class=\"card\">" + body + "</div></body></html>";
 }
 
 function registerRoutes(app, database) {
   db = database;
 
-  app.get("/pay-sim/:token", async (request, response) => {
+  app.get("/pay-sim/:token", async function (request, response) {
     const intent = await store.find("token", request.params.token);
     response.set("Cache-Control", "no-store");
     if (!intent) {
@@ -188,22 +206,22 @@ function registerRoutes(app, database) {
     if (intent.status !== "pending") {
       const words = { paid: "already paid", failed: "marked as failed", expired: "closed" }[intent.status];
       return response.send(page("Payment " + intent.status,
-        `<h2>This payment is ${escapeHtml(words || intent.status)}</h2>` +
+        "<h2>This payment is " + escapeHtml(words || intent.status) + "</h2>" +
         "<p class=\"muted\">You can return to the cashier.</p>"));
     }
 
     response.send(page("Simulated payment",
-      `<p class="muted">Simulated ${escapeHtml(wallet)} payment to Lucelyn Hardware</p>` +
-      `<div class="amount">&#8369;${intent.amount.toFixed(2)}</div>` +
-      (intent.description ? `<p class="muted">${escapeHtml(intent.description)}</p>` : "") +
-      `<form method="post"><input type="hidden" name="result" value="paid">` +
-      `<button class="pay" type="submit">Pay</button></form>` +
-      `<form method="post"><input type="hidden" name="result" value="failed">` +
-      `<button class="fail" type="submit">Fail</button></form>`));
+      "<p class=\"muted\">Simulated " + escapeHtml(wallet) + " payment to Lucelyn Hardware</p>" +
+      "<div class=\"amount\">&#8369;" + intent.amount.toFixed(2) + "</div>" +
+      (intent.description ? "<p class=\"muted\">" + escapeHtml(intent.description) + "</p>" : "") +
+      "<form method=\"post\"><input type=\"hidden\" name=\"result\" value=\"paid\">" +
+      "<button class=\"pay\" type=\"submit\">Pay</button></form>" +
+      "<form method=\"post\"><input type=\"hidden\" name=\"result\" value=\"failed\">" +
+      "<button class=\"fail\" type=\"submit\">Fail</button></form>"));
   });
 
   // a plain form post, so the page works on any phone without scripts
-  app.post("/pay-sim/:token", express.urlencoded({ extended: false, limit: "1kb" }), async (request, response) => {
+  app.post("/pay-sim/:token", express.urlencoded({ extended: false, limit: "1kb" }), async function (request, response) {
     const intent = await store.find("token", request.params.token);
     if (!intent) return response.status(404).send(page("Unknown code", "<h2>This code is not known</h2>"));
 
@@ -231,8 +249,8 @@ module.exports = {
   name: "sim",
   mode: "test",
   problem: null,
-  createPayment,
-  getStatus,
-  cancel,
-  registerRoutes
+  createPayment: createPayment,
+  getStatus: getStatus,
+  cancel: cancel,
+  registerRoutes: registerRoutes
 };

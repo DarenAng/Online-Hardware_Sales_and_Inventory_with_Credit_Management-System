@@ -41,9 +41,11 @@ const REPORT_ROWS_PER_PAGE = 8;
 function showManagerPanel(panelId, title, event) {
     if (event) event.preventDefault();
 
-    document.querySelectorAll('[data-panel]').forEach((panel) => {
+    const allPanels = document.querySelectorAll('[data-panel]');
+    for (let i = 0; i < allPanels.length; i++) {
+        const panel = allPanels[i];
         panel.style.display = panel.id === panelId ? 'block' : 'none';
-    });
+    }
 
     markPanelLinks(panelId);
 
@@ -64,11 +66,13 @@ function markPanelLinks(panelId) {
     if (viewBox && viewBox.dataset.viewOf) view = viewBox.dataset.viewOf;
     const owner = (panel && panel.getAttribute('data-panel-of')) || panelId;
 
-    document.querySelectorAll('[data-panel-link]').forEach((link) => {
+    const links = document.querySelectorAll('[data-panel-link]');
+    for (let i = 0; i < links.length; i++) {
+        const link = links[i];
         const wanted = link.dataset.panelView;
         link.classList.toggle('active',
             link.dataset.panelLink === owner && (!wanted || wanted === view));
-    });
+    }
 }
 
 // ==========================================
@@ -88,20 +92,39 @@ function showPanelView(panelId, viewId, title, event) {
     const panel = document.getElementById(panelId);
     if (!panel) return null;
 
-    const views = Array.from(panel.querySelectorAll(':scope > .panel-view'));
-    const view = views.find((each) => each.id === viewId && viewOffered(panel, each.id)) ||
-                 views.find((each) => viewOffered(panel, each.id)) ||
-                 views[0];
+    const views = panel.querySelectorAll(':scope > .panel-view');
+
+    // the view asked for if it is offered, else the first view offered, else the first view
+    let view = null;
+    for (let i = 0; i < views.length; i++) {
+        if (views[i].id === viewId && viewOffered(panel, views[i].id)) {
+            view = views[i];
+            break;
+        }
+    }
+    if (!view) {
+        for (let i = 0; i < views.length; i++) {
+            if (viewOffered(panel, views[i].id)) {
+                view = views[i];
+                break;
+            }
+        }
+    }
+    if (!view) view = views[0];
     if (!view) return null;
 
-    views.forEach((each) => { each.hidden = each !== view; });
+    for (let i = 0; i < views.length; i++) {
+        views[i].hidden = views[i] !== view;
+    }
     panel.dataset.view = view.id;
 
-    panel.querySelectorAll('[data-view-tab]').forEach((tab) => {
+    const tabs = panel.querySelectorAll('[data-view-tab]');
+    for (let i = 0; i < tabs.length; i++) {
+        const tab = tabs[i];
         const current = tab.dataset.viewTab === view.id;
         tab.classList.toggle('is-current', current);
         tab.setAttribute('aria-selected', current ? 'true' : 'false');
-    });
+    }
 
     showManagerPanel(panelId, title, event);
     return view.id;
@@ -110,18 +133,28 @@ function showPanelView(panelId, viewId, title, event) {
 // After the role's switches are applied: a group with no tabs left goes, and a
 // screen showing a view that was just switched off moves to one still offered.
 function syncViewNavs() {
-    document.querySelectorAll('.tabbed-panel').forEach((panel) => {
-        panel.querySelectorAll('.view-nav-group').forEach((group) => {
-            const tabs = Array.from(group.querySelectorAll('[data-view-tab]'));
-            group.hidden = tabs.length > 0 && tabs.every((tab) => tab.hidden);
-        });
+    const tabbedPanels = document.querySelectorAll('.tabbed-panel');
+    for (let p = 0; p < tabbedPanels.length; p++) {
+        const panel = tabbedPanels[p];
+
+        const groups = panel.querySelectorAll('.view-nav-group');
+        for (let g = 0; g < groups.length; g++) {
+            const group = groups[g];
+            const tabs = group.querySelectorAll('[data-view-tab]');
+            // the group goes when it has tabs and every one of them is hidden
+            let allHidden = true;
+            for (let t = 0; t < tabs.length; t++) {
+                if (!tabs[t].hidden) allHidden = false;
+            }
+            group.hidden = tabs.length > 0 && allHidden;
+        }
 
         const current = panel.dataset.view;
         if (current && !viewOffered(panel, current) && panel.style.display !== 'none') {
             if (panel.id === 'panel-reports') showReport(current);
             else if (panel.id === 'panel-stocks') showStockView(current);
         }
-    });
+    }
 }
 
 // Reports is the first screen. The page opens on the Sales Summary; the menu
@@ -192,10 +225,10 @@ function localIsoDay() {
 // Income and sales are only ever behind us: the pickers stop at today
 function limitDatesToToday(ids) {
     const today = localIsoDay();
-    ids.forEach((id) => {
-        const input = document.getElementById(id);
+    for (let i = 0; i < ids.length; i++) {
+        const input = document.getElementById(ids[i]);
         if (input) input.max = today;
-    });
+    }
 }
 
 // The Period box: the named periods, then Custom date. Once a custom range
@@ -205,8 +238,8 @@ function renderIncomeRanges() {
     if (!select) return;
 
     let html = '';
-    for (const range of INCOME_RANGES) {
-        html += '<option value="' + range[0] + '">' + escapeHtml(range[1]) + '</option>';
+    for (let i = 0; i < INCOME_RANGES.length; i++) {
+        html += '<option value="' + INCOME_RANGES[i][0] + '">' + escapeHtml(INCOME_RANGES[i][1]) + '</option>';
     }
     const customLabel = incomeRange.name === 'custom'
         ? 'Custom: ' + incomeRange.from + ' to ' + incomeRange.to
@@ -239,7 +272,11 @@ function openCustomIncomeRange() {
     if (from) from.value = incomeRange.name === 'custom' ? incomeRange.from : '';
     if (to) to.value = incomeRange.name === 'custom' ? incomeRange.to : localIsoDay();
     showModal('income-custom-modal');
-    if (from) setTimeout(() => from.focus(), 60);
+    if (from) {
+        setTimeout(function () {
+            from.focus();
+        }, 60);
+    }
 }
 
 // closing the popup without applying leaves the period as it was
@@ -308,7 +345,8 @@ function renderIncomeCashiers() {
     if (!select || !incomeData) return;
 
     let html = '<option value="all">All cashiers</option>';
-    for (const cashier of incomeData.cashierChoices) {
+    for (let i = 0; i < incomeData.cashierChoices.length; i++) {
+        const cashier = incomeData.cashierChoices[i];
         html += '<option value="' + cashier.staff_id + '">' + escapeHtml(cashier.full_name) + '</option>';
     }
     select.innerHTML = html;
@@ -329,10 +367,11 @@ async function loadIncome() {
 // A new period refreshes only what is already loaded. With nothing loaded
 // yet it loads everything, as Load Data does.
 async function incomeRangeChanged() {
-    const anyOpen = incomeSummaryShown || INCOME_PANEL_KEYS.some((key) => {
-        const panel = getDataPanel(key);
-        return panel && panel.state !== 'closed';
-    });
+    let anyOpen = incomeSummaryShown;
+    for (let i = 0; i < INCOME_PANEL_KEYS.length; i++) {
+        const panel = getDataPanel(INCOME_PANEL_KEYS[i]);
+        if (!anyOpen && panel && panel.state !== 'closed') anyOpen = true;
+    }
     await refreshIncome(!anyOpen);
 }
 
@@ -343,10 +382,10 @@ async function refreshIncome(all) {
         await fetchIncome();
         if (summary) renderIncome();
 
-        INCOME_PANEL_KEYS.forEach((key) => {
-            const panel = getDataPanel(key);
+        for (let i = 0; i < INCOME_PANEL_KEYS.length; i++) {
+            const panel = getDataPanel(INCOME_PANEL_KEYS[i]);
             if (panel && (all || panel.state !== 'closed')) panel.open();
-        });
+        }
     } catch (error) {
         notifyOffline();
     }
@@ -387,12 +426,15 @@ function renderIncome() {
 
     const grid = document.getElementById('income-kpis');
     if (grid) {
-        grid.innerHTML = kpis.map((k) =>
-            '<div class="kpi-card ' + k[3] + '">' +
-            '<span class="kpi-label">' + k[0] + '</span>' +
-            '<span class="kpi-value">' + escapeHtml(k[1]) + '</span>' +
-            '<span class="kpi-note">' + k[2] + '</span></div>'
-        ).join('');
+        let cards = '';
+        for (let i = 0; i < kpis.length; i++) {
+            const k = kpis[i];
+            cards += '<div class="kpi-card ' + k[3] + '">' +
+                '<span class="kpi-label">' + k[0] + '</span>' +
+                '<span class="kpi-value">' + escapeHtml(k[1]) + '</span>' +
+                '<span class="kpi-note">' + k[2] + '</span></div>';
+        }
+        grid.innerHTML = cards;
     }
 }
 
@@ -409,13 +451,21 @@ function canExportReports() {
 function applyExportPermissions() {
     if (canExportReports()) return;
 
-    document.querySelectorAll('[data-export]').forEach((button) => {
-        button.remove();
-    });
+    const buttons = document.querySelectorAll('[data-export]');
+    for (let i = 0; i < buttons.length; i++) {
+        buttons[i].remove();
+    }
 }
 
+// "a, b" -> ['a', 'b']: split on commas, trim each, leave out empty ones
 function printKeys(keys) {
-    return String(keys || '').split(',').map((key) => key.trim()).filter(Boolean);
+    const parts = String(keys || '').split(',');
+    const result = [];
+    for (let i = 0; i < parts.length; i++) {
+        const key = parts[i].trim();
+        if (key) result.push(key);
+    }
+    return result;
 }
 
 function panelHasRows(key) {
@@ -425,8 +475,14 @@ function panelHasRows(key) {
 
 // called whenever any table changes shape
 function syncExportButtons() {
-    document.querySelectorAll('[data-print-for]').forEach((button) => {
-        const ready = printKeys(button.dataset.printFor).some(panelHasRows);
+    const printButtons = document.querySelectorAll('[data-print-for]');
+    for (let b = 0; b < printButtons.length; b++) {
+        const button = printButtons[b];
+        const keys = printKeys(button.dataset.printFor);
+        let ready = false;
+        for (let i = 0; i < keys.length; i++) {
+            if (panelHasRows(keys[i])) ready = true;
+        }
         button.disabled = !ready;
 
         if (ready) {
@@ -438,7 +494,7 @@ function syncExportButtons() {
         } else {
             button.title = 'Load data first';
         }
-    });
+    }
 }
 
 // the income breakdown as one file, for the period on the screen
@@ -472,8 +528,8 @@ function panelSheet(key) {
     const heads = table.querySelectorAll('thead th');
     const keep = [];
     const headers = [];
-    for (const th of heads) {
-        const text = th.textContent.trim();
+    for (let h = 0; h < heads.length; h++) {
+        const text = heads[h].textContent.trim();
         keep.push(text !== '');
         if (text !== '') {
             headers.push(text);
@@ -490,14 +546,16 @@ function panelSheet(key) {
     scratch.innerHTML = '<tbody>' + rowsHtml + '</tbody>';
 
     const rows = [];
-    const money = new Set();
-    for (const tr of scratch.querySelectorAll('tbody tr')) {
+    const money = [];   // the column numbers that hold money, each listed once
+    const trs = scratch.querySelectorAll('tbody tr');
+    for (let r = 0; r < trs.length; r++) {
+        const tr = trs[r];
         const cells = [];
         for (let i = 0; i < tr.children.length; i++) {
             if (keep[i]) {
                 const value = sheetCell(tr.children[i]);
                 if (typeof value === 'number' && tr.children[i].textContent.includes('\u20B1')) {
-                    money.add(cells.length);
+                    if (money.indexOf(cells.length) === -1) money.push(cells.length);
                 }
                 cells.push(value);
             }
@@ -506,14 +564,13 @@ function panelSheet(key) {
     }
 
     const caption = table.closest('.tab-content, .card');
-    let name;
+    let name = key;
     if (caption) {
-        name = (caption.querySelector('h3') || {}).textContent || key;
-    } else {
-        name = key;
+        const heading = caption.querySelector('h3');
+        if (heading && heading.textContent) name = heading.textContent;
     }
 
-    return { name: String(name).trim(), headers: headers, rows: rows, money: Array.from(money) };
+    return { name: String(name).trim(), headers: headers, rows: rows, money: money };
 }
 
 // money and count cells go in as numbers; anything with words as it reads
@@ -535,7 +592,12 @@ async function exportPanelSpreadsheet(keys, title) {
         return;
     }
 
-    const sheets = printKeys(keys).map(panelSheet).filter(Boolean);
+    const sheetKeys = printKeys(keys);
+    const sheets = [];
+    for (let i = 0; i < sheetKeys.length; i++) {
+        const sheet = panelSheet(sheetKeys[i]);
+        if (sheet) sheets.push(sheet);
+    }
     if (sheets.length === 0) {
         notifyWarning('Load the table first, so the file matches what you are looking at.',
             'Nothing to export yet');
@@ -561,10 +623,12 @@ async function exportPanelSpreadsheet(keys, title) {
         document.body.appendChild(link);
         link.click();
         link.remove();
-        window.setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+        window.setTimeout(function () {
+            URL.revokeObjectURL(link.href);
+        }, 2000);
 
         let total = 0;
-        for (const sheet of sheets) total += sheet.rows.length;
+        for (let i = 0; i < sheets.length; i++) total += sheets[i].rows.length;
         notifyInfo(total + (total === 1 ? ' row' : ' rows') + ' saved as ' + file + '.', 'Spreadsheet saved');
     } catch (error) {
         notifyOffline();
@@ -583,35 +647,44 @@ let printRestore = null;
 // the filters leave. For these panels the chip counts are taken again from the
 // printed (visible) rows: each says which chip a row belongs to.
 const PRINT_CHIP_STATE = {
-    'mgr-deliveries': (d) => d.fulfilment_state,
-    'mgr-po': (po) => poStage(po)
+    'mgr-deliveries': function (d) {
+        return d.fulfilment_state;
+    },
+    'mgr-po': function (po) {
+        return poStage(po);
+    }
 };
 
 function printTotalRows(container, panel) {
     const rows = [];
 
-    container.querySelectorAll('.kpi-card').forEach((card) => {
-        const label = card.querySelector('.kpi-label');
-        const value = card.querySelector('.kpi-value');
+    const cards = container.querySelectorAll('.kpi-card');
+    for (let i = 0; i < cards.length; i++) {
+        const label = cards[i].querySelector('.kpi-label');
+        const value = cards[i].querySelector('.kpi-value');
         if (label && value) {
             rows.push([label.textContent.trim(), value.textContent.trim()]);
         }
-    });
+    }
 
     // a chip reads "3 Completed": the number is in .track-count, the words are the rest
     let chipTotal = 0;
     const chips = container.querySelectorAll('.track-chip');
     const stateOf = panel ? PRINT_CHIP_STATE[panel.key] : null;
     let chipRows = 0;
-    chips.forEach((chip) => {
+    for (let c = 0; c < chips.length; c++) {
+        const chip = chips[c];
         const countBox = chip.querySelector('.track-count');
         let count = countBox ? Number(countBox.textContent) : 0;
 
         // count the printed rows instead of the chip's own number
         if (stateOf && panel.state === 'ready') {
-            count = panel.visible.filter((row) => stateOf(row) === chip.dataset.state).length;
+            count = 0;
+            for (let i = 0; i < panel.visible.length; i++) {
+                if (stateOf(panel.visible[i]) === chip.dataset.state) count++;
+            }
         }
-        if (count === 0) return;   // nothing of this kind is printed
+        if (count === 0) continue;   // nothing of this kind is printed
         chipTotal += count;
         chipRows += 1;
 
@@ -619,7 +692,7 @@ function printTotalRows(container, panel) {
         const copyCount = copy.querySelector('.track-count');
         if (copyCount) copyCount.remove();
         rows.push([copy.textContent.trim(), String(count)]);
-    });
+    }
     if (chipRows > 0) {
         rows.push(['Total', String(chipTotal)]);
     }
@@ -634,12 +707,12 @@ function addPrintTotals(container, panel) {
 
     const block = document.createElement('div');
     block.className = 'print-totals';
-    block.innerHTML = '<h3>Totals</h3><table><tbody>' +
-        rows.map((row) =>
-            '<tr><td>' + escapeHtml(row[0]) + '</td>' +
-            '<td class="cell-num">' + escapeHtml(row[1]) + '</td></tr>'
-        ).join('') +
-        '</tbody></table>';
+    let rowsHtml = '';
+    for (let i = 0; i < rows.length; i++) {
+        rowsHtml += '<tr><td>' + escapeHtml(rows[i][0]) + '</td>' +
+            '<td class="cell-num">' + escapeHtml(rows[i][1]) + '</td></tr>';
+    }
+    block.innerHTML = '<h3>Totals</h3><table><tbody>' + rowsHtml + '</tbody></table>';
     container.appendChild(block);
     return block;
 }
@@ -654,58 +727,86 @@ function printReport(keys) {
         return;
     }
 
-    const panels = printKeys(keys).map(getDataPanel).filter(Boolean);
-    if (panels.length > 0 && !panels.some((p) => p.state === 'ready' && p.visible.length > 0)) {
+    const panelKeys = printKeys(keys);
+    const panels = [];
+    for (let i = 0; i < panelKeys.length; i++) {
+        const found = getDataPanel(panelKeys[i]);
+        if (found) panels.push(found);
+    }
+
+    let anyReady = false;
+    for (let i = 0; i < panels.length; i++) {
+        if (panels[i].state === 'ready' && panels[i].visible.length > 0) anyReady = true;
+    }
+    if (panels.length > 0 && !anyReady) {
         notifyWarning('Load the table first. There is nothing on this screen to print yet.',
             'Nothing to print');
         return;
     }
 
-    const saved = panels.map((panel) => ({ panel: panel, pageSize: panel.pageSize, page: panel.page }));
-    panels.forEach((panel) => {
-        if (panel.state !== 'ready') return;
+    // remember each table's page size and page, to put them back after printing
+    const saved = [];
+    for (let i = 0; i < panels.length; i++) {
+        saved.push({ panel: panels[i], pageSize: panels[i].pageSize, page: panels[i].page });
+    }
+    for (let i = 0; i < panels.length; i++) {
+        const panel = panels[i];
+        if (panel.state !== 'ready') continue;
         panel.pageSize = Math.max(1, panel.visible.length);
         panel.page = 1;
         panel.render();
-    });
+    }
 
     // the views of a tabbed screen share it; the one asked for is the one printed
-    const targets = panels.map((panel) => {
-        const table = document.getElementById(panel.config.tableId);
-        return table ? table.closest('.panel-view') : null;
-    }).filter(Boolean);
-    targets.forEach((card) => card.classList.add('is-print-target'));
+    const targets = [];
+    for (let i = 0; i < panels.length; i++) {
+        const table = document.getElementById(panels[i].config.tableId);
+        const card = table ? table.closest('.panel-view') : null;
+        if (card) targets.push(card);
+    }
+    for (let i = 0; i < targets.length; i++) {
+        targets[i].classList.add('is-print-target');
+    }
 
     // the whole report each table belongs to (two tables of one report share it);
     // its status cards are hidden by the print CSS and listed as Totals at its foot
     const reports = [];
     const reportPanels = [];   // the first panel of each report, for its chip counts
-    panels.forEach((panel) => {
-        const table = document.getElementById(panel.config.tableId);
+    for (let i = 0; i < panels.length; i++) {
+        const table = document.getElementById(panels[i].config.tableId);
         const report = table ? table.closest('.panel-view, [data-panel]') : null;
         if (report && reports.indexOf(report) === -1) {
             reports.push(report);
-            reportPanels.push(panel);
+            reportPanels.push(panels[i]);
         }
-    });
-    const totalBlocks = reports.map((report, index) => addPrintTotals(report, reportPanels[index])).filter(Boolean);
+    }
+    const totalBlocks = [];
+    for (let i = 0; i < reports.length; i++) {
+        const block = addPrintTotals(reports[i], reportPanels[i]);
+        if (block) totalBlocks.push(block);
+    }
 
     document.body.classList.add('is-printing');
 
     // afterprint is the reliable signal; the timer covers a browser that never sends it
-    printRestore = () => {
+    printRestore = function () {
         if (!printRestore) return;
         printRestore = null;
         document.body.classList.remove('is-printing');
-        targets.forEach((card) => card.classList.remove('is-print-target'));
-        totalBlocks.forEach((block) => block.remove());
-        saved.forEach((entry) => {
+        for (let i = 0; i < targets.length; i++) {
+            targets[i].classList.remove('is-print-target');
+        }
+        for (let i = 0; i < totalBlocks.length; i++) {
+            totalBlocks[i].remove();
+        }
+        for (let i = 0; i < saved.length; i++) {
+            const entry = saved[i];
             entry.panel.pageSize = entry.pageSize;
             if (entry.panel.state === 'ready') {
                 entry.panel.page = entry.page;
                 entry.panel.render();
             }
-        });
+        }
     };
 
     window.addEventListener('afterprint', function once() {
@@ -714,7 +815,9 @@ function printReport(keys) {
     });
 
     window.print();
-    window.setTimeout(() => { if (printRestore) printRestore(); }, 1500);
+    window.setTimeout(function () {
+        if (printRestore) printRestore();
+    }, 1500);
 }
 
 // The Sales Summary's two tables, both read from the one period. They share
@@ -723,14 +826,18 @@ const INCOME_PANEL_KEYS = ['mgr-income-methods', 'mgr-income-products'];
 
 // A Sales Summary tab: show its table, hide the other, underline the tab.
 function showSummaryTab(paneId) {
-    document.querySelectorAll('.summary-pane').forEach((pane) => {
-        pane.hidden = pane.id !== paneId;
-    });
-    document.querySelectorAll('.summary-tab').forEach((tab) => {
+    const panes = document.querySelectorAll('.summary-pane');
+    for (let i = 0; i < panes.length; i++) {
+        panes[i].hidden = panes[i].id !== paneId;
+    }
+
+    const tabs = document.querySelectorAll('.summary-tab');
+    for (let i = 0; i < tabs.length; i++) {
+        const tab = tabs[i];
         const isOpen = tab.getAttribute('data-summary-tab') === paneId;
         tab.classList.toggle('active', isOpen);
         tab.setAttribute('aria-selected', isOpen ? 'true' : 'false');
-    });
+    }
 
     // a table that was hidden had no size to measure; measure it now it shows
     const table = document.querySelector('#' + paneId + ' table');
@@ -760,14 +867,17 @@ function buildIncomePanels() {
         pageSize: 5,
         pagerId: 'income-methods-pager',
         gate: INCOME_GATE,
-        load: () => incomeRows('methods'),
-        renderRow: (m) =>
-            '<tr><td class="cell-name">' + escapeHtml(m.payment_method) + '</td>' +
-            '<td class="cell-num">' + m.sale_count + '</td>' +
-            '<td class="cell-num">' + peso(m.billed) + '</td>' +
-            '<td class="cell-num">' + peso(m.collected) + '</td>' +
-            '<td class="cell-num' + (Number(m.outstanding) > 0 ? ' cell-due' : '') + '">' +
-                peso(m.outstanding) + '</td></tr>'
+        load: function () {
+            return incomeRows('methods');
+        },
+        renderRow: function (m) {
+            return '<tr><td class="cell-name">' + escapeHtml(m.payment_method) + '</td>' +
+                '<td class="cell-num">' + m.sale_count + '</td>' +
+                '<td class="cell-num">' + peso(m.billed) + '</td>' +
+                '<td class="cell-num">' + peso(m.collected) + '</td>' +
+                '<td class="cell-num' + (Number(m.outstanding) > 0 ? ' cell-due' : '') + '">' +
+                    peso(m.outstanding) + '</td></tr>';
+        }
     });
 
     createDataPanel({
@@ -778,8 +888,10 @@ function buildIncomePanels() {
         pageSize: 5,
         pagerId: 'income-products-pager',
         gate: INCOME_GATE,
-        load: () => incomeRows('products'),
-        renderRow: (p) => {
+        load: function () {
+            return incomeRows('products');
+        },
+        renderRow: function (p) {
             let total;
             if (incomeData) {
                 total = sumOf(incomeData.products, 'revenue');
@@ -855,24 +967,36 @@ function buildReportPanels() {
             button: 'Load Data'
         },
         filters: { kind: 'all', role: 'all' },
-        load: () => apiGetActivityReport(),
-        match: (row, query) => prefixMatch([
-            row.staff_name, row.role_name, activityKind(row.kind), row.details
-        ], query),
-        filter: (row, filters) =>
-            (filters.kind === 'all' || activityKind(row.kind) === filters.kind) &&
-            (filters.role === 'all' || row.role_name === filters.role),
-        onLoaded: (rows) => {
-            fillFilterOptions('all-kind', rows.map((row) => activityKind(row.kind)), 'Every report');
-            fillFilterOptions('all-role', rows.map((row) => row.role_name), 'Every role');
+        load: function () {
+            return apiGetActivityReport();
         },
-        renderRow: (row, index) =>
-            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
-            '<td class="cell-id">' + escapeHtml(activityWhen(row.happened_at)) + '</td>' +
-            '<td class="cell-name">' + escapeHtml(row.staff_name || 'Not recorded') + '</td>' +
-            '<td>' + escapeHtml(row.role_name || '') + '</td>' +
-            '<td>' + escapeHtml(activityKind(row.kind)) + '</td>' +
-            '<td>' + escapeHtml(row.details || '') + '</td></tr>'
+        match: function (row, query) {
+            return prefixMatch([
+                row.staff_name, row.role_name, activityKind(row.kind), row.details
+            ], query);
+        },
+        filter: function (row, filters) {
+            return (filters.kind === 'all' || activityKind(row.kind) === filters.kind) &&
+                (filters.role === 'all' || row.role_name === filters.role);
+        },
+        onLoaded: function (rows) {
+            const kinds = [];
+            const roles = [];
+            for (let i = 0; i < rows.length; i++) {
+                kinds.push(activityKind(rows[i].kind));
+                roles.push(rows[i].role_name);
+            }
+            fillFilterOptions('all-kind', kinds, 'Every report');
+            fillFilterOptions('all-role', roles, 'Every role');
+        },
+        renderRow: function (row, index) {
+            return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
+                '<td class="cell-id">' + escapeHtml(activityWhen(row.happened_at)) + '</td>' +
+                '<td class="cell-name">' + escapeHtml(row.staff_name || 'Not recorded') + '</td>' +
+                '<td>' + escapeHtml(row.role_name || '') + '</td>' +
+                '<td>' + escapeHtml(activityKind(row.kind)) + '</td>' +
+                '<td>' + escapeHtml(row.details || '') + '</td></tr>';
+        }
     });
 
     createDataPanel({
@@ -888,27 +1012,40 @@ function buildReportPanels() {
             text: 'Press Load Data for every sale with money still owed on it.',
             button: 'Load Data'
         },
-        load: async () => (await reportsOverview(true)).unpaid,
-        match: (row, query) => prefixMatch([
-            row.customer_name, row.payment_method, row.sale_id, '#' + row.sale_id
-        ], query),
-        filter: (row, filters) =>
-            (filters.status === 'all' || row.payment_status === filters.status) &&
-            (filters.method === 'all' || row.payment_method === filters.method) &&
-            receivableAgeMatches(row, filters.age),
-        onLoaded: (rows) => {
-            fillFilterOptions('unpaid-status', rows.map((row) => row.payment_status), 'Every status');
-            fillFilterOptions('unpaid-method', rows.map((row) => row.payment_method), 'Every method');
+        load: async function () {
+            const overview = await reportsOverview(true);
+            return overview.unpaid;
         },
-        renderRow: (u, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openSaleDetail(' + u.sale_id + ')">' +
-            '<td class="cell-id">#' + u.sale_id + '</td>' +
-            '<td class="cell-name">' + escapeHtml(u.customer_name) + '</td>' +
-            '<td>' + escapeHtml(u.payment_method) + '</td>' +
-            '<td>' + statusBadge(u.payment_status) + '</td>' +
-            '<td class="cell-num cell-due">' + peso(u.balance_due) + '</td>' +
-            '<td class="cell-id">' + escapeHtml(String(u.sale_date).slice(0, 10)) + '</td></tr>'
+        match: function (row, query) {
+            return prefixMatch([
+                row.customer_name, row.payment_method, row.sale_id, '#' + row.sale_id
+            ], query);
+        },
+        filter: function (row, filters) {
+            return (filters.status === 'all' || row.payment_status === filters.status) &&
+                (filters.method === 'all' || row.payment_method === filters.method) &&
+                receivableAgeMatches(row, filters.age);
+        },
+        onLoaded: function (rows) {
+            const statuses = [];
+            const methods = [];
+            for (let i = 0; i < rows.length; i++) {
+                statuses.push(rows[i].payment_status);
+                methods.push(rows[i].payment_method);
+            }
+            fillFilterOptions('unpaid-status', statuses, 'Every status');
+            fillFilterOptions('unpaid-method', methods, 'Every method');
+        },
+        renderRow: function (u, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                    'onclick="openSaleDetail(' + u.sale_id + ')">' +
+                '<td class="cell-id">#' + u.sale_id + '</td>' +
+                '<td class="cell-name">' + escapeHtml(u.customer_name) + '</td>' +
+                '<td>' + escapeHtml(u.payment_method) + '</td>' +
+                '<td>' + statusBadge(u.payment_status) + '</td>' +
+                '<td class="cell-num cell-due">' + peso(u.balance_due) + '</td>' +
+                '<td class="cell-id">' + escapeHtml(String(u.sale_date).slice(0, 10)) + '</td></tr>';
+        }
     });
 
     createDataPanel({
@@ -924,18 +1061,26 @@ function buildReportPanels() {
             text: 'Press Load Data for customers who have bought more than once.',
             button: 'Load Data'
         },
-        load: async () => (await reportsOverview()).loyal,
-        match: (row, query) => prefixMatch([row.customer_name], query),
-        filter: (row, filters) => repeatCustomerMatches(row, filters),
-        renderRow: (c, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openCustomerDetail(' + c.customer_id + ')">' +
-            '<td class="cell-name">' + escapeHtml(c.customer_name) + '</td>' +
-            '<td class="cell-num">' + c.purchase_count + '</td>' +
-            '<td class="cell-num">' + peso(c.total_spent) + '</td>' +
-            '<td class="cell-num' + (Number(c.balance_due) > 0 ? ' cell-due' : '') + '">' +
-                peso(c.balance_due) + '</td>' +
-            '<td class="cell-id">' + escapeHtml(String(c.last_purchase).slice(0, 10)) + '</td></tr>'
+        load: async function () {
+            const overview = await reportsOverview();
+            return overview.loyal;
+        },
+        match: function (row, query) {
+            return prefixMatch([row.customer_name], query);
+        },
+        filter: function (row, filters) {
+            return repeatCustomerMatches(row, filters);
+        },
+        renderRow: function (c, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                    'onclick="openCustomerDetail(' + c.customer_id + ')">' +
+                '<td class="cell-name">' + escapeHtml(c.customer_name) + '</td>' +
+                '<td class="cell-num">' + c.purchase_count + '</td>' +
+                '<td class="cell-num">' + peso(c.total_spent) + '</td>' +
+                '<td class="cell-num' + (Number(c.balance_due) > 0 ? ' cell-due' : '') + '">' +
+                    peso(c.balance_due) + '</td>' +
+                '<td class="cell-id">' + escapeHtml(String(c.last_purchase).slice(0, 10)) + '</td></tr>';
+        }
     });
 
 }
@@ -982,10 +1127,26 @@ function fillFilterOptions(id, values, allLabel) {
     const select = document.getElementById(id);
     if (!select) return;
     const picked = select.value;
-    const unique = Array.from(new Set(values.filter((value) => value !== null && value !== undefined && value !== '')))
-        .map(String).sort((a, b) => a.localeCompare(b));
-    select.innerHTML = '<option value="all">' + escapeHtml(allLabel) + '</option>' +
-        unique.map((value) => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) + '</option>').join('');
+
+    // each value once (in the order first seen), as text, then sorted
+    const unique = [];
+    for (let i = 0; i < values.length; i++) {
+        const value = values[i];
+        if (value === null || value === undefined || value === '') continue;
+        if (!unique.includes(value)) unique.push(value);
+    }
+    for (let i = 0; i < unique.length; i++) {
+        unique[i] = String(unique[i]);
+    }
+    unique.sort(function (a, b) {
+        return a.localeCompare(b);
+    });
+
+    let html = '<option value="all">' + escapeHtml(allLabel) + '</option>';
+    for (let i = 0; i < unique.length; i++) {
+        html += '<option value="' + escapeHtml(unique[i]) + '">' + escapeHtml(unique[i]) + '</option>';
+    }
+    select.innerHTML = html;
     select.value = unique.indexOf(picked) !== -1 ? picked : 'all';
     if (select.dataset.filterTable) syncFilteredColumns(select.dataset.filterTable);
 }
@@ -995,16 +1156,32 @@ function fillCountedOptions(id, values, allLabel) {
     const select = document.getElementById(id);
     if (!select) return;
     const picked = select.value;
-    const counts = new Map();
-    values.forEach((value) => {
-        if (value === null || value === undefined || value === '') return;
-        counts.set(String(value), (counts.get(String(value)) || 0) + 1);
+
+    // two lists side by side: each value (as text) and how many rows hold it
+    const unique = [];
+    const counts = [];
+    for (let i = 0; i < values.length; i++) {
+        const value = values[i];
+        if (value === null || value === undefined || value === '') continue;
+        const at = unique.indexOf(String(value));
+        if (at === -1) {
+            unique.push(String(value));
+            counts.push(1);
+        } else {
+            counts[at] += 1;
+        }
+    }
+    const sorted = unique.slice().sort(function (a, b) {
+        return a.localeCompare(b);
     });
-    const unique = Array.from(counts.keys()).sort((a, b) => a.localeCompare(b));
-    select.innerHTML = '<option value="all">' + escapeHtml(allLabel) + ' (' + values.length + ')</option>' +
-        unique.map((value) => '<option value="' + escapeHtml(value) + '">' + escapeHtml(value) +
-            ' (' + counts.get(value) + ')</option>').join('');
-    select.value = unique.indexOf(picked) !== -1 ? picked : 'all';
+
+    let html = '<option value="all">' + escapeHtml(allLabel) + ' (' + values.length + ')</option>';
+    for (let i = 0; i < sorted.length; i++) {
+        html += '<option value="' + escapeHtml(sorted[i]) + '">' + escapeHtml(sorted[i]) +
+            ' (' + counts[unique.indexOf(sorted[i])] + ')</option>';
+    }
+    select.innerHTML = html;
+    select.value = sorted.indexOf(picked) !== -1 ? picked : 'all';
     if (select.dataset.filterTable) syncFilteredColumns(select.dataset.filterTable);
 }
 
@@ -1022,13 +1199,14 @@ function dropFutureSalesDates() {
     const today = localIsoDay();
     let dropped = false;
 
-    ['sales-from', 'sales-to'].forEach((id) => {
-        const input = document.getElementById(id);
+    const ids = ['sales-from', 'sales-to'];
+    for (let i = 0; i < ids.length; i++) {
+        const input = document.getElementById(ids[i]);
         if (input && input.value && input.value > today) {
             input.value = '';
             dropped = true;
         }
-    });
+    }
 
     if (dropped) {
         notifyWarning('Sales only go up to today. Pick dates on or before ' + today + '.',
@@ -1037,21 +1215,23 @@ function dropFutureSalesDates() {
     return dropped;
 }
 
+// adds "key=value" to the list when the box has a real choice in it
+function addSalesFilter(parts, id, key) {
+    const field = document.getElementById(id);
+    if (field && field.value && field.value !== 'all') {
+        parts.push(key + '=' + encodeURIComponent(field.value));
+    }
+}
+
 function salesQuery() {
     dropFutureSalesDates();
 
     const parts = [];
-    const add = (id, key) => {
-        const field = document.getElementById(id);
-        if (field && field.value && field.value !== 'all') {
-            parts.push(key + '=' + encodeURIComponent(field.value));
-        }
-    };
 
-    add('sales-method', 'method');
-    add('sales-status', 'status');
-    add('sales-from', 'from');
-    add('sales-to', 'to');
+    addSalesFilter(parts, 'sales-method', 'method');
+    addSalesFilter(parts, 'sales-status', 'status');
+    addSalesFilter(parts, 'sales-from', 'from');
+    addSalesFilter(parts, 'sales-to', 'to');
 
     return parts.length ? '?' + parts.join('&') : '';
 }
@@ -1077,11 +1257,15 @@ function buildSalesPanel() {
             text: 'Pick a payment method, a status or a date range above, then press Load Data.',
             button: 'Load Data'
         },
-        load: () => apiGetSales(salesQuery()),
-        match: (s, query) => prefixMatch([
-            s.customer_name, s.cashier_name, s.payment_method, s.sale_id, '#' + s.sale_id
-        ], query),
-        renderRow: (s, index) => {
+        load: function () {
+            return apiGetSales(salesQuery());
+        },
+        match: function (s, query) {
+            return prefixMatch([
+                s.customer_name, s.cashier_name, s.payment_method, s.sale_id, '#' + s.sale_id
+            ], query);
+        },
+        renderRow: function (s, index) {
             const tone = SALE_STATUS_TONE[s.transaction_status] || 'badge-neutral';
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openSaleDetail(' + s.sale_id + ')">' +
@@ -1137,23 +1321,42 @@ function stockLevelMatches(p, level) {
 
 // a product nobody sells has no days of cover, so it sorts last
 function sortStockRows(rows, order) {
-    const num = (value) => Number(value) || 0;
-    const byName = (a, b) => String(a.product_name).localeCompare(String(b.product_name));
+    function num(value) {
+        return Number(value) || 0;
+    }
 
-    const compare = {
-        'name':       byName,
-        'stock-asc':  (a, b) => num(a.quantity_in_stock) - num(b.quantity_in_stock) || byName(a, b),
-        'stock-desc': (a, b) => num(b.quantity_in_stock) - num(a.quantity_in_stock) || byName(a, b),
-        'gap':        (a, b) => (num(a.quantity_in_stock) - num(a.effective_rop)) -
-                                (num(b.quantity_in_stock) - num(b.effective_rop)) || byName(a, b),
-        'value-desc': (a, b) => num(b.stock_value) - num(a.stock_value) || byName(a, b),
-        'value-asc':  (a, b) => num(a.stock_value) - num(b.stock_value) || byName(a, b),
-        'cover':      (a, b) => {
-            const left = a.days_of_cover === null || a.days_of_cover === undefined ? Infinity : num(a.days_of_cover);
-            const right = b.days_of_cover === null || b.days_of_cover === undefined ? Infinity : num(b.days_of_cover);
-            return (left - right) || byName(a, b);
+    function byName(a, b) {
+        return String(a.product_name).localeCompare(String(b.product_name));
+    }
+
+    // days of cover; a product with no figure counts as endless cover
+    function coverOf(row) {
+        if (row.days_of_cover === null || row.days_of_cover === undefined) return Infinity;
+        return num(row.days_of_cover);
+    }
+
+    function compare(a, b) {
+        if (order === 'stock-asc') {
+            return num(a.quantity_in_stock) - num(b.quantity_in_stock) || byName(a, b);
         }
-    }[order] || byName;
+        if (order === 'stock-desc') {
+            return num(b.quantity_in_stock) - num(a.quantity_in_stock) || byName(a, b);
+        }
+        if (order === 'gap') {
+            return (num(a.quantity_in_stock) - num(a.effective_rop)) -
+                   (num(b.quantity_in_stock) - num(b.effective_rop)) || byName(a, b);
+        }
+        if (order === 'value-desc') {
+            return num(b.stock_value) - num(a.stock_value) || byName(a, b);
+        }
+        if (order === 'value-asc') {
+            return num(a.stock_value) - num(b.stock_value) || byName(a, b);
+        }
+        if (order === 'cover') {
+            return (coverOf(a) - coverOf(b)) || byName(a, b);
+        }
+        return byName(a, b);   // 'name', or anything not listed
+    }
 
     return rows.sort(compare);
 }
@@ -1171,24 +1374,35 @@ function buildStockPanels() {
             text: 'Press Load Data for every product at or below its reorder point.',
             button: 'Load Data'
         },
-        load: async () => (await stockRows()).filter((p) => p.stock_status !== 'In Stock'),
-        match: (p, query) => prefixMatch([p.product_name, p.supplier_name], query),
-        filter: (p, filters) =>
-            (filters.mode === 'all' || p.reorder_mode === filters.mode) &&
-            (filters.status === 'all' || p.stock_status === filters.status),
-        renderRow: (p, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openStockDetail(' + p.product_id + ')">' +
-            '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
-            '<td class="cell-num">' + p.quantity_in_stock + '</td>' +
-            '<td class="cell-num">' + p.effective_rop + ' ' + modeBadge(p) + '</td>' +
-            '<td class="cell-num">' + Number(p.avg_daily_sales).toFixed(2) + '</td>' +
-            '<td class="cell-num">' + (p.days_of_cover === null
-                ? '<span class="muted">no sales</span>'
-                : Number(p.days_of_cover).toFixed(0) + ' days') + '</td>' +
-            '<td class="cell-num cell-due">' + p.suggested_order + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
-            '<td>' + escapeHtml(p.supplier_name || 'No supplier') + '</td>' +
-            '<td>' + statusBadge(p.stock_status) + '</td></tr>'
+        load: async function () {
+            const all = await stockRows();
+            const low = [];
+            for (let i = 0; i < all.length; i++) {
+                if (all[i].stock_status !== 'In Stock') low.push(all[i]);
+            }
+            return low;
+        },
+        match: function (p, query) {
+            return prefixMatch([p.product_name, p.supplier_name], query);
+        },
+        filter: function (p, filters) {
+            return (filters.mode === 'all' || p.reorder_mode === filters.mode) &&
+                (filters.status === 'all' || p.stock_status === filters.status);
+        },
+        renderRow: function (p, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                    'onclick="openStockDetail(' + p.product_id + ')">' +
+                '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
+                '<td class="cell-num">' + p.quantity_in_stock + '</td>' +
+                '<td class="cell-num">' + p.effective_rop + ' ' + modeBadge(p) + '</td>' +
+                '<td class="cell-num">' + Number(p.avg_daily_sales).toFixed(2) + '</td>' +
+                '<td class="cell-num">' + (p.days_of_cover === null
+                    ? '<span class="muted">no sales</span>'
+                    : Number(p.days_of_cover).toFixed(0) + ' days') + '</td>' +
+                '<td class="cell-num cell-due">' + p.suggested_order + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
+                '<td>' + escapeHtml(p.supplier_name || 'No supplier') + '</td>' +
+                '<td>' + statusBadge(p.stock_status) + '</td></tr>';
+        }
     });
 
     createDataPanel({
@@ -1203,22 +1417,30 @@ function buildStockPanels() {
             text: 'Search for a product, pick a status or a quantity, or press Load Data for the whole inventory.',
             button: 'Load Data'
         },
-        load: () => stockRows(),
-        match: (p, query) => prefixMatch([p.product_name, p.category_name, p.supplier_name], query),
-        filter: (p, filters) =>
-            (filters.status === 'all' || p.stock_status === filters.status) &&
-            stockLevelMatches(p, filters.level),
-        sort: (rows, filters) => sortStockRows(rows, filters.sort),
-        renderRow: (p, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openStockDetail(' + p.product_id + ')">' +
-            '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
-            '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
-            '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
-            '<td class="cell-num">' + p.effective_rop + ' ' + modeBadge(p) + '</td>' +
-            '<td class="cell-num">' + peso(p.price) + '</td>' +
-            '<td class="cell-num">' + peso(p.stock_value) + '</td>' +
-            '<td>' + statusBadge(p.stock_status) + '</td></tr>'
+        load: function () {
+            return stockRows();
+        },
+        match: function (p, query) {
+            return prefixMatch([p.product_name, p.category_name, p.supplier_name], query);
+        },
+        filter: function (p, filters) {
+            return (filters.status === 'all' || p.stock_status === filters.status) &&
+                stockLevelMatches(p, filters.level);
+        },
+        sort: function (rows, filters) {
+            return sortStockRows(rows, filters.sort);
+        },
+        renderRow: function (p, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                    'onclick="openStockDetail(' + p.product_id + ')">' +
+                '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
+                '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
+                '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
+                '<td class="cell-num">' + p.effective_rop + ' ' + modeBadge(p) + '</td>' +
+                '<td class="cell-num">' + peso(p.price) + '</td>' +
+                '<td class="cell-num">' + peso(p.stock_value) + '</td>' +
+                '<td>' + statusBadge(p.stock_status) + '</td></tr>';
+        }
     });
 }
 
@@ -1238,27 +1460,62 @@ function buildStockMovesPanel() {
             text: 'Press Load Data for the damage and return reports, stock adjustments and purchase orders staff have filed.',
             button: 'Load Data'
         },
-        load: async () => (await apiGetActivityReport()).filter((row) => STOCK_MOVE_KINDS.includes(row.kind)),
-        match: (row, query) => prefixMatch([row.staff_name, activityKind(row.kind), row.details], query),
-        filter: (row, filters) =>
-            (filters.kind === 'all' || row.kind === filters.kind) &&
-            (filters.role === 'all' || row.role_name === filters.role),
-        onLoaded: (rows) => fillFilterOptions('stock-moves-role', rows.map((row) => row.role_name), 'Every role'),
-        renderRow: (row, index) =>
-            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
-            '<td class="cell-id">' + escapeHtml(activityWhen(row.happened_at)) + '</td>' +
-            '<td>' + escapeHtml(activityKind(row.kind)) + '</td>' +
-            '<td>' + escapeHtml(row.details || '') + '</td>' +
-            '<td class="cell-name">' + escapeHtml(row.staff_name || 'Not recorded') + '</td>' +
-            '<td>' + escapeHtml(row.role_name || '') + '</td></tr>'
+        load: async function () {
+            const all = await apiGetActivityReport();
+            const moves = [];
+            for (let i = 0; i < all.length; i++) {
+                if (STOCK_MOVE_KINDS.includes(all[i].kind)) moves.push(all[i]);
+            }
+            return moves;
+        },
+        match: function (row, query) {
+            return prefixMatch([row.staff_name, activityKind(row.kind), row.details], query);
+        },
+        filter: function (row, filters) {
+            return (filters.kind === 'all' || row.kind === filters.kind) &&
+                (filters.role === 'all' || row.role_name === filters.role);
+        },
+        onLoaded: function (rows) {
+            const roles = [];
+            for (let i = 0; i < rows.length; i++) {
+                roles.push(rows[i].role_name);
+            }
+            fillFilterOptions('stock-moves-role', roles, 'Every role');
+        },
+        renderRow: function (row, index) {
+            return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
+                '<td class="cell-id">' + escapeHtml(activityWhen(row.happened_at)) + '</td>' +
+                '<td>' + escapeHtml(activityKind(row.kind)) + '</td>' +
+                '<td>' + escapeHtml(row.details || '') + '</td>' +
+                '<td class="cell-name">' + escapeHtml(row.staff_name || 'Not recorded') + '</td>' +
+                '<td>' + escapeHtml(row.role_name || '') + '</td></tr>';
+        }
     });
 }
 
 // ==========================================
 // THE PRICE -- asked for in a card, read back, then saved
 // ==========================================
+// finds the product with this id in the stocks kept from the last load, or undefined
+function findCachedStock(productId) {
+    const list = stocksCache || [];
+    for (let i = 0; i < list.length; i++) {
+        if (list[i].product_id === productId) return list[i];
+    }
+    return undefined;
+}
+
+// reloads the two stock tables that are showing, after a save
+async function refreshStockPanels() {
+    const keys = ['mgr-reorder', 'mgr-stocks'];
+    for (let i = 0; i < keys.length; i++) {
+        const panel = getDataPanel(keys[i]);
+        if (panel && panel.state === 'ready') await panel.refresh();
+    }
+}
+
 async function changePrice(productId) {
-    const product = (stocksCache || []).find((p) => p.product_id === productId);
+    const product = findCachedStock(productId);
     if (!product) return;
 
     const current = Number(product.price) || 0;
@@ -1274,12 +1531,13 @@ async function changePrice(productId) {
         value: current.toFixed(2),
         placeholder: '0.00',
         confirmLabel: 'Next',
-        check: (value) => {
+        check: function (value) {
             const typed = String(value).replace(/,/g, '').trim();
             const number = Number(typed);
             if (typed === '' || !Number.isFinite(number)) return 'Type the price as a figure, like 450 or 78.50.';
             if (number < 0) return 'A price cannot be below zero.';
             // the typed text is checked, not the float: 19.99 * 100 is 1998.9999999999998
+            // (matches digits, then optionally a dot and one or two more digits)
             if (!/^\d+(\.\d{1,2})?$/.test(typed)) return 'Two decimal places at most.';
             if (number === current) return 'That is the price it already sells at.';
             return null;
@@ -1293,9 +1551,14 @@ async function changePrice(productId) {
     const share = current > 0 ? Math.abs(next - current) / current : null;
     const onHand = Number(product.quantity_in_stock) || 0;
 
+    // " (up 12%)" or " (down 12%)", left out when the old price was zero
+    let change = '';
+    if (share !== null) {
+        change = ' (' + (up ? 'up' : 'down') + ' ' + Math.round(share * 100) + '%)';
+    }
+
     const yes = await askConfirm(
-        product.product_name + ': ' + peso(current) + ' to ' + peso(next) + unit +
-        (share !== null ? ' (' + (up ? 'up' : 'down') + ' ' + Math.round(share * 100) + '%)' : '') + '.',
+        product.product_name + ': ' + peso(current) + ' to ' + peso(next) + unit + change + '.',
         {
             title: up ? 'Raise the price?' : 'Lower the price?',
             eyebrow: 'Stocks Overview',
@@ -1324,10 +1587,7 @@ async function changePrice(productId) {
         closeModal('detail-modal');
 
         stocksCache = null;
-        for (const key of ['mgr-reorder', 'mgr-stocks']) {
-            const panel = getDataPanel(key);
-            if (panel && panel.state === 'ready') await panel.refresh();
-        }
+        await refreshStockPanels();
     } catch (error) {
         notifyOffline();
     }
@@ -1337,7 +1597,7 @@ async function changePrice(productId) {
 // THE REORDER POLICY
 // ==========================================
 function openReorderPolicy(productId) {
-    const product = (stocksCache || []).find((p) => p.product_id === productId);
+    const product = findCachedStock(productId);
     if (!product) return;
 
     policyProduct = product;
@@ -1442,10 +1702,7 @@ async function saveReorderPolicy(event) {
         closeModal('policy-modal');
 
         stocksCache = null;
-        for (const key of ['mgr-reorder', 'mgr-stocks']) {
-            const panel = getDataPanel(key);
-            if (panel && panel.state === 'ready') await panel.refresh();
-        }
+        await refreshStockPanels();
     } catch (error) {
         notifyOffline();
     }
@@ -1461,7 +1718,9 @@ function buildManagerPurchaseOrderPanel() {
         canCreate: false,          // the clerk raises an order
         canDecide: true,           // the manager confirms or declines it
         canReceive: false,         // the clerk counts the delivery in
-        showPanel: (panelId, title) => showManagerPanel(panelId, title),
+        showPanel: function (panelId, title) {
+            showManagerPanel(panelId, title);
+        },
         historyPanelId: 'panel-po-history',
         historyTitle: 'Purchase Orders',
         gateText: 'Press Load Data for every order raised, or filter to the ones waiting for your confirmation.'
@@ -1522,11 +1781,15 @@ function buildCreditPanels() {
             button: 'Load Data'
         },
 
-        load: () => apiGetCreditCustomers(),
+        load: function () {
+            return apiGetCreditCustomers();
+        },
 
-        match: (row, query) => prefixMatch([row.customer_name, row.phone], query),
+        match: function (row, query) {
+            return prefixMatch([row.customer_name, row.phone], query);
+        },
 
-        filter: (row, filters) => {
+        filter: function (row, filters) {
             const owed = Number(row.current_credit) || 0;
             const limit = Number(row.credit_limit) || 0;
 
@@ -1537,7 +1800,7 @@ function buildCreditPanels() {
             return true;
         },
 
-        renderRow: (row, index) => {
+        renderRow: function (row, index) {
             const owed = Number(row.current_credit) || 0;
             const limit = Number(row.credit_limit) || 0;
             const over = owed > limit;
@@ -1574,15 +1837,17 @@ function buildCreditPanels() {
 
         inputs: ['requests-status'],
 
-        load: () => {
+        load: function () {
             const status = document.getElementById('requests-status');
             const value = status ? status.value : 'Pending';
             return apiGetCreditRequests(value);
         },
 
-        match: (row, query) => prefixMatch([row.customer_name, row.requested_by], query),
+        match: function (row, query) {
+            return prefixMatch([row.customer_name, row.requested_by], query);
+        },
 
-        renderRow: (row, index) => {
+        renderRow: function (row, index) {
             let tone;
             if (row.status === 'Pending') {
                 tone = 'badge-warning';
@@ -1607,7 +1872,11 @@ function buildCreditPanels() {
 
     loadPenaltyPolicy();
     // another manager's change, or the hourly sweep charging something
-    if (typeof onLiveChange === 'function') onLiveChange(['credit'], () => loadPenaltyPolicy());
+    if (typeof onLiveChange === 'function') {
+        onLiveChange(['credit'], function () {
+            loadPenaltyPolicy();
+        });
+    }
 }
 
 // ---------- the late-payment policy ----------
@@ -1669,7 +1938,10 @@ function openPenaltyPolicy() {
 
     previewPenaltyPolicy();
     showModal('penalty-modal');
-    setTimeout(() => { form.elements.penaltyRate.focus(); form.elements.penaltyRate.select(); }, 60);
+    setTimeout(function () {
+        form.elements.penaltyRate.focus();
+        form.elements.penaltyRate.select();
+    }, 60);
 }
 
 // the rate as a worked example, so 3 reads as pesos a month before it is saved
@@ -1980,8 +2252,10 @@ function renderCreditHistory(data) {
     const box = document.getElementById('credit-history');
     if (!box) return;
 
-    const purchases = pagedTable('mgr-purchases', ['Date', 'Sale', 'Amount', 'Balance'],
-        data.purchases.map((p) => [
+    const purchaseRows = [];
+    for (let i = 0; i < data.purchases.length; i++) {
+        const p = data.purchases[i];
+        purchaseRows.push([
             escapeHtml(String(p.sale_date).slice(0, 10)),
             '#' + p.sale_id + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
             peso(p.final_amount) +
@@ -1992,30 +2266,43 @@ function renderCreditHistory(data) {
             Number(p.balance_due) > 0
                 ? '<span class="cell-due">' + peso(p.balance_due) + '</span>'
                 : '<span class="muted">Paid</span>'
-        ]), [2, 3], { empty: 'Nothing bought yet.' });
+        ]);
+    }
+    const purchases = pagedTable('mgr-purchases', ['Date', 'Sale', 'Amount', 'Balance'],
+        purchaseRows, [2, 3], { empty: 'Nothing bought yet.' });
 
-    const payments = pagedTable('mgr-payments', ['Date', 'Amount', 'How', 'Against'],
-        data.payments.map((p) => [
+    const paymentRows = [];
+    for (let i = 0; i < data.payments.length; i++) {
+        const p = data.payments[i];
+        paymentRows.push([
             escapeHtml(String(p.payment_date).slice(0, 10)),
             peso(p.amount),
             escapeHtml(p.payment_method),
             p.sale_id ? '#' + p.sale_id : '<span class="muted">On account</span>'
-        ]), [1], { empty: 'No payments recorded.' });
+        ]);
+    }
+    const payments = pagedTable('mgr-payments', ['Date', 'Amount', 'How', 'Against'],
+        paymentRows, [1], { empty: 'No payments recorded.' });
 
     let requests;
     if (data.requests.length === 0) {
         requests = '';
     } else {
+        const requestRows = [];
+        for (let i = 0; i < data.requests.length; i++) {
+            const r = data.requests[i];
+            requestRows.push([
+                escapeHtml(String(r.created_at).slice(0, 10)),
+                peso(r.previous_limit),
+                peso(r.requested_limit),
+                escapeHtml(r.status) + (r.decided_by ? ' <span class="muted">' +
+                    escapeHtml(r.decided_by) + '</span>' : '')
+            ]);
+        }
         requests = '<div class="history-column history-full">' +
               '<h4 class="history-head">Extension Requests</h4>' +
               pagedTable('mgr-requests', ['Date Requested', 'From', 'To', 'Outcome'],
-                data.requests.map((r) => [
-                    escapeHtml(String(r.created_at).slice(0, 10)),
-                    peso(r.previous_limit),
-                    peso(r.requested_limit),
-                    escapeHtml(r.status) + (r.decided_by ? ' <span class="muted">' +
-                        escapeHtml(r.decided_by) + '</span>' : '')
-                ]), [1, 2], { empty: 'No requests yet.' }) + '</div>';
+                requestRows, [1, 2], { empty: 'No requests yet.' }) + '</div>';
     }
 
     box.innerHTML =
@@ -2143,8 +2430,9 @@ async function decideCreditRequest(approve) {
         notifySuccess(result.message, approve ? 'Extension approved' : 'Request declined');
         closeModal('decide-modal');
 
-        for (const key of ['mgr-requests', 'mgr-credit']) {
-            const panel = getDataPanel(key);
+        const keys = ['mgr-requests', 'mgr-credit'];
+        for (let i = 0; i < keys.length; i++) {
+            const panel = getDataPanel(keys[i]);
             if (panel && panel.state === 'ready') await panel.refresh();
         }
     } catch (error) {
@@ -2178,16 +2466,21 @@ function buildDeliveryPanel() {
             text: 'Press Load Data for every delivery on record, or filter by fulfilment first.',
             button: 'Load Data'
         },
-        load: () => apiGetDeliveries(),
-        match: (d, query) => prefixMatch([d.customer_name, d.driver_name, d.delivery_address], query),
-        filter: (d, filters) =>
-            (filters.state === 'all' || d.fulfilment_state === filters.state) &&
-            (filters.driver === 'all' || d.driver_name === filters.driver),
-        onLoaded: (rows) => {
+        load: function () {
+            return apiGetDeliveries();
+        },
+        match: function (d, query) {
+            return prefixMatch([d.customer_name, d.driver_name, d.delivery_address], query);
+        },
+        filter: function (d, filters) {
+            return (filters.state === 'all' || d.fulfilment_state === filters.state) &&
+                (filters.driver === 'all' || d.driver_name === filters.driver);
+        },
+        onLoaded: function (rows) {
             renderTrackLegend(rows);
             renderDriverOptions(rows);
         },
-        renderRow: (d, index) => {
+        renderRow: function (d, index) {
             const tone = FULFILMENT_TONE[d.fulfilment_state] || 'badge-neutral';
             const owed = Number(d.balance_due) || 0;
 
@@ -2212,15 +2505,22 @@ function renderTrackLegend(rows) {
     const states = ['Pending Cash Collection', 'Completed', 'Out for Delivery',
                     'In Transit', 'Pending', 'Delayed', 'Failed'];
 
-    legend.innerHTML = states.map((state) => {
-        const count = rows.filter((d) => d.fulfilment_state === state).length;
-        if (count === 0) return '';
+    let html = '';
+    for (let s = 0; s < states.length; s++) {
+        const state = states[s];
+
+        let count = 0;
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].fulfilment_state === state) count++;
+        }
+        if (count === 0) continue;
 
         const alert = state === 'Pending Cash Collection' ? ' track-chip-alert' : '';
-        return '<button type="button" class="track-chip' + alert + '" data-state="' + state + '" ' +
+        html += '<button type="button" class="track-chip' + alert + '" data-state="' + state + '" ' +
             'onclick="filterDeliveriesBy(\'' + state + '\')">' +
             '<span class="track-count">' + count + '</span>' + escapeHtml(state) + '</button>';
-    }).join('');
+    }
+    legend.innerHTML = html;
 }
 
 // The Driver box: "All drivers", "Unassigned", then each driver found in the
@@ -2230,7 +2530,8 @@ function renderDriverOptions(rows) {
     if (!select) return;
 
     const names = [];
-    for (const d of rows) {
+    for (let i = 0; i < rows.length; i++) {
+        const d = rows[i];
         if (d.driver_name !== 'Unassigned' && names.indexOf(d.driver_name) === -1) {
             names.push(d.driver_name);
         }
@@ -2244,11 +2545,13 @@ function renderDriverOptions(rows) {
     if (chosen !== 'all' && chosen !== 'Unassigned' && names.indexOf(chosen) === -1) {
         names.push(chosen);
     }
-    names.sort((a, b) => a.localeCompare(b));
+    names.sort(function (a, b) {
+        return a.localeCompare(b);
+    });
 
     let html = '<option value="all">All drivers</option><option value="Unassigned">Unassigned</option>';
-    for (const name of names) {
-        html += '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>';
+    for (let i = 0; i < names.length; i++) {
+        html += '<option value="' + escapeHtml(names[i]) + '">' + escapeHtml(names[i]) + '</option>';
     }
     select.innerHTML = html;
     select.value = chosen;
@@ -2310,8 +2613,11 @@ function writeRecordHeaders() {
     if (!table) return;
 
     const columns = RECORD_COLUMNS[recordType];
-    table.querySelector('thead tr').innerHTML =
-        columns.map((column) => '<th>' + column[1] + '</th>').join('');
+    let headers = '';
+    for (let i = 0; i < columns.length; i++) {
+        headers += '<th>' + columns[i][1] + '</th>';
+    }
+    table.querySelector('thead tr').innerHTML = headers;
 
     const panel = getDataPanel('mgr-records');
     if (panel) panel.config.columns = columns.length;
@@ -2330,38 +2636,52 @@ function buildRecordsPanel() {
             button: 'Load Data'
         },
         filters: { sort: 'name-asc' },
-        load: () => apiGetRecords(recordType),
-        match: (row, query) => prefixMatch(Object.values(row), query),
-        sort: (rows, filters) => sortRecordRows(rows, filters.sort),
-        renderRow: (row, index) => {
+        load: function () {
+            return apiGetRecords(recordType);
+        },
+        match: function (row, query) {
+            // every value in the row
+            const values = [];
+            for (const field in row) {
+                values.push(row[field]);
+            }
+            return prefixMatch(values, query);
+        },
+        sort: function (rows, filters) {
+            return sortRecordRows(rows, filters.sort);
+        },
+        renderRow: function (row, index) {
             const columns = RECORD_COLUMNS[recordType];
 
+            let cells = '';
+            for (let position = 0; position < columns.length; position++) {
+                const column = columns[position];
+                const value = row[column[0]];
+                const money = MONEY_FIELDS.indexOf(column[0]) !== -1;
+                let shown;
+                if (money) {
+                    shown = peso(value);
+                } else if (value === null || value === undefined || value === '') {
+                    shown = '<span class="muted">Not set</span>';
+                } else {
+                    shown = escapeHtml(value);
+                }
+
+                let style;
+                if (position === 0) {
+                    style = 'cell-name';
+                } else if (RECORD_NUMERIC.indexOf(column[0]) !== -1) {
+                    // a figure (count, quantity or money) sits on the right
+                    style = 'cell-num';
+                } else {
+                    style = '';
+                }
+
+                cells += '<td class="' + style + '">' + shown + '</td>';
+            }
+
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openRecordDetail(' + index + ')">' +
-                columns.map((column, position) => {
-                    const value = row[column[0]];
-                    const money = MONEY_FIELDS.indexOf(column[0]) !== -1;
-                    let shown;
-                    if (money) {
-                        shown = peso(value);
-                    } else if (value === null || value === undefined || value === '') {
-                        shown = '<span class="muted">Not set</span>';
-                    } else {
-                        shown = escapeHtml(value);
-                    }
-
-                    let style;
-                    if (position === 0) {
-                        style = 'cell-name';
-                    } else if (RECORD_NUMERIC.indexOf(column[0]) !== -1) {
-                        // a figure (count, quantity or money) sits on the right
-                        style = 'cell-num';
-                    } else {
-                        style = '';
-                    }
-
-                    return '<td class="' + style + '">' + shown + '</td>';
-                }).join('') + '</tr>';
+                'onclick="openRecordDetail(' + index + ')">' + cells + '</tr>';
         }
     });
 }
@@ -2378,16 +2698,21 @@ function fillRecordSort() {
         options = [['name-asc', 'All'], ['category_name-asc', 'Category'], ['brand_name-asc', 'Brand']];
     } else {
         options = [['name-asc', 'Name, A to Z'], ['name-desc', 'Name, Z to A']];
-        RECORD_COLUMNS[recordType].slice(1).forEach((column) => {
+        const columns = RECORD_COLUMNS[recordType];
+        for (let i = 1; i < columns.length; i++) {
+            const column = columns[i];
             if (RECORD_NUMERIC.indexOf(column[0]) !== -1) {
                 options.push([column[0] + '-desc', column[1] + ', highest first']);
                 options.push([column[0] + '-asc', column[1] + ', lowest first']);
             }
-        });
+        }
     }
 
-    select.innerHTML = options.map((option) =>
-        '<option value="' + option[0] + '">' + escapeHtml(option[1]) + '</option>').join('');
+    let html = '';
+    for (let i = 0; i < options.length; i++) {
+        html += '<option value="' + options[i][0] + '">' + escapeHtml(options[i][1]) + '</option>';
+    }
+    select.innerHTML = html;
     select.value = 'name-asc';
     // set without loading: a closed table stays closed
     const panel = getDataPanel('mgr-records');
@@ -2401,10 +2726,10 @@ const RECORD_NUMERIC = ['product_count', 'purchase_count', 'credit_limit', 'curr
 function sortRecordRows(rows, order) {
     const value = String(order || 'name-asc');
     const descending = value.endsWith('-desc');
-    const field = value.replace(/-(asc|desc)$/, '');
-    const key = field === 'name' ? 'name' : field;
+    // takes "-asc" or "-desc" off the end, leaving the column name
+    const key = value.replace(/-(asc|desc)$/, '');
 
-    return rows.sort((a, b) => {
+    return rows.sort(function (a, b) {
         let result;
         if (key === 'name') {
             result = String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
@@ -2456,7 +2781,9 @@ function openAddRecord() {
     document.getElementById('record-add-supplier').hidden = recordType !== 'supplier';
 
     showModal('record-add-modal');
-    setTimeout(() => document.getElementById('record-add-name').focus(), 60);
+    setTimeout(function () {
+        document.getElementById('record-add-name').focus();
+    }, 60);
 }
 
 async function saveAddRecord(event) {
@@ -2527,18 +2854,31 @@ function buildArchivePanel() {
             text: 'Press Load Data for everything archived across all modules.',
             button: 'Load Data'
         },
-        load: () => apiGetArchives(),
-        match: (a, query) => prefixMatch([a.record_name, a.detail, a.module], query),
-        filter: (a, filters) => filters.module === 'all' || a.module === filters.module,
-        onLoaded: (rows) => fillCountedOptions('archives-module', rows.map((a) => a.module), 'Every module'),
-        renderRow: (a, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openArchiveEntry(' + index + ')">' +
-            '<td>' + statusBadge(a.module) + '</td>' +
-            '<td class="cell-name">' + escapeHtml(a.record_name) + '</td>' +
-            '<td>' + escapeHtml(a.detail || '') + '</td>' +
-            '<td class="cell-id">' + escapeHtml(a.archived_at || 'Unknown') + '</td>' +
-            '<td>' + escapeHtml(a.archived_by || 'Not recorded') + '</td></tr>'
+        load: function () {
+            return apiGetArchives();
+        },
+        match: function (a, query) {
+            return prefixMatch([a.record_name, a.detail, a.module], query);
+        },
+        filter: function (a, filters) {
+            return filters.module === 'all' || a.module === filters.module;
+        },
+        onLoaded: function (rows) {
+            const modules = [];
+            for (let i = 0; i < rows.length; i++) {
+                modules.push(rows[i].module);
+            }
+            fillCountedOptions('archives-module', modules, 'Every module');
+        },
+        renderRow: function (a, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                    'onclick="openArchiveEntry(' + index + ')">' +
+                '<td>' + statusBadge(a.module) + '</td>' +
+                '<td class="cell-name">' + escapeHtml(a.record_name) + '</td>' +
+                '<td>' + escapeHtml(a.detail || '') + '</td>' +
+                '<td class="cell-id">' + escapeHtml(a.archived_at || 'Unknown') + '</td>' +
+                '<td>' + escapeHtml(a.archived_by || 'Not recorded') + '</td></tr>';
+        }
     });
 }
 
@@ -2620,9 +2960,12 @@ async function openSaleDetail(saleId) {
 
         const balance = saleAmountDue(s) - Number(s.amount_paid);
         const units = pieceCount(data.items);
+        let lineNote = '';
+        if (data.items.length !== units) {
+            lineNote = ' (' + data.items.length + (data.items.length === 1 ? ' line)' : ' lines)');
+        }
         const totals = '<div class="detail-grid">' +
-            detailField('Items Purchased', units + (data.items.length !== units
-                ? ' (' + data.items.length + (data.items.length === 1 ? ' line)' : ' lines)') : '')) +
+            detailField('Items Purchased', units + lineNote) +
             detailField('Gross Total', peso(s.total_amount)) +
             detailField('Discount', peso(s.discount)) +
             (Number(s.penalty_amount) > 0
@@ -2640,22 +2983,31 @@ async function openSaleDetail(saleId) {
             detailField('Balance Due', '<span class="' + (balance > 0 ? 'cell-due' : '') + '">' + peso(balance) + '</span>') +
             '</div>';
 
-        const items = detailTable(['Product', 'Qty', 'Unit Price', 'Subtotal'],
-            data.items.map((it) => [
+        const itemRows = [];
+        for (let i = 0; i < data.items.length; i++) {
+            const it = data.items[i];
+            itemRows.push([
                 escapeHtml(it.product_name),
                 escapeHtml(qtyText(it.quantity, it.unit_name)),
                 peso(it.unit_price),
                 peso(it.subtotal)
-            ]), [1, 2, 3]);
+            ]);
+        }
+        const items = detailTable(['Product', 'Qty', 'Unit Price', 'Subtotal'], itemRows, [1, 2, 3]);
 
-        const payments = detailTable(['Date', 'Amount', 'Method', 'Reference', 'Received By'],
-            data.payments.map((p) => [
+        const paymentRows = [];
+        for (let i = 0; i < data.payments.length; i++) {
+            const p = data.payments[i];
+            paymentRows.push([
                 escapeHtml(String(p.payment_date).slice(0, 16)),
                 peso(p.amount),
                 escapeHtml(p.payment_method),
                 p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>',
                 escapeHtml(p.received_by || 'Unknown')
-            ]), [1]);
+            ]);
+        }
+        const payments = detailTable(['Date', 'Amount', 'Method', 'Reference', 'Received By'],
+            paymentRows, [1]);
 
         // a sale can be voided on the day it was made; the machine's own calendar, not UTC
         const now = new Date();
@@ -2751,8 +3103,9 @@ async function voidSale(saleId) {
     closeModal('detail-modal');
     notifySuccess('Sale #' + saleId + ' is voided and its stock is back on the shelf.', 'Sale voided');
 
-    for (const key of ['mgr-sales', 'mgr-archives', 'mgr-deliveries']) {
-        const panel = getDataPanel(key);
+    const keys = ['mgr-sales', 'mgr-archives', 'mgr-deliveries'];
+    for (let i = 0; i < keys.length; i++) {
+        const panel = getDataPanel(keys[i]);
         if (panel && panel.state === 'ready') await panel.refresh();
     }
 }
@@ -2781,14 +3134,15 @@ async function archiveDelivery(deliveryId) {
     closeModal('detail-modal');
     notifySuccess('Delivery #' + deliveryId + ' is archived.', 'Delivery archived');
 
-    for (const key of ['mgr-deliveries', 'mgr-archives']) {
-        const panel = getDataPanel(key);
+    const keys = ['mgr-deliveries', 'mgr-archives'];
+    for (let i = 0; i < keys.length; i++) {
+        const panel = getDataPanel(keys[i]);
         if (panel && panel.state === 'ready') await panel.refresh();
     }
 }
 
 function openStockDetail(productId) {
-    const p = (stocksCache || []).find((item) => item.product_id === productId);
+    const p = findCachedStock(productId);
     if (!p) return;
 
     const stock = '<div class="detail-grid">' +
@@ -2862,27 +3216,38 @@ async function openRecordDetail(index) {
     if (!row) return;
 
     const type = recordType;
-    const keys = Object.keys(row).filter((key) => key !== 'id' && key !== 'name');
+    let fields = '';
+    for (const key in row) {
+        if (key !== 'id' && key !== 'name') {
+            fields += detailField(prettyLabel(key), fieldValue(key, row[key]));
+        }
+    }
     let body = '<div class="detail-grid detail-grid-3">' +
         detailField('Record ID', '#' + row.id) +
         detailField('Name', escapeHtml(row.name)) +
-        keys.map((key) => detailField(prettyLabel(key), fieldValue(key, row[key]))).join('') +
+        fields +
         '</div>';
 
     // a category lists the products filed under it (names are unique)
     if (type === 'category') {
         try {
-            const products = (await apiGetRecords('product'))
-                .filter((p) => p.category_name === row.name);
+            const allProducts = await apiGetRecords('product');
+            const products = [];
+            const productRows = [];
+            for (let i = 0; i < allProducts.length; i++) {
+                const p = allProducts[i];
+                if (p.category_name !== row.name) continue;
+                products.push(p);
+                productRows.push([
+                    escapeHtml(p.name),
+                    p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>',
+                    p.supplier_name ? escapeHtml(p.supplier_name) : '<span class="muted">Not set</span>',
+                    peso(p.price),
+                    escapeHtml(qtyText(p.quantity_in_stock, p.unit_name))
+                ]);
+            }
             body += '<h4 class="detail-subhead">Products in this category (' + products.length + ')</h4>' +
-                detailTable(['Product', 'Brand', 'Supplier', 'Price', 'On Hand'],
-                    products.map((p) => [
-                        escapeHtml(p.name),
-                        p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>',
-                        p.supplier_name ? escapeHtml(p.supplier_name) : '<span class="muted">Not set</span>',
-                        peso(p.price),
-                        escapeHtml(qtyText(p.quantity_in_stock, p.unit_name))
-                    ]), [3, 4]);
+                detailTable(['Product', 'Brand', 'Supplier', 'Price', 'On Hand'], productRows, [3, 4]);
         } catch (error) {
             body += '<p class="detail-note detail-warn">The products in this category could not be loaded.</p>';
         }
@@ -2896,18 +3261,29 @@ async function openRecordDetail(index) {
 async function openCustomerDetail(customerId) {
     try {
         const rows = await apiGetRecords('customer');
-        const index = rows.findIndex((row) => row.id === customerId);
+        let index = -1;
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].id === customerId) {
+                index = i;
+                break;
+            }
+        }
         if (index === -1) return;
 
         const customer = rows[index];
-        const keys = Object.keys(customer).filter((key) => key !== 'id' && key !== 'name');
+        let fields = '';
+        for (const key in customer) {
+            if (key !== 'id' && key !== 'name') {
+                fields += detailField(prettyLabel(key), fieldValue(key, customer[key]));
+            }
+        }
 
         openDetailModal(customer.name, 'Customer record', initialsOf(customer.name), [{
             label: 'Customer',
             body: '<div class="detail-grid">' +
                 detailField('Record ID', '#' + customer.id) +
                 detailField('Name', escapeHtml(customer.name)) +
-                keys.map((key) => detailField(prettyLabel(key), fieldValue(key, customer[key]))).join('') +
+                fields +
                 '</div>'
         }]);
     } catch (error) {
@@ -2937,14 +3313,17 @@ function buildHeldAccountsPanel() {
             title: 'All clear',
             text: 'No accounts are on hold right now.'
         },
-        load: () => apiGetHeldAccounts(),
-        renderRow: (row, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openHeldAccount(' + row.staff_id + ')">' +
-            '<td class="cell-name">' + escapeHtml(row.full_name) + '</td>' +
-            '<td>' + escapeHtml(row.role_name) + '</td>' +
-            '<td>' + escapeHtml(row.email) + '</td>' +
-            '<td class="cell-num">' + minutesText(row.minutes_left) + '</td></tr>'
+        load: function () {
+            return apiGetHeldAccounts();
+        },
+        renderRow: function (row, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                    'onclick="openHeldAccount(' + row.staff_id + ')">' +
+                '<td class="cell-name">' + escapeHtml(row.full_name) + '</td>' +
+                '<td>' + escapeHtml(row.role_name) + '</td>' +
+                '<td>' + escapeHtml(row.email) + '</td>' +
+                '<td class="cell-num">' + minutesText(row.minutes_left) + '</td></tr>';
+        }
     });
 }
 
@@ -3022,30 +3401,74 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
         buildHeldAccountsPanel();
 
         // the schedule follows what the administrator switched on for managers
-        configureDeliverySchedule({ showPanel: (panelId, title) => showManagerPanel(panelId, title) });
+        configureDeliverySchedule({
+            showPanel: function (panelId, title) {
+                showManagerPanel(panelId, title);
+            }
+        });
         buildDeliverySchedulePanel();
-        configureFeatures({ home: () => showReports(), onApply: syncViewNavs });
+        configureFeatures({
+            home: function () {
+                showReports();
+            },
+            onApply: syncViewNavs
+        });
 
         // Go to, on an opened alert: the screen that alert is about
-        const stockAlert = { label: 'Reorder Alerts', panelId: 'panel-stocks',
-                             open: () => showReorderAlerts(), key: 'mgr-reorder', searchId: 'reorder-search' };
-        const returnsAlert = { label: 'Activity Log', panelId: 'panel-reports',
-                               open: () => showReport('report-all'), key: 'mgr-all' };
+        const stockAlert = {
+            label: 'Reorder Alerts', panelId: 'panel-stocks',
+            open: function () {
+                showReorderAlerts();
+            },
+            key: 'mgr-reorder', searchId: 'reorder-search'
+        };
+        const returnsAlert = {
+            label: 'Activity Log', panelId: 'panel-reports',
+            open: function () {
+                showReport('report-all');
+            },
+            key: 'mgr-all'
+        };
         configureNotificationTargets({
             'Low Stock':        stockAlert,
             'Out of Stock':     stockAlert,
-            'Purchase Order':   { label: 'Purchase Orders', panelId: 'panel-po-history',
-                                  open: () => showPurchasing(), key: 'mgr-po' },
+            'Purchase Order':   {
+                label: 'Purchase Orders', panelId: 'panel-po-history',
+                open: function () {
+                    showPurchasing();
+                },
+                key: 'mgr-po'
+            },
             'Damage Report':    returnsAlert,
             'Refund Report':    returnsAlert,
-            'Stock Adjustment': { label: 'Stock Movements', panelId: 'panel-stocks',
-                                  open: () => showStockView('stock-moves'), key: 'mgr-stock-moves' },
-            'Delivery':         { label: 'Deliveries', panelId: 'panel-deliveries',
-                                  open: () => showDeliveries(), key: 'mgr-deliveries' },
-            'Credit Request':   { label: 'Extension Requests', panelId: 'panel-credit-requests',
-                                  open: () => showCreditRequests(), key: 'mgr-requests' },
-            'Late Penalty':     { label: 'Receivables', panelId: 'panel-reports',
-                                  open: () => showReport('report-unpaid'), key: 'mgr-unpaid' }
+            'Stock Adjustment': {
+                label: 'Stock Movements', panelId: 'panel-stocks',
+                open: function () {
+                    showStockView('stock-moves');
+                },
+                key: 'mgr-stock-moves'
+            },
+            'Delivery':         {
+                label: 'Deliveries', panelId: 'panel-deliveries',
+                open: function () {
+                    showDeliveries();
+                },
+                key: 'mgr-deliveries'
+            },
+            'Credit Request':   {
+                label: 'Extension Requests', panelId: 'panel-credit-requests',
+                open: function () {
+                    showCreditRequests();
+                },
+                key: 'mgr-requests'
+            },
+            'Late Penalty':     {
+                label: 'Receivables', panelId: 'panel-reports',
+                open: function () {
+                    showReport('report-unpaid');
+                },
+                key: 'mgr-unpaid'
+            }
         });
 
         writeRecordHeaders();

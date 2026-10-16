@@ -9,9 +9,13 @@ function alignTableColumns(table) {
     const headerCells = table.tHead.rows[0].cells;
     const bodyRows = table.tBodies[0].rows;
 
+    // the first body row that has one cell for every heading
     let sample = null;
-    for (const row of bodyRows) {
-        if (row.cells.length === headerCells.length) { sample = row; break; }
+    for (let i = 0; i < bodyRows.length; i++) {
+        if (bodyRows[i].cells.length === headerCells.length) {
+            sample = bodyRows[i];
+            break;
+        }
     }
 
     for (let index = 0; index < headerCells.length; index += 1) {
@@ -36,8 +40,8 @@ function alignTableColumns(table) {
 // ['2', 'x', '5'] -> [2, 5]  (keeps only whole numbers above 0)
 function columnNumbers(values) {
     const list = [];
-    for (const value of values) {
-        const number = Number(value);
+    for (let i = 0; i < values.length; i++) {
+        const number = Number(values[i]);
         if (Number.isInteger(number) && number > 0) {
             list.push(number);
         }
@@ -64,16 +68,23 @@ function hideFilteredColumns(table) {
     const headerCells = table.tHead.rows[0].cells;
     const columns = headerCells.length;
 
-    const mark = (cell, index) => {
+    // hides or shows one cell, by its position in the row
+    function mark(cell, index) {
         cell.classList.toggle('col-hidden', hidden.indexOf(index + 1) !== -1);
-    };
+    }
 
-    Array.from(headerCells).forEach(mark);
+    for (let i = 0; i < headerCells.length; i++) {
+        mark(headerCells[i], i);
+    }
 
-    for (const body of table.tBodies) {
-        for (const row of body.rows) {
+    for (let b = 0; b < table.tBodies.length; b++) {
+        const bodyRows = table.tBodies[b].rows;
+        for (let r = 0; r < bodyRows.length; r++) {
+            const row = bodyRows[r];
             if (row.cells.length !== columns) continue;
-            Array.from(row.cells).forEach(mark);
+            for (let c = 0; c < row.cells.length; c++) {
+                mark(row.cells[c], c);
+            }
         }
     }
 }
@@ -83,9 +94,15 @@ function hideFilteredColumns(table) {
 function labelTableCells(table) {
     if (!table || !table.tHead || !table.tHead.rows.length || !table.tBodies.length) return;
 
-    const headers = Array.from(table.tHead.rows[0].cells).map((cell) => cell.textContent.trim());
+    const headerCells = table.tHead.rows[0].cells;
+    const headers = [];
+    for (let i = 0; i < headerCells.length; i++) {
+        headers.push(headerCells[i].textContent.trim());
+    }
 
-    for (const row of table.tBodies[0].rows) {
+    const bodyRows = table.tBodies[0].rows;
+    for (let r = 0; r < bodyRows.length; r++) {
+        const row = bodyRows[r];
         if (row.cells.length !== headers.length) continue;
 
         for (let index = 0; index < row.cells.length; index += 1) {
@@ -95,29 +112,41 @@ function labelTableCells(table) {
 }
 
 function alignAllTables(root) {
-    (root || document).querySelectorAll('table').forEach(alignTableColumns);
+    const tables = (root || document).querySelectorAll('table');
+    for (let i = 0; i < tables.length; i++) {
+        alignTableColumns(tables[i]);
+    }
 }
 
 function watchTablesForAlignment() {
     alignAllTables();
 
-    const observer = new MutationObserver((records) => {
-        const seen = new Set();
-        const note = (table) => {
-            if (table && !seen.has(table)) {
-                seen.add(table);
+    const observer = new MutationObserver(function (records) {
+        const seen = [];   // the tables already aligned in this round
+
+        function note(table) {
+            if (table && seen.indexOf(table) === -1) {
+                seen.push(table);
                 alignTableColumns(table);
             }
-        };
+        }
 
-        for (const record of records) {
+        for (let r = 0; r < records.length; r++) {
+            const record = records[r];
             note(record.target.closest ? record.target.closest('table') : null);
 
             // a table that arrived whole inside innerHTML is found among the added nodes
-            for (const node of record.addedNodes) {
+            for (let n = 0; n < record.addedNodes.length; n++) {
+                const node = record.addedNodes[n];
                 if (node.nodeType !== 1) continue;
-                if (node.tagName === 'TABLE') note(node);
-                else if (node.querySelectorAll) node.querySelectorAll('table').forEach(note);
+                if (node.tagName === 'TABLE') {
+                    note(node);
+                } else if (node.querySelectorAll) {
+                    const inside = node.querySelectorAll('table');
+                    for (let t = 0; t < inside.length; t++) {
+                        note(inside[t]);
+                    }
+                }
             }
         }
     });
@@ -138,16 +167,18 @@ function syncFilteredColumns(tableId) {
     if (!table) return;
 
     const hidden = [];
-    document.querySelectorAll('select[data-filter-table="' + tableId + '"]').forEach((select) => {
+    const selects = document.querySelectorAll('select[data-filter-table="' + tableId + '"]');
+    for (let i = 0; i < selects.length; i++) {
+        const select = selects[i];
         const keeps = String(select.dataset.keepsColumnFor || '').split('|');
         if (select.value !== 'all' && keeps.indexOf(select.value) === -1) {
             hidden.push(Number(select.dataset.hidesColumn));
         }
-    });
+    }
     setHiddenColumns(table, hidden);
 }
 
-document.addEventListener('change', (event) => {
+document.addEventListener('change', function (event) {
     const target = event.target;
     if (target && target.matches && target.matches('select[data-filter-table]')) {
         syncFilteredColumns(target.dataset.filterTable);
@@ -155,10 +186,18 @@ document.addEventListener('change', (event) => {
 });
 
 // the browser can bring a dropdown back with its last value after a reload
-document.addEventListener('DOMContentLoaded', () => {
-    const tables = new Set();
-    document.querySelectorAll('select[data-filter-table]').forEach((select) => tables.add(select.dataset.filterTable));
-    tables.forEach(syncFilteredColumns);
+document.addEventListener('DOMContentLoaded', function () {
+    // each table named by a dropdown, once
+    const tables = [];
+    const selects = document.querySelectorAll('select[data-filter-table]');
+    for (let i = 0; i < selects.length; i++) {
+        if (tables.indexOf(selects[i].dataset.filterTable) === -1) {
+            tables.push(selects[i].dataset.filterTable);
+        }
+    }
+    for (let i = 0; i < tables.length; i++) {
+        syncFilteredColumns(tables[i]);
+    }
 });
 
 // ==========================================
@@ -175,8 +214,9 @@ document.addEventListener('DOMContentLoaded', () => {
 // a filler is never taller, so a table of a few tall rows is not padded out
 // to a page of tall rows
 const FILLER_ROW_HEIGHT = 52.3;
-const heldTables = new WeakMap();   // a table's parent -> what its table has held
-const heldBoxes = new WeakMap();    // a box -> the tallest it has been
+// What has been held is written on the element itself:
+//   a table's parent box:  box._heldTable = what its table has held
+//   a box:                 box._heldBox = the tallest it has been
 let heldWatch = null;
 
 function fillerRows(count, columns) {
@@ -191,11 +231,13 @@ function tablesStacked() {
     return window.matchMedia('(max-width: 640px)').matches;
 }
 
-function heldRecord(map, holder) {
-    let held = map.get(holder);
+// The record kept on this element under the given property name ('_heldTable'
+// or '_heldBox'); made the first time it is asked for.
+function heldRecord(holder, property) {
+    let held = holder[property];
     if (!held) {
         held = { tallest: 0, rowHeight: FILLER_ROW_HEIGHT, width: -1, table: null };
-        map.set(holder, held);
+        holder[property] = held;
         watchHeldWidth(holder);
     }
     return held;
@@ -205,20 +247,21 @@ function heldRecord(map, holder) {
 function watchHeldWidth(holder) {
     if (typeof ResizeObserver !== 'function') return;
     if (!heldWatch) {
-        heldWatch = new ResizeObserver((entries) => {
-            for (const entry of entries) {
+        heldWatch = new ResizeObserver(function (entries) {
+            for (let i = 0; i < entries.length; i++) {
+                const entry = entries[i];
                 const target = entry.target;
                 if (!target.isConnected) { heldWatch.unobserve(target); continue; }
                 const width = Math.round(entry.contentRect.width);
 
-                const box = heldBoxes.get(target);
+                const box = target._heldBox;
                 if (box && box.width !== width) {
                     box.width = width;
                     box.tallest = 0;
                     target.style.minHeight = '';
                 }
 
-                const held = heldTables.get(target);
+                const held = target._heldTable;
                 if (held && held.width !== width) {
                     held.width = width;
                     held.tallest = 0;
@@ -233,11 +276,16 @@ function watchHeldWidth(holder) {
 }
 
 // sets each row's height; '' hands it back to the stylesheet
+// (heightOf(row) gives the height wanted for that row)
 function setRowHeights(rows, heightOf) {
-    const heights = rows.map(heightOf);
-    rows.forEach((row, index) => {
-        row.style.height = heights[index] === '' ? '' : heights[index] + 'px';
-    });
+    // every height is worked out first, then they are all applied
+    const heights = [];
+    for (let i = 0; i < rows.length; i++) {
+        heights.push(heightOf(rows[i]));
+    }
+    for (let i = 0; i < rows.length; i++) {
+        rows[i].style.height = heights[i] === '' ? '' : heights[i] + 'px';
+    }
 }
 
 // grows the given rows until the table is the target height; checked once
@@ -247,7 +295,9 @@ function stretchRows(table, rows, target) {
         const gap = target - table.getBoundingClientRect().height;
         if (Math.abs(gap) < 0.5) return;
         const share = gap / rows.length;
-        setRowHeights(rows, (row) => Math.max(0, row.getBoundingClientRect().height + share));
+        setRowHeights(rows, function (row) {
+            return Math.max(0, row.getBoundingClientRect().height + share);
+        });
     }
 }
 
@@ -256,7 +306,7 @@ function stretchRows(table, rows, target) {
 function holdTableHeight(table) {
     if (!table || !table.tBodies.length || !table.parentElement) return;
 
-    const held = heldRecord(heldTables, table.parentElement);
+    const held = heldRecord(table.parentElement, '_heldTable');
     held.table = table;
 
     // the observer would align the headings after this measures, and a
@@ -264,32 +314,44 @@ function holdTableHeight(table) {
     alignTableColumns(table);
 
     const body = table.tBodies[0];
-    const rows = Array.from(body.rows);
-    const fillers = rows.filter((row) => row.classList.contains('row-filler'));
+    const rows = [];
+    for (let i = 0; i < body.rows.length; i++) {
+        rows.push(body.rows[i]);
+    }
+    const fillers = [];
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i].classList.contains('row-filler')) fillers.push(rows[i]);
+    }
     const message = rows.length === 1 && rows[0].cells.length === 1 && rows[0].cells[0].colSpan > 1 &&
         !rows[0].classList.contains('row-filler') ? rows[0] : null;
 
-    setRowHeights(fillers, () => '');
-    if (message) setRowHeights([message], () => '');
+    setRowHeights(fillers, function () { return ''; });
+    if (message) setRowHeights([message], function () { return ''; });
     const spacer = table.nextElementSibling;
     if (spacer && spacer.classList.contains('table-spacer')) spacer.remove();
 
     // a closed tab has no size to read; it is held once it opens
     if (!table.getClientRects().length || tablesStacked()) return;
 
-    const records = rows.filter((row) => !row.classList.contains('row-filler') && !message);
+    // the rows that carry data (not fillers; none at all when this is a message)
+    const records = [];
+    for (let i = 0; i < rows.length; i++) {
+        if (!rows[i].classList.contains('row-filler') && !message) records.push(rows[i]);
+    }
     if (records.length > 0) {
         let sum = 0;
-        records.forEach((row) => { sum += row.getBoundingClientRect().height; });
+        for (let i = 0; i < records.length; i++) {
+            sum += records[i].getBoundingClientRect().height;
+        }
         held.rowHeight = sum / records.length;
     }
 
     if (fillers.length > 0) {
         const height = Math.min(held.rowHeight, FILLER_ROW_HEIGHT);
-        setRowHeights(fillers, () => height);
+        setRowHeights(fillers, function () { return height; });
         const drawn = fillers[0].getBoundingClientRect().height;
         if (Math.abs(drawn - height) >= 0.5) {
-            setRowHeights(fillers, () => Math.max(0, 2 * height - drawn));
+            setRowHeights(fillers, function () { return Math.max(0, 2 * height - drawn); });
         }
     }
 
@@ -327,7 +389,7 @@ function holdTableHeight(table) {
 // which swaps its table for a message): it never gets shorter.
 function holdBoxHeight(box) {
     if (!box) return;
-    const held = heldRecord(heldBoxes, box);
+    const held = heldRecord(box, '_heldBox');
 
     if (!box.getClientRects().length) return;
     if (tablesStacked()) { box.style.minHeight = ''; return; }

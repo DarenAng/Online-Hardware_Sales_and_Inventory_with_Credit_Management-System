@@ -11,17 +11,27 @@ const featuresSetup = {
     onApply: null           // () -- after the marks are applied, for tabs inside a screen
 };
 
-let heldFeatureKeys = null;         // Set of keys, null until the server has answered
+let heldFeatureKeys = null;         // list of keys (no repeats), null until the server has answered
 
 function configureFeatures(options) {
     Object.assign(featuresSetup, options || {});
 }
 
+// a copy of the list with every key only once
+function uniqueKeys(list) {
+    const keys = [];
+    for (let i = 0; i < list.length; i++) {
+        if (keys.indexOf(list[i]) === -1) {
+            keys.push(list[i]);
+        }
+    }
+    return keys;
+}
+
 // saves the keys in the browser tab, so the next page load can use them at once
 function rememberFeatureKeys(keys) {
     try {
-        // Array.from turns the Set into a normal list, which JSON can save
-        sessionStorage.setItem('featureKeys', JSON.stringify(Array.from(keys)));
+        sessionStorage.setItem('featureKeys', JSON.stringify(keys));
     } catch (error) {
         // private browsing mode: nothing is saved, which is fine
     }
@@ -31,7 +41,7 @@ function recallFeatureKeys() {
     try {
         const stored = JSON.parse(sessionStorage.getItem('featureKeys') || 'null');
         if (Array.isArray(stored)) {
-            return new Set(stored);
+            return uniqueKeys(stored);
         }
         return null;
     } catch (error) {
@@ -46,8 +56,9 @@ function recallFeatureKeys() {
 function featureKeysOf(element) {
     const text = String(element.getAttribute('data-feature') || '');
     const keys = [];
-    for (const part of text.split(',')) {
-        const key = part.trim();
+    const parts = text.split(',');
+    for (let i = 0; i < parts.length; i++) {
+        const key = parts[i].trim();
         if (key !== '') {
             keys.push(key);
         }
@@ -57,8 +68,8 @@ function featureKeysOf(element) {
 
 // true when this person holds at least one of the keys
 function holdsAnyFeature(keys) {
-    for (const key of keys) {
-        if (holdsFeature(key)) {
+    for (let i = 0; i < keys.length; i++) {
+        if (holdsFeature(keys[i])) {
             return true;
         }
     }
@@ -66,7 +77,7 @@ function holdsAnyFeature(keys) {
 }
 
 function holdsFeature(key) {
-    return heldFeatureKeys === null || heldFeatureKeys.has(key);
+    return heldFeatureKeys === null || heldFeatureKeys.indexOf(key) !== -1;
 }
 
 function applyFeatureMarks() {
@@ -74,17 +85,20 @@ function applyFeatureMarks() {
     if (!nav || heldFeatureKeys === null) return;
 
     // an <li> marked with the screen it opens, or an <a> inside one
-    nav.querySelectorAll('[data-feature]').forEach((element) => {
+    const marks = nav.querySelectorAll('[data-feature]');
+    for (let i = 0; i < marks.length; i++) {
+        const element = marks[i];
         const item = element.closest('li') || element;
         // data-access (read by subnav.js) wins over the switches
         if (item.hasAttribute('data-access') && typeof hasRole === 'function' &&
-            !hasRole.apply(null, item.getAttribute('data-access').split(','))) return;
+            !hasRole.apply(null, item.getAttribute('data-access').split(','))) continue;
         const keys = featureKeysOf(element);
         item.hidden = keys.length > 0 && !holdsAnyFeature(keys);
-    });
+    }
 
     // a heading whose screens have all gone goes with them
-    for (const module of Array.from(nav.children)) {
+    for (let m = 0; m < nav.children.length; m++) {
+        const module = nav.children[m];
         if (module.tagName !== 'LI' || module.hasAttribute('data-feature')) continue;
         const sub = module.querySelector(':scope > .nav-sub');
         if (!sub) continue;
@@ -95,8 +109,9 @@ function applyFeatureMarks() {
 
         // is at least one of its screens still showing?
         let offered = false;
-        for (const item of sub.querySelectorAll(':scope > li')) {
-            if (!item.hidden) {
+        const screens = sub.querySelectorAll(':scope > li');
+        for (let s = 0; s < screens.length; s++) {
+            if (!screens[s].hidden) {
                 offered = true;
             }
         }
@@ -104,11 +119,13 @@ function applyFeatureMarks() {
     }
 
     // other marked things on the page (not in the menu)
-    document.querySelectorAll('[data-feature]').forEach((element) => {
-        if (element.closest('.sidebar-nav')) return;
+    const others = document.querySelectorAll('[data-feature]');
+    for (let i = 0; i < others.length; i++) {
+        const element = others[i];
+        if (element.closest('.sidebar-nav')) continue;
         const keys = featureKeysOf(element);
         if (keys.length > 0) element.hidden = !holdsAnyFeature(keys);
-    });
+    }
 
     if (typeof featuresSetup.onApply === 'function') featuresSetup.onApply();
 
@@ -123,8 +140,11 @@ function leaveWithdrawnScreen() {
 
     const panels = document.querySelectorAll('[data-panel]');
     let open = null;
-    for (const panel of panels) {
-        if (window.getComputedStyle(panel).display !== 'none') { open = panel; break; }
+    for (let i = 0; i < panels.length; i++) {
+        if (window.getComputedStyle(panels[i]).display !== 'none') {
+            open = panels[i];
+            break;
+        }
     }
     if (!open) return;
 
@@ -141,11 +161,18 @@ function leaveWithdrawnScreen() {
     if (!withdrawn) return;
 
     const name = link.cloneNode(true);
-    name.querySelectorAll('.nav-caret').forEach((node) => node.remove());
+    const carets = name.querySelectorAll('.nav-caret');
+    for (let i = 0; i < carets.length; i++) {
+        carets[i].remove();
+    }
+    // runs of spaces and line breaks become one space
     const title = name.textContent.replace(/\s+/g, ' ').trim() || 'That screen';
 
     if (typeof closeModal === 'function') {
-        document.querySelectorAll('.modal.open').forEach((modal) => closeModal(modal.id));
+        const openModals = document.querySelectorAll('.modal.open');
+        for (let i = 0; i < openModals.length; i++) {
+            closeModal(openModals[i].id);
+        }
     }
 
     if (typeof featuresSetup.home === 'function') {
@@ -171,9 +198,9 @@ async function refreshFeatures() {
     }
 
     if (Array.isArray(answer.held)) {
-        heldFeatureKeys = new Set(answer.held);
+        heldFeatureKeys = uniqueKeys(answer.held);
     } else {
-        heldFeatureKeys = new Set();
+        heldFeatureKeys = [];
     }
     rememberFeatureKeys(heldFeatureKeys);
     applyFeatureMarks();
@@ -194,7 +221,9 @@ function startFeatures() {
     refreshFeatures();
 
     if (typeof onLiveChange === 'function') {
-        onLiveChange(['features'], () => refreshFeatures());
+        onLiveChange(['features'], function () {
+            refreshFeatures();
+        });
     }
 }
 

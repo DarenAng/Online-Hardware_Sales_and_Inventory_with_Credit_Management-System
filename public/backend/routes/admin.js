@@ -24,7 +24,7 @@ const crypto = require("crypto");
 const zlib = require("zlib");
 const express = require("express");   // only for the restore upload's own JSON limit
 const mailer = require("../services/mailer");
-const { splitSqlStatements } = require("../services/sql-script");
+const splitSqlStatements = require("../services/sql-script").splitSqlStatements;
 const adminProcedures = require("../database/procedures/admin-procedures");
 const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
@@ -39,17 +39,49 @@ function emailedText(emailed, yesText) {
 }
 
 function registerAdminRoutes(app, deps) {
-  const {
-    db, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
-    requireRole, publishChange, ADMIN, USER_SELECT, withPresence, notOwnAccount,
-    endSessionsForStaff, hashPassword, generatePassword, phoneComplaint, cleanPhone, cleanMiddleName,
-    findPhoneOwner, phoneTakenMessage, nameComplaint,
-    tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, DB_NAME, sqlValue,
-    sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
-    loadProceduresIfMissing,
-    FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom,
-    HOLD_LIFTED_BY_MANAGER, readDeliveryAreas, deliveryAreasFrom
-  } = deps;
+  const db = deps.db;
+  const getActorId = deps.getActorId;
+  const writeAuditLog = deps.writeAuditLog;
+  const fieldChanges = deps.fieldChanges;
+  const wordStartSearch = deps.wordStartSearch;
+  const requireRole = deps.requireRole;
+  const publishChange = deps.publishChange;
+  const ADMIN = deps.ADMIN;
+  const USER_SELECT = deps.USER_SELECT;
+  const withPresence = deps.withPresence;
+  const notOwnAccount = deps.notOwnAccount;
+  const endSessionsForStaff = deps.endSessionsForStaff;
+  const hashPassword = deps.hashPassword;
+  const generatePassword = deps.generatePassword;
+  const phoneComplaint = deps.phoneComplaint;
+  const cleanPhone = deps.cleanPhone;
+  const cleanMiddleName = deps.cleanMiddleName;
+  const findPhoneOwner = deps.findPhoneOwner;
+  const phoneTakenMessage = deps.phoneTakenMessage;
+  const nameComplaint = deps.nameComplaint;
+  const tinComplaint = deps.tinComplaint;
+  const cleanTin = deps.cleanTin;
+  const DEFAULT_STORE_SETTINGS = deps.DEFAULT_STORE_SETTINGS;
+  const DB_NAME = deps.DB_NAME;
+  const sqlValue = deps.sqlValue;
+  const sqlName = deps.sqlName;
+  const EXPECTED_PROCEDURES = deps.EXPECTED_PROCEDURES;
+  const countProcedures = deps.countProcedures;
+  const SERVER_TABLES = deps.SERVER_TABLES;
+  const IS_VERCEL = deps.IS_VERCEL;
+  const proceduresAreMissing = deps.proceduresAreMissing;
+  const proceduresLoadedCount = deps.proceduresLoadedCount;
+  const forgetProcedureCount = deps.forgetProcedureCount;
+  const loadProceduresIfMissing = deps.loadProceduresIfMissing;
+  const FEATURES = deps.FEATURES;
+  const FEATURE_ROLES = deps.FEATURE_ROLES;
+  const findFeature = deps.findFeature;
+  const featuresOf = deps.featuresOf;
+  const forgetFeatureOverrides = deps.forgetFeatureOverrides;
+  const receiptLayoutFrom = deps.receiptLayoutFrom;
+  const HOLD_LIFTED_BY_MANAGER = deps.HOLD_LIFTED_BY_MANAGER;
+  const readDeliveryAreas = deps.readDeliveryAreas;
+  const deliveryAreasFrom = deps.deliveryAreasFrom;
 
   // the first name, middle name and last name, checked in that order; the
   // sentence about the first bad one, or null when all three are letters only
@@ -62,9 +94,10 @@ function registerAdminRoutes(app, deps) {
   // ==========================================
   // LOOKUPS
   // ==========================================
-  app.get("/api/roles", async (request, response) => {
+  app.get("/api/roles", async function (request, response) {
     try {
-      const [rows] = await db.query("SELECT role_id, role_name FROM roles ORDER BY role_id");
+      const rowsResult = await db.query("SELECT role_id, role_name FROM roles ORDER BY role_id");
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       response.status(500).json({ error: error.message });
@@ -80,7 +113,12 @@ function registerAdminRoutes(app, deps) {
   // Handing over a new password: by mail when it works, otherwise back to the
   // administrator's screen to be read out, with the reason. A password is
   // NEVER written to the audit trail on either path.
-  async function deliverFirstPassword({ email, name, roleName, password }) {
+  async function deliverFirstPassword(details) {
+    const email = details.email;
+    const name = details.name;
+    const roleName = details.roleName;
+    const password = details.password;
+
     if (!isMailConfigured()) {
       return {
         emailed: false,
@@ -90,8 +128,9 @@ function registerAdminRoutes(app, deps) {
     }
 
     try {
-      const [rows] = await db.query(
+      const rowsResult = await db.query(
         "SELECT store_name FROM store_settings WHERE setting_id = 1");
+      const rows = rowsResult[0];
       const storeName = (rows[0] && rows[0].store_name) || DEFAULT_STORE_SETTINGS.store_name;
 
       await sendMail(firstPasswordMessage({
@@ -109,14 +148,15 @@ function registerAdminRoutes(app, deps) {
       return {
         emailed: false,
         password: password,
-        reason: `The mail server refused the message: ${error.message}`
+        reason: "The mail server refused the message: " + error.message
       };
     }
   }
 
   async function roleNameById(roleId) {
-    const [rows] = await db.query(
+    const rowsResult = await db.query(
       "SELECT role_name FROM roles WHERE role_id = ?", [roleId]);
+    const rows = rowsResult[0];
     return (rows[0] && rows[0].role_name) || "staff";
   }
 
@@ -164,7 +204,8 @@ function registerAdminRoutes(app, deps) {
     await removeExpiredDrafts();
 
     // still too many? remove the ones that expire first
-    const [counted] = await db.query("SELECT COUNT(*) AS total FROM account_drafts");
+    const countedResult = await db.query("SELECT COUNT(*) AS total FROM account_drafts");
+    const counted = countedResult[0];
     const extra = Number(counted[0].total) - DRAFT_MAX + 1;
     if (extra > 0) {
       await db.query("DELETE FROM account_drafts ORDER BY expires_at LIMIT ?", [extra]);
@@ -188,11 +229,13 @@ function registerAdminRoutes(app, deps) {
     if (id === "") return expired;
 
     const hash = draftHash(id);
-    const [rows] = await db.query(
+    const rowsResult = await db.query(
       "SELECT staff_id, kind, payload, expires_at FROM account_drafts WHERE draft_hash = ?", [hash]);
+    const rows = rowsResult[0];
     if (rows.length === 0) return expired;
 
-    const [removed] = await db.query("DELETE FROM account_drafts WHERE draft_hash = ?", [hash]);
+    const removedResult = await db.query("DELETE FROM account_drafts WHERE draft_hash = ?", [hash]);
+    const removed = removedResult[0];
     if (removed.affectedRows !== 1) return expired;
 
     const row = rows[0];
@@ -218,7 +261,7 @@ function registerAdminRoutes(app, deps) {
 
   // Every staff member, including anyone with no login, with presence. The
   // filters are applied here so a large directory need not travel in full.
-  app.get("/api/users", async (request, response) => {
+  app.get("/api/users", async function (request, response) {
     const status = String(request.query.status || "all").toLowerCase();
     const search = String(request.query.search || "").trim();
 
@@ -235,11 +278,12 @@ function registerAdminRoutes(app, deps) {
 
     let filter = "";
     if (where.length > 0) {
-      filter = ` WHERE ${where.join(" AND ")}`;
+      filter = " WHERE " + where.join(" AND ");
     }
 
     try {
-      const [rows] = await db.query(`${USER_SELECT}${filter} ORDER BY s.staff_id`, params);
+      const rowsResult = await db.query("" + USER_SELECT + filter + " ORDER BY s.staff_id", params);
+      const rows = rowsResult[0];
       response.json(await withPresence(rows));
     } catch (error) {
       console.error("Loading users failed:", error.message);
@@ -251,19 +295,21 @@ function registerAdminRoutes(app, deps) {
   // stay above "/api/users/:staffId" or Express would read "held" as an id.
   // The administrator sees every account; a manager (allowed in by the Lift
   // Sign-in Hold screen) only sees the roles a manager may release.
-  app.get("/api/users/held", async (request, response) => {
+  app.get("/api/users/held", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT s.staff_id, s.full_name, r.role_name, u.email,
-                CEIL(TIMESTAMPDIFF(SECOND, NOW(), u.held_until) / 60) AS minutes_left
-         FROM users u
-         JOIN staff s ON s.staff_id = u.staff_id
-         JOIN roles r ON r.role_id = s.role_id
-         WHERE u.held_until IS NOT NULL AND u.held_until > NOW() AND s.is_active = TRUE
-         ORDER BY u.held_until`);
+      const rowsResult = await db.query(
+        "SELECT s.staff_id, s.full_name, r.role_name, u.email, " +
+        "CEIL(TIMESTAMPDIFF(SECOND, NOW(), u.held_until) / 60) AS minutes_left " +
+        "FROM users u " +
+        "JOIN staff s ON s.staff_id = u.staff_id " +
+        "JOIN roles r ON r.role_id = s.role_id " +
+        "WHERE u.held_until IS NOT NULL AND u.held_until > NOW() AND s.is_active = TRUE " +
+        "ORDER BY u.held_until");
+      const rows = rowsResult[0];
 
       const held = [];
-      for (const row of rows) {
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
         const allowed = request.actor.roleName === ADMIN ||
                         HOLD_LIFTED_BY_MANAGER.includes(row.role_name);
         if (allowed) {
@@ -286,19 +332,20 @@ function registerAdminRoutes(app, deps) {
 
   // Is this address already signing in to an account? Every role counts,
   // active or archived. staffId leaves out the account being edited.
-  app.get("/api/users/email-check", async (request, response) => {
+  app.get("/api/users/email-check", async function (request, response) {
     const email = String(request.query.email || "").trim().toLowerCase();
     const staffId = Number(request.query.staffId) || 0;
     if (email === "") return response.json({ taken: false });
 
     try {
-      const [rows] = await db.query(
-        `SELECT r.role_name FROM users u
-         JOIN staff s ON s.staff_id = u.staff_id
-         JOIN roles r ON r.role_id = s.role_id
-         WHERE LOWER(u.email) = ? AND u.staff_id <> ?
-         LIMIT 1`,
+      const rowsResult = await db.query(
+        "SELECT r.role_name FROM users u " +
+        "JOIN staff s ON s.staff_id = u.staff_id " +
+        "JOIN roles r ON r.role_id = s.role_id " +
+        "WHERE LOWER(u.email) = ? AND u.staff_id <> ? " +
+        "LIMIT 1",
         [email, staffId]);
+      const rows = rowsResult[0];
       if (rows.length === 0) return response.json({ taken: false });
       response.json({ taken: true, roleName: rows[0].role_name });
     } catch (error) {
@@ -309,7 +356,7 @@ function registerAdminRoutes(app, deps) {
 
   // Is this phone number already on a staff account? Every role counts,
   // active or archived. staffId leaves out the account being edited.
-  app.get("/api/users/phone-check", async (request, response) => {
+  app.get("/api/users/phone-check", async function (request, response) {
     try {
       const owner = await findPhoneOwner(request.query.phone, request.query.staffId);
       if (!owner) return response.json({ taken: false });
@@ -320,9 +367,10 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  app.get("/api/users/:staffId", async (request, response) => {
+  app.get("/api/users/:staffId", async function (request, response) {
     try {
-      const [rows] = await db.query(`${USER_SELECT} WHERE s.staff_id = ?`, [request.params.staffId]);
+      const rowsResult = await db.query(USER_SELECT + " WHERE s.staff_id = ?", [request.params.staffId]);
+      const rows = rowsResult[0];
 
       if (rows.length === 0) {
         return response.status(404).json({ error: "Staff record not found" });
@@ -336,8 +384,13 @@ function registerAdminRoutes(app, deps) {
 
   // Step 1 of 2: check everything, make the password, hand the account back to
   // be read. Nothing is in the database when this returns.
-  app.post("/api/users/draft", async (request, response) => {
-    const { firstName, middleName, lastName, phone, roleId, email } = request.body;
+  app.post("/api/users/draft", async function (request, response) {
+    const firstName = request.body.firstName;
+    const middleName = request.body.middleName;
+    const lastName = request.body.lastName;
+    const phone = request.body.phone;
+    const roleId = request.body.roleId;
+    const email = request.body.email;
 
     if (!firstName || !lastName || !roleId || !email || !String(phone || "").trim()) {
       return response.status(400).json({ error: "Name, phone, role and email are required" });
@@ -357,21 +410,23 @@ function registerAdminRoutes(app, deps) {
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
     try {
-      const [roles] = await db.query(
+      const rolesResult = await db.query(
         "SELECT role_name FROM roles WHERE role_id = ?", [roleId]);
+      const roles = rolesResult[0];
       if (roles.length === 0) {
         return response.status(400).json({ error: "The selected role does not exist." });
       }
 
       // the procedure checks this too; checking here keeps the answer in front of the form
-      const [taken] = await db.query(
-        `SELECT r.role_name FROM users u
-         JOIN staff s ON s.staff_id = u.staff_id
-         JOIN roles r ON r.role_id = s.role_id
-         WHERE LOWER(u.email) = ?`, [address]);
+      const takenResult = await db.query(
+        "SELECT r.role_name FROM users u " +
+        "JOIN staff s ON s.staff_id = u.staff_id " +
+        "JOIN roles r ON r.role_id = s.role_id " +
+        "WHERE LOWER(u.email) = ?", [address]);
+      const taken = takenResult[0];
       if (taken.length > 0) {
         return response.status(409).json({
-          error: `The email ${address} is already used by another account (${taken[0].role_name}). ` +
+          error: "The email " + address + " is already used by another account (" + taken[0].role_name + "). " +
                  "Each account needs its own email address, whatever its role."
         });
       }
@@ -399,9 +454,9 @@ function registerAdminRoutes(app, deps) {
       // e.g. "Juan D. Cruz"
       let fullName = details.firstName;
       if (details.middleName) {
-        fullName += ` ${details.middleName[0].toUpperCase()}.`;
+        fullName += " " + details.middleName[0].toUpperCase() + ".";
       }
-      fullName += ` ${details.lastName}`;
+      fullName += " " + details.lastName;
 
       // the answer: the draft id, the password, and every field of "details"
       // (the one place a readable password crosses the wire on purpose)
@@ -421,7 +476,7 @@ function registerAdminRoutes(app, deps) {
   });
 
   // Step 2 of 2: create it from the draft and send the password.
-  app.post("/api/users", async (request, response) => {
+  app.post("/api/users", async function (request, response) {
     const draftResult = await takeAccountDraft(request.body.draftId, request.actor.staffId, "staff");
 
     if (draftResult.error) return response.status(410).json({ error: draftResult.error });
@@ -446,8 +501,9 @@ function registerAdminRoutes(app, deps) {
       }
 
       // read back so the mail greets the person by the name the directory shows
-      const [created] = await db.query(
+      const createdResult = await db.query(
         "SELECT full_name FROM staff WHERE staff_id = ?", [output.staff_id]);
+      const created = createdResult[0];
       let name = details.firstName;
       if (created[0] && created[0].full_name) {
         name = created[0].full_name;
@@ -464,7 +520,7 @@ function registerAdminRoutes(app, deps) {
       await writeAuditLog(
         request,
         "CREATE_ACCOUNT",
-        `Created account for ${details.email}` +
+        "Created account for " + details.email +
           emailedText(delivery.emailed, " and emailed the first password"),
         { staff_id: output.staff_id, email: details.email, role_id: details.roleId,
           name: name, password_emailed: delivery.emailed }
@@ -485,8 +541,13 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  app.put("/api/users/:staffId", notOwnAccount, async (request, response) => {
-    const { firstName, middleName, lastName, phone, roleId, email } = request.body;
+  app.put("/api/users/:staffId", notOwnAccount, async function (request, response) {
+    const firstName = request.body.firstName;
+    const middleName = request.body.middleName;
+    const lastName = request.body.lastName;
+    const phone = request.body.phone;
+    const roleId = request.body.roleId;
+    const email = request.body.email;
 
     if (!firstName || !lastName || !roleId) {
       return response.status(400).json({ error: "Name and role are required" });
@@ -506,25 +567,27 @@ function registerAdminRoutes(app, deps) {
 
     try {
       if (newEmail !== "") {
-        const [taken] = await db.query(
+        const takenResult = await db.query(
           "SELECT user_id FROM users WHERE LOWER(email) = ? AND staff_id <> ?",
           [newEmail, request.params.staffId]);
+        const taken = takenResult[0];
         if (taken.length > 0) {
           return response.status(409).json({
-            error: `The email ${newEmail} is already used by another account. ` +
+            error: "The email " + newEmail + " is already used by another account. " +
                    "Each account needs its own email address, whatever its role."
           });
         }
       }
 
       // read before writing, so the audit entry can say what changed
-      const [existing] = await db.query(
-        `SELECT s.first_name, s.middle_name, s.last_name, s.phone,
-                s.role_id, u.email
-         FROM staff s LEFT JOIN users u ON u.staff_id = s.staff_id
-         WHERE s.staff_id = ?`,
+      const existingResult = await db.query(
+        "SELECT s.first_name, s.middle_name, s.last_name, s.phone, " +
+        "s.role_id, u.email " +
+        "FROM staff s LEFT JOIN users u ON u.staff_id = s.staff_id " +
+        "WHERE s.staff_id = ?",
         [request.params.staffId]
       );
+      const existing = existingResult[0];
       const before = existing[0] || null;
 
       // A phone number may be left empty, but a new one must be free. A number
@@ -582,7 +645,7 @@ function registerAdminRoutes(app, deps) {
       await writeAuditLog(
         request,
         "UPDATE_ACCOUNT",
-        `Updated staff #${request.params.staffId}`,
+        "Updated staff #" + request.params.staffId,
         { staff_id: Number(request.params.staffId), changes: fieldChanges(before, after) }
       );
       response.json({ message: output.message });
@@ -592,7 +655,7 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  app.patch("/api/users/:staffId/status", notOwnAccount, async (request, response) => {
+  app.patch("/api/users/:staffId/status", notOwnAccount, async function (request, response) {
     const isActive = request.body.isActive === true;
 
     try {
@@ -615,7 +678,7 @@ function registerAdminRoutes(app, deps) {
       await writeAuditLog(
         request,
         action,
-        `Staff #${request.params.staffId} was ${words} the active list`,
+        "Staff #" + request.params.staffId + " was " + words + " the active list",
         { staff_id: Number(request.params.staffId),
           is_active: { before: !isActive, after: isActive } }
       );
@@ -628,8 +691,8 @@ function registerAdminRoutes(app, deps) {
 
   // A login for somebody who already has a staff record: the same two steps
   // and the same review card; only the address is asked for.
-  app.post("/api/users/:staffId/account/draft", notOwnAccount, async (request, response) => {
-    const { email } = request.body;
+  app.post("/api/users/:staffId/account/draft", notOwnAccount, async function (request, response) {
+    const email = request.body.email;
     const staffId = Number(request.params.staffId);
 
     if (!email) {
@@ -642,14 +705,15 @@ function registerAdminRoutes(app, deps) {
     }
 
     try {
-      const [staff] = await db.query(
-        `SELECT s.staff_id, s.full_name, s.phone, s.middle_name, r.role_name, u.user_id
-         FROM staff s
-         JOIN roles r ON r.role_id = s.role_id
-         LEFT JOIN users u ON u.staff_id = s.staff_id
-         WHERE s.staff_id = ?`,
+      const staffResult = await db.query(
+        "SELECT s.staff_id, s.full_name, s.phone, s.middle_name, r.role_name, u.user_id " +
+        "FROM staff s " +
+        "JOIN roles r ON r.role_id = s.role_id " +
+        "LEFT JOIN users u ON u.staff_id = s.staff_id " +
+        "WHERE s.staff_id = ?",
         [staffId]
       );
+      const staff = staffResult[0];
 
       if (staff.length === 0) {
         return response.status(404).json({ error: "Staff record not found" });
@@ -658,10 +722,11 @@ function registerAdminRoutes(app, deps) {
         return response.status(409).json({ error: "That person already has a login account." });
       }
 
-      const [taken] = await db.query("SELECT user_id FROM users WHERE LOWER(email) = ?", [address]);
+      const takenResult = await db.query("SELECT user_id FROM users WHERE LOWER(email) = ?", [address]);
+      const taken = takenResult[0];
       if (taken.length > 0) {
         return response.status(409).json({
-          error: `The email ${address} is already used by another account. ` +
+          error: "The email " + address + " is already used by another account. " +
                  "Each account needs its own email address, whatever its role."
         });
       }
@@ -693,7 +758,7 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  app.post("/api/users/:staffId/account", notOwnAccount, async (request, response) => {
+  app.post("/api/users/:staffId/account", notOwnAccount, async function (request, response) {
     const draftResult = await takeAccountDraft(request.body.draftId, request.actor.staffId, "login");
 
     if (draftResult.error) return response.status(410).json({ error: draftResult.error });
@@ -727,7 +792,7 @@ function registerAdminRoutes(app, deps) {
       await writeAuditLog(
         request,
         "CREATE_LOGIN",
-        `Login created for staff #${details.staffId}` +
+        "Login created for staff #" + details.staffId +
           emailedText(delivery.emailed, " and the first password was emailed"),
         { staff_id: details.staffId, email: details.email,
           password_emailed: delivery.emailed }
@@ -756,12 +821,13 @@ function registerAdminRoutes(app, deps) {
     const settings = options || {};
     const by = settings.by || "the administrator";
 
-    const [rows] = await db.query(
-      `SELECT s.full_name, u.email, r.role_name
-       FROM staff s JOIN roles r ON r.role_id = s.role_id
-       LEFT JOIN users u ON u.staff_id = s.staff_id
-       WHERE s.staff_id = ?`,
+    const rowsResult = await db.query(
+      "SELECT s.full_name, u.email, r.role_name " +
+      "FROM staff s JOIN roles r ON r.role_id = s.role_id " +
+      "LEFT JOIN users u ON u.staff_id = s.staff_id " +
+      "WHERE s.staff_id = ?",
       [staffId]);
+    const rows = rowsResult[0];
 
     if (rows.length === 0) return { status: 404, body: { error: "Staff record not found" } };
 
@@ -783,16 +849,17 @@ function registerAdminRoutes(app, deps) {
     }
 
     await endSessionsForStaff(Number(staffId), null,
-      `Your password was reset by ${by}. Sign in with the one that was sent to you.`);
+      "Your password was reset by " + by + ". Sign in with the one that was sent to you.");
 
     // a reset is also the way to release a held account
-    const [released] = await db.query(
-      `UPDATE users SET failed_attempts = 0, held_until = NULL
-       WHERE staff_id = ? AND (failed_attempts > 0 OR held_until IS NOT NULL)`,
+    const releasedResult = await db.query(
+      "UPDATE users SET failed_attempts = 0, held_until = NULL " +
+      "WHERE staff_id = ? AND (failed_attempts > 0 OR held_until IS NOT NULL)",
       [staffId]);
+    const released = releasedResult[0];
     if (released.affectedRows > 0) {
       await writeAuditLog(request, "ACCOUNT_RELEASED",
-        `${rows[0].email} released from its sign-in hold by a password reset`,
+        rows[0].email + " released from its sign-in hold by a password reset",
         { staff_id: Number(staffId), email: rows[0].email });
     }
 
@@ -804,7 +871,7 @@ function registerAdminRoutes(app, deps) {
     });
 
     await writeAuditLog(request, "RESET_PASSWORD",
-      `Password reset for ${rows[0].email} by ${by}` +
+      "Password reset for " + rows[0].email + " by " + by +
         emailedText(delivery.emailed, " and the new one was emailed"),
       { staff_id: Number(staffId), email: rows[0].email,
         password_emailed: delivery.emailed });
@@ -822,7 +889,7 @@ function registerAdminRoutes(app, deps) {
     };
   }
 
-  app.post("/api/users/:staffId/reset-password", notOwnAccount, async (request, response) => {
+  app.post("/api/users/:staffId/reset-password", notOwnAccount, async function (request, response) {
     try {
       const result = await resetStaffPassword(request, request.params.staffId, { by: "the administrator" });
       response.status(result.status).json(result.body);
@@ -836,16 +903,17 @@ function registerAdminRoutes(app, deps) {
   // password: the person signs in again with the one they already have, and
   // gets a full set of tries. The administrator may lift any hold; a manager
   // (given the Lift Sign-in Hold screen) only on a cashier, clerk or driver.
-  app.post("/api/users/:staffId/release-hold", notOwnAccount, async (request, response) => {
+  app.post("/api/users/:staffId/release-hold", notOwnAccount, async function (request, response) {
     const staffId = Number(request.params.staffId);
     try {
-      const [rows] = await db.query(
-        `SELECT u.email, r.role_name, s.is_active
-         FROM users u
-         JOIN staff s ON s.staff_id = u.staff_id
-         JOIN roles r ON r.role_id = s.role_id
-         WHERE u.staff_id = ?`,
+      const rowsResult = await db.query(
+        "SELECT u.email, r.role_name, s.is_active " +
+        "FROM users u " +
+        "JOIN staff s ON s.staff_id = u.staff_id " +
+        "JOIN roles r ON r.role_id = s.role_id " +
+        "WHERE u.staff_id = ?",
         [staffId]);
+      const rows = rowsResult[0];
       if (rows.length === 0) {
         return response.status(404).json({ error: "This staff member has no login account." });
       }
@@ -864,10 +932,11 @@ function registerAdminRoutes(app, deps) {
       }
 
       // only a hold that is still running is lifted
-      const [released] = await db.query(
-        `UPDATE users SET failed_attempts = 0, held_until = NULL
-         WHERE staff_id = ? AND held_until IS NOT NULL AND held_until > NOW()`,
+      const releasedResult = await db.query(
+        "UPDATE users SET failed_attempts = 0, held_until = NULL " +
+        "WHERE staff_id = ? AND held_until IS NOT NULL AND held_until > NOW()",
         [staffId]);
+      const released = releasedResult[0];
       if (released.affectedRows === 0) {
         return response.status(409).json({ error: "This account is not on hold, so there is nothing to lift." });
       }
@@ -875,15 +944,16 @@ function registerAdminRoutes(app, deps) {
       // the trail says who lifted it
       let by = "the administrator";
       if (!byAdmin) {
-        const [who] = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [request.actor.staffId]);
-        by = `the manager ${who[0] ? who[0].full_name : request.actor.email}`;
+        const whoResult = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [request.actor.staffId]);
+        const who = whoResult[0];
+        by = "the manager " + (who[0] ? who[0].full_name : request.actor.email);
       }
 
       await writeAuditLog(request, "ACCOUNT_RELEASED",
-        `${rows[0].email} released from its sign-in hold by ${by}`,
+        rows[0].email + " released from its sign-in hold by " + by,
         { staff_id: staffId, email: rows[0].email });
 
-      response.json({ message: `The hold is lifted. ${rows[0].email} can sign in again now.` });
+      response.json({ message: "The hold is lifted. " + rows[0].email + " can sign in again now." });
     } catch (error) {
       console.error("Lifting a hold failed:", error.message);
       response.status(500).json({ error: "Unable to lift the hold" });
@@ -912,11 +982,11 @@ function registerAdminRoutes(app, deps) {
     // a date is inclusive of the whole day
     if (/^\d{4}-\d{2}-\d{2}$/.test(from)) {
       where.push("l.created_at >= ?");
-      params.push(`${from} 00:00:00`);
+      params.push(from + " 00:00:00");
     }
     if (/^\d{4}-\d{2}-\d{2}$/.test(to)) {
       where.push("l.created_at <= ?");
-      params.push(`${to} 23:59:59`);
+      params.push(to + " 23:59:59");
     }
 
     if (search !== "") {
@@ -925,35 +995,36 @@ function registerAdminRoutes(app, deps) {
 
     let filter = "";
     if (where.length > 0) {
-      filter = ` WHERE ${where.join(" AND ")}`;
+      filter = " WHERE " + where.join(" AND ");
     }
-    return { filter, params, from, to, role };
+    return { filter: filter, params: params, from: from, to: to, role: role };
   }
 
   async function auditLogRows(query, limit) {
     const chosen = auditLogFilter(query);
-    const [rows] = await db.query(
-      `SELECT l.log_id, l.staff_id, l.action, l.action_type,
-              l.details, l.metadata, l.ip_address, l.created_at,
-              COALESCE(s.full_name, 'System') AS staff_name,
-              COALESCE(l.role_name, r.role_name, 'System') AS role_name
-       FROM audit_logs l
-       LEFT JOIN staff s ON s.staff_id = l.staff_id
-       LEFT JOIN roles r ON r.role_id = s.role_id
-       ${chosen.filter}
-       ORDER BY l.log_id DESC
-       LIMIT ?`,
+    const rowsResult = await db.query(
+      "SELECT l.log_id, l.staff_id, l.action, l.action_type, " +
+      "l.details, l.metadata, l.ip_address, l.created_at, " +
+      "COALESCE(s.full_name, 'System') AS staff_name, " +
+      "COALESCE(l.role_name, r.role_name, 'System') AS role_name " +
+      "FROM audit_logs l " +
+      "LEFT JOIN staff s ON s.staff_id = l.staff_id " +
+      "LEFT JOIN roles r ON r.role_id = s.role_id " +
+      chosen.filter +
+      " ORDER BY l.log_id DESC " +
+      "LIMIT ?",
       chosen.params.concat([limit])
     );
-    return { rows, chosen };
+    const rows = rowsResult[0];
+    return { rows: rows, chosen: chosen };
   }
 
-  app.get("/api/audit-logs", async (request, response) => {
+  app.get("/api/audit-logs", async function (request, response) {
     const limit = Math.min(Math.max(parseInt(request.query.limit, 10) || 500, 1), 2000);
 
     try {
-      const { rows } = await auditLogRows(request.query, limit);
-      response.json(rows);
+      const logResult = await auditLogRows(request.query, limit);
+      response.json(logResult.rows);
     } catch (error) {
       console.error("Loading audit logs failed:", error.message);
       response.status(500).json({ error: error.message });
@@ -979,7 +1050,7 @@ function registerAdminRoutes(app, deps) {
     if (chosen.role !== "" && chosen.role !== "all") {
       parts.push(chosen.role + " entries only");
     }
-    if (search) parts.push(`matching "${search}"`);
+    if (search) parts.push("matching \"" + search + "\"");
     if (parts.length === 0) return "All entries";
     const text = parts.join(", ");
     return text[0].toUpperCase() + text.slice(1);
@@ -988,7 +1059,7 @@ function registerAdminRoutes(app, deps) {
   function exportRowValues(row) {
     return [
       String(row.created_at || ""),
-      String(row.staff_name || "") + (row.staff_id ? ` #${row.staff_id}` : ""),
+      String(row.staff_name || "") + (row.staff_id ? " #" + row.staff_id : ""),
       String(row.role_name || ""),
       String(row.ip_address || "Not recorded"),
       AUDIT_TYPE_LABELS[row.action_type] || String(row.action_type || ""),
@@ -1013,30 +1084,33 @@ function registerAdminRoutes(app, deps) {
     sheet.getCell("A1").value = "Audit Trail";
     sheet.getCell("A1").font = { bold: true, size: 14 };
     sheet.mergeCells("A2:F2");
-    sheet.getCell("A2").value = `${subtitle} • ${rows.length} entries • exported ${new Date().toLocaleString("en-PH")}`;
+    sheet.getCell("A2").value = subtitle + " • " + rows.length + " entries • exported " + new Date().toLocaleString("en-PH");
     sheet.getCell("A2").font = { italic: true, size: 10, color: { argb: "FF4D5661" } };
 
     const head = sheet.getRow(3);
     head.values = EXPORT_HEADINGS;
     head.font = { bold: true, color: { argb: "FFFFFFFF" } };
-    head.eachCell((cell) => {
+    head.eachCell(function (cell) {
       cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1B1F24" } };
     });
     sheet.autoFilter = { from: "A3", to: "F3" };
 
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       const added = sheet.addRow(exportRowValues(row));
       added.getCell(6).alignment = { wrapText: true, vertical: "top" };
     }
 
     response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    response.setHeader("Content-Disposition", `attachment; filename="${fileName}.xlsx"`);
+    response.setHeader("Content-Disposition", "attachment; filename=\"" + fileName + ".xlsx\"");
     await workbook.xlsx.write(response);
     response.end();
   }
 
   // PDF's built-in fonts carry Latin-1 and a few marks; anything else becomes "?"
   function pdfText(value) {
+    // first pattern: every peso sign. Second pattern: any character that is not a tab,
+    // new line, ordinary keyboard character, Latin-1 letter or one of the listed marks.
     return String(value)
       .replace(/₱/g, "PHP ")
       .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF–—‘’“”•…]/g, "?");
@@ -1047,40 +1121,54 @@ function registerAdminRoutes(app, deps) {
     const doc = new PDFDocument({ size: "A4", layout: "landscape", margin: 32, bufferPages: true });
 
     response.setHeader("Content-Type", "application/pdf");
-    response.setHeader("Content-Disposition", `attachment; filename="${fileName}.pdf"`);
+    response.setHeader("Content-Disposition", "attachment; filename=\"" + fileName + ".pdf\"");
     doc.pipe(response);
 
     const left = doc.page.margins.left;
     const usable = doc.page.width - doc.page.margins.left - doc.page.margins.right;
     const widths = [100, 120, 95, 80, 72];
-    widths.push(usable - widths.reduce((sum, width) => sum + width, 0));
+    let widthsTotal = 0;
+    for (let i = 0; i < widths.length; i++) {
+      widthsTotal += widths[i];
+    }
+    widths.push(usable - widthsTotal);
     const padding = 4;
-    const bottom = () => doc.page.height - doc.page.margins.bottom - 14;
+    const bottom = function () { return doc.page.height - doc.page.margins.bottom - 14; };
 
     doc.font("Helvetica-Bold").fontSize(15).fillColor("#14181d").text("Audit Trail", left, doc.page.margins.top);
     doc.font("Helvetica").fontSize(9).fillColor("#4d5661")
-      .text(pdfText(`${subtitle} • ${rows.length} entries • exported ${new Date().toLocaleString("en-PH")}`));
+      .text(pdfText(subtitle + " • " + rows.length + " entries • exported " + new Date().toLocaleString("en-PH")));
     doc.moveDown(0.6);
 
-    const drawHeading = () => {
+    const drawHeading = function () {
       const y = doc.y;
       doc.rect(left, y, usable, 18).fill("#1b1f24");
       let x = left;
       doc.font("Helvetica-Bold").fontSize(8.5).fillColor("#ffffff");
-      EXPORT_HEADINGS.forEach((heading, index) => {
-        doc.text(heading, x + padding, y + 5, { width: widths[index] - padding * 2, lineBreak: false });
+      for (let index = 0; index < EXPORT_HEADINGS.length; index++) {
+        doc.text(EXPORT_HEADINGS[index], x + padding, y + 5, { width: widths[index] - padding * 2, lineBreak: false });
         x += widths[index];
-      });
+      }
       doc.y = y + 18;
     };
 
     drawHeading();
     doc.font("Helvetica").fontSize(8.5);
 
-    rows.forEach((row, rowIndex) => {
-      const values = exportRowValues(row).map(pdfText);
-      const height = Math.max(...values.map((value, index) =>
-        doc.heightOfString(value, { width: widths[index] - padding * 2 }))) + padding * 2;
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      const rowValues = exportRowValues(rows[rowIndex]);
+      const values = [];
+      for (let index = 0; index < rowValues.length; index++) {
+        values.push(pdfText(rowValues[index]));
+      }
+
+      // the row is as tall as its tallest cell
+      let tallest = doc.heightOfString(values[0], { width: widths[0] - padding * 2 });
+      for (let index = 1; index < values.length; index++) {
+        const cellHeight = doc.heightOfString(values[index], { width: widths[index] - padding * 2 });
+        if (cellHeight > tallest) tallest = cellHeight;
+      }
+      const height = tallest + padding * 2;
 
       if (doc.y + height > bottom()) {
         doc.addPage();
@@ -1092,12 +1180,12 @@ function registerAdminRoutes(app, deps) {
       if (rowIndex % 2 === 1) doc.rect(left, y, usable, height).fill("#f3f4f6");
       let x = left;
       doc.fillColor("#14181d");
-      values.forEach((value, index) => {
-        doc.text(value, x + padding, y + padding, { width: widths[index] - padding * 2 });
+      for (let index = 0; index < values.length; index++) {
+        doc.text(values[index], x + padding, y + padding, { width: widths[index] - padding * 2 });
         x += widths[index];
-      });
+      }
       doc.y = y + height;
-    });
+    }
 
     if (rows.length === 0) {
       doc.moveDown().fillColor("#4d5661").text("No entries match these filters.");
@@ -1108,7 +1196,7 @@ function registerAdminRoutes(app, deps) {
     for (let index = 0; index < range.count; index += 1) {
       doc.switchToPage(range.start + index);
       doc.font("Helvetica").fontSize(8).fillColor("#616b78").text(
-        `Page ${index + 1} of ${range.count}`,
+        "Page " + (index + 1) + " of " + range.count,
         left, doc.page.height - doc.page.margins.bottom - 8,
         { width: usable, align: "right", lineBreak: false });
     }
@@ -1116,14 +1204,16 @@ function registerAdminRoutes(app, deps) {
     doc.end();
   }
 
-  app.get("/api/audit-logs/export/:format", async (request, response) => {
+  app.get("/api/audit-logs/export/:format", async function (request, response) {
     const format = request.params.format;
     if (format !== "xlsx" && format !== "pdf") {
       return response.status(400).json({ error: "Export as xlsx or pdf." });
     }
 
     try {
-      const { rows, chosen } = await auditLogRows(request.query, EXPORT_LIMIT);
+      const logResult = await auditLogRows(request.query, EXPORT_LIMIT);
+      const rows = logResult.rows;
+      const chosen = logResult.chosen;
       const search = String(request.query.search || "").trim();
       const subtitle = exportFilterText(chosen, search);
       const stamp = new Date();
@@ -1131,7 +1221,7 @@ function registerAdminRoutes(app, deps) {
         twoDigits(stamp.getDate()) + "_" + twoDigits(stamp.getHours()) + twoDigits(stamp.getMinutes());
 
       await writeAuditLog(request, "EXPORT_AUDIT",
-        `Exported ${rows.length} audit entries as ${format === "pdf" ? "PDF" : "Excel"} (${subtitle})`);
+        "Exported " + rows.length + " audit entries as " + (format === "pdf" ? "PDF" : "Excel") + " (" + subtitle + ")");
 
       if (format === "xlsx") {
         await writeAuditWorkbook(response, rows, subtitle, fileName);
@@ -1148,14 +1238,15 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  app.get("/api/audit-logs/types", async (request, response) => {
+  app.get("/api/audit-logs/types", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT action_type, COUNT(*) AS entries
-         FROM audit_logs
-         GROUP BY action_type
-         ORDER BY entries DESC`
+      const rowsResult = await db.query(
+        "SELECT action_type, COUNT(*) AS entries " +
+        "FROM audit_logs " +
+        "GROUP BY action_type " +
+        "ORDER BY entries DESC"
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       response.status(500).json({ error: error.message });
@@ -1191,6 +1282,7 @@ function registerAdminRoutes(app, deps) {
   //   hardware_db_auto_2026-09-18_1101-2.sql     (automatic, 2nd one that minute)
   const BACKUP_NAME =
     /^hardware_db_(backup|auto)_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
+  // the same, for the automatic kind only
   const AUTO_NAME = /^hardware_db_auto_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
 
   // The two stores answer the same calls:
@@ -1209,43 +1301,56 @@ function registerAdminRoutes(app, deps) {
   const AUTO_SWITCH_FILE = path.join(BACKUP_DIR, "auto-backup.json");
 
   const folderStore = {
-    async names() {
+    names: async function () {
       await fsp.mkdir(BACKUP_DIR, { recursive: true });
-      return (await fsp.readdir(BACKUP_DIR)).filter((name) => BACKUP_NAME.test(name));
+      const allNames = await fsp.readdir(BACKUP_DIR);
+      const names = [];
+      for (let i = 0; i < allNames.length; i++) {
+        if (BACKUP_NAME.test(allNames[i])) names.push(allNames[i]);
+      }
+      return names;
     },
-    async list() {
+    list: async function () {
       const files = [];
-      for (const name of await this.names()) {
+      const names = await folderStore.names();
+      for (let i = 0; i < names.length; i++) {
+        const name = names[i];
         const stats = await fsp.stat(path.join(BACKUP_DIR, name));
         files.push({ name: name, bytes: stats.size, createdAt: stats.mtime.toISOString() });
       }
       return files;
     },
-    async exists(name) {
+    exists: async function (name) {
       return fs.existsSync(path.join(BACKUP_DIR, name));
     },
-    async writer(name) {
+    writer: async function (name) {
       await fsp.mkdir(BACKUP_DIR, { recursive: true });
       const fullPath = path.join(BACKUP_DIR, name);
       const out = fs.createWriteStream(fullPath, { encoding: "utf8" });
-      const close = () => new Promise((resolve) => out.end(resolve));
+      const close = function () { return new Promise(function (resolve) { return out.end(resolve); }); };
       return {
         // "await write(...)" waits until the text is in the file
-        write(text) {
-          return new Promise((resolve, reject) => {
-            out.write(text, (error) => (error ? reject(error) : resolve()));
+        write: function (text) {
+          return new Promise(function (resolve, reject) {
+            out.write(text, function (error) {
+              if (error) {
+                reject(error);
+              } else {
+                resolve();
+              }
+            });
           });
         },
-        async finish() {
+        finish: async function () {
           await close();
           return (await fsp.stat(fullPath)).size;
         },
-        async abandon() {
+        abandon: async function () {
           await close();
         }
       };
     },
-    async readText(name) {
+    readText: async function (name) {
       try {
         return await fsp.readFile(path.join(BACKUP_DIR, name), "utf8");
       } catch (error) {
@@ -1253,7 +1358,7 @@ function registerAdminRoutes(app, deps) {
         throw error;
       }
     },
-    async remove(name) {
+    remove: async function (name) {
       try {
         await fsp.unlink(path.join(BACKUP_DIR, name));
         return true;
@@ -1262,92 +1367,107 @@ function registerAdminRoutes(app, deps) {
         throw error;
       }
     },
-    async readSwitch() {
+    readSwitch: async function () {
       try {
         return JSON.parse(await fsp.readFile(AUTO_SWITCH_FILE, "utf8")).enabled !== false;
       } catch (error) {
         return true;
       }
     },
-    async writeSwitch(enabled) {
+    writeSwitch: async function (enabled) {
       await fsp.mkdir(BACKUP_DIR, { recursive: true });
       await fsp.writeFile(AUTO_SWITCH_FILE,
         JSON.stringify({ enabled: enabled, changedAt: new Date().toISOString() }, null, 2) + "\n");
     },
     // one server, so its memory is enough
-    async readError() {
+    readError: async function () {
       return autoBackup.lastError;
     },
-    async writeError() {}
+    writeError: async function () {}
   };
 
   async function readFlag(key) {
-    const [rows] = await db.query("SELECT flag_value FROM app_flags WHERE flag_key = ?", [key]);
+    const rowsResult = await db.query("SELECT flag_value FROM app_flags WHERE flag_key = ?", [key]);
+    const rows = rowsResult[0];
     return rows.length > 0 ? rows[0].flag_value : null;
   }
 
   async function writeFlag(key, value) {
     await db.query(
-      `INSERT INTO app_flags (flag_key, flag_value, updated_at) VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE flag_value = VALUES(flag_value), updated_at = VALUES(updated_at)`,
+      "INSERT INTO app_flags (flag_key, flag_value, updated_at) VALUES (?, ?, ?) " +
+      "ON DUPLICATE KEY UPDATE flag_value = VALUES(flag_value), updated_at = VALUES(updated_at)",
       [key, value === null ? null : String(value).slice(0, 255), Date.now()]);
   }
 
   const databaseStore = {
-    async names() {
-      const [rows] = await db.query("SELECT file_name FROM backup_files");
-      return rows.map((row) => row.file_name);
+    names: async function () {
+      const rowsResult = await db.query("SELECT file_name FROM backup_files");
+      const rows = rowsResult[0];
+      const names = [];
+      for (let i = 0; i < rows.length; i++) {
+        names.push(rows[i].file_name);
+      }
+      return names;
     },
-    async list() {
-      const [rows] = await db.query("SELECT file_name, bytes, created_at FROM backup_files");
-      return rows.map((row) => ({
-        name: row.file_name,
-        bytes: Number(row.bytes),
-        createdAt: new Date(Number(row.created_at)).toISOString()
-      }));
+    list: async function () {
+      const rowsResult = await db.query("SELECT file_name, bytes, created_at FROM backup_files");
+      const rows = rowsResult[0];
+      const files = [];
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        files.push({
+          name: row.file_name,
+          bytes: Number(row.bytes),
+          createdAt: new Date(Number(row.created_at)).toISOString()
+        });
+      }
+      return files;
     },
-    async exists(name) {
-      const [rows] = await db.query("SELECT 1 FROM backup_files WHERE file_name = ?", [name]);
+    exists: async function (name) {
+      const rowsResult = await db.query("SELECT 1 FROM backup_files WHERE file_name = ?", [name]);
+      const rows = rowsResult[0];
       return rows.length > 0;
     },
     // gathered in memory and saved gzipped in one row: a shop's backup is a
     // few hundred kilobytes of text and squeezes to a tenth of that
-    async writer(name) {
+    writer: async function (name) {
       const parts = [];
       return {
-        async write(text) {
+        write: async function (text) {
           parts.push(text);
         },
-        async finish() {
+        finish: async function () {
           const text = Buffer.from(parts.join(""), "utf8");
           await db.query(
             "INSERT INTO backup_files (file_name, bytes, created_at, content) VALUES (?, ?, ?, ?)",
             [name, text.length, Date.now(), zlib.gzipSync(text)]);
           return text.length;
         },
-        async abandon() {}
+        abandon: async function () {}
       };
     },
-    async readText(name) {
-      const [rows] = await db.query("SELECT content FROM backup_files WHERE file_name = ?", [name]);
+    readText: async function (name) {
+      const rowsResult = await db.query("SELECT content FROM backup_files WHERE file_name = ?", [name]);
+      const rows = rowsResult[0];
       if (rows.length === 0) return null;
       return zlib.gunzipSync(rows[0].content).toString("utf8");
     },
-    async remove(name) {
-      const [result] = await db.query("DELETE FROM backup_files WHERE file_name = ?", [name]);
+    remove: async function (name) {
+      const queryResult = await db.query("DELETE FROM backup_files WHERE file_name = ?", [name]);
+      const result = queryResult[0];
       return result.affectedRows > 0;
     },
-    async readSwitch() {
+    readSwitch: async function () {
       return (await readFlag("auto_backup_enabled")) !== "0";
     },
-    async writeSwitch(enabled) {
+    writeSwitch: async function (enabled) {
       await writeFlag("auto_backup_enabled", enabled ? "1" : "0");
     },
     // many copies of the server, so the one that ran the job writes it down
-    async readError() {
+    readError: async function () {
       return await readFlag("auto_backup_error");
     },
-    async writeError(message) {
+    writeError: async function (message) {
       await writeFlag("auto_backup_error", message);
     }
   };
@@ -1373,7 +1493,8 @@ function registerAdminRoutes(app, deps) {
     let counter = 2;
 
     while (await backupStore.exists(name)) {
-      name = base.replace(/\.sql$/, `-${counter}.sql`);
+      // matches ".sql" at the very end of the name
+      name = base.replace(/\.sql$/, "-" + counter + ".sql");
       counter += 1;
     }
     return name;
@@ -1385,48 +1506,65 @@ function registerAdminRoutes(app, deps) {
   // "DEFAULT_GENERATED", and those hold real dates (sale_date, payment_date)
   // that a restore must bring back.
   async function generatedColumnsOf(table) {
-    const [rows] = await db.query(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-         AND (EXTRA LIKE '%STORED GENERATED%' OR EXTRA LIKE '%VIRTUAL GENERATED%')`,
+    const rowsResult = await db.query(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS " +
+      "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? " +
+      "AND (EXTRA LIKE '%STORED GENERATED%' OR EXTRA LIKE '%VIRTUAL GENERATED%')",
       [DB_NAME, table]
     );
-    return rows.map((row) => row.COLUMN_NAME);
+    const rows = rowsResult[0];
+    const names = [];
+    for (let i = 0; i < rows.length; i++) {
+      names.push(rows[i].COLUMN_NAME);
+    }
+    return names;
   }
 
   // a table's columns in their order, read from the catalogue
   async function columnsOf(table) {
-    const [rows] = await db.query(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-       ORDER BY ORDINAL_POSITION`,
+    const rowsResult = await db.query(
+      "SELECT COLUMN_NAME FROM information_schema.COLUMNS " +
+      "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? " +
+      "ORDER BY ORDINAL_POSITION",
       [DB_NAME, table]
     );
-    return rows.map((row) => row.COLUMN_NAME);
+    const rows = rowsResult[0];
+    const names = [];
+    for (let i = 0; i < rows.length; i++) {
+      names.push(rows[i].COLUMN_NAME);
+    }
+    return names;
   }
 
   async function listBaseTables() {
-    const [rows] = await db.query(
-      `SELECT TABLE_NAME FROM information_schema.TABLES
-       WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'
-       ORDER BY TABLE_NAME`,
+    const rowsResult = await db.query(
+      "SELECT TABLE_NAME FROM information_schema.TABLES " +
+      "WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE' " +
+      "ORDER BY TABLE_NAME",
       [DB_NAME]
     );
+    const rows = rowsResult[0];
     // the server's own tables (sign-ins, the backups themselves) are not shop data
-    return rows.map((row) => row.TABLE_NAME).filter((name) => !SERVER_TABLES.includes(name));
+    const names = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (!SERVER_TABLES.includes(rows[i].TABLE_NAME)) names.push(rows[i].TABLE_NAME);
+    }
+    return names;
   }
 
   // in the order they can be created: a view that names another view goes after it
   async function listViews() {
-    const [rows] = await db.query(
-      `SELECT TABLE_NAME, VIEW_DEFINITION FROM information_schema.VIEWS
-       WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME`,
+    const rowsResult = await db.query(
+      "SELECT TABLE_NAME, VIEW_DEFINITION FROM information_schema.VIEWS " +
+      "WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
       [DB_NAME]
     );
+    const rows = rowsResult[0];
 
     // the views still to be placed in order
     const pending = [];
-    for (const row of rows) {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       pending.push({
         name: row.TABLE_NAME,
         definition: String(row.VIEW_DEFINITION || "").toLowerCase()
@@ -1440,7 +1578,8 @@ function registerAdminRoutes(app, deps) {
       let chosen = 0;
       for (let i = 0; i < pending.length; i++) {
         let usesPending = false;
-        for (const other of pending) {
+        for (let j = 0; j < pending.length; j++) {
+          const other = pending[j];
           if (other !== pending[i] &&
               pending[i].definition.includes("`" + other.name.toLowerCase() + "`")) {
             usesPending = true;
@@ -1461,18 +1600,24 @@ function registerAdminRoutes(app, deps) {
   }
 
   async function listProcedures() {
-    const [rows] = await db.query(
-      `SELECT ROUTINE_NAME FROM information_schema.ROUTINES
-       WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE'
-       ORDER BY ROUTINE_NAME`,
+    const rowsResult = await db.query(
+      "SELECT ROUTINE_NAME FROM information_schema.ROUTINES " +
+      "WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE' " +
+      "ORDER BY ROUTINE_NAME",
       [DB_NAME]
     );
-    return rows.map((row) => row.ROUTINE_NAME);
+    const rows = rowsResult[0];
+    const names = [];
+    for (let i = 0; i < rows.length; i++) {
+      names.push(rows[i].ROUTINE_NAME);
+    }
+    return names;
   }
 
   // A DEFINER names a MySQL account that may not exist on another computer,
   // so it is removed. Example: "DEFINER=`root`@`localhost` " -> ""
   function stripDefiner(sql) {
+    // matches DEFINER=`user`@`host` and any spaces after it
     return String(sql).replace(/DEFINER\s*=\s*`[^`]*`@`[^`]*`\s*/gi, "");
   }
 
@@ -1496,43 +1641,54 @@ function registerAdminRoutes(app, deps) {
 
     try {
       await write(
-        `-- Lucelyn Hardware - full database backup\n` +
-        `-- Database : ${DB_NAME}\n` +
-        `-- Taken on : ${now.toISOString()}\n` +
-        `-- Contains : ${tables.length} tables, ${views.length} views, ${procedures.length} procedures\n` +
-        `--\n` +
-        `-- Restore from the Backup & Recovery screen, or run this file in\n` +
-        `-- MySQL Workbench. It rebuilds every table and reloads every row.\n\n` +
-        `SET FOREIGN_KEY_CHECKS = 0;\n` +
-        `SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n`
+        "-- Lucelyn Hardware - full database backup\n" +
+        "-- Database : " + DB_NAME + "\n" +
+        "-- Taken on : " + now.toISOString() + "\n" +
+        "-- Contains : " + tables.length + " tables, " + views.length + " views, " + procedures.length + " procedures\n" +
+        "--\n" +
+        "-- Restore from the Backup & Recovery screen, or run this file in\n" +
+        "-- MySQL Workbench. It rebuilds every table and reloads every row.\n\n" +
+        "SET FOREIGN_KEY_CHECKS = 0;\n" +
+        "SET SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';\n\n"
       );
 
-      for (const view of views) {
-        await write(`DROP VIEW IF EXISTS ${sqlName(view)};\n`);
+      for (let i = 0; i < views.length; i++) {
+        const view = views[i];
+        await write("DROP VIEW IF EXISTS " + sqlName(view) + ";\n");
       }
       await write("\n");
 
-      for (const table of tables) {
-        const [createdRows] = await db.query(`SHOW CREATE TABLE ${sqlName(table)}`);
+      for (let t = 0; t < tables.length; t++) {
+        const table = tables[t];
+        const createdRowsResult = await db.query("SHOW CREATE TABLE " + sqlName(table));
+        const createdRows = createdRowsResult[0];
         const created = createdRows[0];
-        await write(`-- ----------------------------------------\n`);
-        await write(`-- Table: ${table}\n`);
-        await write(`-- ----------------------------------------\n`);
-        await write(`DROP TABLE IF EXISTS ${sqlName(table)};\n`);
-        await write(`${stripDefiner(created["Create Table"])};\n\n`);
+        await write("-- ----------------------------------------\n");
+        await write("-- Table: " + table + "\n");
+        await write("-- ----------------------------------------\n");
+        await write("DROP TABLE IF EXISTS " + sqlName(table) + ";\n");
+        await write(stripDefiner(created["Create Table"]) + ";\n\n");
 
         // the columns to save (generated columns are skipped: MySQL makes them itself)
         const skip = await generatedColumnsOf(table);
-        const columns = (await columnsOf(table)).filter((column) => !skip.includes(column));
-        const columnList = columns.map((column) => sqlName(column)).join(", ");
+        const allColumns = await columnsOf(table);
+        const columns = [];
+        const quotedColumns = [];
+        for (let c = 0; c < allColumns.length; c++) {
+          if (!skip.includes(allColumns[c])) {
+            columns.push(allColumns[c]);
+            quotedColumns.push(sqlName(allColumns[c]));
+          }
+        }
+        const columnList = quotedColumns.join(", ");
 
         // The rows are streamed from MySQL and written 100 at a time, so a large
         // table never sits in memory whole: INSERT INTO t (a, b) VALUES (1, 2), ...;
         let count = 0;
         let batch = [];
-        const flush = async () => {
+        const flush = async function () {
           if (batch.length === 0) return;
-          await write(`INSERT INTO ${sqlName(table)} (${columnList}) VALUES\n`);
+          await write("INSERT INTO " + sqlName(table) + " (" + columnList + ") VALUES\n");
           await write(batch.join(",\n") + ";\n");
           batch = [];
         };
@@ -1540,10 +1696,14 @@ function registerAdminRoutes(app, deps) {
         const connection = await db.getConnection();
         try {
           const stream = connection.connection
-            .query(`SELECT ${columnList} FROM ${sqlName(table)}`)
+            .query("SELECT " + columnList + " FROM " + sqlName(table))
             .stream({ highWaterMark: 200 });
           for await (const row of stream) {
-            batch.push("  (" + columns.map((column) => sqlValue(row[column])).join(", ") + ")");
+            const values = [];
+            for (let c = 0; c < columns.length; c++) {
+              values.push(sqlValue(row[columns[c]]));
+            }
+            batch.push("  (" + values.join(", ") + ")");
             count += 1;
             if (batch.length >= 100) await flush();
           }
@@ -1553,33 +1713,37 @@ function registerAdminRoutes(app, deps) {
         }
 
         rowTotal += count;
-        await write(count === 0 ? `-- no rows\n\n` : `-- ${count} row(s)\n\n`);
+        await write(count === 0 ? "-- no rows\n\n" : "-- " + count + " row(s)\n\n");
       }
 
-      for (const view of views) {
-        const [createdRows] = await db.query(`SHOW CREATE VIEW ${sqlName(view)}`);
+      for (let i = 0; i < views.length; i++) {
+        const view = views[i];
+        const createdRowsResult = await db.query("SHOW CREATE VIEW " + sqlName(view));
+        const createdRows = createdRowsResult[0];
         const created = createdRows[0];
-        await write(`-- View: ${view}\n`);
-        await write(`${stripDefiner(created["Create View"])};\n\n`);
+        await write("-- View: " + view + "\n");
+        await write(stripDefiner(created["Create View"]) + ";\n\n");
       }
 
       if (procedures.length > 0) {
-        await write(`-- ----------------------------------------\n`);
-        await write(`-- Stored procedures\n`);
-        await write(`-- ----------------------------------------\n`);
-        await write(`DELIMITER //\n`);
+        await write("-- ----------------------------------------\n");
+        await write("-- Stored procedures\n");
+        await write("-- ----------------------------------------\n");
+        await write("DELIMITER //\n");
 
-        for (const procedure of procedures) {
-          const [createdRows] = await db.query(`SHOW CREATE PROCEDURE ${sqlName(procedure)}`);
+        for (let i = 0; i < procedures.length; i++) {
+          const procedure = procedures[i];
+          const createdRowsResult = await db.query("SHOW CREATE PROCEDURE " + sqlName(procedure));
+          const createdRows = createdRowsResult[0];
           const created = createdRows[0];
-          await write(`DROP PROCEDURE IF EXISTS ${sqlName(procedure)} //\n`);
-          await write(`${stripDefiner(created["Create Procedure"])} //\n\n`);
+          await write("DROP PROCEDURE IF EXISTS " + sqlName(procedure) + " //\n");
+          await write(stripDefiner(created["Create Procedure"]) + " //\n\n");
         }
 
-        await write(`DELIMITER ;\n\n`);
+        await write("DELIMITER ;\n\n");
       }
 
-      await write(`SET FOREIGN_KEY_CHECKS = 1;\n`);
+      await write("SET FOREIGN_KEY_CHECKS = 1;\n");
     } catch (error) {
       await out.abandon();
       throw error;
@@ -1625,8 +1789,10 @@ function registerAdminRoutes(app, deps) {
     try {
       await connection.query("SET FOREIGN_KEY_CHECKS = 0");
 
-      for (const statement of statements) {
+      for (let j = 0; j < statements.length; j++) {
+        const statement = statements[j];
         // skip "USE some_database" so the file cannot switch to another database
+        // matches a statement that starts with the word USE, in any letter case
         if (/^use[\s`]/i.test(statement)) continue;
         await connection.query(statement);
       }
@@ -1667,14 +1833,21 @@ function registerAdminRoutes(app, deps) {
   // the backup files, by kind, oldest first (the stamp is year-first)
   async function backupNames() {
     const all = await backupStore.names();
-    const automatic = all.filter((name) => AUTO_NAME.test(name)).sort();
-    const manual = all.filter((name) => BACKUP_NAME.test(name) && !AUTO_NAME.test(name)).sort();
-    return { automatic, manual };
+    const automatic = [];
+    const manual = [];
+    for (let i = 0; i < all.length; i++) {
+      if (AUTO_NAME.test(all[i])) automatic.push(all[i]);
+      if (BACKUP_NAME.test(all[i]) && !AUTO_NAME.test(all[i])) manual.push(all[i]);
+    }
+    automatic.sort();
+    manual.sort();
+    return { automatic: automatic, manual: manual };
   }
 
   // the moment a backup was taken, read from its name, so the two kinds sort
   // together: "hardware_db_auto_2026-09-18_1101.sql" gives "2026-09-18_1101.sql"
   function backupStamp(name) {
+    // matches the start of the name: "hardware_db_backup_" or "hardware_db_auto_"
     return name.replace(/^hardware_db_(backup|auto)_/, "");
   }
 
@@ -1682,11 +1855,15 @@ function registerAdminRoutes(app, deps) {
   // ago. The newest backup is always kept, so a system whose daily backup
   // stopped for a month still has one to restore from.
   async function removeOldBackups() {
-    const names = (await backupStore.names()).filter((name) => BACKUP_NAME.test(name));
+    const storedNames = await backupStore.names();
+    const names = [];
+    for (let i = 0; i < storedNames.length; i++) {
+      if (BACKUP_NAME.test(storedNames[i])) names.push(storedNames[i]);
+    }
     if (names.length === 0) return 0;
 
     // oldest first; the stamp is year-first, so text order is time order
-    names.sort((left, right) => backupStamp(left).localeCompare(backupStamp(right)));
+    names.sort(function (left, right) { return backupStamp(left).localeCompare(backupStamp(right)); });
     const newest = names[names.length - 1];
 
     // the first day that is still kept, e.g. "2026-09-14" when today is 2026-10-14
@@ -1695,14 +1872,15 @@ function registerAdminRoutes(app, deps) {
     const keepFrom = cutoff.getFullYear() + "-" + twoDigits(cutoff.getMonth() + 1) + "-" + twoDigits(cutoff.getDate());
 
     let removed = 0;
-    for (const name of names) {
+    for (let i = 0; i < names.length; i++) {
+      const name = names[i];
       if (name === newest) continue;
       if (backupStamp(name).slice(0, 10) < keepFrom) {
         await backupStore.remove(name);   // already gone is fine
         removed += 1;
       }
     }
-    if (removed > 0) console.log(`Deleted ${removed} backup(s) older than ${KEEP_DAYS} days.`);
+    if (removed > 0) console.log("Deleted " + removed + " backup(s) older than " + KEEP_DAYS + " days.");
     return removed;
   }
 
@@ -1743,11 +1921,11 @@ function registerAdminRoutes(app, deps) {
 
       autoBackup.lastFileName = summary.fileName;
       autoBackup.lastAt = summary.createdAt;
-      if (autoBackup.lastError) console.log(`The daily backup is working again (${summary.fileName}).`);
+      if (autoBackup.lastError) console.log("The daily backup is working again (" + summary.fileName + ").");
       autoBackup.lastError = null;
       autoBackup.failures = 0;
       await backupStore.writeError(null);
-      return `saved ${summary.fileName}`;
+      return "saved " + summary.fileName;
     } catch (error) {
       autoBackup.failures += 1;
       autoBackup.lastError = error.message;
@@ -1762,7 +1940,7 @@ function registerAdminRoutes(app, deps) {
           await writeAuditLog(
             { staffId: null, request: null },
             "BACKUP_FAILED",
-            `The daily backup failed: ${error.message}`
+            "The daily backup failed: " + error.message
           );
         } catch (ignored) { /* the database is the thing that is broken */ }
       }
@@ -1776,7 +1954,10 @@ function registerAdminRoutes(app, deps) {
   async function todayIsBackedUp() {
     const today = AUTO_PREFIX + todayStamp();
     const names = (await backupNames()).automatic;
-    return names.some((name) => name.startsWith(today));
+    for (let i = 0; i < names.length; i++) {
+      if (names[i].startsWith(today)) return true;
+    }
+    return false;
   }
 
   // writes today's backup once the hour has come, if today has none yet
@@ -1819,8 +2000,8 @@ function registerAdminRoutes(app, deps) {
     if (!autoBackup.enabled) {
       console.log("The daily backup is switched off. Turn it on from the Backup & Recovery screen.");
     } else {
-      console.log(`Daily backup at ${twoDigits(AUTO_HOUR)}:00, deleting backups older than ${KEEP_DAYS} days. ` +
-        `Up to ${MANUAL_LIMIT} backups taken by hand are kept until deleted.`);
+      console.log("Daily backup at " + twoDigits(AUTO_HOUR) + ":00, deleting backups older than " + KEEP_DAYS + " days. " +
+        "Up to " + MANUAL_LIMIT + " backups taken by hand are kept until deleted.");
     }
 
     const first = setTimeout(dailyBackupCheck, AUTO_FIRST_CHECK_MS);
@@ -1843,13 +2024,13 @@ function registerAdminRoutes(app, deps) {
       const deliveries = Number(output.deliveries) || 0;
       const materials = Number(output.materials) || 0;
       if (deliveries < 0) {
-        console.error(`Archive sweep failed inside the database (${output.err_no}): ${output.err_text}`);
+        console.error("Archive sweep failed inside the database (" + output.err_no + "): " + output.err_text);
         return;
       }
       if (deliveries > 0 || materials > 0) {
-        console.log(`Archive sweep: put away ${deliveries} closed ` +
-          `${deliveries === 1 ? "delivery" : "deliveries"} and ${materials} idle ` +
-          `${materials === 1 ? "material" : "materials"}.`);
+        console.log("Archive sweep: put away " + deliveries + " closed " +
+          (deliveries === 1 ? "delivery" : "deliveries") + " and " + materials + " idle " +
+          (materials === 1 ? "material" : "materials") + ".");
         publishChange("archives", "sweep", null);
         if (deliveries > 0) publishChange("deliveries", "sweep", null);
         if (materials > 0) publishChange("inventory", "sweep", null);
@@ -1866,13 +2047,15 @@ function registerAdminRoutes(app, deps) {
   }
 
   // Screens by role: read as a whole, written one cell at a time.
-  app.get("/api/features", async (request, response) => {
+  app.get("/api/features", async function (request, response) {
     try {
-      const [roleRows] = await db.query("SELECT role_id, role_name FROM roles ORDER BY role_id");
+      const roleRowsResult = await db.query("SELECT role_id, role_name FROM roles ORDER BY role_id");
+      const roleRows = roleRowsResult[0];
 
       // the roles that appear as columns in the Access Control table
       const roles = [];
-      for (const row of roleRows) {
+      for (let i = 0; i < roleRows.length; i++) {
+        const row = roleRows[i];
         if (FEATURE_ROLES.includes(row.role_name)) {
           roles.push(row);
         }
@@ -1880,19 +2063,23 @@ function registerAdminRoutes(app, deps) {
 
       // perRole[role name][screen key] = what that role has for that screen
       const perRole = {};
-      for (const role of roles) {
+      for (let j = 0; j < roles.length; j++) {
+        const role = roles[j];
         perRole[role.role_name] = {};
         const roleFeatures = await featuresOf(role.role_name);
-        for (const f of roleFeatures) {
+        for (let i = 0; i < roleFeatures.length; i++) {
+          const f = roleFeatures[i];
           perRole[role.role_name][f.key] = f;
         }
       }
 
       // one row per screen, with one cell per role
       const featureRows = [];
-      for (const feature of FEATURES) {
+      for (let j = 0; j < FEATURES.length; j++) {
+        const feature = FEATURES[j];
         const cells = {};
-        for (const role of roles) {
+        for (let i = 0; i < roles.length; i++) {
+          const role = roles[i];
           const held = perRole[role.role_name][feature.key] || null;
 
           if (held) {
@@ -1924,7 +2111,8 @@ function registerAdminRoutes(app, deps) {
   // what one role has for one screen (from the list featuresOf gives back)
   async function roleFeature(roleName, featureKey) {
     const list = await featuresOf(roleName);
-    for (const f of list) {
+    for (let i = 0; i < list.length; i++) {
+      const f = list[i];
       if (f.key === featureKey) {
         return f;
       }
@@ -1934,7 +2122,7 @@ function registerAdminRoutes(app, deps) {
 
   // Setting a cell back to the role's default removes the override row rather
   // than writing one that agrees with the page.
-  app.put("/api/features/:featureKey/roles/:roleId", async (request, response) => {
+  app.put("/api/features/:featureKey/roles/:roleId", async function (request, response) {
     const feature = findFeature(request.params.featureKey);
     const roleId = Number(request.params.roleId);
     const body = request.body || {};
@@ -1947,7 +2135,8 @@ function registerAdminRoutes(app, deps) {
     }
 
     try {
-      const [roles] = await db.query("SELECT role_id, role_name FROM roles WHERE role_id = ?", [roleId]);
+      const rolesResult = await db.query("SELECT role_id, role_name FROM roles WHERE role_id = ?", [roleId]);
+      const roles = rolesResult[0];
       if (roles.length === 0) return response.status(404).json({ error: "No such role." });
       const role = roles[0];
 
@@ -1956,7 +2145,7 @@ function registerAdminRoutes(app, deps) {
       }
       if (!feature.available.includes(role.role_name)) {
         return response.status(400).json({
-          error: `The ${role.role_name} dashboard has no ${feature.name} screen to show, so it cannot be granted there.`
+          error: "The " + role.role_name + " dashboard has no " + feature.name + " screen to show, so it cannot be granted there."
         });
       }
 
@@ -1969,7 +2158,7 @@ function registerAdminRoutes(app, deps) {
           holds = "hold";
         }
         return response.json({
-          message: `Nothing changed: ${role.role_name} accounts already ${holds} ${feature.name}.`,
+          message: "Nothing changed: " + role.role_name + " accounts already " + holds + " " + feature.name + ".",
           changed: false
         });
       }
@@ -1979,10 +2168,10 @@ function registerAdminRoutes(app, deps) {
           [roleId, feature.key]);
       } else {
         await db.query(
-          `INSERT INTO role_feature_permissions (role_id, feature_key, is_granted, note, granted_by_staff_id)
-           VALUES (?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted), note = VALUES(note),
-                                   granted_by_staff_id = VALUES(granted_by_staff_id)`,
+          "INSERT INTO role_feature_permissions (role_id, feature_key, is_granted, note, granted_by_staff_id) " +
+          "VALUES (?, ?, ?, ?, ?) " +
+          "ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted), note = VALUES(note), " +
+          "granted_by_staff_id = VALUES(granted_by_staff_id)",
           [roleId, feature.key, wanted, note || null, request.actor.staffId]);
       }
       forgetFeatureOverrides();
@@ -1990,13 +2179,13 @@ function registerAdminRoutes(app, deps) {
       // "again" when the screen goes back to how the role has it by default
       let message;
       if (wanted && byDefault) {
-        message = `${feature.name} is now on the ${role.role_name} menu again.`;
+        message = feature.name + " is now on the " + role.role_name + " menu again.";
       } else if (wanted) {
-        message = `${feature.name} is now on the ${role.role_name} menu.`;
+        message = feature.name + " is now on the " + role.role_name + " menu.";
       } else if (byDefault) {
-        message = `${feature.name} is off the ${role.role_name} menu.`;
+        message = feature.name + " is off the " + role.role_name + " menu.";
       } else {
-        message = `${feature.name} is off the ${role.role_name} menu again.`;
+        message = feature.name + " is off the " + role.role_name + " menu again.";
       }
 
       if (before.held !== wanted) {
@@ -2007,7 +2196,7 @@ function registerAdminRoutes(app, deps) {
           onOff = "on";
         }
         await writeAuditLog(request, action,
-          `${feature.name} switched ${onOff} for ${role.role_name} accounts`,
+          feature.name + " switched " + onOff + " for " + role.role_name + " accounts",
           { role_id: roleId, role_name: role.role_name, feature_key: feature.key, feature_name: feature.name,
             by_default: byDefault,
             changes: fieldChanges({ held: before.held }, { held: wanted }), note: note || null });
@@ -2023,13 +2212,15 @@ function registerAdminRoutes(app, deps) {
 
   // The list, the daily backup's state and the limits. The folder's path on
   // the server is not sent: it is no business of a browser's.
-  app.get("/api/backups", requireRole(ADMIN), async (request, response) => {
+  app.get("/api/backups", requireRole(ADMIN), async function (request, response) {
     try {
       const names = await backupNames();
 
       // one entry per backup file in the store
       const files = [];
-      for (const file of await backupStore.list()) {
+      const stored = await backupStore.list();
+      for (let i = 0; i < stored.length; i++) {
+        const file = stored[i];
         files.push({
           fileName: file.name,
           bytes: file.bytes,
@@ -2049,18 +2240,21 @@ function registerAdminRoutes(app, deps) {
       // a restore is named at the end of the RESTORE entry ("... before it is <file>").
       const madeBy = {};
       try {
-        const [logs] = await db.query(
-          `SELECT a.action, a.details, s.full_name
-           FROM audit_logs a
-           LEFT JOIN staff s ON s.staff_id = a.staff_id
-           WHERE a.action IN ('BACKUP', 'RESTORE')`
+        const logsResult = await db.query(
+          "SELECT a.action, a.details, s.full_name " +
+          "FROM audit_logs a " +
+          "LEFT JOIN staff s ON s.staff_id = a.staff_id " +
+          "WHERE a.action IN ('BACKUP', 'RESTORE')"
         );
-        for (const log of logs) {
+        const logs = logsResult[0];
+        for (let i = 0; i < logs.length; i++) {
+          const log = logs[i];
           const details = String(log.details || "");
           let fileName = null;
           if (log.action === "BACKUP") {
             fileName = details.split(" ")[0];
           } else {
+            // matches the words "before it is" and takes the file name after them
             const found = /before it is (\S+)/.exec(details);
             if (found) fileName = found[1];
           }
@@ -2071,7 +2265,8 @@ function registerAdminRoutes(app, deps) {
       }
 
       // the daily backup is made by the system itself, not by a person
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
         if (madeBy[file.fileName]) {
           file.madeBy = madeBy[file.fileName];
         } else if (file.automatic) {
@@ -2084,7 +2279,13 @@ function registerAdminRoutes(app, deps) {
       // Read from the store rather than this copy's memory: on Vercel the
       // daily job ran on another copy of the server.
       autoBackup.enabled = await backupStore.readSwitch();
-      const lastAuto = files.find((file) => file.automatic) || null;
+      let lastAuto = null;
+      for (let i = 0; i < files.length; i++) {
+        if (files[i].automatic) {
+          lastAuto = files[i];
+          break;
+        }
+      }
       const lastError = await backupStore.readError();
 
       response.json({
@@ -2120,7 +2321,7 @@ function registerAdminRoutes(app, deps) {
 
   // The switch. Off stops the daily backup (nothing new is written, nothing
   // old is deleted); on writes today's at the next check if the hour has passed.
-  app.put("/api/backups/auto", requireRole(ADMIN), async (request, response) => {
+  app.put("/api/backups/auto", requireRole(ADMIN), async function (request, response) {
     const enabled = request.body && request.body.enabled;
     if (typeof enabled !== "boolean") {
       return response.status(400).json({ error: "Say whether the daily backup is on or off." });
@@ -2132,11 +2333,11 @@ function registerAdminRoutes(app, deps) {
 
       if (enabled) {
         await writeAuditLog(request, "AUTO_BACKUP_ON",
-          `Daily backup switched on (at ${twoDigits(AUTO_HOUR)}:00, deleting backups older than ${KEEP_DAYS} days)`);
+          "Daily backup switched on (at " + twoDigits(AUTO_HOUR) + ":00, deleting backups older than " + KEEP_DAYS + " days)");
         // on Vercel the daily job does it; a copy of the server may stop once this answer is sent
         if (!IS_VERCEL) dailyBackupCheck();
         response.json({
-          message: `The daily backup is on. It runs every day at ${twoDigits(AUTO_HOUR)}:00.`,
+          message: "The daily backup is on. It runs every day at " + twoDigits(AUTO_HOUR) + ":00.",
           enabled: enabled
         });
       } else {
@@ -2162,14 +2363,14 @@ function registerAdminRoutes(app, deps) {
 
   // Run Backup Now. Backups taken by hand are kept until deleted, so there is
   // a limit to them: at the limit, an old one has to be deleted first.
-  app.post("/api/backups", requireRole(ADMIN), async (request, response) => {
+  app.post("/api/backups", requireRole(ADMIN), async function (request, response) {
     if (manualBackupRunning) {
       return response.status(429).json({ error: "A backup is already being saved. Wait for it to finish." });
     }
     const waitMs = lastManualBackupAt + BACKUP_COOLDOWN_MS - Date.now();
     if (waitMs > 0) {
       return response.status(429).json({
-        error: `Wait ${Math.ceil(waitMs / 1000)} more second(s) before running another backup.`
+        error: "Wait " + Math.ceil(waitMs / 1000) + " more second(s) before running another backup."
       });
     }
 
@@ -2178,7 +2379,7 @@ function registerAdminRoutes(app, deps) {
       const names = await backupNames();
       if (names.manual.length >= MANUAL_LIMIT) {
         return response.status(409).json({
-          error: `There are already ${names.manual.length} manual backups, the most this system keeps. ` +
+          error: "There are already " + names.manual.length + " manual backups, the most this system keeps. " +
                  "Delete one you no longer need, then run the backup again."
         });
       }
@@ -2186,10 +2387,10 @@ function registerAdminRoutes(app, deps) {
       const summary = await writeBackupFile();
 
       await writeAuditLog(request, "BACKUP",
-        `${summary.fileName} (${summary.tableCount} tables, ${summary.rowCount} rows)`);
+        summary.fileName + " (" + summary.tableCount + " tables, " + summary.rowCount + " rows)");
 
       // the message plus every field of "summary" (fileName, bytes, ...)
-      const answer = Object.assign({ message: `Backup saved as ${summary.fileName}.` }, summary);
+      const answer = Object.assign({ message: "Backup saved as " + summary.fileName + "." }, summary);
       response.json(answer);
     } catch (error) {
       console.error("Backup failed:", error.message);
@@ -2201,7 +2402,7 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  app.get("/api/backups/:fileName", requireRole(ADMIN), async (request, response) => {
+  app.get("/api/backups/:fileName", requireRole(ADMIN), async function (request, response) {
     const name = request.params.fileName;
 
     if (!BACKUP_NAME.test(name)) {
@@ -2223,7 +2424,7 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  app.delete("/api/backups/:fileName", requireRole(ADMIN), async (request, response) => {
+  app.delete("/api/backups/:fileName", requireRole(ADMIN), async function (request, response) {
     const name = request.params.fileName;
 
     if (!BACKUP_NAME.test(name)) {
@@ -2243,7 +2444,7 @@ function registerAdminRoutes(app, deps) {
         return response.status(404).json({ error: "That backup is no longer saved." });
       }
       await writeAuditLog(request, "BACKUP_DELETE", name);
-      response.json({ message: `${name} deleted.` });
+      response.json({ message: name + " deleted." });
     } catch (error) {
       console.error("Backup delete failed:", error.message);
       response.status(500).json({ error: "Unable to delete that backup" });
@@ -2264,16 +2465,16 @@ function registerAdminRoutes(app, deps) {
       const total = await countProcedures();
       if (total >= EXPECTED_PROCEDURES) return "";
 
-      return ` WARNING: that backup did not carry the stored procedures -- this ` +
-        `database now has ${total} of ${EXPECTED_PROCEDURES} and nothing can be ` +
-        `saved until they are put back. Run ` +
-        `public/database/2-RUN-SECOND-stored-procedures.sql. Your data is intact.`;
+      return " WARNING: that backup did not carry the stored procedures -- this " +
+        "database now has " + total + " of " + EXPECTED_PROCEDURES + " and nothing can be " +
+        "saved until they are put back. Run " +
+        "public/database/2-RUN-SECOND-stored-procedures.sql. Your data is intact.";
     } catch (error) {
       return "";
     }
   }
 
-  app.post("/api/backups/:fileName/restore", requireRole(ADMIN), async (request, response) => {
+  app.post("/api/backups/:fileName/restore", requireRole(ADMIN), async function (request, response) {
     const name = request.params.fileName;
 
     if (!BACKUP_NAME.test(name)) {
@@ -2290,10 +2491,10 @@ function registerAdminRoutes(app, deps) {
       // the database as it is now, kept beside the others in case this has to be undone
       safety = await writeBackupFile(AUTO_PREFIX);
       const count = await runSqlScript(text);
-      await writeAuditLog(request, "RESTORE", `Restored from ${name}; the database before it is ${safety.fileName}`);
+      await writeAuditLog(request, "RESTORE", "Restored from " + name + "; the database before it is " + safety.fileName);
       response.json({
-        message: `Database restored from ${name}. ${count} statements ran. ` +
-          `The database as it was before is kept as ${safety.fileName}.` + (await restoreShortfall())
+        message: "Database restored from " + name + ". " + count + " statements ran. " +
+          "The database as it was before is kept as " + safety.fileName + "." + (await restoreShortfall())
       });
     } catch (error) {
       console.error("Restore failed:", error.message);
@@ -2304,7 +2505,7 @@ function registerAdminRoutes(app, deps) {
   // The one route that takes a big body: the .sql file the administrator picked.
   // server.js leaves it alone (see smallJson there) and it is read here, after the role check, with a
   // 50 MB limit instead of the default 100 kb.
-  app.post("/api/restore", requireRole(ADMIN), express.json({ limit: "50mb" }), async (request, response) => {
+  app.post("/api/restore", requireRole(ADMIN), express.json({ limit: "50mb" }), async function (request, response) {
     const sql = request.body && request.body.sql;
 
     if (typeof sql !== "string" || sql.trim() === "") {
@@ -2316,10 +2517,10 @@ function registerAdminRoutes(app, deps) {
       safety = await writeBackupFile(AUTO_PREFIX);
       const count = await runSqlScript(sql);
       await writeAuditLog(request, "RESTORE",
-        `Restored from an uploaded .sql file; the database before it is ${safety.fileName}`);
+        "Restored from an uploaded .sql file; the database before it is " + safety.fileName);
       response.json({
-        message: `Database restored. ${count} statements ran. ` +
-          `The database as it was before is kept as ${safety.fileName}.` + (await restoreShortfall())
+        message: "Database restored. " + count + " statements ran. " +
+          "The database as it was before is kept as " + safety.fileName + "." + (await restoreShortfall())
       });
     } catch (error) {
       console.error("Restore failed:", error.message);
@@ -2331,23 +2532,24 @@ function registerAdminRoutes(app, deps) {
   // others; the copy taken just before it is the way back.
   function restoreUndoNote(safety) {
     if (safety) {
-      return ` The database may be part-way restored. To put it back as it was, restore ${safety.fileName}.`;
+      return " The database may be part-way restored. To put it back as it was, restore " + safety.fileName + ".";
     } else {
       return "";
     }
   }
 
-  app.get("/api/store-settings", async (request, response) => {
+  app.get("/api/store-settings", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT setting_id, store_name, proprietor, address, tin, registration_type,
-                vat_rate, invoice_note, penalty_rate,
-                bank_name, bank_account_name, bank_account_number, receipt_layout, updated_at,
-                st.full_name AS updated_by
-         FROM store_settings cfg
-         LEFT JOIN staff st ON st.staff_id = cfg.updated_by_staff_id
-         WHERE cfg.setting_id = 1`
+      const rowsResult = await db.query(
+        "SELECT setting_id, store_name, proprietor, address, tin, registration_type, " +
+        "vat_rate, invoice_note, penalty_rate, " +
+        "bank_name, bank_account_name, bank_account_number, receipt_layout, updated_at, " +
+        "st.full_name AS updated_by " +
+        "FROM store_settings cfg " +
+        "LEFT JOIN staff st ON st.staff_id = cfg.updated_by_staff_id " +
+        "WHERE cfg.setting_id = 1"
       );
+      const rows = rowsResult[0];
 
       // a database mid-install has no row yet; the defaults keep the till printing
       const settings = Object.assign({}, rows[0] || DEFAULT_STORE_SETTINGS);
@@ -2383,6 +2585,7 @@ function registerAdminRoutes(app, deps) {
       return { error: "The bank, the account name and the account number are all required." };
     }
     // digits, with spaces or dashes allowed in between, and at least 6 digits in total
+    // the pattern matches every character that is not a digit, so only digits are counted
     const digitCount = bank.bank_account_number.replace(/\D/g, "").length;
     if (!/^[0-9][0-9 -]*[0-9]$/.test(bank.bank_account_number) || digitCount < 6) {
       return { error: "An account number is digits, with spaces or dashes where the bank prints them. " +
@@ -2391,8 +2594,14 @@ function registerAdminRoutes(app, deps) {
     return { bank: bank };
   }
 
-  app.put("/api/store-settings", requireRole(ADMIN), async (request, response) => {
-    const { storeName, proprietor, address, tin, registrationType, vatRate, invoiceNote } = request.body;
+  app.put("/api/store-settings", requireRole(ADMIN), async function (request, response) {
+    const storeName = request.body.storeName;
+    const proprietor = request.body.proprietor;
+    const address = request.body.address;
+    const tin = request.body.tin;
+    const registrationType = request.body.registrationType;
+    const vatRate = request.body.vatRate;
+    const invoiceNote = request.body.invoiceNote;
 
     // refused with the reason: this is printed at the head of every invoice
     const tinProblem = tinComplaint(tin);
@@ -2415,11 +2624,12 @@ function registerAdminRoutes(app, deps) {
 
     try {
       // read first, so the trail can say what stood before
-      const [existing] = await db.query(
-        `SELECT store_name, proprietor, address, tin, registration_type, vat_rate, invoice_note,
-                bank_name, bank_account_name, bank_account_number, receipt_layout
-         FROM store_settings WHERE setting_id = 1`
+      const existingResult = await db.query(
+        "SELECT store_name, proprietor, address, tin, registration_type, vat_rate, invoice_note, " +
+        "bank_name, bank_account_name, bank_account_number, receipt_layout " +
+        "FROM store_settings WHERE setting_id = 1"
       );
+      const existing = existingResult[0];
 
       const before = existing[0] || {};
 
@@ -2442,7 +2652,9 @@ function registerAdminRoutes(app, deps) {
       let bankMessage = "";
       // did any of the three bank fields change?
       let bankChanged = false;
-      for (const key of ["bank_name", "bank_account_name", "bank_account_number"]) {
+      const bankKeys = ["bank_name", "bank_account_name", "bank_account_number"];
+      for (let i = 0; i < bankKeys.length; i++) {
+        const key = bankKeys[i];
         if ((before[key] || null) !== bankCheck.bank[key]) {
           bankChanged = true;
         }
@@ -2475,7 +2687,7 @@ function registerAdminRoutes(app, deps) {
       await writeAuditLog(
         request,
         "UPDATE_STORE_SETTINGS",
-        `Store details and tax registration updated`,
+        "Store details and tax registration updated",
         {
           changes: fieldChanges(existing[0] || null, {
             store_name: String(storeName || "").trim().slice(0, 150),
@@ -2506,7 +2718,7 @@ function registerAdminRoutes(app, deps) {
   const AREA_MAX_LENGTH = 150;
   const AREA_MAX_COUNT = 200;
 
-  app.get("/api/delivery-areas", async (request, response) => {
+  app.get("/api/delivery-areas", async function (request, response) {
     try {
       response.json({ areas: await readDeliveryAreas() });
     } catch (error) {
@@ -2530,8 +2742,8 @@ function registerAdminRoutes(app, deps) {
     const area = sent.trim().replace(/\s+/g, " ");
     if (adding && (area.length < AREA_MIN_LENGTH || area.length > AREA_MAX_LENGTH)) {
       return response.status(400).json({
-        error: `A delivery area is ${AREA_MIN_LENGTH} to ${AREA_MAX_LENGTH} characters, such as ` +
-               `"Brgy. San Isidro, Antipolo City".`
+        error: "A delivery area is " + AREA_MIN_LENGTH + " to " + AREA_MAX_LENGTH + " characters, such as " +
+               "\"Brgy. San Isidro, Antipolo City\"."
       });
     }
     if (area === "") {
@@ -2543,9 +2755,10 @@ function registerAdminRoutes(app, deps) {
       connection = await db.getConnection();
       await connection.beginTransaction();
 
-      const [rows] = await connection.query(
+      const rowsResult = await connection.query(
         "SELECT delivery_areas FROM store_settings WHERE setting_id = 1 FOR UPDATE"
       );
+      const rows = rowsResult[0];
 
       // the reason this change is refused, if it is
       let refusal = null;
@@ -2556,19 +2769,28 @@ function registerAdminRoutes(app, deps) {
       } else {
         const before = deliveryAreasFrom(rows[0].delivery_areas);
         // the same place in a different letter case is the same place
-        const position = before.findIndex((saved) => saved.toLowerCase() === area.toLowerCase());
+        let position = -1;
+        for (let i = 0; i < before.length; i++) {
+          if (before[i].toLowerCase() === area.toLowerCase()) {
+            position = i;
+            break;
+          }
+        }
 
         if (adding && position !== -1) {
-          refusal = { status: 400, error: `"${area}" is already on the list.` };
+          refusal = { status: 400, error: "\"" + area + "\" is already on the list." };
         } else if (adding && before.length >= AREA_MAX_COUNT) {
-          refusal = { status: 400, error: `There can be at most ${AREA_MAX_COUNT} delivery areas.` };
+          refusal = { status: 400, error: "There can be at most " + AREA_MAX_COUNT + " delivery areas." };
         } else if (!adding && position === -1) {
-          refusal = { status: 404, error: `"${area}" is not on the list. It may already have been removed.` };
+          refusal = { status: 404, error: "\"" + area + "\" is not on the list. It may already have been removed." };
         } else if (adding) {
           after = before.concat([area]);
         } else {
           // every area except the one at this position
-          after = before.filter((saved, index) => index !== position);
+          after = [];
+          for (let i = 0; i < before.length; i++) {
+            if (i !== position) after.push(before[i]);
+          }
         }
       }
 
@@ -2584,9 +2806,9 @@ function registerAdminRoutes(app, deps) {
       await connection.commit();
 
       if (adding) {
-        await writeAuditLog(request, "CREATE_DELIVERY_AREA", `Delivery area added: ${area}`, { area: area });
+        await writeAuditLog(request, "CREATE_DELIVERY_AREA", "Delivery area added: " + area, { area: area });
       } else {
-        await writeAuditLog(request, "REMOVE_DELIVERY_AREA", `Delivery area removed: ${area}`, { area: area });
+        await writeAuditLog(request, "REMOVE_DELIVERY_AREA", "Delivery area removed: " + area, { area: area });
       }
 
       response.json({ message: adding ? "Delivery area added." : "Delivery area removed.", areas: after });
@@ -2602,19 +2824,19 @@ function registerAdminRoutes(app, deps) {
     }
   }
 
-  app.post("/api/delivery-areas", requireRole(ADMIN), (request, response) => {
+  app.post("/api/delivery-areas", requireRole(ADMIN), function (request, response) {
     return changeDeliveryAreas(request, response, true);
   });
 
-  app.delete("/api/delivery-areas", requireRole(ADMIN), (request, response) => {
+  app.delete("/api/delivery-areas", requireRole(ADMIN), function (request, response) {
     return changeDeliveryAreas(request, response, false);
   });
 
   return {
-    startAutoBackup, startArchiveSweep, runSqlScript, resetStaffPassword,
+    startAutoBackup: startAutoBackup, startArchiveSweep: startArchiveSweep, runSqlScript: runSqlScript, resetStaffPassword: resetStaffPassword,
     // the daily job on Vercel (routes/shared.js, /api/cron/daily)
-    runArchiveSweep, runDailyBackup, removeExpiredDrafts
+    runArchiveSweep: runArchiveSweep, runDailyBackup: runDailyBackup, removeExpiredDrafts: removeExpiredDrafts
   };
 }
 
-module.exports = { registerAdminRoutes };
+module.exports = { registerAdminRoutes: registerAdminRoutes };

@@ -28,7 +28,7 @@ function setSaleReference(params) {
   );
 }
 
-// sp_create_delivery: Books a delivery for a sale.
+// sp_create_delivery: Creates a delivery for a sale.
 function createDelivery(params) {
   return callProcedure(
     "CALL sp_create_delivery(?, ?, ?, ?, ?, ?, ?, ?, ?, @delivery_id, @status_code, @message)",
@@ -56,9 +56,9 @@ function recordCreditPayment(params) {
 }
 
 module.exports = {
-  recordSale,
-  setSaleReference,
-  createDelivery,
-  updateDeliveryStatus,
-  recordCreditPayment
+  recordSale: recordSale,
+  setSaleReference: setSaleReference,
+  createDelivery: createDelivery,
+  updateDeliveryStatus: updateDeliveryStatus,
+  recordCreditPayment: recordCreditPayment
 };

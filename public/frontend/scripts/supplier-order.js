@@ -12,7 +12,7 @@
 //   and one big Send button at the end, with what will be sent written above it.
 // Once answered, the page turns into the receipt of what was said.
 
-(function () {
+function startSupplierOrderPage() {
     const main = document.getElementById('so-main');
     const code = new URLSearchParams(window.location.search).get('code') || '';
     let view = null;            // { order, items, shop } as the server last gave it
@@ -57,6 +57,14 @@
     }
 
     function has(object, key) { return Object.prototype.hasOwnProperty.call(object, key); }
+
+    // the order line with this id (the id may be a number or a string), or null
+    function findItem(id) {
+        for (let i = 0; i < view.items.length; i++) {
+            if (String(view.items[i].id) === String(id)) return view.items[i];
+        }
+        return null;
+    }
 
     // ---------- days ----------
     function isoDay(day) {
@@ -125,8 +133,13 @@
         if (!Number.isFinite(value) || value < 0) return 'The discount has to be zero or more.';
         if (draft.discountType === 'percent' && value >= 100) return 'A percentage has to be less than 100%.';
         let goods = 0;
-        for (const item of view.items) {
-            goods += lineChanged(item) ? priceFor(item) * Number(item.quantity) : Number(item.line_cost || 0);
+        for (let i = 0; i < view.items.length; i++) {
+            const item = view.items[i];
+            if (lineChanged(item)) {
+                goods += priceFor(item) * Number(item.quantity);
+            } else {
+                goods += Number(item.line_cost || 0);
+            }
         }
         if (discountAmount(goods) >= goods) return 'The discount has to be less than the order total.';
         return null;
@@ -136,7 +149,8 @@
         let ours = 0;
         let theirs = 0;
         let changed = 0;
-        for (const item of view.items) {
+        for (let i = 0; i < view.items.length; i++) {
+            const item = view.items[i];
             const line = Number(item.line_cost || 0);
             ours += line;
             if (lineChanged(item)) {
@@ -181,7 +195,7 @@
         let stage = 1;
         if (order.supplier_response === 'Accepted') stage = 2;
         if (order.status === 'Received') stage = 3;
-        const stop = (index, label, sub) => {
+        function stop(index, label, sub) {
             let state = '';
             if (index < stage) state = 'is-done';
             else if (index === stage) state = 'is-now';
@@ -189,7 +203,7 @@
                 (index < stage ? '<i class="bi bi-check-lg" aria-hidden="true"></i>' : index + 1) +
                 '</span><span class="so-stop-label">' + label + '</span>' +
                 '<span class="so-stop-sub">' + escapeHtml(sub) + '</span></li>';
-        };
+        }
         return '<ol class="so-track">' +
             stop(0, 'Order sent', String(order.order_date || '').slice(0, 10)) +
             stop(1, 'Your answer', order.supplier_response ? order.supplier_response : 'Now') +
@@ -208,6 +222,11 @@
         const order = view.order;
         const pdf = '/api/supplier-order/' + encodeURIComponent(code) + '/pdf';
 
+        let linesHtml = '';
+        for (let i = 0; i < view.items.length; i++) {
+            linesHtml += lineHtml(view.items[i], i);
+        }
+
         main.innerHTML =
             '<section class="so-hero">' + trackHtml(order) + '</section>' +
 
@@ -217,7 +236,7 @@
                     '<p>Price not what you sell it for? Press <strong>Edit price</strong> on that line.</p>' +
                 '</div></header>' +
                 '<ol class="so-lines" id="so-lines">' +
-                    view.items.map((item, index) => lineHtml(item, index)).join('') +
+                    linesHtml +
                 '</ol>' +
                 // a discount off the whole order: a percentage or a peso amount
                 '<div class="so-discount">' +
@@ -329,9 +348,11 @@
     }
 
     function refreshLines() {
-        document.querySelectorAll('.so-line').forEach((row) => {
-            const item = view.items.find((each) => String(each.id) === row.dataset.id);
-            if (!item) return;
+        const rowList = document.querySelectorAll('.so-line');
+        for (let r = 0; r < rowList.length; r++) {
+            const row = rowList[r];
+            const item = findItem(row.dataset.id);
+            if (!item) continue;
             const editing = Boolean(draft.editing[item.id]);
             const price = priceFor(item);
             const changed = lineChanged(item);
@@ -352,13 +373,16 @@
                 delta.innerHTML = '';
             }
 
-            row.querySelector('[data-price-text]').innerHTML = changed
-                ? '<s>' + peso(item.unit_cost) + '</s> <strong>' + peso(price) + '</strong> per ' + escapeHtml(unit) +
-                  ' <span class="so-yours">your price</span>'
-                : peso(item.unit_cost) + ' per ' + escapeHtml(unit);
+            if (changed) {
+                row.querySelector('[data-price-text]').innerHTML =
+                    '<s>' + peso(item.unit_cost) + '</s> <strong>' + peso(price) + '</strong> per ' + escapeHtml(unit) +
+                    ' <span class="so-yours">your price</span>';
+            } else {
+                row.querySelector('[data-price-text]').innerHTML = peso(item.unit_cost) + ' per ' + escapeHtml(unit);
+            }
 
             row.querySelector('[data-edit]').hidden = editing;
-        });
+        }
         refreshTotal();
     }
 
@@ -382,11 +406,13 @@
     }
 
     function refreshDiscount() {
-        document.querySelectorAll('[data-discount-type]').forEach((button) => {
+        const typeButtons = document.querySelectorAll('[data-discount-type]');
+        for (let i = 0; i < typeButtons.length; i++) {
+            const button = typeButtons[i];
             const on = button.dataset.discountType === draft.discountType;
             button.classList.toggle('is-on', on);
             button.setAttribute('aria-checked', on ? 'true' : 'false');
-        });
+        }
         const sign = document.getElementById('so-discount-sign');
         if (sign) sign.textContent = draft.discountType === 'percent' ? '%' : '₱';
         const error = document.getElementById('so-discount-error');
@@ -395,20 +421,24 @@
     }
 
     function refreshDecision() {
-        document.querySelectorAll('[data-decision]').forEach((button) => {
+        const decisionButtons = document.querySelectorAll('[data-decision]');
+        for (let i = 0; i < decisionButtons.length; i++) {
+            const button = decisionButtons[i];
             const on = button.dataset.decision === draft.decision;
             button.classList.toggle('is-on', on);
             button.setAttribute('aria-checked', on ? 'true' : 'false');
-        });
+        }
         document.getElementById('so-accept-part').hidden = draft.decision !== 'accept';
         document.getElementById('so-decline-part').hidden = draft.decision !== 'decline';
         document.getElementById('so-send-part').hidden = draft.decision === '';
 
         const send = document.getElementById('so-send');
         send.className = 'so-btn so-btn-big ' + (draft.decision === 'decline' ? 'is-decline' : 'is-accept');
-        send.innerHTML = draft.decision === 'decline'
-            ? '<i class="bi bi-send" aria-hidden="true"></i>Send: decline the order'
-            : '<i class="bi bi-send" aria-hidden="true"></i>Send: accept the order';
+        if (draft.decision === 'decline') {
+            send.innerHTML = '<i class="bi bi-send" aria-hidden="true"></i>Send: decline the order';
+        } else {
+            send.innerHTML = '<i class="bi bi-send" aria-hidden="true"></i>Send: accept the order';
+        }
     }
 
     // only a day after today: the calendar does not offer an earlier one, and
@@ -488,7 +518,7 @@
 
     // Save keeps the typed price; the same as ours keeps ours
     function savePrice(id) {
-        const item = view.items.find((each) => String(each.id) === String(id));
+        const item = findItem(id);
         const input = document.getElementById('so-price-' + id);
         const typed = Math.round(parseFloat(input.value) * 100) / 100;
         if (!Number.isFinite(typed) || typed <= 0) {
@@ -509,20 +539,20 @@
     function wireQuote() {
         const lines = document.getElementById('so-lines');
 
-        lines.addEventListener('click', (event) => {
+        lines.addEventListener('click', function (event) {
             const edit = event.target.closest('[data-edit]');
             const save = event.target.closest('[data-save]');
             const cancel = event.target.closest('[data-cancel]');
             if (edit) {
                 const id = edit.dataset.edit;
-                const item = view.items.find((each) => String(each.id) === id);
+                const item = findItem(id);
                 const input = document.getElementById('so-price-' + id);
                 // opens on the price in force: theirs if saved before, else ours
                 input.value = has(draft.prices, id) ? Number(draft.prices[id]).toFixed(2) : Number(item.unit_cost).toFixed(2);
                 draft.editing[id] = true;
                 lineError(id, '');
                 refreshLines();
-                setTimeout(() => { input.focus(); input.select(); }, 30);
+                setTimeout(function () { input.focus(); input.select(); }, 30);
             } else if (save) {
                 savePrice(save.dataset.save);
             } else if (cancel) {
@@ -534,7 +564,7 @@
         });
 
         // Enter in a price box saves it; Escape cancels
-        lines.addEventListener('keydown', (event) => {
+        lines.addEventListener('keydown', function (event) {
             const input = event.target.closest('[data-price]');
             if (!input) return;
             if (event.key === 'Enter') { event.preventDefault(); savePrice(input.dataset.price); }
@@ -546,25 +576,29 @@
         });
 
         const discount = document.getElementById('so-discount');
-        discount.addEventListener('input', () => {
+        discount.addEventListener('input', function () {
             draft.discount = discount.value;
             setError('');
             refreshDiscount();
             refreshTotal();
             refreshSummary();
         });
-        document.querySelectorAll('[data-discount-type]').forEach((button) => {
-            button.addEventListener('click', () => {
+        const typeButtons = document.querySelectorAll('[data-discount-type]');
+        for (let i = 0; i < typeButtons.length; i++) {
+            const button = typeButtons[i];
+            button.addEventListener('click', function () {
                 draft.discountType = button.dataset.discountType;
                 refreshDiscount();
                 refreshTotal();
                 refreshSummary();
                 discount.focus();
             });
-        });
+        }
 
-        document.querySelectorAll('[data-decision]').forEach((button) => {
-            button.addEventListener('click', () => {
+        const decisionButtons = document.querySelectorAll('[data-decision]');
+        for (let i = 0; i < decisionButtons.length; i++) {
+            const button = decisionButtons[i];
+            button.addEventListener('click', function () {
                 draft.decision = button.dataset.decision;
                 setError('');
                 refreshDecision();
@@ -572,24 +606,24 @@
                 const part = document.getElementById(draft.decision === 'accept' ? 'so-accept-part' : 'so-decline-part');
                 part.scrollIntoView({ behavior: 'smooth', block: 'start' });
             });
-        });
+        }
 
         const picker = document.getElementById('so-date');
-        const pickDate = () => {
+        function pickDate() {
             draft.shipDate = picker.value;
             setError('');
             refreshWhen();
             refreshSummary();
-        };
+        }
         picker.addEventListener('change', pickDate);
         picker.addEventListener('input', pickDate);
 
-        document.getElementById('so-note').addEventListener('input', (event) => {
+        document.getElementById('so-note').addEventListener('input', function (event) {
             draft.note = event.target.value;
         });
 
         const why = document.getElementById('so-why');
-        why.addEventListener('input', () => { draft.reason = why.value; setError(''); });
+        why.addEventListener('input', function () { draft.reason = why.value; setError(''); });
 
         document.getElementById('so-send').addEventListener('click', send);
     }
@@ -626,9 +660,16 @@
         if (draft.decision === 'decline') {
             answer({ accept: false, note: draft.reason.trim() });
         } else {
-            const prices = view.items.filter(lineChanged).map((item) => ({ id: item.id, unitCost: priceFor(item) }));
-            const discount = String(draft.discount).trim() === ''
-                ? null : { type: draft.discountType, value: Number(draft.discount) };
+            const prices = [];
+            for (let i = 0; i < view.items.length; i++) {
+                if (lineChanged(view.items[i])) {
+                    prices.push({ id: view.items[i].id, unitCost: priceFor(view.items[i]) });
+                }
+            }
+            let discount = null;
+            if (String(draft.discount).trim() !== '') {
+                discount = { type: draft.discountType, value: Number(draft.discount) };
+            }
             answer({ accept: true, shipDate: draft.shipDate, prices: prices, discount: discount,
                      note: draft.note.trim() });
         }
@@ -645,7 +686,7 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
-            const result = await response.json().catch(() => ({}));
+            const result = await response.json().catch(function () { return {}; });
 
             if (!response.ok) {
                 if (result.view) {
@@ -692,27 +733,39 @@
             mark = 'bi-lock';
             tone = 'is-closed';
             title = 'Nothing to answer';
-            sub = order.status === 'Received' ? 'This order has been delivered and counted in.'
-                : order.status === 'Cancelled' ? 'The shop cancelled this order.'
-                : 'This order is not open for an answer.';
+            if (order.status === 'Received') {
+                sub = 'This order has been delivered and counted in.';
+            } else if (order.status === 'Cancelled') {
+                sub = 'The shop cancelled this order.';
+            } else {
+                sub = 'This order is not open for an answer.';
+            }
         }
 
         let total = 0;
         let ours = 0;
-        const rows = view.items.map((item) => {
+        let rows = '';
+        for (let i = 0; i < view.items.length; i++) {
+            const item = view.items[i];
             total += Number(item.line_cost || 0);
-            const original = item.original_unit_cost !== null && item.original_unit_cost !== undefined
-                ? Number(item.original_unit_cost) : null;
-            ours += original !== null ? original * Number(item.quantity) : Number(item.line_cost || 0);
+            let original = null;
+            if (item.original_unit_cost !== null && item.original_unit_cost !== undefined) {
+                original = Number(item.original_unit_cost);
+            }
+            if (original !== null) {
+                ours += original * Number(item.quantity);
+            } else {
+                ours += Number(item.line_cost || 0);
+            }
             const moved = original !== null && original !== Number(item.unit_cost);
-            return '<li class="so-rline' + (moved ? ' is-changed' : '') + '">' +
+            rows += '<li class="so-rline' + (moved ? ' is-changed' : '') + '">' +
                 '<span class="so-rname">' + escapeHtml(item.product_name) +
                     '<small>' + escapeHtml(lineQuantity(item)) + '</small></span>' +
                 '<span class="so-rprice">' + (moved ? '<s>' + peso(original) + '</s>' : '') +
                     peso(item.unit_cost) + '<small>per ' + escapeHtml(item.unit_name || 'unit') + '</small></span>' +
                 '<span class="so-fig">' + peso(item.line_cost) + '</span>' +
             '</li>';
-        }).join('');
+        }
 
         const facts = [];
         if (order.supplier_ship_date) {
@@ -761,7 +814,7 @@
 
         try {
             const response = await fetch('/api/supplier-order/' + encodeURIComponent(code));
-            const result = await response.json().catch(() => ({}));
+            const result = await response.json().catch(function () { return {}; });
             if (!response.ok) {
                 showProblem('This order cannot be opened', result.error || 'Contact the shop.');
                 return;
@@ -774,4 +827,6 @@
     }
 
     load();
-})();
+}
+
+startSupplierOrderPage();

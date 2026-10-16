@@ -58,7 +58,8 @@ function likelyMailDomain(email) {
     if (COMMON_MAIL_DOMAINS.indexOf(domain) !== -1) return null;
 
     let best = null;
-    for (const known of COMMON_MAIL_DOMAINS) {
+    for (let i = 0; i < COMMON_MAIL_DOMAINS.length; i++) {
+        const known = COMMON_MAIL_DOMAINS[i];
         const distance = editDistance(domain, known);
         if (distance > 0 && distance <= 2 && (!best || distance < best.distance)) {
             best = { domain: known, distance: distance };
@@ -107,7 +108,9 @@ async function handleLogin(event) {
             const reason = String(result.error || 'That sign-in did not work').trim();
 
             // a held account (423) says all it needs to; a wrong password gets
-            // the usual advice, plus the warning when the next one holds it
+            // the usual advice, plus the warning when the next one holds it.
+            // (reason.replace(/[.!]?$/, '.') ends the sentence with a full stop:
+            // a "." or "!" already at the end is swapped for ".")
             if (response.status === 423) {
                 showLoginAlert(reason.replace(/[.!]?$/, '.'));
             } else {
@@ -459,9 +462,10 @@ function startIdleWatch() {
 
     // The scroll event is not used: the page scrolls by itself when a live
     // update changes a table's height. A wheel turn or a finger drag is a person.
-    ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'touchmove'].forEach(function (name) {
-        document.addEventListener(name, onUserActivity, { capture: true, passive: true });
-    });
+    const activityEvents = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'touchmove'];
+    for (let i = 0; i < activityEvents.length; i++) {
+        document.addEventListener(activityEvents[i], onUserActivity, { capture: true, passive: true });
+    }
 
     idleTimer = setInterval(checkIdle, 1000);
 }
@@ -486,26 +490,26 @@ function buildIdleWarning() {
         modal.className = 'modal';
         modal.id = 'idle-modal';
         modal.setAttribute('data-modal-locked', '');   // Escape does not close it
-        modal.innerHTML = `
-            <div class="modal-box ask-box">
-                <div class="modal-head">
-                    <div class="modal-identity">
-                        <div class="avatar">!</div>
-                        <div>
-                            <h3>Still there?</h3>
-                            <span class="modal-role">Signing out soon</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="modal-body">
-                    <p class="ask-text">You will be signed out in <strong id="idle-seconds">60</strong>
-                        seconds because this screen has not been used for a while.</p>
-                </div>
-                <div class="modal-foot">
-                    <button type="button" class="btn btn-ghost" onclick="signOutForInactivity()">Sign out now</button>
-                    <button type="button" class="btn btn-accent" onclick="stayAfterWarning()">Stay signed in</button>
-                </div>
-            </div>`;
+        modal.innerHTML = '\n' +
+            '            <div class="modal-box ask-box">\n' +
+            '                <div class="modal-head">\n' +
+            '                    <div class="modal-identity">\n' +
+            '                        <div class="avatar">!</div>\n' +
+            '                        <div>\n' +
+            '                            <h3>Still there?</h3>\n' +
+            '                            <span class="modal-role">Signing out soon</span>\n' +
+            '                        </div>\n' +
+            '                    </div>\n' +
+            '                </div>\n' +
+            '                <div class="modal-body">\n' +
+            '                    <p class="ask-text">You will be signed out in <strong id="idle-seconds">60</strong>\n' +
+            '                        seconds because this screen has not been used for a while.</p>\n' +
+            '                </div>\n' +
+            '                <div class="modal-foot">\n' +
+            '                    <button type="button" class="btn btn-ghost" onclick="signOutForInactivity()">Sign out now</button>\n' +
+            '                    <button type="button" class="btn btn-accent" onclick="stayAfterWarning()">Stay signed in</button>\n' +
+            '                </div>\n' +
+            '            </div>';
     }
 
     // added last, so it sits above any other card that is open
@@ -559,8 +563,8 @@ function staffName(user) {
     const middle = (user.middle_name || '').trim();
     const initial = middle === '' ? '' : ' ' + middle[0].toUpperCase() + '.';
 
-    return `${user.first_name || ''}${initial} ${user.last_name || ''}`.trim() ||
-        user.email || '';
+    const spelled = (user.first_name || '') + initial + ' ' + (user.last_name || '');
+    return spelled.trim() || user.email || '';
 }
 
 // Page-side half of access control: any element marked
@@ -573,27 +577,33 @@ function currentRole() {
 
 function hasRole() {
     const role = currentRole().toLowerCase();
-    return Array.prototype.some.call(arguments,
-        (name) => String(name).trim().toLowerCase() === role);
+    // true when any of the role names given to hasRole is this person's role
+    for (let i = 0; i < arguments.length; i++) {
+        if (String(arguments[i]).trim().toLowerCase() === role) return true;
+    }
+    return false;
 }
 
 function applyAccessMarks(currentUser) {
     const role = String((currentUser && currentUser.role_name) || '').toLowerCase();
 
-    document.querySelectorAll('[data-access]').forEach((element) => {
-        if (element.closest('.sidebar-nav')) return;
+    const marked = document.querySelectorAll('[data-access]');
+    for (let i = 0; i < marked.length; i++) {
+        const element = marked[i];
+        if (element.closest('.sidebar-nav')) continue;
 
         // data-access="Manager, Cashier" -> ['manager', 'cashier']
         const allowed = [];
-        for (const part of String(element.getAttribute('data-access') || '').split(',')) {
-            const name = part.trim().toLowerCase();
+        const parts = String(element.getAttribute('data-access') || '').split(',');
+        for (let p = 0; p < parts.length; p++) {
+            const name = parts[p].trim().toLowerCase();
             if (name !== '') {
                 allowed.push(name);
             }
         }
 
         if (allowed.length > 0 && allowed.indexOf(role) === -1) element.hidden = true;
-    });
+    }
 }
 
 function applyCurrentUserToPage(currentUser) {
@@ -601,20 +611,24 @@ function applyCurrentUserToPage(currentUser) {
 
     const fullName = staffName(currentUser) || currentUser.email;
 
-    document.querySelectorAll('[data-current-user]').forEach((element) => {
-        element.textContent = fullName;
-    });
-    document.querySelectorAll('[data-current-fullname]').forEach((element) => {
-        element.textContent = fullName;
-    });
-    document.querySelectorAll('[data-current-role]').forEach((element) => {
-        element.textContent = currentUser.role_name || '';
-    });
+    const userBoxes = document.querySelectorAll('[data-current-user]');
+    for (let i = 0; i < userBoxes.length; i++) {
+        userBoxes[i].textContent = fullName;
+    }
+    const fullNameBoxes = document.querySelectorAll('[data-current-fullname]');
+    for (let i = 0; i < fullNameBoxes.length; i++) {
+        fullNameBoxes[i].textContent = fullName;
+    }
+    const roleBoxes = document.querySelectorAll('[data-current-role]');
+    for (let i = 0; i < roleBoxes.length; i++) {
+        roleBoxes[i].textContent = currentUser.role_name || '';
+    }
 
     const first = (currentUser.first_name || currentUser.email || '?')[0];
     const last = (currentUser.last_name || '')[0] || '';
-    document.querySelectorAll('[data-current-initials]').forEach((element) => {
-        element.textContent = (first + last).toUpperCase();
-    });
+    const initialsBoxes = document.querySelectorAll('[data-current-initials]');
+    for (let i = 0; i < initialsBoxes.length; i++) {
+        initialsBoxes[i].textContent = (first + last).toUpperCase();
+    }
 }
 document.addEventListener('DOMContentLoaded', initializeSession);

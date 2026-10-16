@@ -27,11 +27,32 @@ const cleanPhone = validation.cleanPhone;
 const phoneComplaint = validation.phoneComplaint;
 const DEFAULT_RECEIPT_LAYOUT = require("../store-settings").DEFAULT_RECEIPT_LAYOUT;
 
+// The column names in a list of rows read from information_schema.COLUMNS.
+function columnNamesOf(columns) {
+  const names = [];
+  for (let i = 0; i < columns.length; i++) {
+    names.push(columns[i].COLUMN_NAME);
+  }
+  return names;
+}
+
+// The row of the column with this name, or undefined when there is none.
+function findColumn(columns, name) {
+  for (let i = 0; i < columns.length; i++) {
+    if (columns[i].COLUMN_NAME === name) {
+      return columns[i];
+    }
+  }
+  return undefined;
+}
+
 async function hashLegacyPasswords() {
-  const [rows] = await db.query("SELECT user_id, password FROM users");
+  const rowsResult = await db.query("SELECT user_id, password FROM users");
+  const rows = rowsResult[0];
   // find the passwords that are still plain text (not hashed yet)
   const plain = [];
-  for (const row of rows) {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex];
     if (!isHashed(row.password)) {
       plain.push(row);
     }
@@ -39,11 +60,12 @@ async function hashLegacyPasswords() {
 
   if (plain.length === 0) return;
 
-  for (const row of plain) {
+  for (let rowIndex = 0; rowIndex < plain.length; rowIndex++) {
+    const row = plain[rowIndex];
     await db.query("UPDATE users SET password = ? WHERE user_id = ?",
       [await hashPassword(row.password), row.user_id]);
   }
-  console.log(`Hashed ${plain.length} password(s) that were stored as readable text.`);
+  console.log("Hashed " + plain.length + " password(s) that were stored as readable text.");
 }
 
 // The password in the seed file ("admin123") is public. An administrator
@@ -52,8 +74,9 @@ async function hashLegacyPasswords() {
 // the owner may have a reason, and a changed password is theirs to choose.
 async function warnIfAdminPasswordIsDefault() {
   try {
-    const [rows] = await db.query(
+    const rowsResult = await db.query(
       "SELECT password FROM users WHERE email = 'admin@hardware.com'");
+    const rows = rowsResult[0];
     if (rows.length === 0) return;
     if (await verifyPassword("admin123", rows[0].password)) {
       console.warn("WARNING: admin@hardware.com still uses the password from the seed file " +
@@ -66,15 +89,16 @@ async function warnIfAdminPasswordIsDefault() {
 }
 
 async function migrateSignInHold() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users'
-       AND COLUMN_NAME IN ('failed_attempts', 'held_until')`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users'\n" +
+      "       AND COLUMN_NAME IN ('failed_attempts', 'held_until')",
     [DB_NAME]
   );
+  const columns = columnsResult[0];
   if (columns.length === 2) return;
 
-  const names = columns.map((row) => row.COLUMN_NAME);
+  const names = columnNamesOf(columns);
   if (names.indexOf("failed_attempts") === -1) {
     await db.query(
       "ALTER TABLE users ADD COLUMN failed_attempts INT NOT NULL DEFAULT 0 AFTER must_change_password");
@@ -90,14 +114,15 @@ async function migrateSignInHold() {
 // a generated column reading it, so it is dropped and rebuilt in the same
 // statement. Does nothing once the column is already middle_name.
 async function migrateMiddleNameColumn() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'staff'
-       AND COLUMN_NAME IN ('middle_initial', 'middle_name')`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'staff'\n" +
+      "       AND COLUMN_NAME IN ('middle_initial', 'middle_name')",
     [DB_NAME]
   );
+  const columns = columnsResult[0];
 
-  const names = columns.map((row) => row.COLUMN_NAME);
+  const names = columnNamesOf(columns);
   if (names.indexOf("middle_initial") === -1) return;   // already migrated, or no staff table
 
   await db.query("ALTER TABLE staff DROP COLUMN full_name");
@@ -105,12 +130,12 @@ async function migrateMiddleNameColumn() {
     "ALTER TABLE staff CHANGE COLUMN middle_initial middle_name VARCHAR(100) NULL"
   );
   await db.query(
-    `ALTER TABLE staff ADD COLUMN full_name VARCHAR(220) AS (
-       CONCAT(first_name,
-              IF(middle_name IS NULL OR middle_name = '', '',
-                 CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),
-              ' ', last_name)
-     ) VIRTUAL AFTER created_at`
+    "ALTER TABLE staff ADD COLUMN full_name VARCHAR(220) AS (\n" +
+      "       CONCAT(first_name,\n" +
+      "              IF(middle_name IS NULL OR middle_name = '', '',\n" +
+      "                 CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),\n" +
+      "              ' ', last_name)\n" +
+      "     ) VIRTUAL AFTER created_at"
   );
 
   console.log("Upgraded staff.middle_initial to staff.middle_name. " +
@@ -118,12 +143,14 @@ async function migrateMiddleNameColumn() {
 }
 
 async function migratePhoneNumbers() {
-  const [rows] = await db.query(
+  const rowsResult = await db.query(
     "SELECT staff_id, phone FROM staff WHERE phone IS NOT NULL AND phone <> ''");
+  const rows = rowsResult[0];
 
   // find the phone numbers that are not written in the +63 form yet
   const wrong = [];
-  for (const row of rows) {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    const row = rows[rowIndex];
     if (row.phone !== cleanPhone(row.phone)) {
       wrong.push(row);
     }
@@ -132,7 +159,8 @@ async function migratePhoneNumbers() {
 
   let emptied = 0;
 
-  for (const row of wrong) {
+  for (let rowIndex = 0; rowIndex < wrong.length; rowIndex++) {
+    const row = wrong[rowIndex];
     // a number we can fix is rewritten; a number that makes no sense is cleared
     let fixed = null;
     if (phoneComplaint(row.phone) === null) {
@@ -144,9 +172,9 @@ async function migratePhoneNumbers() {
     await db.query("UPDATE staff SET phone = ? WHERE staff_id = ?", [fixed, row.staff_id]);
   }
 
-  let message = `Rewrote ${wrong.length} staff phone number(s) to +63 form.`;
+  let message = "Rewrote " + wrong.length + " staff phone number(s) to +63 form.";
   if (emptied > 0) {
-    message += ` ${emptied} of them was not a usable number and was cleared; re-enter it on the staff record.`;
+    message += " " + emptied + " of them was not a usable number and was cleared; re-enter it on the staff record.";
   }
   console.log(message);
 }
@@ -162,40 +190,44 @@ async function migrateMeasuredQuantities() {
   ];
 
   let widened = 0;
-  for (const item of columns) {
+  for (let itemIndex = 0; itemIndex < columns.length; itemIndex++) {
+    const item = columns[itemIndex];
     const table = item[0];
     const column = item[1];
     const rest = item[2];
-    const [rows] = await db.query(
-      `SELECT DATA_TYPE FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+    const rowsResult = await db.query(
+      "SELECT DATA_TYPE FROM information_schema.COLUMNS\n" +
+        "       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?",
       [DB_NAME, table, column]);
+    const rows = rowsResult[0];
     if (!rows[0] || String(rows[0].DATA_TYPE).toLowerCase() !== "int") continue;
 
     if (table === "sale_items") {
       await db.query("ALTER TABLE sale_items DROP COLUMN subtotal");
-      await db.query(`ALTER TABLE sale_items MODIFY quantity DECIMAL(12,3) ${rest}`);
+      await db.query("ALTER TABLE sale_items MODIFY quantity DECIMAL(12,3) " + rest);
       await db.query("ALTER TABLE sale_items ADD COLUMN subtotal DECIMAL(12,2) AS (quantity * unit_price) STORED");
     } else {
-      await db.query(`ALTER TABLE ${table} MODIFY ${column} DECIMAL(12,3) ${rest}`);
+      await db.query("ALTER TABLE " + table + " MODIFY " + column + " DECIMAL(12,3) " + rest);
     }
     widened += 1;
   }
 
   if (widened > 0) {
-    console.log(`Widened ${widened} quantity column(s) to take fractions (kilos, metres). ` +
+    console.log("Widened " + widened + " quantity column(s) to take fractions (kilos, metres). " +
       "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures take them too.");
   }
 }
 
 async function migrateAccessControlTables() {
-  const [tables] = await db.query(
-    `SELECT TABLE_NAME FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'role_feature_permissions'`,
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'role_feature_permissions'",
     [DB_NAME]
   );
+  const tables = tablesResult[0];
   const have = [];
-  for (const row of tables) {
+  for (let rowIndex = 0; rowIndex < tables.length; rowIndex++) {
+    const row = tables[rowIndex];
     have.push(row.TABLE_NAME);
   }
   let created = 0;
@@ -203,34 +235,35 @@ async function migrateAccessControlTables() {
   // the switches for which screens each role's menu holds; one row per override
   if (!have.includes("role_feature_permissions")) {
     await db.query(
-      `CREATE TABLE role_feature_permissions (
-         permission_id INT AUTO_INCREMENT PRIMARY KEY,
-         role_id INT NOT NULL,
-         feature_key VARCHAR(40) NOT NULL,
-         is_granted BOOLEAN NOT NULL DEFAULT TRUE,
-         note VARCHAR(255) NULL,
-         granted_by_staff_id INT NULL,
-         granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-         updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-         UNIQUE KEY uq_role_feature (role_id, feature_key),
-         FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE ON UPDATE CASCADE,
-         FOREIGN KEY (granted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
-       )`);
+      "CREATE TABLE role_feature_permissions (\n" +
+        "         permission_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+        "         role_id INT NOT NULL,\n" +
+        "         feature_key VARCHAR(40) NOT NULL,\n" +
+        "         is_granted BOOLEAN NOT NULL DEFAULT TRUE,\n" +
+        "         note VARCHAR(255) NULL,\n" +
+        "         granted_by_staff_id INT NULL,\n" +
+        "         granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n" +
+        "         updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n" +
+        "         UNIQUE KEY uq_role_feature (role_id, feature_key),\n" +
+        "         FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE ON UPDATE CASCADE,\n" +
+        "         FOREIGN KEY (granted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE\n" +
+        "       )");
     created += 1;
   }
 
-  const [typeColumn] = await db.query(
-    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'audit_logs' AND COLUMN_NAME = 'action_type'`,
+  const typeColumnResult = await db.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'audit_logs' AND COLUMN_NAME = 'action_type'",
     [DB_NAME]
   );
+  const typeColumn = typeColumnResult[0];
   let widened = false;
   if (typeColumn[0] && !/'ACCESS'/i.test(typeColumn[0].COLUMN_TYPE)) {
     await db.query(
-      `ALTER TABLE audit_logs MODIFY action_type
-         ENUM('CREATE','UPDATE','DELETE','VOID','RESTORE','BACKUP',
-              'LOGIN','LOGOUT','LOGIN_FAILURE','SECURITY','PAYMENT',
-              'ACCESS','OTHER') NOT NULL DEFAULT 'OTHER'`);
+      "ALTER TABLE audit_logs MODIFY action_type\n" +
+        "         ENUM('CREATE','UPDATE','DELETE','VOID','RESTORE','BACKUP',\n" +
+        "              'LOGIN','LOGOUT','LOGIN_FAILURE','SECURITY','PAYMENT',\n" +
+        "              'ACCESS','OTHER') NOT NULL DEFAULT 'OTHER'");
     widened = true;
   }
 
@@ -247,33 +280,35 @@ async function migrateAccessControlTables() {
 // stock comes off it directly, sold_unit and sold_quantity carry the size,
 // and subtotal is rebuilt to multiply the sold figure by the price of one.
 async function migrateSellingUnits() {
-  const [tables] = await db.query(
-    `SELECT TABLE_NAME FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'product_units'`,
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'product_units'",
     [DB_NAME]
   );
+  const tables = tablesResult[0];
   let created = false;
 
   if (tables.length === 0) {
     await db.query(
-      `CREATE TABLE product_units (
-         product_unit_id INT AUTO_INCREMENT PRIMARY KEY,
-         product_id INT NOT NULL,
-         unit_name VARCHAR(20) NOT NULL,
-         units_per DECIMAL(12,3) NOT NULL,
-         price DECIMAL(10,2) NULL,
-         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-         UNIQUE KEY uq_product_unit (product_id, unit_name),
-         FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE
-       )`);
+      "CREATE TABLE product_units (\n" +
+        "         product_unit_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+        "         product_id INT NOT NULL,\n" +
+        "         unit_name VARCHAR(20) NOT NULL,\n" +
+        "         units_per DECIMAL(12,3) NOT NULL,\n" +
+        "         price DECIMAL(10,2) NULL,\n" +
+        "         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n" +
+        "         UNIQUE KEY uq_product_unit (product_id, unit_name),\n" +
+        "         FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE\n" +
+        "       )");
     created = true;
   }
 
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'sale_items' AND COLUMN_NAME = 'sold_unit'`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'sale_items' AND COLUMN_NAME = 'sold_unit'",
     [DB_NAME]
   );
+  const columns = columnsResult[0];
   let widened = false;
 
   if (columns.length === 0) {
@@ -282,8 +317,8 @@ async function migrateSellingUnits() {
     // subtotal is generated, so it is dropped and put back reading the sold figure
     await db.query("ALTER TABLE sale_items DROP COLUMN subtotal");
     await db.query(
-      `ALTER TABLE sale_items ADD COLUMN subtotal DECIMAL(12,2)
-         AS (ROUND(COALESCE(sold_quantity, quantity) * unit_price, 2)) STORED`);
+      "ALTER TABLE sale_items ADD COLUMN subtotal DECIMAL(12,2)\n" +
+        "         AS (ROUND(COALESCE(sold_quantity, quantity) * unit_price, 2)) STORED");
     widened = true;
   }
 
@@ -297,37 +332,39 @@ async function migrateSellingUnits() {
 // database made before that has neither the status nor the columns the
 // decision is written to, and sp_decide_purchase_order fails on it.
 async function migratePurchaseOrderApproval() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'
-       AND COLUMN_NAME IN ('raised_by_staff_id', 'confirmed_by_staff_id',
-                           'confirmed_at', 'decision_note', 'discount')`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'\n" +
+      "       AND COLUMN_NAME IN ('raised_by_staff_id', 'confirmed_by_staff_id',\n" +
+      "                           'confirmed_at', 'decision_note', 'discount')",
     [DB_NAME]
   );
-  const [status] = await db.query(
-    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'status'`,
+  const columns = columnsResult[0];
+  const statusResult = await db.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'status'",
     [DB_NAME]
   );
+  const status = statusResult[0];
   const hasApproval = status.length > 0 && status[0].COLUMN_TYPE.indexOf("For Approval") !== -1;
   if (columns.length === 5 && hasApproval) return;
 
-  const names = columns.map((row) => row.COLUMN_NAME);
+  const names = columnNamesOf(columns);
   if (!hasApproval) {
     // existing rows keep their status; only new orders start For Approval
     await db.query(
-      `ALTER TABLE purchase_orders MODIFY COLUMN status
-         ENUM('For Approval', 'Pending', 'Received', 'Cancelled') NOT NULL DEFAULT 'For Approval'`);
+      "ALTER TABLE purchase_orders MODIFY COLUMN status\n" +
+        "         ENUM('For Approval', 'Pending', 'Received', 'Cancelled') NOT NULL DEFAULT 'For Approval'");
   }
   if (names.indexOf("raised_by_staff_id") === -1) {
     await db.query(
-      `ALTER TABLE purchase_orders ADD COLUMN raised_by_staff_id INT NULL AFTER status,
-         ADD FOREIGN KEY (raised_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE`);
+      "ALTER TABLE purchase_orders ADD COLUMN raised_by_staff_id INT NULL AFTER status,\n" +
+        "         ADD FOREIGN KEY (raised_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE");
   }
   if (names.indexOf("confirmed_by_staff_id") === -1) {
     await db.query(
-      `ALTER TABLE purchase_orders ADD COLUMN confirmed_by_staff_id INT NULL AFTER raised_by_staff_id,
-         ADD FOREIGN KEY (confirmed_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE`);
+      "ALTER TABLE purchase_orders ADD COLUMN confirmed_by_staff_id INT NULL AFTER raised_by_staff_id,\n" +
+        "         ADD FOREIGN KEY (confirmed_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE");
   }
   if (names.indexOf("confirmed_at") === -1) {
     await db.query(
@@ -356,21 +393,24 @@ async function migratePackSizes() {
     ["purchase_order_items", "pack_size", "DECIMAL(12,3) NULL"],
     ["purchase_order_items", "pack_count", "DECIMAL(12,3) NULL"]
   ];
-  const [columns] = await db.query(
-    `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('products', 'purchase_order_items')
-       AND COLUMN_NAME IN ('pack_name', 'pack_size', 'pack_count')`,
+  const columnsResult = await db.query(
+    "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('products', 'purchase_order_items')\n" +
+      "       AND COLUMN_NAME IN ('pack_name', 'pack_size', 'pack_count')",
     [DB_NAME]
   );
+  const columns = columnsResult[0];
   // "have" = the columns the database already has, written as "table.column"
   const have = [];
-  for (const row of columns) {
+  for (let rowIndex = 0; rowIndex < columns.length; rowIndex++) {
+    const row = columns[rowIndex];
     have.push(row.TABLE_NAME + "." + row.COLUMN_NAME);
   }
 
   // "missing" = the wanted columns that are not in "have"
   const missing = [];
-  for (const item of wanted) {
+  for (let itemIndex = 0; itemIndex < wanted.length; itemIndex++) {
+    const item = wanted[itemIndex];
     if (have.indexOf(item[0] + "." + item[1]) === -1) {
       missing.push(item);
     }
@@ -378,10 +418,11 @@ async function migratePackSizes() {
   if (missing.length === 0) return;
 
   // item[0] = table, item[1] = column, item[2] = column type
-  for (const item of missing) {
-    await db.query(`ALTER TABLE ${item[0]} ADD COLUMN ${item[1]} ${item[2]}`);
+  for (let itemIndex = 0; itemIndex < missing.length; itemIndex++) {
+    const item = missing[itemIndex];
+    await db.query("ALTER TABLE " + item[0] + " ADD COLUMN " + item[1] + " " + item[2]);
   }
-  console.log(`Added ${missing.length} pack column(s) to products and purchase_order_items. ` +
+  console.log("Added " + missing.length + " pack column(s) to products and purchase_order_items. " +
     "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
 }
 
@@ -399,28 +440,32 @@ async function migrateLatePenalties() {
     ["sales", "penalty_applied_at", "TIMESTAMP NULL AFTER penalty_amount"],
     ["sales", "amount_due", "DECIMAL(12,2) AS (total_amount - discount + penalty_amount) STORED AFTER penalty_applied_at"]
   ];
-  const [columns] = await db.query(
-    `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('store_settings', 'customer_credits', 'sales')
-       AND COLUMN_NAME IN ('penalty_rate', 'penalty_months', 'penalty_amount', 'penalty_applied_at', 'amount_due')`,
+  const columnsResult = await db.query(
+    "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('store_settings', 'customer_credits', 'sales')\n" +
+      "       AND COLUMN_NAME IN ('penalty_rate', 'penalty_months', 'penalty_amount', 'penalty_applied_at', 'amount_due')",
     [DB_NAME]
   );
-  const [notif] = await db.query(
-    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'notif_type'`,
+  const columns = columnsResult[0];
+  const notifResult = await db.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'notif_type'",
     [DB_NAME]
   );
+  const notif = notifResult[0];
   const hasAlert = notif.length > 0 && notif[0].COLUMN_TYPE.indexOf("Late Penalty") !== -1;
 
   // "have" = the columns the database already has, written as "table.column"
   const have = [];
-  for (const row of columns) {
+  for (let rowIndex = 0; rowIndex < columns.length; rowIndex++) {
+    const row = columns[rowIndex];
     have.push(row.TABLE_NAME + "." + row.COLUMN_NAME);
   }
 
   // "missing" = the wanted columns that are not in "have"
   const missing = [];
-  for (const item of wanted) {
+  for (let itemIndex = 0; itemIndex < wanted.length; itemIndex++) {
+    const item = wanted[itemIndex];
     if (have.indexOf(item[0] + "." + item[1]) === -1) {
       missing.push(item);
     }
@@ -429,14 +474,15 @@ async function migrateLatePenalties() {
 
   // Added in the order listed: amount_due uses penalty_amount, so it comes last.
   // item[0] = table, item[1] = column, item[2] = column type
-  for (const item of missing) {
-    await db.query(`ALTER TABLE ${item[0]} ADD COLUMN ${item[1]} ${item[2]}`);
+  for (let itemIndex = 0; itemIndex < missing.length; itemIndex++) {
+    const item = missing[itemIndex];
+    await db.query("ALTER TABLE " + item[0] + " ADD COLUMN " + item[1] + " " + item[2]);
   }
   if (!hasAlert) {
     await db.query(
-      `ALTER TABLE notifications MODIFY COLUMN notif_type
-         ENUM('Low Stock', 'Out of Stock', 'Damage Report', 'Refund Report', 'Purchase Order',
-              'Stock Adjustment', 'Delivery', 'Credit Request', 'Late Penalty') NOT NULL`);
+      "ALTER TABLE notifications MODIFY COLUMN notif_type\n" +
+        "         ENUM('Low Stock', 'Out of Stock', 'Damage Report', 'Refund Report', 'Purchase Order',\n" +
+        "              'Stock Adjustment', 'Delivery', 'Credit Request', 'Late Penalty') NOT NULL");
   }
   console.log("Added the late-payment penalty columns (store_settings.penalty_rate, " +
     "customer_credits.penalty_rate, sales.penalty_rate, penalty_months, penalty_amount, penalty_applied_at, amount_due). " +
@@ -450,14 +496,15 @@ async function migrateLatePenalties() {
 // again by loadProceduresIfMissing, from what the database holds (see
 // routinesAreOld), not from anything remembered while this ran.
 async function migrateRefundedAmount() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME, GENERATION_EXPRESSION FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'sales'
-       AND COLUMN_NAME IN ('refunded_amount', 'amount_due')`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME, GENERATION_EXPRESSION FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'sales'\n" +
+      "       AND COLUMN_NAME IN ('refunded_amount', 'amount_due')",
     [DB_NAME]
   );
-  const hasRefunded = columns.some((row) => row.COLUMN_NAME === "refunded_amount");
-  const due = columns.find((row) => row.COLUMN_NAME === "amount_due");
+  const columns = columnsResult[0];
+  const hasRefunded = findColumn(columns, "refunded_amount") !== undefined;
+  const due = findColumn(columns, "amount_due");
   const dueUsesIt = due && String(due.GENERATION_EXPRESSION).indexOf("refunded_amount") !== -1;
   if (hasRefunded && dueUsesIt) return;
   if (!due) return;   // no amount_due yet: migrateLatePenalties could not add it
@@ -468,8 +515,8 @@ async function migrateRefundedAmount() {
       "ALTER TABLE sales ADD COLUMN refunded_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER penalty_applied_at");
   }
   await db.query(
-    `ALTER TABLE sales MODIFY COLUMN amount_due DECIMAL(12,2)
-       AS (total_amount - discount + penalty_amount - refunded_amount) STORED`);
+    "ALTER TABLE sales MODIFY COLUMN amount_due DECIMAL(12,2)\n" +
+      "       AS (total_amount - discount + penalty_amount - refunded_amount) STORED");
   console.log("Added sales.refunded_amount: a refund now comes off what the customer owes " +
     "(amount_due is worked out from it).");
 }
@@ -480,13 +527,14 @@ async function migrateRefundedAmount() {
 // the cashier's note and are copied over. Older deliveries that already moved
 // on lost the cashier's note, so those stay empty.
 async function migrateCashierRemarks() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'deliveries'
-       AND COLUMN_NAME IN ('delivery_id', 'cashier_remarks', 'booking_remarks')`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'deliveries'\n" +
+      "       AND COLUMN_NAME IN ('delivery_id', 'cashier_remarks', 'booking_remarks')",
     [DB_NAME]
   );
-  const names = columns.map((row) => row.COLUMN_NAME);
+  const columns = columnsResult[0];
+  const names = columnNamesOf(columns);
   if (names.indexOf("delivery_id") === -1) return;     // no deliveries table yet
   if (names.indexOf("cashier_remarks") !== -1) return;  // already added
 
@@ -505,11 +553,12 @@ async function migrateCashierRemarks() {
 // The proprietor's name on the invoice head. A database made before it
 // has no column, and sp_update_store_settings fails.
 async function migrateProprietorName() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'proprietor'`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'proprietor'",
     [DB_NAME]
   );
+  const columns = columnsResult[0];
   if (columns.length > 0) return;
 
   await db.query("ALTER TABLE store_settings ADD COLUMN proprietor VARCHAR(150) NULL AFTER store_name");
@@ -522,14 +571,15 @@ async function migrateProprietorName() {
 // report. A database made before this has the column NOT NULL and none of
 // the inspection columns, and filing a refund fails.
 async function migrateReturnInspection() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME, IS_NULLABLE FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'returned_items'
-       AND COLUMN_NAME IN ('disposition', 'inspected_by_staff_id', 'inspected_at', 'inspection_note')`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME, IS_NULLABLE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'returned_items'\n" +
+      "       AND COLUMN_NAME IN ('disposition', 'inspected_by_staff_id', 'inspected_at', 'inspection_note')",
     [DB_NAME]
   );
-  const have = columns.map((row) => row.COLUMN_NAME);
-  const disposition = columns.find((row) => row.COLUMN_NAME === "disposition");
+  const columns = columnsResult[0];
+  const have = columnNamesOf(columns);
+  const disposition = findColumn(columns, "disposition");
   const nullable = disposition && disposition.IS_NULLABLE === "YES";
   if (nullable && have.length === 4) return;
 
@@ -539,8 +589,8 @@ async function migrateReturnInspection() {
   }
   if (have.indexOf("inspected_by_staff_id") === -1) {
     await db.query(
-      `ALTER TABLE returned_items ADD COLUMN inspected_by_staff_id INT NULL AFTER reported_by_staff_id,
-         ADD FOREIGN KEY (inspected_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE`);
+      "ALTER TABLE returned_items ADD COLUMN inspected_by_staff_id INT NULL AFTER reported_by_staff_id,\n" +
+        "         ADD FOREIGN KEY (inspected_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE");
   }
   if (have.indexOf("inspected_at") === -1) {
     await db.query("ALTER TABLE returned_items ADD COLUMN inspected_at TIMESTAMP NULL AFTER inspected_by_staff_id");
@@ -560,15 +610,16 @@ async function migrateReturnInspection() {
 // This only does the table. The procedures that use it are loaded again by
 // loadProceduresIfMissing (see routinesAreOld).
 async function migrateMissingReports() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'returned_items'
-       AND COLUMN_NAME IN ('report_type', 'po_id')`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'returned_items'\n" +
+      "       AND COLUMN_NAME IN ('report_type', 'po_id')",
     [DB_NAME]
   );
-  const type = columns.find((row) => row.COLUMN_NAME === "report_type");
+  const columns = columnsResult[0];
+  const type = findColumn(columns, "report_type");
   if (!type) return;   // no returned_items table yet
-  const hasPo = columns.some((row) => row.COLUMN_NAME === "po_id");
+  const hasPo = findColumn(columns, "po_id") !== undefined;
   const hasMissing = String(type.COLUMN_TYPE).indexOf("'Missing'") !== -1;
   if (hasMissing && hasPo) return;
 
@@ -578,8 +629,8 @@ async function migrateMissingReports() {
   }
   if (!hasPo) {
     await db.query(
-      `ALTER TABLE returned_items ADD COLUMN po_id INT NULL AFTER sale_id,
-         ADD FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE RESTRICT ON UPDATE CASCADE`);
+      "ALTER TABLE returned_items ADD COLUMN po_id INT NULL AFTER sale_id,\n" +
+        "         ADD FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE RESTRICT ON UPDATE CASCADE");
   }
   console.log("Added the Missing report type and returned_items.po_id: the clerk can now report goods " +
     "missing from a delivery. Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
@@ -594,19 +645,22 @@ async function migrateBankDetails() {
     ["bank_account_name", "VARCHAR(150) NULL AFTER bank_name"],
     ["bank_account_number", "VARCHAR(50) NULL AFTER bank_account_name"]
   ];
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'
-       AND COLUMN_NAME IN ('bank_name', 'bank_account_name', 'bank_account_number')`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'\n" +
+      "       AND COLUMN_NAME IN ('bank_name', 'bank_account_name', 'bank_account_number')",
     [DB_NAME]
   );
+  const columns = columnsResult[0];
   const have = [];
-  for (const row of columns) {
+  for (let rowIndex = 0; rowIndex < columns.length; rowIndex++) {
+    const row = columns[rowIndex];
     have.push(row.COLUMN_NAME);
   }
 
   const missing = [];
-  for (const item of wanted) {
+  for (let itemIndex = 0; itemIndex < wanted.length; itemIndex++) {
+    const item = wanted[itemIndex];
     if (have.indexOf(item[0]) === -1) {
       missing.push(item);
     }
@@ -615,8 +669,9 @@ async function migrateBankDetails() {
 
   // Added in the order listed, because each one is placed after the one before it.
   // item[0] = column, item[1] = column type
-  for (const item of missing) {
-    await db.query(`ALTER TABLE store_settings ADD COLUMN ${item[0]} ${item[1]}`);
+  for (let itemIndex = 0; itemIndex < missing.length; itemIndex++) {
+    const item = missing[itemIndex];
+    await db.query("ALTER TABLE store_settings ADD COLUMN " + item[0] + " " + item[1]);
   }
   console.log("Added the bank transfer details (store_settings.bank_name, bank_account_name, " +
     "bank_account_number). Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
@@ -626,11 +681,12 @@ async function migrateBankDetails() {
 // lines, what is shown) lives in store_settings.receipt_layout as JSON. A
 // database made before it gets the column, filled with the defaults.
 async function migrateReceiptLayout() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'receipt_layout'`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'receipt_layout'",
     [DB_NAME]
   );
+  const columns = columnsResult[0];
   if (columns.length === 0) {
     await db.query("ALTER TABLE store_settings ADD COLUMN receipt_layout TEXT NULL AFTER bank_account_number");
     console.log("Added store_settings.receipt_layout for the receipt's layout.");
@@ -644,11 +700,12 @@ async function migrateReceiptLayout() {
 // one-line texts in store_settings.delivery_areas. The cashier must pick one
 // when making a delivery. NULL means the list is empty, so no value is filled in.
 async function migrateDeliveryAreas() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'delivery_areas'`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'delivery_areas'",
     [DB_NAME]
   );
+  const columns = columnsResult[0];
   if (columns.length === 0) {
     await db.query("ALTER TABLE store_settings ADD COLUMN delivery_areas TEXT NULL AFTER receipt_layout");
     console.log("Added store_settings.delivery_areas for the places the shop delivers to.");
@@ -659,26 +716,27 @@ async function migrateDeliveryAreas() {
 // kept, never the code. A database made before it has no table, and asking
 // for a code fails.
 async function migratePasswordResets() {
-  const [tables] = await db.query(
-    `SELECT TABLE_NAME FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'password_resets'`,
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'password_resets'",
     [DB_NAME]
   );
+  const tables = tablesResult[0];
   if (tables.length > 0) return;
 
   await db.query(
-    `CREATE TABLE password_resets (
-       reset_id INT AUTO_INCREMENT PRIMARY KEY,
-       user_id INT NOT NULL,
-       code_hash VARCHAR(255) NOT NULL,
-       expires_at TIMESTAMP NOT NULL,
-       attempts INT NOT NULL DEFAULT 0,
-       used_at TIMESTAMP NULL,
-       requested_ip VARCHAR(45) NULL,
-       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-       INDEX idx_password_resets_user (user_id, created_at),
-       FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE ON UPDATE CASCADE
-     )`);
+    "CREATE TABLE password_resets (\n" +
+      "       reset_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+      "       user_id INT NOT NULL,\n" +
+      "       code_hash VARCHAR(255) NOT NULL,\n" +
+      "       expires_at TIMESTAMP NOT NULL,\n" +
+      "       attempts INT NOT NULL DEFAULT 0,\n" +
+      "       used_at TIMESTAMP NULL,\n" +
+      "       requested_ip VARCHAR(45) NULL,\n" +
+      "       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n" +
+      "       INDEX idx_password_resets_user (user_id, created_at),\n" +
+      "       FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE ON UPDATE CASCADE\n" +
+      "     )");
   console.log("Added the password_resets table for signing in again with a code sent by email.");
 }
 
@@ -689,21 +747,28 @@ async function migratePasswordResets() {
 // working link; it lets its holder answer that one order and nothing else.
 // An early version kept only a hash (supplier_token_hash); that is dropped.
 async function migrateSupplierResponse() {
-  const [columns] = await db.query(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'
-       AND COLUMN_NAME IN ('supplier_code', 'supplier_sent_at', 'supplier_response',
-                           'supplier_responded_at', 'supplier_note', 'supplier_token_hash')`,
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'\n" +
+      "       AND COLUMN_NAME IN ('supplier_code', 'supplier_sent_at', 'supplier_response',\n" +
+      "                           'supplier_responded_at', 'supplier_note', 'supplier_token_hash')",
     [DB_NAME]
   );
-  const names = columns.map((row) => row.COLUMN_NAME);
+  const columns = columnsResult[0];
+  const names = columnNamesOf(columns);
   const wanted = ["supplier_code", "supplier_sent_at", "supplier_response", "supplier_responded_at", "supplier_note"];
-  if (wanted.every((name) => names.indexOf(name) !== -1) && names.indexOf("supplier_token_hash") === -1) return;
+  let hasAllWanted = true;
+  for (let i = 0; i < wanted.length; i++) {
+    if (names.indexOf(wanted[i]) === -1) {
+      hasAllWanted = false;
+    }
+  }
+  if (hasAllWanted && names.indexOf("supplier_token_hash") === -1) return;
 
   if (names.indexOf("supplier_code") === -1) {
     await db.query(
-      `ALTER TABLE purchase_orders ADD COLUMN supplier_code VARCHAR(64) NULL,
-         ADD UNIQUE INDEX idx_purchase_orders_supplier_code (supplier_code)`);
+      "ALTER TABLE purchase_orders ADD COLUMN supplier_code VARCHAR(64) NULL,\n" +
+        "         ADD UNIQUE INDEX idx_purchase_orders_supplier_code (supplier_code)");
   }
   if (names.indexOf("supplier_sent_at") === -1) {
     await db.query("ALTER TABLE purchase_orders ADD COLUMN supplier_sent_at TIMESTAMP NULL");
@@ -730,14 +795,15 @@ async function migrateSupplierResponse() {
 // goes on the line; the shop's own price is kept beside it (original_unit_cost)
 // so the change is never lost.
 async function migrateSupplierQuote() {
-  const [columns] = await db.query(
-    `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
-     WHERE TABLE_SCHEMA = ?
-       AND ((TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'supplier_ship_date')
-         OR (TABLE_NAME = 'purchase_order_items' AND COLUMN_NAME = 'original_unit_cost'))`,
+  const columnsResult = await db.query(
+    "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ?\n" +
+      "       AND ((TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'supplier_ship_date')\n" +
+      "         OR (TABLE_NAME = 'purchase_order_items' AND COLUMN_NAME = 'original_unit_cost'))",
     [DB_NAME]
   );
-  const names = columns.map((row) => row.COLUMN_NAME);
+  const columns = columnsResult[0];
+  const names = columnNamesOf(columns);
   if (names.length === 2) return;
 
   if (names.indexOf("supplier_ship_date") === -1) {
@@ -753,37 +819,38 @@ async function migrateSupplierQuote() {
 // Every GCash or Maya payment tried by QR code. The same table as
 // public/database/3-ADD-qr-payments.sql, which does this by hand.
 async function migrateQrPayments() {
-  const [tables] = await db.query(
-    `SELECT TABLE_NAME FROM information_schema.TABLES
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'qr_payments'`,
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'qr_payments'",
     [DB_NAME]
   );
+  const tables = tablesResult[0];
   if (tables.length > 0) return;
 
   await db.query(
-    `CREATE TABLE qr_payments (
-       qr_payment_id INT AUTO_INCREMENT PRIMARY KEY,
-       provider ENUM('paymongo','sim') NOT NULL,
-       mode ENUM('test','live') NOT NULL,
-       provider_intent_id VARCHAR(80) NOT NULL,
-       provider_payment_id VARCHAR(80) NULL,
-       amount DECIMAL(12,2) NOT NULL,
-       wallet ENUM('GCash','PayMaya') NOT NULL,
-       purpose ENUM('sale','credit_payment') NOT NULL,
-       status ENUM('pending','paid','failed','expired','cancelled') NOT NULL DEFAULT 'pending',
-       error_message VARCHAR(255) NULL,
-       sale_id INT NULL,
-       created_by_staff_id INT NULL,
-       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-       expires_at TIMESTAMP NULL,
-       paid_at TIMESTAMP NULL,
-       closed_at TIMESTAMP NULL,
-       UNIQUE KEY uq_qr_payments_intent (provider_intent_id),
-       INDEX idx_qr_payments_created (created_at),
-       INDEX idx_qr_payments_status (status),
-       FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE SET NULL ON UPDATE CASCADE,
-       FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
-     )`);
+    "CREATE TABLE qr_payments (\n" +
+      "       qr_payment_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+      "       provider ENUM('paymongo','sim') NOT NULL,\n" +
+      "       mode ENUM('test','live') NOT NULL,\n" +
+      "       provider_intent_id VARCHAR(80) NOT NULL,\n" +
+      "       provider_payment_id VARCHAR(80) NULL,\n" +
+      "       amount DECIMAL(12,2) NOT NULL,\n" +
+      "       wallet ENUM('GCash','PayMaya') NOT NULL,\n" +
+      "       purpose ENUM('sale','credit_payment') NOT NULL,\n" +
+      "       status ENUM('pending','paid','failed','expired','cancelled') NOT NULL DEFAULT 'pending',\n" +
+      "       error_message VARCHAR(255) NULL,\n" +
+      "       sale_id INT NULL,\n" +
+      "       created_by_staff_id INT NULL,\n" +
+      "       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n" +
+      "       expires_at TIMESTAMP NULL,\n" +
+      "       paid_at TIMESTAMP NULL,\n" +
+      "       closed_at TIMESTAMP NULL,\n" +
+      "       UNIQUE KEY uq_qr_payments_intent (provider_intent_id),\n" +
+      "       INDEX idx_qr_payments_created (created_at),\n" +
+      "       INDEX idx_qr_payments_status (status),\n" +
+      "       FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE SET NULL ON UPDATE CASCADE,\n" +
+      "       FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE\n" +
+      "     )");
   console.log("Added the qr_payments table for GCash and Maya payments by QR code.");
 }
 
@@ -802,23 +869,27 @@ const CHECK_RULES = [
 ];
 
 async function migrateCheckConstraints() {
-  for (const [table, name, rule] of CHECK_RULES) {
-    const [found] = await db.query(
-      `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
-       WHERE CONSTRAINT_SCHEMA = ? AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?
-         AND CONSTRAINT_TYPE = 'CHECK'`,
+  for (let ruleIndex = 0; ruleIndex < CHECK_RULES.length; ruleIndex++) {
+    const table = CHECK_RULES[ruleIndex][0];
+    const name = CHECK_RULES[ruleIndex][1];
+    const rule = CHECK_RULES[ruleIndex][2];
+    const foundResult = await db.query(
+      "SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS\n" +
+        "       WHERE CONSTRAINT_SCHEMA = ? AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?\n" +
+        "         AND CONSTRAINT_TYPE = 'CHECK'",
       [DB_NAME, table, name]
     );
+    const found = foundResult[0];
     if (found.length > 0) continue;   // already there
 
     // The table, name and rule above are fixed text, not user input.
     try {
-      await db.query(`ALTER TABLE ${table} ADD CONSTRAINT ${name} CHECK (${rule})`);
-      console.log(`Added the rule "${rule}" to the ${table} table.`);
+      await db.query("ALTER TABLE " + table + " ADD CONSTRAINT " + name + " CHECK (" + rule + ")");
+      console.log("Added the rule \"" + rule + "\" to the " + table + " table.");
     } catch (error) {
       // Usually a row that already breaks the rule. Start-up goes on without
       // this rule; fix the row, then restart to add it.
-      console.warn(`Could not add the rule "${rule}" to the ${table} table (${error.message}). ` +
+      console.warn("Could not add the rule \"" + rule + "\" to the " + table + " table (" + error.message + "). " +
         "Fix the rows that break it, then restart the server.");
     }
   }
@@ -835,63 +906,63 @@ const SERVER_TABLES = ["user_sessions", "live_changes", "account_drafts",
 
 async function migrateServerTables() {
   await db.query(
-    `CREATE TABLE IF NOT EXISTS user_sessions (
-       token_hash CHAR(64) PRIMARY KEY,
-       staff_id INT NOT NULL,
-       user_id INT NOT NULL,
-       role_id INT NOT NULL,
-       role_name VARCHAR(50) NOT NULL,
-       email VARCHAR(100) NOT NULL,
-       started_at BIGINT NOT NULL,
-       last_seen BIGINT NOT NULL,
-       expires_at BIGINT NOT NULL,
-       ended_reason VARCHAR(255) NULL,
-       ended_at BIGINT NULL,
-       INDEX idx_user_sessions_staff (staff_id),
-       INDEX idx_user_sessions_expires (expires_at)
-     )`);
+    "CREATE TABLE IF NOT EXISTS user_sessions (\n" +
+      "       token_hash CHAR(64) PRIMARY KEY,\n" +
+      "       staff_id INT NOT NULL,\n" +
+      "       user_id INT NOT NULL,\n" +
+      "       role_id INT NOT NULL,\n" +
+      "       role_name VARCHAR(50) NOT NULL,\n" +
+      "       email VARCHAR(100) NOT NULL,\n" +
+      "       started_at BIGINT NOT NULL,\n" +
+      "       last_seen BIGINT NOT NULL,\n" +
+      "       expires_at BIGINT NOT NULL,\n" +
+      "       ended_reason VARCHAR(255) NULL,\n" +
+      "       ended_at BIGINT NULL,\n" +
+      "       INDEX idx_user_sessions_staff (staff_id),\n" +
+      "       INDEX idx_user_sessions_expires (expires_at)\n" +
+      "     )");
   await db.query(
-    `CREATE TABLE IF NOT EXISTS live_changes (
-       change_id BIGINT AUTO_INCREMENT PRIMARY KEY,
-       scope VARCHAR(30) NOT NULL,
-       detail VARCHAR(255) NULL,
-       origin VARCHAR(64) NULL,
-       created_at BIGINT NOT NULL
-     )`);
+    "CREATE TABLE IF NOT EXISTS live_changes (\n" +
+      "       change_id BIGINT AUTO_INCREMENT PRIMARY KEY,\n" +
+      "       scope VARCHAR(30) NOT NULL,\n" +
+      "       detail VARCHAR(255) NULL,\n" +
+      "       origin VARCHAR(64) NULL,\n" +
+      "       created_at BIGINT NOT NULL\n" +
+      "     )");
   await db.query(
-    `CREATE TABLE IF NOT EXISTS account_drafts (
-       draft_hash CHAR(64) PRIMARY KEY,
-       staff_id INT NOT NULL,
-       kind VARCHAR(10) NOT NULL,
-       payload TEXT NOT NULL,
-       expires_at BIGINT NOT NULL
-     )`);
+    "CREATE TABLE IF NOT EXISTS account_drafts (\n" +
+      "       draft_hash CHAR(64) PRIMARY KEY,\n" +
+      "       staff_id INT NOT NULL,\n" +
+      "       kind VARCHAR(10) NOT NULL,\n" +
+      "       payload TEXT NOT NULL,\n" +
+      "       expires_at BIGINT NOT NULL\n" +
+      "     )");
   await db.query(
-    `CREATE TABLE IF NOT EXISTS backup_files (
-       file_name VARCHAR(100) PRIMARY KEY,
-       bytes INT NOT NULL,
-       created_at BIGINT NOT NULL,
-       content LONGBLOB NOT NULL
-     )`);
+    "CREATE TABLE IF NOT EXISTS backup_files (\n" +
+      "       file_name VARCHAR(100) PRIMARY KEY,\n" +
+      "       bytes INT NOT NULL,\n" +
+      "       created_at BIGINT NOT NULL,\n" +
+      "       content LONGBLOB NOT NULL\n" +
+      "     )");
   await db.query(
-    `CREATE TABLE IF NOT EXISTS app_flags (
-       flag_key VARCHAR(50) PRIMARY KEY,
-       flag_value VARCHAR(255) NULL,
-       updated_at BIGINT NOT NULL
-     )`);
+    "CREATE TABLE IF NOT EXISTS app_flags (\n" +
+      "       flag_key VARCHAR(50) PRIMARY KEY,\n" +
+      "       flag_value VARCHAR(255) NULL,\n" +
+      "       updated_at BIGINT NOT NULL\n" +
+      "     )");
   await db.query(
-    `CREATE TABLE IF NOT EXISTS qr_sim_intents (
-       intent_id VARCHAR(40) PRIMARY KEY,
-       token VARCHAR(40) NOT NULL UNIQUE,
-       amount DECIMAL(12,2) NOT NULL,
-       wallet VARCHAR(20) NOT NULL,
-       description VARCHAR(255) NULL,
-       return_url VARCHAR(500) NOT NULL,
-       status VARCHAR(10) NOT NULL,
-       payment_id VARCHAR(40) NULL,
-       error_message VARCHAR(255) NULL,
-       created_at BIGINT NOT NULL
-     )`);
+    "CREATE TABLE IF NOT EXISTS qr_sim_intents (\n" +
+      "       intent_id VARCHAR(40) PRIMARY KEY,\n" +
+      "       token VARCHAR(40) NOT NULL UNIQUE,\n" +
+      "       amount DECIMAL(12,2) NOT NULL,\n" +
+      "       wallet VARCHAR(20) NOT NULL,\n" +
+      "       description VARCHAR(255) NULL,\n" +
+      "       return_url VARCHAR(500) NOT NULL,\n" +
+      "       status VARCHAR(10) NOT NULL,\n" +
+      "       payment_id VARCHAR(40) NULL,\n" +
+      "       error_message VARCHAR(255) NULL,\n" +
+      "       created_at BIGINT NOT NULL\n" +
+      "     )");
 }
 
 // a named figure so adding a procedure changes one number, not two
@@ -907,10 +978,11 @@ let procedureCheckAt = 0;
 const PROCEDURE_RECHECK_MS = 5000;
 
 async function countProcedures() {
-  const [rows] = await db.query(
+  const rowsResult = await db.query(
     "SELECT COUNT(*) AS total FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ?",
     [DB_NAME]
   );
+  const rows = rowsResult[0];
   proceduresLoaded = rows[0].total;
   procedureCheckAt = Date.now();
   return proceduresLoaded;
@@ -992,19 +1064,23 @@ async function routinesAreOld() {
     ["sp_update_delivery_status", "FOR UPDATE"]
   ];
 
-  const [routines] = await db.query(
-    `SELECT ROUTINE_NAME, ROUTINE_DEFINITION FROM information_schema.ROUTINES
-     WHERE ROUTINE_SCHEMA = ?
-       AND ROUTINE_NAME IN ('sp_file_return_report', 'sp_apply_late_penalties', 'sp_record_credit_payment',
-                            'sp_create_sale_transaction', 'sp_resolve_return_report', 'sp_archive_record',
-                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',
-                            'sp_adjust_stock')`,
+  const routinesResult = await db.query(
+    "SELECT ROUTINE_NAME, ROUTINE_DEFINITION FROM information_schema.ROUTINES\n" +
+      "     WHERE ROUTINE_SCHEMA = ?\n" +
+      "       AND ROUTINE_NAME IN ('sp_file_return_report', 'sp_apply_late_penalties', 'sp_record_credit_payment',\n" +
+      "                            'sp_create_sale_transaction', 'sp_resolve_return_report', 'sp_archive_record',\n" +
+      "                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',\n" +
+      "                            'sp_adjust_stock')",
     [DB_NAME]
   );
-  for (const row of routines) {
+  const routines = routinesResult[0];
+  for (let rowIndex = 0; rowIndex < routines.length; rowIndex++) {
+    const row = routines[rowIndex];
     const text = String(row.ROUTINE_DEFINITION || "");
     if (text === "") continue;   // not readable by this user: do not reload on every start
-    for (const [name, word] of newestWords) {
+    for (let wordIndex = 0; wordIndex < newestWords.length; wordIndex++) {
+      const name = newestWords[wordIndex][0];
+      const word = newestWords[wordIndex][1];
       if (row.ROUTINE_NAME === name && text.indexOf(word) === -1) return true;
     }
   }
@@ -1018,27 +1094,40 @@ async function routinesAreOld() {
   let ownNames = [];
   try {
     const fileText = fs.readFileSync(PROCEDURES_FILE, "utf8");
-    ownNames = [...fileText.matchAll(/^CREATE PROCEDURE (w+)/gm)].map((match) => match[1]);
+    // KNOWN ISSUE (left as it is on purpose): this pattern is missing a backslash,
+    // it should read (\w+). As written it matches the letter w, so it finds no
+    // names and the "old handler" check below never runs.
+    const namePattern = /^CREATE PROCEDURE (w+)/gm;
+    let nameMatch = namePattern.exec(fileText);
+    while (nameMatch !== null) {
+      ownNames.push(nameMatch[1]);
+      nameMatch = namePattern.exec(fileText);
+    }
   } catch (error) {
     // file 2 cannot be read, so loading it is not possible either
   }
   if (ownNames.length > 0) {
-    const [oldHandlers] = await db.query(
-      `SELECT COUNT(*) AS n FROM information_schema.ROUTINES
-       WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE' AND ROUTINE_NAME IN (?)
-         AND ROUTINE_DEFINITION LIKE '%EXIT HANDLER%'
-         AND ROUTINE_DEFINITION NOT LIKE '%GET DIAGNOSTICS%'`,
+    const oldHandlersResult = await db.query(
+      "SELECT COUNT(*) AS n FROM information_schema.ROUTINES\n" +
+        "       WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE' AND ROUTINE_NAME IN (?)\n" +
+        "         AND ROUTINE_DEFINITION LIKE '%EXIT HANDLER%'\n" +
+        "         AND ROUTINE_DEFINITION NOT LIKE '%GET DIAGNOSTICS%'",
       [DB_NAME, ownNames]
     );
+    const oldHandlers = oldHandlersResult[0];
     if (oldHandlers[0].n > 0) return true;
   }
 
-  const [views] = await db.query(
-    `SELECT VIEW_DEFINITION FROM information_schema.VIEWS
-     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'vw_customer_credit_facts'`,
+  const viewsResult = await db.query(
+    "SELECT VIEW_DEFINITION FROM information_schema.VIEWS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'vw_customer_credit_facts'",
     [DB_NAME]
   );
-  const viewText = views.length > 0 ? String(views[0].VIEW_DEFINITION || "").toLowerCase() : "";
+  const views = viewsResult[0];
+  let viewText = "";
+  if (views.length > 0) {
+    viewText = String(views[0].VIEW_DEFINITION || "").toLowerCase();
+  }
   if (viewText !== "" && viewText.indexOf("least(") === -1) return true;
 
   return false;
@@ -1053,7 +1142,7 @@ async function loadProceduresIfMissing(runSqlScript) {
   try {
     sql = fs.readFileSync(PROCEDURES_FILE, "utf8");
   } catch (error) {
-    console.warn(`Cannot read ${PROCEDURES_FILE}: ${error.message}. Run it by hand.`);
+    console.warn("Cannot read " + PROCEDURES_FILE + ": " + error.message + ". Run it by hand.");
     return;
   }
 
@@ -1061,7 +1150,7 @@ async function loadProceduresIfMissing(runSqlScript) {
     console.log("Some stored procedures in this database are an older version; loading " +
       "public/database/2-RUN-SECOND-stored-procedures.sql again (views and procedures only, no rows).");
   } else {
-    console.log(`${before} of ${EXPECTED_PROCEDURES} stored procedures are loaded; ` +
+    console.log(before + " of " + EXPECTED_PROCEDURES + " stored procedures are loaded; " +
       "loading public/database/2-RUN-SECOND-stored-procedures.sql now (views and procedures only, no rows).");
   }
   try {
@@ -1069,9 +1158,9 @@ async function loadProceduresIfMissing(runSqlScript) {
     forgetProcedureCount();
     const after = await countProcedures();
     if (after >= EXPECTED_PROCEDURES) {
-      console.log(`All ${EXPECTED_PROCEDURES} stored procedures are loaded.`);
+      console.log("All " + EXPECTED_PROCEDURES + " stored procedures are loaded.");
     } else {
-      console.warn(`Still ${after} of ${EXPECTED_PROCEDURES} after loading the file; ` +
+      console.warn("Still " + after + " of " + EXPECTED_PROCEDURES + " after loading the file; " +
         "the file on disk may be older than the code. Nothing can be saved until they match.");
     }
   } catch (error) {
@@ -1081,7 +1170,7 @@ async function loadProceduresIfMissing(runSqlScript) {
 }
 
 function procedureAdvice() {
-  return `This database has ${proceduresLoaded} of ${EXPECTED_PROCEDURES} stored ` +
+  return "This database has " + proceduresLoaded + " of " + EXPECTED_PROCEDURES + " stored " +
     "procedures, so nothing can be saved. Restart the server: it loads " +
     "public/database/2-RUN-SECOND-stored-procedures.sql itself on start-up. " +
     "That file touches no table and no row. Nothing else is wrong: your data is intact.";
@@ -1096,7 +1185,7 @@ async function migrateDatabase(runSqlScript) {
 
   const total = await countProcedures();
   if (total >= EXPECTED_PROCEDURES) {
-    console.log(`All ${EXPECTED_PROCEDURES} stored procedures are loaded.`);
+    console.log("All " + EXPECTED_PROCEDURES + " stored procedures are loaded.");
   }
   // otherwise they are loaded from the file below, once the columns they read exist
 
@@ -1131,10 +1220,11 @@ async function migrateDatabase(runSqlScript) {
 // see a column missing and both add it, and one fails. A MySQL lock, held on
 // its own connection, makes them take turns; the second finds nothing to do.
 async function migrateOneAtATime(runSqlScript) {
-  const lockName = `${DB_NAME}.startup`;
+  const lockName = DB_NAME + ".startup";
   const connection = await db.getConnection();
   try {
-    const [locked] = await connection.query("SELECT GET_LOCK(?, 120) AS got", [lockName]);
+    const lockedResult = await connection.query("SELECT GET_LOCK(?, 120) AS got", [lockName]);
+    const locked = lockedResult[0];
     if (Number(locked[0].got) !== 1) throw new Error("another copy of the server held the start-up lock too long");
     try {
       await migrateDatabase(runSqlScript);
@@ -1147,6 +1237,13 @@ async function migrateOneAtATime(runSqlScript) {
 }
 
 module.exports = {
-  EXPECTED_PROCEDURES, SERVER_TABLES, migrateOneAtATime, countProcedures, proceduresAreMissing,
-  proceduresLoadedCount, forgetProcedureCount, loadProceduresIfMissing, procedureAdvice
+  EXPECTED_PROCEDURES: EXPECTED_PROCEDURES,
+  SERVER_TABLES: SERVER_TABLES,
+  migrateOneAtATime: migrateOneAtATime,
+  countProcedures: countProcedures,
+  proceduresAreMissing: proceduresAreMissing,
+  proceduresLoadedCount: proceduresLoadedCount,
+  forgetProcedureCount: forgetProcedureCount,
+  loadProceduresIfMissing: loadProceduresIfMissing,
+  procedureAdvice: procedureAdvice
 };

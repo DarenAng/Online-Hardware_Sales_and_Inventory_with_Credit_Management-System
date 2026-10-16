@@ -32,35 +32,35 @@ function buildTopbarCorner() {
 
     const menu = document.createElement('div');
     menu.className = 'account-menu';
-    menu.innerHTML = `
-        <button type="button" class="account-chip" id="account-chip" aria-expanded="false"
-                aria-haspopup="true" onclick="toggleAccountMenu(event)">
-            <span class="avatar" data-current-initials>--</span>
-            <span class="account-chip-name" data-current-user>User</span>
-            <span class="account-caret">&#9660;</span>
-        </button>
-        <div class="account-drop" id="account-drop">
-            <div class="account-drop-head">
-                <div class="avatar" data-current-initials>--</div>
-                <div>
-                    <span class="account-drop-name" data-current-fullname>User</span>
-                    <span class="account-drop-role" data-current-role>Role</span>
-                </div>
-            </div>
-            <!-- ONE DOOR, NOT THREE
-                 Edit my credentials and Change my password used to stand here
-                 as menu items of their own. All three opened the same popup:
-                 the popup has Credentials, Edit Details and Password as tabs
-                 across the top of it, so the menu was offering three ways in
-                 to one place and then showing the tabs anyway. Now the menu
-                 opens the popup and the popup's own tabs do the choosing. -->
-            <button type="button" class="account-action" onclick="openMyAccount('view')">
-                <span class="account-action-mark">&#9776;</span>View my credentials
-            </button>
-            <button type="button" class="account-action is-logout" onclick="confirmLogout()">
-                <span class="account-action-mark">&#9099;</span>Log out
-            </button>
-        </div>`;
+    menu.innerHTML = '\n' +
+        '        <button type="button" class="account-chip" id="account-chip" aria-expanded="false"\n' +
+        '                aria-haspopup="true" onclick="toggleAccountMenu(event)">\n' +
+        '            <span class="avatar" data-current-initials>--</span>\n' +
+        '            <span class="account-chip-name" data-current-user>User</span>\n' +
+        '            <span class="account-caret">&#9660;</span>\n' +
+        '        </button>\n' +
+        '        <div class="account-drop" id="account-drop">\n' +
+        '            <div class="account-drop-head">\n' +
+        '                <div class="avatar" data-current-initials>--</div>\n' +
+        '                <div>\n' +
+        '                    <span class="account-drop-name" data-current-fullname>User</span>\n' +
+        '                    <span class="account-drop-role" data-current-role>Role</span>\n' +
+        '                </div>\n' +
+        '            </div>\n' +
+        '            <!-- ONE DOOR, NOT THREE\n' +
+        '                 Edit my credentials and Change my password used to stand here\n' +
+        '                 as menu items of their own. All three opened the same popup:\n' +
+        '                 the popup has Credentials, Edit Details and Password as tabs\n' +
+        '                 across the top of it, so the menu was offering three ways in\n' +
+        '                 to one place and then showing the tabs anyway. Now the menu\n' +
+        '                 opens the popup and the popup\'s own tabs do the choosing. -->\n' +
+        '            <button type="button" class="account-action" onclick="openMyAccount(\'view\')">\n' +
+        '                <span class="account-action-mark">&#9776;</span>View my credentials\n' +
+        '            </button>\n' +
+        '            <button type="button" class="account-action is-logout" onclick="confirmLogout()">\n' +
+        '                <span class="account-action-mark">&#9099;</span>Log out\n' +
+        '            </button>\n' +
+        '        </div>';
     corner.appendChild(menu);
 
     const main = topbar.closest('.main-content') || document.body;
@@ -69,14 +69,14 @@ function buildTopbarCorner() {
         drop.className = 'notif-drop';
         drop.id = 'notif-drop';
         drop.style.display = 'none';
-        drop.innerHTML = `
-            <div class="notif-head">
-                <span class="eyebrow">Alerts</span>
-                <button type="button" class="btn btn-sm btn-ghost"
-                        onclick="markAllNotificationsRead()">Mark all read</button>
-            </div>
-            <div class="notif-list" id="notif-list"></div>
-            <div class="notif-foot" id="notif-foot">Loading</div>`;
+        drop.innerHTML = '\n' +
+            '            <div class="notif-head">\n' +
+            '                <span class="eyebrow">Alerts</span>\n' +
+            '                <button type="button" class="btn btn-sm btn-ghost"\n' +
+            '                        onclick="markAllNotificationsRead()">Mark all read</button>\n' +
+            '            </div>\n' +
+            '            <div class="notif-list" id="notif-list"></div>\n' +
+            '            <div class="notif-foot" id="notif-foot">Loading</div>';
         topbar.insertAdjacentElement('afterend', drop);
         if (!main.contains(drop)) main.appendChild(drop);
     }
@@ -87,23 +87,23 @@ function buildTopbarCorner() {
         modal.className = 'modal';
         modal.id = 'notif-modal';
         modal.setAttribute('onclick', "closeModalOnBackdrop(event, 'notif-modal')");
-        modal.innerHTML = `
-            <div class="modal-box notif-modal-box">
-                <div class="modal-head">
-                    <div class="modal-identity">
-                        <div class="avatar" id="notif-modal-avatar">!</div>
-                        <div>
-                            <span class="notif-modal-kind" id="notif-modal-kind">Alert</span>
-                            <h3 id="notif-modal-title">Alert</h3>
-                            <span class="modal-role" id="notif-modal-sub">Alert</span>
-                        </div>
-                    </div>
-                    <button type="button" class="modal-close" onclick="closeModal('notif-modal')"
-                            aria-label="Close">&times;</button>
-                </div>
-                <div class="modal-body" id="notif-modal-body"></div>
-                <div class="modal-foot" id="notif-modal-foot"></div>
-            </div>`;
+        modal.innerHTML = '\n' +
+            '            <div class="modal-box notif-modal-box">\n' +
+            '                <div class="modal-head">\n' +
+            '                    <div class="modal-identity">\n' +
+            '                        <div class="avatar" id="notif-modal-avatar">!</div>\n' +
+            '                        <div>\n' +
+            '                            <span class="notif-modal-kind" id="notif-modal-kind">Alert</span>\n' +
+            '                            <h3 id="notif-modal-title">Alert</h3>\n' +
+            '                            <span class="modal-role" id="notif-modal-sub">Alert</span>\n' +
+            '                        </div>\n' +
+            '                    </div>\n' +
+            '                    <button type="button" class="modal-close" onclick="closeModal(\'notif-modal\')"\n' +
+            '                            aria-label="Close">&times;</button>\n' +
+            '                </div>\n' +
+            '                <div class="modal-body" id="notif-modal-body"></div>\n' +
+            '                <div class="modal-foot" id="notif-modal-foot"></div>\n' +
+            '            </div>';
         document.body.appendChild(modal);
     }
 }

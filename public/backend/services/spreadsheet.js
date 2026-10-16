@@ -14,16 +14,18 @@ const MIN_WIDTH = 8;       // characters
 const MAX_WIDTH = 60;      // a long detail wraps instead of running off the screen
 
 // "Receivables / March" -> "Receivables - March": Excel refuses : \ / ? * [ ] in a sheet name
+// "used" is the list of sheet names (in lower case) already taken in this workbook
 function sheetName(text, used) {
+  // the characters Excel refuses in a sheet name ( : \ / ? * [ ] ) become a "-"
   let name = String(text || "Sheet").replace(/[:\\/?*[\]]/g, "-").trim().slice(0, 31) || "Sheet";
   let candidate = name;
   let counter = 2;
-  while (used.has(candidate.toLowerCase())) {
+  while (used.indexOf(candidate.toLowerCase()) !== -1) {
     const suffix = " (" + counter + ")";
     candidate = name.slice(0, 31 - suffix.length) + suffix;
     counter += 1;
   }
-  used.add(candidate.toLowerCase());
+  used.push(candidate.toLowerCase());
   return candidate;
 }
 
@@ -38,13 +40,32 @@ function cellValue(value) {
 async function buildWorkbook(sheets) {
   const workbook = new ExcelJS.Workbook();
   workbook.created = new Date();
-  const used = new Set();
+  const used = [];
 
-  for (const sheet of sheets) {
-    const headers = Array.isArray(sheet.headers) ? sheet.headers.map(String) : [];
-    const rows = Array.isArray(sheet.rows) ? sheet.rows : [];
-    const money = new Set(Array.isArray(sheet.money) ? sheet.money : []);
-    const columnCount = Math.max(headers.length, ...rows.map((row) => (Array.isArray(row) ? row.length : 0)), 1);
+  for (let sheetIndex = 0; sheetIndex < sheets.length; sheetIndex++) {
+    const sheet = sheets[sheetIndex];
+    const headers = [];
+    if (Array.isArray(sheet.headers)) {
+      for (let i = 0; i < sheet.headers.length; i++) {
+        headers.push(String(sheet.headers[i]));
+      }
+    }
+    let rows = [];
+    if (Array.isArray(sheet.rows)) {
+      rows = sheet.rows;
+    }
+    // the column numbers (counting from 0) that hold money
+    let money = [];
+    if (Array.isArray(sheet.money)) {
+      money = sheet.money;
+    }
+    // the most columns on any row, or in the header
+    let columnCount = Math.max(headers.length, 1);
+    for (let i = 0; i < rows.length; i++) {
+      if (Array.isArray(rows[i]) && rows[i].length > columnCount) {
+        columnCount = rows[i].length;
+      }
+    }
 
     const ws = workbook.addWorksheet(sheetName(sheet.name, used));
 
@@ -77,24 +98,33 @@ async function buildWorkbook(sheets) {
 
     // the widest thing in each column decides its width
     const widths = new Array(columnCount).fill(MIN_WIDTH);
-    headers.forEach((text, index) => { widths[index] = Math.max(widths[index], text.length + 2); });
+    for (let index = 0; index < headers.length; index++) {
+      widths[index] = Math.max(widths[index], headers[index].length + 2);
+    }
 
-    rows.forEach((row, rowIndex) => {
-      const cells = Array.isArray(row) ? row : [];
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      let cells = [];
+      if (Array.isArray(rows[rowIndex])) {
+        cells = rows[rowIndex];
+      }
       const added = ws.getRow(headerRow + 1 + rowIndex);
-      cells.forEach((value, index) => {
+      for (let index = 0; index < cells.length; index++) {
         const cell = added.getCell(index + 1);
-        cell.value = cellValue(value);
-        if (typeof cell.value === "number" && money.has(index)) cell.numFmt = "#,##0.00";
-        const shown = typeof cell.value === "number" && money.has(index)
-          ? cell.value.toFixed(2).length + 3
-          : String(cell.value).length;
+        cell.value = cellValue(cells[index]);
+        const isMoneyNumber = typeof cell.value === "number" && money.includes(index);
+        if (isMoneyNumber) cell.numFmt = "#,##0.00";
+        let shown = String(cell.value).length;
+        if (isMoneyNumber) {
+          shown = cell.value.toFixed(2).length + 3;
+        }
         widths[index] = Math.max(widths[index], Math.min(shown + 2, MAX_WIDTH));
         if (String(cell.value).length > MAX_WIDTH) cell.alignment = { wrapText: true, vertical: "top" };
-      });
-    });
+      }
+    }
 
-    widths.forEach((width, index) => { ws.getColumn(index + 1).width = width; });
+    for (let index = 0; index < widths.length; index++) {
+      ws.getColumn(index + 1).width = widths[index];
+    }
   }
 
   return workbook;
@@ -105,9 +135,9 @@ async function sendWorkbook(response, fileName, sheets) {
   const workbook = await buildWorkbook(sheets);
   const safe = String(fileName || "report").replace(/[^\w.-]+/g, "-").replace(/^-|-$/g, "") || "report";
   response.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  response.setHeader("Content-Disposition", `attachment; filename="${safe}.xlsx"`);
+  response.setHeader("Content-Disposition", "attachment; filename=\"" + safe + ".xlsx\"");
   await workbook.xlsx.write(response);
   response.end();
 }
 
-module.exports = { buildWorkbook, sendWorkbook };
+module.exports = { buildWorkbook: buildWorkbook, sendWorkbook: sendWorkbook };

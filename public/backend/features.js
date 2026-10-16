@@ -198,7 +198,8 @@ const HOLD_LIFTED_BY_MANAGER = [CASHIER, CLERK, DRIVER];
 // finds a screen by its key, e.g. findFeature("pos"); null when there is none
 function findFeature(key) {
   const wanted = String(key || "").toLowerCase();
-  for (const feature of FEATURES) {
+  for (let featureIndex = 0; featureIndex < FEATURES.length; featureIndex++) {
+    const feature = FEATURES[featureIndex];
     if (feature.key === wanted) {
       return feature;
     }
@@ -209,8 +210,10 @@ function findFeature(key) {
 // every screen that uses this route (method + address)
 function featuresCovering(method, pathname) {
   const found = [];
-  for (const feature of FEATURES) {
-    for (const route of feature.routes) {
+  for (let featureIndex = 0; featureIndex < FEATURES.length; featureIndex++) {
+    const feature = FEATURES[featureIndex];
+    for (let routeIndex = 0; routeIndex < feature.routes.length; routeIndex++) {
+      const route = feature.routes[routeIndex];
       const routeMethod = route[0];
       const routePattern = route[1];
       if (routeMethod === method && routePattern.test(pathname)) {
@@ -223,7 +226,7 @@ function featuresCovering(method, pathname) {
 }
 
 // the overrides, cached between writes:
-// role name -> Map(feature key -> { granted, note, grantedBy, grantedAt, updatedAt })
+// role name -> { feature key: { granted, note, grantedBy, grantedAt, updatedAt } }
 // On Vercel a write on one copy of the server cannot clear another copy's
 // cache, so there it is only trusted for a few seconds.
 let featureOverrides = null;
@@ -233,24 +236,28 @@ const FEATURE_CACHE_MS = IS_VERCEL ? 10 * 1000 : Infinity;
 async function loadFeatureOverrides() {
   if (featureOverrides && Date.now() - featureOverridesAt < FEATURE_CACHE_MS) return featureOverrides;
 
-  const byRole = new Map();
+  const byRole = {};
   try {
-    const [rows] = await db.query(
-      `SELECT r.role_name, p.feature_key, p.is_granted, p.note,
-              p.granted_at, p.updated_at, gb.full_name AS granted_by
-       FROM role_feature_permissions p
-       JOIN roles r ON r.role_id = p.role_id
-       LEFT JOIN staff gb ON gb.staff_id = p.granted_by_staff_id`);
+    const result = await db.query(
+      "SELECT r.role_name, p.feature_key, p.is_granted, p.note, " +
+      "p.granted_at, p.updated_at, gb.full_name AS granted_by " +
+      "FROM role_feature_permissions p " +
+      "JOIN roles r ON r.role_id = p.role_id " +
+      "LEFT JOIN staff gb ON gb.staff_id = p.granted_by_staff_id");
+    const rows = result[0];
 
-    for (const row of rows) {
-      if (!byRole.has(row.role_name)) byRole.set(row.role_name, new Map());
-      byRole.get(row.role_name).set(row.feature_key, {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!Object.prototype.hasOwnProperty.call(byRole, row.role_name)) {
+        byRole[row.role_name] = {};
+      }
+      byRole[row.role_name][row.feature_key] = {
         granted: Boolean(row.is_granted),
         note: row.note,
         grantedBy: row.granted_by,
         grantedAt: row.granted_at,
         updatedAt: row.updated_at
-      });
+      };
     }
   } catch (error) {
     // the table may not exist yet; then there are simply no overrides
@@ -268,10 +275,14 @@ function forgetFeatureOverrides() {
 // what one role holds: the defaults with the overrides applied
 async function featuresOf(roleName) {
   const allOverrides = await loadFeatureOverrides();
-  const overrides = allOverrides.get(roleName) || new Map();
+  let overrides = {};
+  if (Object.prototype.hasOwnProperty.call(allOverrides, roleName)) {
+    overrides = allOverrides[roleName];
+  }
 
   const result = [];
-  for (const feature of FEATURES) {
+  for (let featureIndex = 0; featureIndex < FEATURES.length; featureIndex++) {
+    const feature = FEATURES[featureIndex];
     if (!feature.available.includes(roleName) && roleName !== ADMIN) {
       continue;   // this role can never have this screen
     }
@@ -280,7 +291,10 @@ async function featuresOf(roleName) {
     const byDefault = roleName === ADMIN || feature.defaults.includes(roleName);
 
     // has the administrator switched it on or off for this role?
-    const override = overrides.get(feature.key) || null;
+    let override = null;
+    if (Object.prototype.hasOwnProperty.call(overrides, feature.key)) {
+      override = overrides[feature.key];
+    }
 
     const item = {
       key: feature.key,
@@ -307,19 +321,28 @@ async function featuresOf(roleName) {
   return result;
 }
 
-// everything held, and the part held by grant rather than by role
+// Everything held, and the part held by grant rather than by role. Each is
+// an object with a true for every screen key it holds: { pos: true, ... }
 async function heldFeatures(roleName) {
-  const held = new Set();
-  const granted = new Set();
-  for (const feature of await featuresOf(roleName)) {
+  const held = {};
+  const granted = {};
+  const list = await featuresOf(roleName);
+  for (let i = 0; i < list.length; i++) {
+    const feature = list[i];
     if (!feature.held) continue;
-    held.add(feature.key);
-    if (!feature.byDefault) granted.add(feature.key);
+    held[feature.key] = true;
+    if (!feature.byDefault) granted[feature.key] = true;
   }
-  return { held, granted };
+  return { held: held, granted: granted };
 }
 
 module.exports = {
-  FEATURES, FEATURE_ROLES, HOLD_LIFTED_BY_MANAGER, findFeature, featuresCovering,
-  featuresOf, heldFeatures, forgetFeatureOverrides
+  FEATURES: FEATURES,
+  FEATURE_ROLES: FEATURE_ROLES,
+  HOLD_LIFTED_BY_MANAGER: HOLD_LIFTED_BY_MANAGER,
+  findFeature: findFeature,
+  featuresCovering: featuresCovering,
+  featuresOf: featuresOf,
+  heldFeatures: heldFeatures,
+  forgetFeatureOverrides: forgetFeatureOverrides
 };

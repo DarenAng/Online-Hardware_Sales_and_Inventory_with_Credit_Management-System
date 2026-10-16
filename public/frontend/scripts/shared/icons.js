@@ -18,7 +18,10 @@
 // The icons are empty <i> tags drawn by the icon font, so they add no text:
 // button.textContent and every label a script reads stay exactly as they were.
 
-(function () {
+// Everything is inside one function so its helper names stay private to this
+// file (no other script can see or clash with them). It is called once, at the
+// very bottom.
+function setUpIcons() {
     // whole phrases first: "Sign in" and "Sign out" share a first word
     const BUTTON_PHRASES = [
         ['sign in', 'box-arrow-in-right'],
@@ -58,7 +61,7 @@
     };
 
     // words whose icon reads better after them: "Next ->"
-    const TRAILING = new Set(['next']);
+    const TRAILING = ['next'];
 
     // a summary card's label, matched by the words in it
     const KPI_ICONS = [
@@ -83,7 +86,9 @@
     function iconForButton(button) {
         if (button.hasAttribute('data-icon')) return button.getAttribute('data-icon') || null;
         const text = words(button);
-        for (const [phrase, icon] of BUTTON_PHRASES) {
+        for (let i = 0; i < BUTTON_PHRASES.length; i++) {
+            const phrase = BUTTON_PHRASES[i][0];
+            const icon = BUTTON_PHRASES[i][1];
             if (text === phrase || text.startsWith(phrase + ' ')) return icon;
         }
         const first = (text.match(/^[a-z]+/) || [''])[0];
@@ -114,7 +119,9 @@
     // caret is not part of its words)
     function sidebarIcon(label) {
         const wanted = label.replace(/\s+/g, ' ').trim().toLowerCase();
-        for (const link of document.querySelectorAll('.sidebar-nav a')) {
+        const links = document.querySelectorAll('.sidebar-nav a');
+        for (let i = 0; i < links.length; i++) {
+            const link = links[i];
             const icon = link.querySelector('.nav-icon');
             if (!icon) continue;
             const caret = link.querySelector('.nav-caret');
@@ -126,29 +133,35 @@
     }
 
     function iconName(icon) {
+        // the name after "bi-" in the class list, skipping the "bi-auto" marker
         const match = icon.className.match(/\bbi-(?!auto\b)([a-z0-9-]+)/);
         return match ? match[1] : null;
     }
 
     function decorateButtons() {
-        document.querySelectorAll('button, a.btn').forEach((button) => {
-            if (button.closest('[data-no-icon], .sidebar-nav, .sidebar-brand')) return;
+        const buttons = document.querySelectorAll('button, a.btn');
+        for (let i = 0; i < buttons.length; i++) {
+            const button = buttons[i];
+            if (button.closest('[data-no-icon], .sidebar-nav, .sidebar-brand')) continue;
             // a button that already shows a picture of its own keeps it
-            if (button.querySelector('svg, img, i.bi:not(.bi-auto)')) return;
+            if (button.querySelector('svg, img, i.bi:not(.bi-auto)')) continue;
             if (button.classList.contains('subnav-tab')) {
                 setIcon(button, sidebarIcon(button.textContent), 'tab-icon');
-                return;
+                continue;
             }
+            // the button's first word (letters only), in lower case
             const first = (words(button).match(/^[a-z]+/) || [''])[0];
-            const atEnd = TRAILING.has(first) && !button.hasAttribute('data-icon');
+            const atEnd = TRAILING.indexOf(first) !== -1 && !button.hasAttribute('data-icon');
             setIcon(button, iconForButton(button), atEnd ? 'btn-icon btn-icon-end' : 'btn-icon', atEnd);
-        });
+        }
     }
 
     // The title is a sibling icon, not one inside it: the page scripts set the
     // title with textContent, which would wipe an icon inside.
     function decorateTitles() {
-        document.querySelectorAll('.topbar-title').forEach((title) => {
+        const titles = document.querySelectorAll('.topbar-title');
+        for (let i = 0; i < titles.length; i++) {
+            const title = titles[i];
             let name = sidebarIcon(title.textContent);
             if (!name) {
                 const active = document.querySelector('.sidebar-nav .nav-sub a.active .nav-icon') ||
@@ -157,7 +170,7 @@
             }
             let icon = title.previousElementSibling;
             if (!icon || !icon.classList.contains('title-icon')) {
-                if (!name) return;
+                if (!name) continue;
                 icon = document.createElement('i');
                 icon.setAttribute('aria-hidden', 'true');
                 title.parentNode.insertBefore(icon, title);
@@ -165,15 +178,24 @@
             const className = name ? 'bi bi-' + name + ' title-icon' : 'bi title-icon';
             if (icon.className !== className) icon.className = className;
             icon.hidden = !name;
-        });
+        }
     }
 
     function decorateCards() {
-        document.querySelectorAll('.kpi-label').forEach((label) => {
+        const labels = document.querySelectorAll('.kpi-label');
+        for (let i = 0; i < labels.length; i++) {
+            const label = labels[i];
             const text = label.textContent;
-            const match = KPI_ICONS.find(([pattern]) => pattern.test(text));
-            setIcon(label, match ? match[1] : null, 'kpi-icon');
-        });
+            // the first icon whose pattern matches the label
+            let iconNameFound = null;
+            for (let k = 0; k < KPI_ICONS.length; k++) {
+                if (KPI_ICONS[k][0].test(text)) {
+                    iconNameFound = KPI_ICONS[k][1];
+                    break;
+                }
+            }
+            setIcon(label, iconNameFound, 'kpi-icon');
+        }
     }
 
     function decorate() {
@@ -189,7 +211,7 @@
     function queue() {
         if (queued) return;
         queued = true;
-        window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(function () {
             queued = false;
             decorate();
         });
@@ -209,4 +231,6 @@
     } else {
         start();
     }
-})();
+}
+
+setUpIcons();

@@ -97,7 +97,9 @@ function openLiveStream() {
         setLiveIndicator('live', 'Live');
 
         if (Array.isArray(data.scopes) && data.scopes.length > 0) {
-            data.scopes.forEach((scope) => noticeChange(scope, null));
+            for (let i = 0; i < data.scopes.length; i++) {
+                noticeChange(data.scopes[i], null);
+            }
         }
     });
 
@@ -166,10 +168,15 @@ function onLiveChange(scopes, handler) {
 }
 
 function runLiveListeners(scope) {
-    liveListeners.forEach((entry) => {
-        if (entry.scopes.indexOf(scope) === -1) return;
-        try { entry.handler(scope); } catch (error) { console.error(error); }
-    });
+    for (let i = 0; i < liveListeners.length; i++) {
+        const entry = liveListeners[i];
+        if (entry.scopes.indexOf(scope) === -1) continue;
+        try {
+            entry.handler(scope);
+        } catch (error) {
+            console.error(error);
+        }
+    }
 }
 
 function noticeChange(scope, change) {
@@ -184,17 +191,19 @@ function noticeChange(scope, change) {
 
     let touched = 0;
 
-    dataPanels.forEach((panel) => {
-        if (panel.state !== 'ready') return;
+    // dataPanels (data-panel.js) holds every table on this page, by key
+    for (const key in dataPanels) {
+        const panel = dataPanels[key];
+        if (panel.state !== 'ready') continue;
 
         const scopes = panel.config.scopes || PANEL_SCOPES[panel.key] || [];
-        if (scopes.indexOf(scope) === -1) return;
+        if (scopes.indexOf(scope) === -1) continue;
 
         touched += 1;
 
         if (safeToRefresh(panel)) refreshQuietly(panel);
         else markPanelStale(panel, scope);
-    });
+    }
 
     if (touched > 0 && typeof loadNotifications === 'function' &&
         (scope === 'inventory' || scope === 'returns' || scope === 'deliveries')) {
@@ -235,7 +244,9 @@ function flashPanel(panel, text) {
 
     pill.classList.add('is-fresh');
     pill.title = text;
-    setTimeout(() => pill.classList.remove('is-fresh'), 2200);
+    setTimeout(function () {
+        pill.classList.remove('is-fresh');
+    }, 2200);
 }
 
 function markPanelStale(panel, scope) {

@@ -43,9 +43,9 @@ function quantityText(value) {
 function lineQuantity(item) {
   const unit = item.unit_name || "units";
   if (item.pack_name && Number(item.pack_size) > 0 && Number(item.pack_count) > 0) {
-    return `${quantityText(item.pack_count)} ${item.pack_name} (${quantityText(item.quantity)} ${unit})`;
+    return quantityText(item.pack_count) + " " + item.pack_name + " (" + quantityText(item.quantity) + " " + unit + ")";
   }
-  return `${quantityText(item.quantity)} ${unit}`;
+  return quantityText(item.quantity) + " " + unit;
 }
 
 const STATUS_WORDS = {
@@ -65,20 +65,26 @@ function purchaseOrderPdf(details) {
   const shop = details.shop || {};
 
   const doc = new PDFDocument({ size: "A4", margin: 44, bufferPages: true,
-    info: { Title: `Purchase Order PO-${String(order.po_id).padStart(6, "0")}`,
+    info: { Title: "Purchase Order PO-" + String(order.po_id).padStart(6, "0"),
             Author: shop.store_name || "Lucelyn Hardware" } });
 
   const chunks = [];
-  doc.on("data", (chunk) => chunks.push(chunk));
-  const done = new Promise((resolve, reject) => {
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
+  doc.on("data", function (chunk) {
+    chunks.push(chunk);
+  });
+  const done = new Promise(function (resolve, reject) {
+    doc.on("end", function () {
+      resolve(Buffer.concat(chunks));
+    });
     doc.on("error", reject);
   });
 
   const left = doc.page.margins.left;
   const width = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const right = left + width;
-  const bottom = () => doc.page.height - doc.page.margins.bottom;
+  const bottom = function () {
+    return doc.page.height - doc.page.margins.bottom;
+  };
 
   const shopName = shop.store_name || "Lucelyn Hardware";
   const number = "PO-" + String(order.po_id).padStart(6, "0");
@@ -117,13 +123,14 @@ function purchaseOrderPdf(details) {
 
   // ---------- who it is for and where it goes ----------
   const half = (width - 24) / 2;
-  const party = (x, label, name, lines) => {
+  const party = function (x, label, name, lines) {
     doc.font("Helvetica-Bold").fontSize(8.5).fillColor(STEEL)
       .text(label, x, y, { width: half, characterSpacing: 1.2 });
     doc.moveDown(0.35);
     doc.font("Helvetica-Bold").fontSize(12.5).fillColor(INK).text(pdfText(name), { width: half });
     doc.font("Helvetica").fontSize(9.5).fillColor(STEEL);
-    for (const line of lines) {
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      const line = lines[lineIndex];
       if (line) doc.text(pdfText(line), { width: half });
     }
     return doc.y;
@@ -144,14 +151,20 @@ function purchaseOrderPdf(details) {
     { title: "UNIT PRICE", width: 82, align: "right" },
     { title: "AMOUNT", width: 84, align: "right" }
   ];
-  columns[1].width = width - columns.reduce((sum, column) => sum + column.width, 0);
+  // the material column takes the width the other columns leave
+  let otherWidths = 0;
+  for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+    otherWidths += columns[columnIndex].width;
+  }
+  columns[1].width = width - otherWidths;
   const pad = 6;
 
-  const heading = () => {
+  const heading = function () {
     doc.rect(left, y, width, 22).fill(CHROME);
     let x = left;
     doc.font("Helvetica-Bold").fontSize(8).fillColor("#ffffff");
-    for (const column of columns) {
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+      const column = columns[columnIndex];
       doc.text(column.title, x + pad, y + 7.5,
         { width: column.width - pad * 2, align: column.align, lineBreak: false, characterSpacing: 0.8 });
       x += column.width;
@@ -162,7 +175,8 @@ function purchaseOrderPdf(details) {
 
   let units = 0;
   let total = 0;
-  items.forEach((item, index) => {
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
     units += Number(item.quantity || 0);
     total += Number(item.line_cost || 0);
 
@@ -178,7 +192,8 @@ function purchaseOrderPdf(details) {
 
     // how tall the row is: the tallest cell, with its smaller line
     let height = 0;
-    cells.forEach((cell, position) => {
+    for (let position = 0; position < cells.length; position++) {
+      const cell = cells[position];
       const inner = columns[position].width - pad * 2;
       doc.font(position === 1 ? "Helvetica-Bold" : "Helvetica").fontSize(9.5);
       let cellHeight = doc.heightOfString(pdfText(cell[0]), { width: inner });
@@ -187,7 +202,7 @@ function purchaseOrderPdf(details) {
         cellHeight += 2 + doc.heightOfString(pdfText(cell[1]), { width: inner });
       }
       height = Math.max(height, cellHeight);
-    });
+    }
     height += 16;
 
     if (y + height > bottom() - 40) {
@@ -197,7 +212,8 @@ function purchaseOrderPdf(details) {
     }
 
     let x = left;
-    cells.forEach((cell, position) => {
+    for (let position = 0; position < cells.length; position++) {
+      const cell = cells[position];
       const column = columns[position];
       const inner = column.width - pad * 2;
       doc.font(position === 1 ? "Helvetica-Bold" : "Helvetica").fontSize(9.5).fillColor(INK)
@@ -207,11 +223,11 @@ function purchaseOrderPdf(details) {
           .text(pdfText(cell[1]), x + pad, doc.y + 2, { width: inner, align: column.align });
       }
       x += column.width;
-    });
+    }
 
     y += height;
     doc.moveTo(left, y).lineTo(right, y).lineWidth(0.6).strokeColor(LINE).stroke();
-  });
+  }
 
   if (items.length === 0) {
     doc.font("Helvetica").fontSize(9.5).fillColor(STEEL).text("No lines on this order.", left + pad, y + 8);
@@ -224,9 +240,13 @@ function purchaseOrderPdf(details) {
     y = doc.page.margins.top;
   }
   doc.moveTo(left, y).lineTo(right, y).lineWidth(1.6).strokeColor(CHROME).stroke();
-  const figures = columns.slice(3).reduce((sum, column) => sum + column.width, 0);
+  // the width of the three right-hand columns (quantity, unit price and amount)
+  let figures = 0;
+  for (let columnIndex = 3; columnIndex < columns.length; columnIndex++) {
+    figures += columns[columnIndex].width;
+  }
   doc.font("Helvetica-Bold").fontSize(10).fillColor(INK)
-    .text(`${items.length} ${items.length === 1 ? "line" : "lines"} · priced at the rates on file for these materials; ` +
+    .text(items.length + " " + (items.length === 1 ? "line" : "lines") + " · priced at the rates on file for these materials; " +
           "any discount is settled on the invoice", left + pad, y + 10, { width: width - figures - pad * 2 });
   const labelBottom = doc.y;
   doc.font("Helvetica-Bold").fontSize(10)
@@ -236,7 +256,7 @@ function purchaseOrderPdf(details) {
   y = Math.max(labelBottom, doc.y) + 18;
 
   // ---------- the note to quote the number ----------
-  const note = `Please quote ${number} on the delivery receipt and the invoice. Goods are counted on arrival ` +
+  const note = "Please quote " + number + " on the delivery receipt and the invoice. Goods are counted on arrival " +
                "and anything short or damaged is recorded against this order." +
                (shop.invoice_note ? "\n" + shop.invoice_note : "");
   doc.font("Helvetica").fontSize(9.5);
@@ -279,14 +299,18 @@ function purchaseOrderPdf(details) {
     y = doc.page.margins.top + 30;
   }
   const signWidth = (width - 2 * 24) / 3;
-  [["Prepared by", order.raised_by || "Inventory Clerk"],
-   ["Approved by", order.confirmed_by || "Manager"],
-   ["Received by", order.supplier_name || "Supplier"]].forEach((sign, index) => {
+  const signatures = [
+    ["Prepared by", order.raised_by || "Inventory Clerk"],
+    ["Approved by", order.confirmed_by || "Manager"],
+    ["Received by", order.supplier_name || "Supplier"]
+  ];
+  for (let index = 0; index < signatures.length; index++) {
+    const sign = signatures[index];
     const x = left + index * (signWidth + 24);
     doc.moveTo(x, y).lineTo(x + signWidth, y).lineWidth(0.8).strokeColor(INK).stroke();
     doc.font("Helvetica-Bold").fontSize(9.5).fillColor(INK).text(sign[0], x, y + 6, { width: signWidth });
     doc.font("Helvetica").fontSize(8.5).fillColor(STEEL).text(pdfText(sign[1]), x, doc.y + 1, { width: signWidth });
-  });
+  }
 
   // ---------- page numbers in the foot of every page ----------
   const range = doc.bufferedPageRange();
@@ -296,7 +320,7 @@ function purchaseOrderPdf(details) {
     const margin = doc.page.margins.bottom;
     doc.page.margins.bottom = 0;
     doc.font("Helvetica").fontSize(7.5).fillColor(STEEL)
-      .text(pdfText(`${shopName} · ${number} · page ${page + 1} of ${range.count}`),
+      .text(pdfText(shopName + " · " + number + " · page " + (page + 1) + " of " + range.count),
         left, doc.page.height - 30, { width: width, align: "center", lineBreak: false });
     doc.page.margins.bottom = margin;
   }
@@ -305,4 +329,4 @@ function purchaseOrderPdf(details) {
   return done;
 }
 
-module.exports = { purchaseOrderPdf };
+module.exports = { purchaseOrderPdf: purchaseOrderPdf };

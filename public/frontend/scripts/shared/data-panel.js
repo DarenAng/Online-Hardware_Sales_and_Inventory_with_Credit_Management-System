@@ -10,11 +10,11 @@
 //       columns: 5,                    // colspan for message rows
 //       pagerId: 'accounts-pager',
 //       countPillId: 'accounts-count', // optional
-//       load: async () => [...],       // returns every row, once
-//       match: (row, query) => true,   // optional free-text search
-//       filter: (row, filters) => true,// optional dropdown filters
-//       sort: (rows, filters) => rows, // optional
-//       renderRow: (row, index) => '<tr>...</tr>',
+//       load: async function () { return [...]; },  // returns every row, once
+//       match: function (row, query) { return true; },   // optional free-text search
+//       filter: function (row, filters) { return true; },// optional dropdown filters
+//       sort: function (rows, filters) { return rows; }, // optional
+//       renderRow: function (row, index) { return '<tr>...</tr>'; },
 //       gate: { title, text, button },  // what the closed state says
 //       empty: { title, text },        // optional; a loaded table with no rows
 //       loadOnFilter: false,           // optional; see dataPanelFilter
@@ -32,8 +32,9 @@ const DATA_PANEL_ROWS_PER_PAGE = 10;
 // pages drawn out of sight when the rows arrive, to find the tallest one
 const DATA_PANEL_PAGES_MEASURED = 20;
 
-// every panel on the page, by key, for the inline handlers
-const dataPanels = new Map();
+// every panel on the page: key -> panel, for the inline handlers
+// (the keys are fixed names such as 'mgr-sales', set in each page's script)
+const dataPanels = {};
 
 function createDataPanel(config) {
     const panel = {
@@ -52,28 +53,28 @@ function createDataPanel(config) {
     // so we can call panel.open(), panel.render() and so on.
     // Inside those functions, "this" means the panel they were called on.
     Object.assign(panel, dataPanelMethods);
-    dataPanels.set(config.key, panel);
+    dataPanels[config.key] = panel;
 
     panel.renderClosed();
     return panel;
 }
 
 function getDataPanel(key) {
-    return dataPanels.get(key) || null;
+    return dataPanels[key] || null;
 }
 
 const dataPanelMethods = {
-    body() {
+    body: function () {
         const table = document.getElementById(this.config.tableId);
         return table ? table.querySelector('tbody') : null;
     },
 
-    pager() {
+    pager: function () {
         return this.config.pagerId ? document.getElementById(this.config.pagerId) : null;
     },
 
     // ---------- states ----------
-    renderClosed() {
+    renderClosed: function () {
         const tbody = this.body();
         if (!tbody) return;
 
@@ -110,7 +111,7 @@ const dataPanelMethods = {
         this.announce();
     },
 
-    renderLoading() {
+    renderLoading: function () {
         const tbody = this.body();
         if (!tbody) return;
 
@@ -123,7 +124,7 @@ const dataPanelMethods = {
         this.announce();
     },
 
-    renderError(message) {
+    renderError: function (message) {
         const tbody = this.body();
         if (!tbody) return;
 
@@ -149,7 +150,7 @@ const dataPanelMethods = {
         this.announce();
     },
 
-    renderNoMatches() {
+    renderNoMatches: function () {
         const tbody = this.body();
         if (!tbody) return;
 
@@ -158,9 +159,14 @@ const dataPanelMethods = {
 
         // no search and no filter narrowed it: the table is simply empty,
         // and telling the reader to widen filters they never set is wrong
-        const narrowed = Object.keys(this.filters).some((name) =>
-            this.filters[name] !== undefined && this.filters[name] !== '' &&
-            this.filters[name] !== 'all' && this.filters[name] !== (this.config.filters || {})[name]);
+        let narrowed = false;
+        for (const name in this.filters) {
+            if (this.filters[name] !== undefined && this.filters[name] !== '' &&
+                this.filters[name] !== 'all' && this.filters[name] !== (this.config.filters || {})[name]) {
+                narrowed = true;
+                break;
+            }
+        }
 
         if (!this.query && !narrowed) {
             const empty = this.config.empty || {};
@@ -206,13 +212,13 @@ const dataPanelMethods = {
         this.announce();
     },
 
-    basePageSize() {
+    basePageSize: function () {
         return this.config.pageSize || DATA_PANEL_ROWS_PER_PAGE;
     },
 
     // every state ends here, so this is where the table is held at the
     // height of its fullest page, once the listeners have touched the rows
-    announce() {
+    announce: function () {
         if (typeof CustomEvent === 'function') {
             document.dispatchEvent(new CustomEvent('datapanel:change', {
                 detail: { key: this.key, state: this.state, rows: this.visible.length }
@@ -230,7 +236,7 @@ const dataPanelMethods = {
     // A load asked for during a load is remembered and run when the current one
     // lands, and every load carries a ticket so a late answer is thrown away
     // rather than drawn over newer rows.
-    async open() {
+    open: async function () {
         if (this.state === 'loading') {
             this.reloadWanted = true;   // whoever asked gets their answer below
             return;
@@ -268,7 +274,7 @@ const dataPanelMethods = {
         }
     },
 
-    async refresh() {
+    refresh: async function () {
         if (this.state === 'closed') return;
         const page = this.page;
         await this.open();
@@ -276,7 +282,7 @@ const dataPanelMethods = {
     },
 
     // closes the table on purpose, so it is not loaded again after a reload
-    reset() {
+    reset: function () {
         this.query = '';
         this.filters = Object.assign({}, this.config.filters || {});
         this.forget();
@@ -285,21 +291,22 @@ const dataPanelMethods = {
 
     // ---------- staying loaded ----------
     // The search box above this table (its oninput names the panel's key)
-    searchBox() {
+    searchBox: function () {
         return document.querySelector('[oninput*="dataPanelSearchInput(\'' + this.key + '\'"]');
     },
 
     // Writes down that this table is loaded: the search text, the filters and
     // the boxes named in config.inputs, so they can be put back (see recall)
-    remember() {
+    remember: function () {
         if (this.config.remember === false) return;
 
         const box = this.searchBox();
         const inputs = {};
-        (this.config.inputs || []).forEach((id) => {
-            const field = document.getElementById(id);
-            if (field) inputs[id] = field.value;
-        });
+        const inputIds = this.config.inputs || [];
+        for (let i = 0; i < inputIds.length; i++) {
+            const field = document.getElementById(inputIds[i]);
+            if (field) inputs[inputIds[i]] = field.value;
+        }
 
         const all = readLoadedPanels();
         const page = thisPageName();
@@ -312,7 +319,7 @@ const dataPanelMethods = {
         writeLoadedPanels(all);
     },
 
-    forget() {
+    forget: function () {
         const all = readLoadedPanels();
         const page = thisPageName();
         if (!all[page]) return;
@@ -322,7 +329,7 @@ const dataPanelMethods = {
 
     // Puts the saved search, filters and boxes back, before the table loads
     // (load() can read these boxes)
-    prepare(saved) {
+    prepare: function (saved) {
         this.query = searchText(saved.text);
         Object.assign(this.filters, saved.filters || {});
 
@@ -333,35 +340,37 @@ const dataPanelMethods = {
     },
 
     // After the load: a box filled from the rows has its options only now
-    finish(saved) {
+    finish: function (saved) {
         this.putBoxesBack(saved, true);
         if (this.state === 'ready') this.apply();
     },
 
     // Sets the filter dropdowns and the other boxes to what was saved. Once the
     // load is over, a filter whose choice is no longer in its dropdown goes back to its default.
-    putBoxesBack(saved, loaded) {
+    putBoxesBack: function (saved, loaded) {
         const filters = saved.filters || {};
 
-        Object.keys(filters).forEach((name) => {
+        for (const name in filters) {
             const select = document.querySelector(
                 '[onchange*="dataPanelFilter(\'' + this.key + '\', \'' + name + '\'"]');
-            if (!select) return;
+            if (!select) continue;
 
             const done = setBoxValue(select, filters[name]);
             if (loaded && !done) {
                 const first = (this.config.filters || {})[name];
                 this.filters[name] = first === undefined ? 'all' : first;
             }
-        });
+        }
 
         const inputs = saved.inputs || {};
-        Object.keys(inputs).forEach((id) => setBoxValue(document.getElementById(id), inputs[id]));
+        for (const id in inputs) {
+            setBoxValue(document.getElementById(id), inputs[id]);
+        }
     },
 
     // ---------- searching and filtering ----------
     // Typing on a closed table also loads it.
-    async search(text) {
+    search: async function (text) {
         this.query = searchText(text);
 
         // the load that is running applies the newest query when it lands
@@ -377,22 +386,24 @@ const dataPanelMethods = {
         this.apply();
     },
 
-    setFilter(name, value) {
+    setFilter: function (name, value) {
         this.filters[name] = value;
         this.page = 1;
         if (this.state === 'ready') this.apply();
     },
 
-    apply() {
+    apply: function () {
         const query = this.query.toLowerCase();
         const match = this.config.match;
         const filter = this.config.filter;
 
-        this.visible = this.rows.filter((row) => {
-            if (filter && !filter(row, this.filters)) return false;
-            if (query === '') return true;
-            return match ? match(row, query) : true;
-        });
+        // keep the rows that pass the filters and the search
+        this.visible = [];
+        for (let i = 0; i < this.rows.length; i++) {
+            const row = this.rows[i];
+            if (filter && !filter(row, this.filters)) continue;
+            if (query === '' || !match || match(row, query)) this.visible.push(row);
+        }
 
         // sort is applied to the filtered copy; loaded rows keep server order
         if (typeof this.config.sort === 'function') {
@@ -407,7 +418,7 @@ const dataPanelMethods = {
     },
 
     // ---------- drawing ----------
-    render() {
+    render: function () {
         const tbody = this.body();
         if (!tbody) return;
 
@@ -426,7 +437,7 @@ const dataPanelMethods = {
     },
 
     // puts one page's rows in the table and returns them
-    drawRows(page) {
+    drawRows: function (page) {
         const start = (page - 1) * this.pageSize;
         const slice = this.visible.slice(start, start + this.pageSize);
 
@@ -447,7 +458,7 @@ const dataPanelMethods = {
     // A later page can hold longer rows that wrap. Each page is drawn and
     // measured before the browser paints, then the page being read is drawn
     // back, so page one already takes the room the tallest page needs.
-    measurePages() {
+    measurePages: function () {
         const table = document.getElementById(this.config.tableId);
         if (!table || !table.getClientRects().length || this.pageSize !== this.basePageSize()) return;
 
@@ -463,7 +474,7 @@ const dataPanelMethods = {
         holdTableHeight(table);
     },
 
-    renderPager() {
+    renderPager: function () {
         const mount = this.pager();
         if (!mount) return;
 
@@ -489,7 +500,7 @@ const dataPanelMethods = {
             '</div>';
     },
 
-    clearPager() {
+    clearPager: function () {
         const mount = this.pager();
         if (mount) {
             mount.innerHTML = '';
@@ -497,14 +508,14 @@ const dataPanelMethods = {
         }
     },
 
-    setCount(text) {
+    setCount: function (text) {
         if (!this.config.countPillId) return;
         const pill = document.getElementById(this.config.countPillId);
         if (pill) pill.textContent = text;
     },
 
     // ---------- moving between pages ----------
-    goTo(page) {
+    goTo: function (page) {
         const pages = Math.max(1, Math.ceil(this.visible.length / this.pageSize));
         this.page = Math.min(Math.max(1, page), pages);
         this.render();
@@ -516,12 +527,21 @@ const dataPanelMethods = {
         }
     },
 
-    next() { this.goTo(this.page + 1); },
-    prev() { this.goTo(this.page - 1); },
+    next: function () {
+        this.goTo(this.page + 1);
+    },
 
-    find(id, idField) {
+    prev: function () {
+        this.goTo(this.page - 1);
+    },
+
+    // the loaded row whose id matches, or null
+    find: function (id, idField) {
         const key = idField || this.config.idField || 'id';
-        return this.rows.find((row) => String(row[key]) === String(id)) || null;
+        for (let i = 0; i < this.rows.length; i++) {
+            if (String(this.rows[i][key]) === String(id)) return this.rows[i];
+        }
+        return null;
     }
 };
 
@@ -560,7 +580,13 @@ function setBoxValue(box, value) {
     if (!box) return false;
 
     if (box.tagName === 'SELECT') {
-        const found = Array.from(box.options).some((option) => option.value === String(value));
+        let found = false;
+        for (let i = 0; i < box.options.length; i++) {
+            if (box.options[i].value === String(value)) {
+                found = true;
+                break;
+            }
+        }
         if (!found) return false;
     }
     box.value = value;
@@ -596,22 +622,23 @@ async function restoreLoadedPanels() {
     const saved = readLoadedPanels()[thisPageName()] || {};
     const panels = [];
 
-    Object.keys(saved).forEach((key) => {
+    for (const key in saved) {
         const panel = getDataPanel(key);
-        if (!panel || panel.config.remember === false) return;
+        if (!panel || panel.config.remember === false) continue;
 
         // a screen switched off since: forget it instead of asking the server
         if (screenIsHidden(panel)) {
             panel.forget();
-            return;
+            continue;
         }
         panel.prepare(saved[key]);
         panels.push(panel);
-    });
+    }
 
     // One at a time. A table whose load also fills another one is no longer
     // closed by that one's turn, so it is not read a second time.
-    for (const panel of panels) {
+    for (let i = 0; i < panels.length; i++) {
+        const panel = panels[i];
         if (panel.state !== 'closed') continue;
 
         await panel.open();
@@ -635,24 +662,35 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // ---------- the handlers the generated buttons call ----------
-function dataPanelOpen(key) { const p = getDataPanel(key); if (p) p.open(); }
-function dataPanelNext(key) { const p = getDataPanel(key); if (p) p.next(); }
-function dataPanelPrev(key) { const p = getDataPanel(key); if (p) p.prev(); }
+function dataPanelOpen(key) {
+    const p = getDataPanel(key);
+    if (p) p.open();
+}
+
+function dataPanelNext(key) {
+    const p = getDataPanel(key);
+    if (p) p.next();
+}
+
+function dataPanelPrev(key) {
+    const p = getDataPanel(key);
+    if (p) p.prev();
+}
 
 // Search runs as the text is typed, a moment after the last key so a word
 // typed quickly is one search. Enter searches at once; Escape empties the box.
 const SEARCH_TYPING_DELAY_MS = 220;
-const searchTimers = new Map();
+const searchTimers = {};   // panel key -> the timer waiting to run its search
 
 function dataPanelSearchInput(key, event) {
     const box = event && event.target;
     if (!box) return;
 
-    clearTimeout(searchTimers.get(key));
-    searchTimers.set(key, setTimeout(() => {
-        searchTimers.delete(key);
+    clearTimeout(searchTimers[key]);
+    searchTimers[key] = setTimeout(function () {
+        delete searchTimers[key];
         dataPanelSearch(key, box.value);
-    }, SEARCH_TYPING_DELAY_MS));
+    }, SEARCH_TYPING_DELAY_MS);
 }
 
 function dataPanelSearchKey(key, event) {
@@ -661,7 +699,7 @@ function dataPanelSearchKey(key, event) {
     if (event.key === 'Escape' && event.target && event.target.value !== '') {
         event.target.value = '';
         event.preventDefault();
-        clearTimeout(searchTimers.get(key));
+        clearTimeout(searchTimers[key]);
         dataPanelSearch(key, '');
         return;
     }
@@ -669,7 +707,7 @@ function dataPanelSearchKey(key, event) {
     if (event.key !== 'Enter') return;
 
     event.preventDefault();
-    clearTimeout(searchTimers.get(key));
+    clearTimeout(searchTimers[key]);
     dataPanelSearch(key, event.target ? event.target.value : '');
 }
 
@@ -704,7 +742,10 @@ function startsAWord(value, query) {
 // The query arrives already lower-cased and trimmed.
 function prefixMatch(fields, query) {
     if (!query) return true;
-    return fields.some((field) => startsAWord(field, query));
+    for (let i = 0; i < fields.length; i++) {
+        if (startsAWord(fields[i], query)) return true;
+    }
+    return false;
 }
 
 // On an open table this narrows what has arrived. On a closed table it loads

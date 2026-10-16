@@ -47,8 +47,8 @@ function phoneComplaint(value) {
 
   const national = digits.slice(PH_CODE.length);
   if (national.length !== PH_NATIONAL_DIGITS) {
-    return `A Philippine mobile number is ${PH_NATIONAL_DIGITS} digits after +63 ` +
-           `(09XX XXX XXXX). That one has ${national.length}.`;
+    return "A Philippine mobile number is " + PH_NATIONAL_DIGITS + " digits after +63 " +
+           "(09XX XXX XXXX). That one has " + national.length + ".";
   }
   if (national[0] !== "9") {
     return "A Philippine mobile number starts with 09 (or +63 9).";
@@ -60,12 +60,17 @@ function phoneComplaint(value) {
 // the message and a test. The screens show the same list (format.js).
 // It applies when a password is set; passwords already set still sign in.
 const PASSWORD_RULES = [
-  { need: "at least 8 characters", ok: (password) => password.length >= 8 },
-  { need: "an uppercase letter", ok: (password) => /[A-Z]/.test(password) },
-  { need: "a lowercase letter", ok: (password) => /[a-z]/.test(password) },
-  { need: "a number", ok: (password) => /[0-9]/.test(password) },
-  { need: "a symbol such as ! ? - + . $ %", ok: (password) => /[^A-Za-z0-9\s]/.test(password) },
-  { need: "no spaces", ok: (password) => !/\s/.test(password) }
+  { need: "at least 8 characters", ok: function (password) { return password.length >= 8; } },
+  // a letter from A to Z
+  { need: "an uppercase letter", ok: function (password) { return /[A-Z]/.test(password); } },
+  // a letter from a to z
+  { need: "a lowercase letter", ok: function (password) { return /[a-z]/.test(password); } },
+  // a digit from 0 to 9
+  { need: "a number", ok: function (password) { return /[0-9]/.test(password); } },
+  // anything that is not a letter, a digit or white space
+  { need: "a symbol such as ! ? - + . $ %", ok: function (password) { return /[^A-Za-z0-9\s]/.test(password); } },
+  // no space, tab or line break anywhere
+  { need: "no spaces", ok: function (password) { return !/\s/.test(password); } }
 ];
 
 // null when the password follows every rule, otherwise the one sentence the
@@ -76,7 +81,8 @@ function passwordComplaint(password) {
   }
 
   const missing = [];
-  for (const rule of PASSWORD_RULES) {
+  for (let ruleIndex = 0; ruleIndex < PASSWORD_RULES.length; ruleIndex++) {
+    const rule = PASSWORD_RULES[ruleIndex];
     if (!rule.ok(password)) {
       missing.push(rule.need);
     }
@@ -104,18 +110,19 @@ async function findPhoneOwner(phone, staffId) {
   const stored = cleanPhone(phone);
   if (stored === null) return null;   // an empty box has no owner
 
-  const [rows] = await db.query(
-    `SELECT s.full_name, r.role_name FROM staff s
-     JOIN roles r ON r.role_id = s.role_id
-     WHERE s.phone = ? AND s.staff_id <> ?
-     LIMIT 1`,
+  const result = await db.query(
+    "SELECT s.full_name, r.role_name FROM staff s\n" +
+    "     JOIN roles r ON r.role_id = s.role_id\n" +
+    "     WHERE s.phone = ? AND s.staff_id <> ?\n" +
+    "     LIMIT 1",
     [stored, Number(staffId) || 0]);
+  const rows = result[0];
   return rows[0] || null;
 }
 
 // the sentence for a refused phone number; owner comes from findPhoneOwner
 function phoneTakenMessage(owner) {
-  return `That phone number is already used by ${owner.full_name} (${owner.role_name}). ` +
+  return "That phone number is already used by " + owner.full_name + " (" + owner.role_name + "). " +
          "Each staff account needs its own phone number.";
 }
 
@@ -138,7 +145,7 @@ function nameComplaint(label, value) {
   const name = String(value || "").trim().replace(/\s+/g, " ");
   if (name === "") return null;   // a required name is checked as missing elsewhere
   if (!/^[\p{L}\p{M}]+( [\p{L}\p{M}]+)*$/u.test(name)) {
-    return `${label} can only have letters (accents like é and ñ are fine). No numbers or symbols.`;
+    return label + " can only have letters (accents like é and ñ are fine). No numbers or symbols.";
   }
   return null;
 }
@@ -168,8 +175,8 @@ function tinComplaint(value) {
   if (digits.length !== TIN_BASE_DIGITS &&
       digits.length !== TIN_BASE_DIGITS + 3 &&
       digits.length !== TIN_BASE_DIGITS + TIN_BRANCH_DIGITS) {
-    return `A TIN is ${TIN_BASE_DIGITS} digits and a branch code, written ` +
-           `000-000-000-00000. That one has ${digits.length} digits.`;
+    return "A TIN is " + TIN_BASE_DIGITS + " digits and a branch code, written " +
+           "000-000-000-00000. That one has " + digits.length + " digits.";
   }
   // the first nine digits are all zeros
   if (/^0+$/.test(digits.slice(0, TIN_BASE_DIGITS))) {
@@ -185,10 +192,17 @@ function cleanTin(value) {
   const base = digits.slice(0, TIN_BASE_DIGITS);
   const branch = digits.slice(TIN_BASE_DIGITS).padStart(TIN_BRANCH_DIGITS, "0");
   const whole = base + branch;
-  return `${whole.slice(0, 3)}-${whole.slice(3, 6)}-${whole.slice(6, 9)}-${whole.slice(9)}`;
+  return whole.slice(0, 3) + "-" + whole.slice(3, 6) + "-" + whole.slice(6, 9) + "-" + whole.slice(9);
 }
 
 module.exports = {
-  phoneComplaint, passwordComplaint, cleanPhone, findPhoneOwner, phoneTakenMessage,
-  cleanMiddleName, nameComplaint, tinComplaint, cleanTin
+  phoneComplaint: phoneComplaint,
+  passwordComplaint: passwordComplaint,
+  cleanPhone: cleanPhone,
+  findPhoneOwner: findPhoneOwner,
+  phoneTakenMessage: phoneTakenMessage,
+  cleanMiddleName: cleanMiddleName,
+  nameComplaint: nameComplaint,
+  tinComplaint: tinComplaint,
+  cleanTin: cleanTin
 };

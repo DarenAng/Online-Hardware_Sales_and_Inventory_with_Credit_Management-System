@@ -131,8 +131,8 @@ function whenText(stamp) {
 // Example: sumOf([{ amount: 5 }, { amount: 7 }], 'amount') -> 12
 function sumOf(rows, field) {
     let total = 0;
-    for (const row of rows) {
-        total = total + (Number(row[field]) || 0);
+    for (let i = 0; i < rows.length; i++) {
+        total = total + (Number(rows[i][field]) || 0);
     }
     return total;
 }
@@ -141,7 +141,8 @@ function sumOf(rows, field) {
 // nails) counts as 1 piece; anything else counts its quantity.
 function pieceCount(items) {
     let pieces = 0;
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
         if (isMeasuredUnit(item.unit_name)) {
             pieces = pieces + 1;
         } else {
@@ -432,9 +433,9 @@ function receiptHeadHtml(shop, taxRegistration, receiptNo) {
         html += '<span class="rc-addr">' + escapeHtml(store.address) + '</span>';
     }
     html += '<span class="rc-addr">' + tinLabel + ': ' + escapeHtml(store.tin || '') + '</span>';
-    layout.headerLines.forEach((line) => {
-        html += '<span class="rc-addr">' + escapeHtml(line) + '</span>';
-    });
+    for (let i = 0; i < layout.headerLines.length; i++) {
+        html += '<span class="rc-addr">' + escapeHtml(layout.headerLines[i]) + '</span>';
+    }
     if (layout.title) html += '<span class="rc-line">' + escapeHtml(layout.title) + '</span>';
     html += '<span class="rc-no">' + escapeHtml(receiptNo) + '</span>';
     html += '</div>';
@@ -451,28 +452,44 @@ function receiptHtml(shop, parts) {
     const layout = receiptLayoutOf(store);
     const metaSwitch = { cashier: 'cashier', customer: 'customer', payment: 'payment', reference: 'reference' };
 
-    const meta = (parts.meta || []).filter((row) =>
-        row.value !== null && row.value !== undefined && row.value !== '' &&
-        (!metaSwitch[row.key] || receiptShows(layout, metaSwitch[row.key])));
+    // the details rows that have a value and are switched on
+    const allMeta = parts.meta || [];
+    const meta = [];
+    for (let i = 0; i < allMeta.length; i++) {
+        const row = allMeta[i];
+        if (row.value !== null && row.value !== undefined && row.value !== '' &&
+            (!metaSwitch[row.key] || receiptShows(layout, metaSwitch[row.key]))) {
+            meta.push(row);
+        }
+    }
 
     let html = receiptHeadHtml(store, parts.registration, parts.receiptNo);
 
     if (meta.length > 0) {
-        html += '<div class="rc-meta">' + meta.map((row) =>
-            '<span>' + escapeHtml(row.label) + '</span><span>' + escapeHtml(row.value) + '</span>').join('') + '</div>';
+        let metaHtml = '';
+        for (let i = 0; i < meta.length; i++) {
+            metaHtml += '<span>' + escapeHtml(meta[i].label) + '</span><span>' + escapeHtml(meta[i].value) + '</span>';
+        }
+        html += '<div class="rc-meta">' + metaHtml + '</div>';
+    }
+
+    // the totals lines
+    const totals = parts.totals || [];
+    let totalsHtml = '';
+    for (let i = 0; i < totals.length; i++) {
+        const row = totals[i];
+        let label = escapeHtml(row.label);
+        if (row.due && receiptShows(layout, 'item_count') && parts.itemCount) {
+            label += ' (' + escapeHtml(parts.itemCount) + ')';
+        }
+        totalsHtml += '<div' + (row.due ? ' class="rc-due"' : '') + '><span>' + label + '</span><span>' +
+            row.value + '</span></div>';
     }
 
     html += '<div class="rc-rule"></div>' +
         '<table class="rc-items"><tbody>' + (parts.itemsHtml || '') + '</tbody></table>' +
         '<div class="rc-rule"></div>' +
-        '<div class="rc-totals">' + (parts.totals || []).map((row) => {
-            let label = escapeHtml(row.label);
-            if (row.due && receiptShows(layout, 'item_count') && parts.itemCount) {
-                label += ' (' + escapeHtml(parts.itemCount) + ')';
-            }
-            return '<div' + (row.due ? ' class="rc-due"' : '') + '><span>' + label + '</span><span>' +
-                row.value + '</span></div>';
-        }).join('') + '</div>';
+        '<div class="rc-totals">' + totalsHtml + '</div>';
 
     if (parts.taxHtml && receiptShows(layout, 'tax')) {
         html += '<div class="rc-rule"></div>' + parts.taxHtml;
@@ -486,9 +503,9 @@ function receiptHtml(shop, parts) {
     if (store.invoice_note && receiptShows(layout, 'note')) {
         html += '<p class="rc-note">' + escapeHtml(store.invoice_note) + '</p>';
     }
-    layout.footerLines.forEach((line) => {
-        html += '<p class="rc-thanks">' + escapeHtml(line) + '</p>';
-    });
+    for (let i = 0; i < layout.footerLines.length; i++) {
+        html += '<p class="rc-thanks">' + escapeHtml(layout.footerLines[i]) + '</p>';
+    }
     return html;
 }
 
@@ -499,12 +516,14 @@ function receiptHtml(shop, parts) {
 //   <ul class="password-rules" data-rules-for="the-box-id"></ul>
 // ==========================================
 const PASSWORD_RULES = [
-    { need: 'at least 8 characters', ok: (password) => password.length >= 8 },
-    { need: 'an uppercase letter', ok: (password) => /[A-Z]/.test(password) },
-    { need: 'a lowercase letter', ok: (password) => /[a-z]/.test(password) },
-    { need: 'a number', ok: (password) => /[0-9]/.test(password) },
-    { need: 'a symbol such as ! ? - + . $ %', ok: (password) => /[^A-Za-z0-9\s]/.test(password) },
-    { need: 'no spaces', ok: (password) => !/\s/.test(password) }
+    // each rule: the words shown, and a test that says whether the password follows it
+    { need: 'at least 8 characters', ok: function (password) { return password.length >= 8; } },
+    { need: 'an uppercase letter', ok: function (password) { return /[A-Z]/.test(password); } },
+    { need: 'a lowercase letter', ok: function (password) { return /[a-z]/.test(password); } },
+    { need: 'a number', ok: function (password) { return /[0-9]/.test(password); } },
+    // anything that is not a letter, a digit or a space
+    { need: 'a symbol such as ! ? - + . $ %', ok: function (password) { return /[^A-Za-z0-9\s]/.test(password); } },
+    { need: 'no spaces', ok: function (password) { return !/\s/.test(password); } }
 ];
 
 // null when the password follows every rule, otherwise the one sentence to show
@@ -513,9 +532,9 @@ function passwordComplaint(password) {
     if (text === '') return 'Type a password.';
 
     const missing = [];
-    for (const rule of PASSWORD_RULES) {
-        if (!rule.ok(text)) {
-            missing.push(rule.need);
+    for (let i = 0; i < PASSWORD_RULES.length; i++) {
+        if (!PASSWORD_RULES[i].ok(text)) {
+            missing.push(PASSWORD_RULES[i].need);
         }
     }
 
@@ -525,16 +544,21 @@ function passwordComplaint(password) {
 
 // draws every checklist on the page; a rule that is met gets a tick and turns green
 function showPasswordRules() {
-    document.querySelectorAll('ul[data-rules-for]').forEach((list) => {
+    const lists = document.querySelectorAll('ul[data-rules-for]');
+    for (let i = 0; i < lists.length; i++) {
+        const list = lists[i];
         const box = document.getElementById(list.getAttribute('data-rules-for'));
         const typed = box ? box.value : '';
 
-        list.innerHTML = PASSWORD_RULES.map((rule) => {
+        let rulesHtml = '';
+        for (let r = 0; r < PASSWORD_RULES.length; r++) {
+            const rule = PASSWORD_RULES[r];
             const met = typed !== '' && rule.ok(typed);
             const words = rule.need.charAt(0).toUpperCase() + rule.need.slice(1);
-            return '<li class="' + (met ? 'is-met' : '') + '">' + escapeHtml(words) + '</li>';
-        }).join('');
-    });
+            rulesHtml += '<li class="' + (met ? 'is-met' : '') + '">' + escapeHtml(words) + '</li>';
+        }
+        list.innerHTML = rulesHtml;
+    }
 }
 
 // the checklist follows the box as it is typed in

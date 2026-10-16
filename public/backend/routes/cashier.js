@@ -5,7 +5,7 @@
 // Routes in this file:
 //   GET   /api/sales                       the list of sales, with filters (a cashier gets only their own); days=3 for the past three days
 //   POST  /api/sales                       ring up a new sale
-//   POST  /api/deliveries                  book a delivery for a sale
+//   POST  /api/deliveries                  create a delivery for a sale
 //   PATCH /api/deliveries/:id/status       move a delivery to its next status
 //   GET   /api/sales/undelivered           sales that have no delivery yet
 //   GET   /api/cashier/summary             the cashier's end-of-shift numbers
@@ -41,10 +41,16 @@ const ALL_DELIVERY_STATUSES = Object.keys(NEXT_DELIVERY_STATUS);
 const QR_METHODS = ["GCash", "PayMaya"];
 
 function registerCashierRoutes(app, deps) {
-  const {
-    db, getActorId, DRIVER, CASHIER, isDateText, SALE_CUSTOMER_SQL,
-    phoneComplaint, cleanPhone, qrPayments, readDeliveryAreas
-  } = deps;
+  const db = deps.db;
+  const getActorId = deps.getActorId;
+  const DRIVER = deps.DRIVER;
+  const CASHIER = deps.CASHIER;
+  const isDateText = deps.isDateText;
+  const SALE_CUSTOMER_SQL = deps.SALE_CUSTOMER_SQL;
+  const phoneComplaint = deps.phoneComplaint;
+  const cleanPhone = deps.cleanPhone;
+  const qrPayments = deps.qrPayments;
+  const readDeliveryAreas = deps.readDeliveryAreas;
 
   // ==========================================
   // THE SALES LIST
@@ -52,25 +58,23 @@ function registerCashierRoutes(app, deps) {
   // Two derived filters: PAYMENT GROUP (the four electronic methods answer as
   // one) and TRANSACTION STATUS, which is not payment_status:
   //   Voided           archived; it did not happen
-  //   Pending Delivery goods booked out and not yet arrived
+  //   Pending Delivery goods sent out for delivery and not yet arrived
   //   Partial Credit   money still owed
   //   Completed        paid, and collected or delivered
   // ==========================================
-  const SALE_STATUS_SQL = `
-  CASE
-    WHEN s.is_archived = TRUE THEN 'Voided'
-    WHEN d.delivery_id IS NOT NULL AND d.status <> 'Delivered' THEN 'Pending Delivery'
-    WHEN s.payment_status <> 'Paid' THEN 'Partial Credit'
-    ELSE 'Completed'
-  END`;
+  const SALE_STATUS_SQL = "\n  CASE\n" +
+    "    WHEN s.is_archived = TRUE THEN 'Voided'\n" +
+    "    WHEN d.delivery_id IS NOT NULL AND d.status <> 'Delivered' THEN 'Pending Delivery'\n" +
+    "    WHEN s.payment_status <> 'Paid' THEN 'Partial Credit'\n" +
+    "    ELSE 'Completed'\n" +
+    "  END";
 
-  const PAYMENT_GROUP_SQL = `
-  CASE
-    WHEN s.payment_method IN ('GCash','PayMaya','PayPal','Bank Transfer') THEN 'Online Payment'
-    ELSE s.payment_method
-  END`;
+  const PAYMENT_GROUP_SQL = "\n  CASE\n" +
+    "    WHEN s.payment_method IN ('GCash','PayMaya','PayPal','Bank Transfer') THEN 'Online Payment'\n" +
+    "    ELSE s.payment_method\n" +
+    "  END";
 
-  app.get("/api/sales", async (request, response) => {
+  app.get("/api/sales", async function (request, response) {
     const method = String(request.query.method || "all");
     const status = String(request.query.status || "all");
     const from = String(request.query.from || "");
@@ -106,12 +110,12 @@ function registerCashierRoutes(app, deps) {
     }
 
     if (method !== "all") {
-      where.push(`${PAYMENT_GROUP_SQL} = ?`);
+      where.push(PAYMENT_GROUP_SQL + " = ?");
       params.push(method);
     }
 
     if (status !== "all" && status !== "Voided") {
-      where.push(`${SALE_STATUS_SQL} = ?`);
+      where.push(SALE_STATUS_SQL + " = ?");
       params.push(status);
     }
 
@@ -132,12 +136,12 @@ function registerCashierRoutes(app, deps) {
     }
     if (future) {
       return response.status(400).json({
-        error: `Sales only go up to today (${today}); ${future} has not happened yet.`
+        error: "Sales only go up to today (" + today + "); " + future + " has not happened yet."
       });
     }
 
-    if (isDateText(from)) { where.push("s.sale_date >= ?"); params.push(`${from} 00:00:00`); }
-    if (isDateText(to))   { where.push("s.sale_date <= ?"); params.push(`${to} 23:59:59`); }
+    if (isDateText(from)) { where.push("s.sale_date >= ?"); params.push(from + " 00:00:00"); }
+    if (isDateText(to))   { where.push("s.sale_date <= ?"); params.push(to + " 23:59:59"); }
 
     // days=3 means today and the two days before it. CURDATE() is the
     // database's own date, so the days follow the time zone the server set.
@@ -147,25 +151,26 @@ function registerCashierRoutes(app, deps) {
     }
 
     try {
-      const [rows] = await db.query(
-        `SELECT s.sale_id, s.sale_date, s.total_amount, s.discount, s.final_amount,
-              s.amount_paid, s.change_given, s.payment_method, s.payment_status, s.reference_no,
-              s.cashier_staff_id, s.is_archived, s.refunded_amount,
-              GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due,
-              ${PAYMENT_GROUP_SQL} AS payment_group,
-              ${SALE_STATUS_SQL} AS transaction_status,
-              d.delivery_id, d.status AS delivery_status,
-              ${SALE_CUSTOMER_SQL} AS customer_name,
-              st.full_name AS cashier_name,
-              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.sale_id) AS item_count
-       FROM sales s
-       LEFT JOIN customers c ON c.customer_id = s.customer_id
-       JOIN staff st ON st.staff_id = s.cashier_staff_id
-       LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE
-       WHERE ${where.join(" AND ")}
-       ORDER BY s.sale_date DESC, s.sale_id DESC`,
+      const rowsResult = await db.query(
+        "SELECT s.sale_id, s.sale_date, s.total_amount, s.discount, s.final_amount,\n" +
+          "              s.amount_paid, s.change_given, s.payment_method, s.payment_status, s.reference_no,\n" +
+          "              s.cashier_staff_id, s.is_archived, s.refunded_amount,\n" +
+          "              GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due,\n" +
+          "              " + PAYMENT_GROUP_SQL + " AS payment_group,\n" +
+          "              " + SALE_STATUS_SQL + " AS transaction_status,\n" +
+          "              d.delivery_id, d.status AS delivery_status,\n" +
+          "              " + SALE_CUSTOMER_SQL + " AS customer_name,\n" +
+          "              st.full_name AS cashier_name,\n" +
+          "              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.sale_id) AS item_count\n" +
+          "       FROM sales s\n" +
+          "       LEFT JOIN customers c ON c.customer_id = s.customer_id\n" +
+          "       JOIN staff st ON st.staff_id = s.cashier_staff_id\n" +
+          "       LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE\n" +
+          "       WHERE " + where.join(" AND ") + "\n" +
+          "       ORDER BY s.sale_date DESC, s.sale_id DESC",
         params
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Sales list failed:", error.message);
@@ -187,9 +192,16 @@ function registerCashierRoutes(app, deps) {
   // Ring up a sale. The procedure deducts stock, checks the limit and standing,
   // and decides paid, part paid or on the book. downPaymentMethod is how the
   // money on a Credit sale actually arrived.
-  app.post("/api/sales", async (request, response) => {
-    const { customerId, walkInName, discount, amountPaid, paymentMethod, items, downPaymentMethod, referenceNo,
-            qrPaymentId } = request.body;
+  app.post("/api/sales", async function (request, response) {
+    const customerId = request.body.customerId;
+    const walkInName = request.body.walkInName;
+    const discount = request.body.discount;
+    const amountPaid = request.body.amountPaid;
+    const paymentMethod = request.body.paymentMethod;
+    const items = request.body.items;
+    const downPaymentMethod = request.body.downPaymentMethod;
+    const referenceNo = request.body.referenceNo;
+    const qrPaymentId = request.body.qrPaymentId;
 
     if (!paymentMethod || !Array.isArray(items) || items.length === 0) {
       return response.status(400).json({ error: "A payment method and at least one item are required" });
@@ -211,7 +223,7 @@ function registerCashierRoutes(app, deps) {
     }
     if (typedName !== "" && !customerId) {
       return response.status(400).json({
-        error: `"${typedName.slice(0, 80)}" is not a customer on the books. ` +
+        error: "\"" + typedName.slice(0, 80) + "\" is not a customer on the books. " +
                "Add them under Customers Record first, then pick them from the list " +
                "(or leave the customer empty for a walk-in)."
       });
@@ -245,9 +257,9 @@ function registerCashierRoutes(app, deps) {
     }
 
     if (REFERENCE_REQUIRED.includes(takenNow) && reference === "") {
-      let what = `A ${takenNow.toLowerCase()} sale`;
+      let what = "A " + takenNow.toLowerCase() + " sale";
       if (paymentMethod === "Credit") {
-        what = `The part payment is by ${takenNow.toLowerCase()}, so it`;
+        what = "The part payment is by " + takenNow.toLowerCase() + ", so it";
       }
 
       let whichNumber = "transfer reference from the bank";
@@ -256,7 +268,7 @@ function registerCashierRoutes(app, deps) {
       }
 
       return response.status(400).json({
-        error: `${what} needs its reference: the ${whichNumber}. ` +
+        error: what + " needs its reference: the " + whichNumber + ". " +
                "It is how the money is traced if it does not arrive."
       });
     }
@@ -353,22 +365,23 @@ function registerCashierRoutes(app, deps) {
       return match[1] + " " + match[2] + seconds;
     }
 
-    if (isDateText(text)) return `${text} 00:00:00`;
+    if (isDateText(text)) return text + " 00:00:00";
 
     return null;
   }
 
-  // the drivers a cashier can hand a delivery to at booking time
-  app.get("/api/deliveries/drivers", async (request, response) => {
+  // the drivers a cashier can hand a delivery to when creating it
+  app.get("/api/deliveries/drivers", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT st.staff_id, st.full_name
-       FROM staff st
-       JOIN roles r ON r.role_id = st.role_id
-       WHERE r.role_name = ? AND st.is_active = TRUE AND st.archived_at IS NULL
-       ORDER BY st.full_name`,
+      const rowsResult = await db.query(
+        "SELECT st.staff_id, st.full_name\n" +
+          "       FROM staff st\n" +
+          "       JOIN roles r ON r.role_id = st.role_id\n" +
+          "       WHERE r.role_name = ? AND st.is_active = TRUE AND st.archived_at IS NULL\n" +
+          "       ORDER BY st.full_name",
         [DRIVER]
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Drivers list failed:", error.message);
@@ -376,8 +389,14 @@ function registerCashierRoutes(app, deps) {
     }
   });
 
-  app.post("/api/deliveries", async (request, response) => {
-    const { saleId, area, street, scheduledDate, remarks, contactName, contactPhone } = request.body;
+  app.post("/api/deliveries", async function (request, response) {
+    const saleId = request.body.saleId;
+    const area = request.body.area;
+    const street = request.body.street;
+    const scheduledDate = request.body.scheduledDate;
+    const remarks = request.body.remarks;
+    const contactName = request.body.contactName;
+    const contactPhone = request.body.contactPhone;
     // optional: empty leaves the delivery open for any driver to take
     const driverId = request.body.driverStaffId ? Number(request.body.driverStaffId) : null;
 
@@ -421,7 +440,14 @@ function registerCashierRoutes(app, deps) {
         });
       }
       const wantedArea = String(area || "").trim().toLowerCase();
-      const listedArea = savedAreas.find((saved) => saved.trim().toLowerCase() === wantedArea);
+      // the saved area that matches what was typed (ignoring case), if any
+      let listedArea;
+      for (let areaIndex = 0; areaIndex < savedAreas.length; areaIndex++) {
+        if (savedAreas[areaIndex].trim().toLowerCase() === wantedArea) {
+          listedArea = savedAreas[areaIndex];
+          break;
+        }
+      }
       if (!listedArea) {
         return response.status(400).json({ error: "Choose a delivery area from the list." });
       }
@@ -431,30 +457,35 @@ function registerCashierRoutes(app, deps) {
       // the street first, then the area, as one line of text
       const address = streetText + ", " + listedArea;
 
-      // checked before booking, so a bad pick never leaves a half-made delivery
+      // checked before the delivery is made, so a bad pick never leaves a half-made delivery
       let driverName = null;
       if (driverId) {
-        const [drivers] = await db.query(
-          `SELECT st.full_name FROM staff st
-         JOIN roles r ON r.role_id = st.role_id
-         WHERE st.staff_id = ? AND r.role_name = ? AND st.is_active = TRUE AND st.archived_at IS NULL`,
+        const driversResult = await db.query(
+          "SELECT st.full_name FROM staff st\n" +
+            "         JOIN roles r ON r.role_id = st.role_id\n" +
+            "         WHERE st.staff_id = ? AND r.role_name = ? AND st.is_active = TRUE AND st.archived_at IS NULL",
           [driverId, DRIVER]
         );
+        const drivers = driversResult[0];
         if (drivers.length === 0) {
           return response.status(400).json({ error: "That driver is not an active delivery staff member." });
         }
         driverName = drivers[0].full_name;
       }
 
-      // booked on the day the order was taken: the sale's own date
-      const [saleRows] = await db.query(
+      // dated the day the order was taken: the sale's own date
+      const saleRowsResult = await db.query(
         "SELECT DATE_FORMAT(sale_date, '%Y-%m-%d') AS sale_day FROM sales WHERE sale_id = ?",
         [saleId]
       );
-      const booked = saleRows.length > 0 ? saleRows[0].sale_day : null;
+      const saleRows = saleRowsResult[0];
+      let orderDay = null;
+      if (saleRows.length > 0) {
+        orderDay = saleRows[0].sale_day;
+      }
 
       const output = await cashierProcedures.createDelivery(
-        [saleId, address, scheduled, remarks || null, contact, phone, booked, getActorId(request), driverId]
+        [saleId, address, scheduled, remarks || null, contact, phone, orderDay, getActorId(request), driverId]
       );
 
       if (output.status_code !== 201) {
@@ -466,8 +497,8 @@ function registerCashierRoutes(app, deps) {
 
       response.json({
         message: driverId
-          ? `Delivery #${output.delivery_id} created and assigned to ${driverName}.`
-          : `Delivery #${output.delivery_id} created.`,
+          ? "Delivery #" + output.delivery_id + " created and assigned to " + driverName + "."
+          : "Delivery #" + output.delivery_id + " created.",
         deliveryId: output.delivery_id
       });
     } catch (error) {
@@ -477,8 +508,9 @@ function registerCashierRoutes(app, deps) {
   });
 
   // The one route that moves a delivery; the procedure decides what each role may do.
-  app.patch("/api/deliveries/:deliveryId/status", async (request, response) => {
-    const { status, remarks } = request.body;
+  app.patch("/api/deliveries/:deliveryId/status", async function (request, response) {
+    const status = request.body.status;
+    const remarks = request.body.remarks;
     const actor = request.actor;
 
     if (!status) {
@@ -491,10 +523,11 @@ function registerCashierRoutes(app, deps) {
     }
 
     try {
-      const [rows] = await db.query(
+      const rowsResult = await db.query(
         "SELECT status, delivery_staff_id FROM deliveries WHERE delivery_id = ? AND is_archived = FALSE",
         [request.params.deliveryId]
       );
+      const rows = rowsResult[0];
       if (rows.length === 0) {
         return response.status(404).json({ error: "Delivery not found" });
       }
@@ -517,8 +550,8 @@ function registerCashierRoutes(app, deps) {
       if (nextSteps && nextSteps.length > 0 && status !== delivery.status
           && ALL_DELIVERY_STATUSES.includes(status) && !nextSteps.includes(status)) {
         return response.status(400).json({
-          error: `A delivery cannot go from ${delivery.status} to ${status}. ` +
-                 `From ${delivery.status} it can go to: ${nextSteps.join(", ")}.`
+          error: "A delivery cannot go from " + delivery.status + " to " + status + ". " +
+                 "From " + delivery.status + " it can go to: " + nextSteps.join(", ") + "."
         });
       }
 
@@ -537,19 +570,20 @@ function registerCashierRoutes(app, deps) {
     }
   });
 
-  app.get("/api/sales/undelivered", async (request, response) => {
+  app.get("/api/sales/undelivered", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT s.sale_id, s.final_amount, s.sale_date, s.payment_method,
-              ${SALE_CUSTOMER_SQL} AS customer_name,
-              COALESCE(c.address, '') AS customer_address
-       FROM sales s
-       LEFT JOIN customers c ON c.customer_id = s.customer_id
-       LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE
-       WHERE s.is_archived = FALSE AND d.delivery_id IS NULL
-       ORDER BY s.sale_id DESC
-       LIMIT 60`
+      const rowsResult = await db.query(
+        "SELECT s.sale_id, s.final_amount, s.sale_date, s.payment_method,\n" +
+          "              " + SALE_CUSTOMER_SQL + " AS customer_name,\n" +
+          "              COALESCE(c.address, '') AS customer_address\n" +
+          "       FROM sales s\n" +
+          "       LEFT JOIN customers c ON c.customer_id = s.customer_id\n" +
+          "       LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE\n" +
+          "       WHERE s.is_archived = FALSE AND d.delivery_id IS NULL\n" +
+          "       ORDER BY s.sale_id DESC\n" +
+          "       LIMIT 60"
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Undelivered sales failed:", error.message);
@@ -559,7 +593,7 @@ function registerCashierRoutes(app, deps) {
 
   // End of shift: one cashier, one day (today by default), every figure bounded
   // by DATE(sale_date). Refunds come back line by line.
-  app.get("/api/cashier/summary", async (request, response) => {
+  app.get("/api/cashier/summary", async function (request, response) {
     // the session's shift, always; a staff id in the URL is ignored
     const staffId = request.actor.staffId;
 
@@ -570,59 +604,64 @@ function registerCashierRoutes(app, deps) {
     }
 
     try {
-      const [totalRows] = await db.query(
+      const totalRowsResult = await db.query(
         // collected is what stayed in the drawer, not amount_paid (which includes the note they broke)
-        `SELECT COUNT(*) AS sale_count,
-              COALESCE(SUM(final_amount), 0) AS gross,
-              COALESCE(SUM(discount), 0) AS discounts,
-              COALESCE(SUM(LEAST(amount_paid, final_amount)), 0) AS collected
-       FROM sales
-       WHERE cashier_staff_id = ? AND is_archived = FALSE
-         AND DATE(sale_date) = COALESCE(?, CURDATE())`,
+        "SELECT COUNT(*) AS sale_count,\n" +
+          "              COALESCE(SUM(final_amount), 0) AS gross,\n" +
+          "              COALESCE(SUM(discount), 0) AS discounts,\n" +
+          "              COALESCE(SUM(LEAST(amount_paid, final_amount)), 0) AS collected\n" +
+          "       FROM sales\n" +
+          "       WHERE cashier_staff_id = ? AND is_archived = FALSE\n" +
+          "         AND DATE(sale_date) = COALESCE(?, CURDATE())",
         [staffId, day]
       );
+      const totalRows = totalRowsResult[0];
       const totals = totalRows[0];
 
-      const [methods] = await db.query(
-        `SELECT payment_method, COUNT(*) AS sale_count, COALESCE(SUM(final_amount), 0) AS total_amount
-       FROM sales
-       WHERE cashier_staff_id = ? AND is_archived = FALSE
-         AND DATE(sale_date) = COALESCE(?, CURDATE())
-       GROUP BY payment_method
-       ORDER BY total_amount DESC`,
+      const methodsResult = await db.query(
+        "SELECT payment_method, COUNT(*) AS sale_count, COALESCE(SUM(final_amount), 0) AS total_amount\n" +
+          "       FROM sales\n" +
+          "       WHERE cashier_staff_id = ? AND is_archived = FALSE\n" +
+          "         AND DATE(sale_date) = COALESCE(?, CURDATE())\n" +
+          "       GROUP BY payment_method\n" +
+          "       ORDER BY total_amount DESC",
         [staffId, day]
       );
+      const methods = methodsResult[0];
 
-      const [refundRows] = await db.query(
-        `SELECT COUNT(*) AS refund_count, COALESCE(SUM(refund_amount), 0) AS refund_total,
-              COALESCE(SUM(quantity), 0) AS refund_items
-       FROM returned_items
-       WHERE reported_by_staff_id = ? AND report_type = 'Refunded'
-         AND DATE(return_date) = COALESCE(?, CURDATE())`,
+      const refundRowsResult = await db.query(
+        "SELECT COUNT(*) AS refund_count, COALESCE(SUM(refund_amount), 0) AS refund_total,\n" +
+          "              COALESCE(SUM(quantity), 0) AS refund_items\n" +
+          "       FROM returned_items\n" +
+          "       WHERE reported_by_staff_id = ? AND report_type = 'Refunded'\n" +
+          "         AND DATE(return_date) = COALESCE(?, CURDATE())",
         [staffId, day]
       );
+      const refundRows = refundRowsResult[0];
       const refunds = refundRows[0];
 
       // what actually went back, capped
-      const [refundLines] = await db.query(
-        `SELECT r.return_id, r.quantity, r.refund_amount, r.reason, r.disposition,
-              r.return_date, r.sale_id,
-              p.product_name, u.unit_name,
-              CASE WHEN r.quantity > 0 THEN r.refund_amount / r.quantity ELSE r.refund_amount END
-                AS unit_refund
-       FROM returned_items r
-       JOIN products p ON p.product_id = r.product_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       WHERE r.reported_by_staff_id = ? AND r.report_type = 'Refunded'
-         AND DATE(r.return_date) = COALESCE(?, CURDATE())
-       ORDER BY r.return_date DESC
-       LIMIT 100`,
+      const refundLinesResult = await db.query(
+        "SELECT r.return_id, r.quantity, r.refund_amount, r.reason, r.disposition,\n" +
+          "              r.return_date, r.sale_id,\n" +
+          "              p.product_name, u.unit_name,\n" +
+          "              CASE WHEN r.quantity > 0 THEN r.refund_amount / r.quantity ELSE r.refund_amount END\n" +
+          "                AS unit_refund\n" +
+          "       FROM returned_items r\n" +
+          "       JOIN products p ON p.product_id = r.product_id\n" +
+          "       LEFT JOIN units u ON u.unit_id = p.unit_id\n" +
+          "       WHERE r.reported_by_staff_id = ? AND r.report_type = 'Refunded'\n" +
+          "         AND DATE(r.return_date) = COALESCE(?, CURDATE())\n" +
+          "       ORDER BY r.return_date DESC\n" +
+          "       LIMIT 100",
         [staffId, day]
       );
+      const refundLines = refundLinesResult[0];
 
-      const [stampRows] = await db.query(
+      const stampRowsResult = await db.query(
         "SELECT COALESCE(?, CURDATE()) AS day", [day]
       );
+      const stampRows = stampRowsResult[0];
       const stamp = stampRows[0];
 
       response.json({
@@ -644,18 +683,19 @@ function registerCashierRoutes(app, deps) {
     }
   });
 
-  app.get("/api/sales/:saleId", async (request, response) => {
+  app.get("/api/sales/:saleId", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT s.*, ${SALE_CUSTOMER_SQL} AS customer_name,
-              c.phone AS customer_phone, c.address AS customer_address,
-              st.full_name AS cashier_name
-       FROM sales s
-       LEFT JOIN customers c ON c.customer_id = s.customer_id
-       JOIN staff st ON st.staff_id = s.cashier_staff_id
-       WHERE s.sale_id = ?`,
+      const rowsResult = await db.query(
+        "SELECT s.*, " + SALE_CUSTOMER_SQL + " AS customer_name,\n" +
+          "              c.phone AS customer_phone, c.address AS customer_address,\n" +
+          "              st.full_name AS cashier_name\n" +
+          "       FROM sales s\n" +
+          "       LEFT JOIN customers c ON c.customer_id = s.customer_id\n" +
+          "       JOIN staff st ON st.staff_id = s.cashier_staff_id\n" +
+          "       WHERE s.sale_id = ?",
         [request.params.saleId]
       );
+      const rows = rowsResult[0];
 
       if (rows.length === 0) {
         return response.status(404).json({ error: "Sale not found" });
@@ -666,49 +706,53 @@ function registerCashierRoutes(app, deps) {
       // refunded_quantity and refunded_amount are what has already been
       // refunded of this product on this sale, counted in base_unit (the
       // Refunds screen shows it beside each line).
-      const [items] = await db.query(
-        `SELECT COALESCE(si.sold_quantity, si.quantity) AS quantity,
-              COALESCE(si.sold_unit, u.unit_name) AS unit_name,
-              si.quantity AS base_quantity, u.unit_name AS base_unit,
-              si.unit_price, si.subtotal, p.product_name, si.product_id,
-              (SELECT COALESCE(SUM(r.quantity), 0) FROM returned_items r
-                WHERE r.sale_id = si.sale_id AND r.product_id = si.product_id
-                  AND r.report_type IN ('Refunded', 'Return')) AS refunded_quantity,
-              (SELECT COALESCE(SUM(r.refund_amount), 0) FROM returned_items r
-                WHERE r.sale_id = si.sale_id AND r.product_id = si.product_id
-                  AND r.report_type IN ('Refunded', 'Return')) AS refunded_amount
-       FROM sale_items si
-       JOIN products p ON p.product_id = si.product_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       WHERE si.sale_id = ?`,
+      const itemsResult = await db.query(
+        "SELECT COALESCE(si.sold_quantity, si.quantity) AS quantity,\n" +
+          "              COALESCE(si.sold_unit, u.unit_name) AS unit_name,\n" +
+          "              si.quantity AS base_quantity, u.unit_name AS base_unit,\n" +
+          "              si.unit_price, si.subtotal, p.product_name, si.product_id,\n" +
+          "              (SELECT COALESCE(SUM(r.quantity), 0) FROM returned_items r\n" +
+          "                WHERE r.sale_id = si.sale_id AND r.product_id = si.product_id\n" +
+          "                  AND r.report_type IN ('Refunded', 'Return')) AS refunded_quantity,\n" +
+          "              (SELECT COALESCE(SUM(r.refund_amount), 0) FROM returned_items r\n" +
+          "                WHERE r.sale_id = si.sale_id AND r.product_id = si.product_id\n" +
+          "                  AND r.report_type IN ('Refunded', 'Return')) AS refunded_amount\n" +
+          "       FROM sale_items si\n" +
+          "       JOIN products p ON p.product_id = si.product_id\n" +
+          "       LEFT JOIN units u ON u.unit_id = p.unit_id\n" +
+          "       WHERE si.sale_id = ?",
         [request.params.saleId]
       );
+      const items = itemsResult[0];
 
-      const [payments] = await db.query(
-        `SELECT cp.amount, cp.payment_method, cp.reference_no, cp.payment_date,
-              st.full_name AS received_by
-       FROM credit_payments cp
-       LEFT JOIN staff st ON st.staff_id = cp.received_by_staff_id
-       WHERE cp.sale_id = ?
-       ORDER BY cp.payment_date`,
+      const paymentsResult = await db.query(
+        "SELECT cp.amount, cp.payment_method, cp.reference_no, cp.payment_date,\n" +
+          "              st.full_name AS received_by\n" +
+          "       FROM credit_payments cp\n" +
+          "       LEFT JOIN staff st ON st.staff_id = cp.received_by_staff_id\n" +
+          "       WHERE cp.sale_id = ?\n" +
+          "       ORDER BY cp.payment_date",
         [request.params.saleId]
       );
+      const payments = paymentsResult[0];
 
-      const [delivery] = await db.query(
-        `SELECT d.delivery_id, d.status, d.delivery_address, d.scheduled_date, d.delivered_at, d.remarks, d.cashier_remarks,
-              st.full_name AS driver_name
-       FROM deliveries d
-       LEFT JOIN staff st ON st.staff_id = d.delivery_staff_id
-       WHERE d.sale_id = ?`,
+      const deliveryResult = await db.query(
+        "SELECT d.delivery_id, d.status, d.delivery_address, d.scheduled_date, d.delivered_at, d.remarks, d.cashier_remarks,\n" +
+          "              st.full_name AS driver_name\n" +
+          "       FROM deliveries d\n" +
+          "       LEFT JOIN staff st ON st.staff_id = d.delivery_staff_id\n" +
+          "       WHERE d.sale_id = ?",
         [request.params.saleId]
       );
+      const delivery = deliveryResult[0];
 
       // the GCash or Maya codes paid towards this sale, with PayMongo's reference
-      const [qrPaid] = await db.query(
-        `SELECT qr_payment_id, status, amount, wallet, purpose, provider, mode, provider_payment_id, paid_at
-         FROM qr_payments WHERE sale_id = ? ORDER BY qr_payment_id`,
+      const qrPaidResult = await db.query(
+        "SELECT qr_payment_id, status, amount, wallet, purpose, provider, mode, provider_payment_id, paid_at\n" +
+          "         FROM qr_payments WHERE sale_id = ? ORDER BY qr_payment_id",
         [request.params.saleId]
       );
+      const qrPaid = qrPaidResult[0];
 
       response.json({ sale: rows[0], items: items, payments: payments, delivery: delivery[0] || null,
                       qrPayments: qrPaid });
@@ -718,8 +762,11 @@ function registerCashierRoutes(app, deps) {
     }
   });
 
-  app.post("/api/sales/:saleId/payment", async (request, response) => {
-    const { amount, paymentMethod, referenceNo, qrPaymentId } = request.body;
+  app.post("/api/sales/:saleId/payment", async function (request, response) {
+    const amount = request.body.amount;
+    const paymentMethod = request.body.paymentMethod;
+    const referenceNo = request.body.referenceNo;
+    const qrPaymentId = request.body.qrPaymentId;
 
     if (!amount || !paymentMethod) {
       return response.status(400).json({ error: "Amount and payment method are required" });
@@ -767,4 +814,4 @@ function registerCashierRoutes(app, deps) {
   });
 }
 
-module.exports = { registerCashierRoutes };
+module.exports = { registerCashierRoutes: registerCashierRoutes };

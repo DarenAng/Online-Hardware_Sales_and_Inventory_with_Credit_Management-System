@@ -101,14 +101,14 @@ function resolveReturnReport(params) {
 }
 
 module.exports = {
-  createMaterial,
-  renameUnit,
-  adjustStock,
-  setReorderPoint,
-  createPurchaseOrder,
-  decidePurchaseOrder,
-  receivePurchaseOrder,
-  fileReturnReport,
-  fileReturnReports,
-  resolveReturnReport
+  createMaterial: createMaterial,
+  renameUnit: renameUnit,
+  adjustStock: adjustStock,
+  setReorderPoint: setReorderPoint,
+  createPurchaseOrder: createPurchaseOrder,
+  decidePurchaseOrder: decidePurchaseOrder,
+  receivePurchaseOrder: receivePurchaseOrder,
+  fileReturnReport: fileReturnReport,
+  fileReturnReports: fileReturnReports,
+  resolveReturnReport: resolveReturnReport
 };

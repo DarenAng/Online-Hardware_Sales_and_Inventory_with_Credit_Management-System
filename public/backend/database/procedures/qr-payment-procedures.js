@@ -29,6 +29,6 @@ function createQrPayment(params) {
 }
 
 module.exports = {
-  setQrPaymentResult,
-  createQrPayment
+  setQrPaymentResult: setQrPaymentResult,
+  createQrPayment: createQrPayment
 };

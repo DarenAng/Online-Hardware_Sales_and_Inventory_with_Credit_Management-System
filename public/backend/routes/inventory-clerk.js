@@ -50,52 +50,65 @@ function looseName(value) {
 // "pieces" read as liter, box, battery and piece.
 function singularName(value) {
   const name = looseName(value);
+  // ends with a consonant + "ies" (batteries -> battery)
   if (/[^aeiou]ies$/.test(name)) return name.slice(0, -3) + "y";
+  // ends with s, x, z, ch or sh + "es" (boxes -> box)
   if (/(s|x|z|ch|sh)es$/.test(name)) return name.slice(0, -2);
+  // ends with a single "s" that does not follow another "s" (liters -> liter)
   if (/[^s]s$/.test(name)) return name.slice(0, -1);
   return name;
 }
 
 function registerInventoryRoutes(app, deps) {
-  const {
-    db, getActorId, writeAuditLog, fieldChanges, DEFAULT_STORE_SETTINGS, CASHIER, DRIVER,
-    phoneComplaint, cleanPhone, publishChange
-  } = deps;
+  const db = deps.db;
+  const getActorId = deps.getActorId;
+  const writeAuditLog = deps.writeAuditLog;
+  const fieldChanges = deps.fieldChanges;
+  const DEFAULT_STORE_SETTINGS = deps.DEFAULT_STORE_SETTINGS;
+  const CASHIER = deps.CASHIER;
+  const DRIVER = deps.DRIVER;
+  const phoneComplaint = deps.phoneComplaint;
+  const cleanPhone = deps.cleanPhone;
+  const publishChange = deps.publishChange;
 
   // ==========================================
   // INVENTORY MODULE
   // ==========================================
 
   // headline numbers for the clerk dashboard
-  app.get("/api/inventory/summary", async (request, response) => {
+  app.get("/api/inventory/summary", async function (request, response) {
     try {
-      const [stockRows] = await db.query(
-        `SELECT COUNT(*) AS product_count,
-              COALESCE(SUM(CASE WHEN COALESCE(i.quantity_in_stock, 0) = 0 THEN 1 ELSE 0 END), 0) AS out_of_stock,
-              COALESCE(SUM(CASE WHEN COALESCE(i.quantity_in_stock, 0) > 0
-                                 AND COALESCE(i.quantity_in_stock, 0) <= p.reorder_point THEN 1 ELSE 0 END), 0) AS low_stock,
-              COALESCE(SUM(COALESCE(i.quantity_in_stock, 0) * p.price), 0) AS stock_value
-       FROM products p
-       LEFT JOIN inventory i ON i.product_id = p.product_id
-       WHERE p.is_archived = FALSE`
+      const stockRowsResult = await db.query(
+        "SELECT COUNT(*) AS product_count, " +
+        "COALESCE(SUM(CASE WHEN COALESCE(i.quantity_in_stock, 0) = 0 THEN 1 ELSE 0 END), 0) AS out_of_stock, " +
+        "COALESCE(SUM(CASE WHEN COALESCE(i.quantity_in_stock, 0) > 0 " +
+        "AND COALESCE(i.quantity_in_stock, 0) <= p.reorder_point THEN 1 ELSE 0 END), 0) AS low_stock, " +
+        "COALESCE(SUM(COALESCE(i.quantity_in_stock, 0) * p.price), 0) AS stock_value " +
+        "FROM products p " +
+        "LEFT JOIN inventory i ON i.product_id = p.product_id " +
+        "WHERE p.is_archived = FALSE"
       );
+      const stockRows = stockRowsResult[0];
       const stock = stockRows[0];
-      const [poRows] = await db.query(
-        `SELECT COALESCE(SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END), 0) AS pending_po,
-              COUNT(*) AS total_po
-       FROM purchase_orders`
+      const poRowsResult = await db.query(
+        "SELECT COALESCE(SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END), 0) AS pending_po, " +
+        "COUNT(*) AS total_po " +
+        "FROM purchase_orders"
       );
+      const poRows = poRowsResult[0];
       const po = poRows[0];
-      const [repRows] = await db.query(
-        `SELECT COALESCE(SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END), 0) AS open_reports,
-              COALESCE(SUM(CASE WHEN report_type = 'Damaged' THEN quantity ELSE 0 END), 0) AS damaged_units,
-              COALESCE(SUM(refund_amount), 0) AS refunded_total
-       FROM returned_items`
+      const repRowsResult = await db.query(
+        "SELECT COALESCE(SUM(CASE WHEN status = 'Open' THEN 1 ELSE 0 END), 0) AS open_reports, " +
+        "COALESCE(SUM(CASE WHEN report_type = 'Damaged' THEN quantity ELSE 0 END), 0) AS damaged_units, " +
+        "COALESCE(SUM(refund_amount), 0) AS refunded_total " +
+        "FROM returned_items"
       );
+      const repRows = repRowsResult[0];
       const rep = repRows[0];
-      const [archRows] = await db.query(
+      const archRowsResult = await db.query(
         "SELECT COUNT(*) AS archived FROM products WHERE is_archived = TRUE"
       );
+      const archRows = archRowsResult[0];
 
       const arch = archRows[0];
 
@@ -117,44 +130,48 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  app.get("/api/inventory/products", async (request, response) => {
+  app.get("/api/inventory/products", async function (request, response) {
     const archived = request.query.archived === "true";
 
     try {
-      const [rows] = await db.query(
-        `SELECT p.product_id, p.product_name, p.price, p.reorder_point, p.status,
-              p.pack_name, p.pack_size,
-              p.is_archived, p.archived_at, p.created_at,
-              COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock,
-              i.last_updated,
-              c.category_name, b.brand_name, u.unit_name,
-              sup.supplier_id, sup.supplier_name, sup.contact_person, sup.contact_number,
-              NULLIF(TRIM(sup.email), '') AS supplier_email,
-              NULLIF(TRIM(sup.address), '') AS supplier_address,
-              (COALESCE(i.quantity_in_stock, 0) * p.price) AS stock_value,
-              CASE
-                WHEN COALESCE(i.quantity_in_stock, 0) = 0 THEN 'Out of Stock'
-                WHEN COALESCE(i.quantity_in_stock, 0) <= p.reorder_point THEN 'Low Stock'
-                ELSE 'In Stock'
-              END AS stock_status,
-              GREATEST((p.reorder_point * 2) - COALESCE(i.quantity_in_stock, 0), 0) AS suggested_order,
-              COALESCE(ar.full_name, '') AS archived_by,
-              (SELECT JSON_ARRAYAGG(JSON_OBJECT(
-                        'product_unit_id', pu.product_unit_id, 'unit_name', pu.unit_name,
-                        'units_per', pu.units_per, 'price', pu.price))
-               FROM product_units pu WHERE pu.product_id = p.product_id) AS selling_units
-       FROM products p
-       LEFT JOIN inventory i ON i.product_id = p.product_id
-       LEFT JOIN categories c ON c.category_id = p.category_id
-       LEFT JOIN brands b ON b.brand_id = p.brand_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       LEFT JOIN suppliers sup ON sup.supplier_id = p.supplier_id
-       LEFT JOIN staff ar ON ar.staff_id = p.archived_by_staff_id
-       WHERE p.is_archived = ?
-       ORDER BY (COALESCE(i.quantity_in_stock, 0) <= p.reorder_point) DESC, p.product_name`,
+      const rowsResult = await db.query(
+        "SELECT p.product_id, p.product_name, p.price, p.reorder_point, p.status, " +
+        "p.pack_name, p.pack_size, " +
+        "p.is_archived, p.archived_at, p.created_at, " +
+        "COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, " +
+        "i.last_updated, " +
+        "c.category_name, b.brand_name, u.unit_name, " +
+        "sup.supplier_id, sup.supplier_name, sup.contact_person, sup.contact_number, " +
+        "NULLIF(TRIM(sup.email), '') AS supplier_email, " +
+        "NULLIF(TRIM(sup.address), '') AS supplier_address, " +
+        "(COALESCE(i.quantity_in_stock, 0) * p.price) AS stock_value, " +
+        "CASE " +
+        "WHEN COALESCE(i.quantity_in_stock, 0) = 0 THEN 'Out of Stock' " +
+        "WHEN COALESCE(i.quantity_in_stock, 0) <= p.reorder_point THEN 'Low Stock' " +
+        "ELSE 'In Stock' " +
+        "END AS stock_status, " +
+        "GREATEST((p.reorder_point * 2) - COALESCE(i.quantity_in_stock, 0), 0) AS suggested_order, " +
+        "COALESCE(ar.full_name, '') AS archived_by, " +
+        "(SELECT JSON_ARRAYAGG(JSON_OBJECT( " +
+        "'product_unit_id', pu.product_unit_id, 'unit_name', pu.unit_name, " +
+        "'units_per', pu.units_per, 'price', pu.price)) " +
+        "FROM product_units pu WHERE pu.product_id = p.product_id) AS selling_units " +
+        "FROM products p " +
+        "LEFT JOIN inventory i ON i.product_id = p.product_id " +
+        "LEFT JOIN categories c ON c.category_id = p.category_id " +
+        "LEFT JOIN brands b ON b.brand_id = p.brand_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "LEFT JOIN suppliers sup ON sup.supplier_id = p.supplier_id " +
+        "LEFT JOIN staff ar ON ar.staff_id = p.archived_by_staff_id " +
+        "WHERE p.is_archived = ? " +
+        "ORDER BY (COALESCE(i.quantity_in_stock, 0) <= p.reorder_point) DESC, p.product_name",
         [archived]
       );
-      for (const row of rows) row.selling_units = sellingUnitsOf(row.selling_units);
+      const rows = rowsResult[0];
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        row.selling_units = sellingUnitsOf(row.selling_units);
+      }
       response.json(rows);
     } catch (error) {
       console.error("Inventory products failed:", error.message);
@@ -176,7 +193,8 @@ function registerInventoryRoutes(app, deps) {
     if (!Array.isArray(list)) return [];
 
     const units = [];
-    for (const unit of list) {
+    for (let i = 0; i < list.length; i++) {
+      const unit = list[i];
       let price = null;
       if (unit.price !== null && unit.price !== undefined) {
         price = Number(unit.price);
@@ -203,14 +221,15 @@ function registerInventoryRoutes(app, deps) {
   }
 
   async function listSellingUnits(productId) {
-    const [rows] = await db.query(
-      `SELECT product_unit_id, product_id, unit_name, units_per, price, created_at
-     FROM product_units WHERE product_id = ? ORDER BY units_per, unit_name`,
+    const rowsResult = await db.query(
+      "SELECT product_unit_id, product_id, unit_name, units_per, price, created_at " +
+      "FROM product_units WHERE product_id = ? ORDER BY units_per, unit_name",
       [productId]);
+    const rows = rowsResult[0];
     return rows;
   }
 
-  app.get("/api/inventory/products/:productId/units", async (request, response) => {
+  app.get("/api/inventory/products/:productId/units", async function (request, response) {
     try {
       response.json(await listSellingUnits(request.params.productId));
     } catch (error) {
@@ -222,7 +241,7 @@ function registerInventoryRoutes(app, deps) {
   // Adding a size: the name is trimmed and kept as typed, units_per says how
   // many of the product's own unit it holds, and a blank price means the
   // product's price times units_per. The same name again replaces the row.
-  app.post("/api/inventory/products/:productId/units", async (request, response) => {
+  app.post("/api/inventory/products/:productId/units", async function (request, response) {
     const productId = Number(request.params.productId);
     const body = request.body || {};
     const unitName = String(body.unitName || "").trim().slice(0, 20);
@@ -243,23 +262,24 @@ function registerInventoryRoutes(app, deps) {
     }
 
     try {
-      const [products] = await db.query(
-        `SELECT p.product_id, p.product_name, p.price, u.unit_name
-       FROM products p LEFT JOIN units u ON u.unit_id = p.unit_id
-       WHERE p.product_id = ?`, [productId]);
+      const productsResult = await db.query(
+        "SELECT p.product_id, p.product_name, p.price, u.unit_name " +
+        "FROM products p LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "WHERE p.product_id = ?", [productId]);
+      const products = productsResult[0];
       if (products.length === 0) return response.status(404).json({ error: "That material was not found." });
       const product = products[0];
 
       if (product.unit_name && product.unit_name.toLowerCase() === unitName.toLowerCase()) {
         return response.status(400).json({
-          error: `${product.product_name} is already kept by the ${product.unit_name}; add a bigger size, like box or sack.`
+          error: product.product_name + " is already kept by the " + product.unit_name + "; add a bigger size, like box or sack."
         });
       }
 
       await db.query(
-        `INSERT INTO product_units (product_id, unit_name, units_per, price)
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE units_per = VALUES(units_per), price = VALUES(price)`,
+        "INSERT INTO product_units (product_id, unit_name, units_per, price) " +
+        "VALUES (?, ?, ?, ?) " +
+        "ON DUPLICATE KEY UPDATE units_per = VALUES(units_per), price = VALUES(price)",
         [productId, unitName, unitsPer, price]);
 
       // the price of one of this size (worked out from the unit price when none was given)
@@ -268,11 +288,11 @@ function registerInventoryRoutes(app, deps) {
         each = Math.round(Number(product.price) * unitsPer * 100) / 100;
       }
       await writeAuditLog(request, "UPDATE_SELLING_UNIT",
-        `${product.product_name} sells by the ${unitName}: ${unitsPer} ${product.unit_name || ""} at ${each.toFixed(2)}`,
+        product.product_name + " sells by the " + unitName + ": " + unitsPer + " " + (product.unit_name || "") + " at " + each.toFixed(2),
         { product_id: productId, unit_name: unitName, units_per: unitsPer, price: price });
 
       response.json({
-        message: `${product.product_name} now sells by the ${unitName} (${unitsPer} ${product.unit_name || "units"}).`,
+        message: product.product_name + " now sells by the " + unitName + " (" + unitsPer + " " + (product.unit_name || "units") + ").",
         units: await listSellingUnits(productId)
       });
     } catch (error) {
@@ -283,25 +303,26 @@ function registerInventoryRoutes(app, deps) {
 
   // Sales already written in a size keep their own copy of it (sale_items.sold_unit),
   // so taking a size off the list changes nothing that has been sold.
-  app.delete("/api/inventory/products/:productId/units/:unitId", async (request, response) => {
+  app.delete("/api/inventory/products/:productId/units/:unitId", async function (request, response) {
     const productId = Number(request.params.productId);
     const unitId = Number(request.params.unitId);
 
     try {
-      const [rows] = await db.query(
-        `SELECT pu.unit_name, p.product_name FROM product_units pu
-       JOIN products p ON p.product_id = pu.product_id
-       WHERE pu.product_unit_id = ? AND pu.product_id = ?`, [unitId, productId]);
+      const rowsResult = await db.query(
+        "SELECT pu.unit_name, p.product_name FROM product_units pu " +
+        "JOIN products p ON p.product_id = pu.product_id " +
+        "WHERE pu.product_unit_id = ? AND pu.product_id = ?", [unitId, productId]);
+      const rows = rowsResult[0];
       if (rows.length === 0) return response.status(404).json({ error: "That size is not on the list." });
 
       await db.query("DELETE FROM product_units WHERE product_unit_id = ?", [unitId]);
 
       await writeAuditLog(request, "REMOVE_SELLING_UNIT",
-        `${rows[0].product_name} no longer sells by the ${rows[0].unit_name}`,
+        rows[0].product_name + " no longer sells by the " + rows[0].unit_name,
         { product_id: productId, unit_name: rows[0].unit_name });
 
       response.json({
-        message: `${rows[0].product_name} no longer sells by the ${rows[0].unit_name}.`,
+        message: rows[0].product_name + " no longer sells by the " + rows[0].unit_name + ".",
         units: await listSellingUnits(productId)
       });
     } catch (error) {
@@ -319,13 +340,13 @@ function registerInventoryRoutes(app, deps) {
     const categories = await matchOnFile(
       "SELECT category_name AS name FROM categories", categoryNames);
     if (categories.missing) {
-      return { error: `The category "${categories.missing}" is not on file. Only the manager can add a category; ` +
+      return { error: "The category \"" + categories.missing + "\" is not on file. Only the manager can add a category; " +
                       "pick one on the list, or ask the manager to add it under Records." };
     }
 
     const units = await matchOnFile("SELECT unit_name AS name FROM units", unitNames);
     if (units.missing) {
-      return { error: `The unit "${units.missing}" is not on file. Only the manager can add a unit; ` +
+      return { error: "The unit \"" + units.missing + "\" is not on file. Only the manager can add a unit; " +
                       "pick one on the list, or ask the manager to add it under Records." };
     }
 
@@ -333,24 +354,49 @@ function registerInventoryRoutes(app, deps) {
   }
 
   async function matchOnFile(sql, typedNames) {
-    const typed = typedNames.map((value) => String(value || "").trim()).filter((value) => value !== "");
-    const onFile = new Map();     // what was typed -> the name on file
-    if (typed.length === 0) return { onFile: (value) => value };
+    // the names that were typed, trimmed, with the blanks left out
+    const typed = [];
+    for (let i = 0; i < typedNames.length; i++) {
+      const text = String(typedNames[i] || "").trim();
+      if (text !== "") typed.push(text);
+    }
+    // two lists side by side: what was typed (in loose form) -> the name on file
+    const typedKeys = [];
+    const fileNames = [];
+    if (typed.length === 0) return { onFile: function (value) { return value; } };
 
-    const [rows] = await db.query(sql);
-    for (const value of typed) {
+    const rowsResult = await db.query(sql);
+    const rows = rowsResult[0];
+    for (let i = 0; i < typed.length; i++) {
+      const value = typed[i];
       // the same spelling first, so "Liter" never loses to a "Liters" also on file
-      const same = rows.find((row) => looseName(row.name) === looseName(value)) ||
-                   rows.find((row) => singularName(row.name) === singularName(value));
+      let same = null;
+      for (let r = 0; r < rows.length; r++) {
+        if (looseName(rows[r].name) === looseName(value)) {
+          same = rows[r];
+          break;
+        }
+      }
+      if (!same) {
+        for (let r = 0; r < rows.length; r++) {
+          if (singularName(rows[r].name) === singularName(value)) {
+            same = rows[r];
+            break;
+          }
+        }
+      }
       if (!same) return { missing: value };
-      onFile.set(looseName(value), same.name);
+      typedKeys.push(looseName(value));
+      fileNames.push(same.name);
     }
 
     return {
-      onFile: (value) => {
+      onFile: function (value) {
         const text = String(value || "").trim();
         if (text === "") return value;
-        return onFile.get(looseName(text)) || text;
+        const position = typedKeys.indexOf(looseName(text));
+        if (position === -1) return text;
+        return fileNames[position] || text;
       }
     };
   }
@@ -358,8 +404,13 @@ function registerInventoryRoutes(app, deps) {
   // Adding a material from the shop floor: its category and unit must already
   // be on file; a new brand is created alongside it. An existing name returns
   // the existing material.
-  app.post("/api/materials", async (request, response) => {
-    const { name, brandName, categoryName, unitName, price, supplierId } = request.body;
+  app.post("/api/materials", async function (request, response) {
+    const name = request.body.name;
+    const brandName = request.body.brandName;
+    const categoryName = request.body.categoryName;
+    const unitName = request.body.unitName;
+    const price = request.body.price;
+    const supplierId = request.body.supplierId;
 
     if (!name || String(name).trim() === "") {
       return response.status(400).json({ error: "A material needs a name" });
@@ -399,7 +450,7 @@ function registerInventoryRoutes(app, deps) {
   // one, and renaming onto an existing name merges.
   // How a material is delivered: a "box" of 20 of its unit. Blank clears it.
   // Orders and deliveries are then counted in that pack; stock stays in the unit.
-  app.put("/api/inventory/products/:productId/pack", async (request, response) => {
+  app.put("/api/inventory/products/:productId/pack", async function (request, response) {
     const productId = Number(request.params.productId);
     const body = request.body || {};
     const name = String(body.packName || "").trim().slice(0, 20);
@@ -410,10 +461,11 @@ function registerInventoryRoutes(app, deps) {
     }
 
     try {
-      const [rows] = await db.query(
-        `SELECT p.product_name, p.pack_name, p.pack_size, u.unit_name
-         FROM products p LEFT JOIN units u ON u.unit_id = p.unit_id
-         WHERE p.product_id = ?`, [productId]);
+      const rowsResult = await db.query(
+        "SELECT p.product_name, p.pack_name, p.pack_size, u.unit_name " +
+        "FROM products p LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "WHERE p.product_id = ?", [productId]);
+      const rows = rowsResult[0];
       if (rows.length === 0) return response.status(404).json({ error: "Product not found" });
       const before = rows[0];
 
@@ -437,9 +489,9 @@ function registerInventoryRoutes(app, deps) {
       const unit = before.unit_name || "unit";
       let message;
       if (name) {
-        message = `${before.product_name} is delivered by the ${name} of ${packSize} ${unit}.`;
+        message = before.product_name + " is delivered by the " + name + " of " + packSize + " " + unit + ".";
       } else {
-        message = `${before.product_name} is delivered by the ${unit} again.`;
+        message = before.product_name + " is delivered by the " + unit + " again.";
       }
 
       await writeAuditLog(request, "UPDATE_PACK", message, {
@@ -456,8 +508,8 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  app.put("/api/units/:unitId", async (request, response) => {
-    const { unitName } = request.body;
+  app.put("/api/units/:unitId", async function (request, response) {
+    const unitName = request.body.unitName;
 
     if (!unitName || String(unitName).trim() === "") {
       return response.status(400).json({ error: "A unit needs a name" });
@@ -479,26 +531,27 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  app.get("/api/inventory/adjustments", async (request, response) => {
+  app.get("/api/inventory/adjustments", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT a.adjustment_id, a.adjustment_type, a.quantity_before, a.quantity_change,
-              a.quantity_after, a.reason, a.created_at,
-              p.product_name,
-              -- What the entry itself says it counted, falling back to the
-              -- material's unit today only for entries filed before the log
-              -- recorded one. The entry's own answer always wins: renaming a
-              -- unit must not rewrite what last year's rows say they counted.
-              COALESCE(NULLIF(TRIM(a.unit_name), ''), u.unit_name) AS unit_name,
-              u.unit_name AS current_unit,
-              COALESCE(s.full_name, 'System') AS adjusted_by
-       FROM stock_adjustments a
-       JOIN products p ON p.product_id = a.product_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       LEFT JOIN staff s ON s.staff_id = a.adjusted_by_staff_id
-       ORDER BY a.adjustment_id DESC
-       LIMIT 200`
+      const rowsResult = await db.query(
+        "SELECT a.adjustment_id, a.adjustment_type, a.quantity_before, a.quantity_change, " +
+        "a.quantity_after, a.reason, a.created_at, " +
+        "p.product_name, " +
+        "-- What the entry itself says it counted, falling back to the\n" +
+        "-- material's unit today only for entries filed before the log\n" +
+        "-- recorded one. The entry's own answer always wins: renaming a\n" +
+        "-- unit must not rewrite what last year's rows say they counted.\n" +
+        "COALESCE(NULLIF(TRIM(a.unit_name), ''), u.unit_name) AS unit_name, " +
+        "u.unit_name AS current_unit, " +
+        "COALESCE(s.full_name, 'System') AS adjusted_by " +
+        "FROM stock_adjustments a " +
+        "JOIN products p ON p.product_id = a.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "LEFT JOIN staff s ON s.staff_id = a.adjusted_by_staff_id " +
+        "ORDER BY a.adjustment_id DESC " +
+        "LIMIT 200"
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Adjustments failed:", error.message);
@@ -506,8 +559,12 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  app.post("/api/inventory/adjust", async (request, response) => {
-    const { productId, adjustmentType, quantity, reason, unitName } = request.body;
+  app.post("/api/inventory/adjust", async function (request, response) {
+    const productId = request.body.productId;
+    const adjustmentType = request.body.adjustmentType;
+    const quantity = request.body.quantity;
+    const reason = request.body.reason;
+    const unitName = request.body.unitName;
 
     if (!productId || !adjustmentType || quantity === undefined || quantity === null || quantity === "" || !reason) {
       return response.status(400).json({ error: "Product, type, quantity and reason are all required" });
@@ -550,8 +607,8 @@ function registerInventoryRoutes(app, deps) {
   });
 
   // REORDER POINT SETTINGS
-  app.put("/api/inventory/reorder/:productId", async (request, response) => {
-    const { reorderPoint } = request.body;
+  app.put("/api/inventory/reorder/:productId", async function (request, response) {
+    const reorderPoint = request.body.reorderPoint;
 
     if (reorderPoint === undefined || reorderPoint === null) {
       return response.status(400).json({ error: "A reorder point is required" });
@@ -574,32 +631,33 @@ function registerInventoryRoutes(app, deps) {
   });
 
   // PURCHASE ORDERS
-  app.get("/api/purchase-orders", async (request, response) => {
+  app.get("/api/purchase-orders", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT po.po_id, po.status, po.order_date,
-              po.confirmed_at, po.decision_note,
-              po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note,
-              po.supplier_ship_date,
-              rb.full_name AS raised_by, cb.full_name AS confirmed_by,
-              s.supplier_id, s.supplier_name, s.contact_person, s.contact_number,
-              NULLIF(TRIM(s.email), '') AS supplier_email,
-              COUNT(i.po_item_id) AS line_count,
-              COALESCE(SUM(i.quantity), 0) AS total_units,
-              COALESCE(SUM(i.line_cost), 0) AS goods_cost,
-              po.discount,
-              COALESCE(SUM(i.line_cost), 0) - po.discount AS total_cost
-       FROM purchase_orders po
-       JOIN suppliers s ON s.supplier_id = po.supplier_id
-       LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id
-       LEFT JOIN staff cb ON cb.staff_id = po.confirmed_by_staff_id
-       LEFT JOIN purchase_order_items i ON i.po_id = po.po_id
-       GROUP BY po.po_id, po.status, po.order_date, po.confirmed_at, po.decision_note, po.discount,
-                po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note,
-                po.supplier_ship_date, rb.full_name, cb.full_name,
-                s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, s.email
-       ORDER BY FIELD(po.status, 'For Approval', 'Pending', 'Received', 'Cancelled'), po.po_id DESC`
+      const rowsResult = await db.query(
+        "SELECT po.po_id, po.status, po.order_date, " +
+        "po.confirmed_at, po.decision_note, " +
+        "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
+        "po.supplier_ship_date, " +
+        "rb.full_name AS raised_by, cb.full_name AS confirmed_by, " +
+        "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, " +
+        "NULLIF(TRIM(s.email), '') AS supplier_email, " +
+        "COUNT(i.po_item_id) AS line_count, " +
+        "COALESCE(SUM(i.quantity), 0) AS total_units, " +
+        "COALESCE(SUM(i.line_cost), 0) AS goods_cost, " +
+        "po.discount, " +
+        "COALESCE(SUM(i.line_cost), 0) - po.discount AS total_cost " +
+        "FROM purchase_orders po " +
+        "JOIN suppliers s ON s.supplier_id = po.supplier_id " +
+        "LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id " +
+        "LEFT JOIN staff cb ON cb.staff_id = po.confirmed_by_staff_id " +
+        "LEFT JOIN purchase_order_items i ON i.po_id = po.po_id " +
+        "GROUP BY po.po_id, po.status, po.order_date, po.confirmed_at, po.decision_note, po.discount, " +
+        "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
+        "po.supplier_ship_date, rb.full_name, cb.full_name, " +
+        "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, s.email " +
+        "ORDER BY FIELD(po.status, 'For Approval', 'Pending', 'Received', 'Cancelled'), po.po_id DESC"
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Purchase orders failed:", error.message);
@@ -607,23 +665,24 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  app.get("/api/purchase-orders/:poId/items", async (request, response) => {
+  app.get("/api/purchase-orders/:poId/items", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost,
-              i.pack_name, i.pack_size, i.pack_count,
-              p.product_name, u.unit_name, c.category_name, b.brand_name,
-              COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock
-       FROM purchase_order_items i
-       JOIN products p ON p.product_id = i.product_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       LEFT JOIN categories c ON c.category_id = p.category_id
-       LEFT JOIN brands b ON b.brand_id = p.brand_id
-       LEFT JOIN inventory inv ON inv.product_id = i.product_id
-       WHERE i.po_id = ?
-       ORDER BY i.po_item_id`,
+      const rowsResult = await db.query(
+        "SELECT i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
+        "i.pack_name, i.pack_size, i.pack_count, " +
+        "p.product_name, u.unit_name, c.category_name, b.brand_name, " +
+        "COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock " +
+        "FROM purchase_order_items i " +
+        "JOIN products p ON p.product_id = i.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "LEFT JOIN categories c ON c.category_id = p.category_id " +
+        "LEFT JOIN brands b ON b.brand_id = p.brand_id " +
+        "LEFT JOIN inventory inv ON inv.product_id = i.product_id " +
+        "WHERE i.po_id = ? " +
+        "ORDER BY i.po_item_id",
         [request.params.poId]
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("PO items failed:", error.message);
@@ -635,46 +694,49 @@ function registerInventoryRoutes(app, deps) {
   // printed sheet, the PDF and the supplier's page all read it. Null when
   // there is no such order.
   async function readOrderDocument(poId) {
-    const [orders] = await db.query(
-      `SELECT po.po_id, po.status, po.order_date, po.confirmed_at,
-              po.supplier_code, po.supplier_sent_at,
-              po.supplier_response, po.supplier_responded_at, po.supplier_note, po.supplier_ship_date,
-              po.discount,
-              s.supplier_id, s.supplier_name, s.contact_person, s.contact_number,
-              s.email AS supplier_email, s.address AS supplier_address,
-              COALESCE(rb.full_name, st.full_name) AS raised_by,
-              cb.full_name AS confirmed_by
-       FROM purchase_orders po
-       JOIN suppliers s ON s.supplier_id = po.supplier_id
-       LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id
-       LEFT JOIN staff cb ON cb.staff_id = po.confirmed_by_staff_id
-       LEFT JOIN audit_logs a ON a.action = 'PURCHASE_ORDER'
-                             AND a.details LIKE CONCAT('PO #', po.po_id, ' %')
-       LEFT JOIN staff st ON st.staff_id = a.staff_id
-       WHERE po.po_id = ?
-       LIMIT 1`,
+    const ordersResult = await db.query(
+      "SELECT po.po_id, po.status, po.order_date, po.confirmed_at, " +
+      "po.supplier_code, po.supplier_sent_at, " +
+      "po.supplier_response, po.supplier_responded_at, po.supplier_note, po.supplier_ship_date, " +
+      "po.discount, " +
+      "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, " +
+      "s.email AS supplier_email, s.address AS supplier_address, " +
+      "COALESCE(rb.full_name, st.full_name) AS raised_by, " +
+      "cb.full_name AS confirmed_by " +
+      "FROM purchase_orders po " +
+      "JOIN suppliers s ON s.supplier_id = po.supplier_id " +
+      "LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id " +
+      "LEFT JOIN staff cb ON cb.staff_id = po.confirmed_by_staff_id " +
+      "LEFT JOIN audit_logs a ON a.action = 'PURCHASE_ORDER' " +
+      "AND a.details LIKE CONCAT('PO #', po.po_id, ' %') " +
+      "LEFT JOIN staff st ON st.staff_id = a.staff_id " +
+      "WHERE po.po_id = ? " +
+      "LIMIT 1",
       [poId]
     );
+    const orders = ordersResult[0];
     if (orders.length === 0) return null;
 
-    const [items] = await db.query(
-      `SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost,
-              i.pack_name, i.pack_size, i.pack_count,
-              p.product_name, u.unit_name, c.category_name, b.brand_name
-       FROM purchase_order_items i
-       JOIN products p ON p.product_id = i.product_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       LEFT JOIN categories c ON c.category_id = p.category_id
-       LEFT JOIN brands b ON b.brand_id = p.brand_id
-       WHERE i.po_id = ?
-       ORDER BY i.po_item_id`,
+    const itemsResult = await db.query(
+      "SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
+      "i.pack_name, i.pack_size, i.pack_count, " +
+      "p.product_name, u.unit_name, c.category_name, b.brand_name " +
+      "FROM purchase_order_items i " +
+      "JOIN products p ON p.product_id = i.product_id " +
+      "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+      "LEFT JOIN categories c ON c.category_id = p.category_id " +
+      "LEFT JOIN brands b ON b.brand_id = p.brand_id " +
+      "WHERE i.po_id = ? " +
+      "ORDER BY i.po_item_id",
       [poId]
     );
+    const items = itemsResult[0];
 
-    const [settings] = await db.query(
-      `SELECT store_name, address, tin, registration_type, invoice_note
-       FROM store_settings WHERE setting_id = 1`
+    const settingsResult = await db.query(
+      "SELECT store_name, address, tin, registration_type, invoice_note " +
+      "FROM store_settings WHERE setting_id = 1"
     );
+    const settings = settingsResult[0];
 
     return { order: orders[0], items: items, shop: settings[0] || DEFAULT_STORE_SETTINGS };
   }
@@ -696,10 +758,11 @@ function registerInventoryRoutes(app, deps) {
     let code = order.supplier_code;
     if (!code) {
       await ensureSupplierCode(order.po_id);
-      const [rows] = await db.query("SELECT supplier_code FROM purchase_orders WHERE po_id = ?", [order.po_id]);
+      const rowsResult = await db.query("SELECT supplier_code FROM purchase_orders WHERE po_id = ?", [order.po_id]);
+      const rows = rowsResult[0];
       code = rows.length > 0 ? rows[0].supplier_code : null;
     }
-    const link = supplierOrderLink(`${request.protocol}://${request.get("host")}`, code);
+    const link = supplierOrderLink(request.protocol + "://" + request.get("host"), code);
     if (!link) return null;
     return { link: link, qr: await qrPng(link) };
   }
@@ -707,7 +770,7 @@ function registerInventoryRoutes(app, deps) {
   // The order as a printable document, assembled in one request. An approved
   // order carries the supplier's link and its QR code (a data URL) for the
   // printed sheet; the code itself is not handed out.
-  app.get("/api/purchase-orders/:poId/document", async (request, response) => {
+  app.get("/api/purchase-orders/:poId/document", async function (request, response) {
     try {
       const document = await readOrderDocument(request.params.poId);
       if (!document) {
@@ -728,11 +791,14 @@ function registerInventoryRoutes(app, deps) {
 
   // Raising an order: the supplier arrives as a name and a line may name a new
   // material. The procedure creates whatever is new inside the order's transaction.
-  app.post("/api/purchase-orders", async (request, response) => {
-    const {
-      supplierId, supplierName, contactPerson, contactNumber,
-      supplierEmail, supplierAddress, items
-    } = request.body;
+  app.post("/api/purchase-orders", async function (request, response) {
+    const supplierId = request.body.supplierId;
+    const supplierName = request.body.supplierName;
+    const contactPerson = request.body.contactPerson;
+    const contactNumber = request.body.contactNumber;
+    const supplierEmail = request.body.supplierEmail;
+    const supplierAddress = request.body.supplierAddress;
+    const items = request.body.items;
 
     const company = String(supplierName || "").trim();
 
@@ -757,7 +823,8 @@ function registerInventoryRoutes(app, deps) {
 
     // only the fields the procedure reads, trimmed to their column widths
     const lines = [];
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
       lines.push({
         product_id: Number(item.productId || item.product_id) || null,
         quantity: Number(item.quantity) || 0,
@@ -777,22 +844,32 @@ function registerInventoryRoutes(app, deps) {
     try {
       // the supplier is one on file: a new company is the manager's to add
       if (!Number(supplierId)) {
-        const [known] = await db.query(
+        const knownResult = await db.query(
           "SELECT supplier_id FROM suppliers WHERE LOWER(supplier_name) = LOWER(?)", [company]);
+        const known = knownResult[0];
         if (known.length === 0) {
           return response.status(400).json({
-            error: `${company} is not on file. Only the manager can add a supplier; ` +
+            error: company + " is not on file. Only the manager can add a supplier; " +
                    "ask the manager to add it under Records, then pick it here."
           });
         }
       }
 
       // a line naming a new material needs a category and a unit already on file
-      const newLines = lines.filter((line) => !line.product_id);
-      const onFile = await namesOnFile(newLines.map((line) => line.category_name),
-                                       newLines.map((line) => line.unit_name));
+      const newLines = [];
+      const newCategories = [];
+      const newUnits = [];
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].product_id) {
+          newLines.push(lines[i]);
+          newCategories.push(lines[i].category_name);
+          newUnits.push(lines[i].unit_name);
+        }
+      }
+      const onFile = await namesOnFile(newCategories, newUnits);
       if (onFile.error) return response.status(400).json({ error: onFile.error });
-      for (const line of newLines) {
+      for (let i = 0; i < newLines.length; i++) {
+        const line = newLines[i];
         line.category_name = onFile.category(line.category_name);
         line.unit_name = onFile.unit(line.unit_name);
       }
@@ -828,7 +905,7 @@ function registerInventoryRoutes(app, deps) {
   // for its delivery (Pending) and gets the supplier code its printed copy
   // carries; the clerk is told to print it and send it to the supplier
   // (sp_decide_purchase_order). Declined, it is Cancelled with the reason kept.
-  app.post("/api/purchase-orders/:poId/decide", async (request, response) => {
+  app.post("/api/purchase-orders/:poId/decide", async function (request, response) {
     const body = request.body || {};
     const approve = body.approve === true;
     let note = "";
@@ -852,7 +929,7 @@ function registerInventoryRoutes(app, deps) {
 
       await ensureSupplierCode(poId);
       response.json({
-        message: `Purchase order #${poId} is approved. The clerk prints it and sends it to the supplier.`,
+        message: "Purchase order #" + poId + " is approved. The clerk prints it and sends it to the supplier.",
         status: "Pending"
       });
     } catch (error) {
@@ -866,7 +943,7 @@ function registerInventoryRoutes(app, deps) {
   // with. Printing it and handing it over is the other way; both carry the
   // same link. A supplier with no address, mail not set up, or a refusal from
   // the mail server each come back as a sentence saying to print it instead.
-  app.post("/api/purchase-orders/:poId/send", async (request, response) => {
+  app.post("/api/purchase-orders/:poId/send", async function (request, response) {
     const poId = Number(request.params.poId);
 
     try {
@@ -878,17 +955,17 @@ function registerInventoryRoutes(app, deps) {
       if (order.status !== "Pending") {
         return response.status(409).json({
           error: order.status === "For Approval"
-            ? `${number} is not approved yet. The manager approves it before it goes to the supplier.`
-            : `${number} is ${String(order.status).toLowerCase()}; there is nothing to send.`
+            ? number + " is not approved yet. The manager approves it before it goes to the supplier."
+            : number + " is " + String(order.status).toLowerCase() + "; there is nothing to send."
         });
       }
 
       const email = String(order.supplier_email || "").trim();
       let problem = null;
       if (!email) {
-        problem = `${order.supplier_name} has no email address on file. Print the order and send it to them.`;
+        problem = order.supplier_name + " has no email address on file. Print the order and send it to them.";
       } else if (!isMailConfigured()) {
-        problem = `Mail is not set up on this server. Print the order and send it to ${order.supplier_name}.`;
+        problem = "Mail is not set up on this server. Print the order and send it to " + order.supplier_name + ".";
       }
 
       const answer = await supplierAnswerLink(request, order);
@@ -903,24 +980,24 @@ function registerInventoryRoutes(app, deps) {
               answer ? { link: answer.link, qr: answer.qr } : {}))
           }));
         } catch (error) {
-          console.error(`Emailing ${number} to the supplier failed:`, error.message);
-          problem = `The mail server refused ${number} for ${email}: ${error.message} ` +
+          console.error("Emailing " + number + " to the supplier failed:", error.message);
+          problem = "The mail server refused " + number + " for " + email + ": " + error.message + " " +
                     "Print the order and send it to them.";
         }
       }
 
       if (problem) {
-        await writeAuditLog(request, "PURCHASE_ORDER_NOT_SENT", `${number} not emailed to ${order.supplier_name}: ${problem}`,
+        await writeAuditLog(request, "PURCHASE_ORDER_NOT_SENT", number + " not emailed to " + order.supplier_name + ": " + problem,
           { po_id: order.po_id, supplier: order.supplier_name, email: email || null, emailed: false });
         return response.status(400).json({ error: problem });
       }
 
       await db.query("UPDATE purchase_orders SET supplier_sent_at = NOW() WHERE po_id = ?", [poId]);
-      await writeAuditLog(request, "PURCHASE_ORDER_SENT", `${number} emailed to ${order.supplier_name} at ${email}`,
+      await writeAuditLog(request, "PURCHASE_ORDER_SENT", number + " emailed to " + order.supplier_name + " at " + email,
         { po_id: order.po_id, supplier: order.supplier_name, email: email, emailed: true });
 
       response.json({
-        message: `${number} was emailed to ${order.supplier_name} at ${email}, with the PDF and the link ` +
+        message: number + " was emailed to " + order.supplier_name + " at " + email + ", with the PDF and the link " +
                  "to accept or decline it.",
         linked: Boolean(answer)
       });
@@ -937,8 +1014,9 @@ function registerInventoryRoutes(app, deps) {
   // access-control.js lets these three routes through without a session for that reason.
   // Gives back the order's document for a code, or null for an unknown one.
   async function orderForCode(code) {
-    const [rows] = await db.query(
+    const rowsResult = await db.query(
       "SELECT po_id FROM purchase_orders WHERE supplier_code = ?", [String(code)]);
+    const rows = rowsResult[0];
     if (rows.length === 0) return null;
     return readOrderDocument(rows[0].po_id);
   }
@@ -949,6 +1027,20 @@ function registerInventoryRoutes(app, deps) {
   // shop's notes on it
   function supplierView(document) {
     const order = document.order;
+
+    // the order lines, with only the fields the supplier page needs
+    const viewItems = [];
+    for (let i = 0; i < document.items.length; i++) {
+      const item = document.items[i];
+      viewItems.push({
+        id: item.po_item_id,
+        product_name: item.product_name, brand_name: item.brand_name, category_name: item.category_name,
+        quantity: item.quantity, unit_name: item.unit_name, unit_cost: item.unit_cost, line_cost: item.line_cost,
+        original_unit_cost: item.original_unit_cost,
+        pack_name: item.pack_name, pack_size: item.pack_size, pack_count: item.pack_count
+      });
+    }
+
     return {
       order: {
         po_id: order.po_id,
@@ -965,18 +1057,12 @@ function registerInventoryRoutes(app, deps) {
         // only a placed order waiting for its delivery, answered once
         can_respond: order.status === "Pending" && !order.supplier_response
       },
-      items: document.items.map((item) => ({
-        id: item.po_item_id,
-        product_name: item.product_name, brand_name: item.brand_name, category_name: item.category_name,
-        quantity: item.quantity, unit_name: item.unit_name, unit_cost: item.unit_cost, line_cost: item.line_cost,
-        original_unit_cost: item.original_unit_cost,
-        pack_name: item.pack_name, pack_size: item.pack_size, pack_count: item.pack_count
-      })),
+      items: viewItems,
       shop: { store_name: document.shop.store_name, address: document.shop.address }
     };
   }
 
-  app.get("/api/supplier-order/:code", async (request, response) => {
+  app.get("/api/supplier-order/:code", async function (request, response) {
     try {
       const document = await orderForCode(request.params.code);
       if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
@@ -987,7 +1073,7 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  app.get("/api/supplier-order/:code/pdf", async (request, response) => {
+  app.get("/api/supplier-order/:code/pdf", async function (request, response) {
     try {
       const document = await orderForCode(request.params.code);
       if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
@@ -997,7 +1083,7 @@ function registerInventoryRoutes(app, deps) {
       const pdf = await purchaseOrderPdf(Object.assign({}, document,
         answer ? { link: answer.link, qr: answer.qr } : {}));
       response.setHeader("Content-Type", "application/pdf");
-      response.setHeader("Content-Disposition", `inline; filename="${number}.pdf"`);
+      response.setHeader("Content-Disposition", "inline; filename=\"" + number + ".pdf\"");
       response.send(pdf);
     } catch (error) {
       console.error("Supplier order PDF failed:", error.message);
@@ -1035,7 +1121,7 @@ function registerInventoryRoutes(app, deps) {
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  app.post("/api/supplier-order/:code/respond", async (request, response) => {
+  app.post("/api/supplier-order/:code/respond", async function (request, response) {
     const body = request.body || {};
     const accept = body.accept === true;
     const note = String(body.note || "").trim().slice(0, 255);
@@ -1050,6 +1136,7 @@ function registerInventoryRoutes(app, deps) {
     if (accept) {
       shipDate = String(body.shipDate || "").trim();
       const parsed = new Date(shipDate + "T00:00:00");
+      // the date must be written like 2026-10-14, and be a day that really exists
       const real = /^\d{4}-\d{2}-\d{2}$/.test(shipDate) && !Number.isNaN(parsed.getTime()) &&
                    isoDay(parsed) === shipDate;
       if (!real) {
@@ -1075,25 +1162,40 @@ function registerInventoryRoutes(app, deps) {
 
       // each corrected price, checked against this order's own lines
       const changes = [];
-      for (const entry of asked) {
-        const item = document.items.find((line) => Number(line.po_item_id) === Number(entry && entry.id));
+      for (let i = 0; i < asked.length; i++) {
+        const entry = asked[i];
+        let item = null;
+        for (let n = 0; n < document.items.length; n++) {
+          if (Number(document.items[n].po_item_id) === Number(entry && entry.id)) {
+            item = document.items[n];
+            break;
+          }
+        }
         if (!item) {
           return response.status(400).json({
             error: "A price was sent for a line that is not on this order. Reload the page and try again." });
         }
         const price = Math.round(Number(entry.unitCost) * 100) / 100;
         if (!Number.isFinite(price) || price <= 0 || price >= PRICE_CEILING) {
-          return response.status(400).json({ error: `Enter a price above zero for ${item.product_name}.` });
+          return response.status(400).json({ error: "Enter a price above zero for " + item.product_name + "." });
         }
-        if (price !== Number(item.unit_cost) && !changes.some((change) => change.item === item)) {
+        let alreadyChanged = false;
+        for (let n = 0; n < changes.length; n++) {
+          if (changes[n].item === item) alreadyChanged = true;
+        }
+        if (price !== Number(item.unit_cost) && !alreadyChanged) {
           changes.push({ item: item, price: price });
         }
       }
 
       let before = 0;
-      for (const item of document.items) before += Number(item.line_cost || 0);
+      for (let i = 0; i < document.items.length; i++) {
+        const item = document.items[i];
+        before += Number(item.line_cost || 0);
+      }
       let after = before;
-      for (const change of changes) {
+      for (let i = 0; i < changes.length; i++) {
+        const change = changes[i];
         after += (change.price - Number(change.item.unit_cost)) * Number(change.item.quantity);
       }
 
@@ -1122,30 +1224,32 @@ function registerInventoryRoutes(app, deps) {
 
       // answered once, and only while the order waits for its delivery; the
       // WHERE makes two presses at once count as one
-      const [result] = await connection.query(
-        `UPDATE purchase_orders
-         SET supplier_response = ?, supplier_responded_at = NOW(), supplier_note = ?, supplier_ship_date = ?,
-             discount = CASE WHEN ? THEN ? ELSE discount END
-         WHERE po_id = ? AND status = 'Pending' AND supplier_response IS NULL`,
+      const queryResult = await connection.query(
+        "UPDATE purchase_orders " +
+        "SET supplier_response = ?, supplier_responded_at = NOW(), supplier_note = ?, supplier_ship_date = ?, " +
+        "discount = CASE WHEN ? THEN ? ELSE discount END " +
+        "WHERE po_id = ? AND status = 'Pending' AND supplier_response IS NULL",
         [accept ? "Accepted" : "Declined", note || null, shipDate, accept, discount, order.po_id]);
+      const result = queryResult[0];
 
       if (result.affectedRows === 0) {
         await connection.rollback();
         connection.release();
         connection = null;
         const again = await readOrderDocument(order.po_id);
-        let why = `${number} can no longer be answered here: it is ${String(again.order.status).toLowerCase()}.`;
+        let why = number + " can no longer be answered here: it is " + String(again.order.status).toLowerCase() + ".";
         if (again.order.supplier_response) {
-          why = `${number} was already ${again.order.supplier_response.toLowerCase()}. Contact the shop to change it.`;
+          why = number + " was already " + again.order.supplier_response.toLowerCase() + ". Contact the shop to change it.";
         }
         return response.status(409).json({ error: why, view: supplierView(again) });
       }
 
-      for (const change of changes) {
+      for (let i = 0; i < changes.length; i++) {
+        const change = changes[i];
         await connection.query(
-          `UPDATE purchase_order_items
-           SET original_unit_cost = COALESCE(original_unit_cost, unit_cost), unit_cost = ?
-           WHERE po_item_id = ? AND po_id = ?`,
+          "UPDATE purchase_order_items " +
+          "SET original_unit_cost = COALESCE(original_unit_cost, unit_cost), unit_cost = ? " +
+          "WHERE po_item_id = ? AND po_id = ?",
           [change.price, change.item.po_item_id, order.po_id]);
       }
 
@@ -1154,59 +1258,71 @@ function registerInventoryRoutes(app, deps) {
       connection = null;
 
       // the manager and the clerk are told at once, on the bell
-      let title = `${order.supplier_name} accepted purchase order #${order.po_id}`;
-      let message = `${order.supplier_name} accepted ${number} and will ship it on ${dayText(shipDate)}.`;
+      let title = order.supplier_name + " accepted purchase order #" + order.po_id;
+      let message = order.supplier_name + " accepted " + number + " and will ship it on " + dayText(shipDate) + ".";
       if (changes.length > 0) {
-        title = `${order.supplier_name} accepted purchase order #${order.po_id} with new prices`;
-        message += ` They changed the price on ${changes.length} ${changes.length === 1 ? "line" : "lines"}: ` +
-                   changes.map((change) => `${change.item.product_name} ${pesoText(change.item.unit_cost)} to ` +
-                     pesoText(change.price)).join("; ") +
-                   `. Order total ${pesoText(before)} to ${pesoText(after)}.`;
+        title = order.supplier_name + " accepted purchase order #" + order.po_id + " with new prices";
+        const priceChanges = [];
+        for (let i = 0; i < changes.length; i++) {
+          const change = changes[i];
+          priceChanges.push(change.item.product_name + " " + pesoText(change.item.unit_cost) + " to " + pesoText(change.price));
+        }
+        message += " They changed the price on " + changes.length + " " + (changes.length === 1 ? "line" : "lines") + ": " +
+                   priceChanges.join("; ") +
+                   ". Order total " + pesoText(before) + " to " + pesoText(after) + ".";
       }
       if (discount > 0) {
-        message += ` They gave a discount of ${pesoText(discount)}, so the order comes to ${pesoText(after - discount)}.`;
+        message += " They gave a discount of " + pesoText(discount) + ", so the order comes to " + pesoText(after - discount) + ".";
       }
-      if (note) message += ` Their note: ${note}`;
+      if (note) message += " Their note: " + note;
       if (!accept) {
-        title = `${order.supplier_name} cannot fill purchase order #${order.po_id}`;
-        message = `${order.supplier_name} declined ${number}: ${note} Order the materials elsewhere, ` +
+        title = order.supplier_name + " cannot fill purchase order #" + order.po_id;
+        message = order.supplier_name + " declined " + number + ": " + note + " Order the materials elsewhere, " +
                   "or contact the supplier.";
       }
       await db.query(
-        `INSERT INTO notifications (target_role_id, notif_type, title, message)
-         SELECT role_id, 'Purchase Order', ?, ? FROM roles WHERE role_name IN ('Manager', 'Inventory Clerk')`,
+        "INSERT INTO notifications (target_role_id, notif_type, title, message) " +
+        "SELECT role_id, 'Purchase Order', ?, ? FROM roles WHERE role_name IN ('Manager', 'Inventory Clerk')",
         [title.slice(0, 150), message]);
 
-      let details = `${number} declined by ${order.supplier_name} from the link on the order: ${note}`;
+      let details = number + " declined by " + order.supplier_name + " from the link on the order: " + note;
       if (accept) {
-        details = `${number} accepted by ${order.supplier_name} from the link on the order, shipping ${shipDate}` +
+        details = number + " accepted by " + order.supplier_name + " from the link on the order, shipping " + shipDate +
           (changes.length > 0
-            ? `, ${changes.length} price(s) changed, total ${pesoText(before)} to ${pesoText(after)}`
+            ? ", " + changes.length + " price(s) changed, total " + pesoText(before) + " to " + pesoText(after)
             : "") +
-          (discount > 0 ? `, discount ${pesoText(discount)}` : "") +
-          (note ? `: ${note}` : "");
+          (discount > 0 ? ", discount " + pesoText(discount) : "") +
+          (note ? ": " + note : "");
+      }
+      const auditPrices = [];
+      for (let i = 0; i < changes.length; i++) {
+        const change = changes[i];
+        auditPrices.push({ product: change.item.product_name, from: Number(change.item.unit_cost), to: change.price });
       }
       await writeAuditLog(request, accept ? "PURCHASE_ORDER_ACCEPTED" : "PURCHASE_ORDER_DECLINED_BY_SUPPLIER",
         details,
         { po_id: order.po_id, supplier: order.supplier_name, accepted: accept, ship_date: shipDate, discount: discount,
-          prices: changes.map((change) => ({ product: change.item.product_name,
-            from: Number(change.item.unit_cost), to: change.price })) });
+          prices: auditPrices });
 
       // the bell and the order list update without a reload
       if (publishChange) {
-        publishChange("notifications", `supplier answered ${number}`, null);
-        publishChange("inventory", `supplier answered ${number}`, null);
+        publishChange("notifications", "supplier answered " + number, null);
+        publishChange("inventory", "supplier answered " + number, null);
       }
 
       response.json({
         message: accept
-          ? `Thank you. ${number} is accepted, and ${document.shop.store_name || "the shop"} has been told.`
-          : `Thank you. ${document.shop.store_name || "The shop"} has been told that ${number} cannot be filled.`,
+          ? "Thank you. " + number + " is accepted, and " + (document.shop.store_name || "the shop") + " has been told."
+          : "Thank you. " + (document.shop.store_name || "The shop") + " has been told that " + number + " cannot be filled.",
         view: supplierView(await readOrderDocument(order.po_id))
       });
     } catch (error) {
       if (connection) {
-        await connection.rollback().catch(() => {});
+        try {
+          await connection.rollback();
+        } catch (ignored) {
+          // nothing more can be done if the rollback itself fails
+        }
         connection.release();
       }
       console.error("Supplier response failed:", error.message);
@@ -1217,7 +1333,7 @@ function registerInventoryRoutes(app, deps) {
   // Receiving, by the clerk once the manager has confirmed the order: the
   // body carries the count sheet, including anything never ordered. An empty
   // body receives the order exactly as written.
-  app.post("/api/purchase-orders/:poId/receive", async (request, response) => {
+  app.post("/api/purchase-orders/:poId/receive", async function (request, response) {
     let received;
     if (Array.isArray(request.body && request.body.received)) {
       received = request.body.received;
@@ -1227,7 +1343,8 @@ function registerInventoryRoutes(app, deps) {
 
     // what was actually counted in, line by line
     const sheet = [];
-    for (const line of received) {
+    for (let i = 0; i < received.length; i++) {
+      const line = received[i];
       sheet.push({
         product_id: Number(line.productId || line.product_id) || null,
         quantity: Math.max(0, Number(line.quantity) || 0),
@@ -1260,7 +1377,7 @@ function registerInventoryRoutes(app, deps) {
   });
 
   // RETURNS, DAMAGE AND REFUND REPORTS
-  app.get("/api/returns", async (request, response) => {
+  app.get("/api/returns", async function (request, response) {
     try {
       // goods missing from a supplier delivery are the stockroom business;
       // the counter list (the cashier) does not carry them
@@ -1269,22 +1386,23 @@ function registerInventoryRoutes(app, deps) {
         hideMissing = "WHERE r.report_type <> 'Missing'";
       }
 
-      const [rows] = await db.query(
-        `SELECT r.return_id, r.report_type, r.quantity, r.reason, r.refund_amount,
-              r.restocked, r.disposition, r.status, r.return_date, r.sale_id, r.po_id,
-              r.inspected_at, r.inspection_note,
-              (r.status = 'Open' AND r.disposition IS NULL AND r.report_type <> 'Missing') AS awaiting_inspection,
-              p.product_id, p.product_name, u.unit_name,
-              COALESCE(s.full_name, 'Unknown') AS reported_by,
-              i.full_name AS inspected_by
-       FROM returned_items r
-       JOIN products p ON p.product_id = r.product_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       LEFT JOIN staff s ON s.staff_id = r.reported_by_staff_id
-       LEFT JOIN staff i ON i.staff_id = r.inspected_by_staff_id
-       ${hideMissing}
-       ORDER BY FIELD(r.status, 'Open', 'Resolved'), r.disposition IS NOT NULL, r.return_id DESC`
+      const rowsResult = await db.query(
+        "SELECT r.return_id, r.report_type, r.quantity, r.reason, r.refund_amount, " +
+        "r.restocked, r.disposition, r.status, r.return_date, r.sale_id, r.po_id, " +
+        "r.inspected_at, r.inspection_note, " +
+        "(r.status = 'Open' AND r.disposition IS NULL AND r.report_type <> 'Missing') AS awaiting_inspection, " +
+        "p.product_id, p.product_name, u.unit_name, " +
+        "COALESCE(s.full_name, 'Unknown') AS reported_by, " +
+        "i.full_name AS inspected_by " +
+        "FROM returned_items r " +
+        "JOIN products p ON p.product_id = r.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "LEFT JOIN staff s ON s.staff_id = r.reported_by_staff_id " +
+        "LEFT JOIN staff i ON i.staff_id = r.inspected_by_staff_id " +
+        hideMissing +
+        " ORDER BY FIELD(r.status, 'Open', 'Resolved'), r.disposition IS NOT NULL, r.return_id DESC"
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Returns failed:", error.message);
@@ -1312,19 +1430,22 @@ function registerInventoryRoutes(app, deps) {
   // same again under a lock, and that is the one that cannot be raced.
   async function refundProblem(saleId, productId, quantity, refundAmount) {
     // what the sale holds of this product, and what has already come back
-    const [lines] = await db.query(
-      `SELECT COALESCE(SUM(quantity), 0) AS sold, COALESCE(SUM(subtotal), 0) AS worth
-       FROM sale_items WHERE sale_id = ? AND product_id = ?`,
+    const linesResult = await db.query(
+      "SELECT COALESCE(SUM(quantity), 0) AS sold, COALESCE(SUM(subtotal), 0) AS worth " +
+      "FROM sale_items WHERE sale_id = ? AND product_id = ?",
       [saleId, productId]
     );
-    const [taken] = await db.query(
-      `SELECT COALESCE(SUM(quantity), 0) AS refunded FROM returned_items
-       WHERE sale_id = ? AND product_id = ? AND report_type IN ('Refunded', 'Return')`,
+    const lines = linesResult[0];
+    const takenResult = await db.query(
+      "SELECT COALESCE(SUM(quantity), 0) AS refunded FROM returned_items " +
+      "WHERE sale_id = ? AND product_id = ? AND report_type IN ('Refunded', 'Return')",
       [saleId, productId]
     );
+    const taken = takenResult[0];
     // the lines add up to total_amount; the customer paid final_amount, after the discount
-    const [sales] = await db.query(
+    const salesResult = await db.query(
       "SELECT total_amount, final_amount FROM sales WHERE sale_id = ?", [saleId]);
+    const sales = salesResult[0];
     if (sales.length === 0) {
       return "That sale was not found.";
     }
@@ -1345,21 +1466,27 @@ function registerInventoryRoutes(app, deps) {
     }
     if (qty > left + QUANTITY_SLACK) {
       return left <= 0 ? "That item has already been refunded in full."
-                       : `Only ${left} of that item can still be refunded.`;
+                       : "Only " + left + " of that item can still be refunded.";
     }
 
     // never more than the customer was charged for those pieces (after the discount)
     const mostToRefund = Number(lines[0].worth) * afterDiscount * qty / sold;
     if (!(Number(refundAmount) > 0) || Number(refundAmount) > mostToRefund + AMOUNT_SLACK) {
-      return `The refund must be more than zero and no more than ${mostToRefund.toFixed(2)}, ` +
+      return "The refund must be more than zero and no more than " + mostToRefund.toFixed(2) + ", " +
              "what the customer was charged for those pieces.";
     }
     return "";
   }
 
-  app.post("/api/returns", async (request, response) => {
-    const { productId, saleId, reportType, quantity, reason, refundAmount,
-            disposition, restock } = request.body;
+  app.post("/api/returns", async function (request, response) {
+    const productId = request.body.productId;
+    const saleId = request.body.saleId;
+    const reportType = request.body.reportType;
+    const quantity = request.body.quantity;
+    const reason = request.body.reason;
+    const refundAmount = request.body.refundAmount;
+    const disposition = request.body.disposition;
+    const restock = request.body.restock;
 
     if (!productId || !reportType || !quantity) {
       return response.status(400).json({ error: "Product, type and quantity are all required" });
@@ -1407,12 +1534,13 @@ function registerInventoryRoutes(app, deps) {
       }
 
       try {
-        const [deliveries] = await db.query(
-          `SELECT d.status
-           FROM deliveries d
-           WHERE d.sale_id = ? AND d.delivery_staff_id = ? AND d.is_archived = FALSE`,
+        const deliveriesResult = await db.query(
+          "SELECT d.status " +
+          "FROM deliveries d " +
+          "WHERE d.sale_id = ? AND d.delivery_staff_id = ? AND d.is_archived = FALSE",
           [saleId, request.actor.staffId]
         );
+        const deliveries = deliveriesResult[0];
         if (deliveries.length === 0) {
           return response.status(403).json({ error: "You can only refund items on a delivery you took." });
         }
@@ -1482,7 +1610,7 @@ function registerInventoryRoutes(app, deps) {
       await writeAuditLog(
         request,
         action,
-        `${reportType} #${output.report_id}: ${quantity} unit(s), ${where || "awaiting inspection"}`,
+        reportType + " #" + output.report_id + ": " + quantity + " unit(s), " + (where || "awaiting inspection"),
         {
           report_id: output.report_id,
           product_id: Number(productId),
@@ -1511,7 +1639,7 @@ function registerInventoryRoutes(app, deps) {
   const REPORT_TYPES = ["Return", "Damaged", "Refunded", "Missing"];
   const MOST_REPORT_ITEMS = 50;
 
-  app.post("/api/returns/batch", async (request, response) => {
+  app.post("/api/returns/batch", async function (request, response) {
     const body = request.body || {};
     const reportType = body.reportType;
 
@@ -1541,7 +1669,8 @@ function registerInventoryRoutes(app, deps) {
 
     const items = [];
     const seen = [];
-    for (const line of sent) {
+    for (let i = 0; i < sent.length; i++) {
+      const line = sent[i];
       const productId = Number(line.productId);
       const quantity = Math.round(Number(line.quantity) * 1000) / 1000;
       let refund = 0;
@@ -1570,7 +1699,7 @@ function registerInventoryRoutes(app, deps) {
     }
     // always filed in the same order, so two reports at once lock the shelf rows
     // in the same order and cannot wait on each other
-    items.sort((a, b) => a.product_id - b.product_id);
+    items.sort(function (a, b) { return a.product_id - b.product_id; });
 
     // goods missing from a delivery name their purchase order; a refund names
     // its sale; the others may name a sale or leave it out
@@ -1608,10 +1737,12 @@ function registerInventoryRoutes(app, deps) {
     try {
       // a refund is checked against its sale, item by item, for a friendly message
       if (reportType === "Refunded") {
-        for (const item of items) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
           const problem = await refundProblem(saleId, item.product_id, item.quantity, item.refund_amount);
           if (problem !== "") {
-            const [names] = await db.query("SELECT product_name FROM products WHERE product_id = ?", [item.product_id]);
+            const namesResult = await db.query("SELECT product_name FROM products WHERE product_id = ?", [item.product_id]);
+            const names = namesResult[0];
             const label = names.length > 0 ? names[0].product_name + ": " : "";
             return response.status(400).json({ error: label + problem + " Nothing was filed." });
           }
@@ -1626,12 +1757,16 @@ function registerInventoryRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      const reportIds = String(output.report_ids).split(",").map(Number);
+      const reportIdTexts = String(output.report_ids).split(",");
+      const reportIds = [];
+      for (let i = 0; i < reportIdTexts.length; i++) {
+        reportIds.push(Number(reportIdTexts[i]));
+      }
       await writeAuditLog(
         request,
         reportType === "Refunded" ? "REFUND" : "RETURN",
-        `${reportType} report for ${items.length} item(s): #${reportIds.join(", #")}` +
-          (poId ? `, purchase order #${poId}` : ""),
+        reportType + " report for " + items.length + " item(s): #" + reportIds.join(", #") +
+          (poId ? ", purchase order #" + poId : ""),
         {
           report_ids: reportIds,
           report_type: reportType,
@@ -1654,7 +1789,7 @@ function registerInventoryRoutes(app, deps) {
   // The clerk's verdict on a refund from the counter: Return to Stock if it
   // can be sold again, Write-Off if not, with a note. A report that was
   // decided at filing is simply closed.
-  app.post("/api/returns/:reportId/resolve", async (request, response) => {
+  app.post("/api/returns/:reportId/resolve", async function (request, response) {
     const body = request.body || {};
     let verdict = null;
     if (RETURN_DISPOSITIONS.includes(body.disposition)) {
@@ -1675,7 +1810,7 @@ function registerInventoryRoutes(app, deps) {
       }
 
       if (verdict) {
-        let details = `Report #${request.params.reportId} inspected: ${verdict}`;
+        let details = "Report #" + request.params.reportId + " inspected: " + verdict;
         if (note) {
           details += " - " + note;
         }
@@ -1691,24 +1826,25 @@ function registerInventoryRoutes(app, deps) {
   });
 
   // NOTIFICATIONS -- which alerts you see is decided by the role on your session
-  app.get("/api/notifications", async (request, response) => {
+  app.get("/api/notifications", async function (request, response) {
     const roleId = request.actor.roleId;
 
     try {
-      const [rows] = await db.query(
-        `SELECT n.notification_id, n.notif_type, n.title, n.message, n.is_read, n.created_at,
-              n.product_id, p.product_name,
-              COALESCE(s.full_name, 'System') AS from_name,
-              COALESCE(r.role_name, 'Automatic') AS from_role
-       FROM notifications n
-       LEFT JOIN products p ON p.product_id = n.product_id
-       LEFT JOIN staff s ON s.staff_id = n.created_by_staff_id
-       LEFT JOIN roles r ON r.role_id = s.role_id
-       WHERE n.target_role_id IS NULL OR n.target_role_id = ?
-       ORDER BY n.is_read, n.notification_id DESC
-       LIMIT 60`,
+      const rowsResult = await db.query(
+        "SELECT n.notification_id, n.notif_type, n.title, n.message, n.is_read, n.created_at, " +
+        "n.product_id, p.product_name, " +
+        "COALESCE(s.full_name, 'System') AS from_name, " +
+        "COALESCE(r.role_name, 'Automatic') AS from_role " +
+        "FROM notifications n " +
+        "LEFT JOIN products p ON p.product_id = n.product_id " +
+        "LEFT JOIN staff s ON s.staff_id = n.created_by_staff_id " +
+        "LEFT JOIN roles r ON r.role_id = s.role_id " +
+        "WHERE n.target_role_id IS NULL OR n.target_role_id = ? " +
+        "ORDER BY n.is_read, n.notification_id DESC " +
+        "LIMIT 60",
         [roleId]
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Notifications failed:", error.message);
@@ -1716,11 +1852,11 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  app.post("/api/notifications/:notificationId/read", async (request, response) => {
+  app.post("/api/notifications/:notificationId/read", async function (request, response) {
     try {
       await db.query(
-        `UPDATE notifications SET is_read = TRUE
-       WHERE notification_id = ? AND (target_role_id IS NULL OR target_role_id = ?)`,
+        "UPDATE notifications SET is_read = TRUE " +
+        "WHERE notification_id = ? AND (target_role_id IS NULL OR target_role_id = ?)",
         [request.params.notificationId, request.actor.roleId]
       );
       response.json({ message: "Marked as read" });
@@ -1730,7 +1866,7 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  app.post("/api/notifications/read-all", async (request, response) => {
+  app.post("/api/notifications/read-all", async function (request, response) {
     const roleId = request.actor.roleId;
 
     try {
@@ -1746,4 +1882,4 @@ function registerInventoryRoutes(app, deps) {
   });
 }
 
-module.exports = { registerInventoryRoutes };
+module.exports = { registerInventoryRoutes: registerInventoryRoutes };

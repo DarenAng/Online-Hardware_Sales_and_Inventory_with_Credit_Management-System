@@ -9,122 +9,122 @@ function buildAccountModal() {
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.id = 'account-modal';
-    modal.innerHTML = `
-        <div class="modal-box">
-            <div class="modal-head">
-                <div class="modal-identity">
-                    <div class="avatar" id="account-avatar">--</div>
-                    <div>
-                        <h3 id="account-name">My Account</h3>
-                        <span class="modal-role" id="account-role">Role</span>
-                    </div>
-                </div>
-                <button type="button" class="modal-close" onclick="closeModal('account-modal')" aria-label="Close">&times;</button>
-            </div>
-
-            <div class="modal-tabs">
-                <button type="button" class="modal-tab active" id="account-tab-view"
-                        onclick="showAccountTab('view')">Credentials</button>
-                <button type="button" class="modal-tab" id="account-tab-edit"
-                        onclick="showAccountTab('edit')">Edit Details</button>
-                <button type="button" class="modal-tab" id="account-tab-password"
-                        onclick="showAccountTab('password')">Password</button>
-            </div>
-
-            <div class="modal-body">
-                <!-- WHAT A STANDARD USER MAY NOT CHANGE
-                     The sign-in email, the password and the role are credentials,
-                     and none of them is changed by its own holder from here. A
-                     screen left signed in at a counter is otherwise a screen on
-                     which anybody can set a new password and own the account.
-                     A new password comes from "Forgot your password?" on the
-                     sign-in page (a code sent to the address on file), from a
-                     manager for counter, stockroom and delivery staff, or from
-                     the administrator. -->
-                <div class="detail-grid" id="account-view"></div>
-
-                <div id="account-edit" style="display: none;">
-                    <form id="account-form" onsubmit="handleSaveMyProfile(event)">
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label for="me-first">First name</label>
-                                <input type="text" id="me-first" name="firstName" class="form-control" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="me-middle">Middle name <span class="label-hint">optional</span></label>
-                                <input type="text" id="me-middle" name="middleName"
-                                       class="form-control" maxlength="100" placeholder="Dela Cruz">
-                            </div>
-                            <div class="form-group">
-                                <label for="me-last">Last name</label>
-                                <input type="text" id="me-last" name="lastName" class="form-control" required>
-                            </div>
-                            <div class="form-group">
-                                <label for="me-phone">Phone</label>
-                                <div class="phone-field">
-                                    <span class="phone-prefix">+63</span>
-                                    <input type="text" id="me-phone" name="phone" class="form-control"
-                                           inputmode="numeric" autocomplete="tel"
-                                           maxlength="20" placeholder="9XXXXXXXXX" required
-                                           oninput="onPhoneInput(this)">
-                                </div>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="me-email">Email</label>
-                            <input type="email" id="me-email" name="email" class="form-control" readonly
-                                   title="Your sign-in email is changed by the System Administrator">
-                        </div>
-                        <!-- Save Changes sits in the foot below, so it is never paged away -->
-                    </form>
-                </div>
-
-                <div id="account-password" style="display: none;">
-                    <form id="account-password-form" onsubmit="handleChangeMyPassword(event)">
-                        <div class="form-group">
-                            <label for="me-current">Current password</label>
-                            <div class="password-field">
-                                <input type="password" id="me-current" name="currentPassword"
-                                       class="form-control" required autocomplete="current-password">
-                                <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
-                            </div>
-                        </div>
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label for="me-new">New password <span class="label-hint">not the current one</span></label>
-                                <div class="password-field">
-                                    <input type="password" id="me-new" name="newPassword" class="form-control"
-                                           minlength="8" required autocomplete="new-password">
-                                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
-                                </div>
-                                <ul class="password-rules" data-rules-for="me-new"></ul>
-                            </div>
-                            <div class="form-group">
-                                <label for="me-confirm">Confirm new password</label>
-                                <div class="password-field">
-                                    <input type="password" id="me-confirm" name="confirmPassword"
-                                           class="form-control" minlength="8" required autocomplete="new-password">
-                                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
-                                </div>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <!-- the form buttons live in the foot, outside the paged body, so a
-                 long form never pushes them onto a second page -->
-            <div class="modal-foot" id="account-foot">
-                <div class="detail-foot-actions" data-account-foot="edit" hidden>
-                    <button type="button" class="btn btn-ghost" onclick="showAccountTab('view')">Cancel</button>
-                    <button type="submit" form="account-form" class="btn btn-success">Save Changes</button>
-                </div>
-                <div class="detail-foot-actions" data-account-foot="password" hidden>
-                    <button type="button" class="btn btn-ghost" onclick="showAccountTab('view')">Cancel</button>
-                    <button type="submit" form="account-password-form" class="btn btn-success">Change Password</button>
-                </div>
-            </div>
-        </div>`;
+    modal.innerHTML = '\n' +
+        '        <div class="modal-box">\n' +
+        '            <div class="modal-head">\n' +
+        '                <div class="modal-identity">\n' +
+        '                    <div class="avatar" id="account-avatar">--</div>\n' +
+        '                    <div>\n' +
+        '                        <h3 id="account-name">My Account</h3>\n' +
+        '                        <span class="modal-role" id="account-role">Role</span>\n' +
+        '                    </div>\n' +
+        '                </div>\n' +
+        '                <button type="button" class="modal-close" onclick="closeModal(\'account-modal\')" aria-label="Close">&times;</button>\n' +
+        '            </div>\n' +
+        '\n' +
+        '            <div class="modal-tabs">\n' +
+        '                <button type="button" class="modal-tab active" id="account-tab-view"\n' +
+        '                        onclick="showAccountTab(\'view\')">Credentials</button>\n' +
+        '                <button type="button" class="modal-tab" id="account-tab-edit"\n' +
+        '                        onclick="showAccountTab(\'edit\')">Edit Details</button>\n' +
+        '                <button type="button" class="modal-tab" id="account-tab-password"\n' +
+        '                        onclick="showAccountTab(\'password\')">Password</button>\n' +
+        '            </div>\n' +
+        '\n' +
+        '            <div class="modal-body">\n' +
+        '                <!-- WHAT A STANDARD USER MAY NOT CHANGE\n' +
+        '                     The sign-in email, the password and the role are credentials,\n' +
+        '                     and none of them is changed by its own holder from here. A\n' +
+        '                     screen left signed in at a counter is otherwise a screen on\n' +
+        '                     which anybody can set a new password and own the account.\n' +
+        '                     A new password comes from "Forgot your password?" on the\n' +
+        '                     sign-in page (a code sent to the address on file), from a\n' +
+        '                     manager for counter, stockroom and delivery staff, or from\n' +
+        '                     the administrator. -->\n' +
+        '                <div class="detail-grid" id="account-view"></div>\n' +
+        '\n' +
+        '                <div id="account-edit" style="display: none;">\n' +
+        '                    <form id="account-form" onsubmit="handleSaveMyProfile(event)">\n' +
+        '                        <div class="grid-2">\n' +
+        '                            <div class="form-group">\n' +
+        '                                <label for="me-first">First name</label>\n' +
+        '                                <input type="text" id="me-first" name="firstName" class="form-control" required>\n' +
+        '                            </div>\n' +
+        '                            <div class="form-group">\n' +
+        '                                <label for="me-middle">Middle name <span class="label-hint">optional</span></label>\n' +
+        '                                <input type="text" id="me-middle" name="middleName"\n' +
+        '                                       class="form-control" maxlength="100" placeholder="Dela Cruz">\n' +
+        '                            </div>\n' +
+        '                            <div class="form-group">\n' +
+        '                                <label for="me-last">Last name</label>\n' +
+        '                                <input type="text" id="me-last" name="lastName" class="form-control" required>\n' +
+        '                            </div>\n' +
+        '                            <div class="form-group">\n' +
+        '                                <label for="me-phone">Phone</label>\n' +
+        '                                <div class="phone-field">\n' +
+        '                                    <span class="phone-prefix">+63</span>\n' +
+        '                                    <input type="text" id="me-phone" name="phone" class="form-control"\n' +
+        '                                           inputmode="numeric" autocomplete="tel"\n' +
+        '                                           maxlength="20" placeholder="9XXXXXXXXX" required\n' +
+        '                                           oninput="onPhoneInput(this)">\n' +
+        '                                </div>\n' +
+        '                            </div>\n' +
+        '                        </div>\n' +
+        '                        <div class="form-group">\n' +
+        '                            <label for="me-email">Email</label>\n' +
+        '                            <input type="email" id="me-email" name="email" class="form-control" readonly\n' +
+        '                                   title="Your sign-in email is changed by the System Administrator">\n' +
+        '                        </div>\n' +
+        '                        <!-- Save Changes sits in the foot below, so it is never paged away -->\n' +
+        '                    </form>\n' +
+        '                </div>\n' +
+        '\n' +
+        '                <div id="account-password" style="display: none;">\n' +
+        '                    <form id="account-password-form" onsubmit="handleChangeMyPassword(event)">\n' +
+        '                        <div class="form-group">\n' +
+        '                            <label for="me-current">Current password</label>\n' +
+        '                            <div class="password-field">\n' +
+        '                                <input type="password" id="me-current" name="currentPassword"\n' +
+        '                                       class="form-control" required autocomplete="current-password">\n' +
+        '                                <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>\n' +
+        '                            </div>\n' +
+        '                        </div>\n' +
+        '                        <div class="grid-2">\n' +
+        '                            <div class="form-group">\n' +
+        '                                <label for="me-new">New password <span class="label-hint">not the current one</span></label>\n' +
+        '                                <div class="password-field">\n' +
+        '                                    <input type="password" id="me-new" name="newPassword" class="form-control"\n' +
+        '                                           minlength="8" required autocomplete="new-password">\n' +
+        '                                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>\n' +
+        '                                </div>\n' +
+        '                                <ul class="password-rules" data-rules-for="me-new"></ul>\n' +
+        '                            </div>\n' +
+        '                            <div class="form-group">\n' +
+        '                                <label for="me-confirm">Confirm new password</label>\n' +
+        '                                <div class="password-field">\n' +
+        '                                    <input type="password" id="me-confirm" name="confirmPassword"\n' +
+        '                                           class="form-control" minlength="8" required autocomplete="new-password">\n' +
+        '                                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>\n' +
+        '                                </div>\n' +
+        '                            </div>\n' +
+        '                        </div>\n' +
+        '                    </form>\n' +
+        '                </div>\n' +
+        '            </div>\n' +
+        '\n' +
+        '            <!-- the form buttons live in the foot, outside the paged body, so a\n' +
+        '                 long form never pushes them onto a second page -->\n' +
+        '            <div class="modal-foot" id="account-foot">\n' +
+        '                <div class="detail-foot-actions" data-account-foot="edit" hidden>\n' +
+        '                    <button type="button" class="btn btn-ghost" onclick="showAccountTab(\'view\')">Cancel</button>\n' +
+        '                    <button type="submit" form="account-form" class="btn btn-success">Save Changes</button>\n' +
+        '                </div>\n' +
+        '                <div class="detail-foot-actions" data-account-foot="password" hidden>\n' +
+        '                    <button type="button" class="btn btn-ghost" onclick="showAccountTab(\'view\')">Cancel</button>\n' +
+        '                    <button type="submit" form="account-password-form" class="btn btn-success">Change Password</button>\n' +
+        '                </div>\n' +
+        '            </div>\n' +
+        '        </div>';
     document.body.appendChild(modal);
     showPasswordRules();   // draws the checklist under the new-password box
 }
@@ -140,7 +140,7 @@ function canEditOwnDetails() {
 // routes/shared.js); the administrator keeps it.
 function canChangeOwnPassword() {
     const me = getCurrentUser();
-    return !!me && me.role_name === 'System Administrator';
+    return Boolean(me) && me.role_name === 'System Administrator';
 }
 
 function showAccountTab(tab) {
@@ -154,11 +154,14 @@ function showAccountTab(tab) {
     if (passwordTab) passwordTab.style.display = canChangeOwnPassword() ? '' : 'none';
 
     // Save Changes / Change Password in the foot follow the open tab
-    document.querySelectorAll('[data-account-foot]').forEach((group) => {
-        group.hidden = group.dataset.accountFoot !== tab;
-    });
+    const footGroups = document.querySelectorAll('[data-account-foot]');
+    for (let i = 0; i < footGroups.length; i++) {
+        footGroups[i].hidden = footGroups[i].dataset.accountFoot !== tab;
+    }
 
-    ['view', 'edit', 'password'].forEach((name) => {
+    const tabNames = ['view', 'edit', 'password'];
+    for (let i = 0; i < tabNames.length; i++) {
+        const name = tabNames[i];
         const panel = document.getElementById('account-' + name);
         const button = document.getElementById('account-tab-' + name);
         if (panel) {
@@ -171,7 +174,7 @@ function showAccountTab(tab) {
             }
         }
         if (button) button.classList.toggle('active', name === tab);
-    });
+    }
 }
 
 async function openMyAccount(tab) {
@@ -232,7 +235,8 @@ function renderMyAccount() {
             ? '<span class="mono">' + escapeHtml(phoneForDisplay(me.phone)) + '</span>'
             : '<span class="muted">Not set</span>', editableRowsLocked) +
         detailRow('Role', escapeHtml(me.role_name), locked) +
-        detailRow('Account Status', `<span class="badge ${me.is_active ? 'badge-success' : 'badge-danger'}">${me.is_active ? 'Active' : 'Inactive'}</span>`, locked);
+        detailRow('Account Status', '<span class="badge ' + (me.is_active ? 'badge-success' : 'badge-danger') + '">' +
+            (me.is_active ? 'Active' : 'Inactive') + '</span>', locked);
 
     const form = document.getElementById('account-form');
     form.elements.firstName.value = me.first_name || '';

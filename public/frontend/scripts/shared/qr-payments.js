@@ -30,13 +30,26 @@ function qrSaleNumber(saleId) {
     return 'OR-' + String(saleId).padStart(6, '0');
 }
 
-// the screens built on this page, by key, with what each was given
-const qrPanels = new Map();
+// the screens built on this page: key -> what that screen was given
+const qrPanels = {};
+
+// Remembers a cashier for the "Cashier" picker. A cashier seen again keeps the
+// place they had and gets the newest name. staff holds { id, name } in the
+// order first seen.
+function rememberQrStaff(state, id, name) {
+    for (let i = 0; i < state.staff.length; i++) {
+        if (state.staff[i].id === id) {
+            state.staff[i].name = name;
+            return;
+        }
+    }
+    state.staff.push({ id: id, name: name });
+}
 
 function buildQrPaymentsPanel(options) {
     const p = options.prefix;
-    const state = { options: options, summary: null, staff: new Map() };
-    qrPanels.set(options.key, state);
+    const state = { options: options, summary: null, staff: [] };
+    qrPanels[options.key] = state;
 
     createDataPanel({
         key: options.key,
@@ -59,35 +72,44 @@ function buildQrPaymentsPanel(options) {
             text: 'Nothing was paid by QR code in this period.'
         },
 
-        load: async () => {
+        load: async function () {
             const answer = await apiGetQrPayments(qrPaymentsQuery(state));
             state.summary = answer.summary;
-            answer.rows.forEach((row) => {
-                if (row.cashierName) state.staff.set(String(row.staffId), row.cashierName);
-            });
+            for (let i = 0; i < answer.rows.length; i++) {
+                const row = answer.rows[i];
+                if (row.cashierName) rememberQrStaff(state, String(row.staffId), row.cashierName);
+            }
             return answer.rows;
         },
 
-        onLoaded: () => { renderQrPaymentTiles(state); fillQrStaffPicker(state); },
+        onLoaded: function () {
+            renderQrPaymentTiles(state);
+            fillQrStaffPicker(state);
+        },
 
-        match: (row, query) => prefixMatch([
-            row.reference, row.wallet, QR_WALLET_WORDS[row.wallet], row.cashierName, row.errorMessage,
-            QR_STATUS_WORDS[row.status], row.saleId ? qrSaleNumber(row.saleId) : '', '#' + row.id
-        ], query),
+        match: function (row, query) {
+            return prefixMatch([
+                row.reference, row.wallet, QR_WALLET_WORDS[row.wallet], row.cashierName, row.errorMessage,
+                QR_STATUS_WORDS[row.status], row.saleId ? qrSaleNumber(row.saleId) : '', '#' + row.id
+            ], query);
+        },
 
-        filter: (row, filters) => filters.status === 'all' || row.status === filters.status,
+        filter: function (row, filters) {
+            return filters.status === 'all' || row.status === filters.status;
+        },
 
-        renderRow: (row, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-            'onclick="openQrPaymentRow(\'' + options.key + '\', ' + row.id + ')">' +
-            '<td class="cell-id">' + escapeHtml(String(row.createdAt || '').slice(0, 16)) + '</td>' +
-            '<td class="cell-num">' + peso(row.amount) + '</td>' +
-            '<td>' + escapeHtml(QR_WALLET_WORDS[row.wallet] || row.wallet) + '</td>' +
-            '<td>' + qrStatusBadge(row.status) + '</td>' +
-            '<td class="cell-id">' + (row.reference ? escapeHtml(row.reference) : '<span class="muted">None</span>') + '</td>' +
-            '<td class="cell-id">' + (row.saleId ? qrSaleNumber(row.saleId) : '<span class="muted">None</span>') + '</td>' +
-            '<td class="cell-name">' + escapeHtml(row.cashierName || 'Unknown') + '</td>' +
-            '<td>' + (row.errorMessage ? escapeHtml(row.errorMessage) : '') + '</td></tr>'
+        renderRow: function (row, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + ((index % 10) * 28) + 'ms" ' +
+                'onclick="openQrPaymentRow(\'' + options.key + '\', ' + row.id + ')">' +
+                '<td class="cell-id">' + escapeHtml(String(row.createdAt || '').slice(0, 16)) + '</td>' +
+                '<td class="cell-num">' + peso(row.amount) + '</td>' +
+                '<td>' + escapeHtml(QR_WALLET_WORDS[row.wallet] || row.wallet) + '</td>' +
+                '<td>' + qrStatusBadge(row.status) + '</td>' +
+                '<td class="cell-id">' + (row.reference ? escapeHtml(row.reference) : '<span class="muted">None</span>') + '</td>' +
+                '<td class="cell-id">' + (row.saleId ? qrSaleNumber(row.saleId) : '<span class="muted">None</span>') + '</td>' +
+                '<td class="cell-name">' + escapeHtml(row.cashierName || 'Unknown') + '</td>' +
+                '<td>' + (row.errorMessage ? escapeHtml(row.errorMessage) : '') + '</td></tr>';
+        }
     });
 
     renderQrPaymentTiles(state);
@@ -97,10 +119,10 @@ function buildQrPaymentsPanel(options) {
 function qrPaymentsQuery(state) {
     const p = state.options.prefix;
     const parts = [];
-    const add = (id, name) => {
+    function add(id, name) {
         const box = document.getElementById(id);
         if (box && box.value && box.value !== 'all') parts.push(name + '=' + encodeURIComponent(box.value));
-    };
+    }
     add(p + '-from', 'from');
     add(p + '-to', 'to');
     if (state.options.byStaff) add(p + '-staff', 'staff');
@@ -117,11 +139,14 @@ function renderQrPaymentTiles(state) {
     const grid = document.getElementById(state.options.prefix + '-kpis');
     if (!grid) return;
     const s = state.summary;
-    const value = (n) => (s ? escapeHtml(String(n)) : '—');
+    function value(n) {
+        return s ? escapeHtml(String(n)) : '—';
+    }
 
-    const tile = (label, figure, note) =>
-        '<div class="kpi-card"><span class="kpi-label">' + label + '</span>' +
-        '<span class="kpi-value">' + figure + '</span><span class="kpi-note">' + note + '</span></div>';
+    function tile(label, figure, note) {
+        return '<div class="kpi-card"><span class="kpi-label">' + label + '</span>' +
+            '<span class="kpi-value">' + figure + '</span><span class="kpi-note">' + note + '</span></div>';
+    }
 
     const rate = s && s.successRate !== null ? s.successRate + '%' : '—';
     grid.innerHTML =
@@ -139,15 +164,22 @@ function fillQrStaffPicker(state) {
     const select = document.getElementById(state.options.prefix + '-staff');
     if (!select) return;
     const current = select.value;
-    const people = Array.from(state.staff.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-    select.innerHTML = '<option value="all">Everyone</option>' + people.map(([id, name]) =>
-        '<option value="' + escapeHtml(id) + '">' + escapeHtml(name) + '</option>').join('');
-    select.value = people.some(([id]) => id === current) ? current : 'all';
+    const people = state.staff.slice().sort(function (a, b) {
+        return a.name.localeCompare(b.name);
+    });
+    let optionsHtml = '<option value="all">Everyone</option>';
+    let currentIsListed = false;
+    for (let i = 0; i < people.length; i++) {
+        optionsHtml += '<option value="' + escapeHtml(people[i].id) + '">' + escapeHtml(people[i].name) + '</option>';
+        if (people[i].id === current) currentIsListed = true;
+    }
+    select.innerHTML = optionsHtml;
+    select.value = currentIsListed ? current : 'all';
 }
 
 // A row that paid for a sale opens the sale; any other opens the attempt.
 function openQrPaymentRow(key, id) {
-    const state = qrPanels.get(key);
+    const state = qrPanels[key];
     const panel = getDataPanel(key);
     const row = panel ? panel.find(id) : null;
     if (!state || !row) return;
@@ -182,12 +214,16 @@ function openQrPaymentRow(key, id) {
 // reference of each code paid towards it. Empty when there were none.
 function qrPaymentsOfSaleHtml(list) {
     if (!Array.isArray(list) || list.length === 0) return '';
-    return detailTable(['QR Payment', 'Wallet', 'Amount', 'Status', 'Reference'],
-        list.map((q) => [
+    const rows = [];
+    for (let i = 0; i < list.length; i++) {
+        const q = list[i];
+        rows.push([
             '#' + q.qr_payment_id,
             escapeHtml(QR_WALLET_WORDS[q.wallet] || q.wallet),
             peso(q.amount),
             qrStatusBadge(q.status),
             q.provider_payment_id ? escapeHtml(q.provider_payment_id) : '<span class="muted">None</span>'
-        ]), [2]);
+        ]);
+    }
+    return detailTable(['QR Payment', 'Wallet', 'Amount', 'Status', 'Reference'], rows, [2]);
 }

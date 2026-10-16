@@ -4,7 +4,7 @@
 // one marks it read. "Once" means once in this browser tab since signing in:
 // the ids are kept in sessionStorage, so a reload does not pop them again.
 let invNotifications = [];
-const poppedNotifications = readPoppedAlerts();
+const poppedNotifications = readPoppedAlerts();   // a list of alert ids, each once
 
 // Alerts that have not had their card yet. The next one comes forward as soon
 // as there is room, so a long list never covers the screen. When more than
@@ -45,7 +45,7 @@ const NOTIF_ABOUT = {
 // Each page says where each kind of alert leads on it:
 //   configureNotificationTargets({
 //       'Purchase Order': { label: 'Purchase Orders', panelId: 'panel-po-history',
-//                           open: () => showPurchaseOrderHistory(), key: 'clerk-po' },
+//                           open: function () { showPurchaseOrderHistory(); }, key: 'clerk-po' },
 //       'Low Stock':      { ..., key: 'clerk-reorder', searchId: 'reorder-search' }
 //   });
 // panelId is the menu entry behind it: switched off for the role, no button.
@@ -72,8 +72,18 @@ function notifTargetFor(n) {
     return target;
 }
 
+// the loaded alert with this id, or undefined when there is none
+function findNotificationById(id) {
+    for (let i = 0; i < invNotifications.length; i++) {
+        if (String(invNotifications[i].notification_id) === String(id)) {
+            return invNotifications[i];
+        }
+    }
+    return undefined;
+}
+
 function goToNotification(id) {
-    const n = invNotifications.find((item) => String(item.notification_id) === String(id));
+    const n = findNotificationById(id);
     const target = notifTargetFor(n);
     if (!target) return;
 
@@ -130,7 +140,10 @@ async function loadNotifications() {
         return;
     }
 
-    const unread = invNotifications.filter((n) => !n.is_read);
+    const unread = [];
+    for (let i = 0; i < invNotifications.length; i++) {
+        if (!invNotifications[i].is_read) unread.push(invNotifications[i]);
+    }
 
     const badge = document.getElementById('bell-badge');
     if (badge) {
@@ -148,19 +161,22 @@ async function loadNotifications() {
             ' role yet. Low stock, damage reports, purchase orders and new ' +
             'deliveries all arrive here.</p>';
     } else {
-        list.innerHTML = invNotifications.map((n) =>
-            '<button type="button" class="notif-item' + (n.is_read ? '' : ' unread') +
-            '" onclick="openNotification(' + n.notification_id + ')">' +
-            '<span class="notif-type">' + escapeHtml(n.notif_type) + '</span>' +
-            '<span class="notif-title">' + escapeHtml(n.title) + '</span>' +
-            '<span class="notif-msg">' + escapeHtml(n.message || '') + '</span>' +
-            '<span class="notif-meta">' +
-            (n.is_read ? '' : '<span class="notif-new">New</span>') +
-            '<span class="notif-from">From <strong>' + escapeHtml(n.from_name || 'System') + '</strong>' +
-            (n.from_role ? ' (' + escapeHtml(n.from_role) + ')' : '') + '</span>' +
-            '<span class="notif-when">' + escapeHtml(whenText(n.created_at)) + '</span>' +
-            '</span></button>'
-        ).join('');
+        let itemsHtml = '';
+        for (let i = 0; i < invNotifications.length; i++) {
+            const n = invNotifications[i];
+            itemsHtml += '<button type="button" class="notif-item' + (n.is_read ? '' : ' unread') +
+                '" onclick="openNotification(' + n.notification_id + ')">' +
+                '<span class="notif-type">' + escapeHtml(n.notif_type) + '</span>' +
+                '<span class="notif-title">' + escapeHtml(n.title) + '</span>' +
+                '<span class="notif-msg">' + escapeHtml(n.message || '') + '</span>' +
+                '<span class="notif-meta">' +
+                (n.is_read ? '' : '<span class="notif-new">New</span>') +
+                '<span class="notif-from">From <strong>' + escapeHtml(n.from_name || 'System') + '</strong>' +
+                (n.from_role ? ' (' + escapeHtml(n.from_role) + ')' : '') + '</span>' +
+                '<span class="notif-when">' + escapeHtml(whenText(n.created_at)) + '</span>' +
+                '</span></button>';
+        }
+        list.innerHTML = itemsHtml;
     }
 
     const foot = document.getElementById('notif-foot');
@@ -168,7 +184,7 @@ async function loadNotifications() {
         if (invNotifications.length === 0) {
             foot.textContent = 'Nothing waiting';
         } else {
-            foot.textContent = `${unread.length} unread of ${invNotifications.length} shown`;
+            foot.textContent = unread.length + ' unread of ' + invNotifications.length + ' shown';
         }
     }
 
@@ -179,23 +195,37 @@ async function loadNotifications() {
 function readPoppedAlerts() {
     try {
         const ids = JSON.parse(sessionStorage.getItem(POPPED_ALERTS_KEY) || '[]');
-        if (Array.isArray(ids)) return new Set(ids);
+        if (Array.isArray(ids)) {
+            // each id once
+            const once = [];
+            for (let i = 0; i < ids.length; i++) {
+                if (once.indexOf(ids[i]) === -1) once.push(ids[i]);
+            }
+            return once;
+        }
     } catch (error) { /* blocked, or not readable */ }
-    return new Set();
+    return [];
 }
 
 function writePoppedAlerts() {
     try {
-        sessionStorage.setItem(POPPED_ALERTS_KEY, JSON.stringify(Array.from(poppedNotifications)));
+        sessionStorage.setItem(POPPED_ALERTS_KEY, JSON.stringify(poppedNotifications));
     } catch (error) { /* blocked: they may pop again after a reload */ }
 }
 
 // every unseen alert gets a card, once; they queue up and come forward three at a time
 function popNewNotifications(unread) {
-    const fresh = unread.filter((n) => !poppedNotifications.has(n.notification_id));
+    const fresh = [];
+    for (let i = 0; i < unread.length; i++) {
+        if (poppedNotifications.indexOf(unread[i].notification_id) === -1) fresh.push(unread[i]);
+    }
     if (fresh.length === 0) return;
 
-    fresh.forEach((n) => poppedNotifications.add(n.notification_id));
+    for (let i = 0; i < fresh.length; i++) {
+        if (poppedNotifications.indexOf(fresh[i].notification_id) === -1) {
+            poppedNotifications.push(fresh[i].notification_id);
+        }
+    }
     writePoppedAlerts();
 
     if (fresh.length > POP_MOST_QUEUED) {
@@ -229,12 +259,20 @@ function showQueuedCards() {
                 tone: 'warning',
                 title: queued.more + ' more alerts',
                 message: 'Open the bell in the top right corner to read them.',
-                onOpen: () => openNotifications()
+                onOpen: function () {
+                    openNotifications();
+                }
             });
             continue;
         }
 
-        const n = invNotifications.find((item) => item.notification_id === queued.notification_id);
+        let n;   // the loaded alert with this id, if it is still there
+        for (let i = 0; i < invNotifications.length; i++) {
+            if (invNotifications[i].notification_id === queued.notification_id) {
+                n = invNotifications[i];
+                break;
+            }
+        }
         if (!n || n.is_read) continue;
 
         showCard({
@@ -243,7 +281,9 @@ function showQueuedCards() {
             message: n.message || '',
             from: n.from_name || 'System',
             when: n.created_at,
-            onOpen: () => openNotification(n.notification_id)
+            onOpen: function () {
+                openNotification(n.notification_id);
+            }
         });
     }
 
@@ -291,10 +331,12 @@ function openNotification(id) {
 
     const text = String(n.message || '').trim() || 'No further detail was given.';
     // every line of the message becomes its own <p> paragraph
+    // (the text is split at a blank line or at any line break)
+    const lines = text.split(/\n{2,}|\r?\n/);
     let paragraphs = '';
-    for (const line of text.split(/\n{2,}|\r?\n/)) {
-        if (line !== '') {
-            paragraphs += '<p>' + escapeHtml(line) + '</p>';
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i] !== '') {
+            paragraphs += '<p>' + escapeHtml(lines[i]) + '</p>';
         }
     }
 

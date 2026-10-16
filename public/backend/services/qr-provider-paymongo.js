@@ -49,6 +49,8 @@ const LOG_RAW = mode === "test" || process.env.PAYMONGO_LOG === "1";
 
 // The till asks every 3 seconds, so a status read is printed only when what
 // it says has changed since the last one for that payment.
+// (a Map on purpose: it remembers the order payments were added in, so the
+// oldest one can be dropped when there are more than 500)
 const lastLogged = new Map();
 
 function logRaw(what, body) {
@@ -60,8 +62,11 @@ function logRaw(what, body) {
     lastLogged.set(id, status);
     if (lastLogged.size > 500) lastLogged.delete(lastLogged.keys().next().value);
   }
-  const text = JSON.stringify(body, (key, value) => (key === "client_key" ? "(hidden)" : value));
-  console.log(`[PayMongo ${what}] ${text}`);
+  const text = JSON.stringify(body, function (key, value) {
+    if (key === "client_key") return "(hidden)";
+    return value;
+  });
+  console.log("[PayMongo " + what + "] " + text);
 }
 
 // An error from PayMongo, with its own sentence (errors[0].detail) and the
@@ -107,11 +112,11 @@ async function call(method, pathname, attributes) {
   } catch (error) {
     body = null;
   }
-  logRaw(`${method} ${pathname} -> ${response.status}`, body);
+  logRaw(method + " " + pathname + " -> " + response.status, body);
 
   if (!response.ok) {
     const first = body && Array.isArray(body.errors) && body.errors[0] ? body.errors[0] : {};
-    let message = first.detail || `PayMongo refused the request (HTTP ${response.status}).`;
+    let message = first.detail || "PayMongo refused the request (HTTP " + response.status + ").";
     if (response.status === 401) {
       message = "PayMongo did not accept the secret key. Check PAYMONGO_SECRET_KEY in .env.";
     }
@@ -130,13 +135,17 @@ function toCentavos(pesos) {
 const WALLET_TYPES = { GCash: "gcash", PayMaya: "paymaya" };
 
 async function attach(intentId, methodId, returnUrl) {
-  return call("POST", `/payment_intents/${intentId}/attach`, {
+  return call("POST", "/payment_intents/" + intentId + "/attach", {
     payment_method: methodId,
     return_url: returnUrl
   });
 }
 
-async function createPayment({ amount, wallet, description, returnUrl }) {
+async function createPayment(options) {
+  const amount = options.amount;
+  const wallet = options.wallet;
+  const description = options.description;
+  const returnUrl = options.returnUrl;
   const type = WALLET_TYPES[wallet];
   if (!type) throw new PayMongoError("Only GCash and Maya can be paid by QR code.", 400);
 
@@ -165,10 +174,10 @@ async function createPayment({ amount, wallet, description, returnUrl }) {
     const fallback = site ? site + "/pay/done" : "";
     if (!fallback || fallback === returnUrl) {
       throw new PayMongoError(
-        `PayMongo would not accept ${returnUrl} as the page to return to (${error.message}). ` +
+        "PayMongo would not accept " + returnUrl + " as the page to return to (" + error.message + "). " +
         "Set HARDWARE_SITE_URL in .env to the shop's https address and restart the server.", 400);
     }
-    console.warn(`PayMongo refused return_url ${returnUrl}; using HARDWARE_SITE_URL (${fallback}) instead.`);
+    console.warn("PayMongo refused return_url " + returnUrl + "; using HARDWARE_SITE_URL (" + fallback + ") instead.");
     attached = await attach(intent.id, method.id, fallback);
   }
 
@@ -176,19 +185,26 @@ async function createPayment({ amount, wallet, description, returnUrl }) {
   const payUrl = next && next.redirect ? next.redirect.url : null;
   if (!payUrl) {
     throw new PayMongoError(
-      `PayMongo did not give a page to pay on (the payment is ${attached.attributes.status}). Try again.`, 502);
+      "PayMongo did not give a page to pay on (the payment is " + attached.attributes.status + "). Try again.", 502);
   }
 
   return { providerIntentId: intent.id, payUrl: payUrl, status: "pending" };
 }
 
 async function getStatus(providerIntentId) {
-  const intent = await call("GET", `/payment_intents/${encodeURIComponent(providerIntentId)}`);
+  const intent = await call("GET", "/payment_intents/" + encodeURIComponent(providerIntentId));
   const a = intent.attributes;
   const payments = Array.isArray(a.payments) ? a.payments : [];
 
   if (a.status === "succeeded") {
-    const paid = payments.find((p) => p.attributes && p.attributes.status === "paid") || payments[0];
+    // the first payment that is paid, else the first payment at all
+    let paid = payments[0];
+    for (let i = 0; i < payments.length; i++) {
+      if (payments[i].attributes && payments[i].attributes.status === "paid") {
+        paid = payments[i];
+        break;
+      }
+    }
     return {
       status: "paid",
       providerPaymentId: paid ? paid.id : null,
@@ -203,7 +219,13 @@ async function getStatus(providerIntentId) {
   // last_payment_error stays null; both are read.
   const failure = a.last_payment_error;
   if (failure || a.status === "awaiting_payment_method") {
-    const failed = payments.filter((p) => p.attributes && p.attributes.status === "failed").pop();
+    // the last payment that failed, if any
+    let failed;
+    for (let i = 0; i < payments.length; i++) {
+      if (payments[i].attributes && payments[i].attributes.status === "failed") {
+        failed = payments[i];
+      }
+    }
     const why = (failed && failed.attributes) || failure || {};
     return {
       status: "failed",
@@ -227,10 +249,10 @@ async function getStatus(providerIntentId) {
 // it, and a payment that still arrives later is caught there.
 async function cancel(providerIntentId) {
   try {
-    await call("POST", `/payment_intents/${encodeURIComponent(providerIntentId)}/cancel`);
+    await call("POST", "/payment_intents/" + encodeURIComponent(providerIntentId) + "/cancel");
     return true;
   } catch (error) {
-    if (LOG_RAW) console.log(`[PayMongo] cancel ${providerIntentId} not accepted: ${error.message}`);
+    if (LOG_RAW) console.log("[PayMongo] cancel " + providerIntentId + " not accepted: " + error.message);
     return false;
   }
 }
@@ -257,7 +279,9 @@ function parseWebhook(rawBody, header) {
   if (!Buffer.isBuffer(rawBody)) throw webhookRefusal("The event's body could not be read.");
 
   const parts = {};
-  for (const piece of String(header || "").split(",")) {
+  const pieces = String(header || "").split(",");
+  for (let pieceIndex = 0; pieceIndex < pieces.length; pieceIndex++) {
+    const piece = pieces[pieceIndex];
     const split = piece.indexOf("=");
     if (split > 0) parts[piece.slice(0, split).trim()] = piece.slice(split + 1).trim();
   }
@@ -271,7 +295,7 @@ function parseWebhook(rawBody, header) {
 
   const received = String((mode === "live" ? parts.li : parts.te) || "");
   const expected = crypto.createHmac("sha256", WEBHOOK_SECRET)
-    .update(`${parts.t}.`).update(rawBody).digest("hex");
+    .update(parts.t + ".").update(rawBody).digest("hex");
   const a = Buffer.from(expected, "utf8");
   const b = Buffer.from(received, "utf8");
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
@@ -303,8 +327,8 @@ module.exports = {
   name: "paymongo",
   mode: mode || "test",
   problem: problem,
-  createPayment,
-  getStatus,
-  cancel,
-  parseWebhook
+  createPayment: createPayment,
+  getStatus: getStatus,
+  cancel: cancel,
+  parseWebhook: parseWebhook
 };

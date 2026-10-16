@@ -33,18 +33,22 @@ function invBody() { return document.querySelector('#inv-table tbody'); }
 function showInventoryPanel(panelId, title, event) {
     if (event) event.preventDefault();
 
-    document.querySelectorAll('[data-panel]').forEach((panel) => {
+    const allPanels = document.querySelectorAll('[data-panel]');
+    for (let i = 0; i < allPanels.length; i++) {
+        const panel = allPanels[i];
         panel.style.display = panel.id === panelId ? 'block' : 'none';
-    });
+    }
     // a screen opened from another (the order form, from Purchase Orders) lights its menu entry
     const opened = document.getElementById(panelId);
     const litId = (opened && opened.getAttribute('data-panel-of')) || panelId;
     // a link naming a view (Records: Suppliers, Products...) lights only for that view
     const view = opened ? opened.dataset.view : undefined;
-    document.querySelectorAll('[data-panel-link]').forEach((link) => {
+    const panelLinks = document.querySelectorAll('[data-panel-link]');
+    for (let i = 0; i < panelLinks.length; i++) {
+        const link = panelLinks[i];
         const wanted = link.dataset.panelView;
         link.classList.toggle('active', link.dataset.panelLink === litId && (!wanted || wanted === view));
-    });
+    }
 
     const heading = document.getElementById('inv-page-title');
     if (heading) heading.textContent = title;
@@ -120,25 +124,31 @@ function buildMaterialsPanel() {
             button: 'Load Data'
         },
 
-        load: async () => {
+        load: async function () {
             invProducts = await apiGetProducts();
             invLoaded = true;
             return invProducts;
         },
 
         // this load replaces invProducts, so the Stock Adjustment list is redrawn from it
-        onLoaded: () => { if (adjustScreenOpen()) afterMaterialsLoaded(true); },
+        onLoaded: function () {
+            if (adjustScreenOpen()) afterMaterialsLoaded(true);
+        },
 
-        match: (p, query) => prefixMatch([
-            p.product_name, p.category_name, p.supplier_name, p.stock_status
-        ], query),
+        match: function (p, query) {
+            return prefixMatch([
+                p.product_name, p.category_name, p.supplier_name, p.stock_status
+            ], query);
+        },
 
-        filter: (p, filters) => filters.status === 'all' || p.stock_status === filters.status,
+        filter: function (p, filters) {
+            return filters.status === 'all' || p.stock_status === filters.status;
+        },
 
         // the catalogue: what it is, who supplies it and what it sells for.
         // Reorder points have their own screen, so they are not repeated here.
-        renderRow: (p, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+        renderRow: function (p, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openMaterialDetail(' + p.product_id + ')" title="Open this material">' +
             '<td class="cell-id">#' + p.product_id + '</td>' +
             '<td class="cell-name">' + escapeHtml(p.product_name) +
@@ -149,14 +159,36 @@ function buildMaterialsPanel() {
             '<td class="cell-num">' + peso(p.price) +
                 '<span class="cell-sub">per ' + escapeHtml(p.unit_name || 'unit') + '</span></td>' +
             '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
-            '<td>' + statusBadge(p.stock_status) + '</td></tr>'
+            '<td>' + statusBadge(p.stock_status) + '</td></tr>';
+        }
     });
+}
+
+// The material in invProducts with this id, or undefined when there is none.
+function findProductById(productId) {
+    for (let i = 0; i < invProducts.length; i++) {
+        if (invProducts[i].product_id === productId) return invProducts[i];
+    }
+    return undefined;
+}
+
+// Puts the names in a list into one string, each one made safe for HTML,
+// with the separator between them.
+function joinEscaped(names, separator) {
+    let text = '';
+    for (let i = 0; i < names.length; i++) {
+        if (i > 0) text += separator;
+        text += escapeHtml(names[i]);
+    }
+    return text;
 }
 
 // "Stanley · Hand Tools": brand then category, whichever are on file
 function materialKindText(p) {
-    const parts = [p.brand_name, p.category_name || 'Uncategorised'].filter(Boolean);
-    return parts.map(escapeHtml).join(' &middot; ');
+    const parts = [];
+    if (p.brand_name) parts.push(p.brand_name);
+    parts.push(p.category_name || 'Uncategorised');
+    return joinEscaped(parts, ' &middot; ');
 }
 
 async function loadInventoryAll(event) {
@@ -254,7 +286,7 @@ function afterMaterialsLoaded(loaded) {
 function refreshPickedMaterial() {
     if (!adjustMaterial) return;
 
-    const fresh = invProducts.find((p) => p.product_id === adjustMaterial.product_id);
+    const fresh = findProductById(adjustMaterial.product_id);
     if (!fresh) return;
 
     adjustMaterial = fresh;
@@ -278,20 +310,27 @@ function renderAttentionList() {
     const more = document.getElementById('attention-more');
     if (!list || !more) return;
 
-    const short = invProducts.filter(isShort).sort(compareShort);
+    const short = [];
+    for (let i = 0; i < invProducts.length; i++) {
+        if (isShort(invProducts[i])) short.push(invProducts[i]);
+    }
+    short.sort(compareShort);
 
     if (short.length === 0) {
         attentionMessage('Everything is above its reorder point.');
         return;
     }
 
-    list.innerHTML = short.slice(0, ATTENTION_SHOWN).map((p) => {
+    let listHtml = '';
+    const shown = short.slice(0, ATTENTION_SHOWN);
+    for (let i = 0; i < shown.length; i++) {
+        const p = shown[i];
         const out = p.stock_status === 'Out of Stock';
         const unit = p.unit_name ? ' ' + escapeHtml(p.unit_name) : '';
 
         // the whole row is the button (like a clickable table row); it is a
         // real <button> so the keyboard can reach it too
-        return '<li>' +
+        listHtml += '<li>' +
             '<button type="button" class="attention-row" ' +
                 'aria-label="Adjust ' + escapeHtml(p.product_name) + '" ' +
                 'onclick="adjustFromList(' + p.product_id + ')">' +
@@ -306,7 +345,8 @@ function renderAttentionList() {
                 '<span class="attention-reorder">Reorder at ' + (Number(p.reorder_point) || 0) + '</span>' +
             '</span>' +
             '</button></li>';
-    }).join('');
+    }
+    list.innerHTML = listHtml;
 
     // more than fit here: the Reorder Point screen has them all
     if (short.length > ATTENTION_SHOWN) {
@@ -356,25 +396,30 @@ function findMaterials(query) {
     const words = [];
     const other = [];
 
-    invProducts.forEach((p) => {
+    for (let i = 0; i < invProducts.length; i++) {
+        const p = invProducts[i];
         const name = String(p.product_name || '').toLowerCase();
 
         if (name.startsWith(query)) starts.push(p);
         else if (startsAWord(name, query)) words.push(p);
         else if (prefixMatch([p.brand_name, p.category_name], query)) other.push(p);
-    });
+    }
 
     return starts.concat(words, other).slice(0, 6);
 }
 
 // the dropdown's rows; a row calls pickFn with its product id
 function materialSuggestHtml(found, idPrefix, pickFn) {
-    return found.map((p, i) => {
+    let html = '';
+    for (let i = 0; i < found.length; i++) {
+        const p = found[i];
         const stock = Number(p.quantity_in_stock);
-        const meta = [p.category_name, p.brand_name].filter(Boolean).map(escapeHtml);
+        const meta = [];
+        if (p.category_name) meta.push(escapeHtml(p.category_name));
+        if (p.brand_name) meta.push(escapeHtml(p.brand_name));
 
         // stock on hand is the figure about to change
-        return '<li class="suggest-item" role="option" id="' + idPrefix + i + '" ' +
+        html += '<li class="suggest-item" role="option" id="' + idPrefix + i + '" ' +
             'onmousedown="event.preventDefault()" ' +
             'onclick="' + pickFn + '(' + p.product_id + ')">' +
             '<span class="suggest-line">' +
@@ -383,7 +428,8 @@ function materialSuggestHtml(found, idPrefix, pickFn) {
             '</span>' +
             (meta.length ? '<span class="suggest-note">' + meta.join(' &middot; ') + '</span>' : '') +
             '</li>';
-    }).join('');
+    }
+    return html;
 }
 
 async function loadSupplierOptions() {
@@ -392,8 +438,13 @@ async function loadSupplierOptions() {
 
     try {
         const rows = await apiGetRecords('supplier');
-        const options = rows.map((s) => '<option value="' + s.id + '">' + escapeHtml(s.name) + '</option>').join('');
-        selects.forEach((s) => { s.innerHTML = options; });
+        let options = '';
+        for (let i = 0; i < rows.length; i++) {
+            options += '<option value="' + rows[i].id + '">' + escapeHtml(rows[i].name) + '</option>';
+        }
+        for (let i = 0; i < selects.length; i++) {
+            selects[i].innerHTML = options;
+        }
     } catch (error) {
         console.error('Unable to load suppliers:', error);
     }
@@ -436,7 +487,7 @@ function renderAdjustSuggestions(text) {
     const query = String(text || '').trim().toLowerCase();
     adjustSuggestHighlight = -1;
 
-    const hide = () => {
+    const hide = function () {
         list.hidden = true;
         list.innerHTML = '';
         if (box) box.setAttribute('aria-expanded', 'false');
@@ -481,7 +532,9 @@ function onAdjustMaterialKey(event) {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
         adjustSuggestHighlight = (adjustSuggestHighlight + step + items.length) % items.length;
-        items.forEach((item, i) => item.classList.toggle('is-active', i === adjustSuggestHighlight));
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === adjustSuggestHighlight);
+        }
         return;
     }
 
@@ -496,7 +549,7 @@ function onAdjustMaterialKey(event) {
 }
 
 function pickAdjustMaterial(productId) {
-    const found = invProducts.find((p) => p.product_id === productId);
+    const found = findProductById(productId);
     if (!found) return;
 
     const box = adjustMaterialBox();
@@ -545,7 +598,10 @@ function renderAdjustMaterialStrip() {
     const p = adjustMaterial;
     if (!p) { strip.hidden = true; strip.innerHTML = ''; return; }
 
-    const meta = [p.category_name, p.brand_name].filter(Boolean).map(escapeHtml).join(' &middot; ');
+    const metaParts = [];
+    if (p.category_name) metaParts.push(p.category_name);
+    if (p.brand_name) metaParts.push(p.brand_name);
+    const meta = joinEscaped(metaParts, ' &middot; ');
     const stock = Number(p.quantity_in_stock);
     const reorder = Number(p.reorder_point) || 0;
 
@@ -614,7 +670,7 @@ function renderUnitSuggestions(text) {
     const query = String(text || '').trim().toLowerCase();
     unitSuggestHighlight = -1;
 
-    const hide = () => {
+    const hide = function () {
         list.hidden = true;
         list.innerHTML = '';
         if (box) box.setAttribute('aria-expanded', 'false');
@@ -628,22 +684,29 @@ function renderUnitSuggestions(text) {
     if (typed === '') {
         matches = invUnits.slice(0, 8);
     } else {
-        matches = invUnits.filter((u) => startsAWord(u.name, typed)).slice(0, 8);
+        matches = [];
+        for (let i = 0; i < invUnits.length; i++) {
+            if (startsAWord(invUnits[i].name, typed)) matches.push(invUnits[i]);
+        }
+        matches = matches.slice(0, 8);
     }
 
     if (matches.length === 1 && String(matches[0].name).toLowerCase() === query) { hide(); return; }
     if (matches.length === 0) { hide(); return; }
 
-    list.innerHTML = matches.map((u, i) => {
+    let unitHtml = '';
+    for (let i = 0; i < matches.length; i++) {
+        const u = matches[i];
         const used = Number(u.product_count) || 0;
-        return '<li class="suggest-item" role="option" id="unit-suggest-' + i + '" ' +
+        unitHtml += '<li class="suggest-item" role="option" id="unit-suggest-' + i + '" ' +
             'onmousedown="event.preventDefault()" ' +
             'onclick="pickAdjustUnit(' + JSON.stringify(String(u.name)).replace(/"/g, '&quot;') + ')">' +
             '<span class="suggest-line">' +
                 '<span class="suggest-name">' + escapeHtml(u.name) + '</span>' +
                 '<span class="suggest-figure">' + used + '</span>' +
             '</span></li>';
-    }).join('');
+    }
+    list.innerHTML = unitHtml;
 
     list.hidden = false;
     if (box) box.setAttribute('aria-expanded', 'true');
@@ -671,7 +734,9 @@ function onAdjustUnitKey(event) {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
         unitSuggestHighlight = (unitSuggestHighlight + step + items.length) % items.length;
-        items.forEach((item, i) => item.classList.toggle('is-active', i === unitSuggestHighlight));
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === unitSuggestHighlight);
+        }
         return;
     }
 
@@ -727,7 +792,10 @@ function renderAdjustUnitVerdict() {
         return;
     }
 
-    const known = invUnits.some((u) => String(u.name).toLowerCase() === typed.toLowerCase());
+    let known = false;
+    for (let i = 0; i < invUnits.length; i++) {
+        if (String(invUnits[i].name).toLowerCase() === typed.toLowerCase()) known = true;
+    }
     const current = adjustMaterial ? String(adjustMaterial.unit_name || '') : '';
     const changing = adjustMaterial && current.toLowerCase() !== typed.toLowerCase();
 
@@ -857,13 +925,19 @@ function buildAdjustmentsPanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetStockAdjustments(),
+        load: function () {
+            return apiGetStockAdjustments();
+        },
 
-        match: (a, query) => prefixMatch([a.product_name, a.adjusted_by, a.reason, a.unit_name], query),
+        match: function (a, query) {
+            return prefixMatch([a.product_name, a.adjusted_by, a.reason, a.unit_name], query);
+        },
 
-        filter: (a, filters) => filters.type === 'all' || a.adjustment_type === filters.type,
+        filter: function (a, filters) {
+            return filters.type === 'all' || a.adjustment_type === filters.type;
+        },
 
-        renderRow: (a, index) => {
+        renderRow: function (a, index) {
             // the unit the entry recorded, not the material's unit today
             const unit = a.unit_name ? ' ' + escapeHtml(a.unit_name) : '';
 
@@ -977,7 +1051,7 @@ async function handleAdjustStock(event) {
         afterMaterialsLoaded(await ensureInventoryLoaded(true));    // a restocked material drops off the list
         await loadUnits(true);
 
-        const again = invProducts.find((m) => m.product_id === data.productId);
+        const again = findProductById(data.productId);
         setAdjustMaterial(again || null);
         if (!again) clearAdjustMaterial();
 
@@ -1008,15 +1082,21 @@ function buildReorderPanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetProducts(),
+        load: function () {
+            return apiGetProducts();
+        },
 
-        match: (p, query) => prefixMatch([p.product_name], query),
-        filter: (p, filters) => filters.status === 'all' || p.stock_status === filters.status,
+        match: function (p, query) {
+            return prefixMatch([p.product_name], query);
+        },
+        filter: function (p, filters) {
+            return filters.status === 'all' || p.stock_status === filters.status;
+        },
 
         // the stock level against the point: a bar, the point itself, and what
         // an order would take to get back to comfortable
-        renderRow: (p, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+        renderRow: function (p, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="askReorderPoint(' + p.product_id + ')" title="Set the reorder point">' +
             '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
             '<td class="cell-num">' + stockLevelBar(p) + '</td>' +
@@ -1024,7 +1104,8 @@ function buildReorderPanel() {
             '<td class="cell-num">' + (suggestedOrderOf(p) > 0
                 ? suggestedOrderOf(p) + ' ' + escapeHtml(p.unit_name || '')
                 : '<span class="muted">None</span>') + '</td>' +
-            '<td>' + statusBadge(p.stock_status) + '</td></tr>'
+            '<td>' + statusBadge(p.stock_status) + '</td></tr>';
+        }
     });
 }
 
@@ -1066,7 +1147,15 @@ async function loadReorderTable() {
 // the card asks for the new point, reads it back, then saves it
 async function askReorderPoint(productId) {
     const panel = getDataPanel('clerk-reorder');
-    const p = panel ? panel.rows.find((row) => row.product_id === productId) : null;
+    let p = null;
+    if (panel) {
+        for (let i = 0; i < panel.rows.length; i++) {
+            if (panel.rows[i].product_id === productId) {
+                p = panel.rows[i];
+                break;
+            }
+        }
+    }
     if (!p) return;
 
     const current = Number(p.reorder_point) || 0;
@@ -1092,8 +1181,9 @@ async function askReorderPoint(productId) {
         value: String(current),
         placeholder: '0',
         confirmLabel: 'Save the point',
-        check: (value) => {
+        check: function (value) {
             const typed = String(value).trim();
+            // /^\d+$/ matches text made only of digits (a whole number, no sign or decimal point)
             if (typed === '' || !/^\d+$/.test(typed)) return 'Type a whole number of' + (unit || ' units') + ', like 12.';
             if (Number(typed) === current) return 'That is the point it already has.';
             return null;
@@ -1139,9 +1229,10 @@ function buildClerkPurchaseOrderPanel() {
         gateText: 'Press Load Data for every order raised, or filter to the ones still ' +
                   'waiting to be confirmed or delivered.',
         // a delivery counted in moves stock
-        afterChange: async () => {
-            for (const key of ['clerk-materials', 'clerk-reorder']) {
-                const panel = getDataPanel(key);
+        afterChange: async function () {
+            const keys = ['clerk-materials', 'clerk-reorder'];
+            for (let i = 0; i < keys.length; i++) {
+                const panel = getDataPanel(keys[i]);
                 if (panel && panel.state === 'ready') await panel.refresh();
             }
         }
@@ -1165,11 +1256,15 @@ function buildReturnsPanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetReturns(),
+        load: function () {
+            return apiGetReturns();
+        },
 
-        match: (r, query) => prefixMatch([r.product_name, r.reason], query),
+        match: function (r, query) {
+            return prefixMatch([r.product_name, r.reason], query);
+        },
 
-        filter: (r, filters) => {
+        filter: function (r, filters) {
             if (filters.type === 'To inspect') { if (!returnAwaiting(r)) return false; }
             else if (filters.type !== 'All' && r.report_type !== filters.type) return false;
             if (filters.where === 'awaiting') return returnAwaiting(r);
@@ -1177,10 +1272,12 @@ function buildReturnsPanel() {
             return true;
         },
 
-        onLoaded: (rows) => renderReturnFilters(rows),
+        onLoaded: function (rows) {
+            renderReturnFilters(rows);
+        },
 
-        renderRow: (r, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+        renderRow: function (r, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openReturnDetail(' + r.return_id + ')">' +
             '<td class="cell-id">#' + r.return_id + '</td>' +
             '<td>' + statusBadge(r.report_type) + '</td>' +
@@ -1188,7 +1285,8 @@ function buildReturnsPanel() {
             '<td class="cell-num">' + r.quantity + ' ' + escapeHtml(r.unit_name || '') + '</td>' +
             '<td>' + returnDispositionBadge(r) + '</td>' +
             '<td class="cell-id">' + escapeHtml(String(r.return_date).slice(0, 10)) + '</td>' +
-            '<td>' + statusBadge(r.status) + '</td></tr>'
+            '<td>' + statusBadge(r.status) + '</td></tr>';
+        }
     });
 }
 
@@ -1230,21 +1328,28 @@ function renderReturnFilters(rows) {
     // the worklist first: what the counter took back and nobody has looked at
     const types = ['To inspect', 'All', 'Damaged', 'Refunded', 'Return', 'Missing'];
 
-    box.innerHTML = types.map((type) => {
-        let count;
+    let chips = '';
+    for (let t = 0; t < types.length; t++) {
+        const type = types[t];
+        let count = 0;
         if (type === 'All') {
             count = rows.length;
-        } else if (type === 'To inspect') {
-            count = rows.filter(returnAwaiting).length;
         } else {
-            count = rows.filter((r) => r.report_type === type).length;
+            for (let i = 0; i < rows.length; i++) {
+                if (type === 'To inspect') {
+                    if (returnAwaiting(rows[i])) count++;
+                } else if (rows[i].report_type === type) {
+                    count++;
+                }
+            }
         }
 
-        return '<button type="button" class="filter-chip' + (returnFilter === type ? ' active' : '') +
+        chips += '<button type="button" class="filter-chip' + (returnFilter === type ? ' active' : '') +
             (type === 'To inspect' && count > 0 ? ' track-chip-alert' : '') +
             '" onclick="setReturnFilter(\'' + type + '\')">' + statusWord(type) +
             ' <span class="chip-count">' + count + '</span></button>';
-    }).join('');
+    }
+    box.innerHTML = chips;
 }
 
 function setReturnFilter(type) {
@@ -1324,8 +1429,9 @@ async function sendReturnVerdict(reportId, verdict, note) {
         await loadReturns();
         // a verdict that put goods back moves stock
         if (verdict === 'Return to Stock') {
-            for (const key of ['clerk-materials', 'clerk-reorder']) {
-                const panel = getDataPanel(key);
+            const keys = ['clerk-materials', 'clerk-reorder'];
+            for (let i = 0; i < keys.length; i++) {
+                const panel = getDataPanel(keys[i]);
                 if (panel && panel.state === 'ready') await panel.refresh();
             }
         }
@@ -1400,7 +1506,9 @@ function onReportMaterialKey(event) {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
         reportSuggestHighlight = (reportSuggestHighlight + step + items.length) % items.length;
-        items.forEach((item, i) => item.classList.toggle('is-active', i === reportSuggestHighlight));
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === reportSuggestHighlight);
+        }
         return;
     }
 
@@ -1416,7 +1524,7 @@ function onReportMaterialKey(event) {
 
 // a picked material goes onto the list; the box empties, ready for the next one
 function pickReportMaterial(productId) {
-    const found = invProducts.find((p) => p.product_id === productId);
+    const found = findProductById(productId);
     if (!found) return;
 
     addReportItem(found);
@@ -1453,7 +1561,11 @@ function renderReportMaterialVerdict() {
 
 // ---------- the materials listed in this report ----------
 function addReportItem(product) {
-    if (reportItems.some((item) => item.productId === product.product_id)) {
+    let alreadyListed = false;
+    for (let i = 0; i < reportItems.length; i++) {
+        if (reportItems[i].productId === product.product_id) alreadyListed = true;
+    }
+    if (alreadyListed) {
         notifyWarning(product.product_name + ' is already in this report. Change its quantity in the list.', 'Already listed');
         return;
     }
@@ -1492,9 +1604,10 @@ function renderReportItems() {
     const type = reportTypeNow();
     const withRefund = type === 'Refunded' || type === 'Return';
 
-    box.innerHTML = '<div class="report-items-head">Items in this report ' +
-        '<span class="chip-count">' + reportItems.length + '</span></div>' +
-        reportItems.map((item, index) =>
+    let lines = '';
+    for (let index = 0; index < reportItems.length; index++) {
+        const item = reportItems[index];
+        lines +=
             '<div class="report-line' + (withRefund ? ' has-refund' : '') + '">' +
                 '<div>' +
                     '<div class="recv-name">' + escapeHtml(item.name) + '</div>' +
@@ -1517,7 +1630,12 @@ function renderReportItems() {
                     : '') +
                 '<button type="button" class="btn btn-sm btn-danger" ' +
                         'onclick="removeReportItem(' + index + ')">Remove</button>' +
-            '</div>').join('');
+            '</div>';
+    }
+
+    box.innerHTML = '<div class="report-items-head">Items in this report ' +
+        '<span class="chip-count">' + reportItems.length + '</span></div>' +
+        lines;
 }
 
 // ---------- the purchase orders a delivery can be checked against ----------
@@ -1528,17 +1646,32 @@ let poChoices = [];
 
 async function loadPoChoices() {
     const rows = await apiGetPurchaseOrders();
-    poChoices = rows.filter((po) => po.status === 'Pending');
+    poChoices = [];
+    for (let i = 0; i < rows.length; i++) {
+        if (rows[i].status === 'Pending') poChoices.push(rows[i]);
+    }
     return poChoices;
+}
+
+// The approved order with this id from poChoices, or undefined when there is none.
+function findPoChoice(poId) {
+    for (let i = 0; i < poChoices.length; i++) {
+        if (poChoices[i].po_id === poId) return poChoices[i];
+    }
+    return undefined;
 }
 
 // the <option> rows of a purchase order box; the order with this id is selected
 function poChoiceOptions(selectedId) {
-    return poChoices.map((po) =>
-        '<option value="' + po.po_id + '"' + (po.po_id === selectedId ? ' selected' : '') + '>' +
-        escapeHtml('PO #' + po.po_id + ' · ' + po.supplier_name + ' · ' +
-                   poWhen(po.order_date).slice(0, 10) + ' · ' + poStatusWord(poStage(po))) +
-        '</option>').join('');
+    let options = '';
+    for (let i = 0; i < poChoices.length; i++) {
+        const po = poChoices[i];
+        options += '<option value="' + po.po_id + '"' + (po.po_id === selectedId ? ' selected' : '') + '>' +
+            escapeHtml('PO #' + po.po_id + ' · ' + po.supplier_name + ' · ' +
+                       poWhen(po.order_date).slice(0, 10) + ' · ' + poStatusWord(poStage(po))) +
+            '</option>';
+    }
+    return options;
 }
 
 // ---------- Missing from delivery: the purchase order and its checklist ----------
@@ -1580,7 +1713,7 @@ async function onReportPoChange(value) {
         const select = document.getElementById('report-po');
         if (select && parseInt(select.value, 10) !== poId) return;
 
-        reportPo = { po: poChoices.find((po) => po.po_id === poId), items: items };
+        reportPo = { po: findPoChoice(poId), items: items };
         renderReportPoLines();
     } catch (error) {
         setReportPoVerdict('That purchase order could not be opened. Try again.', true);
@@ -1604,16 +1737,12 @@ function renderReportPoLines() {
 
     setReportPoVerdict('Tick every item that did not arrive and say how many.', false);
 
-    box.innerHTML = '<div class="table-responsive"><table class="mini-table report-po-table">' +
-        '<thead><tr>' +
-            '<th class="report-tick"><input type="checkbox" id="report-po-all" ' +
-                'onchange="tickAllReportPo(this.checked)" aria-label="Tick every item"></th>' +
-            '<th>Material</th><th class="col-num">Ordered</th><th class="col-num">Missing</th>' +
-        '</tr></thead><tbody>' +
-        reportPo.items.map((item, index) => {
-            const ticked = reportPoTicks[item.product_id] !== undefined;
-            const howMany = ticked ? reportPoTicks[item.product_id] : item.quantity;
-            return '<tr>' +
+    let bodyRows = '';
+    for (let index = 0; index < reportPo.items.length; index++) {
+        const item = reportPo.items[index];
+        const ticked = reportPoTicks[item.product_id] !== undefined;
+        const howMany = ticked ? reportPoTicks[item.product_id] : item.quantity;
+        bodyRows += '<tr>' +
                 '<td class="report-tick"><input type="checkbox" id="report-po-tick-' + index + '"' +
                     (ticked ? ' checked' : '') + ' onchange="tickReportPo(' + index + ', this.checked)" ' +
                     'aria-label="Missing: ' + escapeHtml(item.product_name) + '"></td>' +
@@ -1624,7 +1753,15 @@ function renderReportPoLines() {
                     (ticked ? '' : ' disabled') + ' aria-label="How many missing: ' + escapeHtml(item.product_name) + '"> ' +
                     '<span class="muted">' + escapeHtml(item.unit_name || '') + '</span></td>' +
                 '</tr>';
-        }).join('') +
+    }
+
+    box.innerHTML = '<div class="table-responsive"><table class="mini-table report-po-table">' +
+        '<thead><tr>' +
+            '<th class="report-tick"><input type="checkbox" id="report-po-all" ' +
+                'onchange="tickAllReportPo(this.checked)" aria-label="Tick every item"></th>' +
+            '<th>Material</th><th class="col-num">Ordered</th><th class="col-num">Missing</th>' +
+        '</tr></thead><tbody>' +
+        bodyRows +
         '</tbody></table></div>';
 }
 
@@ -1637,11 +1774,11 @@ function tickReportPo(index, on) {
 
 function tickAllReportPo(on) {
     if (!reportPo) return;
-    reportPo.items.forEach((item, index) => {
+    for (let index = 0; index < reportPo.items.length; index++) {
         const tick = document.getElementById('report-po-tick-' + index);
         if (tick) tick.checked = on;
         tickReportPo(index, on);
-    });
+    }
 }
 
 // ---------- the report type decides which parts of the form show ----------
@@ -1681,7 +1818,9 @@ async function startMissingReport(po, items, shortLines) {
 
     reportPo = { po: po, items: items };
     reportPoTicks = {};
-    shortLines.forEach((line) => { reportPoTicks[line.item.product_id] = line.shortBase; });
+    for (let i = 0; i < shortLines.length; i++) {
+        reportPoTicks[shortLines[i].item.product_id] = shortLines[i].shortBase;
+    }
 
     await loadReportPoChoices();
     renderReportPoLines();
@@ -1711,13 +1850,14 @@ async function handleFileReport(event) {
         }
         data.poId = reportPo.po.po_id;
 
-        reportPo.items.forEach((item, index) => {
+        for (let index = 0; index < reportPo.items.length; index++) {
+            const item = reportPo.items[index];
             const tick = document.getElementById('report-po-tick-' + index);
             const howMany = document.getElementById('report-po-qty-' + index);
             if (tick && tick.checked) {
                 data.items.push({ productId: item.product_id, quantity: readQuantity(howMany ? howMany.value : '') });
             }
-        });
+        }
         if (data.items.length === 0) {
             notifyWarning('Tick at least one item that did not arrive.', 'Nothing to report');
             return;
@@ -1734,17 +1874,22 @@ async function handleFileReport(event) {
         // a refund amount goes only with a refund or a plain return; a value typed
         // while one of those was chosen is not sent for a damage report
         const withRefund = type === 'Refunded' || type === 'Return';
-        reportItems.forEach((item) => {
+        for (let i = 0; i < reportItems.length; i++) {
+            const item = reportItems[i];
             data.items.push({
                 productId: item.productId,
                 quantity: readQuantity(item.quantity),
                 refundAmount: withRefund ? (parseFloat(item.refund) || 0) : 0
             });
-        });
+        }
     }
 
     if (reason === '') { notifyWarning('Say why this is being recorded.', 'A reason is required'); return; }
-    if (data.items.some((item) => !item.quantity || item.quantity <= 0)) {
+    let badQuantity = false;
+    for (let i = 0; i < data.items.length; i++) {
+        if (!data.items[i].quantity || data.items[i].quantity <= 0) badQuantity = true;
+    }
+    if (badQuantity) {
         notifyWarning('Every item needs a quantity greater than zero.', 'Nothing was filed');
         return;
     }
@@ -1851,7 +1996,7 @@ async function onPoCheckPick(value) {
     poCheck = { poId: poId || null, po: null, items: [] };
 
     if (poId) {
-        poCheck.po = poChoices.find((po) => po.po_id === poId) || null;
+        poCheck.po = findPoChoice(poId) || null;
         try {
             const items = await apiGetPurchaseOrderItems(poId);
             // the card may have been closed, or another order chosen, while this one was loading
@@ -1869,10 +2014,12 @@ async function onPoCheckPick(value) {
 function poCheckLines() {
     if (poCheck.items.length === 0) return '<p class="detail-empty">This order has no items.</p>';
 
-    const rows = poCheck.items.map((item, index) => {
+    const rows = [];
+    for (let index = 0; index < poCheck.items.length; index++) {
+        const item = poCheck.items[index];
         const pack = recvPackOf(item);
         const unit = pack ? pack.name : (item.unit_name || '');
-        return [
+        rows.push([
             escapeHtml(item.product_name),
             escapeHtml(poQuantityText(item)),
             '<input type="number" class="form-control recv-qty" id="check-arrived-' + index + '" ' +
@@ -1881,8 +2028,8 @@ function poCheckLines() {
                    'aria-label="Arrived: ' + escapeHtml(item.product_name) + '"> ' +
                    '<span class="muted">' + escapeHtml(unit) + '</span>',
             '<span class="recv-verdict is-exact" id="check-result-' + index + '">As ordered</span>'
-        ];
-    });
+        ]);
+    }
 
     return detailTable(['Material', 'Ordered', 'Arrived', 'Check'], rows, [1, 2]) +
         '<p class="check-summary" id="check-summary" aria-live="polite"></p>';
@@ -1942,9 +2089,9 @@ function updatePoCheckSummary() {
     const button = document.getElementById('po-check-report');
 
     let shortCount = 0;
-    poCheck.items.forEach((item, index) => {
+    for (let index = 0; index < poCheck.items.length; index++) {
         if (poCheckLineState(index).short > 0) shortCount++;
-    });
+    }
 
     if (summary) {
         if (shortCount === 0) {
@@ -1961,10 +2108,10 @@ function updatePoCheckSummary() {
 // Make a Report: closes the card and opens the report with what is short
 function reportShortFromCheck() {
     const shortLines = [];
-    poCheck.items.forEach((item, index) => {
+    for (let index = 0; index < poCheck.items.length; index++) {
         const state = poCheckLineState(index);
         if (state.short > 0) shortLines.push(state);
-    });
+    }
     if (shortLines.length === 0 || !poCheck.po) return;
 
     const po = poCheck.po;
@@ -1990,19 +2137,24 @@ function buildInventoryArchivePanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetArchivedProducts(),
+        load: function () {
+            return apiGetArchivedProducts();
+        },
 
-        match: (p, query) => prefixMatch([p.product_name, p.category_name], query),
+        match: function (p, query) {
+            return prefixMatch([p.product_name, p.category_name], query);
+        },
 
         // a row opens a card with the material and the button that restores it
-        renderRow: (p, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+        renderRow: function (p, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openArchivedMaterial(' + p.product_id + ')" title="Open this material">' +
             '<td class="cell-id">#' + p.product_id + '</td>' +
             '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
             '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
             '<td class="cell-num">' + p.quantity_in_stock + '</td>' +
-            '<td class="cell-id">' + escapeHtml(p.archived_at || 'Unknown') + '</td></tr>'
+            '<td class="cell-id">' + escapeHtml(p.archived_at || 'Unknown') + '</td></tr>';
+        }
     });
 }
 
@@ -2076,10 +2228,13 @@ function writeClerkRecordHeaders() {
     if (!table) return;
 
     const columns = CLERK_RECORD_COLUMNS[clerkRecordType];
-    table.querySelector('thead tr').innerHTML = columns.map((column) => {
+    let headers = '';
+    for (let i = 0; i < columns.length; i++) {
+        const column = columns[i];
         const style = CLERK_RECORD_NUMERIC.indexOf(column[0]) !== -1 ? ' class="cell-num"' : '';
-        return '<th' + style + '>' + column[1] + '</th>';
-    }).join('');
+        headers += '<th' + style + '>' + column[1] + '</th>';
+    }
+    table.querySelector('thead tr').innerHTML = headers;
 
     const panel = getDataPanel('clerk-records');
     if (panel) panel.config.columns = columns.length;
@@ -2097,8 +2252,11 @@ function fillClerkRecordSort() {
         options = [['name-asc', 'Name, A to Z'], ['name-desc', 'Name, Z to A']];
     }
 
-    select.innerHTML = options.map((option) =>
-        '<option value="' + option[0] + '">' + escapeHtml(option[1]) + '</option>').join('');
+    let optionsHtml = '';
+    for (let i = 0; i < options.length; i++) {
+        optionsHtml += '<option value="' + options[i][0] + '">' + escapeHtml(options[i][1]) + '</option>';
+    }
+    select.innerHTML = optionsHtml;
     select.value = 'name-asc';
     // set without loading: a closed table stays closed
     const panel = getDataPanel('clerk-records');
@@ -2108,9 +2266,10 @@ function fillClerkRecordSort() {
 function sortClerkRecordRows(rows, order) {
     const value = String(order || 'name-asc');
     const descending = value.endsWith('-desc');
+    // the sort order without its "-asc" or "-desc" ending
     const key = value.replace(/-(asc|desc)$/, '');
 
-    return rows.sort((a, b) => {
+    return rows.sort(function (a, b) {
         const byName = String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
         let result = byName;
         if (key === 'category_name' || key === 'brand_name') {
@@ -2138,15 +2297,25 @@ function buildClerkRecordsPanel() {
             button: 'Load Data'
         },
         filters: { sort: 'name-asc' },
-        load: () => apiGetRecords(clerkRecordType),
-        match: (row, query) => prefixMatch(Object.values(row), query),
-        sort: (rows, filters) => sortClerkRecordRows(rows, filters.sort),
+        load: function () {
+            return apiGetRecords(clerkRecordType);
+        },
+        match: function (row, query) {
+            // every value in the record (a plain object from the server)
+            const values = [];
+            for (const name in row) values.push(row[name]);
+            return prefixMatch(values, query);
+        },
+        sort: function (rows, filters) {
+            return sortClerkRecordRows(rows, filters.sort);
+        },
 
         // a row opens a card with the whole record
-        renderRow: (row, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openClerkRecord(' + index + ')" title="Open this record">' +
-            CLERK_RECORD_COLUMNS[clerkRecordType].map((column, position) => {
+        renderRow: function (row, index) {
+            let cells = '';
+            const columns = CLERK_RECORD_COLUMNS[clerkRecordType];
+            for (let position = 0; position < columns.length; position++) {
+                const column = columns[position];
                 const value = row[column[0]];
                 let shown;
                 if (column[0] === 'price') shown = peso(value);
@@ -2157,8 +2326,13 @@ function buildClerkRecordsPanel() {
                 if (position === 0) style = 'cell-name';
                 else if (CLERK_RECORD_NUMERIC.indexOf(column[0]) !== -1) style = 'cell-num';
 
-                return '<td class="' + style + '">' + shown + '</td>';
-            }).join('') + '</tr>'
+                cells += '<td class="' + style + '">' + shown + '</td>';
+            }
+
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                'onclick="openClerkRecord(' + index + ')" title="Open this record">' +
+                cells + '</tr>';
+        }
     });
 }
 
@@ -2178,21 +2352,25 @@ function openClerkRecord(index) {
     const row = panel ? panel.visible[index] : null;
     if (!row) return;
 
-    const fields = CLERK_RECORD_FIELDS[clerkRecordType].map((field) => {
+    let fields = '';
+    const fieldList = CLERK_RECORD_FIELDS[clerkRecordType];
+    for (let i = 0; i < fieldList.length; i++) {
+        const field = fieldList[i];
         const value = row[field[0]];
         let shown;
         if (value === null || value === undefined || value === '') shown = '<span class="muted">Not set</span>';
         else if (field[0] === 'price') shown = peso(value);
         else if (field[0] === 'status') shown = statusBadge(String(value));
         else shown = escapeHtml(value);
-        return detailField(field[1], shown);
-    }).join('');
+        fields += detailField(field[1], shown);
+    }
 
     const body = '<div class="detail-grid">' +
         detailField('Record ID', '#' + row.id) +
         detailField('Name', escapeHtml(row.name)) +
         fields + '</div>';
 
+    // the plural title made singular: "Categories" becomes "Category", "Suppliers" becomes "Supplier"
     const kind = CLERK_RECORD_TITLES[clerkRecordType].replace(/ies$/, 'y').replace(/s$/, '');
     openDetailModal(row.name, kind + ' record', initialsOf(row.name), [{ label: 'Details', body: body }]);
 }
@@ -2219,8 +2397,9 @@ async function archiveMaterial(productId) {
         closeModal('detail-modal');
         invLoaded = false;
 
-        for (const key of ['clerk-materials', 'clerk-archive', 'clerk-reorder']) {
-            const panel = getDataPanel(key);
+        const keys = ['clerk-materials', 'clerk-archive', 'clerk-reorder'];
+        for (let i = 0; i < keys.length; i++) {
+            const panel = getDataPanel(keys[i]);
             if (panel && panel.state === 'ready') await panel.refresh();
         }
 
@@ -2263,7 +2442,7 @@ async function restoreMaterial(productId) {
 
 // ---------- popups ----------
 function openMaterialDetail(productId) {
-    const p = invProducts.find((x) => x.product_id === productId);
+    const p = findProductById(productId);
     if (!p) return;
 
     const unit = escapeHtml(p.unit_name || '');
@@ -2272,6 +2451,7 @@ function openMaterialDetail(productId) {
     let supplierBlock;
     if (p.supplier_name) {
         const phone = p.contact_number
+            // /[^\d+]/g matches every character that is not a digit or a plus sign (so only digits and + stay in the phone link)
             ? '<a href="tel:' + escapeHtml(String(p.contact_number).replace(/[^\d+]/g, '')) + '">' +
               escapeHtml(p.contact_number) + '</a>'
             : '<span class="muted">Not set</span>';
@@ -2403,11 +2583,11 @@ async function putDeliveryPack(productId, packName, packSize) {
 
         notifySuccess(result.message, 'Delivery pack saved');
 
-        const p = invProducts.find((x) => x.product_id === productId);
+        const p = findProductById(productId);
         if (p) {
             p.pack_name = result.packName;
             p.pack_size = result.packSize;
-            const page = detailPages.find((entry) => entry.label === 'Delivered In');
+            const page = findDetailPage('Delivered In');
             if (page) {
                 page.body = deliveryPackPage(p);
                 if (detailPages[detailIndex] === page) renderDetailPage();
@@ -2425,8 +2605,16 @@ async function putDeliveryPack(productId, packName, packSize) {
 // The till offers the sizes beside the unit. Sales already written keep
 // their own copy, so removing a size changes nothing sold.
 function sellingUnitsPage(p) {
+    // (the table rows for the sizes are built by sizeRows, just below this function)
     const own = p.unit_name || 'unit';
     const sizes = Array.isArray(p.selling_units) ? p.selling_units : [];
+
+    // the size names offered while typing a new size
+    const sizeNames = ['box', 'pack', 'sack', 'bag', 'bundle', 'roll', 'set', 'dozen', 'pallet', 'length', 'sheet', 'gallon'];
+    let sizeNameOptions = '';
+    for (let i = 0; i < sizeNames.length; i++) {
+        sizeNameOptions += '<option value="' + sizeNames[i] + '">';
+    }
 
     let list;
     if (sizes.length === 0) {
@@ -2435,18 +2623,7 @@ function sellingUnitsPage(p) {
     } else {
         list = '<div class="table-responsive"><table class="mini-table unit-sizes-table"><thead><tr>' +
               '<th>Size</th><th class="col-num">Holds</th><th class="col-num">Price</th></tr></thead><tbody>' +
-              sizes.map((u) => {
-                  const each = u.price === null || u.price === undefined
-                      ? Math.round(Number(p.price) * Number(u.units_per) * 100) / 100 : Number(u.price);
-                  return '<tr class="row-clickable" title="Press to stop selling by this size" ' +
-                      'onclick="removeSellingUnit(' + p.product_id + ', ' + Number(u.product_unit_id) + ')">' +
-                      '<td><strong>' + escapeHtml(u.unit_name) + '</strong></td>' +
-                      '<td class="cell-num">' + escapeHtml(qtyText(u.units_per, own)) + '</td>' +
-                      '<td class="cell-num">' + peso(each) +
-                          (u.price === null || u.price === undefined
-                              ? ' <span class="muted" title="The unit price times what it holds">worked out</span>' : '') + '</td>' +
-                  '</tr>';
-              }).join('') + '</tbody></table></div>';
+              sizeRows(p, sizes, own) + '</tbody></table></div>';
     }
 
     return '<p class="detail-note">Kept by the <strong>' + escapeHtml(own) + '</strong> at ' + peso(p.price) +
@@ -2474,21 +2651,45 @@ function sellingUnitsPage(p) {
                         'min="0" step="0.01" placeholder="' + escapeHtml(own) + ' price x holds">' +
                 '</div>' +
             '</div>' +
-            '<datalist id="unit-size-names">' +
-                ['box', 'pack', 'sack', 'bag', 'bundle', 'roll', 'set', 'dozen', 'pallet', 'length', 'sheet', 'gallon']
-                    .map((name) => '<option value="' + name + '">').join('') +
-            '</datalist>' +
+            '<datalist id="unit-size-names">' + sizeNameOptions + '</datalist>' +
             '<div class="detail-actions"><button type="submit" class="btn btn-accent">Add this size</button></div>' +
         '</form>';
 }
 
+// the table rows of the sizes a material sells in; a row removes its size
+function sizeRows(p, sizes, own) {
+    let rows = '';
+    for (let i = 0; i < sizes.length; i++) {
+        const u = sizes[i];
+        const each = u.price === null || u.price === undefined
+            ? Math.round(Number(p.price) * Number(u.units_per) * 100) / 100 : Number(u.price);
+        rows += '<tr class="row-clickable" title="Press to stop selling by this size" ' +
+            'onclick="removeSellingUnit(' + p.product_id + ', ' + Number(u.product_unit_id) + ')">' +
+            '<td><strong>' + escapeHtml(u.unit_name) + '</strong></td>' +
+            '<td class="cell-num">' + escapeHtml(qtyText(u.units_per, own)) + '</td>' +
+            '<td class="cell-num">' + peso(each) +
+                (u.price === null || u.price === undefined
+                    ? ' <span class="muted" title="The unit price times what it holds">worked out</span>' : '') + '</td>' +
+        '</tr>';
+    }
+    return rows;
+}
+
+// The page of the open card with this label, or undefined when it has none.
+function findDetailPage(label) {
+    for (let i = 0; i < detailPages.length; i++) {
+        if (detailPages[i].label === label) return detailPages[i];
+    }
+    return undefined;
+}
+
 // the card is redrawn on its Selling Units page once the list comes back
 function refreshSellingUnitsPage(productId, units) {
-    const p = invProducts.find((x) => x.product_id === productId);
+    const p = findProductById(productId);
     if (!p) return;
     p.selling_units = units;
 
-    const page = detailPages.find((entry) => entry.label === 'Selling Units');
+    const page = findDetailPage('Selling Units');
     if (page) {
         page.body = sellingUnitsPage(p);
         if (detailPages[detailIndex] === page) renderDetailPage();
@@ -2519,10 +2720,16 @@ async function addSellingUnit(event, productId) {
 }
 
 async function removeSellingUnit(productId, unitId) {
-    const p = invProducts.find((x) => x.product_id === productId);
+    const p = findProductById(productId);
     let unit;
     if (p && Array.isArray(p.selling_units)) {
-        unit = p.selling_units.find((u) => Number(u.product_unit_id) === unitId);
+        unit = undefined;
+        for (let i = 0; i < p.selling_units.length; i++) {
+            if (Number(p.selling_units[i].product_unit_id) === unitId) {
+                unit = p.selling_units[i];
+                break;
+            }
+        }
     } else {
         unit = null;
     }
@@ -2667,24 +2874,32 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         fillClerkRecordSort();
 
         // the schedule follows what the administrator switched on for this role
-        configureDeliverySchedule({ showPanel: (panelId, title) => showInventoryPanel(panelId, title) });
+        configureDeliverySchedule({
+            showPanel: function (panelId, title) {
+                return showInventoryPanel(panelId, title);
+            }
+        });
         buildDeliverySchedulePanel();
-        configureFeatures({ home: () => showInventoryHome() });
+        configureFeatures({
+            home: function () {
+                return showInventoryHome();
+            }
+        });
 
         // Go to, on an opened alert: the screen that alert is about
         const stockAlert = { label: 'Reorder Point', panelId: 'panel-reorder',
-                             open: () => showReorder(), key: 'clerk-reorder', searchId: 'reorder-search' };
+                             open: function () { return showReorder(); }, key: 'clerk-reorder', searchId: 'reorder-search' };
         const returnsAlert = { label: 'Returned Items', panelId: 'panel-returns',
-                               open: () => showReturns(), key: 'clerk-returns' };
+                               open: function () { return showReturns(); }, key: 'clerk-returns' };
         configureNotificationTargets({
             'Low Stock':        stockAlert,
             'Out of Stock':     stockAlert,
             'Purchase Order':   { label: 'Purchase Orders', panelId: 'panel-po-history',
-                                  open: () => showPurchaseOrderHistory(), key: 'clerk-po' },
+                                  open: function () { return showPurchaseOrderHistory(); }, key: 'clerk-po' },
             'Damage Report':    returnsAlert,
             'Refund Report':    returnsAlert,
             'Stock Adjustment': { label: 'Adjustment History', panelId: 'panel-adjust-log',
-                                  open: () => showAdjustmentHistory(), key: 'clerk-adjustments' }
+                                  open: function () { return showAdjustmentHistory(); }, key: 'clerk-adjustments' }
         });
 
         // the Stock Adjustment screen follows stock moved by other people (live-sync.js)

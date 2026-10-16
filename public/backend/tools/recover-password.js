@@ -34,17 +34,18 @@ async function main() {
   const db = require("../database/connection").db;
 
   try {
-    const [rows] = await db.query(
-      `SELECT u.user_id, u.staff_id, u.email, s.full_name, s.is_active, r.role_name
-       FROM users u
-       JOIN staff s ON s.staff_id = u.staff_id
-       JOIN roles r ON r.role_id = s.role_id
-       WHERE LOWER(u.email) = LOWER(?)
-       LIMIT 1`,
+    const rowsResult = await db.query(
+      "SELECT u.user_id, u.staff_id, u.email, s.full_name, s.is_active, r.role_name\n" +
+        "       FROM users u\n" +
+        "       JOIN staff s ON s.staff_id = u.staff_id\n" +
+        "       JOIN roles r ON r.role_id = s.role_id\n" +
+        "       WHERE LOWER(u.email) = LOWER(?)\n" +
+        "       LIMIT 1",
       [email]);
+    const rows = rowsResult[0];
 
     if (rows.length === 0) {
-      console.error(`No account signs in with ${email}. Check the spelling; nothing was changed.`);
+      console.error("No account signs in with " + email + ". Check the spelling; nothing was changed.");
       process.exitCode = 1;
       return;
     }
@@ -56,11 +57,12 @@ async function main() {
     // temporary, and has to be changed on the next sign-in
     await db.query("CALL sp_reset_user_password(?, ?, @status_code, @message)",
       [user.staff_id, await hashPassword(password)]);
-    const [outputRows] = await db.query("SELECT @status_code AS status_code, @message AS message");
+    const outputRowsResult = await db.query("SELECT @status_code AS status_code, @message AS message");
+    const outputRows = outputRowsResult[0];
     const output = outputRows[0];
 
     if (Number(output.status_code) !== 200) {
-      console.error(`The password was not changed: ${output.message}`);
+      console.error("The password was not changed: " + output.message);
       process.exitCode = 1;
       return;
     }
@@ -70,16 +72,16 @@ async function main() {
       [user.user_id]);
 
     await db.query(
-      `INSERT INTO audit_logs (staff_id, role_name, ip_address, action, action_type, details, metadata)
-       VALUES (NULL, NULL, NULL, 'RECOVER_PASSWORD', 'SECURITY', ?, ?)`,
-      [`Temporary password set for ${user.email} with npm run recover-password on the server's ` +
-         `own computer (${os.hostname()}); any sign-in hold released`,
+      "INSERT INTO audit_logs (staff_id, role_name, ip_address, action, action_type, details, metadata)\n" +
+        "       VALUES (NULL, NULL, NULL, 'RECOVER_PASSWORD', 'SECURITY', ?, ?)",
+      ["Temporary password set for " + user.email + " with npm run recover-password on the server's " +
+         "own computer (" + os.hostname() + "); any sign-in hold released",
        JSON.stringify({ staff_id: user.staff_id, email: user.email, host: os.hostname() })]);
 
     console.log("");
-    console.log(`  ${user.full_name} (${user.role_name})`);
-    console.log(`  Signs in with:       ${user.email}`);
-    console.log(`  Temporary password:  ${password}`);
+    console.log("  " + user.full_name + " (" + user.role_name + ")");
+    console.log("  Signs in with:       " + user.email);
+    console.log("  Temporary password:  " + password);
     console.log("");
     console.log("  This is shown once and is not stored anywhere it can be read back.");
     console.log("  It has to be changed on the next sign-in, and any sign-in hold is released.");
@@ -94,7 +96,7 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch(function (error) {
   console.error("Recovering the password failed:", error.message);
   console.error("Check DB_HOST, DB_PORT, DB_USER and DB_PASSWORD in .env at the project root,");
   console.error("and that public/database/2-RUN-SECOND-stored-procedures.sql has been loaded.");

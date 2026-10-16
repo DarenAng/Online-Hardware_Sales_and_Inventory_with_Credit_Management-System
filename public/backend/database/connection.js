@@ -13,7 +13,8 @@
 // Use it like this in another file:
 //   const database = require("../database/connection");
 //   const db = database.db;
-//   const [rows] = await db.query("SELECT * FROM users");
+//   const result = await db.query("SELECT * FROM users");
+//   const rows = result[0];   // db.query gives back [rows, fields]
 // ============================================================
 
 const fs = require("fs");
@@ -54,9 +55,13 @@ const DB_PORT = Number(process.env.DB_PORT) || 3306;
 
 // Each Vercel instance holds its own pool, and a free cloud database allows
 // only so many connections, so the pool is kept small there.
-const DB_CONNECTION_LIMIT = Number(process.env.DB_CONNECTION_LIMIT) > 0
-  ? Number(process.env.DB_CONNECTION_LIMIT)
-  : (IS_VERCEL ? 3 : 10);
+let DB_CONNECTION_LIMIT = 10;
+if (IS_VERCEL) {
+  DB_CONNECTION_LIMIT = 3;
+}
+if (Number(process.env.DB_CONNECTION_LIMIT) > 0) {
+  DB_CONNECTION_LIMIT = Number(process.env.DB_CONNECTION_LIMIT);
+}
 
 // the placeholders a copied template still carries
 const PLACEHOLDER_PASSWORDS = ["your_secure_password_here", "your-mysql-password"];
@@ -65,7 +70,7 @@ if (DB_PASSWORD === undefined || DB_PASSWORD === "") {
   console.warn("DB_PASSWORD is not set. Copy .env.example to .env at the project root and " +
                "fill in the MySQL password; the server will try to connect without one.");
 } else if (PLACEHOLDER_PASSWORDS.includes(DB_PASSWORD)) {
-  console.warn(`DB_PASSWORD in .env is still the placeholder "${DB_PASSWORD}". ` +
+  console.warn("DB_PASSWORD in .env is still the placeholder \"" + DB_PASSWORD + "\". " +
                "Put the real MySQL password there.");
 }
 
@@ -90,14 +95,17 @@ function cleanCertificate(text) {
   const blocks = String(text).match(/-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g);
   if (!blocks) return String(text).replace(/\\n/g, "\n");
 
-  return blocks.map((block) => {
-    const body = block
+  let result = "";
+  for (let i = 0; i < blocks.length; i++) {
+    const body = blocks[i]
       .replace("-----BEGIN CERTIFICATE-----", "")
       .replace("-----END CERTIFICATE-----", "")
-      .replace(/\\n/g, "")
-      .replace(/\s+/g, "");
-    return "-----BEGIN CERTIFICATE-----\n" + body.match(/.{1,64}/g).join("\n") + "\n-----END CERTIFICATE-----\n";
-  }).join("");
+      .replace(/\\n/g, "")   // a written-out \n
+      .replace(/\s+/g, "");  // any white space
+    // the body cut into lines of at most 64 characters
+    result += "-----BEGIN CERTIFICATE-----\n" + body.match(/.{1,64}/g).join("\n") + "\n-----END CERTIFICATE-----\n";
+  }
+  return result;
 }
 
 const db = mysql.createPool({
@@ -119,9 +127,9 @@ const db = mysql.createPool({
 });
 
 // every new connection reads NOW() on the shop's clock, whatever the server's is
-db.pool.on("connection", (connection) => {
-  connection.query("SET time_zone = ?", [DB_TIME_ZONE], (error) => {
-    if (error) console.error(`Could not set the database time zone to ${DB_TIME_ZONE}:`, error.message);
+db.pool.on("connection", function (connection) {
+  connection.query("SET time_zone = ?", [DB_TIME_ZONE], function (error) {
+    if (error) console.error("Could not set the database time zone to " + DB_TIME_ZONE + ":", error.message);
   });
 });
 

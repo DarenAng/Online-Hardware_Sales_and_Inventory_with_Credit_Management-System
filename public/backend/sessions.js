@@ -36,8 +36,12 @@ const SESSION_MS = SESSION_HOURS * 60 * 60 * 1000;
 const SESSION_IDLE_MS = SESSION_IDLE_MINUTES * 60 * 1000;
 
 // what a screen is told when its sign-in ran out of idle time
+let minutesWord = "minutes";
+if (SESSION_IDLE_MINUTES === 1) {
+  minutesWord = "minute";
+}
 const IDLE_ENDED_REASON =
-  `You were signed out after ${SESSION_IDLE_MINUTES} ${SESSION_IDLE_MINUTES === 1 ? "minute" : "minutes"} ` +
+  "You were signed out after " + SESSION_IDLE_MINUTES + " " + minutesWord + " " +
   "of inactivity. Please sign in again.";
 
 // When a sign-in that was used at "now" runs out: the idle time later, but
@@ -67,9 +71,9 @@ async function startSession(user) {
   const token = crypto.randomBytes(32).toString("hex");
   const now = Date.now();
   await db.query(
-    `INSERT INTO user_sessions
-       (token_hash, staff_id, user_id, role_id, role_name, email, started_at, last_seen, expires_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    "INSERT INTO user_sessions " +
+    "(token_hash, staff_id, user_id, role_id, role_name, email, started_at, last_seen, expires_at) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     [tokenHash(token), user.staff_id, user.user_id, user.role_id, user.role_name, user.email,
      now, now, sessionExpiry(now, now, user.role_name)]);
   return token;
@@ -94,7 +98,9 @@ function readCookie(request, name) {
   const header = request.headers.cookie;
   if (!header) return null;
 
-  for (const part of header.split(";")) {
+  const parts = header.split(";");
+  for (let partIndex = 0; partIndex < parts.length; partIndex++) {
+    const part = parts[partIndex];
     const split = part.indexOf("=");
     if (split === -1) continue;
     if (part.slice(0, split).trim() === name) {
@@ -117,11 +123,12 @@ async function sessionState(request) {
   if (!token) return {};
 
   const hash = tokenHash(token);
-  const [rows] = await db.query(
-    `SELECT staff_id, user_id, role_id, role_name, email, started_at, last_seen,
-            expires_at, ended_reason
-     FROM user_sessions WHERE token_hash = ?`,
+  const sessionResult = await db.query(
+    "SELECT staff_id, user_id, role_id, role_name, email, started_at, last_seen, " +
+    "expires_at, ended_reason " +
+    "FROM user_sessions WHERE token_hash = ?",
     [hash]);
+  const rows = sessionResult[0];
   const row = rows[0];
   if (!row) return {};
 
@@ -192,15 +199,16 @@ async function currentSession(request) {
 const PRESENCE_WINDOW_MS = 2 * 60 * 1000;
 
 async function presenceByStaff() {
-  const [rows] = await db.query(
-    `SELECT staff_id, MAX(last_seen) AS last_seen FROM user_sessions
-     WHERE ended_reason IS NULL AND expires_at > ?
-     GROUP BY staff_id`,
+  const presenceResult = await db.query(
+    "SELECT staff_id, MAX(last_seen) AS last_seen FROM user_sessions " +
+    "WHERE ended_reason IS NULL AND expires_at > ? " +
+    "GROUP BY staff_id",
     [Date.now()]);
+  const rows = presenceResult[0];
 
-  const seen = new Map();   // staffId -> most recent lastSeen
-  for (const row of rows) {
-    seen.set(row.staff_id, Number(row.last_seen));
+  const seen = {};   // staffId -> most recent lastSeen
+  for (let i = 0; i < rows.length; i++) {
+    seen[rows[i].staff_id] = Number(rows[i].last_seen);
   }
   return seen;
 }
@@ -211,8 +219,9 @@ async function withPresence(rows) {
 
   // copy every row and add two fields: is_online and seconds_idle
   const result = [];
-  for (const row of rows) {
-    const lastSeen = seen.get(row.staff_id);
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const lastSeen = seen[row.staff_id];
     const copy = Object.assign({}, row);
 
     if (lastSeen === undefined) {
@@ -255,11 +264,11 @@ async function endSessionsForStaff(staffId, keepToken, reason) {
     params.push(tokenHash(keepToken));
   }
 
-  const [result] = await db.query(
-    `UPDATE user_sessions SET ended_reason = ?, ended_at = ?
-     WHERE staff_id = ? AND ended_reason IS NULL AND expires_at > ?${keep}`,
+  const updateResult = await db.query(
+    "UPDATE user_sessions SET ended_reason = ?, ended_at = ? " +
+    "WHERE staff_id = ? AND ended_reason IS NULL AND expires_at > ?" + keep,
     params);
-  return result.affectedRows;
+  return updateResult[0].affectedRows;
 }
 
 // the signed-in staff id, from the session and never from the request body
@@ -283,7 +292,19 @@ async function renewSessionAfterPasswordChange(request, response) {
 }
 
 module.exports = {
-  LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES, SESSION_IDLE_MINUTES, SESSION_SWEEP_MS, PRESENCE_WINDOW_MS,
-  startSession, setSessionCookie, sessionState, currentSession, withPresence, endSession,
-  removeExpiredSessions, endSessionsForStaff, getActorId, renewSessionAfterPasswordChange
+  LOGIN_MAX_ATTEMPTS: LOGIN_MAX_ATTEMPTS,
+  LOGIN_HOLD_MINUTES: LOGIN_HOLD_MINUTES,
+  SESSION_IDLE_MINUTES: SESSION_IDLE_MINUTES,
+  SESSION_SWEEP_MS: SESSION_SWEEP_MS,
+  PRESENCE_WINDOW_MS: PRESENCE_WINDOW_MS,
+  startSession: startSession,
+  setSessionCookie: setSessionCookie,
+  sessionState: sessionState,
+  currentSession: currentSession,
+  withPresence: withPresence,
+  endSession: endSession,
+  removeExpiredSessions: removeExpiredSessions,
+  endSessionsForStaff: endSessionsForStaff,
+  getActorId: getActorId,
+  renewSessionAfterPasswordChange: renewSessionAfterPasswordChange
 };

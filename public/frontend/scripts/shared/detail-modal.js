@@ -19,14 +19,28 @@ const detailRow = detailField;
 function detailTable(headers, rows, numeric) {
     if (rows.length === 0) return '<p class="detail-empty">Nothing to show here.</p>';
 
-    const isNumber = (index) => Array.isArray(numeric) && numeric.indexOf(index) !== -1;
+    function isNumber(index) {
+        return Array.isArray(numeric) && numeric.indexOf(index) !== -1;
+    }
+
+    let headHtml = '';
+    for (let i = 0; i < headers.length; i++) {
+        headHtml += '<th class="' + (isNumber(i) ? 'col-num' : '') + '">' + headers[i] + '</th>';
+    }
+
+    let bodyHtml = '';
+    for (let r = 0; r < rows.length; r++) {
+        bodyHtml += '<tr>';
+        for (let c = 0; c < rows[r].length; c++) {
+            bodyHtml += '<td class="' + (isNumber(c) ? 'cell-num' : '') + '">' + rows[r][c] + '</td>';
+        }
+        bodyHtml += '</tr>';
+    }
 
     return '<div class="table-responsive"><table class="mini-table"><thead><tr>' +
-        headers.map((h, i) => '<th class="' + (isNumber(i) ? 'col-num' : '') + '">' + h + '</th>').join('') +
+        headHtml +
         '</tr></thead><tbody>' +
-        rows.map((r) => '<tr>' +
-            r.map((c, i) => '<td class="' + (isNumber(i) ? 'cell-num' : '') + '">' + c + '</td>').join('') +
-            '</tr>').join('') +
+        bodyHtml +
         '</tbody></table></div>';
 }
 
@@ -66,7 +80,10 @@ function openDetailModal(title, subtitle, initials, pages, footActions, options)
 
     const foot = document.querySelector('#detail-modal .modal-foot');
     if (foot) {
-        foot.querySelectorAll('[data-detail-foot]').forEach((node) => node.remove());
+        const oldActions = foot.querySelectorAll('[data-detail-foot]');
+        for (let i = 0; i < oldActions.length; i++) {
+            oldActions[i].remove();
+        }
         if (footActions) {
             const box = document.createElement('div');
             box.className = 'detail-foot-actions';
@@ -85,11 +102,12 @@ function renderDetailPage() {
     const page = detailPages[detailIndex];
     document.getElementById('detail-page').innerHTML = page.body;
 
-    document.getElementById('detail-steps').innerHTML = detailPages.map((p, i) =>
-        '<button type="button" class="modal-tab' + (i === detailIndex ? ' active' : '') +
-        '" onclick="detailGoTo(' + i + ')">' + escapeHtml(p.label) + '</button>'
-    ).join('');
-
+    let tabsHtml = '';
+    for (let i = 0; i < detailPages.length; i++) {
+        tabsHtml += '<button type="button" class="modal-tab' + (i === detailIndex ? ' active' : '') +
+            '" onclick="detailGoTo(' + i + ')">' + escapeHtml(detailPages[i].label) + '</button>';
+    }
+    document.getElementById('detail-steps').innerHTML = tabsHtml;
 }
 
 function detailGoTo(index) {
@@ -98,8 +116,13 @@ function detailGoTo(index) {
     renderDetailPage();
 }
 
-function detailNext() { detailGoTo(detailIndex + 1); }
-function detailBack() { detailGoTo(detailIndex - 1); }
+function detailNext() {
+    detailGoTo(detailIndex + 1);
+}
+
+function detailBack() {
+    detailGoTo(detailIndex - 1);
+}
 
 document.addEventListener('keydown', function (event) {
     const modal = document.getElementById('detail-modal');
@@ -109,7 +132,10 @@ document.addEventListener('keydown', function (event) {
 });
 
 function prettyLabel(key) {
-    return String(key).replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    // underscores become spaces, and the first letter of every word becomes a capital
+    return String(key).replace(/_/g, ' ').replace(/\b\w/g, function (c) {
+        return c.toUpperCase();
+    });
 }
 
 function fieldValue(key, value) {
@@ -123,9 +149,9 @@ function fieldValue(key, value) {
 function initialsOf(text) {
     const words = String(text).trim().split(/\s+/);
     let initials = '';
-    for (const word of words.slice(0, 2)) {
-        if (word !== '') {
-            initials += word[0];
+    for (let i = 0; i < words.length && i < 2; i++) {
+        if (words[i] !== '') {
+            initials += words[i][0];
         }
     }
     return initials.toUpperCase();
@@ -146,7 +172,7 @@ function pagedTable(id, headers, rows, numeric, options) {
         page: 1,
         pageSize: settings.pageSize || PAGED_TABLE_ROWS,
         empty: settings.empty || 'Nothing to show here.',
-        // optional: (index) => attributes for that row's <tr>, e.g. a click handler
+        // optional: a function(index) giving the attributes for that row's <tr>, e.g. a click handler
         rowAttrs: typeof settings.rowAttrs === 'function' ? settings.rowAttrs : null
     };
     return '<div class="paged-table" id="paged-' + id + '">' + pagedTableBody(id) + '</div>';
@@ -163,14 +189,28 @@ function pagedTableBody(id) {
 
     const start = (t.page - 1) * t.pageSize;
     const slice = t.rows.slice(start, start + t.pageSize);
-    const isNumber = (index) => t.numeric.indexOf(index) !== -1;
+    function isNumber(index) {
+        return t.numeric.indexOf(index) !== -1;
+    }
+
+    let headHtml = '';
+    for (let i = 0; i < t.headers.length; i++) {
+        headHtml += '<th class="' + (isNumber(i) ? 'col-num' : '') + '">' + t.headers[i] + '</th>';
+    }
+
+    let bodyHtml = '';
+    for (let r = 0; r < slice.length; r++) {
+        bodyHtml += '<tr' + (t.rowAttrs ? ' ' + t.rowAttrs(start + r) : '') + '>';
+        for (let c = 0; c < slice[r].length; c++) {
+            bodyHtml += '<td class="' + (isNumber(c) ? 'cell-num' : '') + '">' + slice[r][c] + '</td>';
+        }
+        bodyHtml += '</tr>';
+    }
 
     const table = '<table class="mini-table"><thead><tr>' +
-        t.headers.map((h, i) => '<th class="' + (isNumber(i) ? 'col-num' : '') + '">' + h + '</th>').join('') +
+        headHtml +
         '</tr></thead><tbody>' +
-        slice.map((r, i) => '<tr' + (t.rowAttrs ? ' ' + t.rowAttrs(start + i) : '') + '>' +
-            r.map((c, i) => '<td class="' + (isNumber(i) ? 'cell-num' : '') + '">' + c + '</td>').join('') +
-            '</tr>').join('') +
+        bodyHtml +
         // the last page is topped up so Previous and Next stay put (tables.js)
         (pages > 1 ? fillerRows(t.pageSize - slice.length, t.headers.length) : '') +
         '</tbody></table>';

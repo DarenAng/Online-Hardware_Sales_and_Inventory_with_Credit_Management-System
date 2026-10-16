@@ -28,32 +28,32 @@ function ensureUiFurniture() {
     const ask = document.createElement('div');
     ask.className = 'modal';
     ask.id = 'ask-modal';
-    ask.innerHTML = `
-        <div class="modal-box ask-box">
-            <div class="modal-head">
-                <div class="modal-identity">
-                    <div class="avatar" id="ask-mark">?</div>
-                    <div>
-                        <h3 id="ask-title">Please confirm</h3>
-                        <span class="modal-role" id="ask-eyebrow">Confirmation</span>
-                    </div>
-                </div>
-                <button type="button" class="modal-close" onclick="closeAsk(false)" aria-label="Close">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p class="ask-text" id="ask-text"></p>
-                <ul class="ask-detail" id="ask-detail" style="display: none;"></ul>
-                <div class="form-group ask-field" id="ask-field" style="display: none;">
-                    <label id="ask-label" for="ask-input">Value</label>
-                    <input type="text" id="ask-input" class="form-control" autocomplete="off">
-                    <p class="ask-error" id="ask-error"></p>
-                </div>
-            </div>
-            <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closeAsk(false)" id="ask-cancel">Cancel</button>
-                <button type="button" class="btn btn-accent" onclick="submitAsk()" id="ask-ok">Confirm</button>
-            </div>
-        </div>`;
+    ask.innerHTML = '\n' +
+        '        <div class="modal-box ask-box">\n' +
+        '            <div class="modal-head">\n' +
+        '                <div class="modal-identity">\n' +
+        '                    <div class="avatar" id="ask-mark">?</div>\n' +
+        '                    <div>\n' +
+        '                        <h3 id="ask-title">Please confirm</h3>\n' +
+        '                        <span class="modal-role" id="ask-eyebrow">Confirmation</span>\n' +
+        '                    </div>\n' +
+        '                </div>\n' +
+        '                <button type="button" class="modal-close" onclick="closeAsk(false)" aria-label="Close">&times;</button>\n' +
+        '            </div>\n' +
+        '            <div class="modal-body">\n' +
+        '                <p class="ask-text" id="ask-text"></p>\n' +
+        '                <ul class="ask-detail" id="ask-detail" style="display: none;"></ul>\n' +
+        '                <div class="form-group ask-field" id="ask-field" style="display: none;">\n' +
+        '                    <label id="ask-label" for="ask-input">Value</label>\n' +
+        '                    <input type="text" id="ask-input" class="form-control" autocomplete="off">\n' +
+        '                    <p class="ask-error" id="ask-error"></p>\n' +
+        '                </div>\n' +
+        '            </div>\n' +
+        '            <div class="modal-foot">\n' +
+        '                <button type="button" class="btn btn-ghost" onclick="closeAsk(false)" id="ask-cancel">Cancel</button>\n' +
+        '                <button type="button" class="btn btn-accent" onclick="submitAsk()" id="ask-ok">Confirm</button>\n' +
+        '            </div>\n' +
+        '        </div>';
     document.body.appendChild(ask);
 
     // the wait between a confirm and its result; no buttons, cannot be closed
@@ -61,23 +61,23 @@ function ensureUiFurniture() {
     work.className = 'modal';
     work.id = 'work-modal';
     work.setAttribute('data-modal-locked', '');
-    work.innerHTML = `
-        <div class="modal-box ask-box work-box" role="status" aria-live="assertive" aria-busy="true">
-            <div class="modal-head">
-                <div class="modal-identity">
-                    <div class="avatar work-spinner" aria-hidden="true"></div>
-                    <div>
-                        <h3 id="work-title">One moment</h3>
-                        <span class="modal-role" id="work-eyebrow">Working</span>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-body">
-                <p class="ask-text" id="work-text"></p>
-                <ol class="work-steps" id="work-steps"></ol>
-                <div class="work-bar" aria-hidden="true"><span></span></div>
-            </div>
-        </div>`;
+    work.innerHTML = '\n' +
+        '        <div class="modal-box ask-box work-box" role="status" aria-live="assertive" aria-busy="true">\n' +
+        '            <div class="modal-head">\n' +
+        '                <div class="modal-identity">\n' +
+        '                    <div class="avatar work-spinner" aria-hidden="true"></div>\n' +
+        '                    <div>\n' +
+        '                        <h3 id="work-title">One moment</h3>\n' +
+        '                        <span class="modal-role" id="work-eyebrow">Working</span>\n' +
+        '                    </div>\n' +
+        '                </div>\n' +
+        '            </div>\n' +
+        '            <div class="modal-body">\n' +
+        '                <p class="ask-text" id="work-text"></p>\n' +
+        '                <ol class="work-steps" id="work-steps"></ol>\n' +
+        '                <div class="work-bar" aria-hidden="true"><span></span></div>\n' +
+        '            </div>\n' +
+        '        </div>';
     document.body.appendChild(work);
 
     document.getElementById('ask-input').addEventListener('keydown', function (event) {
@@ -105,17 +105,21 @@ function showCard(options) {
     if (options.when) meta.push(whenText(options.when));
 
     const card = document.createElement('div');
-    card.className = `toast toast-card toast-${tone}` + (options.onOpen ? ' is-clickable' : '');
+    card.className = 'toast toast-card toast-' + tone + (options.onOpen ? ' is-clickable' : '');
     card.setAttribute('role', tone === 'danger' ? 'alert' : 'status');
+
+    let metaHtml = '';
+    for (let i = 0; i < meta.length; i++) {
+        metaHtml += '<span>' + escapeHtml(meta[i]) + '</span>';
+    }
+
     card.innerHTML =
         '<span class="toast-stripe"></span>' +
         '<span class="toast-mark">' + look.mark + '</span>' +
         '<div class="toast-body"><span class="toast-title">' + escapeHtml(options.title || look.title) + '</span>' +
         (options.message ? '<p class="toast-text">' + escapeHtml(options.message) + '</p>' : '') +
         (meta.length
-            ? '<span class="toast-meta">' +
-              meta.map((line) => '<span>' + escapeHtml(line) + '</span>').join('') +
-              '</span>'
+            ? '<span class="toast-meta">' + metaHtml + '</span>'
             : '') +
         '</div>' +
         '<button type="button" class="toast-close" aria-label="Dismiss">&times;</button>';
@@ -124,19 +128,21 @@ function showCard(options) {
 
     const life = options.stay ? 0 : TOAST_LIFE;
 
-    const remove = () => {
+    function remove() {
         if (!card.isConnected) return;
         card.classList.add('is-leaving');
-        setTimeout(() => card.remove(), 200);
-    };
+        setTimeout(function () {
+            card.remove();
+        }, 200);
+    }
 
-    card.querySelector('.toast-close').addEventListener('click', (event) => {
+    card.querySelector('.toast-close').addEventListener('click', function (event) {
         event.stopPropagation();
         remove();
     });
 
     if (options.onOpen) {
-        card.addEventListener('click', () => {
+        card.addEventListener('click', function () {
             options.onOpen();
             remove();
         });
@@ -148,7 +154,9 @@ function showCard(options) {
             autohide: life > 0,
             delay: life || 5000
         });
-        card.addEventListener('hidden.bs.toast', () => card.remove());
+        card.addEventListener('hidden.bs.toast', function () {
+            card.remove();
+        });
         toast.show();
     } else {
         card.classList.add('show');
@@ -164,7 +172,10 @@ function showCard(options) {
 function clearCards() {
     const deck = document.getElementById('toast-deck');
     if (!deck) return;
-    deck.querySelectorAll('.toast-card').forEach((card) => card.remove());
+    const cards = deck.querySelectorAll('.toast-card');
+    for (let i = 0; i < cards.length; i++) {
+        cards[i].remove();
+    }
 }
 
 // the fourth argument overrides the life for callers whose reader is looking away
@@ -209,18 +220,21 @@ function openAsk(options) {
     // columns in the figure face (for checking an email, phone or password).
     const detail = document.getElementById('ask-detail');
     if (Array.isArray(options.detail) && options.detail.length > 0) {
-        detail.innerHTML = options.detail.map((line) => {
-            const text = String(line);
+        let detailHtml = '';
+        for (let i = 0; i < options.detail.length; i++) {
+            const text = String(options.detail[i]);
             const split = text.indexOf(': ');
 
             if (split > 0 && split <= 22) {
-                return '<li class="ask-pair">' +
+                detailHtml += '<li class="ask-pair">' +
                     '<span class="ask-pair-label">' + escapeHtml(text.slice(0, split)) + '</span>' +
                     '<span class="ask-pair-value">' + escapeHtml(text.slice(split + 2)) + '</span>' +
                     '</li>';
+            } else {
+                detailHtml += '<li>' + escapeHtml(text) + '</li>';
             }
-            return '<li>' + escapeHtml(text) + '</li>';
-        }).join('');
+        }
+        detail.innerHTML = detailHtml;
         detail.style.display = 'block';
     } else {
         detail.innerHTML = '';
@@ -247,9 +261,15 @@ function openAsk(options) {
     }
 
     showModal('ask-modal');
-    if (options.ask) setTimeout(() => input.focus(), 60);
+    if (options.ask) {
+        setTimeout(function () {
+            input.focus();
+        }, 60);
+    }
 
-    return new Promise((resolve) => { askResolve = resolve; });
+    return new Promise(function (resolve) {
+        askResolve = resolve;
+    });
 }
 
 function closeAsk(answer) {
@@ -303,10 +323,10 @@ function renderWorkSteps(current, done) {
     const list = document.getElementById('work-steps');
     const items = list.querySelectorAll('li');
 
-    items.forEach((item, index) => {
-        item.classList.toggle('is-done', done || index < current);
-        item.classList.toggle('is-active', !done && index === current);
-    });
+    for (let index = 0; index < items.length; index++) {
+        items[index].classList.toggle('is-done', done || index < current);
+        items[index].classList.toggle('is-active', !done && index === current);
+    }
 }
 
 function showWorking(options) {
@@ -324,16 +344,19 @@ function showWorking(options) {
     document.getElementById('work-text').textContent = settings.message || '';
 
     const list = document.getElementById('work-steps');
-    list.innerHTML = steps.map((step) =>
-        '<li><span class="work-step-mark" aria-hidden="true"></span>' +
-        '<span class="work-step-text">' + escapeHtml(step) + '</span></li>').join('');
+    let stepsHtml = '';
+    for (let i = 0; i < steps.length; i++) {
+        stepsHtml += '<li><span class="work-step-mark" aria-hidden="true"></span>' +
+            '<span class="work-step-text">' + escapeHtml(steps[i]) + '</span></li>';
+    }
+    list.innerHTML = stepsHtml;
     list.style.display = steps.length > 0 ? 'block' : 'none';
 
     workState = { openedAt: Date.now(), timer: null, steps: steps.length, current: 0 };
     renderWorkSteps(0, false);
 
     if (steps.length > 1) {
-        workState.timer = setInterval(() => {
+        workState.timer = setInterval(function () {
             if (!workState || workState.current >= workState.steps - 1) return;
             workState.current += 1;
             renderWorkSteps(workState.current, false);
@@ -344,7 +367,9 @@ function showWorking(options) {
 }
 
 function pause(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise(function (resolve) {
+        setTimeout(resolve, ms);
+    });
 }
 
 // the answer arrived and it was good: every step ticks, then the card leaves

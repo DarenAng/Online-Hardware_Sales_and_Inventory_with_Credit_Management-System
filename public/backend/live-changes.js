@@ -48,12 +48,13 @@ let changesWritten = 0;
 
 async function recordChange(scope, detail, origin) {
   try {
-    const [result] = await db.query(
+    const insertResult = await db.query(
       "INSERT INTO live_changes (scope, detail, origin, created_at) VALUES (?, ?, ?, ?)",
       [scope, detail ? String(detail).slice(0, 255) : null,
        origin ? String(origin).slice(0, 64) : null, Date.now()]);
 
     // trimmed now and then rather than on every write
+    const result = insertResult[0];
     changesWritten += 1;
     if (changesWritten % 50 === 0) {
       await db.query("DELETE FROM live_changes WHERE change_id <= ?", [result.insertId - CHANGE_LOG_SIZE]);
@@ -82,7 +83,8 @@ function keepAlive(promise) {
 }
 
 async function latestChangeVersion() {
-  const [rows] = await db.query("SELECT COALESCE(MAX(change_id), 0) AS version FROM live_changes");
+  const versionResult = await db.query("SELECT COALESCE(MAX(change_id), 0) AS version FROM live_changes");
+  const rows = versionResult[0];
   return Number(rows[0].version);
 }
 
@@ -93,29 +95,40 @@ async function changesSince(version) {
     return { version: latest, changes: [], gap: false };
   }
 
-  const [rows] = await db.query(
-    `SELECT change_id, scope, detail, origin, created_at FROM live_changes
-     WHERE change_id > ? ORDER BY change_id LIMIT ?`,
+  const changeResult = await db.query(
+    "SELECT change_id, scope, detail, origin, created_at FROM live_changes " +
+    "WHERE change_id > ? ORDER BY change_id LIMIT ?",
     [version, CHANGE_LOG_SIZE]);
+  const rows = changeResult[0];
 
   // the oldest row still kept is newer than the one after "version": some were trimmed
   if (rows.length === 0 || Number(rows[0].change_id) > version + 1) {
-    const [oldest] = await db.query("SELECT MIN(change_id) AS first FROM live_changes");
+    const oldestResult = await db.query("SELECT MIN(change_id) AS first FROM live_changes");
+    const oldest = oldestResult[0];
     if (oldest[0].first === null || Number(oldest[0].first) > version + 1) {
       return { version: latest, changes: [], gap: true };
     }
   }
 
-  const changes = rows.map((row) => ({
-    version: Number(row.change_id),
-    scope: row.scope,
-    detail: row.detail,
-    origin: row.origin,          // so a browser can ignore its own writes
-    at: new Date(Number(row.created_at)).toISOString()
-  }));
+  const changes = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    changes.push({
+      version: Number(row.change_id),
+      scope: row.scope,
+      detail: row.detail,
+      origin: row.origin,          // so a browser can ignore its own writes
+      at: new Date(Number(row.created_at)).toISOString()
+    });
+  }
   return { version: latest, changes: changes, gap: false };
 }
 
 module.exports = {
-  LIVE_POLL_SECONDS, scopeOf, recordChange, publishChange, latestChangeVersion, changesSince
+  LIVE_POLL_SECONDS: LIVE_POLL_SECONDS,
+  scopeOf: scopeOf,
+  recordChange: recordChange,
+  publishChange: publishChange,
+  latestChangeVersion: latestChangeVersion,
+  changesSince: changesSince
 };

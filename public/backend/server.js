@@ -40,13 +40,12 @@
 //   store-settings.js  the shop's default settings and receipt layout
 //   env-settings.js    reading a number from .env
 //
-// Two short forms you will see a lot:
-//   const [rows] = await db.query(...);
+// Two things you will see a lot:
+//   const result = await db.query(...);   const rows = result[0];
 //     db.query() gives back a list of two things: [rows, fields].
-//     We only need the rows, so we take the first item with [rows].
-//   const { email, password } = request.body;
-//     is short for:  const email = request.body.email;
-//                    const password = request.body.password;
+//     We only need the rows, so we take the first item, result[0].
+//   const email = request.body.email;
+//     reads one field the browser sent, from request.body.
 // ============================================================
 
 // Load the settings (database password etc.) from the .env file in the project folder
@@ -189,9 +188,9 @@ const DELIVERY_PHONE_SQL = sharedSql.DELIVERY_PHONE_SQL;
 // waits for it (see the hook after this) so it never meets a missing table.
 // (adminModule is made further down; this runs after that is done.)
 const startup = db.getConnection()
-  .then(async (connection) => {
+  .then(async function (connection) {
     connection.release();
-    console.log(`Connected to MySQL database "${DB_NAME}" on ${DB_HOST}:${DB_PORT}.`);
+    console.log("Connected to MySQL database \"" + DB_NAME + "\" on " + DB_HOST + ":" + DB_PORT + ".");
 
     await migrations.migrateOneAtATime(adminModule.runSqlScript);
 
@@ -202,19 +201,21 @@ const startup = db.getConnection()
       adminModule.startAutoBackup();
       adminModule.startArchiveSweep();
       managerModule.startPenaltySweep();
-      const sessionTimer = setInterval(() => {
-        removeExpiredSessions().catch((error) => console.error("Session sweep failed:", error.message));
+      const sessionTimer = setInterval(function () {
+        removeExpiredSessions().catch(function (error) {
+          console.error("Session sweep failed:", error.message);
+        });
       }, SESSION_SWEEP_MS);
       sessionTimer.unref();
     }
   })
-  .catch((error) => {
+  .catch(function (error) {
     console.error("DATABASE CONNECTION FAILED:", error.message);
     console.error("Check DB_HOST, DB_PORT, DB_USER and DB_PASSWORD in .env at the project root (see .env.example),");
     console.error("and make sure you ran the two files in public/database/, in the order their names give.");
   });
 
-app.use(async (request, response, next) => {
+app.use(async function (request, response, next) {
   await startup;
   next();
 });
@@ -229,22 +230,22 @@ app.use("/api/paymongo/webhook", express.raw({ type: "*/*", limit: "1mb" }));
 // read by its own route in routes/admin.js, which has a 50 MB limit and
 // only after the administrator check has passed.
 const smallJson = express.json();
-app.use((request, response, next) => {
+app.use(function (request, response, next) {
   if (request.method === "POST" && request.path === "/api/restore") return next();
   smallJson(request, response, next);
 });
 
-app.get("/", (request, response) => {
+app.get("/", function (request, response) {
   response.redirect("/Login.html");
 });
 
 // every browser asks for this; a 404 in the console hides real errors
 const FAVICON =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">` +
-  `<rect width="32" height="32" rx="6" fill="#1d4ed8"/>` +
-  `<path d="M9 8h3v7h8V8h3v16h-3v-7h-8v7H9z" fill="#fff"/></svg>`;
+  "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\">" +
+  "<rect width=\"32\" height=\"32\" rx=\"6\" fill=\"#1d4ed8\"/>" +
+  "<path d=\"M9 8h3v7h8V8h3v16h-3v-7h-8v7H9z\" fill=\"#fff\"/></svg>";
 
-app.get(["/favicon.ico", "/favicon.svg"], (request, response) => {
+app.get(["/favicon.ico", "/favicon.svg"], function (request, response) {
   response.type("image/svg+xml");
   response.setHeader("Cache-Control", "public, max-age=86400");
   response.send(FAVICON);
@@ -293,7 +294,7 @@ function resolvedPath(rawPath) {
   return pathname;
 }
 
-app.use((request, response, next) => {
+app.use(function (request, response, next) {
   const pathname = resolvedPath(request.path);
 
   if (pathname === null) {
@@ -301,7 +302,8 @@ app.use((request, response, next) => {
   }
 
   // pretend private files do not exist
-  for (const pattern of PRIVATE_FILES) {
+  for (let patternIndex = 0; patternIndex < PRIVATE_FILES.length; patternIndex++) {
+    const pattern = PRIVATE_FILES[patternIndex];
     if (pattern.test(pathname)) {
       return response.status(404).send("Not found");
     }
@@ -312,7 +314,7 @@ app.use((request, response, next) => {
 
 // A dashboard page is served to its role only (PAGE_ROLES in roles.js), checked
 // here from the session cookie before the file server sees the request.
-app.use(async (request, response, next) => {
+app.use(async function (request, response, next) {
   if (request.method !== "GET" && request.method !== "HEAD") return next();
 
   const pathname = resolvedPath(request.path);
@@ -321,7 +323,9 @@ app.use(async (request, response, next) => {
   // Is this one of the dashboard pages? Compared without caring about
   // upper/lower case, because Windows file names do not care either.
   let page = null;
-  for (const name of Object.keys(PAGE_ROLES)) {
+  const pageNames = Object.keys(PAGE_ROLES);
+  for (let nameIndex = 0; nameIndex < pageNames.length; nameIndex++) {
+    const name = pageNames[nameIndex];
     if (name.toLowerCase() === pathname.toLowerCase()) {
       page = name;
     }
@@ -357,18 +361,20 @@ app.use(accessControl.accessHook);
 // AUTH -- in routes/login.js: sign in, sign out, heartbeat, first-sign-in password
 // ==========================================
 registerLoginRoutes(app, {
-  db, writeAuditLog,
-  hashPassword, isHashed, verifyPassword,
-  startSession, setSessionCookie, endSession, endSessionsForStaff,
-  renewSessionAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
-  LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES, SESSION_IDLE_MINUTES, passwordComplaint
+  db: db, writeAuditLog: writeAuditLog, hashPassword: hashPassword, isHashed: isHashed,
+  verifyPassword: verifyPassword, startSession: startSession, setSessionCookie: setSessionCookie,
+  endSession: endSession, endSessionsForStaff: endSessionsForStaff,
+  renewSessionAfterPasswordChange: renewSessionAfterPasswordChange, clientIp: clientIp,
+  DEFAULT_STORE_SETTINGS: DEFAULT_STORE_SETTINGS, LOGIN_MAX_ATTEMPTS: LOGIN_MAX_ATTEMPTS,
+  LOGIN_HOLD_MINUTES: LOGIN_HOLD_MINUTES, SESSION_IDLE_MINUTES: SESSION_IDLE_MINUTES,
+  passwordComplaint: passwordComplaint
 });
 
 // ==========================================
 // SYSTEM ADMINISTRATION -- in routes/admin.js: staff accounts, the audit trail,
 // backup and recovery, screens by role, store settings
 // ==========================================
-// { db, getActorId } is short for { db: db, getActorId: getActorId }.
+// Each route file is handed an object such as { db: db, getActorId: getActorId }.
 
 // routes/admin.js calls this after a restore. Loading the procedures needs a way
 // to run a whole SQL file, and that is routes/admin.js's own (runSqlScript).
@@ -377,15 +383,22 @@ function loadProceduresIfMissing() {
 }
 
 const adminModule = registerAdminRoutes(app, {
-  db, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
-  requireRole, publishChange, ADMIN, USER_SELECT, withPresence, notOwnAccount,
-  endSessionsForStaff, hashPassword, generatePassword, phoneComplaint, cleanPhone, cleanMiddleName,
-  findPhoneOwner, phoneTakenMessage, nameComplaint,
-  tinComplaint, cleanTin, DEFAULT_STORE_SETTINGS, AUDIT_TYPES, DB_NAME, sqlValue,
-  sqlName, EXPECTED_PROCEDURES, countProcedures, SERVER_TABLES, IS_VERCEL, proceduresAreMissing, proceduresLoadedCount, forgetProcedureCount,
-  loadProceduresIfMissing,
-  FEATURES, FEATURE_ROLES, findFeature, featuresOf, forgetFeatureOverrides, receiptLayoutFrom,
-  HOLD_LIFTED_BY_MANAGER, readDeliveryAreas, deliveryAreasFrom
+  db: db, getActorId: getActorId, writeAuditLog: writeAuditLog, fieldChanges: fieldChanges,
+  wordStartSearch: wordStartSearch, requireRole: requireRole, publishChange: publishChange,
+  ADMIN: ADMIN, USER_SELECT: USER_SELECT, withPresence: withPresence, notOwnAccount: notOwnAccount,
+  endSessionsForStaff: endSessionsForStaff, hashPassword: hashPassword,
+  generatePassword: generatePassword, phoneComplaint: phoneComplaint, cleanPhone: cleanPhone,
+  cleanMiddleName: cleanMiddleName, findPhoneOwner: findPhoneOwner,
+  phoneTakenMessage: phoneTakenMessage, nameComplaint: nameComplaint, tinComplaint: tinComplaint,
+  cleanTin: cleanTin, DEFAULT_STORE_SETTINGS: DEFAULT_STORE_SETTINGS, AUDIT_TYPES: AUDIT_TYPES,
+  DB_NAME: DB_NAME, sqlValue: sqlValue, sqlName: sqlName, EXPECTED_PROCEDURES: EXPECTED_PROCEDURES,
+  countProcedures: countProcedures, SERVER_TABLES: SERVER_TABLES, IS_VERCEL: IS_VERCEL,
+  proceduresAreMissing: proceduresAreMissing, proceduresLoadedCount: proceduresLoadedCount,
+  forgetProcedureCount: forgetProcedureCount, loadProceduresIfMissing: loadProceduresIfMissing,
+  FEATURES: FEATURES, FEATURE_ROLES: FEATURE_ROLES, findFeature: findFeature,
+  featuresOf: featuresOf, forgetFeatureOverrides: forgetFeatureOverrides,
+  receiptLayoutFrom: receiptLayoutFrom, HOLD_LIFTED_BY_MANAGER: HOLD_LIFTED_BY_MANAGER,
+  readDeliveryAreas: readDeliveryAreas, deliveryAreasFrom: deliveryAreasFrom
 });
 
 // ==========================================
@@ -393,10 +406,12 @@ const adminModule = registerAdminRoutes(app, {
 // management, and stocks with the reorder point and the selling price.
 // ==========================================
 const managerModule = registerManagerRoutes(app, {
-  db, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
-  requireRole, MANAGER, LOW_STOCK_EFFECTIVE_SQL, isDateText, SALE_CUSTOMER_SQL,
-  proceduresAreMissing, publishChange,
-  CLERK, CASHIER, DRIVER, cleanPhone, phoneComplaint
+  db: db, getActorId: getActorId, writeAuditLog: writeAuditLog, fieldChanges: fieldChanges,
+  wordStartSearch: wordStartSearch, requireRole: requireRole, MANAGER: MANAGER,
+  LOW_STOCK_EFFECTIVE_SQL: LOW_STOCK_EFFECTIVE_SQL, isDateText: isDateText,
+  SALE_CUSTOMER_SQL: SALE_CUSTOMER_SQL, proceduresAreMissing: proceduresAreMissing,
+  publishChange: publishChange, CLERK: CLERK, CASHIER: CASHIER, DRIVER: DRIVER,
+  cleanPhone: cleanPhone, phoneComplaint: phoneComplaint
 });
 
 // ==========================================
@@ -406,16 +421,18 @@ const managerModule = registerManagerRoutes(app, {
 // who asks it again before a sale or a payment is recorded against one.
 // ==========================================
 const qrPayments = registerQrPaymentRoutes(app, {
-  db, getActorId, publishChange, isDateText, CASHIER, port
+  db: db, getActorId: getActorId, publishChange: publishChange, isDateText: isDateText,
+  CASHIER: CASHIER, port: port
 });
 
 // ==========================================
-// CASHIER MODULE -- in routes/cashier.js: the sales list, ringing up a sale, booking
+// CASHIER MODULE -- in routes/cashier.js: the sales list, ringing up a sale, creating
 // and moving a delivery, the end-of-shift summary, payments on a sale
 // ==========================================
 registerCashierRoutes(app, {
-  db, getActorId, DRIVER, CASHIER, isDateText, SALE_CUSTOMER_SQL,
-  phoneComplaint, cleanPhone, qrPayments, readDeliveryAreas
+  db: db, getActorId: getActorId, DRIVER: DRIVER, CASHIER: CASHIER, isDateText: isDateText,
+  SALE_CUSTOMER_SQL: SALE_CUSTOMER_SQL, phoneComplaint: phoneComplaint, cleanPhone: cleanPhone,
+  qrPayments: qrPayments, readDeliveryAreas: readDeliveryAreas
 });
 
 // ==========================================
@@ -423,7 +440,8 @@ registerCashierRoutes(app, {
 // runs, cash collected at the door, the driver's summary
 // ==========================================
 registerDeliveryRoutes(app, {
-  db, getActorId, isDateText, DELIVERY_CONTACT_SQL, DELIVERY_PHONE_SQL
+  db: db, getActorId: getActorId, isDateText: isDateText,
+  DELIVERY_CONTACT_SQL: DELIVERY_CONTACT_SQL, DELIVERY_PHONE_SQL: DELIVERY_PHONE_SQL
 });
 
 // ==========================================
@@ -432,8 +450,9 @@ registerDeliveryRoutes(app, {
 // and damage reports, and the notifications every role reads
 // ==========================================
 registerInventoryRoutes(app, {
-  db, getActorId, writeAuditLog, fieldChanges, DEFAULT_STORE_SETTINGS, CASHIER, DRIVER,
-  phoneComplaint, cleanPhone, publishChange
+  db: db, getActorId: getActorId, writeAuditLog: writeAuditLog, fieldChanges: fieldChanges,
+  DEFAULT_STORE_SETTINGS: DEFAULT_STORE_SETTINGS, CASHIER: CASHIER, DRIVER: DRIVER,
+  phoneComplaint: phoneComplaint, cleanPhone: cleanPhone, publishChange: publishChange
 });
 
 // ==========================================
@@ -441,17 +460,23 @@ registerInventoryRoutes(app, {
 // archives and the daily job. Last, because the daily job runs the sweeps of
 // the admin and manager route files.
 // ==========================================
-registerSharedRoutes(app, { adminModule, managerModule });
+registerSharedRoutes(app, { adminModule: adminModule, managerModule: managerModule });
 
 // npm start runs this file and it listens on the port; on Vercel,
 // api/index.js loads it and Vercel hands it the requests.
 if (require.main === module) {
-  app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
-    for (const line of qrPayments.describe()) console.log(line);
+  app.listen(port, function () {
+    console.log("Server running at http://localhost:" + port);
+    const lines = qrPayments.describe();
+    for (let i = 0; i < lines.length; i++) {
+      console.log(lines[i]);
+    }
   });
 } else if (IS_VERCEL) {
-  for (const line of qrPayments.describe()) console.log(line);
+  const lines = qrPayments.describe();
+  for (let i = 0; i < lines.length; i++) {
+    console.log(lines[i]);
+  }
 }
 
 module.exports = app;

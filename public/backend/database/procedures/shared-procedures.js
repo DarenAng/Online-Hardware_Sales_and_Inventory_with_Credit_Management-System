@@ -26,11 +26,13 @@ async function callProcedure(sql, params, outputNames) {
     // Build "SELECT @a AS `a`, @b AS `b`" to read the OUT values back.
     // The name is quoted because some are reserved words (like "lines").
     const parts = [];
-    for (const name of outputNames) {
-      parts.push(`@${name} AS ${sqlName(name)}`);
+    for (let nameIndex = 0; nameIndex < outputNames.length; nameIndex++) {
+      const name = outputNames[nameIndex];
+      parts.push("@" + name + " AS " + sqlName(name));
     }
     const selectList = parts.join(", ");
-    const [rows] = await connection.query(`SELECT ${selectList}`);
+    const selected = await connection.query("SELECT " + selectList);
+    const rows = selected[0];
     const output = rows[0];
 
     // A 500 from a procedure is its EXIT HANDLER speaking: the message holds the
@@ -73,4 +75,9 @@ function archiveRecord(params) {
   );
 }
 
-module.exports = { callProcedure, updateOwnAccount, restoreArchive, archiveRecord };
+module.exports = {
+  callProcedure: callProcedure,
+  updateOwnAccount: updateOwnAccount,
+  restoreArchive: restoreArchive,
+  archiveRecord: archiveRecord
+};

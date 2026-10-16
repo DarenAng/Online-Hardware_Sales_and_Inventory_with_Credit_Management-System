@@ -12,7 +12,7 @@
 //   - the Payment window (Proceed to Payment): the customer, cash, cheque,
 //     e-wallet, bank transfer, credit or COD
 //   - checkout (handleCheckout) and the printed receipt
-//   - booking a delivery for the sale
+//   - scheduling a delivery for the sale
 //   - the lists: deliveries, recent sales (for refunds), sales report
 //   - the customer credit screen: adding a customer, the card with its
 //     history tabs, asking for a higher limit, and payments taken from a
@@ -31,7 +31,7 @@ const CASHIER_ROWS_PER_PAGE = 8;
 // eight a page keeps the form and the list of recent sales on one screen without scrolling
 const RECENT_SALES_ROWS_PER_PAGE = 8;
 
-// the customer book, read once and searched in memory behind the typing box
+// the customer list, read once and searched in memory behind the typing box
 let customerDirectory = [];
 let customerDirectoryLoaded = false;
 let suggestHighlight = -1;
@@ -42,12 +42,18 @@ let pendingDelivery = null;
 function showCashierPanel(panelId, title, event) {
     if (event) event.preventDefault();
 
-    document.querySelectorAll('[data-panel]').forEach((panel) => {
-        panel.style.display = panel.id === panelId ? 'block' : 'none';
-    });
-    document.querySelectorAll('[data-panel-link]').forEach((link) => {
-        link.classList.toggle('active', link.dataset.panelLink === panelId);
-    });
+    const panels = document.querySelectorAll('[data-panel]');
+    for (let i = 0; i < panels.length; i++) {
+        if (panels[i].id === panelId) {
+            panels[i].style.display = 'block';
+        } else {
+            panels[i].style.display = 'none';
+        }
+    }
+    const links = document.querySelectorAll('[data-panel-link]');
+    for (let i = 0; i < links.length; i++) {
+        links[i].classList.toggle('active', links[i].dataset.panelLink === panelId);
+    }
 
     const heading = document.getElementById('cash-page-title');
     if (heading) heading.textContent = title;
@@ -109,20 +115,20 @@ function renderCatalogEmpty() {
     const grid = catalogGrid();
     if (!grid) return;
     setPill('catalog-count', 'Not loaded');
-    grid.innerHTML = `
-        <div class="empty-state">
-            <div class="empty-mark">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M6 6h15l-1.5 9h-12z"></path>
-                    <path d="M6 6L5 3H2"></path>
-                    <circle cx="9" cy="20" r="1.4"></circle>
-                    <circle cx="18" cy="20" r="1.4"></circle>
-                </svg>
-            </div>
-            <h4>No products loaded</h4>
-            <p>Search above for what the customer is buying, or press Load Data to list every product.</p>
-            <button type="button" class="btn btn-accent" onclick="loadCatalogAll(event)">Load Data</button>
-        </div>`;
+    grid.innerHTML = '\n' +
+        '        <div class="empty-state">\n' +
+        '            <div class="empty-mark">\n' +
+        '                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">\n' +
+        '                    <path d="M6 6h15l-1.5 9h-12z"></path>\n' +
+        '                    <path d="M6 6L5 3H2"></path>\n' +
+        '                    <circle cx="9" cy="20" r="1.4"></circle>\n' +
+        '                    <circle cx="18" cy="20" r="1.4"></circle>\n' +
+        '                </svg>\n' +
+        '            </div>\n' +
+        '            <h4>No products loaded</h4>\n' +
+        '            <p>Search above for what the customer is buying, or press Load Data to list every product.</p>\n' +
+        '            <button type="button" class="btn btn-accent" onclick="loadCatalogAll(event)">Load Data</button>\n' +
+        '        </div>';
     holdBoxHeight(grid);
 }
 
@@ -130,19 +136,21 @@ function renderCatalogNoMatch(keyword) {
     const grid = catalogGrid();
     if (!grid) return;
     setPill('catalog-count', '0 results');
-    grid.innerHTML = `
-        <div class="empty-state">
-            <div class="empty-mark">
-                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4.2-4.2"></path><path d="M8.5 11h5"></path>
-                </svg>
-            </div>
-            <h4>No match found</h4>
-            <p>${keyword ? "Nothing matches <kbd>" + escapeHtml(keyword) + "</kbd>" : "Nothing is left"}${
-                catalogFilters.category !== "all"
-                    ? " in the category picked above" : ""}. Archived and out-of-stock products never appear here.</p>
-            <button type="button" class="btn btn-accent" onclick="loadCatalogAll(event)">Load Data</button>
-        </div>`;
+    let nothingText = 'Nothing is left';
+    if (keyword) nothingText = 'Nothing matches <kbd>' + escapeHtml(keyword) + '</kbd>';
+    let categoryText = '';
+    if (catalogFilters.category !== 'all') categoryText = ' in the category picked above';
+    grid.innerHTML = '\n' +
+        '        <div class="empty-state">\n' +
+        '            <div class="empty-mark">\n' +
+        '                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">\n' +
+        '                    <circle cx="11" cy="11" r="7"></circle><path d="M20 20l-4.2-4.2"></path><path d="M8.5 11h5"></path>\n' +
+        '                </svg>\n' +
+        '            </div>\n' +
+        '            <h4>No match found</h4>\n' +
+        '            <p>' + nothingText + categoryText + '. Archived and out-of-stock products never appear here.</p>\n' +
+        '            <button type="button" class="btn btn-accent" onclick="loadCatalogAll(event)">Load Data</button>\n' +
+        '        </div>';
     holdBoxHeight(grid);
 }
 
@@ -168,10 +176,26 @@ const CATALOG_ROW_TITLE = {
     on: 'Already on the order. Change the amount with + and − on the order.'
 };
 
+// The order line for this product, or undefined when it is not on the order
+function findCartLine(productId) {
+    for (let i = 0; i < cart.length; i++) {
+        if (cart[i].product_id === productId) return cart[i];
+    }
+    return undefined;
+}
+
+// The catalog product with this id, or undefined
+function findCatalogProduct(productId) {
+    for (let i = 0; i < catalog.length; i++) {
+        if (catalog[i].product_id === productId) return catalog[i];
+    }
+    return undefined;
+}
+
 // the click on a row: a product on the order is not added a second time; the
 // line it is on lights up instead, so the cashier can see where to change it
 function pressCatalogRow(productId) {
-    if (cart.some((l) => l.product_id === productId)) {
+    if (findCartLine(productId)) {
         flashCartLine(productId);
         return;
     }
@@ -193,7 +217,8 @@ function fillCatalogCategories() {
 
     // every category name of the products for sale, each one once, A to Z
     const names = [];
-    for (const p of catalog) {
+    for (let i = 0; i < catalog.length; i++) {
+        const p = catalog[i];
         if (!isCatalogAvailable(p)) continue;
         const name = String(p.category_name || 'Uncategorised');
         if (!names.includes(name)) {
@@ -202,9 +227,16 @@ function fillCatalogCategories() {
     }
     names.sort();
     const current = select.value;
-    select.innerHTML = '<option value="all">Every category</option>' +
-        names.map((name) => '<option value="' + escapeHtml(name) + '">' + escapeHtml(name) + '</option>').join('');
-    select.value = names.indexOf(current) !== -1 ? current : 'all';
+    let optionsHtml = '<option value="all">Every category</option>';
+    for (let i = 0; i < names.length; i++) {
+        optionsHtml += '<option value="' + escapeHtml(names[i]) + '">' + escapeHtml(names[i]) + '</option>';
+    }
+    select.innerHTML = optionsHtml;
+    if (names.indexOf(current) !== -1) {
+        select.value = current;
+    } else {
+        select.value = 'all';
+    }
     catalogFilters.category = select.value;
 }
 
@@ -214,9 +246,14 @@ function applyCatalogView() {
 
     if (text === '' && catalogMode === 'idle') { renderCatalogEmpty(); return; }
 
-    const rows = catalog.filter((p) =>
-        catalogMatchesFilters(p) &&
-        (text === '' || prefixMatch([p.product_name, p.category_name, p.brand_name], text)));
+    const rows = [];
+    for (let i = 0; i < catalog.length; i++) {
+        const p = catalog[i];
+        if (catalogMatchesFilters(p) &&
+            (text === '' || prefixMatch([p.product_name, p.category_name, p.brand_name], text))) {
+            rows.push(p);
+        }
+    }
     renderCatalog(rows, text);
 }
 
@@ -241,7 +278,11 @@ function renderCatalog(rows, keyword) {
 
     if (rows.length === 0) { renderCatalogNoMatch(keyword || ''); return; }
 
-    const key = rows.map((p) => p.product_id).join(',');
+    const ids = [];
+    for (let i = 0; i < rows.length; i++) {
+        ids.push(rows[i].product_id);
+    }
+    const key = ids.join(',');
     if (key !== catalogShownKey) catalogPage = 1;
     catalogShown = rows;
     catalogShownKey = key;
@@ -268,31 +309,57 @@ function renderCatalog(rows, keyword) {
     // sizes a product also sells in are listed under its unit, and picked on
     // the order line.
     setPill('catalog-count', rows.length + (rows.length === 1 ? ' product' : ' products'));
+    // the table rows, one for each product on this page
+    let rowsHtml = '';
+    for (let i = 0; i < slice.length; i++) {
+        const p = slice[i];
+        const inCart = findCartLine(p.product_id);
+        const sizes = sellingUnitsOf(p);
+
+        let rowClass = '';
+        let rowTitle = CATALOG_ROW_TITLE.off;
+        let disabledAttr = '';
+        let markHidden = ' hidden';
+        let markText = '';
+        if (inCart) {
+            rowClass = ' is-on-order';
+            rowTitle = CATALOG_ROW_TITLE.on;
+            disabledAttr = ' aria-disabled="true"';
+            markHidden = '';
+            markText = escapeHtml(qtyText(inCart.quantity, inCart.unit)) + ' on order';
+        }
+
+        let sizesHtml = '';
+        if (sizes.length > 0) {
+            const sizeNames = [];
+            for (let s = 0; s < sizes.length; s++) {
+                sizeNames.push(escapeHtml(sizes[s].unit_name));
+            }
+            sizesHtml = '<span class="unit-sizes">also by the ' + sizeNames.join(', ') + '</span>';
+        }
+
+        let perHtml = '';
+        if (p.unit_name) perHtml = '<span class="price-per">per ' + escapeHtml(unitShort(p.unit_name)) + '</span>';
+
+        rowsHtml += '<tr class="row-reveal row-clickable' + rowClass + '"' +
+            ' style="animation-delay:' + Math.min(i, 12) * 26 + 'ms"' +
+            ' onclick="pressCatalogRow(' + p.product_id + ')"' +
+            ' title="' + rowTitle + '"' +
+            disabledAttr +
+            ' data-product-row="' + p.product_id + '">' +
+            '<td class="cell-name">' + escapeHtml(p.product_name) +
+                '<span class="on-order-mark" title="On the order"' + markHidden + '>' + markText + '</span></td>' +
+            '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
+            '<td>' + escapeHtml(p.brand_name || '—') + '</td>' +
+            '<td class="cell-unit">' + escapeHtml(p.unit_name || '—') + sizesHtml + '</td>' +
+            '<td class="cell-num catalog-price">' + peso(p.price) + perHtml + '</td>' +
+        '</tr>';
+    }
+
     grid.innerHTML =
         '<table class="catalog-table" id="catalog-table">' +
         '<thead><tr><th>Product</th><th>Category</th><th>Brand</th><th>Sold By</th><th>Price</th></tr></thead>' +
-        '<tbody>' + slice.map((p, i) => {
-            const inCart = cart.find((l) => l.product_id === p.product_id);
-            const sizes = sellingUnitsOf(p);
-            return '<tr class="row-reveal row-clickable' + (inCart ? ' is-on-order' : '') + '"' +
-                ' style="animation-delay:' + Math.min(i, 12) * 26 + 'ms"' +
-                ' onclick="pressCatalogRow(' + p.product_id + ')"' +
-                ' title="' + CATALOG_ROW_TITLE[inCart ? 'on' : 'off'] + '"' +
-                (inCart ? ' aria-disabled="true"' : '') +
-                ' data-product-row="' + p.product_id + '">' +
-                '<td class="cell-name">' + escapeHtml(p.product_name) +
-                    '<span class="on-order-mark" title="On the order"' + (inCart ? '' : ' hidden') + '>' +
-                        (inCart ? escapeHtml(qtyText(inCart.quantity, inCart.unit)) + ' on order' : '') + '</span></td>' +
-                '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
-                '<td>' + escapeHtml(p.brand_name || '\u2014') + '</td>' +
-                '<td class="cell-unit">' + escapeHtml(p.unit_name || '\u2014') +
-                    (sizes.length > 0
-                        ? '<span class="unit-sizes">also by the ' +
-                          sizes.map((u) => escapeHtml(u.unit_name)).join(', ') + '</span>' : '') + '</td>' +
-                '<td class="cell-num catalog-price">' + peso(p.price) +
-                    (p.unit_name ? '<span class="price-per">per ' + escapeHtml(unitShort(p.unit_name)) + '</span>' : '') + '</td>' +
-            '</tr>';
-        }).join('') +
+        '<tbody>' + rowsHtml +
         // a short page is topped up to ten so the pager stays put (tables.js)
         fillerRows(CATALOG_PAGE_ROWS - slice.length, 5) +
         '</tbody></table>' + pager;
@@ -334,7 +401,7 @@ function onCatalogSearchInput(event) {
     if (!event || !event.target) return;
     const box = event.target;
     clearTimeout(catalogSearchTimer);
-    catalogSearchTimer = setTimeout(() => filterCatalog(box.value), SEARCH_TYPING_DELAY_MS);
+    catalogSearchTimer = setTimeout(function () { filterCatalog(box.value); }, SEARCH_TYPING_DELAY_MS);
 }
 
 function onCatalogSearchKey(event) {
@@ -427,11 +494,11 @@ function renderRefundSuggestions(text) {
     const query = String(text || '').trim().toLowerCase();
     refundSuggestHighlight = -1;
 
-    const hide = () => {
+    function hide() {
         list.hidden = true;
         list.innerHTML = '';
         if (box) box.setAttribute('aria-expanded', 'false');
-    };
+    }
 
     if (searchText(query) === '' || catalog.length === 0) { hide(); return; }
 
@@ -445,34 +512,41 @@ function renderRefundSuggestions(text) {
     const words = [];
     const other = [];
 
-    catalog.forEach((p) => {
+    for (let i = 0; i < catalog.length; i++) {
+        const p = catalog[i];
         const name = String(p.product_name || '').toLowerCase();
 
         if (name.startsWith(query)) starts.push(p);
         else if (startsAWord(name, query)) words.push(p);
         else if (prefixMatch([p.brand_name, p.category_name], query)) other.push(p);
-    });
+    }
 
     const found = starts.concat(words, other).slice(0, 6);
 
     if (found.length === 0) { hide(); return; }
 
-    list.innerHTML = found.map((p, i) => {
+    let suggestHtml = '';
+    for (let i = 0; i < found.length; i++) {
+        const p = found[i];
         // brand and category separate two products whose names read almost the same
-        const meta = [p.category_name, p.brand_name].filter(Boolean).map(escapeHtml);
+        const meta = [];
+        if (p.category_name) meta.push(escapeHtml(p.category_name));
+        if (p.brand_name) meta.push(escapeHtml(p.brand_name));
 
-        return '<li class="suggest-item" role="option" id="refund-suggest-' + i + '" ' +
+        let noteHtml = '';
+        if (meta.length) noteHtml = '<span class="suggest-note">' + meta.join(' &middot; ') + '</span>';
+
+        suggestHtml += '<li class="suggest-item" role="option" id="refund-suggest-' + i + '" ' +
             'onmousedown="event.preventDefault()" ' +
             'onclick="pickRefundProduct(' + p.product_id + ')">' +
             '<span class="suggest-line">' +
                 '<span class="suggest-name">' + escapeHtml(p.product_name) + '</span>' +
                 '<span class="suggest-figure">' + peso(p.price) + '</span>' +
             '</span>' +
-            (meta.length
-                ? '<span class="suggest-note">' + meta.join(' &middot; ') + '</span>'
-                : '') +
+            noteHtml +
             '</li>';
-    }).join('');
+    }
+    list.innerHTML = suggestHtml;
 
     list.hidden = false;
     if (box) box.setAttribute('aria-expanded', 'true');
@@ -500,13 +574,17 @@ function onRefundProductKey(event) {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
         refundSuggestHighlight = (refundSuggestHighlight + step + items.length) % items.length;
-        items.forEach((item, i) => item.classList.toggle('is-active', i === refundSuggestHighlight));
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === refundSuggestHighlight);
+        }
         return;
     }
 
     if (event.key === 'Enter') {
         event.preventDefault();
-        const pick = items[refundSuggestHighlight >= 0 ? refundSuggestHighlight : 0];
+        let pickIndex = 0;
+        if (refundSuggestHighlight >= 0) pickIndex = refundSuggestHighlight;
+        const pick = items[pickIndex];
         if (pick) pick.click();
         return;
     }
@@ -515,7 +593,7 @@ function onRefundProductKey(event) {
 }
 
 function pickRefundProduct(productId) {
-    const found = catalog.find((p) => p.product_id === productId);
+    const found = findCatalogProduct(productId);
     if (!found) return;
 
     const box = refundProductBox();
@@ -561,7 +639,10 @@ function renderRefundProductStrip() {
     const p = refundProduct;
     if (!p) { strip.hidden = true; strip.innerHTML = ''; return; }
 
-    const meta = [p.category_name, p.brand_name].filter(Boolean).map(escapeHtml).join(' &middot; ');
+    const metaParts = [];
+    if (p.category_name) metaParts.push(escapeHtml(p.category_name));
+    if (p.brand_name) metaParts.push(escapeHtml(p.brand_name));
+    const meta = metaParts.join(' &middot; ');
 
     strip.hidden = false;
     strip.innerHTML =
@@ -656,7 +737,7 @@ async function loadCustomerDirectory(force) {
         return true;
     } catch (error) {
         // not fatal: a cash sale to a walk-in needs none of this (a typed name
-        // cannot be checked against the book until it loads, and is refused then)
+        // cannot be checked against the customer list until it loads, and is refused then)
         customerDirectoryLoaded = false;
         return false;
     }
@@ -683,7 +764,10 @@ function typedCustomerName() {
 function customerMatchingTypedName() {
     const text = typedCustomerName().toLowerCase();
     if (text === '') return null;
-    return customerDirectory.find((c) => String(c.name).trim().toLowerCase() === text) || null;
+    for (let i = 0; i < customerDirectory.length; i++) {
+        if (String(customerDirectory[i].name).trim().toLowerCase() === text) return customerDirectory[i];
+    }
+    return null;
 }
 
 async function onCustomerInput(value) {
@@ -697,7 +781,7 @@ async function onCustomerInput(value) {
 
     const exact = customerMatchingTypedName();
 
-    // an id that no longer agrees with the text books the sale against the wrong account
+    // an id that no longer agrees with the text puts the sale against the wrong account
     if (idBox) {
         const nextId = exact ? String(exact.id) : '';
         if (idBox.value !== nextId) {
@@ -729,11 +813,12 @@ function renderCustomerSuggestions(text) {
     const starts = [];
     const words = [];
 
-    customerDirectory.forEach((c) => {
+    for (let i = 0; i < customerDirectory.length; i++) {
+        const c = customerDirectory[i];
         const name = String(c.name || '').toLowerCase();
         if (name.startsWith(query)) starts.push(c);
         else if (prefixMatch([name, c.phone], query)) words.push(c);
-    });
+    }
 
     const found = starts.concat(words).slice(0, 6);
 
@@ -744,7 +829,9 @@ function renderCustomerSuggestions(text) {
         return;
     }
 
-    list.innerHTML = found.map((c, i) => {
+    let suggestHtml = '';
+    for (let i = 0; i < found.length; i++) {
+        const c = found[i];
         const owed = Number(c.current_credit) || 0;
         const bought = Number(c.purchase_count) || 0;
 
@@ -754,15 +841,17 @@ function renderCustomerSuggestions(text) {
         if (owed > 0) notes.push('owes ' + peso(owed));
         if (c.phone) notes.push(escapeHtml(c.phone));
 
-        return '<li class="suggest-item" role="option" id="suggest-' + i + '" ' +
+        let noteHtml = '';
+        if (notes.length) noteHtml = '<span class="suggest-note">' + notes.join(' &middot; ') + '</span>';
+
+        suggestHtml += '<li class="suggest-item" role="option" id="suggest-' + i + '" ' +
             'onmousedown="event.preventDefault()" ' +
             'onclick="pickCustomer(' + c.id + ')">' +
             '<span class="suggest-name">' + escapeHtml(c.name) + '</span>' +
-            (notes.length
-                ? '<span class="suggest-note">' + notes.join(' &middot; ') + '</span>'
-                : '') +
+            noteHtml +
             '</li>';
-    }).join('');
+    }
+    list.innerHTML = suggestHtml;
 
     list.hidden = false;
     if (box) box.setAttribute('aria-expanded', 'true');
@@ -791,13 +880,17 @@ function onCustomerKey(event) {
         event.preventDefault();
         const step = event.key === 'ArrowDown' ? 1 : -1;
         suggestHighlight = (suggestHighlight + step + items.length) % items.length;
-        items.forEach((item, i) => item.classList.toggle('is-active', i === suggestHighlight));
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === suggestHighlight);
+        }
         return;
     }
 
     if (event.key === 'Enter') {
         event.preventDefault();
-        const pick = items[suggestHighlight >= 0 ? suggestHighlight : 0];
+        let pickIndex = 0;
+        if (suggestHighlight >= 0) pickIndex = suggestHighlight;
+        const pick = items[pickIndex];
         if (pick) pick.click();
         return;
     }
@@ -805,8 +898,16 @@ function onCustomerKey(event) {
     if (event.key === 'Escape') hideCustomerSuggestions();
 }
 
+// The customer in the directory with this id, or undefined
+function findCustomer(customerId) {
+    for (let i = 0; i < customerDirectory.length; i++) {
+        if (customerDirectory[i].id === customerId) return customerDirectory[i];
+    }
+    return undefined;
+}
+
 async function pickCustomer(customerId) {
-    const found = customerDirectory.find((c) => c.id === customerId);
+    const found = findCustomer(customerId);
     if (!found) return;
 
     const nameBox = customerNameBox();
@@ -905,7 +1006,12 @@ async function loadCustomerOptions() {
 // product's own unit, so 2 sacks ask the shelf for 50 kilos.
 function sellingUnitsOf(product) {
     const list = Array.isArray(product.selling_units) ? product.selling_units : [];
-    return list.filter((u) => u && u.unit_name && Number(u.units_per) > 0);
+    const usable = [];
+    for (let i = 0; i < list.length; i++) {
+        const u = list[i];
+        if (u && u.unit_name && Number(u.units_per) > 0) usable.push(u);
+    }
+    return usable;
 }
 
 // "kg" for a kilogram, otherwise the unit's own name
@@ -917,21 +1023,34 @@ function unitShort(unit) {
 // the choices on a line: the product's own unit first, then the sizes, smallest up
 function lineUnitChoices(line) {
     const own = { unit_name: line.base_unit || 'unit', units_per: 1, price: line.price, own: true };
-    const sizes = line.sizes.slice().sort((a, b) => Number(a.units_per) - Number(b.units_per))
-        .map((u) => ({
+    const sorted = line.sizes.slice().sort(function (a, b) {
+        return Number(a.units_per) - Number(b.units_per);
+    });
+    const sizes = [];
+    for (let i = 0; i < sorted.length; i++) {
+        const u = sorted[i];
+        let sizePrice;
+        if (u.price === null || u.price === undefined) {
+            sizePrice = Math.round(line.price * Number(u.units_per) * 100) / 100;
+        } else {
+            sizePrice = Number(u.price);
+        }
+        sizes.push({
             unit_name: u.unit_name,
             units_per: Number(u.units_per),
-            price: u.price === null || u.price === undefined
-                ? Math.round(line.price * Number(u.units_per) * 100) / 100
-                : Number(u.price),
+            price: sizePrice,
             own: false
-        }));
+        });
+    }
     return [own].concat(sizes);
 }
 
 function lineChoice(line) {
     const choices = lineUnitChoices(line);
-    return choices.find((c) => c.unit_name.toLowerCase() === String(line.unit).toLowerCase()) || choices[0];
+    for (let i = 0; i < choices.length; i++) {
+        if (choices[i].unit_name.toLowerCase() === String(line.unit).toLowerCase()) return choices[i];
+    }
+    return choices[0];
 }
 
 // the price of one of what the line is counted in
@@ -975,7 +1094,7 @@ function tellAllOfIt(line) {
 // Pressing a product puts one of its own unit on the order, or one more if
 // it is already there. The unit and the amount are changed on the line.
 function addToCart(productId) {
-    const p = catalog.find((x) => x.product_id === productId);
+    const p = findCatalogProduct(productId);
     if (!p) return;
 
     const onHand = Number(p.quantity_in_stock);
@@ -984,7 +1103,7 @@ function addToCart(productId) {
         return;
     }
 
-    const line = cart.find((l) => l.product_id === productId);
+    const line = findCartLine(productId);
     if (line) {
         const next = Number((line.quantity + lineStep(line)).toFixed(3));
         if (next > lineCeiling(line)) { tellAllOfIt(line); return; }
@@ -1015,11 +1134,11 @@ function flashCartLine(productId) {
     const row = document.querySelector('.cart-line[data-line="' + productId + '"]');
     if (!row) return;
     row.classList.add('is-added');
-    setTimeout(() => row.classList.remove('is-added'), 500);
+    setTimeout(function () { row.classList.remove('is-added'); }, 500);
 }
 
 function changeCartQty(productId, delta) {
-    const line = cart.find((l) => l.product_id === productId);
+    const line = findCartLine(productId);
     if (!line) return;
 
     const next = Number((line.quantity + delta * lineStep(line)).toFixed(3));
@@ -1031,7 +1150,7 @@ function changeCartQty(productId, delta) {
 
 // the amount box on a line: typed, then checked against the shelf when it is left
 function onCartQtyInput(productId, value) {
-    const line = cart.find((l) => l.product_id === productId);
+    const line = findCartLine(productId);
     if (!line) return;
 
     const amount = Number(String(value).replace(/,/g, '').trim());
@@ -1045,7 +1164,7 @@ function onCartQtyInput(productId, value) {
 }
 
 function onCartQtyBlur(productId) {
-    const line = cart.find((l) => l.product_id === productId);
+    const line = findCartLine(productId);
     if (!line) return;
     if (!(line.quantity > 0)) line.quantity = Math.min(1, lineCeiling(line)) || 1;
     renderCart();
@@ -1054,7 +1173,7 @@ function onCartQtyBlur(productId) {
 // Changing the unit keeps the count where it can: 3 boxes become 3 kilos,
 // capped at what the shelf holds in the new size.
 function changeCartUnit(productId, unitName) {
-    const line = cart.find((l) => l.product_id === productId);
+    const line = findCartLine(productId);
     if (!line) return;
 
     line.unit = unitName;
@@ -1073,7 +1192,11 @@ function changeCartUnit(productId, unitName) {
 }
 
 function removeCartLine(productId) {
-    cart = cart.filter((l) => l.product_id !== productId);
+    const remaining = [];
+    for (let i = 0; i < cart.length; i++) {
+        if (cart[i].product_id !== productId) remaining.push(cart[i]);
+    }
+    cart = remaining;
     renderCart();
 }
 
@@ -1093,7 +1216,7 @@ async function clearCart() {
         if (form.elements.downPayment) form.elements.downPayment.value = '';
     }
 
-    // a delivery left attached to an emptied cart is a booking for goods nobody chose
+    // a delivery left attached to an emptied cart is a delivery for goods nobody chose
     pendingDelivery = null;
     renderDeliveryAttached();
     await clearCustomer();
@@ -1107,8 +1230,8 @@ function cartTotals() {
     const form = document.getElementById('checkout-form');
     // the total of every line in the cart
     let gross = 0;
-    for (const line of cart) {
-        gross = gross + lineSubtotal(line);
+    for (let i = 0; i < cart.length; i++) {
+        gross = gross + lineSubtotal(cart[i]);
     }
     const discount = 0;
     const due = Math.max(gross - discount, 0);
@@ -1122,7 +1245,7 @@ function cartTotals() {
     const onCredit = method === 'Credit';
     const onAccount = onCredit || method === 'COD';
 
-    // half now and half on the book; capped at the bill because there is no change
+    // half now and half on account; capped at the bill because there is no change
     let rawDown;
     if (form && form.elements.downPayment) {
         rawDown = parseFloat(form.elements.downPayment.value) || 0;
@@ -1176,24 +1299,38 @@ function renderCart() {
     if (cart.length === 0) {
         box.innerHTML = '<p class="cart-empty">No items yet. Press a product to put it on the order.</p>';
     } else {
-        box.innerHTML = cart.map((l) => {
+        let cartHtml = '';
+        for (let n = 0; n < cart.length; n++) {
+            const l = cart[n];
             const choices = lineUnitChoices(l);
             const chosen = lineChoice(l);
             let unitBox;
             if (choices.length > 1) {
+                let optionsHtml = '';
+                for (let k = 0; k < choices.length; k++) {
+                    const c = choices[k];
+                    let label = c.unit_name;
+                    let sizeNote = '';
+                    if (c.own) {
+                        label = unitShort(c.unit_name) || 'unit';
+                    } else {
+                        sizeNote = ' (' + escapeHtml(qtyText(c.units_per, l.base_unit)) + ')';
+                    }
+                    optionsHtml += '<option value="' + escapeHtml(c.unit_name) + '"' +
+                        (c.unit_name === chosen.unit_name ? ' selected' : '') + '>' +
+                        escapeHtml(label) +
+                        sizeNote +
+                        '</option>';
+                }
                 unitBox = '<select class="cart-unit-pick" aria-label="Sold by" title="The size this line is counted in" ' +
                           'onchange="changeCartUnit(' + l.product_id + ', this.value)">' +
-                      choices.map((c) => '<option value="' + escapeHtml(c.unit_name) + '"' +
-                          (c.unit_name === chosen.unit_name ? ' selected' : '') + '>' +
-                          escapeHtml(c.own ? (unitShort(c.unit_name) || 'unit') : c.unit_name) +
-                          (c.own ? '' : ' (' + escapeHtml(qtyText(c.units_per, l.base_unit)) + ')') +
-                          '</option>').join('') +
-                      '</select>';
+                          optionsHtml +
+                          '</select>';
             } else {
                 unitBox = '<span class="cart-unit-fixed">' + escapeHtml(unitShort(l.base_unit) || 'unit') + '</span>';
             }
 
-            return '<div class="cart-line" data-line="' + l.product_id + '">' +
+            cartHtml += '<div class="cart-line" data-line="' + l.product_id + '">' +
                 '<div class="cart-line-main">' +
                     '<span class="cart-name">' + escapeHtml(l.name) + '</span>' +
                     '<span class="cart-unit">' + cartLineNote(l) + '</span>' +
@@ -1211,7 +1348,8 @@ function renderCart() {
                 '</div>' +
                 '<span class="cart-sub" data-line-sub="' + l.product_id + '">' + peso(lineSubtotal(l)) + '</span>' +
             '</div>';
-        }).join('');
+        }
+        box.innerHTML = cartHtml;
     }
 
     renderCartFigures();
@@ -1221,28 +1359,31 @@ function renderCart() {
 // the catalog rows say what is already on the order, without being redrawn:
 // a product on the order is greyed and cannot be pressed (pressCatalogRow)
 function markCatalogRows() {
-    document.querySelectorAll('#catalog-table tr[data-product-row]').forEach((row) => {
-        const line = cart.find((l) => l.product_id === Number(row.dataset.productRow));
+    const catalogRows = document.querySelectorAll('#catalog-table tr[data-product-row]');
+    for (let i = 0; i < catalogRows.length; i++) {
+        const row = catalogRows[i];
+        const line = findCartLine(Number(row.dataset.productRow));
         row.classList.toggle('is-on-order', Boolean(line));
         row.title = CATALOG_ROW_TITLE[line ? 'on' : 'off'];
         if (line) row.setAttribute('aria-disabled', 'true');
         else row.removeAttribute('aria-disabled');
         const mark = row.querySelector('.on-order-mark');
-        if (!mark) return;
+        if (!mark) continue;
         mark.hidden = !line;
         mark.textContent = line ? qtyText(line.quantity, line.unit) + ' on order' : '';
-    });
+    }
 }
 
 // the figures alone, while an amount is being typed: rebuilding the line
 // would take the cursor out of the box
 function renderCartFigures() {
-    cart.forEach((l) => {
+    for (let i = 0; i < cart.length; i++) {
+        const l = cart[i];
         const sub = document.querySelector('[data-line-sub="' + l.product_id + '"]');
         if (sub) sub.textContent = peso(lineSubtotal(l));
         const row = document.querySelector('.cart-line[data-line="' + l.product_id + '"] .cart-unit');
         if (row) row.innerHTML = cartLineNote(l);
-    });
+    }
 
     const t = cartTotals();
 
@@ -1312,13 +1453,14 @@ function renderCartFigures() {
     qrAmountChanged('sale', t.onCredit ? t.down : t.due);
 }
 
-// The button says what pressing it does, so nobody books a sale to an
+// The button says what pressing it does, so nobody charges a sale to an
 // account thinking they took the money for it.
 function checkoutLabel(t) {
     if (t.method === 'COD') return 'Place COD Order';
     if (t.onCredit) {
         if (cart.length > 0 && t.onBook <= 0) return 'Complete Sale';
-        return t.down > 0 ? 'Take Part Payment & Charge the Rest' : 'Charge to Account';
+        if (t.down > 0) return 'Take Part Payment & Charge the Rest';
+        return 'Charge to Account';
     }
     return 'Complete Sale';
 }
@@ -1342,13 +1484,18 @@ const REFERENCE_WORDS = {
 // Credit sale the part payment's; nothing is taken on COD, nor on credit
 // with nothing paid now
 function methodTakenNow(t) {
-    if (t.onCredit) return t.down > 0 ? downPaymentMethod() : null;
-    return t.method === 'COD' ? null : t.method;
+    if (t.onCredit) {
+        if (t.down > 0) return downPaymentMethod();
+        return null;
+    }
+    if (t.method === 'COD') return null;
+    return t.method;
 }
 
 function downPaymentMethod() {
     const form = document.getElementById('checkout-form');
-    return form && form.elements.downPaymentMethod ? form.elements.downPaymentMethod.value : 'Cash';
+    if (form && form.elements.downPaymentMethod) return form.elements.downPaymentMethod.value;
+    return 'Cash';
 }
 
 // the reference typed, but only while the box is on screen
@@ -1424,16 +1571,15 @@ function renderSalePaymentExtras(totals) {
     bank.hidden = !transfer;
     if (!transfer) return;
 
-    if (!bankSettingsReady(() => renderSalePaymentExtras())) {
+    if (!bankSettingsReady(function () { renderSalePaymentExtras(); })) {
         bank.innerHTML = '<p class="bank-box-note">Reading the shop\'s bank account...</p>';
         return;
     }
 
     const amount = t.onCredit ? t.down : t.due;
-    bank.innerHTML = bankBoxHtml(amount,
-        t.onCredit && amount <= 0
-            ? 'Type what is paid now to see the amount to send.'
-            : 'Once it is sent, type the bank\'s reference for it in the box below.');
+    let bankNote = 'Once it is sent, type the bank\'s reference for it in the box below.';
+    if (t.onCredit && amount <= 0) bankNote = 'Type what is paid now to see the amount to send.';
+    bank.innerHTML = bankBoxHtml(amount, bankNote);
 }
 
 // ---------- paying GCash or PayMaya by QR code ----------
@@ -1459,7 +1605,7 @@ const QR_APP_WORDS = { 'GCash': 'GCash', 'PayMaya': 'Maya' };
 
 // a change to any QR payment: the code on screen is asked about straight away
 if (typeof onLiveChange === 'function') {
-    onLiveChange(['qr-payments'], () => { if (qrSession && !qrSession.over) checkQr(qrSession); });
+    onLiveChange(['qr-payments'], function () { if (qrSession && !qrSession.over) checkQr(qrSession); });
 }
 
 // Pay by QR, beside Complete Sale: the same checkout, with the money taken by
@@ -1470,7 +1616,7 @@ function payByQr() {
     return handleCheckout({ preventDefault: function () {}, target: form }, true);
 }
 
-// Shows a code for `amount` and waits. purpose is 'sale' or 'credit_payment'
+// Shows a code for amount and waits. purpose is 'sale' or 'credit_payment'
 // (then saleId is the sale being paid). Resolves to { id, reference, amount }
 // once paid, or null when the cashier cancelled or chose another method (the
 // reason already said on screen).
@@ -1488,7 +1634,7 @@ async function collectQrPayment(amount, what, method, purpose, saleId) {
             'An earlier QR payment is unused');
     }
 
-    return new Promise((resolve) => {
+    return new Promise(function (resolve) {
         const session = {
             amount: amount, what: what, method: method,
             purpose: purpose || 'sale', saleId: saleId || null,
@@ -1537,7 +1683,7 @@ async function startQrCode(session) {
 
     tickQr();
     session.ticker = setInterval(tickQr, 1000);
-    session.poller = setInterval(() => { if (qrSession === session) checkQr(session); }, QR_CHECK_MS);
+    session.poller = setInterval(function () { if (qrSession === session) checkQr(session); }, QR_CHECK_MS);
 }
 
 function isModalOpen(id) {
@@ -1580,12 +1726,12 @@ function setQrStatus(text, tone) {
 // waiting: Cancel. over (failed or ran out): Choose another method, New QR.
 // busy: nothing can be pressed.
 function setQrButtons(state) {
-    const show = (id, visible, enabled) => {
+    function show(id, visible, enabled) {
         const button = document.getElementById(id);
         if (!button) return;
         button.hidden = !visible;
         button.disabled = !enabled;
-    };
+    }
     show('qr-cancel-btn', state !== 'over', state === 'waiting');
     show('qr-other-btn', state === 'over', true);
     show('qr-new-btn', state === 'over', true);
@@ -1630,9 +1776,11 @@ function qrPaid(session, state) {
     setQrButtons('busy');
     setQrStatus('Payment received', 'is-good');
     // long enough to read before the card closes
-    setTimeout(() => endQr(session, {
-        id: session.id, reference: state.reference, amount: session.amount, wallet: session.method
-    }), 700);
+    setTimeout(function () {
+        endQr(session, {
+            id: session.id, reference: state.reference, amount: session.amount, wallet: session.method
+        });
+    }, 700);
 }
 
 // One question to the server, acted on: paid, failed, ran out, or still
@@ -1643,7 +1791,7 @@ function checkQr(session) {
     if (session.inflight) return session.inflight;
 
     session.inflight = apiGetQrPayment(session.id)
-        .then((state) => {
+        .then(function (state) {
             if (session.done || session.over) return state.status;
 
             if (state.status === 'paid') {
@@ -1658,20 +1806,22 @@ function checkQr(session) {
                 // the server's clock decides; the countdown follows it
                 session.endsAt = Date.now() + (Number(state.secondsLeft) || 0) * 1000;
                 if (!session.closing) {
-                    setQrStatus(state.checkError
-                        ? 'The payment provider cannot be reached just now. Still trying...'
-                        : 'Waiting for the customer to pay...', state.checkError ? 'is-stop' : '');
+                    if (state.checkError) {
+                        setQrStatus('The payment provider cannot be reached just now. Still trying...', 'is-stop');
+                    } else {
+                        setQrStatus('Waiting for the customer to pay...', '');
+                    }
                 }
             }
             return state.status;
         })
-        .catch(() => {
+        .catch(function () {
             if (!session.done && !session.closing && !session.over) {
                 setQrStatus('The server cannot be reached just now. Still trying...', 'is-stop');
             }
             return 'offline';
         })
-        .finally(() => { session.inflight = null; });
+        .finally(function () { session.inflight = null; });
     return session.inflight;
 }
 
@@ -1758,12 +1908,12 @@ function qrAmountChanged(purpose, amountNow) {
 
 // Leaving the page with a code on screen: the browser asks first, and if the
 // cashier goes anyway the checking stops with the page.
-window.addEventListener('beforeunload', (event) => {
+window.addEventListener('beforeunload', function (event) {
     if (!qrSession) return;
     event.preventDefault();
     event.returnValue = '';
 });
-window.addEventListener('pagehide', () => {
+window.addEventListener('pagehide', function () {
     if (qrSession) stopQrTimers(qrSession);
 });
 
@@ -1885,9 +2035,11 @@ function renderCreditVerdict(totals) {
 
     if (!selectedCustomerCredit) {
         box.className = 'credit-verdict is-watch';
-        box.textContent = t.onCredit
-            ? 'A credit sale is settled later, so it has to be booked against a named customer.'
-            : 'A COD order is paid on delivery, so it needs a named customer.';
+        if (t.onCredit) {
+            box.textContent = 'A credit sale is settled later, so it has to be booked against a named customer.';
+        } else {
+            box.textContent = 'A COD order is paid on delivery, so it needs a named customer.';
+        }
         return;
     }
 
@@ -1966,7 +2118,7 @@ function openCheckoutModal() {
     if (sub) sub.textContent = cart.length + (cart.length === 1 ? ' item' : ' items') + ' on the order';
 
     showModal('checkout-modal');
-    setTimeout(() => {
+    setTimeout(function () {
         const amount = document.getElementById('pay-amount');
         if (isModalOpen('checkout-modal') && amount && amount.offsetParent !== null) amount.focus();
     }, 60);
@@ -1982,8 +2134,9 @@ function checkoutCustomerName() {
     const id = selectedCustomerId();
     if (!id) return 'Walk-in';
     if (selectedCustomerCredit && selectedCustomerCredit.customer_name) return selectedCustomerCredit.customer_name;
-    const found = customerDirectory.find((c) => c.id === id);
-    return found ? found.name : typedCustomerName();
+    const found = findCustomer(id);
+    if (found) return found.name;
+    return typedCustomerName();
 }
 
 // ---------- checkout ----------
@@ -2006,9 +2159,14 @@ function checkoutQuestion(t, customerName) {
     } else if (t.onCredit) {
         detail.push('Paid now: ' + peso(t.down) + (t.down > 0 ? ' by ' + downPaymentMethod() : ''));
         if (t.onBook > 0) {
-            title = t.down > 0 ? 'Take part payment and book the rest?' : 'Put this sale on account?';
+            if (t.down > 0) {
+                title = 'Take part payment and book the rest?';
+                confirmLabel = 'Take ' + peso(t.down) + ' and book the rest';
+            } else {
+                title = 'Put this sale on account?';
+                confirmLabel = 'Book it to their account';
+            }
             message = peso(t.onBook) + ' of this sale goes on ' + customerName + "'s account.";
-            confirmLabel = t.down > 0 ? 'Take ' + peso(t.down) + ' and book the rest' : 'Book it to their account';
             detail.push('Goes on account: ' + peso(t.onBook));
         } else {
             detail.push('Balance on account: ' + peso(0));
@@ -2041,7 +2199,7 @@ async function handleCheckout(event, viaQr) {
     if (form.elements.customerId.value) {
         customerId = parseInt(form.elements.customerId.value, 10);
     } else if (typedName !== '') {
-        // the book may not have been read yet when the name was typed
+        // the customer list may not have been read yet when the name was typed
         await loadCustomerDirectory(false);
         const exact = customerMatchingTypedName();
         if (exact) {
@@ -2081,9 +2239,13 @@ async function handleCheckout(event, viaQr) {
     const taken = methodTakenNow(t);
     const reference = saleReference();
     if (REFERENCE_REQUIRED.indexOf(taken) !== -1 && reference === '') {
+        let referenceSubject = 'A ' + taken.toLowerCase() + ' sale';
+        if (t.onCredit) referenceSubject = 'The part payment is by ' + taken.toLowerCase() + ', so it';
+        let referenceWhat = 'the bank\'s reference for the transfer';
+        if (taken === 'Cheque') referenceWhat = 'the cheque number';
         notifyWarning(
-            (t.onCredit ? 'The part payment is by ' + taken.toLowerCase() + ', so it' : 'A ' + taken.toLowerCase() + ' sale') +
-            ' needs its reference: ' + (taken === 'Cheque' ? 'the cheque number' : 'the bank\'s reference for the transfer') +
+            referenceSubject +
+            ' needs its reference: ' + referenceWhat +
             '. It is how the money is traced if it does not arrive.',
             'Reference needed');
         const box = document.getElementById('sale-reference');
@@ -2134,19 +2296,25 @@ async function handleCheckout(event, viaQr) {
     let qr = null;
     if (viaQr) {
         if (QR_METHODS.indexOf(taken) === -1) return;
-        qr = await collectQrPayment(amountPaid, t.onCredit ? 'Paid now on this credit sale' : 'For this sale', taken, 'sale');
+        let qrWhat = 'For this sale';
+        if (t.onCredit) qrWhat = 'Paid now on this credit sale';
+        qr = await collectQrPayment(amountPaid, qrWhat, taken, 'sale');
         if (!qr) return;
     }
 
     // the cart lines; quantity is in the unit named, and a plain line names no unit
     const items = [];
-    for (const l of cart) {
+    for (let i = 0; i < cart.length; i++) {
+        const l = cart[i];
         let unit = null;
         if (!lineChoice(l).own) {
             unit = lineChoice(l).unit_name;
         }
         items.push({ product_id: l.product_id, quantity: l.quantity, unit: unit });
     }
+
+    let referenceNo = reference || null;
+    if (qr) referenceNo = null;
 
     // no name goes with a walk-in: the customer is an account or nobody
     const data = {
@@ -2156,7 +2324,7 @@ async function handleCheckout(event, viaQr) {
         amountPaid: amountPaid,
         paymentMethod: t.method,
         downPaymentMethod: downPaymentMethod,
-        referenceNo: qr ? null : reference || null,
+        referenceNo: referenceNo,
         qrPaymentId: qr ? qr.id : null,
         items: items
     };
@@ -2166,7 +2334,13 @@ async function handleCheckout(event, viaQr) {
         const result = await response.json();
         if (!response.ok) {
             if (!handleAuthFailure(response, result)) {
-                notifyError(result.error + (qr ? keepUnusedQr(qr, result) : ''), qr ? 'Sale not completed' : undefined);
+                let errorText = result.error + '';
+                let errorTitle;
+                if (qr) {
+                    errorText = result.error + keepUnusedQr(qr, result);
+                    errorTitle = 'Sale not completed';
+                }
+                notifyError(errorText, errorTitle);
             }
             return;
         }
@@ -2174,7 +2348,7 @@ async function handleCheckout(event, viaQr) {
 
         // the delivery is written against the sale before the till is cleared, so a
         // failure is reported while the details are still on screen
-        const booked = await bookAttachedDelivery(result.saleId);
+        const deliveryMade = await bookAttachedDelivery(result.saleId);
 
         // the sale stands; a reference the server could not keep is said, not hidden
         if (result.referenceNote) notifyWarning(result.referenceNote, 'Reference not saved');
@@ -2184,7 +2358,7 @@ async function handleCheckout(event, viaQr) {
         if (form.elements.downPayment) form.elements.downPayment.value = '';
         if (form.elements.referenceNo) form.elements.referenceNo.value = '';
 
-        if (booked) { pendingDelivery = null; renderDeliveryAttached(); }
+        if (deliveryMade) { pendingDelivery = null; renderDeliveryAttached(); }
 
         if (customerId) {
             customerDirectoryLoaded = false;
@@ -2278,15 +2452,24 @@ async function openReceipt(saleId) {
     const shop = storeSettings || {};
 
     document.getElementById('receipt-heading').textContent = 'Invoice ' + receiptNo;
-    const itemsHtml = data.items.map((it) =>
-            '<tr><td>' + escapeHtml(it.product_name) + '<br><span class="rc-qty">' +
+    let itemsHtml = '';
+    for (let i = 0; i < data.items.length; i++) {
+        const it = data.items[i];
+        // a size shows what it came to on the shelf: "2 sack (50 kg)"
+        let shelfNote = '';
+        if (it.base_unit && it.unit_name && it.base_unit !== it.unit_name) {
+            shelfNote = ' (' + escapeHtml(qtyText(it.base_quantity, it.base_unit)) + ')';
+        }
+        let perUnit = '';
+        if (isMeasuredUnit(it.unit_name)) perUnit = '/' + escapeHtml(measuredUnit(it.unit_name).short);
+
+        itemsHtml += '<tr><td>' + escapeHtml(it.product_name) + '<br><span class="rc-qty">' +
             escapeHtml(qtyText(it.quantity, it.unit_name)) +
-            // a size shows what it came to on the shelf: "2 sack (50 kg)"
-            (it.base_unit && it.unit_name && it.base_unit !== it.unit_name
-                ? ' (' + escapeHtml(qtyText(it.base_quantity, it.base_unit)) + ')' : '') +
+            shelfNote +
             ' x ' + peso(it.unit_price) +
-            (isMeasuredUnit(it.unit_name) ? '/' + escapeHtml(measuredUnit(it.unit_name).short) : '') + '</span></td>' +
-            '<td class="rc-amt">' + peso(it.subtotal) + '</td></tr>').join('');
+            perUnit + '</span></td>' +
+            '<td class="rc-amt">' + peso(it.subtotal) + '</td></tr>';
+    }
 
     const totals = [{ label: 'Subtotal', value: peso(s.total_amount) }];
     // only when there was one; older sales still carry real figures
@@ -2334,12 +2517,21 @@ async function openReceipt(saleId) {
 function receiptBankBlock(shop, sale, payments, receiptNo) {
     if (!shop || !shop.bank_account_number) return '';
 
-    const byTransfer = sale.payment_method === 'Bank Transfer' ||
-        (payments || []).some((p) => p.payment_method === 'Bank Transfer');
+    let byTransfer = sale.payment_method === 'Bank Transfer';
+    const paymentList = payments || [];
+    for (let i = 0; i < paymentList.length; i++) {
+        if (paymentList[i].payment_method === 'Bank Transfer') byTransfer = true;
+    }
     const balance = saleAmountDue(sale) - Number(sale.amount_paid);
     const owing = sale.payment_status !== 'Paid' && balance > 0.004;
 
     if (!byTransfer && !owing) return '';
+
+    let quoteHtml = '';
+    if (owing) {
+        quoteHtml = '<p class="rc-bank-note">Quote <strong>' + escapeHtml(receiptNo) + '</strong> as the transfer ' +
+            'reference, so the payment is matched to this invoice.</p>';
+    }
 
     return '<div class="rc-rule"></div>' +
         '<div class="rc-bank">' +
@@ -2347,10 +2539,7 @@ function receiptBankBlock(shop, sale, payments, receiptNo) {
             '<div><span>Bank</span><span>' + escapeHtml(shop.bank_name) + '</span></div>' +
             '<div><span>Account name</span><span>' + escapeHtml(shop.bank_account_name) + '</span></div>' +
             '<div><span>Account no.</span><span>' + escapeHtml(shop.bank_account_number) + '</span></div>' +
-            (owing
-                ? '<p class="rc-bank-note">Quote <strong>' + escapeHtml(receiptNo) + '</strong> as the transfer ' +
-                  'reference, so the payment is matched to this invoice.</p>'
-                : '') +
+            quoteHtml +
         '</div>';
 }
 
@@ -2363,7 +2552,7 @@ function printReceipt() {
 
 // Make a delivery: filled in beside the order, held as pendingDelivery on
 // this screen, and posted by handleCheckout once a sale id comes back.
-// The booked date is not asked for: the server takes it from the sale.
+// The date it is created on is not asked for: the server takes it from the sale.
 function deliveryFormFields() {
     const form = document.getElementById('make-delivery-form');
     return form ? form.elements : null;
@@ -2375,7 +2564,8 @@ function fillDeliveryFromCustomer() {
     if (!fields) return;
 
     const id = selectedCustomerId();
-    const account = id ? customerDirectory.find((c) => c.id === id) : null;
+    let account = null;
+    if (id) account = findCustomer(id);
 
     fields.contactName.value = account ? account.name : typedCustomerName();
     phoneFill(fields.contactPhone, account && account.phone ? account.phone : '');
@@ -2410,14 +2600,19 @@ async function loadDeliveryAreaChoices() {
         deliveryAreaList = [];
         deliveryAreasUnreadable = true;
         // error.status is set when the server answered but said no
-        problem = error.status
-            ? 'The server did not give the delivery areas. Ask the administrator to restart the server.'
-            : 'The delivery areas could not be read. Check the connection and try again.';
+        if (error.status) {
+            problem = 'The server did not give the delivery areas. Ask the administrator to restart the server.';
+        } else {
+            problem = 'The delivery areas could not be read. Check the connection and try again.';
+        }
     }
 
-    select.innerHTML = '<option value="">Choose an area</option>' +
-        deliveryAreaList.map((area) =>
-            '<option value="' + escapeHtml(area) + '">' + escapeHtml(area) + '</option>').join('');
+    let areaOptions = '<option value="">Choose an area</option>';
+    for (let i = 0; i < deliveryAreaList.length; i++) {
+        const area = deliveryAreaList[i];
+        areaOptions += '<option value="' + escapeHtml(area) + '">' + escapeHtml(area) + '</option>';
+    }
+    select.innerHTML = areaOptions;
     if (note) note.textContent = problem;
 }
 
@@ -2429,7 +2624,8 @@ function areaInAddress(address) {
     if (text === '') return '';
 
     let found = '';
-    for (const area of deliveryAreaList) {
+    for (let i = 0; i < deliveryAreaList.length; i++) {
+        const area = deliveryAreaList[i];
         if (text.includes(area.toLowerCase()) && area.length > found.length) {
             found = area;
         }
@@ -2440,7 +2636,13 @@ function areaInAddress(address) {
 // selects an area in the box; one no longer on the list leaves "Choose an area"
 function chooseDeliveryArea(fields, area) {
     const wanted = String(area || '').toLowerCase();
-    const found = deliveryAreaList.find((listed) => listed.toLowerCase() === wanted);
+    let found;
+    for (let i = 0; i < deliveryAreaList.length; i++) {
+        if (deliveryAreaList[i].toLowerCase() === wanted) {
+            found = deliveryAreaList[i];
+            break;
+        }
+    }
     fields.area.value = found || '';
 }
 
@@ -2501,26 +2703,41 @@ function renderDriverSuggestions(text) {
     const query = String(text || '').trim().toLowerCase();
     driverSuggestHighlight = -1;
 
-    const found = query === ''
-        ? driverRoster
-        : driverRoster.filter((d) => String(d.full_name).toLowerCase().startsWith(query))
-            .concat(driverRoster.filter((d) => {
-                const name = String(d.full_name).toLowerCase();
-                return !name.startsWith(query) && startsAWord(name, query);
-            }));
+    let found;
+    if (query === '') {
+        found = driverRoster;
+    } else {
+        // drivers whose name starts with the text, then those with a later word that does
+        const startsWith = [];
+        const laterWord = [];
+        for (let i = 0; i < driverRoster.length; i++) {
+            const d = driverRoster[i];
+            const name = String(d.full_name).toLowerCase();
+            if (name.startsWith(query)) {
+                startsWith.push(d);
+            } else if (startsAWord(name, query)) {
+                laterWord.push(d);
+            }
+        }
+        found = startsWith.concat(laterWord);
+    }
 
     if (found.length === 0) {
+        let emptyText = 'No driver by that name';
+        if (driverRoster.length === 0) emptyText = 'No active drivers to assign';
         list.innerHTML = '<li class="suggest-item is-empty" role="option" aria-disabled="true">' +
-            '<span class="suggest-note">' + (driverRoster.length === 0
-                ? 'No active drivers to assign'
-                : 'No driver by that name') + '</span></li>';
+            '<span class="suggest-note">' + emptyText + '</span></li>';
     } else {
-        list.innerHTML = found.map((d, i) =>
-            '<li class="suggest-item" role="option" id="driver-suggest-' + i + '" ' +
+        let driverHtml = '';
+        for (let i = 0; i < found.length; i++) {
+            const d = found[i];
+            driverHtml += '<li class="suggest-item" role="option" id="driver-suggest-' + i + '" ' +
                 'onmousedown="event.preventDefault()" ' +
                 'onclick="pickDriver(' + d.staff_id + ')">' +
                 '<span class="suggest-name">' + escapeHtml(d.full_name) + '</span>' +
-            '</li>').join('');
+            '</li>';
+        }
+        list.innerHTML = driverHtml;
     }
 
     list.hidden = false;
@@ -2536,7 +2753,13 @@ function hideDriverSuggestions() {
 }
 
 function pickDriver(staffId) {
-    const driver = driverRoster.find((d) => d.staff_id === staffId);
+    let driver;
+    for (let i = 0; i < driverRoster.length; i++) {
+        if (driverRoster[i].staff_id === staffId) {
+            driver = driverRoster[i];
+            break;
+        }
+    }
     if (!driver) return;
     setDriverPick(driver);
     hideDriverSuggestions();
@@ -2562,13 +2785,17 @@ function onDriverKey(event) {
         if (items.length === 0) return;
         const step = event.key === 'ArrowDown' ? 1 : -1;
         driverSuggestHighlight = (driverSuggestHighlight + step + items.length) % items.length;
-        items.forEach((item, i) => item.classList.toggle('is-active', i === driverSuggestHighlight));
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === driverSuggestHighlight);
+        }
         return;
     }
 
     if (event.key === 'Enter') {
         event.preventDefault();
-        const pick = items[driverSuggestHighlight >= 0 ? driverSuggestHighlight : 0];
+        let pickIndex = 0;
+        if (driverSuggestHighlight >= 0) pickIndex = driverSuggestHighlight;
+        const pick = items[pickIndex];
         if (pick) pick.click();
         return;
     }
@@ -2622,7 +2849,7 @@ async function openDeliveryForm() {
     if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
 
     showModal('delivery-modal');
-    setTimeout(() => { if (fields.contactName) fields.contactName.focus(); }, 60);
+    setTimeout(function () { if (fields.contactName) fields.contactName.focus(); }, 60);
 }
 
 function saveDeliveryForm(event) {
@@ -2632,12 +2859,12 @@ function saveDeliveryForm(event) {
     const verdict = document.getElementById('delivery-verdict');
     if (!fields) return;
 
-    const complain = (text) => {
+    function complain(text) {
         if (verdict) {
             verdict.className = 'delivery-verdict is-stop';
             verdict.textContent = text;
         }
-    };
+    }
 
     const contactName = fields.contactName.value.trim();
     const contactPhone = phoneToStore(fields.contactPhone);
@@ -2654,9 +2881,11 @@ function saveDeliveryForm(event) {
     // with no area on the list, no delivery can be attached at all; the note
     // above the address already says why and what to do, so this stays short
     if (deliveryAreaList.length === 0) {
-        complain(deliveryAreasUnreadable
-            ? 'A delivery cannot be attached until the delivery areas can be read.'
-            : 'A delivery cannot be attached until a delivery area is set.');
+        if (deliveryAreasUnreadable) {
+            complain('A delivery cannot be attached until the delivery areas can be read.');
+        } else {
+            complain('A delivery cannot be attached until a delivery area is set.');
+        }
         return;
     }
     if (area === '') { complain('Choose the area the delivery goes to.'); fields.area.focus(); return; }
@@ -2675,8 +2904,10 @@ function saveDeliveryForm(event) {
 
     // a name typed but never picked would silently leave the delivery open
     const driverBox = document.getElementById('dl-driver');
-    const driverId = fields.driverStaffId && fields.driverStaffId.value ? Number(fields.driverStaffId.value) : null;
-    const driverName = driverId && driverBox ? driverBox.value : null;
+    let driverId = null;
+    if (fields.driverStaffId && fields.driverStaffId.value) driverId = Number(fields.driverStaffId.value);
+    let driverName = null;
+    if (driverId && driverBox) driverName = driverBox.value;
     if (!driverId && driverBox && driverBox.value.trim() !== '') {
         complain('Pick the driver from the list, or clear the box to leave the delivery open for any driver.');
         driverBox.focus();
@@ -2729,6 +2960,12 @@ function renderDeliveryAttached() {
     if (!pendingDelivery) { strip.hidden = true; strip.innerHTML = ''; return; }
 
     const d = pendingDelivery;
+
+    let whenText = 'No slot agreed yet';
+    if (d.scheduledDate) whenText = 'Scheduled for ' + escapeHtml(String(d.scheduledDate).replace('T', ' '));
+    let driverText = 'Open for any driver to take';
+    if (d.driverId) driverText = 'Driver: ' + escapeHtml(d.driverName);
+
     strip.hidden = false;
     strip.innerHTML =
         '<div class="delivery-attached-head">' +
@@ -2740,12 +2977,10 @@ function renderDeliveryAttached() {
             ' &middot; ' + escapeHtml(phoneForDisplay(d.contactPhone)) + '</p>' +
         '<p class="delivery-attached-line">' + escapeHtml(d.address) + '</p>' +
         '<p class="delivery-attached-line delivery-attached-when">' +
-            (d.scheduledDate
-                ? 'Scheduled for ' + escapeHtml(String(d.scheduledDate).replace('T', ' '))
-                : 'No slot agreed yet') +
+            whenText +
         '</p>' +
         '<p class="delivery-attached-line">' +
-            (d.driverId ? 'Driver: ' + escapeHtml(d.driverName) : 'Open for any driver to take') +
+            driverText +
         '</p>';
 }
 
@@ -2767,7 +3002,9 @@ async function attachedAreaIsStillListed() {
     }
 
     const wanted = String(pendingDelivery.area).toLowerCase();
-    if (deliveryAreaList.some((area) => area.toLowerCase() === wanted)) return true;
+    for (let i = 0; i < deliveryAreaList.length; i++) {
+        if (deliveryAreaList[i].toLowerCase() === wanted) return true;
+    }
 
     notifyWarning('The delivery area "' + pendingDelivery.area + '" is no longer on the list. ' +
         'Press Edit Delivery and choose the area again, or remove the delivery. Nothing has been charged.',
@@ -2831,26 +3068,35 @@ function buildDeliveryPanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetDeliveries(),
+        load: function () {
+            return apiGetDeliveries();
+        },
 
-        match: (row, query) => prefixMatch([
-            row.customer_name, row.delivery_address, row.status,
-            row.sale_id, '#' + row.sale_id, row.delivery_id, '#' + row.delivery_id
-        ], query),
+        match: function (row, query) {
+            return prefixMatch([
+                row.customer_name, row.delivery_address, row.status,
+                row.sale_id, '#' + row.sale_id, row.delivery_id, '#' + row.delivery_id
+            ], query);
+        },
 
-        filter: (row, filters) => filters.status === 'all' || row.status === filters.status,
+        filter: function (row, filters) {
+            return filters.status === 'all' || row.status === filters.status;
+        },
 
-        onLoaded: (rows) => renderDeliveryLegend(rows),
+        onLoaded: function (rows) {
+            renderDeliveryLegend(rows);
+        },
 
-        renderRow: (row, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
-            'onclick="openCashierDeliveryDetail(' + row.delivery_id + ')">' +
-            '<td class="cell-id">#' + row.delivery_id + '</td>' +
-            '<td class="cell-id">#' + row.sale_id + '</td>' +
-            '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
-            '<td>' + escapeHtml(row.delivery_address) + '</td>' +
-            '<td class="cell-id">' + escapeHtml(scheduleText(row.scheduled_date)) + '</td>' +
-            '<td>' + statusBadge(row.status) + '</td></tr>'
+        renderRow: function (row, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
+                'onclick="openCashierDeliveryDetail(' + row.delivery_id + ')">' +
+                '<td class="cell-id">#' + row.delivery_id + '</td>' +
+                '<td class="cell-id">#' + row.sale_id + '</td>' +
+                '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
+                '<td>' + escapeHtml(row.delivery_address) + '</td>' +
+                '<td class="cell-id">' + escapeHtml(scheduleText(row.scheduled_date)) + '</td>' +
+                '<td>' + statusBadge(row.status) + '</td></tr>';
+        }
     });
 }
 
@@ -2872,10 +3118,16 @@ function renderDeliveryLegend(rows) {
 
     if (!rows || rows.length === 0) { legend.innerHTML = ''; return; }
 
-    legend.innerHTML = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed'].map((stage) => {
-        const count = rows.filter((d) => d.status === stage).length;
-        return '<span class="track-chip"><span class="track-count">' + count + '</span>' + stage + '</span>';
-    }).join('');
+    const stages = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed'];
+    let chips = '';
+    for (let s = 0; s < stages.length; s++) {
+        let count = 0;
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].status === stages[s]) count++;
+        }
+        chips += '<span class="track-chip"><span class="track-count">' + count + '</span>' + stages[s] + '</span>';
+    }
+    legend.innerHTML = chips;
 }
 
 function clearDeliveryPanel() {
@@ -3024,24 +3276,31 @@ function buildRecentSalesPanel() {
             text: 'A refund needs a receipt number. For an older sale, type its number in the form.'
         },
 
-        load: () => apiGetRecentSales(),
+        load: function () {
+            return apiGetRecentSales();
+        },
 
-        match: (row, query) => prefixMatch([
-            row.customer_name, row.sale_id, '#' + row.sale_id, 'OR-' + String(row.sale_id).padStart(6, '0')
-        ], query),
+        match: function (row, query) {
+            return prefixMatch([
+                row.customer_name, row.sale_id, '#' + row.sale_id, 'OR-' + String(row.sale_id).padStart(6, '0')
+            ], query);
+        },
 
-        renderRow: (row, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
-            'onclick="openRecentSale(' + row.sale_id + ')">' +
-            '<td class="cell-id">#' + row.sale_id + '</td>' +
-            '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 16)) + '</td>' +
-            '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
-            '<td class="cell-num">' + row.item_count + '</td>' +
-            '<td class="cell-num">' + peso(row.final_amount) +
-                (Number(row.refunded_amount) > 0
-                    ? '<span class="cell-sub">refunded ' + peso(row.refunded_amount) + '</span>' : '') + '</td>' +
-            '<td>' + statusBadge(row.payment_status) +
-                '<span class="cell-sub">' + escapeHtml(row.payment_method) + '</span></td></tr>'
+        renderRow: function (row, index) {
+            let refundedNote = '';
+            if (Number(row.refunded_amount) > 0) {
+                refundedNote = '<span class="cell-sub">refunded ' + peso(row.refunded_amount) + '</span>';
+            }
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
+                'onclick="openRecentSale(' + row.sale_id + ')">' +
+                '<td class="cell-id">#' + row.sale_id + '</td>' +
+                '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 16)) + '</td>' +
+                '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
+                '<td class="cell-num">' + row.item_count + '</td>' +
+                '<td class="cell-num">' + peso(row.final_amount) + refundedNote + '</td>' +
+                '<td>' + statusBadge(row.payment_status) +
+                    '<span class="cell-sub">' + escapeHtml(row.payment_method) + '</span></td></tr>';
+        }
     });
 }
 
@@ -3067,14 +3326,16 @@ async function openRecentSale(saleId) {
     const s = data.sale;
     recentSale = { saleId: s.sale_id, items: data.items, picked: -1 };
 
+    let refundedText = '<span class="muted">Nothing yet</span>';
+    if (Number(s.refunded_amount) > 0) refundedText = peso(s.refunded_amount);
+
     const facts = '<div class="detail-grid">' +
         detailField('Date', escapeHtml(String(s.sale_date).slice(0, 16))) +
         detailField('Customer', escapeHtml(s.customer_name)) +
         detailField('Rung Up By', escapeHtml(s.cashier_name)) +
         detailField('Total', peso(s.final_amount)) +
         detailField('Payment', escapeHtml(s.payment_method) + ' ' + statusBadge(s.payment_status)) +
-        detailField('Refunded Already', Number(s.refunded_amount) > 0
-            ? peso(s.refunded_amount) : '<span class="muted">Nothing yet</span>') +
+        detailField('Refunded Already', refundedText) +
         '</div>';
 
     const body = facts +
@@ -3090,24 +3351,32 @@ async function openRecentSale(saleId) {
 
 // the lines of the open receipt; the pressed line is shaded
 function recentSaleItemsTable() {
-    const rows = recentSale.items.map((it) => [
-        escapeHtml(it.product_name),
-        escapeHtml(qtyText(it.quantity, it.unit_name)),
-        peso(it.unit_price),
-        peso(it.subtotal),
-        Number(it.refunded_quantity) > 0
-            ? escapeHtml(qtyText(it.refunded_quantity, it.base_unit)) +
-              '<span class="cell-sub">' + peso(it.refunded_amount) + '</span>'
-            : '<span class="muted">None</span>'
-    ]);
+    const rows = [];
+    for (let i = 0; i < recentSale.items.length; i++) {
+        const it = recentSale.items[i];
+        let refundedCell = '<span class="muted">None</span>';
+        if (Number(it.refunded_quantity) > 0) {
+            refundedCell = escapeHtml(qtyText(it.refunded_quantity, it.base_unit)) +
+                '<span class="cell-sub">' + peso(it.refunded_amount) + '</span>';
+        }
+        rows.push([
+            escapeHtml(it.product_name),
+            escapeHtml(qtyText(it.quantity, it.unit_name)),
+            peso(it.unit_price),
+            peso(it.subtotal),
+            refundedCell
+        ]);
+    }
 
     return pagedTable('recent-sale-items', ['Product', 'Qty', 'Unit Price', 'Total', 'Refunded'], rows,
         [1, 2, 3, 4], {
             empty: 'This receipt has no items.',
             pageSize: 8,
-            rowAttrs: (index) => 'class="row-clickable" title="Refund this item" ' +
-                'onclick="pickRecentSaleItem(' + index + ')"' +
-                (index === recentSale.picked ? ' style="background: var(--go-dim);"' : '')
+            rowAttrs: function (index) {
+                return 'class="row-clickable" title="Refund this item" ' +
+                    'onclick="pickRecentSaleItem(' + index + ')"' +
+                    (index === recentSale.picked ? ' style="background: var(--go-dim);"' : '');
+            }
         });
 }
 
@@ -3119,11 +3388,21 @@ function pickRecentSaleItem(index) {
 
     const hint = document.getElementById('recent-sale-pick');
     if (hint) {
-        hint.textContent = recentSale.picked === -1
-            ? 'Press an item to fill the Product box with it.'
-            : 'Chosen: ' + recentSale.items[index].product_name + '. It goes into the Product box.';
+        if (recentSale.picked === -1) {
+            hint.textContent = 'Press an item to fill the Product box with it.';
+        } else {
+            hint.textContent = 'Chosen: ' + recentSale.items[index].product_name + '. It goes into the Product box.';
+        }
     }
     pagedTableGo('recent-sale-items', 0);
+}
+
+// true when the open receipt has a line for this product
+function receiptHasProduct(productId) {
+    for (let i = 0; i < recentSale.items.length; i++) {
+        if (recentSale.items[i].product_id === productId) return true;
+    }
+    return false;
 }
 
 // puts the receipt number (and the pressed item) into the refund form, closes
@@ -3133,21 +3412,22 @@ async function refundFromRecentSale() {
     const form = document.getElementById('refund-form');
     if (!form) return;
 
-    const line = recentSale.picked === -1 ? null : recentSale.items[recentSale.picked];
+    let line = null;
+    if (recentSale.picked !== -1) line = recentSale.items[recentSale.picked];
     form.elements.saleId.value = recentSale.saleId;
     closeModal('detail-modal');
 
     if (line) {
         await ensureCatalogLoaded(false);
         // the product may be gone from the catalogue (archived): say so
-        if (catalog.some((p) => p.product_id === line.product_id)) {
+        if (findCatalogProduct(line.product_id)) {
             pickRefundProduct(line.product_id);
         } else {
             clearRefundProduct();
             notifyWarning(line.product_name + ' cannot be picked here, it may have been archived. ' +
                 'Type the product by hand.', 'Product not filled in');
         }
-    } else if (refundProduct && !recentSale.items.some((it) => it.product_id === refundProduct.product_id)) {
+    } else if (refundProduct && !receiptHasProduct(refundProduct.product_id)) {
         // a product chosen earlier that is not on this receipt would be refunded against it
         clearRefundProduct();
     }
@@ -3178,28 +3458,33 @@ function buildSalesPanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetSales(''),
+        load: function () {
+            return apiGetSales('');
+        },
 
-        match: (row, query) => prefixMatch([
-            row.customer_name, row.payment_method, row.payment_status, row.transaction_status,
-            row.sale_id, '#' + row.sale_id, 'OR-' + String(row.sale_id).padStart(6, '0')
-        ], query),
+        match: function (row, query) {
+            return prefixMatch([
+                row.customer_name, row.payment_method, row.payment_status, row.transaction_status,
+                row.sale_id, '#' + row.sale_id, 'OR-' + String(row.sale_id).padStart(6, '0')
+            ], query);
+        },
 
-        filter: (row, filters) => {
+        filter: function (row, filters) {
             if (filters.method !== 'all' && row.payment_group !== filters.method) return false;
             if (filters.status !== 'all' && row.transaction_status !== filters.status) return false;
             return true;
         },
 
-        renderRow: (row, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
-            'onclick="openReceipt(' + row.sale_id + ')">' +
-            '<td class="cell-id">OR-' + String(row.sale_id).padStart(6, '0') + '</td>' +
-            '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 10)) + '</td>' +
-            '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
-            '<td>' + escapeHtml(row.payment_method) + '</td>' +
-            '<td>' + statusBadge(row.payment_status) + '</td>' +
-            '<td class="cell-num">' + peso(row.final_amount) + '</td></tr>'
+        renderRow: function (row, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
+                'onclick="openReceipt(' + row.sale_id + ')">' +
+                '<td class="cell-id">OR-' + String(row.sale_id).padStart(6, '0') + '</td>' +
+                '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 10)) + '</td>' +
+                '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
+                '<td>' + escapeHtml(row.payment_method) + '</td>' +
+                '<td>' + statusBadge(row.payment_status) + '</td>' +
+                '<td class="cell-num">' + peso(row.final_amount) + '</td></tr>';
+        }
     });
 }
 
@@ -3276,14 +3561,22 @@ function paymentFormFields() {
     return form ? form.elements : null;
 }
 
+// the row in this list for the sale, or null
+function findSaleRow(list, saleId) {
+    for (let i = 0; i < list.length; i++) {
+        if (list[i].sale_id === saleId) return list[i];
+    }
+    return null;
+}
+
 async function openPaymentForm(saleId) {
-    let row = customerOpenSales.find((r) => r.sale_id === saleId) || null;
+    let row = findSaleRow(customerOpenSales, saleId);
 
     // not among the card's rows: read the list for the one row
     if (!row) {
         try {
             const rows = await apiGetOpenSales();
-            row = rows.find((r) => r.sale_id === saleId) || null;
+            row = findSaleRow(rows, saleId);
         } catch (error) {
             notifyOffline();
             return;
@@ -3302,19 +3595,28 @@ async function openPaymentForm(saleId) {
         row.customer_name + ' \u00b7 OR-' + String(row.sale_id).padStart(6, '0');
     document.getElementById('payment-avatar').textContent = initialsOf(row.customer_name);
 
+    let penaltyNote = '';
+    if (Number(row.penalty_amount) > 0) {
+        let monthWord = ' months';
+        if (Number(row.penalty_months) === 1) monthWord = ' month';
+        penaltyNote = ' <span class="muted">+ ' + peso(row.penalty_amount) + ' late penalty (' +
+            escapeHtml(penaltyRateWord(row.penalty_rate)) + ' a month, ' + row.penalty_months +
+            monthWord + ' overdue)</span>';
+    }
+    let paymentCountNote = '';
+    if (Number(row.payment_count) > 0) {
+        let paymentWord = ' payments';
+        if (row.payment_count === 1) paymentWord = ' payment';
+        paymentCountNote = ' <span class="muted">' + row.payment_count + paymentWord + '</span>';
+    }
+
     document.getElementById('payment-facts').innerHTML =
         detailField('Customer', escapeHtml(row.customer_name) +
             (row.phone ? ' <span class="muted">' + escapeHtml(row.phone) + '</span>' : '')) +
         detailField('Sale', escapeHtml(String(row.sale_date).slice(0, 10)) +
             ' <span class="muted">' + escapeHtml(row.payment_method) + '</span>') +
-        detailField('Total', peso(row.final_amount) +
-            (Number(row.penalty_amount) > 0
-                ? ' <span class="muted">+ ' + peso(row.penalty_amount) + ' late penalty (' +
-                  escapeHtml(penaltyRateWord(row.penalty_rate)) + ' a month, ' + row.penalty_months +
-                  (Number(row.penalty_months) === 1 ? ' month' : ' months') + ' overdue)</span>' : '')) +
-        detailField('Paid So Far', peso(row.amount_paid) +
-            (Number(row.payment_count) > 0
-                ? ' <span class="muted">' + row.payment_count + (row.payment_count === 1 ? ' payment' : ' payments') + '</span>' : '')) +
+        detailField('Total', peso(row.final_amount) + penaltyNote) +
+        detailField('Paid So Far', peso(row.amount_paid) + paymentCountNote) +
         detailField('Balance', '<span class="cell-due">' + peso(balance) + '</span>') +
         detailField('Due', debtDueCell(row));
 
@@ -3333,7 +3635,7 @@ async function openPaymentForm(saleId) {
 
     renderPaymentVerdict();
     showModal('payment-modal');
-    setTimeout(() => { if (fields && fields.amount) { fields.amount.focus(); fields.amount.select(); } }, 60);
+    setTimeout(function () { if (fields && fields.amount) { fields.amount.focus(); fields.amount.select(); } }, 60);
 }
 
 // Paid or cancelled, the form goes back to the customer's card it was opened
@@ -3365,14 +3667,14 @@ function renderPaymentBankBox(amount) {
     bank.hidden = !transfer;
     if (!transfer) return;
 
-    if (!bankSettingsReady(() => renderPaymentVerdict())) {
+    if (!bankSettingsReady(function () { renderPaymentVerdict(); })) {
         bank.innerHTML = '<p class="bank-box-note">Reading the shop\'s bank account...</p>';
         return;
     }
 
-    bank.innerHTML = bankBoxHtml(amount,
-        amount > 0 ? 'Once it is sent, type the bank\'s reference for it in the reference box.'
-                   : 'Type the amount to see what to send.');
+    let bankNote = 'Type the amount to see what to send.';
+    if (amount > 0) bankNote = 'Once it is sent, type the bank\'s reference for it in the reference box.';
+    bank.innerHTML = bankBoxHtml(amount, bankNote);
 }
 
 // what the balance becomes if this is recorded, said before the button
@@ -3460,10 +3762,10 @@ async function handleTakePayment(event, viaQr) {
 
     const button = document.getElementById('payment-save-btn');
     const qrButton = document.getElementById('payment-qr-btn');
-    const ready = () => {
+    function ready() {
         if (button) { button.disabled = false; button.textContent = 'Record the Payment'; }
         if (qrButton) qrButton.disabled = false;
-    };
+    }
 
     // by QR code: the customer pays the code before anything is recorded
     let qr = null;
@@ -3479,18 +3781,23 @@ async function handleTakePayment(event, viaQr) {
     if (button) { button.disabled = true; button.textContent = 'Recording...'; }
     if (qrButton) qrButton.disabled = true;
 
+    let referenceNo = reference || null;
+    if (qr) referenceNo = null;
+
     try {
         const response = await apiTakePayment(paymentSale.sale_id, {
             amount: amount,
             paymentMethod: method,
-            referenceNo: qr ? null : reference || null,
+            referenceNo: referenceNo,
             qrPaymentId: qr ? qr.id : null
         });
         const result = await response.json();
 
         if (!response.ok) {
             if (!handleAuthFailure(response, result)) {
-                notifyError(result.error + (qr ? keepUnusedQr(qr, result) : ''), 'Payment not recorded');
+                let errorText = result.error + '';
+                if (qr) errorText = result.error + keepUnusedQr(qr, result);
+                notifyError(errorText, 'Payment not recorded');
             }
             ready();
             return;
@@ -3498,14 +3805,16 @@ async function handleTakePayment(event, viaQr) {
         if (qr) qrPaidUnused = null;
 
         const left = balance - amount;
+        let leftText = peso(left) + ' is still owed on it.';
+        if (left <= 0.004) leftText = 'The sale is paid in full.';
         notifySuccess(peso(amount) + ' taken from ' + paymentSale.customer_name + ' against OR-' +
             String(paymentSale.sale_id).padStart(6, '0') + '. ' +
-            (left <= 0.004 ? 'The sale is paid in full.' : peso(left) + ' is still owed on it.'),
+            leftText,
             'Payment recorded');
 
         closePaymentForm();
 
-        // the credit book and a customer picked at the till follow
+        // the credit list and a customer picked at the till follow
         const credit = getDataPanel('cash-credit');
         if (credit && credit.state === 'ready') await credit.refresh();
         const pickedId = selectedCustomerId();
@@ -3557,26 +3866,39 @@ function renderCustomerUnpaid() {
     if (!box) return;
 
     const owed = sumOf(customerOpenSales, 'balance_due');
-    const intro = customerOpenSales.length === 0
-        ? ''
-        : '<p class="panel-sub" style="margin-bottom: 12px;">' + peso(owed) + ' owed on ' +
-          customerOpenSales.length + (customerOpenSales.length === 1 ? ' sale' : ' sales') +
-          ', oldest first. Press the one the money is for.</p>';
+    let intro = '';
+    if (customerOpenSales.length !== 0) {
+        let saleWord = ' sales';
+        if (customerOpenSales.length === 1) saleWord = ' sale';
+        intro = '<p class="panel-sub" style="margin-bottom: 12px;">' + peso(owed) + ' owed on ' +
+            customerOpenSales.length + saleWord +
+            ', oldest first. Press the one the money is for.</p>';
+    }
 
-    box.innerHTML = intro + pagedTable('cash-unpaid', ['Receipt', 'Sold', 'Balance', 'Due'],
-        customerOpenSales.map((row) => [
+    const unpaidRows = [];
+    for (let i = 0; i < customerOpenSales.length; i++) {
+        const row = customerOpenSales[i];
+        let penaltyNote = '';
+        if (penaltyInBalance(row) > 0) {
+            penaltyNote = '<span class="cell-sub">incl. ' + peso(penaltyInBalance(row)) + ' penalty</span>';
+        }
+        unpaidRows.push([
             '<span class="cell-id">OR-' + String(row.sale_id).padStart(6, '0') + '</span>',
             escapeHtml(String(row.sale_date).slice(0, 10)) +
                 ' <span class="muted">' + escapeHtml(row.payment_method) + '</span>',
-            '<span class="cell-due">' + peso(row.balance_due) + '</span>' +
-                (penaltyInBalance(row) > 0
-                    ? '<span class="cell-sub">incl. ' + peso(penaltyInBalance(row)) + ' penalty</span>' : ''),
+            '<span class="cell-due">' + peso(row.balance_due) + '</span>' + penaltyNote,
             debtDueCell(row)
-        ]), [2], {
+        ]);
+    }
+
+    box.innerHTML = intro + pagedTable('cash-unpaid', ['Receipt', 'Sold', 'Balance', 'Due'],
+        unpaidRows, [2], {
             empty: 'Nothing is owed on any sale.',
             // the row itself opens the payment form for that sale
-            rowAttrs: (index) => 'class="row-clickable" title="Take a payment on this sale" ' +
-                'onclick="payCustomerSale(' + customerOpenSales[index].sale_id + ')"'
+            rowAttrs: function (index) {
+                return 'class="row-clickable" title="Take a payment on this sale" ' +
+                    'onclick="payCustomerSale(' + customerOpenSales[index].sale_id + ')"';
+            }
         });
 }
 
@@ -3584,7 +3906,7 @@ function renderCustomerUnpaid() {
 // for more room. Setting a limit is refused by the server here.
 const CASH_RATING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
 
-// The cashier's book reads by due date: oldest unpaid sale plus thirty days,
+// The cashier's list reads by due date: oldest unpaid sale plus thirty days,
 // the same thirty after which the credit rating turns to Watch (vw_customer_credit).
 const CREDIT_TERM_DAYS = 30;
 
@@ -3654,11 +3976,15 @@ function buildCustomerPanel() {
             button: 'Load Data'
         },
 
-        load: () => apiGetCreditCustomers(),
+        load: function () {
+            return apiGetCreditCustomers();
+        },
 
-        match: (row, query) => prefixMatch([row.customer_name, row.phone], query),
+        match: function (row, query) {
+            return prefixMatch([row.customer_name, row.phone], query);
+        },
 
-        filter: (row, filters) => {
+        filter: function (row, filters) {
             const owed = Number(row.current_credit) || 0;
             const left = creditDaysLeft(row);
             switch (filters.due) {
@@ -3670,7 +3996,7 @@ function buildCustomerPanel() {
             }
         },
 
-        renderRow: (row, index) => {
+        renderRow: function (row, index) {
             const owed = Number(row.current_credit) || 0;
 
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -3716,7 +4042,10 @@ async function openCustomerCredit(customerId, tab) {
         if (payable) {
             try {
                 const open = await apiGetOpenSales();
-                customerOpenSales = open.filter((r) => Number(r.customer_id) === Number(customerId));
+                customerOpenSales = [];
+                for (let i = 0; i < open.length; i++) {
+                    if (Number(open[i].customer_id) === Number(customerId)) customerOpenSales.push(open[i]);
+                }
             } catch (error) {
                 customerOpenSales = [];
             }
@@ -3727,31 +4056,37 @@ async function openCustomerCredit(customerId, tab) {
             (c.phone || 'No phone on file') + ' · Credit Rating: ' + (CASH_RATING_WORD[c.standing] || c.standing);
         document.getElementById('customer-avatar').textContent = initialsOf(c.customer_name);
 
+        let availableCell = peso(c.available_credit);
+        if (c.standing === 'Hold') availableCell = '<span class="cell-due">Nothing, on hold</span>';
+
+        let overdueNote = '';
+        if (Number(c.overdue_sales) > 0) overdueNote = ' <span class="cell-due">' + c.overdue_sales + ' overdue</span>';
+
+        let penaltiesFact = '';
+        if (Number(c.penalties_owed) > 0) {
+            penaltiesFact = detailField('Late Penalties', '<span class="cell-due">' + peso(c.penalties_owed) +
+                '</span> <span class="muted">of the amount owed, at ' +
+                escapeHtml(penaltyRateWord(c.penalty_rate)) + ' a month</span>');
+        }
+
+        let noteFact = '';
+        if (c.credit_notes) noteFact = detailField('Manager Note', escapeHtml(c.credit_notes));
+
         document.getElementById('customer-facts').innerHTML =
             detailField('Credit Limit', peso(c.credit_limit)) +
             detailField('Balance', '<span class="' + (owed > 0 ? 'cell-due' : '') + '">' +
                 peso(owed) + '</span>') +
-            detailField('Available Balance', c.standing === 'Hold'
-                ? '<span class="cell-due">Nothing, on hold</span>'
-                : peso(c.available_credit)) +
+            detailField('Available Balance', availableCell) +
             detailField('Due Date', creditDueCell(c)) +
             detailField('Credit Rating', '<span class="badge ' +
                 (CASH_RATING_TONE[c.standing] || 'badge-neutral') + '">' +
                 escapeHtml(CASH_RATING_WORD[c.standing] || c.standing) + '</span>') +
             detailField('Why', escapeHtml(c.standing_reason || '')) +
-            detailField('Open Sales', String(c.open_sales) +
-                (Number(c.overdue_sales) > 0
-                    ? ' <span class="cell-due">' + c.overdue_sales + ' overdue</span>' : '')) +
-            (Number(c.penalties_owed) > 0
-                ? detailField('Late Penalties', '<span class="cell-due">' + peso(c.penalties_owed) +
-                    '</span> <span class="muted">of the amount owed, at ' +
-                    escapeHtml(penaltyRateWord(c.penalty_rate)) + ' a month</span>')
-                : '') +
+            detailField('Open Sales', String(c.open_sales) + overdueNote) +
+            penaltiesFact +
             detailField('Lifetime Purchases', peso(c.total_purchase)) +
             detailField('Address', c.address ? escapeHtml(c.address) : '<span class="muted">Not on file</span>') +
-            (c.credit_notes
-                ? detailField('Manager Note', escapeHtml(c.credit_notes))
-                : '');
+            noteFact;
 
         resetHistoryFilters();
         renderCustomerHistory();
@@ -3777,12 +4112,14 @@ async function openCustomerCredit(customerId, tab) {
 
 // the account, the unpaid sales, the purchases and the payments, one tab each
 function showCustomerTab(name) {
-    ['account', 'unpaid', 'history', 'payments'].forEach((each) => {
+    const tabNames = ['account', 'unpaid', 'history', 'payments'];
+    for (let i = 0; i < tabNames.length; i++) {
+        const each = tabNames[i];
         const body = document.getElementById('customer-' + each + '-tab');
         if (body) body.style.display = name === each ? 'block' : 'none';
         const tab = document.getElementById('customer-tab-' + each);
         if (tab) tab.classList.toggle('active', name === each);
-    });
+    }
 }
 
 // ---------- the history tabs ----------
@@ -3808,7 +4145,8 @@ function dayInRange(day, from, to) {
 // the sentence under a filtered table that has no rows
 function emptyHistoryNote(nothing, from, to, filtered) {
     if (from && to && from > to) return 'The From date is after the To date.';
-    return filtered ? 'Nothing matches these filters.' : nothing;
+    if (filtered) return 'Nothing matches these filters.';
+    return nothing;
 }
 
 function renderCustomerHistory() {
@@ -3819,28 +4157,38 @@ function renderCustomerHistory() {
     const to = filterValue('hist-to');
     const status = filterValue('hist-status') || 'all';
 
-    const rows = openCustomer.purchases.filter((p) => {
-        if (!dayInRange(dayOfStamp(p.sale_date), from, to)) return false;
+    const rows = [];
+    for (let i = 0; i < openCustomer.purchases.length; i++) {
+        const p = openCustomer.purchases[i];
+        if (!dayInRange(dayOfStamp(p.sale_date), from, to)) continue;
         const owing = Number(p.balance_due) > 0;
-        if (status === 'owing') return owing;
-        if (status === 'paid') return !owing;
-        return true;
-    });
+        if (status === 'owing' && !owing) continue;
+        if (status === 'paid' && owing) continue;
+        rows.push(p);
+    }
 
     const total = document.getElementById('customer-history-total');
     if (total) total.textContent = peso(openCustomer.credit.total_purchase);
 
-    box.innerHTML = pagedTable('cash-purchases', ['Date', 'Sale', 'Amount', 'Balance'],
-        rows.map((p) => [
+    const purchaseRows = [];
+    for (let i = 0; i < rows.length; i++) {
+        const p = rows[i];
+        let penaltyNote = '';
+        if (Number(p.penalty_amount) > 0) {
+            penaltyNote = '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty</span>';
+        }
+        let balanceCell = '<span class="muted">Paid</span>';
+        if (Number(p.balance_due) > 0) balanceCell = '<span class="cell-due">' + peso(p.balance_due) + '</span>';
+        purchaseRows.push([
             escapeHtml(dayOfStamp(p.sale_date)),
             '#' + p.sale_id + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
-            peso(p.final_amount) +
-                (Number(p.penalty_amount) > 0
-                    ? '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty</span>' : ''),
-            Number(p.balance_due) > 0
-                ? '<span class="cell-due">' + peso(p.balance_due) + '</span>'
-                : '<span class="muted">Paid</span>'
-        ]), [2, 3], {
+            peso(p.final_amount) + penaltyNote,
+            balanceCell
+        ]);
+    }
+
+    box.innerHTML = pagedTable('cash-purchases', ['Date', 'Sale', 'Amount', 'Balance'],
+        purchaseRows, [2, 3], {
             empty: emptyHistoryNote('Nothing bought yet.', from, to, status !== 'all' || from || to)
         });
 }
@@ -3853,24 +4201,37 @@ function renderCustomerPayments() {
     const to = filterValue('pay-to');
     const how = filterValue('pay-how') || 'all';
 
-    const rows = openCustomer.payments.filter((p) =>
-        dayInRange(dayOfStamp(p.payment_date), from, to) && (how === 'all' || p.payment_method === how));
+    const rows = [];
+    for (let i = 0; i < openCustomer.payments.length; i++) {
+        const p = openCustomer.payments[i];
+        if (dayInRange(dayOfStamp(p.payment_date), from, to) && (how === 'all' || p.payment_method === how)) {
+            rows.push(p);
+        }
+    }
 
     const c = openCustomer.credit;
     const total = document.getElementById('customer-payments-total');
     if (total) {
-        total.innerHTML = Number(c.current_credit) > 0
-            ? '<span class="cell-due">' + peso(c.current_credit) + ' balance</span>'
-            : 'No balance';
+        if (Number(c.current_credit) > 0) {
+            total.innerHTML = '<span class="cell-due">' + peso(c.current_credit) + ' balance</span>';
+        } else {
+            total.innerHTML = 'No balance';
+        }
     }
 
-    box.innerHTML = pagedTable('cash-payments', ['Date', 'Amount', 'How'],
-        rows.map((p) => [
+    const paymentRows = [];
+    for (let i = 0; i < rows.length; i++) {
+        const p = rows[i];
+        paymentRows.push([
             escapeHtml(dayOfStamp(p.payment_date)),
             peso(p.amount),
             escapeHtml(p.payment_method) +
                 (p.sale_id ? ' <span class="muted">#' + p.sale_id + '</span>' : '')
-        ]), [1], {
+        ]);
+    }
+
+    box.innerHTML = pagedTable('cash-payments', ['Date', 'Amount', 'How'],
+        paymentRows, [1], {
             empty: emptyHistoryNote('No payments recorded.', from, to, how !== 'all' || from || to)
         });
 }
@@ -3878,22 +4239,27 @@ function renderCustomerPayments() {
 // a card just opened: the filters start empty, and the method list is the
 // methods this customer has actually paid by
 function resetHistoryFilters() {
-    ['hist-from', 'hist-to', 'pay-from', 'pay-to'].forEach((id) => {
-        const box = document.getElementById(id);
+    const filterIds = ['hist-from', 'hist-to', 'pay-from', 'pay-to'];
+    for (let i = 0; i < filterIds.length; i++) {
+        const box = document.getElementById(filterIds[i]);
         if (box) box.value = '';
-    });
+    }
     const status = document.getElementById('hist-status');
     if (status) status.value = 'all';
 
     const how = document.getElementById('pay-how');
     if (how) {
         const methods = [];
-        openCustomer.payments.forEach((p) => {
+        for (let i = 0; i < openCustomer.payments.length; i++) {
+            const p = openCustomer.payments[i];
             if (p.payment_method && methods.indexOf(p.payment_method) === -1) methods.push(p.payment_method);
-        });
+        }
         methods.sort();
-        how.innerHTML = '<option value="all">All</option>' +
-            methods.map((m) => '<option value="' + escapeHtml(m) + '">' + escapeHtml(m) + '</option>').join('');
+        let methodOptions = '<option value="all">All</option>';
+        for (let i = 0; i < methods.length; i++) {
+            methodOptions += '<option value="' + escapeHtml(methods[i]) + '">' + escapeHtml(methods[i]) + '</option>';
+        }
+        how.innerHTML = methodOptions;
         how.value = 'all';
     }
 }
@@ -3911,8 +4277,11 @@ function askForExtension() {
     const c = openCustomer.credit;
     const current = Number(c.credit_limit) || 0;
 
-    const waiting = (openCustomer.requests || [])
-        .some((request) => request.status === 'Pending');
+    let waiting = false;
+    const requestList = openCustomer.requests || [];
+    for (let i = 0; i < requestList.length; i++) {
+        if (requestList[i].status === 'Pending') waiting = true;
+    }
 
     if (waiting) {
         notifyWarning('A request for ' + c.customer_name + ' is already waiting for a manager. ' +
@@ -3937,7 +4306,7 @@ function askForExtension() {
     renderLimitVerdict();
     closeModal('customer-modal');
     showModal('limit-modal');
-    setTimeout(() => form.elements.requestedLimit.focus(), 60);
+    setTimeout(function () { form.elements.requestedLimit.focus(); }, 60);
 }
 
 // counts up to the minimum: "have you said enough yet"
@@ -3982,10 +4351,10 @@ async function handleLimitRequest(event) {
     const form = document.getElementById('limit-form');
     const verdict = document.getElementById('limit-verdict');
 
-    const complain = (text, field) => {
+    function complain(text, field) {
         if (verdict) { verdict.className = 'delivery-verdict is-stop'; verdict.textContent = text; }
         if (field) field.focus();
-    };
+    }
 
     const typed = form.elements.requestedLimit.value;
     const requested = Number(typed);
@@ -4034,7 +4403,7 @@ async function handleLimitRequest(event) {
 // ---------- Add Customer ----------
 // The one place an account is opened (the till no longer opens one from a
 // typed name). Name is required; the server refuses a name already on the
-// books, any case, and gives the account a credit limit of zero.
+// list, any case, and gives the account a credit limit of zero.
 let addCustomerForSale = false;   // opened from the payment form: the new account goes on the sale
 
 function openAddCustomer() {
@@ -4052,7 +4421,7 @@ function openAddCustomer() {
     if (save) save.disabled = false;
 
     showModal('add-customer-modal');
-    setTimeout(() => form.elements.name.focus(), 60);
+    setTimeout(function () { form.elements.name.focus(); }, 60);
 }
 
 function cancelAddCustomer() {
@@ -4067,10 +4436,10 @@ async function handleAddCustomer(event) {
     const verdict = document.getElementById('add-customer-verdict');
     if (!form) return;
 
-    const complain = (text, field) => {
+    function complain(text, field) {
         if (verdict) { verdict.className = 'delivery-verdict is-stop'; verdict.textContent = text; }
         if (field) field.focus();
-    };
+    }
 
     // "Maria  Santos" and "Maria Santos" are one customer
     const name = form.elements.name.value.trim().replace(/\s+/g, ' ');
@@ -4106,7 +4475,7 @@ async function handleAddCustomer(event) {
         closeModal('add-customer-modal');
         notifySuccess(result.message, 'Customer added');
 
-        // the register's customer box reads the book afresh, and the list shows the new account
+        // the register's customer box reads the customer list afresh, and the list shows the new account
         customerDirectoryLoaded = false;
 
         // opened from the payment form: the new account is the sale's customer
@@ -4142,7 +4511,7 @@ async function openCreditPaymentPicker() {
     if (list) list.innerHTML = '<p class="detail-empty">Reading the customers...</p>';
 
     showModal('credit-pay-modal');
-    setTimeout(() => { if (search) search.focus(); }, 60);
+    setTimeout(function () { if (search) search.focus(); }, 60);
 
     // read fresh: a balance paid a moment ago must not be offered again
     const loaded = await loadCustomerDirectory(true);
@@ -4158,28 +4527,39 @@ function renderCreditPayList() {
     const search = document.getElementById('credit-pay-search');
     if (!list) return;
 
-    const owing = customerDirectory.filter((c) => Number(c.current_credit) > 0);
+    const owing = [];
+    for (let i = 0; i < customerDirectory.length; i++) {
+        if (Number(customerDirectory[i].current_credit) > 0) owing.push(customerDirectory[i]);
+    }
     if (owing.length === 0) {
         list.innerHTML = '<p class="detail-empty">Nobody owes anything right now.</p>';
         return;
     }
 
     const query = searchText(search ? search.value : '');
-    const found = owing
-        .filter((c) => query === '' || prefixMatch([c.name, c.phone], query))
-        .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const found = [];
+    for (let i = 0; i < owing.length; i++) {
+        if (query === '' || prefixMatch([owing[i].name, owing[i].phone], query)) found.push(owing[i]);
+    }
+    found.sort(function (a, b) {
+        return String(a.name).localeCompare(String(b.name));
+    });
 
     if (found.length === 0) {
         list.innerHTML = '<p class="detail-empty">Nobody who owes matches <kbd>' + escapeHtml(query) + '</kbd>.</p>';
         return;
     }
 
-    list.innerHTML = found.map((c) =>
-        '<button type="button" class="credit-pay-item" onclick="pickCreditPayCustomer(' + c.id + ')">' +
+    let payHtml = '';
+    for (let i = 0; i < found.length; i++) {
+        const c = found[i];
+        payHtml += '<button type="button" class="credit-pay-item" onclick="pickCreditPayCustomer(' + c.id + ')">' +
             '<span><span class="credit-pay-name">' + escapeHtml(c.name) + '</span>' +
                 '<span class="credit-pay-meta">' + escapeHtml(c.phone || 'No phone on file') + '</span></span>' +
             '<span class="credit-pay-owes">owes ' + peso(c.current_credit) + '</span>' +
-        '</button>').join('');
+        '</button>';
+    }
+    list.innerHTML = payHtml;
 }
 
 async function pickCreditPayCustomer(customerId) {
@@ -4201,18 +4581,18 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
         buildRecentSalesPanel();
 
         // the schedule follows what the administrator switched on for this role
-        configureDeliverySchedule({ showPanel: (panelId, title) => showCashierPanel(panelId, title) });
+        configureDeliverySchedule({ showPanel: function (panelId, title) { showCashierPanel(panelId, title); } });
         buildDeliverySchedulePanel();
-        configureFeatures({ home: () => showCashierHome() });
+        configureFeatures({ home: function () { showCashierHome(); } });
 
         // Go to, on an opened alert: the screen that alert is about
         const creditAlert = { label: 'Customers Record', panelId: 'panel-customers',
-                              open: () => showCustomers(), key: 'cash-credit' };
+                              open: function () { showCustomers(); }, key: 'cash-credit' };
         configureNotificationTargets({
             'Delivery':       { label: 'Delivery Tracking', panelId: 'panel-delivery',
-                                open: () => showCashierDeliveries(), key: 'cash-deliveries' },
+                                open: function () { showCashierDeliveries(); }, key: 'cash-deliveries' },
             'Refund Report':  { label: 'Refunds', panelId: 'panel-refund',
-                                open: () => showRefunds() },
+                                open: function () { showRefunds(); } },
             'Credit Request': creditAlert,
             'Late Penalty':   creditAlert
         });
@@ -4224,7 +4604,7 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
         renderDeliveryAttached();
         showCashierHome();
         unfoldSidebarAtOpenScreen();
-        // the customer book is fetched the first time somebody types; the store
+        // the customer list is fetched the first time somebody types; the store
         // details are read on arrival because they head every receipt
         loadStoreSettings(false);
         loadNotifications();

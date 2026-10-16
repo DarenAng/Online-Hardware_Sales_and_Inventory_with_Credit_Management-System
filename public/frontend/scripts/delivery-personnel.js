@@ -31,12 +31,18 @@ function monthStartText() {
 function showDeliveryPanel(panelId, title, event) {
     if (event) event.preventDefault();
 
-    document.querySelectorAll('[data-panel]').forEach((panel) => {
-        panel.style.display = panel.id === panelId ? 'block' : 'none';
-    });
-    document.querySelectorAll('[data-panel-link]').forEach((link) => {
-        link.classList.toggle('active', link.dataset.panelLink === panelId);
-    });
+    const panels = document.querySelectorAll('[data-panel]');
+    for (let i = 0; i < panels.length; i++) {
+        if (panels[i].id === panelId) {
+            panels[i].style.display = 'block';
+        } else {
+            panels[i].style.display = 'none';
+        }
+    }
+    const links = document.querySelectorAll('[data-panel-link]');
+    for (let i = 0; i < links.length; i++) {
+        links[i].classList.toggle('active', links[i].dataset.panelLink === panelId);
+    }
 
     const heading = document.getElementById('del-page-title');
     if (heading) heading.textContent = title;
@@ -75,9 +81,17 @@ async function loadDriverDeliveries() {
     if (panel.state === 'error') notifyOffline();
 }
 
+// The driver's delivery with this id, or undefined when it is not in the list
+function findDriverDelivery(deliveryId) {
+    for (let i = 0; i < driverDeliveries.length; i++) {
+        if (driverDeliveries[i].delivery_id === deliveryId) return driverDeliveries[i];
+    }
+    return undefined;
+}
+
 function isMine(d) {
     const user = getCurrentUser();
-    return !!user && d.delivery_staff_id != null && Number(d.delivery_staff_id) === Number(user.staff_id);
+    return Boolean(user) && d.delivery_staff_id != null && Number(d.delivery_staff_id) === Number(user.staff_id);
 }
 
 // A delivery is still active until it is Delivered or Failed. That covers
@@ -109,7 +123,7 @@ function delayedReason(d) {
 
 // Clicking a delivery nobody has taken claims it for this driver first.
 async function openPendingDelivery(deliveryId) {
-    const d = driverDeliveries.find((x) => x.delivery_id === deliveryId);
+    const d = findDriverDelivery(deliveryId);
     if (!d) return;
 
     if (!isMine(d)) {
@@ -154,14 +168,20 @@ function buildDriverPanels() {
                 text: 'Press Load Data to read your deliveries, or type a customer.',
                 button: 'Load Data' },
 
-        load: async () => {
+        load: async function () {
             await fetchDriverDeliveries();
-            return driverDeliveries.filter(pendingForDriver);
+            const pending = [];
+            for (let i = 0; i < driverDeliveries.length; i++) {
+                if (pendingForDriver(driverDeliveries[i])) pending.push(driverDeliveries[i]);
+            }
+            return pending;
         },
 
-        match: (d, query) => prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query),
+        match: function (d, query) {
+            return prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query);
+        },
 
-        filter: (d, filters) => {
+        filter: function (d, filters) {
             if (filters.status !== 'all' && d.status !== filters.status) return false;
 
             // a date range only keeps deliveries that have a scheduled date inside it
@@ -174,15 +194,16 @@ function buildDriverPanels() {
             return true;
         },
 
-        renderRow: (d, index) =>
-            '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+        renderRow: function (d, index) {
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openPendingDelivery(' + d.delivery_id + ')">' +
-            '<td class="cell-id">#' + d.delivery_id + '</td>' +
-            // the Unassigned tag sits by the name, so it stays when a Status filter hides that column
-            '<td class="cell-name">' + escapeHtml(d.customer_name) + ' ' + ownerTag(d) + '</td>' +
-            '<td>' + escapeHtml(d.delivery_address) + '</td>' +
-            '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
-            '<td>' + statusBadge(d.status) + delayedReason(d) + '</td></tr>'
+                '<td class="cell-id">#' + d.delivery_id + '</td>' +
+                // the Unassigned tag sits by the name, so it stays when a Status filter hides that column
+                '<td class="cell-name">' + escapeHtml(d.customer_name) + ' ' + ownerTag(d) + '</td>' +
+                '<td>' + escapeHtml(d.delivery_address) + '</td>' +
+                '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
+                '<td>' + statusBadge(d.status) + delayedReason(d) + '</td></tr>';
+        }
     });
 }
 
@@ -193,7 +214,7 @@ let paymentDeliveryId = null;
 let paymentRemarks = null;     // the note typed in the delivery's card; it goes with Delivered
 
 function openDriverPayment(deliveryId, remarks) {
-    const d = driverDeliveries.find((x) => x.delivery_id === deliveryId);
+    const d = findDriverDelivery(deliveryId);
     if (!d) {
         notifyWarning('Reload the list and open the delivery again.', 'Delivery not found');
         return;
@@ -238,7 +259,7 @@ async function handleDriverPayment(event) {
     }
 
     // how much was owed before this payment, to say what is left afterwards
-    const d = driverDeliveries.find((x) => x.delivery_id === paymentDeliveryId);
+    const d = findDriverDelivery(paymentDeliveryId);
     const owedBefore = d ? Number(d.balance_due) : 0;
     const stillOwed = Math.round((owedBefore - amount) * 100) / 100;
 
@@ -302,7 +323,7 @@ async function handleDriverPayment(event) {
 
 // ---------- popup ----------
 function openDriverDetail(deliveryId) {
-    showDeliveryRecord(driverDeliveries.find((x) => x.delivery_id === deliveryId), true);
+    showDeliveryRecord(findDriverDelivery(deliveryId), true);
 }
 
 // ---------- refund at the door ----------
@@ -316,7 +337,7 @@ let refundLines = [];     // what can still be refunded, one per sale line
 let refundBalance = 0;    // what the order still owed when the form opened
 
 async function openDriverRefund(deliveryId) {
-    const d = driverDeliveries.find((x) => x.delivery_id === deliveryId);
+    const d = findDriverDelivery(deliveryId);
     if (!d) return;
 
     let items;
@@ -331,7 +352,8 @@ async function openDriverRefund(deliveryId) {
     // its own unit (base_quantity); the customer bought in the sold unit
     // (quantity), so one sold unit is "ratio" shelf units.
     refundLines = [];
-    for (const it of items) {
+    for (let n = 0; n < items.length; n++) {
+        const it = items[n];
         const sold = Number(it.quantity);
         const ratio = sold > 0 ? Number(it.base_quantity) / sold : 1;
         const leftBase = Number(it.base_quantity) - Number(it.refunded_quantity || 0);
@@ -377,8 +399,10 @@ async function openDriverRefund(deliveryId) {
         'Tick each item the customer turned away and say how many. ' + moneyNote +
         ' The goods go to the inventory clerk for inspection.';
 
-    document.getElementById('refund-lines').innerHTML = refundLines.map((line, i) =>
-        '<div class="refund-line">' +
+    let linesHtml = '';
+    for (let i = 0; i < refundLines.length; i++) {
+        const line = refundLines[i];
+        linesHtml += '<div class="refund-line">' +
             '<label class="refund-pick"><input type="checkbox" id="refund-pick-' + i + '" onchange="onRefundLineChange()"> ' +
                 escapeHtml(line.name) + '</label>' +
             '<span class="refund-sold muted">bought ' + escapeHtml(qtyText(line.sold, line.unit)) +
@@ -387,8 +411,9 @@ async function openDriverRefund(deliveryId) {
                 'min="0" max="' + line.left + '" step="any" value="' + Math.min(1, line.left) + '" ' +
                 'oninput="onRefundLineChange()" aria-label="Quantity of ' + escapeHtml(line.name) + '">' +
             '<span class="refund-amount" id="refund-amount-' + i + '"></span>' +
-        '</div>'
-    ).join('');
+        '</div>';
+    }
+    document.getElementById('refund-lines').innerHTML = linesHtml;
 
     onRefundLineChange();
     showModal('refund-modal');
@@ -398,23 +423,32 @@ async function openDriverRefund(deliveryId) {
 function onRefundLineChange() {
     let total = 0;
 
-    refundLines.forEach((line, i) => {
+    for (let i = 0; i < refundLines.length; i++) {
+        const line = refundLines[i];
         const picked = document.getElementById('refund-pick-' + i).checked;
         const quantity = Number(document.getElementById('refund-qty-' + i).value) || 0;
         const amount = Math.round(quantity * line.price * 100) / 100;
 
-        document.getElementById('refund-amount-' + i).textContent = picked ? peso(amount) : '';
-        if (picked) total = total + amount;
-    });
+        if (picked) {
+            document.getElementById('refund-amount-' + i).textContent = peso(amount);
+            total = total + amount;
+        } else {
+            document.getElementById('refund-amount-' + i).textContent = '';
+        }
+    }
 
     // where the money goes: off the balance first, any rest is cash back
     let where = ' (cash handed back)';
     if (refundBalance > 0) {
         const off = Math.min(total, refundBalance);
         const back = Math.round((total - off) * 100) / 100;
-        where = ' (' + peso(off) + ' off the balance' + (back > 0 ? ', ' + peso(back) + ' cash handed back' : '') + ')';
+        let backText = '';
+        if (back > 0) backText = ', ' + peso(back) + ' cash handed back';
+        where = ' (' + peso(off) + ' off the balance' + backText + ')';
     }
-    document.getElementById('refund-total').textContent = 'Refund total: ' + peso(total) + (total > 0 ? where : '');
+    let whereText = '';
+    if (total > 0) whereText = where;
+    document.getElementById('refund-total').textContent = 'Refund total: ' + peso(total) + whereText;
 }
 
 async function handleDriverRefund(event) {
@@ -463,7 +497,8 @@ async function handleDriverRefund(event) {
     const notFiled = [];    // "Name (why)" for each one that was not
     let offBalance = 0;     // how much of the refunds came off what the customer owes
     try {
-        for (const pick of chosen) {
+        for (let c = 0; c < chosen.length; c++) {
+            const pick = chosen[c];
             const name = pick.line.name;
 
             // after a failure the rest are not tried: the same reason would likely stop them too
@@ -503,8 +538,14 @@ async function handleDriverRefund(event) {
             closeModal('refund-modal');
             let paidNote = '';
             if (offBalance > 0) paidNote = ' ' + peso(offBalance) + ' came off what the customer owes.';
-            notifySuccess(filed.length + (filed.length === 1 ? ' item' : ' items') + ' set aside for the stockroom. ' +
-                'The clerk has been asked to inspect ' + (filed.length === 1 ? 'it' : 'them') + '.' + paidNote,
+            let itemWord = ' items';
+            let itWord = 'them';
+            if (filed.length === 1) {
+                itemWord = ' item';
+                itWord = 'it';
+            }
+            notifySuccess(filed.length + itemWord + ' set aside for the stockroom. ' +
+                'The clerk has been asked to inspect ' + itWord + '.' + paidNote,
                 'Refund recorded');
             return;
         }
@@ -515,7 +556,9 @@ async function handleDriverRefund(event) {
         let message = '';
         if (filed.length > 0) message = 'Recorded: ' + filed.join(', ') + '. ';
         message += 'Not recorded: ' + notFiled.join('; ') + '.';
-        notifyError(message, filed.length > 0 ? 'Only some items were recorded' : 'Nothing was recorded');
+        let errorTitle = 'Nothing was recorded';
+        if (filed.length > 0) errorTitle = 'Only some items were recorded';
+        notifyError(message, errorTitle);
 
         await openDriverRefund(refundDeliveryId);
         document.getElementById('refund-reason').value = reason;
@@ -582,27 +625,37 @@ function buildReportPanels() {
                 text: 'Pick the dates above, or press Load Data for this month so far.',
                 button: 'Load Data' },
 
-        load: async () => {
+        load: async function () {
             const report = await fetchDeliveryReport('driver-report', 'dhand-from', 'dhand-to');
-            return report.deliveries.filter((d) => d.status === 'Delivered' && d.delivered_at);
+            const handled = [];
+            for (let i = 0; i < report.deliveries.length; i++) {
+                const d = report.deliveries[i];
+                if (d.status === 'Delivered' && d.delivered_at) handled.push(d);
+            }
+            return handled;
         },
 
-        match: (d, query) => prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query),
+        match: function (d, query) {
+            return prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query);
+        },
 
-        filter: (d, filters) => {
+        filter: function (d, filters) {
             if (filters.balance === 'paid' && Number(d.balance_due) > 0) return false;
             if (filters.balance === 'owing' && !(Number(d.balance_due) > 0)) return false;
             return true;
         },
 
-        renderRow: (d, index) =>
-            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
-            '<td class="cell-id">#' + d.delivery_id + '</td>' +
-            '<td class="cell-id">' + escapeHtml(String(d.delivered_at).slice(0, 10)) + '</td>' +
-            '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
-            '<td>' + escapeHtml(d.delivery_address) + '</td>' +
-            '<td class="cell-num">' + peso(d.final_amount) + '</td>' +
-            '<td class="cell-num' + (Number(d.balance_due) > 0 ? ' cell-due' : '') + '">' + peso(d.balance_due) + '</td></tr>'
+        renderRow: function (d, index) {
+            let dueClass = '';
+            if (Number(d.balance_due) > 0) dueClass = ' cell-due';
+            return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
+                '<td class="cell-id">#' + d.delivery_id + '</td>' +
+                '<td class="cell-id">' + escapeHtml(String(d.delivered_at).slice(0, 10)) + '</td>' +
+                '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
+                '<td>' + escapeHtml(d.delivery_address) + '</td>' +
+                '<td class="cell-num">' + peso(d.final_amount) + '</td>' +
+                '<td class="cell-num' + dueClass + '">' + peso(d.balance_due) + '</td></tr>';
+        }
     });
 
     // Payments Collected: the date is the day the payment was taken
@@ -619,25 +672,28 @@ function buildReportPanels() {
                 text: 'Pick the dates above, or press Load Data for this month so far.',
                 button: 'Load Data' },
 
-        load: async () => {
+        load: async function () {
             const report = await fetchDeliveryReport('driver-report-pay', 'dpay-from', 'dpay-to');
             return report.payments;
         },
 
-        match: (p, query) => prefixMatch([p.customer_name, p.payment_method, p.reference_no], query),
+        match: function (p, query) {
+            return prefixMatch([p.customer_name, p.payment_method, p.reference_no], query);
+        },
 
-        filter: (p, filters) => {
+        filter: function (p, filters) {
             if (filters.method !== 'all' && p.payment_method !== filters.method) return false;
             return true;
         },
 
-        renderRow: (p, index) =>
-            '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
-            '<td class="cell-id">' + escapeHtml(String(p.payment_date).slice(0, 16)) + '</td>' +
-            '<td class="cell-name">' + escapeHtml(p.customer_name) + '</td>' +
-            '<td>' + escapeHtml(p.payment_method) + '</td>' +
-            '<td>' + (p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>') + '</td>' +
-            '<td class="cell-num">' + peso(p.amount) + '</td></tr>'
+        renderRow: function (p, index) {
+            return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
+                '<td class="cell-id">' + escapeHtml(String(p.payment_date).slice(0, 16)) + '</td>' +
+                '<td class="cell-name">' + escapeHtml(p.customer_name) + '</td>' +
+                '<td>' + escapeHtml(p.payment_method) + '</td>' +
+                '<td>' + (p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>') + '</td>' +
+                '<td class="cell-num">' + peso(p.amount) + '</td></tr>';
+        }
     });
 }
 
@@ -663,12 +719,18 @@ let driverPrintRestore = null;
 
 // A Print / PDF button works only when its report is loaded and has rows
 function syncDriverPrintButtons() {
-    document.querySelectorAll('[data-print-report]').forEach((button) => {
+    const buttons = document.querySelectorAll('[data-print-report]');
+    for (let i = 0; i < buttons.length; i++) {
+        const button = buttons[i];
         const panel = getDataPanel(button.dataset.printReport);
-        const ready = !!panel && panel.state === 'ready' && panel.visible.length > 0;
+        const ready = Boolean(panel) && panel.state === 'ready' && panel.visible.length > 0;
         button.disabled = !ready;
-        button.title = ready ? 'Print every row shown, or save it as a PDF' : 'Load data first';
-    });
+        if (ready) {
+            button.title = 'Print every row shown, or save it as a PDF';
+        } else {
+            button.title = 'Load data first';
+        }
+    }
 }
 
 // the lines above the table: report name, driver, dates and the filter chosen
@@ -704,26 +766,29 @@ function driverPrintTotals(key, rows) {
 
     if (key === 'driver-report') {
         let balance = 0;
-        rows.forEach((d) => {
-            money = money + (Number(d.final_amount) || 0);
-            balance = balance + (Number(d.balance_due) || 0);
-        });
+        for (let i = 0; i < rows.length; i++) {
+            money = money + (Number(rows[i].final_amount) || 0);
+            balance = balance + (Number(rows[i].balance_due) || 0);
+        }
         lines.push(['Deliveries', String(rows.length)]);
         lines.push(['Order Total', peso(money)]);
         lines.push(['Balance', peso(balance)]);
     } else {
-        rows.forEach((p) => { money = money + (Number(p.amount) || 0); });
+        for (let i = 0; i < rows.length; i++) {
+            money = money + (Number(rows[i].amount) || 0);
+        }
         lines.push(['Payments', String(rows.length)]);
         lines.push(['Amount', peso(money)]);
     }
 
+    let linesHtml = '';
+    for (let i = 0; i < lines.length; i++) {
+        linesHtml += '<tr><td>' + escapeHtml(lines[i][0]) + '</td><td class="cell-num">' + escapeHtml(lines[i][1]) + '</td></tr>';
+    }
+
     const block = document.createElement('div');
     block.className = 'driver-print-totals';
-    block.innerHTML = '<h3>Totals</h3><table><tbody>' +
-        lines.map((line) =>
-            '<tr><td>' + escapeHtml(line[0]) + '</td><td class="cell-num">' + escapeHtml(line[1]) + '</td></tr>'
-        ).join('') +
-        '</tbody></table>';
+    block.innerHTML = '<h3>Totals</h3><table><tbody>' + linesHtml + '</tbody></table>';
     return block;
 }
 
@@ -755,7 +820,7 @@ function printDriverReport(key) {
     document.body.classList.add('is-printing');
 
     // afterprint puts the screen back (no timer: a phone returns from print() at once)
-    driverPrintRestore = () => {
+    driverPrintRestore = function () {
         if (!driverPrintRestore) return;
         driverPrintRestore = null;
         document.body.classList.remove('is-printing');
@@ -789,14 +854,14 @@ if (window.location.pathname.toLowerCase().endsWith('delivery.html')) {
         syncDriverPrintButtons();
 
         // the schedule follows what the administrator switched on for this role
-        configureDeliverySchedule({ showPanel: (panelId, title) => showDeliveryPanel(panelId, title) });
+        configureDeliverySchedule({ showPanel: function (panelId, title) { showDeliveryPanel(panelId, title); } });
         buildDeliverySchedulePanel();
-        configureFeatures({ home: () => showDeliveryHome() });
+        configureFeatures({ home: function () { showDeliveryHome(); } });
 
         // Go to, on an opened alert: a new delivery is on the pending list
         configureNotificationTargets({
             'Delivery': { label: 'Pending Deliveries', panelId: 'panel-pending',
-                          open: () => showDeliveryHome(), key: 'driver-pending' }
+                          open: function () { showDeliveryHome(); }, key: 'driver-pending' }
         });
 
         showDeliveryHome();

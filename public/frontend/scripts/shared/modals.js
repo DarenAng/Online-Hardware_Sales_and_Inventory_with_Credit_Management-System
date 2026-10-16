@@ -17,7 +17,7 @@ function closeModalOnBackdrop(event, id) {
 
 // Escape still closes a card unless it is marked data-modal-locked.
 function isModalLocked(modal) {
-    return !!modal && modal.hasAttribute('data-modal-locked');
+    return Boolean(modal) && modal.hasAttribute('data-modal-locked');
 }
 
 // A card with something to lose can ask first. The guard is a function that
@@ -61,10 +61,16 @@ document.addEventListener('keydown', function (event) {
         return;
     }
 
-    document.querySelectorAll('.modal.open').forEach((modal) => {
-        if (isModalLocked(modal)) return;
-        if (modalCloseGuards[modal.id]) requestCloseModal(modal.id); else modal.classList.remove('open');
-    });
+    const openModals = document.querySelectorAll('.modal.open');
+    for (let i = 0; i < openModals.length; i++) {
+        const modal = openModals[i];
+        if (isModalLocked(modal)) continue;
+        if (modalCloseGuards[modal.id]) {
+            requestCloseModal(modal.id);
+        } else {
+            modal.classList.remove('open');
+        }
+    }
 });
 
 // A card grows to fit what it holds, up to the window's height. When it is
@@ -173,12 +179,14 @@ function layoutModalPages(modal, resetPage) {
     const wrapRect = wrap.getBoundingClientRect();
     const scale = wrapRect.width > 0 ? wrapRect.width / width : 1;
     let count = 1;
-    Array.from(wrap.children).forEach((child) => {
-        Array.from(child.getClientRects()).forEach((rect) => {
-            if (rect.width === 0 && rect.height === 0) return;
+    for (let c = 0; c < wrap.children.length; c++) {
+        const rects = wrap.children[c].getClientRects();
+        for (let r = 0; r < rects.length; r++) {
+            const rect = rects[r];
+            if (rect.width === 0 && rect.height === 0) continue;
             count = Math.max(count, Math.floor((rect.left - wrapRect.left + 1) / (stride * scale)) + 1);
-        });
-    });
+        }
+    }
     if (wrap.children.length === 0) {
         count = Math.max(count, Math.floor((wrap.scrollWidth - 1) / stride) + 1);
     }
@@ -187,7 +195,7 @@ function layoutModalPages(modal, resetPage) {
 
     let page = 0;
     if (!resetPage && previous) page = Math.min(previous.page, count - 1);
-    modal._pages = { page, count, stride };
+    modal._pages = { page: page, count: count, stride: stride };
 
     // the pager sits right under the content it turns
     const pager = document.createElement('div');
@@ -198,8 +206,12 @@ function layoutModalPages(modal, resetPage) {
             '<button type="button" class="btn btn-sm" data-page-back aria-label="Previous page">Previous</button>' +
             '<button type="button" class="btn btn-sm" data-page-next aria-label="Next page">Next</button>' +
         '</div>';
-    pager.querySelector('[data-page-back]').onclick = () => turnModalPage(modal, -1);
-    pager.querySelector('[data-page-next]').onclick = () => turnModalPage(modal, 1);
+    pager.querySelector('[data-page-back]').onclick = function () {
+        turnModalPage(modal, -1);
+    };
+    pager.querySelector('[data-page-next]').onclick = function () {
+        turnModalPage(modal, 1);
+    };
     body.insertAdjacentElement('afterend', pager);
 
     showModalPage(modal);
@@ -227,37 +239,48 @@ function turnModalPage(modal, direction) {
 }
 
 // ---- when to lay the pages out again ----
-const pendingPaginate = new Map();   // modal -> go back to page one?
+// Two lists side by side: pendingModals[i] is a card waiting to be laid out,
+// and pendingReset[i] says whether it goes back to page one.
+const pendingModals = [];
+const pendingReset = [];
 
 function schedulePaginate(modal, resetPage) {
-    const already = pendingPaginate.has(modal);
-    pendingPaginate.set(modal, !!resetPage || !!pendingPaginate.get(modal));
-    if (already || pendingPaginate.size > 1) return;
+    let index = pendingModals.indexOf(modal);
+    const already = index !== -1;
+    if (!already) {
+        pendingModals.push(modal);
+        pendingReset.push(false);
+        index = pendingModals.length - 1;
+    }
+    pendingReset[index] = Boolean(resetPage) || pendingReset[index];
+    if (already || pendingModals.length > 1) return;
     // a timeout rather than a frame: frames stop in a background tab
-    setTimeout(() => {
-        const batch = Array.from(pendingPaginate.entries());
-        pendingPaginate.clear();
-        // each entry is [modal, goBackToPageOne]
-        for (const entry of batch) {
-            paginateModal(entry[0], entry[1]);
+    setTimeout(function () {
+        const batchModals = pendingModals.slice();
+        const batchReset = pendingReset.slice();
+        pendingModals.length = 0;
+        pendingReset.length = 0;
+        for (let i = 0; i < batchModals.length; i++) {
+            paginateModal(batchModals[i], batchReset[i]);
         }
         modalWatcher.takeRecords();   // the layout's own edits are not a reason to lay out again
     });
 }
 
-const modalWatcher = new MutationObserver((records) => {
-    records.forEach((record) => {
+const modalWatcher = new MutationObserver(function (records) {
+    for (let i = 0; i < records.length; i++) {
+        const record = records[i];
         const target = record.target.nodeType === 1 ? record.target : record.target.parentElement;
-        if (!target) return;
+        if (!target) continue;
 
         if (record.type === 'attributes' && target.classList.contains('modal')) {
             if (record.attributeName === 'class') schedulePaginate(target, true);
-            return;
+            continue;
         }
         const modal = target.closest('.modal');
-        if (!modal || !modal.classList.contains('open')) return;
-        if (target.closest('.modal-pager')) return;
-        if (target.classList.contains('modal-pages')) return;   // the slide between pages
+        if (!modal || !modal.classList.contains('open')) continue;
+        if (target.closest('.modal-pager')) continue;
+        if (target.classList.contains('modal-pages')) continue;   // the slide between pages
 
         // a whole page replaced starts from page one; smaller changes keep the page
         const body = modalBodyOf(modal);
@@ -267,12 +290,12 @@ const modalWatcher = new MutationObserver((records) => {
 
         // deep class changes are ignored: the table module restamps headers on every
         // move, which would lay the pages out for ever
-        if (record.type === 'attributes' && record.attributeName === 'class' && !topLevel) return;
+        if (record.type === 'attributes' && record.attributeName === 'class' && !topLevel) continue;
 
         const wholePage = target === body || target === wrap ||
             (topLevel && (record.type === 'attributes' || record.removedNodes.length > 0));
         schedulePaginate(modal, wholePage);
-    });
+    }
 });
 
 modalWatcher.observe(document.documentElement, {
@@ -283,23 +306,26 @@ modalWatcher.observe(document.documentElement, {
 // the body changing size is the signal, whatever changed it
 let modalSizer;
 if (typeof ResizeObserver === 'function') {
-    modalSizer = new ResizeObserver((entries) => {
-            entries.forEach((entry) => {
-                const modal = entry.target.closest('.modal');
-                if (modal && modal.classList.contains('open')) schedulePaginate(modal, false);
-            });
-        });
+    modalSizer = new ResizeObserver(function (entries) {
+        for (let i = 0; i < entries.length; i++) {
+            const modal = entries[i].target.closest('.modal');
+            if (modal && modal.classList.contains('open')) schedulePaginate(modal, false);
+        }
+    });
 } else {
     modalSizer = null;
 }
 
-window.addEventListener('resize', () => {
-    document.querySelectorAll('.modal.open').forEach((modal) => schedulePaginate(modal, false));
+window.addEventListener('resize', function () {
+    const openModals = document.querySelectorAll('.modal.open');
+    for (let i = 0; i < openModals.length; i++) {
+        schedulePaginate(openModals[i], false);
+    }
 });
 
 // a box was left: the pages held still while it was typed in, so lay them out
 // now for whatever changed (a message under the box, the keyboard closing)
-document.addEventListener('focusout', (event) => {
+document.addEventListener('focusout', function (event) {
     const modal = event.target.closest ? event.target.closest('.modal.open') : null;
     if (modal) schedulePaginate(modal, false);
 });

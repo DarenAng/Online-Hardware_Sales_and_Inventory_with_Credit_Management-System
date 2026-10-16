@@ -20,43 +20,54 @@ const passwordResetMessage = mailer.passwordResetMessage;
 
 function registerLoginRoutes(app, deps) {
   // take the helpers we need out of "deps" (sent to us by server.js)
-  const {
-    db, writeAuditLog,
-    hashPassword, isHashed, verifyPassword,
-    startSession, setSessionCookie, endSession, endSessionsForStaff,
-    renewSessionAfterPasswordChange, clientIp, DEFAULT_STORE_SETTINGS,
-    LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES, SESSION_IDLE_MINUTES, passwordComplaint
-  } = deps;
+  const db = deps.db;
+  const writeAuditLog = deps.writeAuditLog;
+  const hashPassword = deps.hashPassword;
+  const isHashed = deps.isHashed;
+  const verifyPassword = deps.verifyPassword;
+  const startSession = deps.startSession;
+  const setSessionCookie = deps.setSessionCookie;
+  const endSession = deps.endSession;
+  const endSessionsForStaff = deps.endSessionsForStaff;
+  const renewSessionAfterPasswordChange = deps.renewSessionAfterPasswordChange;
+  const clientIp = deps.clientIp;
+  const DEFAULT_STORE_SETTINGS = deps.DEFAULT_STORE_SETTINGS;
+  const LOGIN_MAX_ATTEMPTS = deps.LOGIN_MAX_ATTEMPTS;
+  const LOGIN_HOLD_MINUTES = deps.LOGIN_HOLD_MINUTES;
+  const SESSION_IDLE_MINUTES = deps.SESSION_IDLE_MINUTES;
+  const passwordComplaint = deps.passwordComplaint;
 
   const LOGIN_SELECT =
-    `SELECT u.user_id, u.staff_id, u.email, u.password, u.must_change_password,
-            -- a hold that has run out wipes the count, so the account gets a full set of tries again
-            IF(u.held_until IS NOT NULL AND u.held_until <= NOW(), 0, u.failed_attempts) AS failed_attempts,
-            IF(u.held_until IS NOT NULL AND u.held_until > NOW(), u.held_until, NULL) AS held_until,
-            TIMESTAMPDIFF(SECOND, NOW(), u.held_until) AS held_for_seconds,
-            s.first_name, s.middle_name, s.last_name, s.full_name, s.is_active,
-            r.role_id, r.role_name
-     FROM users u
-     JOIN staff s ON s.staff_id = u.staff_id
-     JOIN roles r ON r.role_id = s.role_id`;
+    "SELECT u.user_id, u.staff_id, u.email, u.password, u.must_change_password,\n" +
+      "            -- a hold that has run out wipes the count, so the account gets a full set of tries again\n" +
+      "            IF(u.held_until IS NOT NULL AND u.held_until <= NOW(), 0, u.failed_attempts) AS failed_attempts,\n" +
+      "            IF(u.held_until IS NOT NULL AND u.held_until > NOW(), u.held_until, NULL) AS held_until,\n" +
+      "            TIMESTAMPDIFF(SECOND, NOW(), u.held_until) AS held_for_seconds,\n" +
+      "            s.first_name, s.middle_name, s.last_name, s.full_name, s.is_active,\n" +
+      "            r.role_id, r.role_name\n" +
+      "     FROM users u\n" +
+      "     JOIN staff s ON s.staff_id = u.staff_id\n" +
+      "     JOIN roles r ON r.role_id = s.role_id";
 
   // the account with exactly this address, or null
   async function findLoginByExactEmail(address) {
-    const [rows] = await db.query(
-      `${LOGIN_SELECT} WHERE u.email = ? LIMIT 1`,
+    const rowsResult = await db.query(
+      LOGIN_SELECT + " WHERE u.email = ? LIMIT 1",
       [address]);
+    const rows = rowsResult[0];
     return rows[0] || null;
   }
 
   // Gmail ignores dots in the part before the @, so "j.doe" and "jdoe" are one
   // inbox; this finds the account whose dotless local part matches
   async function findLoginByGmailAlias(localWithoutDots) {
-    const [rows] = await db.query(
-      `${LOGIN_SELECT}
-       WHERE LOWER(SUBSTRING_INDEX(u.email, '@', -1)) IN ('gmail.com', 'googlemail.com')
-         AND REPLACE(SUBSTRING_INDEX(u.email, '@', 1), '.', '') = ?
-       LIMIT 1`,
+    const rowsResult = await db.query(
+      LOGIN_SELECT + "\n" +
+        "       WHERE LOWER(SUBSTRING_INDEX(u.email, '@', -1)) IN ('gmail.com', 'googlemail.com')\n" +
+        "         AND REPLACE(SUBSTRING_INDEX(u.email, '@', 1), '.', '') = ?\n" +
+        "       LIMIT 1",
       [localWithoutDots]);
+    const rows = rowsResult[0];
     return rows[0] || null;
   }
 
@@ -93,13 +104,14 @@ function registerLoginRoutes(app, deps) {
   // failed_attempts still sees the old held_until before it is cleared.
   // true when this try was counted and may go on to have its password checked.
   async function countTry(user) {
-    const [counted] = await db.query(
-      `UPDATE users
-       SET failed_attempts = IF(held_until IS NULL, failed_attempts + 1, 1),
-           held_until = NULL
-       WHERE user_id = ?
-         AND (held_until <= NOW() OR (held_until IS NULL AND failed_attempts < ?))`,
+    const countedResult = await db.query(
+      "UPDATE users\n" +
+        "       SET failed_attempts = IF(held_until IS NULL, failed_attempts + 1, 1),\n" +
+        "           held_until = NULL\n" +
+        "       WHERE user_id = ?\n" +
+        "         AND (held_until <= NOW() OR (held_until IS NULL AND failed_attempts < ?))",
       [user.user_id, LOGIN_MAX_ATTEMPTS]);
+    const counted = countedResult[0];
     return counted.affectedRows > 0;
   }
 
@@ -112,17 +124,18 @@ function registerLoginRoutes(app, deps) {
   // to get here changes anything, so the hold is logged and the screens are
   // signed out once, however many guesses arrived together. true for that first one.
   async function holdAccount(user, email, attempts, request) {
-    const [held] = await db.query(
-      `UPDATE users SET held_until = DATE_ADD(NOW(), INTERVAL ? MINUTE)
-       WHERE user_id = ? AND held_until IS NULL AND failed_attempts >= ?`,
+    const heldResult = await db.query(
+      "UPDATE users SET held_until = DATE_ADD(NOW(), INTERVAL ? MINUTE)\n" +
+        "       WHERE user_id = ? AND held_until IS NULL AND failed_attempts >= ?",
       [LOGIN_HOLD_MINUTES, user.user_id, LOGIN_MAX_ATTEMPTS]);
+    const held = heldResult[0];
     if (held.affectedRows === 0) return false;
 
     await writeAuditLog(
       { staffId: user.staff_id, roleName: user.role_name, request: request },
       "ACCOUNT_HELD",
-      `${email} held for ${LOGIN_HOLD_MINUTES} minutes after ` +
-        `${LOGIN_MAX_ATTEMPTS} wrong passwords in a row`,
+      email + " held for " + LOGIN_HOLD_MINUTES + " minutes after " +
+        LOGIN_MAX_ATTEMPTS + " wrong passwords in a row",
       { email: String(email), attempts: attempts, hold_minutes: LOGIN_HOLD_MINUTES }
     );
     // whoever is at the screen is signed out too: the guesses may be theirs
@@ -141,17 +154,18 @@ function registerLoginRoutes(app, deps) {
   }
 
   function heldMessage(minutes) {
-    return `This account is held after ${LOGIN_MAX_ATTEMPTS} wrong passwords in a row. ` +
-      `Try again in ${minutes} minute${minutes === 1 ? "" : "s"}, or set a new password with ` +
-      `"Forgot your password?" below, which releases it now.`;
+    return "This account is held after " + LOGIN_MAX_ATTEMPTS + " wrong passwords in a row. " +
+      "Try again in " + minutes + " minute" + (minutes === 1 ? "" : "s") + ", or set a new password with " +
+      "\"Forgot your password?\" below, which releases it now.";
   }
 
   // whole minutes left on the hold as the database has it now; a hold that is
   // only just being set (or not yet) is the full hold time
   async function heldMinutesNow(user) {
-    const [rows] = await db.query(
+    const rowsResult = await db.query(
       "SELECT TIMESTAMPDIFF(SECOND, NOW(), held_until) AS seconds FROM users WHERE user_id = ?",
       [user.user_id]);
+    const rows = rowsResult[0];
     if (rows[0] && rows[0].seconds !== null && Number(rows[0].seconds) > 0) {
       return minutesLeft(rows[0].seconds);
     }
@@ -163,7 +177,7 @@ function registerLoginRoutes(app, deps) {
     await writeAuditLog(
       { staffId: user.staff_id, roleName: user.role_name, request: request },
       "LOGIN_FAILURE",
-      `Sign-in refused for ${email}: the account is held for ${minutes} more minute(s)`,
+      "Sign-in refused for " + email + ": the account is held for " + minutes + " more minute(s)",
       { email: String(email), reason: "held", held_until: user.held_until }
     );
     return response.status(423).json({ error: heldMessage(minutes), heldMinutes: minutes });
@@ -171,9 +185,10 @@ function registerLoginRoutes(app, deps) {
 
   // the stored hash while the account is still on its system-made password; null once chosen
   async function temporaryPasswordHash(userId) {
-    const [rows] = await db.query(
+    const rowsResult = await db.query(
       "SELECT password FROM users WHERE user_id = ? AND must_change_password = TRUE",
       [userId]);
+    const rows = rowsResult[0];
     if (rows.length > 0) {
       return rows[0].password;
     }
@@ -183,11 +198,12 @@ function registerLoginRoutes(app, deps) {
   // sets the chosen password and clears the first-sign-in flag; false when the
   // account was not on a temporary password, so nothing was changed
   async function saveChosenPassword(userId, hash) {
-    const [result] = await db.query(
-      `UPDATE users
-       SET password = ?, must_change_password = FALSE
-       WHERE user_id = ? AND must_change_password = TRUE`,
+    const queryResult = await db.query(
+      "UPDATE users\n" +
+        "       SET password = ?, must_change_password = FALSE\n" +
+        "       WHERE user_id = ? AND must_change_password = TRUE",
       [hash, userId]);
+    const result = queryResult[0];
     return result.affectedRows > 0;
   }
 
@@ -233,7 +249,7 @@ function registerLoginRoutes(app, deps) {
   // it the quick answer would say which addresses have accounts.
   const decoyHash = hashPassword(crypto.randomBytes(24).toString("hex"));
 
-  app.post("/api/login", async (request, response) => {
+  app.post("/api/login", async function (request, response) {
     const email = String(request.body.email || "").trim();
     const password = request.body.password;
 
@@ -252,7 +268,7 @@ function registerLoginRoutes(app, deps) {
         await writeAuditLog(
           { staffId: null, request: request },
           "LOGIN_FAILURE",
-          `Sign-in refused for ${email}: no account with that email`,
+          "Sign-in refused for " + email + ": no account with that email",
           { email: String(email), reason: "unknown_email" }
         );
         return response.status(401).json({ error: "Invalid email or password" });
@@ -274,13 +290,14 @@ function registerLoginRoutes(app, deps) {
 
       if (!(await passwordMatches(user, password))) {
         // how many places the count has taken, this one included
-        const [counts] = await db.query("SELECT failed_attempts FROM users WHERE user_id = ?", [user.user_id]);
+        const countsResult = await db.query("SELECT failed_attempts FROM users WHERE user_id = ?", [user.user_id]);
+        const counts = countsResult[0];
         const attempts = Math.min(Math.max(Number(counts[0] ? counts[0].failed_attempts : 0), 1), LOGIN_MAX_ATTEMPTS);
 
         await writeAuditLog(
           { staffId: user.staff_id, roleName: user.role_name, request: request },
           "LOGIN_FAILURE",
-          `Sign-in refused for ${email}: wrong password (${attempts} of ${LOGIN_MAX_ATTEMPTS})`,
+          "Sign-in refused for " + email + ": wrong password (" + attempts + " of " + LOGIN_MAX_ATTEMPTS + ")",
           { email: String(email), reason: "wrong_password", attempts: attempts }
         );
 
@@ -294,7 +311,7 @@ function registerLoginRoutes(app, deps) {
         const left = LOGIN_MAX_ATTEMPTS - attempts;
         let warning = null;
         if (left === 1) {
-          warning = `One more wrong password and the account is held for ${LOGIN_HOLD_MINUTES} minutes.`;
+          warning = "One more wrong password and the account is held for " + LOGIN_HOLD_MINUTES + " minutes.";
         }
         return response.status(401).json({
           error: "Invalid email or password",
@@ -316,7 +333,7 @@ function registerLoginRoutes(app, deps) {
         await writeAuditLog(
           { staffId: user.staff_id, roleName: user.role_name, request: request },
           "LOGIN_FAILURE",
-          `Sign-in refused for ${email}: the account is deactivated`,
+          "Sign-in refused for " + email + ": the account is deactivated",
           { email: String(email), reason: "deactivated" }
         );
         return response.status(403).json({ error: "This account is deactivated" });
@@ -326,7 +343,7 @@ function registerLoginRoutes(app, deps) {
       await writeAuditLog(
         { staffId: user.staff_id, roleName: user.role_name, request: request },
         "LOGIN",
-        `${user.email} signed in`
+        user.email + " signed in"
       );
 
       const token = await startSession(user);
@@ -338,7 +355,7 @@ function registerLoginRoutes(app, deps) {
         await writeAuditLog(
           { staffId: user.staff_id, roleName: user.role_name, request: request },
           "SESSION_REPLACED",
-          `${user.email} signed in again; ${previous} earlier session${previous === 1 ? "" : "s"} ended`,
+          user.email + " signed in again; " + previous + " earlier session" + (previous === 1 ? "" : "s") + " ended",
           { sessions_ended: previous }
         );
       }
@@ -346,15 +363,15 @@ function registerLoginRoutes(app, deps) {
       setSessionCookie(response, token);
 
       // the profile is only for drawing the screen; nothing sent back is trusted
-      response.json({ message: "Login successful", user });
+      response.json({ message: "Login successful", user: user });
     } catch (error) {
       console.error("Login failed:", error.message);
       response.status(500).json({ error: "Unable to log in" });
     }
   });
 
-  app.post("/api/logout", async (request, response) => {
-    await writeAuditLog(request, "LOGOUT", `${request.actor.email} signed out`);
+  app.post("/api/logout", async function (request, response) {
+    await writeAuditLog(request, "LOGOUT", request.actor.email + " signed out");
 
     await endSession(request);
     response.clearCookie("sid", { path: "/" });
@@ -365,7 +382,7 @@ function registerLoginRoutes(app, deps) {
   // once a minute to stay present. The access check ahead of it refreshes the session.
   // It also tells the page how long a screen may sit unused (idleMinutes), so
   // the page and the server use the one setting.
-  app.post("/api/heartbeat", (request, response) => {
+  app.post("/api/heartbeat", function (request, response) {
     response.json({
       ok: true,
       idleMinutes: SESSION_IDLE_MINUTES,
@@ -374,8 +391,8 @@ function registerLoginRoutes(app, deps) {
     });
   });
 
-  app.post("/api/change-password", async (request, response) => {
-    const { newPassword } = request.body;
+  app.post("/api/change-password", async function (request, response) {
+    const newPassword = request.body.newPassword;
 
     // always the signed-in account, never one named in the body
     const userId = request.actor.userId;
@@ -414,7 +431,7 @@ function registerLoginRoutes(app, deps) {
       }
 
       await writeAuditLog(request, "CHANGE_OWN_PASSWORD",
-        `${request.actor.email} chose their own password on first sign-in`);
+        request.actor.email + " chose their own password on first sign-in");
 
       await renewSessionAfterPasswordChange(request, response);
       response.json({ message: "Password changed successfully" });
@@ -440,9 +457,9 @@ function registerLoginRoutes(app, deps) {
   const RESET_PER_HOUR = 5;
 
   const RESET_SENT =
-    `If that address belongs to an account here, a six-digit code is on its way to it. ` +
-    `It stops working in ${RESET_CODE_MINUTES} minutes. Only one code is sent a minute, ` +
-    `so give it a moment before asking again.`;
+    "If that address belongs to an account here, a six-digit code is on its way to it. " +
+    "It stops working in " + RESET_CODE_MINUTES + " minutes. Only one code is sent a minute, " +
+    "so give it a moment before asking again.";
 
   const RESET_NO_MAIL =
     "Codes are sent by email, and mail is not set up on this server, so no code can be sent. " +
@@ -450,8 +467,8 @@ function registerLoginRoutes(app, deps) {
     "from the staff directory.";
 
   const RESET_BAD_CODE =
-    `That code is not right, or it has stopped working. A code lasts ${RESET_CODE_MINUTES} ` +
-    `minutes and ${RESET_MAX_TRIES} tries; ask for a new one if it has run out.`;
+    "That code is not right, or it has stopped working. A code lasts " + RESET_CODE_MINUTES + " " +
+    "minutes and " + RESET_MAX_TRIES + " tries; ask for a new one if it has run out.";
 
   // a simple check for "something@something.something" (no spaces)
   function looksLikeEmail(value) {
@@ -464,35 +481,36 @@ function registerLoginRoutes(app, deps) {
     if (!user) {
       await writeAuditLog({ staffId: null, request: request },
         "PASSWORD_RESET_REFUSED",
-        `A reset code was asked for ${email}: no account with that email`,
+        "A reset code was asked for " + email + ": no account with that email",
         { email: email, reason: "unknown_email" });
       return;
     }
     if (!user.is_active) {
       await writeAuditLog({ staffId: user.staff_id, request: request },
         "PASSWORD_RESET_REFUSED",
-        `A reset code was asked for ${email}: the account is deactivated`,
+        "A reset code was asked for " + email + ": the account is deactivated",
         { email: email, reason: "deactivated" });
       return;
     }
 
     // how many codes were sent in the last minute and in the last hour
-    const [recentRows] = await db.query(
-      `SELECT SUM(created_at > DATE_SUB(NOW(), INTERVAL 1 MINUTE)) AS last_minute,
-              COUNT(*) AS last_hour
-       FROM password_resets
-       WHERE user_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+    const recentRowsResult = await db.query(
+      "SELECT SUM(created_at > DATE_SUB(NOW(), INTERVAL 1 MINUTE)) AS last_minute,\n" +
+        "              COUNT(*) AS last_hour\n" +
+        "       FROM password_resets\n" +
+        "       WHERE user_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)",
       [user.user_id]);
+    const recentRows = recentRowsResult[0];
     const recent = recentRows[0];
 
     if (Number(recent.last_minute) > 0 || Number(recent.last_hour) >= RESET_PER_HOUR) {
-      let why = `${RESET_PER_HOUR} were already sent this hour`;
+      let why = RESET_PER_HOUR + " were already sent this hour";
       if (Number(recent.last_minute) > 0) {
         why = "one was sent less than a minute ago";
       }
       await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
         "PASSWORD_RESET_REFUSED",
-        `A reset code for ${user.email} was not sent: ` + why,
+        "A reset code for " + user.email + " was not sent: " + why,
         { email: user.email, reason: "too_many" });
       return;
     }
@@ -505,11 +523,12 @@ function registerLoginRoutes(app, deps) {
       "UPDATE password_resets SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL",
       [user.user_id]);
     await db.query(
-      `INSERT INTO password_resets (user_id, code_hash, expires_at, requested_ip)
-       VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), ?)`,
+      "INSERT INTO password_resets (user_id, code_hash, expires_at, requested_ip)\n" +
+        "       VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE), ?)",
       [user.user_id, await hashPassword(code), RESET_CODE_MINUTES, clientIp(request)]);
 
-    const [settings] = await db.query("SELECT store_name FROM store_settings WHERE setting_id = 1");
+    const settingsResult = await db.query("SELECT store_name FROM store_settings WHERE setting_id = 1");
+    const settings = settingsResult[0];
     let storeName = DEFAULT_STORE_SETTINGS.store_name;
     if (settings[0] && settings[0].store_name) {
       storeName = settings[0].store_name;
@@ -522,18 +541,18 @@ function registerLoginRoutes(app, deps) {
       }));
       await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
         "PASSWORD_RESET_CODE_SENT",
-        `A password reset code was emailed to ${user.email}`,
+        "A password reset code was emailed to " + user.email,
         { email: user.email, expires_in_minutes: RESET_CODE_MINUTES });
     } catch (error) {
       console.error("Sending a password reset code failed:", error.message);
       await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
         "PASSWORD_RESET_CODE_FAILED",
-        `A password reset code for ${user.email} could not be sent: ${error.message}`,
+        "A password reset code for " + user.email + " could not be sent: " + error.message,
         { email: user.email });
     }
   }
 
-  app.post("/api/password-reset/request", async (request, response) => {
+  app.post("/api/password-reset/request", async function (request, response) {
     const body = request.body || {};
     const email = String(body.email || "").trim();
 
@@ -547,7 +566,7 @@ function registerLoginRoutes(app, deps) {
     // answered first; the lookup and the mail happen after, whatever the address
     response.json({ message: RESET_SENT, minutes: RESET_CODE_MINUTES });
 
-    sendResetCode(request, email).catch((error) => {
+    sendResetCode(request, email).catch(function (error) {
       console.error("Password reset request failed:", error.message);
     });
   });
@@ -562,11 +581,12 @@ function registerLoginRoutes(app, deps) {
       return false;
     }
 
-    const [codes] = await db.query(
-      `SELECT reset_id, code_hash FROM password_resets
-       WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?
-       ORDER BY reset_id DESC LIMIT 1`,
+    const codesResult = await db.query(
+      "SELECT reset_id, code_hash FROM password_resets\n" +
+        "       WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?\n" +
+        "       ORDER BY reset_id DESC LIMIT 1",
       [user.user_id, RESET_MAX_TRIES]);
+    const codes = codesResult[0];
 
     if (codes.length === 0) {
       await verifyPassword(code, await decoyHash);
@@ -575,14 +595,15 @@ function registerLoginRoutes(app, deps) {
 
     // the try is counted before the code is looked at, and only while tries
     // are left, so guesses sent side by side cannot get past the limit
-    const [counted] = await db.query(
+    const countedResult = await db.query(
       "UPDATE password_resets SET attempts = attempts + 1 WHERE reset_id = ? AND attempts < ?",
       [codes[0].reset_id, RESET_MAX_TRIES]);
+    const counted = countedResult[0];
 
     if (counted.affectedRows === 0 || !(await verifyPassword(code, codes[0].code_hash))) {
       await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
         "PASSWORD_RESET_WRONG_CODE",
-        `A wrong password reset code was typed for ${user.email}`,
+        "A wrong password reset code was typed for " + user.email,
         { email: user.email });
       return false;
     }
@@ -591,7 +612,7 @@ function registerLoginRoutes(app, deps) {
 
   // step 2: the code alone is checked, before the new password is asked for.
   // The code is not used up here; the next step sends it again with the password.
-  app.post("/api/password-reset/verify", async (request, response) => {
+  app.post("/api/password-reset/verify", async function (request, response) {
     const body = request.body || {};
     const email = String(body.email || "").trim();
     const code = String(body.code || "").replace(/\s+/g, "");   // remove any spaces
@@ -622,7 +643,7 @@ function registerLoginRoutes(app, deps) {
 
   // step 3: the code again with the new password; once it is saved the
   // person is signed in with it
-  app.post("/api/password-reset/confirm", async (request, response) => {
+  app.post("/api/password-reset/confirm", async function (request, response) {
     const body = request.body || {};
     const email = String(body.email || "").trim();
     const code = String(body.code || "").replace(/\s+/g, "");   // remove any spaces
@@ -658,9 +679,9 @@ function registerLoginRoutes(app, deps) {
       // chosen by the person, so not a temporary one; the hold is released as an
       // administrator's reset releases it
       await db.query(
-        `UPDATE users
-         SET password = ?, must_change_password = FALSE, failed_attempts = 0, held_until = NULL
-         WHERE user_id = ?`,
+        "UPDATE users\n" +
+          "         SET password = ?, must_change_password = FALSE, failed_attempts = 0, held_until = NULL\n" +
+          "         WHERE user_id = ?",
         [await hashPassword(newPassword), user.user_id]);
 
       await endSessionsForStaff(user.staff_id, null,
@@ -668,7 +689,7 @@ function registerLoginRoutes(app, deps) {
 
       await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
         "PASSWORD_RESET_BY_CODE",
-        `${user.email} set a new password with a code sent to their email; ` +
+        user.email + " set a new password with a code sent to their email; " +
           "every other session was ended and any sign-in hold released",
         { email: user.email });
 
@@ -676,7 +697,7 @@ function registerLoginRoutes(app, deps) {
       await recordSignIn(user.user_id);
       await writeAuditLog({ staffId: user.staff_id, roleName: user.role_name, request: request },
         "LOGIN",
-        `${user.email} signed in after setting a new password`);
+        user.email + " signed in after setting a new password");
 
       delete user.password;   // never let the hash leave the server
       user.must_change_password = 0;
@@ -695,4 +716,4 @@ function registerLoginRoutes(app, deps) {
   });
 }
 
-module.exports = { registerLoginRoutes };
+module.exports = { registerLoginRoutes: registerLoginRoutes };

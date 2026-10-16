@@ -64,10 +64,10 @@ function applyLatePenalties() {
 }
 
 module.exports = {
-  setCreditLimit,
-  setPenaltyPolicy,
-  requestCreditExtension,
-  decideCreditRequest,
-  createCustomer,
-  applyLatePenalties
+  setCreditLimit: setCreditLimit,
+  setPenaltyPolicy: setPenaltyPolicy,
+  requestCreditExtension: requestCreditExtension,
+  decideCreditRequest: decideCreditRequest,
+  createCustomer: createCustomer,
+  applyLatePenalties: applyLatePenalties
 };

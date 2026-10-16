@@ -18,13 +18,24 @@
 const managerProcedures = require("../database/procedures/manager-procedures");
 
 function registerManagerRoutes(app, deps) {
-  const {
-    db, getActorId, writeAuditLog, fieldChanges, wordStartSearch,
-    requireRole, MANAGER, LOW_STOCK_EFFECTIVE_SQL, isDateText, SALE_CUSTOMER_SQL,
-    proceduresAreMissing, publishChange,
-    CLERK, CASHIER, DRIVER, cleanPhone, phoneComplaint
-  } = deps;
-  const { sendWorkbook } = require("../services/spreadsheet");
+  const db = deps.db;
+  const getActorId = deps.getActorId;
+  const writeAuditLog = deps.writeAuditLog;
+  const fieldChanges = deps.fieldChanges;
+  const wordStartSearch = deps.wordStartSearch;
+  const requireRole = deps.requireRole;
+  const MANAGER = deps.MANAGER;
+  const LOW_STOCK_EFFECTIVE_SQL = deps.LOW_STOCK_EFFECTIVE_SQL;
+  const isDateText = deps.isDateText;
+  const SALE_CUSTOMER_SQL = deps.SALE_CUSTOMER_SQL;
+  const proceduresAreMissing = deps.proceduresAreMissing;
+  const publishChange = deps.publishChange;
+  const CLERK = deps.CLERK;
+  const CASHIER = deps.CASHIER;
+  const DRIVER = deps.DRIVER;
+  const cleanPhone = deps.cleanPhone;
+  const phoneComplaint = deps.phoneComplaint;
+  const sendWorkbook = require("../services/spreadsheet").sendWorkbook;
 
   // ==========================================
   // MANAGER MODULE
@@ -68,12 +79,12 @@ function registerManagerRoutes(app, deps) {
 
       if (end > today) {
         const error = new Error(
-          `The income breakdown only covers days up to today (${today}); ${end} has not happened yet.`);
+          "The income breakdown only covers days up to today (" + today + "); " + end + " has not happened yet.");
         error.status = 400;
         throw error;
       }
 
-      return { from: start, to: end, label: `${start} to ${end}`, bucket: bucketFor(start, end) };
+      return { from: start, to: end, label: start + " to " + end, bucket: bucketFor(start, end) };
     }
 
     const name = String(query.range || "monthly").toLowerCase();
@@ -122,7 +133,7 @@ function registerManagerRoutes(app, deps) {
 
   async function incomeReport(range, cashierId) {
     const bucket = BUCKET_SQL[range.bucket] || BUCKET_SQL.day;
-    const window = [`${range.from} 00:00:00`, `${range.to} 23:59:59`];
+    const window = [range.from + " 00:00:00", range.to + " 23:59:59"];
 
     // with a cashier chosen, every query below only counts that cashier's sales
     let cashierSql = "";
@@ -132,99 +143,107 @@ function registerManagerRoutes(app, deps) {
     }
 
     {
-      const [totalsRows] = await db.query(
-        `SELECT COUNT(*) AS sale_count,
-              COALESCE(SUM(s.total_amount), 0) AS gross,
-              COALESCE(SUM(s.discount), 0) AS discounts,
-              COALESCE(SUM(s.final_amount), 0) AS billed,
-              COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected,
-              COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS outstanding,
-              -- the part of outstanding that is late-payment penalty rather than goods
-              COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0) - GREATEST(s.final_amount - s.refunded_amount - s.amount_paid, 0)), 0) AS penalties
-       FROM sales s
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}`,
+      const totalsRowsResult = await db.query(
+        "SELECT COUNT(*) AS sale_count, " +
+        "COALESCE(SUM(s.total_amount), 0) AS gross, " +
+        "COALESCE(SUM(s.discount), 0) AS discounts, " +
+        "COALESCE(SUM(s.final_amount), 0) AS billed, " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected, " +
+        "COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS outstanding, " +
+        "-- the part of outstanding that is late-payment penalty rather than goods\n" +
+        "COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0) - GREATEST(s.final_amount - s.refunded_amount - s.amount_paid, 0)), 0) AS penalties " +
+        "FROM sales s " +
+        "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql,
         window
       );
+      const totalsRows = totalsRowsResult[0];
 
       const totals = totalsRows[0];
 
-      const [unitsRows] = await db.query(
-        `SELECT COALESCE(SUM(si.quantity), 0) AS units_sold
-       FROM sale_items si
-       JOIN sales s ON s.sale_id = si.sale_id
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}`,
+      const unitsRowsResult = await db.query(
+        "SELECT COALESCE(SUM(si.quantity), 0) AS units_sold " +
+        "FROM sale_items si " +
+        "JOIN sales s ON s.sale_id = si.sale_id " +
+        "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql,
         window
       );
+      const unitsRows = unitsRowsResult[0];
 
       const units = unitsRows[0];
 
-      const [series] = await db.query(
-        `SELECT ${bucket} AS bucket,
-              COUNT(*) AS sale_count,
-              COALESCE(SUM(s.final_amount), 0) AS billed,
-              COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected
-       FROM sales s
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}
-       GROUP BY bucket
-       ORDER BY bucket`,
+      const seriesResult = await db.query(
+        "SELECT " + bucket + " AS bucket, " +
+        "COUNT(*) AS sale_count, " +
+        "COALESCE(SUM(s.final_amount), 0) AS billed, " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected " +
+        "FROM sales s " +
+        "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql +
+        " GROUP BY bucket " +
+        "ORDER BY bucket",
         window
       );
+      const series = seriesResult[0];
 
-      const [methods] = await db.query(
-        `SELECT s.payment_method,
-              COUNT(*) AS sale_count,
-              COALESCE(SUM(s.final_amount), 0) AS billed,
-              COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected,
-              COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS outstanding
-       FROM sales s
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}
-       GROUP BY s.payment_method
-       ORDER BY billed DESC`,
+      const methodsResult = await db.query(
+        "SELECT s.payment_method, " +
+        "COUNT(*) AS sale_count, " +
+        "COALESCE(SUM(s.final_amount), 0) AS billed, " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected, " +
+        "COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS outstanding " +
+        "FROM sales s " +
+        "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql +
+        " GROUP BY s.payment_method " +
+        "ORDER BY billed DESC",
         window
       );
+      const methods = methodsResult[0];
 
-      const [products] = await db.query(
-        `SELECT p.product_id, p.product_name, u.unit_name,
-              COALESCE(SUM(si.quantity), 0) AS units_sold,
-              COALESCE(SUM(si.subtotal), 0) AS revenue
-       FROM sale_items si
-       JOIN sales s ON s.sale_id = si.sale_id
-       JOIN products p ON p.product_id = si.product_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}
-       GROUP BY p.product_id, p.product_name, u.unit_name
-       ORDER BY revenue DESC
-       LIMIT 10`,
+      const productsResult = await db.query(
+        "SELECT p.product_id, p.product_name, u.unit_name, " +
+        "COALESCE(SUM(si.quantity), 0) AS units_sold, " +
+        "COALESCE(SUM(si.subtotal), 0) AS revenue " +
+        "FROM sale_items si " +
+        "JOIN sales s ON s.sale_id = si.sale_id " +
+        "JOIN products p ON p.product_id = si.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql +
+        " GROUP BY p.product_id, p.product_name, u.unit_name " +
+        "ORDER BY revenue DESC " +
+        "LIMIT 10",
         window
       );
+      const products = productsResult[0];
 
-      const [cashiers] = await db.query(
-        `SELECT st.staff_id, st.full_name AS staff_name,
-              COUNT(*) AS sale_count,
-              COALESCE(SUM(s.final_amount), 0) AS billed,
-              COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected
-       FROM sales s
-       JOIN staff st ON st.staff_id = s.cashier_staff_id
-       WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?${cashierSql}
-       GROUP BY st.staff_id, st.full_name
-       ORDER BY billed DESC`,
+      const cashiersResult = await db.query(
+        "SELECT st.staff_id, st.full_name AS staff_name, " +
+        "COUNT(*) AS sale_count, " +
+        "COALESCE(SUM(s.final_amount), 0) AS billed, " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected " +
+        "FROM sales s " +
+        "JOIN staff st ON st.staff_id = s.cashier_staff_id " +
+        "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql +
+        " GROUP BY st.staff_id, st.full_name " +
+        "ORDER BY billed DESC",
         window
       );
+      const cashiers = cashiersResult[0];
 
       // everyone who has rung up a sale, for the Cashier dropdown (whatever the period)
-      const [cashierChoices] = await db.query(
-        `SELECT DISTINCT st.staff_id, st.full_name
-       FROM sales s
-       JOIN staff st ON st.staff_id = s.cashier_staff_id
-       WHERE s.is_archived = FALSE
-       ORDER BY st.full_name`
+      const cashierChoicesResult = await db.query(
+        "SELECT DISTINCT st.staff_id, st.full_name " +
+        "FROM sales s " +
+        "JOIN staff st ON st.staff_id = s.cashier_staff_id " +
+        "WHERE s.is_archived = FALSE " +
+        "ORDER BY st.full_name"
       );
+      const cashierChoices = cashierChoicesResult[0];
 
       // the chosen cashier's name, so the screen, print and export can say who it is for
       let cashier = null;
       if (cashierId !== null) {
         cashier = { staff_id: cashierId, name: "Staff #" + cashierId };
-        for (const choice of cashierChoices) {
+        for (let i = 0; i < cashierChoices.length; i++) {
+          const choice = cashierChoices[i];
           if (choice.staff_id === cashierId) cashier.name = choice.full_name;
         }
       }
@@ -265,7 +284,7 @@ function registerManagerRoutes(app, deps) {
     }
   }
 
-  app.get("/api/reports/income", async (request, response) => {
+  app.get("/api/reports/income", async function (request, response) {
     try {
       const report = await incomeReport(resolveRange(request.query), cashierFromQuery(request.query));
       report.range.name = String(request.query.range || "custom");
@@ -292,7 +311,8 @@ function registerManagerRoutes(app, deps) {
       headers: ["Method", "Sales", "Billed", "Collected", "Outstanding"],
       rows: function (data) {
         const rows = [];
-        for (const m of data.methods) {
+        for (let i = 0; i < data.methods.length; i++) {
+          const m = data.methods[i];
           rows.push([m.payment_method, m.sale_count, m.billed, m.collected, m.outstanding]);
         }
         return rows;
@@ -303,7 +323,8 @@ function registerManagerRoutes(app, deps) {
       headers: ["Product", "Unit", "Units Sold", "Revenue"],
       rows: function (data) {
         const rows = [];
-        for (const p of data.products) {
+        for (let i = 0; i < data.products.length; i++) {
+          const p = data.products[i];
           rows.push([p.product_name, p.unit_name || "", p.units_sold, p.revenue]);
         }
         return rows;
@@ -314,7 +335,8 @@ function registerManagerRoutes(app, deps) {
       headers: ["Staff", "Sales", "Billed", "Collected"],
       rows: function (data) {
         const rows = [];
-        for (const c of data.cashiers) {
+        for (let i = 0; i < data.cashiers.length; i++) {
+          const c = data.cashiers[i];
           rows.push([c.staff_name, c.sale_count, c.billed, c.collected]);
         }
         return rows;
@@ -325,7 +347,8 @@ function registerManagerRoutes(app, deps) {
       headers: ["Period", "Sales", "Billed", "Collected"],
       rows: function (data) {
         const rows = [];
-        for (const s of data.series) {
+        for (let i = 0; i < data.series.length; i++) {
+          const s = data.series[i];
           rows.push([String(s.bucket).slice(0, 10), s.sale_count, s.billed, s.collected]);
         }
         return rows;
@@ -356,7 +379,7 @@ function registerManagerRoutes(app, deps) {
       headers: [],
       rows: function (data) {
         const rows = [];
-        rows.push(["Income breakdown", data.range.label, `${data.range.from} to ${data.range.to}`,
+        rows.push(["Income breakdown", data.range.label, data.range.from + " to " + data.range.to,
                    data.cashier ? "Cashier: " + data.cashier.name : "All cashiers"]);
 
         // one section = an empty line, the section name, its headers, then its rows
@@ -364,7 +387,8 @@ function registerManagerRoutes(app, deps) {
           rows.push([]);
           rows.push([name]);
           rows.push(headers);
-          for (const row of body) {
+          for (let i = 0; i < body.length; i++) {
+            const row = body[i];
             rows.push(row);
           }
         }
@@ -392,9 +416,9 @@ function registerManagerRoutes(app, deps) {
   };
 
   function exportSheets(name, plan, data, range) {
-    let subtitle = `${range.label}, ${range.from} to ${range.to}`;
+    let subtitle = range.label + ", " + range.from + " to " + range.to;
     if (data.cashier) {
-      subtitle += `, Cashier: ${data.cashier.name}`;
+      subtitle += ", Cashier: " + data.cashier.name;
     } else {
       subtitle += ", All cashiers";
     }
@@ -427,32 +451,67 @@ function registerManagerRoutes(app, deps) {
   // A table on a report screen, saved as a workbook. The browser sends the
   // rows exactly as it drew them, so the file and the screen cannot disagree;
   // this only lays them out. Sizes are capped so nothing runaway reaches it.
-  app.post("/api/reports/spreadsheet", async (request, response) => {
+  app.post("/api/reports/spreadsheet", async function (request, response) {
     const body = request.body || {};
     const sheets = Array.isArray(body.sheets) ? body.sheets.slice(0, 10) : [];
     if (sheets.length === 0) {
       return response.status(400).json({ error: "There is no table to save." });
     }
 
-    const cleaned = sheets.map((sheet) => ({
-      name: String(sheet.name || "Report").slice(0, 60),
-      title: String(sheet.name || "Report").slice(0, 120),
-      subtitle: "Saved " + new Date().toLocaleString("en-PH"),
-      headers: (Array.isArray(sheet.headers) ? sheet.headers : []).slice(0, 40).map((h) => String(h).slice(0, 80)),
-      rows: (Array.isArray(sheet.rows) ? sheet.rows : []).slice(0, 20000).map((row) =>
-        (Array.isArray(row) ? row : []).slice(0, 40).map((cell) =>
-          typeof cell === "number" ? cell : String(cell === null || cell === undefined ? "" : cell).slice(0, 2000))),
-      money: (Array.isArray(sheet.money) ? sheet.money : []).filter((index) => Number.isInteger(index))
-    }));
+    // tidy every sheet: cut the names and sizes down, and turn every cell into a number or text
+    const cleaned = [];
+    for (let i = 0; i < sheets.length; i++) {
+      const sheet = sheets[i];
+
+      const headerList = (Array.isArray(sheet.headers) ? sheet.headers : []).slice(0, 40);
+      const headers = [];
+      for (let h = 0; h < headerList.length; h++) {
+        headers.push(String(headerList[h]).slice(0, 80));
+      }
+
+      const rowList = (Array.isArray(sheet.rows) ? sheet.rows : []).slice(0, 20000);
+      const rows = [];
+      for (let r = 0; r < rowList.length; r++) {
+        const cellList = (Array.isArray(rowList[r]) ? rowList[r] : []).slice(0, 40);
+        const cells = [];
+        for (let c = 0; c < cellList.length; c++) {
+          const cell = cellList[c];
+          if (typeof cell === "number") {
+            cells.push(cell);
+          } else {
+            cells.push(String(cell === null || cell === undefined ? "" : cell).slice(0, 2000));
+          }
+        }
+        rows.push(cells);
+      }
+
+      const moneyList = Array.isArray(sheet.money) ? sheet.money : [];
+      const money = [];
+      for (let m = 0; m < moneyList.length; m++) {
+        if (Number.isInteger(moneyList[m])) money.push(moneyList[m]);
+      }
+
+      cleaned.push({
+        name: String(sheet.name || "Report").slice(0, 60),
+        title: String(sheet.name || "Report").slice(0, 120),
+        subtitle: "Saved " + new Date().toLocaleString("en-PH"),
+        headers: headers,
+        rows: rows,
+        money: money
+      });
+    }
 
     const title = String(body.title || cleaned[0].name);
     const stamp = new Date().toISOString().slice(0, 10);
     try {
       let total = 0;
-      for (const sheet of cleaned) total += sheet.rows.length;
-      await writeAuditLog(request, "EXPORT_REPORT", `${title} saved as a spreadsheet (${total} rows)`,
+      for (let i = 0; i < cleaned.length; i++) {
+        const sheet = cleaned[i];
+        total += sheet.rows.length;
+      }
+      await writeAuditLog(request, "EXPORT_REPORT", title + " saved as a spreadsheet (" + total + " rows)",
         { report: title, rows: total });
-      await sendWorkbook(response, `${title}_${stamp}`, cleaned);
+      await sendWorkbook(response, title + "_" + stamp, cleaned);
     } catch (error) {
       console.error("Spreadsheet export failed:", error.message);
       if (!response.headersSent) response.status(500).json({ error: "Unable to build the spreadsheet" });
@@ -469,11 +528,12 @@ function registerManagerRoutes(app, deps) {
     return String(value || "").trim().replace(/\s+/g, " ").slice(0, max);
   }
 
-  app.post("/api/suppliers", async (request, response) => {
+  app.post("/api/suppliers", async function (request, response) {
     const body = request.body || {};
     const name = tidyName(body.name, 100);
     const email = String(body.email || "").trim().slice(0, 100);
     if (name === "") return response.status(400).json({ error: "The supplier needs a company name." });
+    // the email must look like name@site.ext, with no spaces
     if (email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return response.status(400).json({ error: "That email address does not look right." });
     }
@@ -481,17 +541,19 @@ function registerManagerRoutes(app, deps) {
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
     try {
-      const [taken] = await db.query("SELECT supplier_id FROM suppliers WHERE LOWER(supplier_name) = LOWER(?)", [name]);
-      if (taken.length > 0) return response.status(409).json({ error: `${name} is already on file.` });
+      const takenResult = await db.query("SELECT supplier_id FROM suppliers WHERE LOWER(supplier_name) = LOWER(?)", [name]);
+      const taken = takenResult[0];
+      if (taken.length > 0) return response.status(409).json({ error: name + " is already on file." });
 
-      const [result] = await db.query(
-        `INSERT INTO suppliers (supplier_name, contact_person, contact_number, email, address)
-         VALUES (?, ?, ?, ?, ?)`,
+      const queryResult = await db.query(
+        "INSERT INTO suppliers (supplier_name, contact_person, contact_number, email, address) " +
+        "VALUES (?, ?, ?, ?, ?)",
         [name, tidyName(body.contactPerson, 100) || null, cleanPhone(body.contactNumber) || null,
          email || null, String(body.address || "").trim().slice(0, 255) || null]);
-      await writeAuditLog(request, "CREATE_SUPPLIER", `Supplier ${name} added`,
+      const result = queryResult[0];
+      await writeAuditLog(request, "CREATE_SUPPLIER", "Supplier " + name + " added",
         { supplier_id: result.insertId, name: name });
-      response.status(201).json({ message: `${name} was added to the suppliers.`, id: result.insertId });
+      response.status(201).json({ message: name + " was added to the suppliers.", id: result.insertId });
     } catch (error) {
       console.error("Adding a supplier failed:", error.message);
       response.status(500).json({ error: "Unable to add the supplier" });
@@ -500,21 +562,23 @@ function registerManagerRoutes(app, deps) {
 
   // categories and units are one name each, unique whatever the capitals
   function addNamedRecord(table, column, label, max) {
-    return async (request, response) => {
+    return async function (request, response) {
       const name = tidyName((request.body || {}).name, max);
-      if (name === "") return response.status(400).json({ error: `The ${label} needs a name.` });
+      if (name === "") return response.status(400).json({ error: "The " + label + " needs a name." });
 
       try {
-        const [taken] = await db.query(`SELECT 1 FROM ${table} WHERE LOWER(${column}) = LOWER(?)`, [name]);
-        if (taken.length > 0) return response.status(409).json({ error: `${name} is already on file.` });
+        const takenResult = await db.query("SELECT 1 FROM " + table + " WHERE LOWER(" + column + ") = LOWER(?)", [name]);
+        const taken = takenResult[0];
+        if (taken.length > 0) return response.status(409).json({ error: name + " is already on file." });
 
-        const [result] = await db.query(`INSERT INTO ${table} (${column}) VALUES (?)`, [name]);
-        await writeAuditLog(request, "CREATE_" + label.toUpperCase(), `${label[0].toUpperCase() + label.slice(1)} ${name} added`,
+        const queryResult = await db.query("INSERT INTO " + table + " (" + column + ") VALUES (?)", [name]);
+        const result = queryResult[0];
+        await writeAuditLog(request, "CREATE_" + label.toUpperCase(), (label[0].toUpperCase() + label.slice(1)) + " " + name + " added",
           { id: result.insertId, name: name });
-        response.status(201).json({ message: `${name} was added.`, id: result.insertId });
+        response.status(201).json({ message: name + " was added.", id: result.insertId });
       } catch (error) {
-        console.error(`Adding a ${label} failed:`, error.message);
-        response.status(500).json({ error: `Unable to add the ${label}` });
+        console.error("Adding a " + label + " failed:", error.message);
+        response.status(500).json({ error: "Unable to add the " + label });
       }
     };
   }
@@ -522,13 +586,13 @@ function registerManagerRoutes(app, deps) {
   app.post("/api/categories", addNamedRecord("categories", "category_name", "category", 50));
   app.post("/api/units", addNamedRecord("units", "unit_name", "unit", 20));
 
-  app.get("/api/reports/export", async (request, response) => {
+  app.get("/api/reports/export", async function (request, response) {
     const name = String(request.query.report || "");
     const plan = EXPORTS[name];
 
     if (!plan) {
       return response.status(400).json({
-        error: `There is no report called "${name}". Try one of: ${Object.keys(EXPORTS).join(", ")}.`
+        error: "There is no report called \"" + name + "\". Try one of: " + Object.keys(EXPORTS).join(", ") + "."
       });
     }
 
@@ -547,10 +611,10 @@ function registerManagerRoutes(app, deps) {
       if (data.cashier) forWhom = "cashier " + data.cashier.name;
 
       await writeAuditLog(request, "EXPORT_REPORT",
-        `${plan.title} exported for ${range.label}, ${forWhom}`,
+        plan.title + " exported for " + range.label + ", " + forWhom,
         { report: name, from: range.from, to: range.to, cashier_staff_id: data.cashier ? data.cashier.staff_id : null, rows: rows.length });
 
-      await sendWorkbook(response, `${plan.title}_${range.from}_to_${range.to}`, exportSheets(name, plan, data, range));
+      await sendWorkbook(response, plan.title + "_" + range.from + "_to_" + range.to, exportSheets(name, plan, data, range));
     } catch (error) {
       console.error("Report export failed:", error.message);
       response.status(500).json({ error: "Unable to build that export" });
@@ -559,7 +623,7 @@ function registerManagerRoutes(app, deps) {
 
   // The daily tally for a cashier or clerk: one day on the screen. A manager
   // sees the whole shop's day. canExport is a convenience, not the control.
-  app.get("/api/reports/daily-tally", async (request, response) => {
+  app.get("/api/reports/daily-tally", async function (request, response) {
     let day = null;
     if (isDateText(request.query.date)) {
       day = request.query.date;
@@ -576,31 +640,33 @@ function registerManagerRoutes(app, deps) {
     }
 
     try {
-      const [totalsRows] = await db.query(
-        `SELECT COUNT(*) AS sale_count,
-              COALESCE(SUM(s.final_amount), 0) AS billed,
-              COALESCE(SUM(s.discount), 0) AS discounts,
-              COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected,
-              COALESCE(SUM(s.change_given), 0) AS change_given,
-              COALESCE(SUM(CASE WHEN s.payment_method = 'Cash'
-                                THEN s.amount_paid - s.change_given ELSE 0 END), 0) AS cash_drawer
-       FROM sales s
-       WHERE s.is_archived = FALSE AND DATE(s.sale_date) = COALESCE(?, CURDATE()) ${scope}`,
+      const totalsRowsResult = await db.query(
+        "SELECT COUNT(*) AS sale_count, " +
+        "COALESCE(SUM(s.final_amount), 0) AS billed, " +
+        "COALESCE(SUM(s.discount), 0) AS discounts, " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected, " +
+        "COALESCE(SUM(s.change_given), 0) AS change_given, " +
+        "COALESCE(SUM(CASE WHEN s.payment_method = 'Cash' " +
+        "THEN s.amount_paid - s.change_given ELSE 0 END), 0) AS cash_drawer " +
+        "FROM sales s " +
+        "WHERE s.is_archived = FALSE AND DATE(s.sale_date) = COALESCE(?, CURDATE()) " + scope,
         params
       );
+      const totalsRows = totalsRowsResult[0];
 
       const totals = totalsRows[0];
 
-      const [methods] = await db.query(
-        `SELECT s.payment_method, COUNT(*) AS sale_count,
-              COALESCE(SUM(s.final_amount), 0) AS billed,
-              COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected
-       FROM sales s
-       WHERE s.is_archived = FALSE AND DATE(s.sale_date) = COALESCE(?, CURDATE()) ${scope}
-       GROUP BY s.payment_method
-       ORDER BY billed DESC`,
+      const methodsResult = await db.query(
+        "SELECT s.payment_method, COUNT(*) AS sale_count, " +
+        "COALESCE(SUM(s.final_amount), 0) AS billed, " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected " +
+        "FROM sales s " +
+        "WHERE s.is_archived = FALSE AND DATE(s.sale_date) = COALESCE(?, CURDATE()) " + scope +
+        " GROUP BY s.payment_method " +
+        "ORDER BY billed DESC",
         params
       );
+      const methods = methodsResult[0];
 
       let scopeName = "Your own sales";
       if (wholeShop) {
@@ -622,49 +688,55 @@ function registerManagerRoutes(app, deps) {
 
   // Dashboard headline numbers. Gross sales is what was billed and total income
   // what was collected; the difference is the outstanding balance.
-  app.get("/api/manager/summary", async (request, response) => {
+  app.get("/api/manager/summary", async function (request, response) {
     try {
-      const [salesRows] = await db.query(
-        `SELECT COUNT(*) AS sale_count,
-              COALESCE(SUM(final_amount), 0) AS gross_sales
-       FROM sales WHERE is_archived = FALSE`
+      const salesRowsResult = await db.query(
+        "SELECT COUNT(*) AS sale_count, " +
+        "COALESCE(SUM(final_amount), 0) AS gross_sales " +
+        "FROM sales WHERE is_archived = FALSE"
       );
+      const salesRows = salesRowsResult[0];
       const sales = salesRows[0];
       // the tile opens Reorder Alerts, so it counts what that screen lists
-      const [stockRows] = await db.query(
-        `SELECT COUNT(*) AS product_count FROM products p WHERE p.is_archived = FALSE`
+      const stockRowsResult = await db.query(
+        "SELECT COUNT(*) AS product_count FROM products p WHERE p.is_archived = FALSE"
       );
+      const stockRows = stockRowsResult[0];
       const stock = stockRows[0];
-      const [lowStockRows] = await db.query(LOW_STOCK_EFFECTIVE_SQL,
+      const lowStockRowsResult = await db.query(LOW_STOCK_EFFECTIVE_SQL,
         [SALES_WINDOW_DAYS, SALES_WINDOW_DAYS, SALES_WINDOW_DAYS]);
+      const lowStockRows = lowStockRowsResult[0];
       const lowStock = lowStockRows[0];
       stock.low_stock = lowStock.n;
-      const [deliveryRows] = await db.query(
-        `SELECT COALESCE(SUM(CASE WHEN status IN ('Pending','In Transit','Out for Delivery') THEN 1 ELSE 0 END), 0) AS in_progress,
-              COALESCE(SUM(CASE WHEN status IN ('Delayed','Failed') THEN 1 ELSE 0 END), 0) AS problem
-       FROM deliveries WHERE is_archived = FALSE`
+      const deliveryRowsResult = await db.query(
+        "SELECT COALESCE(SUM(CASE WHEN status IN ('Pending','In Transit','Out for Delivery') THEN 1 ELSE 0 END), 0) AS in_progress, " +
+        "COALESCE(SUM(CASE WHEN status IN ('Delayed','Failed') THEN 1 ELSE 0 END), 0) AS problem " +
+        "FROM deliveries WHERE is_archived = FALSE"
       );
+      const deliveryRows = deliveryRowsResult[0];
 
       const delivery = deliveryRows[0];
 
-      const [incomeRows] = await db.query(
-        `SELECT COALESCE(SUM(LEAST(amount_paid, final_amount)), 0) AS collected,
-              COALESCE(SUM(CASE WHEN DATE(sale_date) = CURDATE()
-                                THEN LEAST(amount_paid, final_amount) ELSE 0 END), 0) AS collected_today
-       FROM sales WHERE is_archived = FALSE`
+      const incomeRowsResult = await db.query(
+        "SELECT COALESCE(SUM(LEAST(amount_paid, final_amount)), 0) AS collected, " +
+        "COALESCE(SUM(CASE WHEN DATE(sale_date) = CURDATE() " +
+        "THEN LEAST(amount_paid, final_amount) ELSE 0 END), 0) AS collected_today " +
+        "FROM sales WHERE is_archived = FALSE"
       );
+      const incomeRows = incomeRowsResult[0];
 
       const income = incomeRows[0];
 
       // owed is the goods and the late penalties together; penalties is the
       // penalty part alone, so billed - collected + penalties = owed
-      const [creditsRows] = await db.query(
-        `SELECT COUNT(*) AS open_accounts,
-              COALESCE(SUM(GREATEST(amount_due - amount_paid, 0)), 0) AS owed,
-              COALESCE(SUM(GREATEST(amount_due - amount_paid, 0) - GREATEST(final_amount - refunded_amount - amount_paid, 0)), 0) AS penalties
-       FROM sales
-       WHERE is_archived = FALSE AND payment_status <> 'Paid'`
+      const creditsRowsResult = await db.query(
+        "SELECT COUNT(*) AS open_accounts, " +
+        "COALESCE(SUM(GREATEST(amount_due - amount_paid, 0)), 0) AS owed, " +
+        "COALESCE(SUM(GREATEST(amount_due - amount_paid, 0) - GREATEST(final_amount - refunded_amount - amount_paid, 0)), 0) AS penalties " +
+        "FROM sales " +
+        "WHERE is_archived = FALSE AND payment_status <> 'Paid'"
       );
+      const creditsRows = creditsRowsResult[0];
 
       const credits = creditsRows[0];
 
@@ -698,91 +770,92 @@ function registerManagerRoutes(app, deps) {
   // a quantity without trailing zeros: 2.500 reads 2.5, 40.000 reads 40. The
   // CHARACTER SET keeps the text in the tables' own collation: a bare CAST
   // takes the connection's, and the UNION below refuses to mix the two.
-  const qty = (column) =>
-    `IF(${column} = FLOOR(${column}), CAST(FLOOR(${column}) AS CHAR CHARACTER SET utf8mb4), ` +
-    `TRIM(TRAILING '0' FROM CAST(${column} AS CHAR CHARACTER SET utf8mb4)))`;
-  const ACTIVITY_SQL = `
-    SELECT a.kind, a.happened_at, a.ref, a.details,
-           COALESCE(st.full_name, 'Not recorded') AS staff_name,
-           COALESCE(r.role_name, '') AS role_name
-    FROM (
-      SELECT 'SALE' AS kind, s.sale_date AS happened_at, s.cashier_staff_id AS staff_id, s.sale_id AS ref,
-             CONCAT('Sale #', s.sale_id, ' for ',
-                    COALESCE(CONCAT(c.first_name, ' ', c.last_name), NULLIF(s.walk_in_name, ''), 'a walk-in customer'),
-                    ': ', FORMAT(s.final_amount, 2), ' by ', s.payment_method, ', ', s.payment_status,
-                    IF(s.is_archived, ' (voided)', '')) AS details
-      FROM sales s LEFT JOIN customers c ON c.customer_id = s.customer_id
-      UNION ALL
-      SELECT 'PAYMENT', p.payment_date, p.received_by_staff_id, p.sale_id,
-             CONCAT(COALESCE(CONCAT(c.first_name, ' ', c.last_name), 'Customer'), ' paid ', FORMAT(p.amount, 2),
-                    ' on sale #', p.sale_id, ' by ', p.payment_method)
-      FROM credit_payments p LEFT JOIN customers c ON c.customer_id = p.customer_id
-      UNION ALL
-      SELECT CASE ri.report_type WHEN 'Damaged' THEN 'DAMAGE' WHEN 'Refunded' THEN 'REFUND' WHEN 'Missing' THEN 'MISSING' ELSE 'RETURN' END,
-             ri.return_date, ri.reported_by_staff_id, ri.return_id,
-             CONCAT(pr.product_name, ' x', ${qty("ri.quantity")},
-                    IF(ri.sale_id IS NULL, '', CONCAT(' from sale #', ri.sale_id)),
-                    IF(ri.po_id IS NULL, '', CONCAT(' missing from purchase order #', ri.po_id)),
-                    IF(ri.reason IS NULL OR ri.reason = '', '', CONCAT(': ', ri.reason)),
-                    ' (', ri.status, ')')
-      FROM returned_items ri JOIN products pr ON pr.product_id = ri.product_id
-      UNION ALL
-      SELECT 'STOCK_ADJUST', sa.created_at, sa.adjusted_by_staff_id, sa.adjustment_id,
-             CONCAT(pr.product_name, ': ', sa.adjustment_type, ' ', ${qty("sa.quantity_before")}, ' to ',
-                    ${qty("sa.quantity_after")},
-                    IF(sa.unit_name IS NULL OR sa.unit_name = '', '', CONCAT(' ', sa.unit_name)),
-                    IF(sa.reason IS NULL OR sa.reason = '', '', CONCAT(' - ', sa.reason)))
-      FROM stock_adjustments sa JOIN products pr ON pr.product_id = sa.product_id
-      UNION ALL
-      SELECT 'DELIVERY', COALESCE(d.booked_date, d.scheduled_date, d.updated_at), d.delivery_staff_id, d.delivery_id,
-             CONCAT('Sale #', d.sale_id, ' to ',
-                    COALESCE(NULLIF(d.contact_name, ''), CONCAT(c.first_name, ' ', c.last_name),
-                             NULLIF(s.walk_in_name, ''), 'the customer'),
-                    ': ', d.status,
-                    IF(d.delivered_at IS NULL, '', CONCAT(', delivered ', DATE_FORMAT(d.delivered_at, '%e %b'))))
-      FROM deliveries d
-      LEFT JOIN sales s ON s.sale_id = d.sale_id
-      LEFT JOIN customers c ON c.customer_id = s.customer_id
-      UNION ALL
-      SELECT 'PURCHASE_ORDER', po.order_date, po.raised_by_staff_id, po.po_id,
-             CONCAT('PO #', po.po_id, ' to ', sup.supplier_name, ': ',
-                    (SELECT COUNT(*) FROM purchase_order_items i WHERE i.po_id = po.po_id), ' line(s) (', po.status, ')')
-      FROM purchase_orders po JOIN suppliers sup ON sup.supplier_id = po.supplier_id
-      UNION ALL
-      SELECT IF(po.status = 'Cancelled', 'PO_DECLINED', 'PO_CONFIRMED'), po.confirmed_at, po.confirmed_by_staff_id, po.po_id,
-             CONCAT('PO #', po.po_id, ' to ', sup.supplier_name,
-                    IF(po.status = 'Cancelled', ' declined', ' confirmed'),
-                    IF(po.decision_note IS NULL OR po.decision_note = '', '', CONCAT(' - ', po.decision_note)))
-      FROM purchase_orders po JOIN suppliers sup ON sup.supplier_id = po.supplier_id
-      WHERE po.confirmed_at IS NOT NULL
-      UNION ALL
-      SELECT 'CREDIT_REQUEST', cr.created_at, cr.requested_by_staff_id, cr.request_id,
-             CONCAT(c.first_name, ' ', c.last_name, ': ', FORMAT(cr.previous_limit, 2), ' to ',
-                    FORMAT(cr.requested_limit, 2),
-                    IF(cr.reason IS NULL OR cr.reason = '', '', CONCAT(' - ', cr.reason)), ' (', cr.status, ')')
-      FROM credit_requests cr JOIN customers c ON c.customer_id = cr.customer_id
-      UNION ALL
-      SELECT IF(cr.status = 'Approved', 'CREDIT_APPROVED', 'CREDIT_DECLINED'), cr.decided_at,
-             cr.decided_by_staff_id, cr.request_id,
-             CONCAT(c.first_name, ' ', c.last_name, ': request #', cr.request_id, ' ',
-                    IF(cr.status = 'Approved', CONCAT('approved at ', FORMAT(cr.requested_limit, 2)), 'declined'),
-                    IF(cr.decision_note IS NULL OR cr.decision_note = '', '', CONCAT(' - ', cr.decision_note)))
-      FROM credit_requests cr JOIN customers c ON c.customer_id = cr.customer_id
-      WHERE cr.decided_at IS NOT NULL
-      UNION ALL
-      SELECT 'CREDIT_LIMIT', cc.updated_at, cc.updated_by_staff_id, cc.customer_id,
-             CONCAT(c.first_name, ' ', c.last_name, ': limit ', FORMAT(cc.credit_limit, 2), ', ', cc.standing)
-      FROM customer_credits cc JOIN customers c ON c.customer_id = cc.customer_id
-    ) a
-    LEFT JOIN staff st ON st.staff_id = a.staff_id
-    LEFT JOIN roles r ON r.role_id = st.role_id
-    ORDER BY a.happened_at DESC
-    LIMIT ?`;
+  function qty(column) {
+    return "IF(" + column + " = FLOOR(" + column + "), CAST(FLOOR(" + column + ") AS CHAR CHARACTER SET utf8mb4), " +
+      "TRIM(TRAILING '0' FROM CAST(" + column + " AS CHAR CHARACTER SET utf8mb4)))";
+  }
+  const ACTIVITY_SQL = "SELECT a.kind, a.happened_at, a.ref, a.details, " +
+      "COALESCE(st.full_name, 'Not recorded') AS staff_name, " +
+      "COALESCE(r.role_name, '') AS role_name " +
+      "FROM ( " +
+      "SELECT 'SALE' AS kind, s.sale_date AS happened_at, s.cashier_staff_id AS staff_id, s.sale_id AS ref, " +
+      "CONCAT('Sale #', s.sale_id, ' for ', " +
+      "COALESCE(CONCAT(c.first_name, ' ', c.last_name), NULLIF(s.walk_in_name, ''), 'a walk-in customer'), " +
+      "': ', FORMAT(s.final_amount, 2), ' by ', s.payment_method, ', ', s.payment_status, " +
+      "IF(s.is_archived, ' (voided)', '')) AS details " +
+      "FROM sales s LEFT JOIN customers c ON c.customer_id = s.customer_id " +
+      "UNION ALL " +
+      "SELECT 'PAYMENT', p.payment_date, p.received_by_staff_id, p.sale_id, " +
+      "CONCAT(COALESCE(CONCAT(c.first_name, ' ', c.last_name), 'Customer'), ' paid ', FORMAT(p.amount, 2), " +
+      "' on sale #', p.sale_id, ' by ', p.payment_method) " +
+      "FROM credit_payments p LEFT JOIN customers c ON c.customer_id = p.customer_id " +
+      "UNION ALL " +
+      "SELECT CASE ri.report_type WHEN 'Damaged' THEN 'DAMAGE' WHEN 'Refunded' THEN 'REFUND' WHEN 'Missing' THEN 'MISSING' ELSE 'RETURN' END, " +
+      "ri.return_date, ri.reported_by_staff_id, ri.return_id, " +
+      "CONCAT(pr.product_name, ' x', " + qty("ri.quantity") + ", " +
+      "IF(ri.sale_id IS NULL, '', CONCAT(' from sale #', ri.sale_id)), " +
+      "IF(ri.po_id IS NULL, '', CONCAT(' missing from purchase order #', ri.po_id)), " +
+      "IF(ri.reason IS NULL OR ri.reason = '', '', CONCAT(': ', ri.reason)), " +
+      "' (', ri.status, ')') " +
+      "FROM returned_items ri JOIN products pr ON pr.product_id = ri.product_id " +
+      "UNION ALL " +
+      "SELECT 'STOCK_ADJUST', sa.created_at, sa.adjusted_by_staff_id, sa.adjustment_id, " +
+      "CONCAT(pr.product_name, ': ', sa.adjustment_type, ' ', " + qty("sa.quantity_before") + ", ' to ', " +
+      qty("sa.quantity_after") + ", " +
+      "IF(sa.unit_name IS NULL OR sa.unit_name = '', '', CONCAT(' ', sa.unit_name)), " +
+      "IF(sa.reason IS NULL OR sa.reason = '', '', CONCAT(' - ', sa.reason))) " +
+      "FROM stock_adjustments sa JOIN products pr ON pr.product_id = sa.product_id " +
+      "UNION ALL " +
+      "SELECT 'DELIVERY', COALESCE(d.booked_date, d.scheduled_date, d.updated_at), d.delivery_staff_id, d.delivery_id, " +
+      "CONCAT('Sale #', d.sale_id, ' to ', " +
+      "COALESCE(NULLIF(d.contact_name, ''), CONCAT(c.first_name, ' ', c.last_name), " +
+      "NULLIF(s.walk_in_name, ''), 'the customer'), " +
+      "': ', d.status, " +
+      "IF(d.delivered_at IS NULL, '', CONCAT(', delivered ', DATE_FORMAT(d.delivered_at, '%e %b')))) " +
+      "FROM deliveries d " +
+      "LEFT JOIN sales s ON s.sale_id = d.sale_id " +
+      "LEFT JOIN customers c ON c.customer_id = s.customer_id " +
+      "UNION ALL " +
+      "SELECT 'PURCHASE_ORDER', po.order_date, po.raised_by_staff_id, po.po_id, " +
+      "CONCAT('PO #', po.po_id, ' to ', sup.supplier_name, ': ', " +
+      "(SELECT COUNT(*) FROM purchase_order_items i WHERE i.po_id = po.po_id), ' line(s) (', po.status, ')') " +
+      "FROM purchase_orders po JOIN suppliers sup ON sup.supplier_id = po.supplier_id " +
+      "UNION ALL " +
+      "SELECT IF(po.status = 'Cancelled', 'PO_DECLINED', 'PO_CONFIRMED'), po.confirmed_at, po.confirmed_by_staff_id, po.po_id, " +
+      "CONCAT('PO #', po.po_id, ' to ', sup.supplier_name, " +
+      "IF(po.status = 'Cancelled', ' declined', ' confirmed'), " +
+      "IF(po.decision_note IS NULL OR po.decision_note = '', '', CONCAT(' - ', po.decision_note))) " +
+      "FROM purchase_orders po JOIN suppliers sup ON sup.supplier_id = po.supplier_id " +
+      "WHERE po.confirmed_at IS NOT NULL " +
+      "UNION ALL " +
+      "SELECT 'CREDIT_REQUEST', cr.created_at, cr.requested_by_staff_id, cr.request_id, " +
+      "CONCAT(c.first_name, ' ', c.last_name, ': ', FORMAT(cr.previous_limit, 2), ' to ', " +
+      "FORMAT(cr.requested_limit, 2), " +
+      "IF(cr.reason IS NULL OR cr.reason = '', '', CONCAT(' - ', cr.reason)), ' (', cr.status, ')') " +
+      "FROM credit_requests cr JOIN customers c ON c.customer_id = cr.customer_id " +
+      "UNION ALL " +
+      "SELECT IF(cr.status = 'Approved', 'CREDIT_APPROVED', 'CREDIT_DECLINED'), cr.decided_at, " +
+      "cr.decided_by_staff_id, cr.request_id, " +
+      "CONCAT(c.first_name, ' ', c.last_name, ': request #', cr.request_id, ' ', " +
+      "IF(cr.status = 'Approved', CONCAT('approved at ', FORMAT(cr.requested_limit, 2)), 'declined'), " +
+      "IF(cr.decision_note IS NULL OR cr.decision_note = '', '', CONCAT(' - ', cr.decision_note))) " +
+      "FROM credit_requests cr JOIN customers c ON c.customer_id = cr.customer_id " +
+      "WHERE cr.decided_at IS NOT NULL " +
+      "UNION ALL " +
+      "SELECT 'CREDIT_LIMIT', cc.updated_at, cc.updated_by_staff_id, cc.customer_id, " +
+      "CONCAT(c.first_name, ' ', c.last_name, ': limit ', FORMAT(cc.credit_limit, 2), ', ', cc.standing) " +
+      "FROM customer_credits cc JOIN customers c ON c.customer_id = cc.customer_id " +
+      ") a " +
+      "LEFT JOIN staff st ON st.staff_id = a.staff_id " +
+      "LEFT JOIN roles r ON r.role_id = st.role_id " +
+      "ORDER BY a.happened_at DESC " +
+      "LIMIT ?";
 
-  app.get("/api/reports/activity", async (request, response) => {
+  app.get("/api/reports/activity", async function (request, response) {
     const limit = Math.min(Math.max(parseInt(request.query.limit, 10) || 500, 1), 2000);
     try {
-      const [rows] = await db.query(ACTIVITY_SQL, [limit]);
+      const rowsResult = await db.query(ACTIVITY_SQL, [limit]);
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Activity report failed:", error.message);
@@ -790,48 +863,51 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  app.get("/api/reports/overview", async (request, response) => {
+  app.get("/api/reports/overview", async function (request, response) {
     try {
-      const [methods] = await db.query(
-        `SELECT payment_method,
-              COUNT(*) AS sale_count,
-              COALESCE(SUM(final_amount), 0) AS total_amount,
-              COALESCE(SUM(CASE WHEN payment_status = 'Paid' THEN final_amount ELSE 0 END), 0) AS paid_amount,
-              COALESCE(SUM(CASE WHEN payment_status <> 'Paid' THEN amount_due - amount_paid ELSE 0 END), 0) AS balance_due
-       FROM sales WHERE is_archived = FALSE
-       GROUP BY payment_method
-       ORDER BY total_amount DESC`
+      const methodsResult = await db.query(
+        "SELECT payment_method, " +
+        "COUNT(*) AS sale_count, " +
+        "COALESCE(SUM(final_amount), 0) AS total_amount, " +
+        "COALESCE(SUM(CASE WHEN payment_status = 'Paid' THEN final_amount ELSE 0 END), 0) AS paid_amount, " +
+        "COALESCE(SUM(CASE WHEN payment_status <> 'Paid' THEN amount_due - amount_paid ELSE 0 END), 0) AS balance_due " +
+        "FROM sales WHERE is_archived = FALSE " +
+        "GROUP BY payment_method " +
+        "ORDER BY total_amount DESC"
       );
+      const methods = methodsResult[0];
 
-      const [unpaid] = await db.query(
-        `SELECT s.sale_id, s.payment_method, s.payment_status, s.sale_date,
-              s.final_amount, s.amount_paid,
-              (s.amount_due - s.amount_paid) AS balance_due,
-              ${SALE_CUSTOMER_SQL} AS customer_name,
-              st.full_name AS cashier_name
-       FROM sales s
-       LEFT JOIN customers c ON c.customer_id = s.customer_id
-       JOIN staff st ON st.staff_id = s.cashier_staff_id
-       WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid'
-       ORDER BY s.sale_date DESC`
+      const unpaidResult = await db.query(
+        "SELECT s.sale_id, s.payment_method, s.payment_status, s.sale_date, " +
+        "s.final_amount, s.amount_paid, " +
+        "(s.amount_due - s.amount_paid) AS balance_due, " +
+        SALE_CUSTOMER_SQL + " AS customer_name, " +
+        "st.full_name AS cashier_name " +
+        "FROM sales s " +
+        "LEFT JOIN customers c ON c.customer_id = s.customer_id " +
+        "JOIN staff st ON st.staff_id = s.cashier_staff_id " +
+        "WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid' " +
+        "ORDER BY s.sale_date DESC"
       );
+      const unpaid = unpaidResult[0];
 
-      const [loyal] = await db.query(
-        `SELECT c.customer_id,
-              TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS customer_name,
-              c.phone,
-              COUNT(s.sale_id) AS purchase_count,
-              COALESCE(SUM(s.final_amount), 0) AS total_spent,
-              COALESCE(SUM(CASE WHEN s.payment_status <> 'Paid' THEN s.amount_due - s.amount_paid ELSE 0 END), 0) AS balance_due,
-              MAX(s.sale_date) AS last_purchase
-       FROM customers c
-       JOIN sales s ON s.customer_id = c.customer_id AND s.is_archived = FALSE
-       GROUP BY c.customer_id, c.first_name, c.last_name, c.phone
-       HAVING COUNT(s.sale_id) >= 2
-       ORDER BY purchase_count DESC, total_spent DESC`
+      const loyalResult = await db.query(
+        "SELECT c.customer_id, " +
+        "TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS customer_name, " +
+        "c.phone, " +
+        "COUNT(s.sale_id) AS purchase_count, " +
+        "COALESCE(SUM(s.final_amount), 0) AS total_spent, " +
+        "COALESCE(SUM(CASE WHEN s.payment_status <> 'Paid' THEN s.amount_due - s.amount_paid ELSE 0 END), 0) AS balance_due, " +
+        "MAX(s.sale_date) AS last_purchase " +
+        "FROM customers c " +
+        "JOIN sales s ON s.customer_id = c.customer_id AND s.is_archived = FALSE " +
+        "GROUP BY c.customer_id, c.first_name, c.last_name, c.phone " +
+        "HAVING COUNT(s.sale_id) >= 2 " +
+        "ORDER BY purchase_count DESC, total_spent DESC"
       );
+      const loyal = loyalResult[0];
 
-      response.json({ methods, unpaid, loyal });
+      response.json({ methods: methods, unpaid: unpaid, loyal: loyal });
     } catch (error) {
       console.error("Reports overview failed:", error.message);
       response.status(500).json({ error: error.message });
@@ -845,7 +921,7 @@ function registerManagerRoutes(app, deps) {
   // nothing about a balance is stored, so nothing can go stale.
   // ==========================================
 
-  app.get("/api/credit/customers", async (request, response) => {
+  app.get("/api/credit/customers", async function (request, response) {
     const standing = String(request.query.standing || "all");
     const search = String(request.query.search || "").trim();
 
@@ -867,19 +943,20 @@ function registerManagerRoutes(app, deps) {
 
     let filter = "";
     if (where.length > 0) {
-      filter = ` WHERE ${where.join(" AND ")}`;
+      filter = " WHERE " + where.join(" AND ");
     }
 
     try {
-      const [rows] = await db.query(
-        `SELECT v.*,
-              (SELECT COUNT(*) FROM credit_requests r
-               WHERE r.customer_id = v.customer_id AND r.status = 'Pending') AS pending_requests
-       FROM vw_customer_credit v
-       ${filter}
-       ORDER BY v.current_credit DESC, v.customer_name`,
+      const rowsResult = await db.query(
+        "SELECT v.*, " +
+        "(SELECT COUNT(*) FROM credit_requests r " +
+        "WHERE r.customer_id = v.customer_id AND r.status = 'Pending') AS pending_requests " +
+        "FROM vw_customer_credit v " +
+        filter +
+        " ORDER BY v.current_credit DESC, v.customer_name",
         params
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Credit list failed:", error.message);
@@ -892,26 +969,27 @@ function registerManagerRoutes(app, deps) {
   // that vw_customer_credit ages an account by; a Credit sale past it carries
   // the late penalty, and the balance is measured against the bill with the
   // penalty on it (amount_due).
-  app.get("/api/credit/open-sales", async (request, response) => {
+  app.get("/api/credit/open-sales", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT s.sale_id, s.sale_date, s.customer_id,
-              CONCAT(c.first_name, ' ', c.last_name) AS customer_name, c.phone,
-              s.payment_method, s.payment_status, s.final_amount, s.amount_paid,
-              s.penalty_rate, s.penalty_months, s.penalty_amount, s.penalty_applied_at, s.amount_due,
-              GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due,
-              DATEDIFF(CURDATE(), DATE(s.sale_date)) AS days_old,
-              DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY) AS due_date,
-              cc.standing,
-              (SELECT COUNT(*) FROM credit_payments cp WHERE cp.sale_id = s.sale_id) AS payment_count,
-              (SELECT MAX(cp.payment_date) FROM credit_payments cp WHERE cp.sale_id = s.sale_id) AS last_payment
-       FROM sales s
-       JOIN customers c ON c.customer_id = s.customer_id
-       LEFT JOIN vw_customer_credit cc ON cc.customer_id = s.customer_id
-       WHERE s.is_archived = FALSE
-         AND s.customer_id IS NOT NULL
-         AND s.amount_due - s.amount_paid > 0
-       ORDER BY s.sale_date ASC`);
+      const rowsResult = await db.query(
+        "SELECT s.sale_id, s.sale_date, s.customer_id, " +
+        "CONCAT(c.first_name, ' ', c.last_name) AS customer_name, c.phone, " +
+        "s.payment_method, s.payment_status, s.final_amount, s.amount_paid, " +
+        "s.penalty_rate, s.penalty_months, s.penalty_amount, s.penalty_applied_at, s.amount_due, " +
+        "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
+        "DATEDIFF(CURDATE(), DATE(s.sale_date)) AS days_old, " +
+        "DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY) AS due_date, " +
+        "cc.standing, " +
+        "(SELECT COUNT(*) FROM credit_payments cp WHERE cp.sale_id = s.sale_id) AS payment_count, " +
+        "(SELECT MAX(cp.payment_date) FROM credit_payments cp WHERE cp.sale_id = s.sale_id) AS last_payment " +
+        "FROM sales s " +
+        "JOIN customers c ON c.customer_id = s.customer_id " +
+        "LEFT JOIN vw_customer_credit cc ON cc.customer_id = s.customer_id " +
+        "WHERE s.is_archived = FALSE " +
+        "AND s.customer_id IS NOT NULL " +
+        "AND s.amount_due - s.amount_paid > 0 " +
+        "ORDER BY s.sale_date ASC");
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Open sales failed:", error.message);
@@ -919,29 +997,31 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  app.get("/api/credit/customers/:customerId", async (request, response) => {
+  app.get("/api/credit/customers/:customerId", async function (request, response) {
     try {
-      const [rows] = await db.query(
+      const rowsResult = await db.query(
         "SELECT * FROM vw_customer_credit WHERE customer_id = ?",
         [request.params.customerId]
       );
+      const rows = rowsResult[0];
 
       if (rows.length === 0) {
         return response.status(404).json({ error: "That customer was not found." });
       }
 
-      const [requests] = await db.query(
-        `SELECT r.*, rb.full_name AS requested_by, db.full_name AS decided_by
-       FROM credit_requests r
-       LEFT JOIN staff rb ON rb.staff_id = r.requested_by_staff_id
-       LEFT JOIN staff db ON db.staff_id = r.decided_by_staff_id
-       WHERE r.customer_id = ?
-       ORDER BY r.request_id DESC
-       LIMIT 20`,
+      const requestsResult = await db.query(
+        "SELECT r.*, rb.full_name AS requested_by, db.full_name AS decided_by " +
+        "FROM credit_requests r " +
+        "LEFT JOIN staff rb ON rb.staff_id = r.requested_by_staff_id " +
+        "LEFT JOIN staff db ON db.staff_id = r.decided_by_staff_id " +
+        "WHERE r.customer_id = ? " +
+        "ORDER BY r.request_id DESC " +
+        "LIMIT 20",
         [request.params.customerId]
       );
+      const requests = requestsResult[0];
 
-      response.json({ credit: rows[0], requests });
+      response.json({ credit: rows[0], requests: requests });
     } catch (error) {
       console.error("Credit read failed:", error.message);
       response.status(500).json({ error: error.message });
@@ -951,8 +1031,11 @@ function registerManagerRoutes(app, deps) {
   // penaltyRate: blank or null means the shop's late-payment rate applies to
   // this account; a number, 1 to 3 percent a month, is the manager's rate for
   // this account alone
-  app.put("/api/credit/customers/:customerId/limit", requireRole(MANAGER), async (request, response) => {
-    const { creditLimit, standing, notes, penaltyRate } = request.body;
+  app.put("/api/credit/customers/:customerId/limit", requireRole(MANAGER), async function (request, response) {
+    const creditLimit = request.body.creditLimit;
+    const standing = request.body.standing;
+    const notes = request.body.notes;
+    const penaltyRate = request.body.penaltyRate;
 
     const limit = Number(creditLimit);
     if (!Number.isFinite(limit) || limit < 0) {
@@ -975,11 +1058,12 @@ function registerManagerRoutes(app, deps) {
     }
 
     try {
-      const [before] = await db.query(
-        `SELECT customer_name, credit_limit, manual_standing AS standing, penalty_rate_override
-         FROM vw_customer_credit WHERE customer_id = ?`,
+      const beforeResult = await db.query(
+        "SELECT customer_name, credit_limit, manual_standing AS standing, penalty_rate_override " +
+        "FROM vw_customer_credit WHERE customer_id = ?",
         [request.params.customerId]
       );
+      const before = beforeResult[0];
 
       const output = await managerProcedures.setCreditLimit(
         [request.params.customerId, limit, standing || "Good", ownRate,
@@ -1002,9 +1086,9 @@ function registerManagerRoutes(app, deps) {
         };
       }
 
-      let details = `${customerName} set to ${limit} (${standing || "Good"})`;
+      let details = customerName + " set to " + limit + " (" + (standing || "Good") + ")";
       if (ownRate !== null) {
-        details += `, late-payment rate ${ownRate}%`;
+        details += ", late-payment rate " + ownRate + "%";
       }
 
       await writeAuditLog(
@@ -1035,20 +1119,21 @@ function registerManagerRoutes(app, deps) {
   // account on its credit terms. The charge itself is made by
   // sp_apply_late_penalties, run at startup and every hour.
   // ==========================================
-  app.get("/api/credit/policy", async (request, response) => {
+  app.get("/api/credit/policy", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `SELECT cfg.penalty_rate, cfg.updated_at, st.full_name AS updated_by,
-              (SELECT COUNT(*) FROM customer_credits WHERE penalty_rate IS NOT NULL) AS own_rate_accounts,
-              (SELECT COUNT(*) FROM sales s
-               WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid' AND s.penalty_amount > 0) AS penalised_sales,
-              (SELECT COALESCE(SUM(LEAST(s.penalty_amount, GREATEST(s.amount_due - s.amount_paid, 0))), 0)
-               FROM sales s
-               WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid') AS penalties_owed
-         FROM store_settings cfg
-         LEFT JOIN staff st ON st.staff_id = cfg.updated_by_staff_id
-         WHERE cfg.setting_id = 1`
+      const rowsResult = await db.query(
+        "SELECT cfg.penalty_rate, cfg.updated_at, st.full_name AS updated_by, " +
+        "(SELECT COUNT(*) FROM customer_credits WHERE penalty_rate IS NOT NULL) AS own_rate_accounts, " +
+        "(SELECT COUNT(*) FROM sales s " +
+        "WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid' AND s.penalty_amount > 0) AS penalised_sales, " +
+        "(SELECT COALESCE(SUM(LEAST(s.penalty_amount, GREATEST(s.amount_due - s.amount_paid, 0))), 0) " +
+        "FROM sales s " +
+        "WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid') AS penalties_owed " +
+        "FROM store_settings cfg " +
+        "LEFT JOIN staff st ON st.staff_id = cfg.updated_by_staff_id " +
+        "WHERE cfg.setting_id = 1"
       );
+      const rows = rowsResult[0];
       response.json(rows[0] || { penalty_rate: "3.00", updated_at: null, updated_by: null,
                                  own_rate_accounts: 0, penalised_sales: 0, penalties_owed: 0 });
     } catch (error) {
@@ -1057,7 +1142,7 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  app.put("/api/credit/policy", requireRole(MANAGER), async (request, response) => {
+  app.put("/api/credit/policy", requireRole(MANAGER), async function (request, response) {
     const rate = Number((request.body || {}).penaltyRate);
     if (!Number.isFinite(rate) || rate < 1 || rate > 3) {
       return response.status(400).json({
@@ -1066,7 +1151,8 @@ function registerManagerRoutes(app, deps) {
     }
 
     try {
-      const [before] = await db.query("SELECT penalty_rate FROM store_settings WHERE setting_id = 1");
+      const beforeResult = await db.query("SELECT penalty_rate FROM store_settings WHERE setting_id = 1");
+      const before = beforeResult[0];
 
       const output = await managerProcedures.setPenaltyPolicy(
         [rate, getActorId(request)]
@@ -1082,7 +1168,7 @@ function registerManagerRoutes(app, deps) {
       }
 
       await writeAuditLog(request, "UPDATE_PENALTY_POLICY",
-        `Late-payment penalty set to ${rate}% a month of the unpaid balance`,
+        "Late-payment penalty set to " + rate + "% a month of the unpaid balance",
         { changes: fieldChanges(oldValues, { penalty_rate: rate }) });
 
       response.json({ message: output.message, penalty_rate: rate.toFixed(2) });
@@ -1092,7 +1178,7 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  app.get("/api/credit/requests", async (request, response) => {
+  app.get("/api/credit/requests", async function (request, response) {
     const status = String(request.query.status || "all");
 
     const where = [];
@@ -1109,23 +1195,24 @@ function registerManagerRoutes(app, deps) {
     }
 
     try {
-      const [rows] = await db.query(
-        `SELECT r.*,
-              TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS customer_name,
-              c.phone,
-              rb.full_name AS requested_by,
-              db.full_name AS decided_by,
-              v.current_credit, v.standing
-       FROM credit_requests r
-       JOIN customers c ON c.customer_id = r.customer_id
-       LEFT JOIN vw_customer_credit v ON v.customer_id = r.customer_id
-       LEFT JOIN staff rb ON rb.staff_id = r.requested_by_staff_id
-       LEFT JOIN staff db ON db.staff_id = r.decided_by_staff_id
-       ${whereText}
-       ORDER BY FIELD(r.status, 'Pending', 'Approved', 'Declined'), r.request_id DESC
-       LIMIT 200`,
+      const rowsResult = await db.query(
+        "SELECT r.*, " +
+        "TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS customer_name, " +
+        "c.phone, " +
+        "rb.full_name AS requested_by, " +
+        "db.full_name AS decided_by, " +
+        "v.current_credit, v.standing " +
+        "FROM credit_requests r " +
+        "JOIN customers c ON c.customer_id = r.customer_id " +
+        "LEFT JOIN vw_customer_credit v ON v.customer_id = r.customer_id " +
+        "LEFT JOIN staff rb ON rb.staff_id = r.requested_by_staff_id " +
+        "LEFT JOIN staff db ON db.staff_id = r.decided_by_staff_id " +
+        whereText +
+        " ORDER BY FIELD(r.status, 'Pending', 'Approved', 'Declined'), r.request_id DESC " +
+        "LIMIT 200",
         params
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Credit requests failed:", error.message);
@@ -1133,8 +1220,10 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  app.post("/api/credit/requests", async (request, response) => {
-    const { customerId, requestedLimit, reason } = request.body;
+  app.post("/api/credit/requests", async function (request, response) {
+    const customerId = request.body.customerId;
+    const requestedLimit = request.body.requestedLimit;
+    const reason = request.body.reason;
 
     const limit = Number(requestedLimit);
     if (!customerId || !Number.isFinite(limit) || limit <= 0) {
@@ -1148,7 +1237,7 @@ function registerManagerRoutes(app, deps) {
     if (why.length < MINIMUM_REQUEST_REASON) {
       return response.status(400).json({
         error: "Say why the limit should go up, so the manager deciding it can see the reason " +
-               `(at least ${MINIMUM_REQUEST_REASON} characters).`
+               "(at least " + MINIMUM_REQUEST_REASON + " characters)."
       });
     }
     if (why.length > 255) {
@@ -1165,7 +1254,7 @@ function registerManagerRoutes(app, deps) {
       }
 
       await writeAuditLog(request, "CREDIT_REQUEST",
-        `Extension to ${limit} asked for on customer #${customerId}`,
+        "Extension to " + limit + " asked for on customer #" + customerId,
         { customer_id: Number(customerId), requested_limit: limit, reason: why });
 
       response.json({ message: output.message, requestId: output.request_id });
@@ -1175,7 +1264,7 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  app.post("/api/credit/requests/:requestId/decide", requireRole(MANAGER), async (request, response) => {
+  app.post("/api/credit/requests/:requestId/decide", requireRole(MANAGER), async function (request, response) {
     const approve = request.body.approve === true;
     const note = request.body.note;
 
@@ -1204,7 +1293,7 @@ function registerManagerRoutes(app, deps) {
       await writeAuditLog(
         request,
         action,
-        `Request #${request.params.requestId} ${word}`,
+        "Request #" + request.params.requestId + " " + word,
         { request_id: Number(request.params.requestId), approved: approve, note: note || null }
       );
 
@@ -1216,70 +1305,75 @@ function registerManagerRoutes(app, deps) {
   });
 
   // One customer in full: what they bought beside what they have paid.
-  app.get("/api/customers/:customerId/history", async (request, response) => {
+  app.get("/api/customers/:customerId/history", async function (request, response) {
     const customerId = request.params.customerId;
 
     try {
-      const [credit] = await db.query(
+      const creditResult = await db.query(
         "SELECT * FROM vw_customer_credit WHERE customer_id = ?", [customerId]);
+      const credit = creditResult[0];
 
       if (credit.length === 0) {
         return response.status(404).json({ error: "That customer was not found." });
       }
 
-      const [purchases] = await db.query(
-        `SELECT s.sale_id, s.sale_date, s.total_amount, s.discount, s.final_amount,
-              s.amount_paid, s.payment_method, s.payment_status, s.reference_no,
-              s.is_archived, s.penalty_rate, s.penalty_months, s.penalty_amount, s.penalty_applied_at, s.amount_due,
-              GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due,
-              st.full_name AS cashier_name,
-              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.sale_id) AS item_count,
-              d.delivery_id, d.status AS delivery_status
-       FROM sales s
-       JOIN staff st ON st.staff_id = s.cashier_staff_id
-       LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE
-       WHERE s.customer_id = ?
-       ORDER BY s.sale_date DESC`,
+      const purchasesResult = await db.query(
+        "SELECT s.sale_id, s.sale_date, s.total_amount, s.discount, s.final_amount, " +
+        "s.amount_paid, s.payment_method, s.payment_status, s.reference_no, " +
+        "s.is_archived, s.penalty_rate, s.penalty_months, s.penalty_amount, s.penalty_applied_at, s.amount_due, " +
+        "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
+        "st.full_name AS cashier_name, " +
+        "(SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.sale_id) AS item_count, " +
+        "d.delivery_id, d.status AS delivery_status " +
+        "FROM sales s " +
+        "JOIN staff st ON st.staff_id = s.cashier_staff_id " +
+        "LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE " +
+        "WHERE s.customer_id = ? " +
+        "ORDER BY s.sale_date DESC",
         [customerId]
       );
+      const purchases = purchasesResult[0];
 
-      const [payments] = await db.query(
-        `SELECT p.payment_id, p.sale_id, p.amount, p.payment_method,
-              p.reference_no, p.payment_date,
-              COALESCE(st.full_name, 'Unknown') AS received_by
-       FROM credit_payments p
-       LEFT JOIN staff st ON st.staff_id = p.received_by_staff_id
-       WHERE p.customer_id = ?
-       ORDER BY p.payment_date DESC`,
+      const paymentsResult = await db.query(
+        "SELECT p.payment_id, p.sale_id, p.amount, p.payment_method, " +
+        "p.reference_no, p.payment_date, " +
+        "COALESCE(st.full_name, 'Unknown') AS received_by " +
+        "FROM credit_payments p " +
+        "LEFT JOIN staff st ON st.staff_id = p.received_by_staff_id " +
+        "WHERE p.customer_id = ? " +
+        "ORDER BY p.payment_date DESC",
         [customerId]
       );
+      const payments = paymentsResult[0];
 
-      const [requests] = await db.query(
-        `SELECT r.*, rb.full_name AS requested_by, db.full_name AS decided_by
-       FROM credit_requests r
-       LEFT JOIN staff rb ON rb.staff_id = r.requested_by_staff_id
-       LEFT JOIN staff db ON db.staff_id = r.decided_by_staff_id
-       WHERE r.customer_id = ?
-       ORDER BY r.request_id DESC`,
+      const requestsResult = await db.query(
+        "SELECT r.*, rb.full_name AS requested_by, db.full_name AS decided_by " +
+        "FROM credit_requests r " +
+        "LEFT JOIN staff rb ON rb.staff_id = r.requested_by_staff_id " +
+        "LEFT JOIN staff db ON db.staff_id = r.decided_by_staff_id " +
+        "WHERE r.customer_id = ? " +
+        "ORDER BY r.request_id DESC",
         [customerId]
       );
+      const requests = requestsResult[0];
 
-      const [products] = await db.query(
-        `SELECT p.product_name, u.unit_name,
-              SUM(si.quantity) AS units, SUM(si.subtotal) AS spent,
-              MAX(s.sale_date) AS last_bought
-       FROM sale_items si
-       JOIN sales s ON s.sale_id = si.sale_id
-       JOIN products p ON p.product_id = si.product_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       WHERE s.customer_id = ? AND s.is_archived = FALSE
-       GROUP BY p.product_id, p.product_name, u.unit_name
-       ORDER BY spent DESC
-       LIMIT 10`,
+      const productsResult = await db.query(
+        "SELECT p.product_name, u.unit_name, " +
+        "SUM(si.quantity) AS units, SUM(si.subtotal) AS spent, " +
+        "MAX(s.sale_date) AS last_bought " +
+        "FROM sale_items si " +
+        "JOIN sales s ON s.sale_id = si.sale_id " +
+        "JOIN products p ON p.product_id = si.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "WHERE s.customer_id = ? AND s.is_archived = FALSE " +
+        "GROUP BY p.product_id, p.product_name, u.unit_name " +
+        "ORDER BY spent DESC " +
+        "LIMIT 10",
         [customerId]
       );
+      const products = productsResult[0];
 
-      response.json({ credit: credit[0], purchases, payments, requests, products });
+      response.json({ credit: credit[0], purchases: purchases, payments: payments, requests: requests, products: products });
     } catch (error) {
       console.error("Customer history failed:", error.message);
       response.status(500).json({ error: error.message });
@@ -1291,8 +1385,11 @@ function registerManagerRoutes(app, deps) {
   // is manager-only. A name already on the books (any case, extra spaces
   // ignored) is refused with 409 -- the till no longer opens accounts by
   // typing a name, so this is the one place an account starts.
-  app.post("/api/customers", async (request, response) => {
-    const { firstName, lastName, phone, address } = request.body;
+  app.post("/api/customers", async function (request, response) {
+    const firstName = request.body.firstName;
+    const lastName = request.body.lastName;
+    const phone = request.body.phone;
+    const address = request.body.address;
 
     if (!firstName || String(firstName).trim() === "") {
       return response.status(400).json({ error: "A customer needs a name" });
@@ -1312,13 +1409,14 @@ function registerManagerRoutes(app, deps) {
     const phoneText = cleanPhone(phone) || "";
 
     try {
-      const [same] = await db.query(
-        `SELECT customer_id FROM customers
-         WHERE LOWER(TRIM(CONCAT(first_name, ' ', last_name))) = LOWER(?)
-         LIMIT 1`, [fullName]);
+      const sameResult = await db.query(
+        "SELECT customer_id FROM customers " +
+        "WHERE LOWER(TRIM(CONCAT(first_name, ' ', last_name))) = LOWER(?) " +
+        "LIMIT 1", [fullName]);
+      const same = sameResult[0];
       if (same.length > 0) {
         return response.status(409).json({
-          error: `${fullName} is already on the books. Find them in Customers Record instead of adding them again.`,
+          error: fullName + " is already on the books. Find them in Customers Record instead of adding them again.",
           customerId: same[0].customer_id
         });
       }
@@ -1335,13 +1433,13 @@ function registerManagerRoutes(app, deps) {
 
       const created = output.status_code === 201;
       if (created) {
-        await writeAuditLog(request, "CREATE_CUSTOMER", `Customer ${fullName} added`,
+        await writeAuditLog(request, "CREATE_CUSTOMER", "Customer " + fullName + " added",
           { customer_id: Number(output.customer_id), name: fullName,
             phone: phoneText || null, address: String(address || "").trim() || null });
       }
 
       response.status(output.status_code).json({
-        message: created ? `${fullName} was added to Customers Record.` : output.message,
+        message: created ? fullName + " was added to Customers Record." : output.message,
         customerId: output.customer_id,
         created: created
       });
@@ -1363,86 +1461,80 @@ function registerManagerRoutes(app, deps) {
   // ==========================================
   const SALES_WINDOW_DAYS = 90;
 
-  app.get("/api/stocks", async (request, response) => {
+  app.get("/api/stocks", async function (request, response) {
     try {
-      const [rows] = await db.query(
-        `WITH window_days AS (
-         SELECT GREATEST(
-                  LEAST(?, COALESCE(DATEDIFF(CURDATE(), DATE(MIN(sale_date))) + 1, ?)),
-                  1) AS days
-         FROM sales
-         WHERE is_archived = FALSE
-       ),
-       recent AS (
-         SELECT si.product_id, COALESCE(SUM(si.quantity), 0) AS units
-         FROM sale_items si
-         JOIN sales s ON s.sale_id = si.sale_id
-         WHERE s.is_archived = FALSE
-           AND s.sale_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-         GROUP BY si.product_id
-       )
-       SELECT p.product_id, p.product_name, p.price, p.reorder_point, p.status,
-              p.lead_time_days, p.safety_stock, p.reorder_mode,
-              COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock,
-              i.last_updated,
-              c.category_name, b.brand_name, u.unit_name,
-              sup.supplier_name, sup.contact_person, sup.contact_number,
-              (COALESCE(i.quantity_in_stock, 0) * p.price) AS stock_value,
-
-              w.days AS window_days,
-              COALESCE(rc.units, 0) AS units_sold_window,
-              ROUND(COALESCE(rc.units, 0) / w.days, 3) AS avg_daily_sales,
-
-              -- the formula, rounded up: half a bag of cement short is short
-              CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock
-                AS calculated_rop,
-
-              CASE WHEN p.reorder_mode = 'Dynamic'
-                   THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock
-                   ELSE p.reorder_point
-              END AS effective_rop,
-
-              CASE
-                WHEN COALESCE(i.quantity_in_stock, 0) = 0 THEN 'Out of Stock'
-                WHEN COALESCE(i.quantity_in_stock, 0) <=
-                     CASE WHEN p.reorder_mode = 'Dynamic'
-                          THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock
-                          ELSE p.reorder_point END
-                THEN 'Low Stock'
-                ELSE 'In Stock'
-              END AS stock_status,
-
-              -- order back up to twice the reorder point, so the next order is
-              -- not due the week after this one arrives
-              GREATEST(
-                (CASE WHEN p.reorder_mode = 'Dynamic'
-                      THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock
-                      ELSE p.reorder_point END) * 2
-                - COALESCE(i.quantity_in_stock, 0), 0) AS suggested_order,
-
-              -- roughly how long what is on the shelf will last at the
-              -- current rate. NULL when nothing is moving, because "forever"
-              -- is not a number worth printing.
-              CASE WHEN COALESCE(rc.units, 0) = 0 THEN NULL
-                   ELSE ROUND(COALESCE(i.quantity_in_stock, 0) / (rc.units / w.days), 1)
-              END AS days_of_cover
-
-       FROM products p
-       CROSS JOIN window_days w
-       LEFT JOIN recent rc ON rc.product_id = p.product_id
-       LEFT JOIN inventory i ON i.product_id = p.product_id
-       LEFT JOIN categories c ON c.category_id = p.category_id
-       LEFT JOIN brands b ON b.brand_id = p.brand_id
-       LEFT JOIN units u ON u.unit_id = p.unit_id
-       LEFT JOIN suppliers sup ON sup.supplier_id = p.supplier_id
-       WHERE p.is_archived = FALSE
-       ORDER BY (COALESCE(i.quantity_in_stock, 0) <=
-                 CASE WHEN p.reorder_mode = 'Dynamic'
-                      THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock
-                      ELSE p.reorder_point END) DESC,
-                p.product_name`,
+      const rowsResult = await db.query(
+        "WITH window_days AS ( " +
+        "SELECT GREATEST( " +
+        "LEAST(?, COALESCE(DATEDIFF(CURDATE(), DATE(MIN(sale_date))) + 1, ?)), " +
+        "1) AS days " +
+        "FROM sales " +
+        "WHERE is_archived = FALSE " +
+        "), " +
+        "recent AS ( " +
+        "SELECT si.product_id, COALESCE(SUM(si.quantity), 0) AS units " +
+        "FROM sale_items si " +
+        "JOIN sales s ON s.sale_id = si.sale_id " +
+        "WHERE s.is_archived = FALSE " +
+        "AND s.sale_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY) " +
+        "GROUP BY si.product_id " +
+        ") " +
+        "SELECT p.product_id, p.product_name, p.price, p.reorder_point, p.status, " +
+        "p.lead_time_days, p.safety_stock, p.reorder_mode, " +
+        "COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, " +
+        "i.last_updated, " +
+        "c.category_name, b.brand_name, u.unit_name, " +
+        "sup.supplier_name, sup.contact_person, sup.contact_number, " +
+        "(COALESCE(i.quantity_in_stock, 0) * p.price) AS stock_value, " +
+        "w.days AS window_days, " +
+        "COALESCE(rc.units, 0) AS units_sold_window, " +
+        "ROUND(COALESCE(rc.units, 0) / w.days, 3) AS avg_daily_sales, " +
+        "-- the formula, rounded up: half a bag of cement short is short\n" +
+        "CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
+        "AS calculated_rop, " +
+        "CASE WHEN p.reorder_mode = 'Dynamic' " +
+        "THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
+        "ELSE p.reorder_point " +
+        "END AS effective_rop, " +
+        "CASE " +
+        "WHEN COALESCE(i.quantity_in_stock, 0) = 0 THEN 'Out of Stock' " +
+        "WHEN COALESCE(i.quantity_in_stock, 0) <= " +
+        "CASE WHEN p.reorder_mode = 'Dynamic' " +
+        "THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
+        "ELSE p.reorder_point END " +
+        "THEN 'Low Stock' " +
+        "ELSE 'In Stock' " +
+        "END AS stock_status, " +
+        "-- order back up to twice the reorder point, so the next order is\n" +
+        "-- not due the week after this one arrives\n" +
+        "GREATEST( " +
+        "(CASE WHEN p.reorder_mode = 'Dynamic' " +
+        "THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
+        "ELSE p.reorder_point END) * 2 " +
+        "- COALESCE(i.quantity_in_stock, 0), 0) AS suggested_order, " +
+        "-- roughly how long what is on the shelf will last at the\n" +
+        "-- current rate. NULL when nothing is moving, because \"forever\"\n" +
+        "-- is not a number worth printing.\n" +
+        "CASE WHEN COALESCE(rc.units, 0) = 0 THEN NULL " +
+        "ELSE ROUND(COALESCE(i.quantity_in_stock, 0) / (rc.units / w.days), 1) " +
+        "END AS days_of_cover " +
+        "FROM products p " +
+        "CROSS JOIN window_days w " +
+        "LEFT JOIN recent rc ON rc.product_id = p.product_id " +
+        "LEFT JOIN inventory i ON i.product_id = p.product_id " +
+        "LEFT JOIN categories c ON c.category_id = p.category_id " +
+        "LEFT JOIN brands b ON b.brand_id = p.brand_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "LEFT JOIN suppliers sup ON sup.supplier_id = p.supplier_id " +
+        "WHERE p.is_archived = FALSE " +
+        "ORDER BY (COALESCE(i.quantity_in_stock, 0) <= " +
+        "CASE WHEN p.reorder_mode = 'Dynamic' " +
+        "THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
+        "ELSE p.reorder_point END) DESC, " +
+        "p.product_name",
         [SALES_WINDOW_DAYS, SALES_WINDOW_DAYS, SALES_WINDOW_DAYS]
       );
+      const rows = rowsResult[0];
       response.json(rows);
     } catch (error) {
       console.error("Stocks failed:", error.message);
@@ -1451,8 +1543,11 @@ function registerManagerRoutes(app, deps) {
   });
 
   // the manager sets the policy; the clerk sets a manual reorder point
-  app.put("/api/stocks/:productId/reorder-policy", async (request, response) => {
-    const { leadTimeDays, safetyStock, reorderMode, reorderPoint } = request.body;
+  app.put("/api/stocks/:productId/reorder-policy", async function (request, response) {
+    const leadTimeDays = request.body.leadTimeDays;
+    const safetyStock = request.body.safetyStock;
+    const reorderMode = request.body.reorderMode;
+    const reorderPoint = request.body.reorderPoint;
 
     const lead = parseInt(leadTimeDays, 10);
     const safety = parseInt(safetyStock, 10);
@@ -1481,11 +1576,12 @@ function registerManagerRoutes(app, deps) {
     }
 
     try {
-      const [existing] = await db.query(
-        `SELECT product_name, reorder_point, lead_time_days, safety_stock, reorder_mode
-       FROM products WHERE product_id = ? AND is_archived = FALSE`,
+      const existingResult = await db.query(
+        "SELECT product_name, reorder_point, lead_time_days, safety_stock, reorder_mode " +
+        "FROM products WHERE product_id = ? AND is_archived = FALSE",
         [request.params.productId]
       );
+      const existing = existingResult[0];
 
       if (existing.length === 0) {
         return response.status(404).json({ error: "That product was not found." });
@@ -1494,10 +1590,10 @@ function registerManagerRoutes(app, deps) {
       const before = existing[0];
 
       await db.query(
-        `UPDATE products
-       SET lead_time_days = ?, safety_stock = ?, reorder_mode = ?,
-           reorder_point = COALESCE(?, reorder_point)
-       WHERE product_id = ?`,
+        "UPDATE products " +
+        "SET lead_time_days = ?, safety_stock = ?, reorder_mode = ?, " +
+        "reorder_point = COALESCE(?, reorder_point) " +
+        "WHERE product_id = ?",
         [lead, safety, mode, manual, request.params.productId]
       );
 
@@ -1510,7 +1606,7 @@ function registerManagerRoutes(app, deps) {
       await writeAuditLog(
         request,
         "UPDATE_REORDER_POLICY",
-        `${before.product_name}: ${mode.toLowerCase()} reorder point, ${lead} day lead time`,
+        before.product_name + ": " + mode.toLowerCase() + " reorder point, " + lead + " day lead time",
         {
           product_id: Number(request.params.productId),
           changes: fieldChanges(
@@ -1529,7 +1625,7 @@ function registerManagerRoutes(app, deps) {
         }
       );
 
-      response.json({ message: `Reorder policy updated for ${before.product_name}.` });
+      response.json({ message: "Reorder policy updated for " + before.product_name + "." });
     } catch (error) {
       console.error("Reorder policy failed:", error.message);
       response.status(500).json({ error: "Unable to save the reorder policy" });
@@ -1541,7 +1637,7 @@ function registerManagerRoutes(app, deps) {
   // stock value from the next sale on, never the invoices behind it. A size
   // with its own price in product_units keeps it; one priced from the unit
   // follows the new figure on its own.
-  app.put("/api/stocks/:productId/price", async (request, response) => {
+  app.put("/api/stocks/:productId/price", async function (request, response) {
     let price = NaN;   // NaN = "not a number"
     if (request.body) {
       price = Number(request.body.price);
@@ -1555,10 +1651,11 @@ function registerManagerRoutes(app, deps) {
     }
 
     try {
-      const [existing] = await db.query(
+      const existingResult = await db.query(
         "SELECT product_name, price FROM products WHERE product_id = ? AND is_archived = FALSE",
         [request.params.productId]
       );
+      const existing = existingResult[0];
       if (existing.length === 0) {
         return response.status(404).json({ error: "That product was not found." });
       }
@@ -1567,7 +1664,7 @@ function registerManagerRoutes(app, deps) {
       const rounded = Math.round(price * 100) / 100;
 
       if (Number(before.price) === rounded) {
-        return response.json({ message: `${before.product_name} already sells at ${rounded.toFixed(2)}.`, changed: false });
+        return response.json({ message: before.product_name + " already sells at " + rounded.toFixed(2) + ".", changed: false });
       }
 
       await db.query("UPDATE products SET price = ? WHERE product_id = ?", [rounded, request.params.productId]);
@@ -1575,7 +1672,7 @@ function registerManagerRoutes(app, deps) {
       await writeAuditLog(
         request,
         "UPDATE_PRICE",
-        `${before.product_name}: price ${Number(before.price).toFixed(2)} to ${rounded.toFixed(2)}`,
+        before.product_name + ": price " + Number(before.price).toFixed(2) + " to " + rounded.toFixed(2),
         {
           product_id: Number(request.params.productId),
           changes: fieldChanges({ price: Number(before.price) }, { price: rounded })
@@ -1583,7 +1680,7 @@ function registerManagerRoutes(app, deps) {
       );
 
       response.json({
-        message: `${before.product_name} now sells at ${rounded.toFixed(2)}, from the next sale on.`,
+        message: before.product_name + " now sells at " + rounded.toFixed(2) + ", from the next sale on.",
         changed: true, price: rounded
       });
     } catch (error) {
@@ -1605,12 +1702,12 @@ function registerManagerRoutes(app, deps) {
       const applied = Number(output.applied) || 0;
       const total = Number(output.total) || 0;
       if (applied < 0) {
-        console.error(`Late-payment sweep failed inside the database (${output.err_no}): ${output.err_text}`);
+        console.error("Late-payment sweep failed inside the database (" + output.err_no + "): " + output.err_text);
         return;
       }
       if (applied > 0) {
-        console.log(`Late-payment sweep: ${applied} overdue ${applied === 1 ? "sale" : "sales"} charged ` +
-          `a month's penalty, ${total.toFixed(2)} in all.`);
+        console.log("Late-payment sweep: " + applied + " overdue " + (applied === 1 ? "sale" : "sales") + " charged " +
+          "a month's penalty, " + total.toFixed(2) + " in all.");
         publishChange("credit", "penalties", null);
         publishChange("sales", "penalties", null);
         publishChange("notifications", "penalties", null);
@@ -1626,7 +1723,7 @@ function registerManagerRoutes(app, deps) {
     if (typeof timer.unref === "function") timer.unref();
   }
 
-  return { startPenaltySweep, runPenaltySweep };
+  return { startPenaltySweep: startPenaltySweep, runPenaltySweep: runPenaltySweep };
 }
 
-module.exports = { registerManagerRoutes };
+module.exports = { registerManagerRoutes: registerManagerRoutes };
