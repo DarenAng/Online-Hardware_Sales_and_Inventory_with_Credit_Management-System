@@ -1,0 +1,2781 @@
+// ============================================================
+// system-admin.js -- the System Administrator dashboard
+// Loaded by: system.html
+//
+// What is in this file, from top to bottom:
+//   - switching screens (showPanel and the show... functions)
+//   - the staff directory: list, create (review then confirm), edit,
+//     activate / deactivate, reset password, archived accounts
+//   - Access Control: which screens each role can open
+//   - the audit logs
+//   - Backup & Recovery: make, download, restore and delete backups
+//   - Receipt Maintenance: the store name, TIN, VAT and bank details
+//   - the page start-up code at the very bottom ("SYSTEM PAGE BOOT")
+// ============================================================
+
+// ==========================================
+// PANEL SWITCHING (System page)
+// ==========================================
+// what the top bar says on each screen
+const ADMIN_TITLES = {
+    'panel-accounts':    'Staff Directory',
+    'panel-archive':     'Archived Accounts',
+    'panel-features':    'Access Control',
+    'panel-logs':        'Audit Logs',
+    'panel-maintenance': 'Backup & Recovery',
+    'panel-store':       'Receipt Maintenance'
+};
+
+// Account screens are a list under a folded heading; opening one unfolds
+// the list, except the one the page opens on by itself.
+
+function showPanel(panelId, event) {
+    if (event) event.preventDefault();
+
+    document.querySelectorAll('[data-panel]').forEach((panel) => {
+        panel.style.display = panel.id === panelId ? 'block' : 'none';
+    });
+
+    const opened = document.getElementById(panelId);
+    const linkedTo = (opened && opened.getAttribute('data-panel-of')) || panelId;
+    document.querySelectorAll('[data-panel-link]').forEach((link) => {
+        link.classList.toggle('active', link.dataset.panelLink === linkedTo);
+    });
+
+    const heading = document.getElementById('admin-page-title');
+    if (heading) heading.textContent = ADMIN_TITLES[panelId] || 'System Administration';
+
+    leaveScreenFurniture();
+}
+
+// Opening a screen fetches nothing. The default view is the directory.
+function showAccountsList(event) {
+    showPanel('panel-accounts', event);
+}
+
+// Two ways to load the directory: Load Data, or a search. The filters only
+// narrow what has arrived (on a closed table they apply to the first load).
+function showAllUsers(event) {
+    showPanel('panel-accounts', event);
+}
+
+// Opening a screen never unfolds the Accounts Management list: only the
+// heading's caret does (shared/helpers.js sidebarHeading); the heading lights
+// up on its own while a screen beneath it is the open one.
+
+function showCreateAccount(event) {
+    if (event) event.preventDefault();
+    clearCreateForm();
+    showModal('create-modal');
+    const first = document.getElementById('create-first');
+    if (first) first.focus();
+}
+function showArchiveModule(event) { showPanel('panel-archive', event); }
+function showAuditLogs(event)     { showPanel('panel-logs', event); }
+// Backup & Recovery loads everything on opening: the daily backup's state
+// and every saved backup.
+function showMaintenance(event) {
+    showPanel('panel-maintenance', event);
+    const panel = getDataPanel('admin-backups');
+    if (panel) panel.open(); else loadAutoBackupState();
+}
+function showStoreSettings(event) { showPanel('panel-store', event); loadStoreSettingsForm(); loadDeliveryAreas(); }
+
+// one small request, read on opening; not re-read while a click is saving
+function showAccessControl(event) {
+    showPanel('panel-features', event);
+    if (!featureSaving) loadFeatureMatrix();
+}
+
+// ==========================================
+// ROLES
+// ==========================================
+let systemRoles = [];
+
+async function loadRoles() {
+    try {
+        const response = await apiGetRoles();
+        if (!response.ok) return;
+
+        systemRoles = await response.json();
+
+        const options = systemRoles
+            .map((role) => `<option value="${role.role_id}">${escapeHtml(role.role_name)}</option>`)
+            .join('');
+
+        document.querySelectorAll('[data-role-select]').forEach((select) => {
+            select.innerHTML = options;
+        });
+
+        document.querySelectorAll('[data-role-filter]').forEach((select) => {
+            select.innerHTML = '<option value="all">Every role</option>' + options;
+
+            // a role chosen before the list arrived (a table loaded again after a reload) stays shown
+            const users = getDataPanel('admin-users');
+            if (users) setBoxValue(select, users.filters.roleId);
+        });
+
+        // the audit trail keeps the role's name as it was at the time, so it filters by name
+        document.querySelectorAll('[data-log-role-filter]').forEach((select) => {
+            const chosen = select.value;
+            select.innerHTML = '<option value="all">Every role</option>' + systemRoles
+                .map((role) => `<option value="${escapeHtml(role.role_name)}">${escapeHtml(role.role_name)}</option>`)
+                .join('');
+            setBoxValue(select, chosen);
+        });
+    } catch (error) {
+        console.error('Unable to load roles:', error);
+    }
+}
+
+// Active/Inactive is a decision about the account. Whether somebody is at a
+// screen right now is not the directory's business; Last Login is on the card.
+let selectedUser = null;
+
+function accountCell(user) {
+    if (!user.is_active) return '<span class="badge badge-danger">Inactive</span>';
+    // held after too many wrong passwords; a password reset releases it
+    if (user.held_until) return '<span class="badge badge-warning" title="Held until ' + escapeHtml(whenText(user.held_until)) + ' after too many wrong passwords">Held</span>';
+    return '<span class="badge badge-success">Active</span>';
+}
+
+function userSearchFields(user) {
+    return [
+        user.full_name, user.first_name, user.middle_name, user.last_name,
+        user.email, user.role_name, user.staff_id, '#' + user.staff_id
+    ];
+}
+
+// the account-state filter goes back to the server; the role is decided here
+function currentStatusFilter() {
+    const select = document.getElementById('accounts-status');
+    return select ? select.value : 'all';
+}
+
+async function reloadUsers() {
+    syncDirectoryColumns();
+
+    const panel = getDataPanel('admin-users');
+    if (!panel) return;
+
+    // on an open table the server filter means re-reading; a closed one reads it on load
+    if (panel.state === 'ready') await panel.refresh();
+}
+
+function filterDirectory(name, value) {
+    dataPanelFilter('admin-users', name, value);
+    syncDirectoryColumns();
+}
+
+// While a filter is set, the column it decides is not drawn. Positions are
+// 1-based to match the <th> order in system.html; tables.js re-applies them
+// on every redraw.
+const DIRECTORY_COLUMN = { role: 4, status: 5 };
+const LOG_COLUMN = { role: 3 };
+
+function selectValue(id) {
+    const select = document.getElementById(id);
+    return select ? select.value : 'all';
+}
+
+function syncDirectoryColumns() {
+    const hidden = [];
+    if (selectValue('accounts-role') !== 'all') hidden.push(DIRECTORY_COLUMN.role);
+    if (selectValue('accounts-status') !== 'all') hidden.push(DIRECTORY_COLUMN.status);
+
+    setHiddenColumns(document.getElementById('accounts-table'), hidden);
+}
+
+// the date boxes are left out: a range still leaves a different timestamp per row
+function syncLogColumns() {
+    const hidden = [];
+    if (selectValue('logs-role') !== 'all') hidden.push(LOG_COLUMN.role);
+
+    setHiddenColumns(document.getElementById('logs-table'), hidden);
+}
+
+function buildUsersPanel() {
+    createDataPanel({
+        key: 'admin-users',
+        inputs: ['accounts-status', 'accounts-role'],
+        tableId: 'accounts-table',
+        columns: 5,
+        pagerId: 'accounts-pager',
+        idField: 'staff_id',
+        filters: { roleId: 'all' },
+
+        // filters set up a query rather than run one; see dataPanelFilter
+        loadOnFilter: false,
+
+        gate: {
+            title: 'The directory is not loaded',
+            text: 'Set the filters you want, then press Load Data to read the staff ' +
+                  'directory &mdash; or type a name in the search box to look one person up.',
+            button: 'Load Data'
+        },
+
+        load: () => {
+            const status = currentStatusFilter();
+            const query = status === 'all' ? '' : '?status=' + encodeURIComponent(status);
+            return apiGetStaff(query);
+        },
+
+        match: (user, query) => prefixMatch(userSearchFields(user), query),
+
+        filter: (user, filters) => {
+            if (filters.roleId !== 'all' && String(user.role_id) !== String(filters.roleId)) return false;
+            return true;
+        },
+
+        renderRow: (user, index) => `
+            <tr class="row-clickable row-reveal" style="animation-delay: ${(index % 10) * 28}ms"
+                onclick="openUserModal(${user.staff_id})" title="Click to view full details">
+                <td class="cell-id">#${escapeHtml(user.staff_id)}</td>
+                <td class="cell-name">${escapeHtml(staffName(user))}</td>
+                <td>${user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>'}</td>
+                <td>${escapeHtml(user.role_name)}</td>
+                <td>${accountCell(user)}</td>
+            </tr>`
+    });
+}
+
+async function openUserModal(staffId) {
+    // opening a card over a dirty Edit form would refill it: ask first
+    if (editUserDirty() && !(await confirmCloseEditUser())) return;
+
+    const panel = getDataPanel('admin-users');
+    selectedUser = panel ? panel.find(staffId, 'staff_id') : null;
+    if (!selectedUser) return;
+
+    document.getElementById('modal-user-name').textContent =
+        staffName(selectedUser);
+    document.getElementById('modal-user-role').textContent = selectedUser.role_name;
+
+    const initials = (selectedUser.first_name[0] + selectedUser.last_name[0]).toUpperCase();
+    document.getElementById('modal-user-avatar').textContent = initials;
+
+    document.getElementById('modal-user-details').innerHTML =
+        detailRow('Staff ID', '#' + escapeHtml(selectedUser.staff_id)) +
+        detailRow('User ID', selectedUser.user_id ? '#' + escapeHtml(selectedUser.user_id) : '<span class="muted">None</span>') +
+        detailRow('Full Name', escapeHtml(staffName(selectedUser))) +
+        detailRow('First Name', escapeHtml(selectedUser.first_name)) +
+        detailRow('Middle Name', selectedUser.middle_name
+            ? escapeHtml(selectedUser.middle_name)
+            : '<span class="muted">Not set</span>') +
+        detailRow('Last Name', escapeHtml(selectedUser.last_name)) +
+        detailRow('Email', selectedUser.email ? escapeHtml(selectedUser.email) : '<span class="muted">No login account</span>') +
+        detailRow('Phone', selectedUser.phone
+            ? '<span class="mono">' + escapeHtml(phoneForDisplay(selectedUser.phone)) + '</span>'
+            : '<span class="muted">Not set</span>') +
+        detailRow('Role', escapeHtml(selectedUser.role_name)) +
+        detailRow('Account Status', accountCell(selectedUser) +
+            (selectedUser.held_until
+                ? ' <span class="muted">until ' + escapeHtml(whenText(selectedUser.held_until)) +
+                  ' \u2014 Lift Hold lets them sign in again now</span>'
+                : '')) +
+        detailRow('Password State', selectedUser.must_change_password ? '<span class="badge badge-warning">Temporary</span>' : '<span class="badge badge-neutral">Set by user</span>') +
+        detailRow('Hired On', escapeHtml(selectedUser.staff_created_at)) +
+        detailRow('Account Created', selectedUser.created_at ? escapeHtml(selectedUser.created_at) : '<span class="muted">Not available</span>') +
+        detailRow('Last Login', selectedUser.last_login ? escapeHtml(selectedUser.last_login) : '<span class="muted">Never</span>');
+
+    const form = document.getElementById('edit-user-form');
+    form.elements.firstName.value = selectedUser.first_name;
+    form.elements.middleName.value = selectedUser.middle_name || '';
+    form.elements.lastName.value = selectedUser.last_name;
+    hideNameErrors(form);
+    phoneFill(form.elements.phone, selectedUser.phone);
+    setPhoneError(form.elements.phone, '');
+    form.elements.email.value = selectedUser.email || '';
+    form.elements.email.required = Boolean(selectedUser.user_id);
+    document.getElementById('edit-email-req').hidden = !selectedUser.user_id;
+    setEmailError(form.elements.email, '');
+    form.elements.roleId.value = selectedUser.role_id;
+
+    markFormClean(form, document.getElementById('edit-user-save-btn'));
+
+    const statusButton = document.getElementById('modal-status-btn');
+    statusButton.textContent = selectedUser.is_active ? 'Deactivate Account' : 'Activate Account';
+    statusButton.className = selectedUser.is_active ? 'btn btn-danger' : 'btn btn-success';
+
+    const hasLogin = Boolean(selectedUser.user_id);
+    document.getElementById('modal-login-btn').style.display = hasLogin ? 'none' : 'inline-block';
+    document.getElementById('modal-reset-btn').style.display = hasLogin ? 'inline-block' : 'none';
+    // Lift Hold only while the account is held after too many wrong passwords
+    document.getElementById('modal-hold-btn').style.display =
+        hasLogin && selectedUser.held_until ? 'inline-block' : 'none';
+
+    // The server refuses every change to the signed-in person's own record
+    // (notOwnAccount in access-control.js), so the buttons are taken away here too.
+    const own = isOwnAccount(selectedUser);
+    document.getElementById('modal-own-note').style.display = own ? 'block' : 'none';
+    document.getElementById('modal-edit-tab').style.display = own ? 'none' : '';
+    ['modal-login-btn', 'modal-hold-btn', 'modal-reset-btn', 'modal-status-btn'].forEach((id) => {
+        const button = document.getElementById(id);
+        button.disabled = own;
+        button.title = own ? 'Another administrator makes changes to your account' : '';
+    });
+
+    showUserTab('view');
+    showModal('user-modal');
+}
+
+function isOwnAccount(user) {
+    const me = getCurrentUser();
+    return Boolean(me && user && Number(me.staff_id) === Number(user.staff_id));
+}
+
+function showUserTab(tab) {
+    const isEdit = tab === 'edit';
+    document.getElementById('modal-user-details').style.display = isEdit ? 'none' : 'grid';
+    document.getElementById('modal-user-edit').style.display = isEdit ? 'block' : 'none';
+    document.getElementById('modal-view-tab').classList.toggle('active', !isEdit);
+    document.getElementById('modal-edit-tab').classList.toggle('active', isEdit);
+}
+
+// "request" is a call that was already sent to the server, for example
+// apiUpdateStaff(5, data) (see connections/admin-connection.js).
+// Returns the server's reply on success and false on failure. No
+// successMessage means the caller does the talking.
+async function sendUserRequest(request, successMessage) {
+    try {
+        const response = await request;   // wait for the server's answer
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error);
+            return false;
+        }
+
+        if (successMessage) notifySuccess(successMessage);
+        closeModal('user-modal');
+
+        const panel = getDataPanel('admin-users');
+        if (panel) await panel.refresh();
+
+        return result || true;
+    } catch (error) {
+        notifyOffline();
+        return false;
+    }
+}
+
+async function handleUpdateUser(event) {
+    event.preventDefault();
+    if (!selectedUser) return;
+
+    if (isOwnAccount(selectedUser)) {
+        notifyWarning('Your own account is changed by another administrator, not from here.', 'Not allowed');
+        return;
+    }
+
+    const form = event.target;
+
+    // a save of nothing writes an "unchanged" audit entry and signs the person out
+    if (!isFormDirty(form)) {
+        notifyInfo('Nothing on this form has been changed, so there is nothing to save.', 'No changes');
+        return;
+    }
+
+    const empty = firstEmptyRequired(form);
+    if (empty) {
+        notifyWarning('Fill in every field marked with *.', 'Fill in the form');
+        empty.focus();
+        return;
+    }
+
+    const badName = firstBadName(form);
+    if (badName) {
+        notifyWarning(nameBoxLabel(form, badName) + ' can only have letters. Take out any numbers or symbols.',
+            'Check the name');
+        badName.focus();
+        return;
+    }
+
+    // the phone number may be empty, but one that is given has to be free
+    if (!(await checkPhoneFree(form.elements.phone))) {
+        form.elements.phone.focus();
+        return;
+    }
+
+    // a login's address cannot be emptied, and it has to be free
+    if (selectedUser.user_id && form.elements.email.value.trim() === '') {
+        setEmailError(form.elements.email, 'An email address is required.');
+        form.elements.email.focus();
+        return;
+    }
+    if (!(await checkEmailFree(form.elements.email))) {
+        form.elements.email.focus();
+        return;
+    }
+
+    const data = {
+        firstName: form.elements.firstName.value.trim(),
+        middleName: form.elements.middleName.value.trim(),
+        lastName: form.elements.lastName.value.trim(),
+        phone: phoneToStore(form.elements.phone),
+        email: form.elements.email.value.trim().toLowerCase(),
+        roleId: parseInt(form.elements.roleId.value, 10)
+    };
+
+    const name = staffName(selectedUser);
+
+    // One card for the whole save. A new role or sign-in email ends the
+    // person's sessions (the server does this in PUT /api/users/:staffId), so
+    // those saves say so and take the danger look; a corrected name or phone does not.
+    const roleChanged = Number(data.roleId) !== Number(selectedUser.role_id);
+    const emailChanged = data.email !== String(selectedUser.email || '').trim().toLowerCase();
+    const signsOut = Boolean(selectedUser.user_id) && (roleChanged || emailChanged);
+
+    let consequence = `${name} stays signed in.`;
+    if (signsOut) {
+        consequence = `${name} is signed out now and must sign in again.`;
+        if (roleChanged) consequence += ' Their menu and permissions become the new role at once.';
+        if (emailChanged) consequence += ' They sign in with the new email address.';
+    }
+
+    const yes = await askConfirm(consequence, {
+        title: 'Save these changes?',
+        eyebrow: 'Accounts Management',
+        confirmLabel: signsOut ? 'Save and sign them out' : 'Save changes',
+        tone: signsOut ? 'danger' : undefined,
+        detail: changeListFor(formChangeLines(form))
+    });
+
+    if (!yes) return;
+
+    await sendUserRequest(apiUpdateStaff(selectedUser.staff_id, data), 'Account updated.');
+}
+
+async function toggleUserStatus() {
+    if (!selectedUser) return;
+
+    if (isOwnAccount(selectedUser)) {
+        notifyWarning('You cannot deactivate your own account. Another administrator can.', 'Not allowed');
+        return;
+    }
+
+    const makeActive = !selectedUser.is_active;
+    const name = staffName(selectedUser);
+
+    let yes;
+    if (makeActive) {
+        yes = await askConfirm(`${name} will be able to sign in again straight away.`, {
+                title: 'Activate this account?',
+                eyebrow: 'Accounts Management',
+                confirmLabel: 'Activate'
+            });
+    } else {
+        yes = await askDanger(`${name} loses access to the system.`, {
+                title: 'Deactivate this account?',
+                eyebrow: 'Accounts Management',
+                confirmLabel: 'Deactivate the account',
+                detail: [
+                    'Any session they have open is ended immediately.',
+                    'They cannot sign in again until an administrator restores the account.',
+                    'Their sales, records and history are kept and are not deleted.'
+                ]
+            });
+    }
+
+    if (!yes) return;
+
+    let doneMessage = 'The account has been deactivated.';
+    if (makeActive) {
+        doneMessage = 'The account is active again.';
+    }
+    await sendUserRequest(apiSetStaffActive(selectedUser.staff_id, makeActive), doneMessage);
+}
+
+// Lift Hold: the account was held after too many wrong passwords. This lets
+// the person sign in again straight away with the password they already have.
+async function liftUserHold() {
+    if (!selectedUser) return;
+
+    const name = staffName(selectedUser);
+    const yes = await askConfirm(
+        `${name} can sign in again straight away with the password they already have.`,
+        {
+            title: 'Lift the hold on this account?',
+            eyebrow: 'Accounts Management',
+            confirmLabel: 'Lift Hold',
+            detail: [
+                'Their password is not changed.',
+                'They get a full set of tries again before another hold.'
+            ]
+        });
+    if (!yes) return;
+
+    // sendUserRequest shows the server's message, closes the card and reloads the list
+    const result = await sendUserRequest(apiReleaseHold(selectedUser.staff_id));
+    if (result && result.message) notifySuccess(result.message, 'Hold lifted');
+}
+
+async function resetUserPassword() {
+    if (!selectedUser) return;
+
+    if (isOwnAccount(selectedUser)) {
+        notifyWarning('Change your own password under My Account. This screen resets other people\'s.', 'Not allowed');
+        return;
+    }
+
+    if (!selectedUser.user_id) {
+        notifyWarning('This staff member has no login account yet. Use Create Login first.', 'No login to reset');
+        return;
+    }
+
+    // nobody types the new password: the server makes it and sends it
+    const name = staffName(selectedUser);
+    const yes = await askDanger(
+        `A new password is made for ${name} and sent to ${selectedUser.email}. ` +
+        'The one they have now stops working the moment you confirm.',
+        {
+            title: 'Reset this password?',
+            eyebrow: 'Accounts Management',
+            confirmLabel: 'Reset and send',
+            cancelLabel: 'Cancel',
+            detail: [
+                'Every screen they are signed in on is signed out.',
+                'They sign in with the new password and are asked to choose their own.',
+                'If the mail cannot go, the password is shown to you once, to hand over.'
+            ]
+        });
+
+    if (!yes) return;
+
+    const result = await sendUserRequest(apiResetUserPassword(selectedUser.staff_id));
+    if (!result) return;
+
+    closeModal('user-modal');
+    await reportResetPassword(result, selectedUser.email, name);
+}
+
+// the same two outcomes as a first password, worded for a reset
+async function reportResetPassword(result, email, name) {
+    if (result.emailed) {
+        notifySuccess(`A new password was emailed to ${email}. ` +
+            `${name} must change it the next time they sign in.`, 'Password reset');
+        return;
+    }
+
+    await askConfirm(
+        `The password was reset, but the new one could not be sent. Read it out to ` +
+        `${name} now: it is not shown again after this card.`,
+        {
+            title: 'The password was not sent',
+            eyebrow: 'Accounts Management',
+            mark: '!',
+            confirmLabel: 'I have written it down',
+            cancelLabel: 'Close',
+            tone: 'danger',
+            detail: [
+                'Password: ' + result.password,
+                'Signs in with: ' + email,
+                result.reason || 'The password could not be emailed.',
+                name + ' must change it the next time they sign in.'
+            ]
+        });
+}
+
+// Save is off until something in the form differs from what the record said.
+// Spaces at the ends do not count: the server trims them.
+const formBaselines = new WeakMap();
+
+function formValues(form) {
+    const values = {};
+    Array.from(form.elements).forEach((field) => {
+        if (!field.name || field.disabled) return;
+        if (field.hasAttribute('data-untracked')) return;   // the receipt's line boxes: see below
+        if (field.type === 'checkbox') {
+            values[field.name] = field.checked;
+            return;
+        }
+        values[field.name] = String(field.value === undefined ? '' : field.value).trim();
+    });
+
+    // The receipt's header and footer boxes are numbered as they are drawn, and
+    // a box added but left empty is no change; what counts is the lines that
+    // would be printed, in order.
+    if (form.id === 'store-form') {
+        values.headerLines = readReceiptLines('header');
+        values.footerLines = readReceiptLines('footer');
+    }
+    return JSON.stringify(values);
+}
+
+function isFormDirty(form) {
+    if (!form) return false;
+    const baseline = formBaselines.get(form);
+    return baseline === undefined ? true : formValues(form) !== baseline;
+}
+
+function markFormClean(form, button) {
+    if (!form) return;
+    formBaselines.set(form, formValues(form));
+    syncSaveButton(form, button);
+}
+
+function syncSaveButton(form, button) {
+    if (!form || !button) return;
+    const dirty = isFormDirty(form);
+    button.disabled = !dirty;
+    button.title = dirty ? '' : 'Nothing has changed yet';
+}
+
+function watchFormEdits(form, button) {
+    if (!form || !button) return;
+    const update = () => syncSaveButton(form, button);
+    form.addEventListener('input', update);
+    form.addEventListener('change', update);
+}
+
+// ---------- what the form changes, said before it is saved ----------
+const CHANGE_VALUE_MAX = 40;      // characters of one value in the list
+const CHANGE_LINES_MAX = 8;       // lines in the list; the rest are counted
+
+function clipValue(text) {
+    const value = String(text);
+    return value.length > CHANGE_VALUE_MAX ? value.slice(0, CHANGE_VALUE_MAX - 1) + '\u2026' : value;
+}
+
+// A box as the person reads it: its label, and a list's choice by its words.
+function fieldLabelText(form, field) {
+    if (field.type === 'checkbox') {
+        const wrap = field.closest('label');
+        return 'Show ' + (wrap ? wrap.textContent.trim().toLowerCase() : field.name);
+    }
+    const label = field.id ? form.querySelector('label[for="' + field.id + '"]') : null;
+    return label ? label.childNodes[0].textContent.trim() : field.name;
+}
+
+function fieldValueText(field, value) {
+    if (field.type === 'checkbox') return value ? 'Yes' : 'No';
+    if (field.type === 'email') value = String(value).toLowerCase();   // the server stores it so
+    if (field.tagName === 'SELECT') {
+        const option = Array.from(field.options).find((item) => item.value === String(value));
+        if (option) return clipValue(option.textContent.trim());
+    }
+    return value === '' ? '(empty)' : clipValue(value);
+}
+
+// "Field: old -> new" for every box that differs from the record it was
+// filled from. "skip" is asked the name of a box that is not part of the change.
+// The lines are plain text: the confirm card escapes them.
+function formChangeLines(form, skip) {
+    const before = JSON.parse(formBaselines.get(form) || '{}');
+    const after = JSON.parse(formValues(form));
+    const lines = [];
+
+    Object.keys(after).forEach((name) => {
+        if (before[name] === after[name] || (skip && skip(name))) return;
+        const field = form.elements[name];
+        if (!field) return;
+        const was = fieldValueText(field, before[name] === undefined ? '' : before[name]);
+        const now = fieldValueText(field, after[name]);
+        if (was !== now) lines.push(fieldLabelText(form, field) + ': ' + was + ' \u2192 ' + now);
+    });
+    return lines;
+}
+
+// the list as the card shows it: long lists are cut and the rest counted
+function changeListFor(lines) {
+    if (lines.length <= CHANGE_LINES_MAX) return lines;
+    const more = lines.length - (CHANGE_LINES_MAX - 1);
+    return lines.slice(0, CHANGE_LINES_MAX - 1).concat('and ' + more + ' more changes');
+}
+
+// ---------- unsaved changes: asked about, never lost quietly ----------
+function askDiscardChanges(message, eyebrow) {
+    return askDanger(message, {
+        title: 'Discard your changes?',
+        eyebrow: eyebrow,
+        confirmLabel: 'Discard changes',
+        cancelLabel: 'Keep editing'
+    });
+}
+
+// Dirty means different from the record the form was last filled from. A form
+// that was never filled has no record to differ from, so it is not dirty.
+function editUserDirty() {
+    const form = document.getElementById('edit-user-form');
+    const modal = document.getElementById('user-modal');
+    return Boolean(form && modal && modal.classList.contains('open') &&
+                   formBaselines.has(form) && isFormDirty(form));
+}
+
+function storeFormDirty() {
+    const form = document.getElementById('store-form');
+    const panel = document.getElementById('panel-store');
+    return Boolean(form && panel && panel.style.display !== 'none' &&
+                   formBaselines.has(form) && isFormDirty(form));
+}
+
+// The Edit Account card: the x button and Escape ask before closing it.
+async function confirmCloseEditUser() {
+    if (!editUserDirty()) return true;
+    return askDiscardChanges('The changes made to this account have not been saved. ' +
+                             'Closing it now throws them away.', 'Accounts Management');
+}
+
+setModalCloseGuard('user-modal', confirmCloseEditUser);
+
+// Leaving a screen with a dirty form. The click is held, the question asked,
+// and the same click let through once the answer is "discard".
+let sidebarLeaveAllowed = false;
+
+document.addEventListener('click', async function (event) {
+    const link = event.target.closest && event.target.closest('a[data-panel-link], a.sidebar-brand');
+    if (!link) return;
+    if (sidebarLeaveAllowed) { sidebarLeaveAllowed = false; return; }
+    if (!storeFormDirty() && !editUserDirty()) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const storeOpen = storeFormDirty();
+    const yes = await askDiscardChanges(storeOpen
+        ? 'The receipt details have not been saved. Leaving this screen throws the changes away.'
+        : 'The changes made to this account have not been saved. Leaving this screen throws them away.',
+        storeOpen ? 'Receipt Maintenance' : 'Accounts Management');
+    if (!yes) return;
+
+    if (!storeOpen) closeModal('user-modal');
+    sidebarLeaveAllowed = true;
+    link.click();
+}, true);
+
+// closing or reloading the tab: the browser's own question, with its own words
+window.addEventListener('beforeunload', function (event) {
+    // every sign-out removes currentUser before it leaves: the way out is not questioned
+    if (!localStorage.getItem('currentUser')) return;
+    if (!storeFormDirty() && !editUserDirty()) return;
+    event.preventDefault();
+    event.returnValue = '';
+});
+
+// Cancelling the create form empties it so the next person does not find a
+// half-typed account waiting.
+function clearCreateForm() {
+    const form = document.getElementById('create-user-form');
+    if (!form) return;
+
+    form.reset();
+
+    // reset() does not clear the box's verdict, nor the country button
+    const phone = form.elements.phone;
+    if (phone) phoneFill(phone, '');
+
+    setPhoneError(form.elements.phone, '');
+    setEmailError(form.elements.email, '');
+    hideNameErrors(form);
+}
+
+// the "Letters only" lines under the name boxes, put away
+function hideNameErrors(form) {
+    form.querySelectorAll('.name-error').forEach((box) => { box.hidden = true; });
+}
+
+function cancelCreateAccount() {
+    clearCreateForm();
+    closeModal('create-modal');
+}
+
+// ==========================================
+// THE EMAIL BOX -- an address and nothing else, and one no other account uses
+// ==========================================
+const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+
+function emailComplaint(value) {
+    const email = String(value || '').trim();
+    if (email === '') return 'An email address is required.';
+    if (!EMAIL_PATTERN.test(email)) return 'Enter an email address, for example name@example.com.';
+    return null;
+}
+
+function setEmailError(input, text) {
+    if (!input) return;
+    const box = document.getElementById(input.id + '-error');
+    input.classList.toggle('is-bad', Boolean(text));
+    if (box) {
+        box.textContent = text || '';
+        box.hidden = !text;
+    }
+}
+
+// spaces cannot be part of an address, so they never get into the box
+function onEmailInput(input) {
+    const cleaned = input.value.replace(/\s+/g, '');
+    if (cleaned !== input.value) input.value = cleaned;
+    setEmailError(input, '');
+}
+
+// Asked when the box is left: is this address already signing in to an
+// account? Every role counts, active or archived. The server asks again on
+// save, so this is only for saying it early.
+async function checkEmailFree(input) {
+    if (!input) return true;
+    const email = input.value.trim();
+
+    // the edit form may leave the address as it was
+    const own = input.id === 'edit-email' && selectedUser &&
+        String(selectedUser.email || '').toLowerCase() === email.toLowerCase();
+    if (own || (email === '' && input.id === 'edit-email')) {
+        setEmailError(input, '');
+        return true;
+    }
+
+    const problem = emailComplaint(email);
+    if (problem) {
+        setEmailError(input, problem);
+        return false;
+    }
+
+    try {
+        const answer = await apiCheckEmail(email, input.id === 'edit-email' && selectedUser ? selectedUser.staff_id : null);
+
+        // typed something else while the answer was coming: that address gets its own check
+        if (input.value.trim() !== email) return true;
+
+        if (answer && answer.taken) {
+            setEmailError(input, 'This email is already used by another account (' + answer.roleName + ').');
+            return false;
+        }
+    } catch (error) {
+        // offline: the server says so on save
+    }
+    setEmailError(input, '');
+    return true;
+}
+
+// ==========================================
+// THE PHONE BOX -- format is checked by format.js; here, one no other staff member uses
+// ==========================================
+function setPhoneError(input, text) {
+    if (!input) return;
+    const box = document.getElementById(input.id + '-error');
+    // A badly written number keeps its red edge (format.js put it there);
+    // only a number that is well written but taken gets it from here.
+    const badlyWritten = input.value !== '' && phoneComplaint(input) !== null;
+    input.classList.toggle('is-bad', Boolean(text) || badlyWritten);
+    if (box) {
+        box.textContent = text || '';
+        box.hidden = !text;
+    }
+}
+
+// Asked when the box is left: does another staff member already have this
+// number? Every role counts, active or archived. The server asks again on
+// save, so this is only for saying it early.
+async function checkPhoneFree(input) {
+    if (!input) return true;
+    const phone = phoneToStore(input);   // like +639171234567, the way it is stored
+
+    // An empty box (the edit form allows it) or a badly written number is not
+    // a clash; the format check says what is wrong with it.
+    if (phone === '' || phoneComplaint(input) !== null) {
+        setPhoneError(input, '');
+        return true;
+    }
+
+    // the edit form may leave the number as it was
+    const own = input.id === 'edit-phone' && selectedUser &&
+        phoneToStore(selectedUser.phone) === phone;
+    if (own) {
+        setPhoneError(input, '');
+        return true;
+    }
+
+    try {
+        const answer = await apiCheckPhone(phone, input.id === 'edit-phone' && selectedUser ? selectedUser.staff_id : null);
+
+        // typed something else while the answer was coming: that number gets its own check
+        if (phoneToStore(input) !== phone) return true;
+
+        if (answer && answer.taken) {
+            setPhoneError(input, 'This number is already used by ' + answer.name + ' (' + answer.roleName + ').');
+            return false;
+        }
+    } catch (error) {
+        // offline: the server says so on save
+    }
+    setPhoneError(input, '');
+    return true;
+}
+
+// what a required box says when it was left empty
+function firstEmptyRequired(form) {
+    return Array.from(form.querySelectorAll('[required]'))
+        .find((field) => String(field.value || '').trim() === '');
+}
+
+// Emailed is a corner card; not emailed keeps the password on screen in a dialog.
+async function reportFirstPassword(result, email, name) {
+    if (result.emailed) {
+        notifySuccess(`The first password was emailed to ${email}. ` +
+            `${name} must change it the first time they sign in.`, 'Account created');
+        return;
+    }
+
+    await askConfirm(
+        `The account exists, but the password could not be sent. Read it out to ` +
+        `${name} now: it is not shown again after this card.`,
+        {
+            title: 'The password was not sent',
+            eyebrow: 'Accounts Management',
+            mark: '!',
+            confirmLabel: 'I have written it down',
+            cancelLabel: 'Close',
+            tone: 'danger',
+            detail: [
+                'Password: ' + result.password,
+                'Signs in with: ' + email,
+                result.reason || 'The password could not be emailed.',
+                name + ' must change it the first time they sign in.'
+            ]
+        });
+}
+
+// what the working card says while the account is being made; the steps
+// are what the server does, in order, and the card ticks through them
+function creatingCard(review) {
+    return {
+        title: 'Creating the account',
+        eyebrow: 'Accounts Management',
+        message: review.willEmail
+            ? `This can take a few seconds while the mail goes out.`
+            : `Mail is not set up, so the password comes back to this screen.`,
+        steps: review.willEmail
+            ? [`Saving ${review.fullName}'s account`,
+               `Emailing the first password to ${review.email}`,
+               'Writing it in the audit trail']
+            : [`Saving ${review.fullName}'s account`,
+               'Writing it in the audit trail']
+    };
+}
+
+// One press of Create: the form is checked here, the server checks it again
+// and makes the password, and the account is created straight away.
+// ---------- names: letters only ----------
+// First, middle and last name take letters only. Letters with accents (é, ñ)
+// count, and spaces between words stay. Numbers and symbols are taken out as
+// they are typed or pasted, and a line under the box says why.
+const NAME_LETTERS = /^[\p{L}\p{M}]+( [\p{L}\p{M}]+)*$/u;
+
+function onNameInput(input) {
+    const typed = input.value;
+    const cleaned = typed.replace(/[^\p{L}\p{M} ]/gu, '');   // keep letters, accents and spaces
+    const box = document.getElementById(input.id + '-error');
+
+    if (cleaned !== typed) {
+        // keep the cursor where it was, less the characters taken out
+        const cursor = Math.max(0, input.selectionStart - (typed.length - cleaned.length));
+        input.value = cleaned;
+        input.setSelectionRange(cursor, cursor);
+        if (box) {
+            box.textContent = 'Letters only. Numbers and symbols cannot be typed here.';
+            box.hidden = false;
+        }
+    } else if (box) {
+        box.hidden = true;
+    }
+}
+
+// the first name box on this form that is not letters only, or null
+// (a name saved before this rule can still hold a number)
+function firstBadName(form) {
+    for (const field of ['firstName', 'middleName', 'lastName']) {
+        const input = form.elements[field];
+        const value = input.value.trim().replace(/\s+/g, ' ');
+        if (value !== '' && !NAME_LETTERS.test(value)) return input;
+    }
+    return null;
+}
+
+function nameBoxLabel(form, input) {
+    const label = form.querySelector('label[for="' + input.id + '"]');
+    return label ? label.childNodes[0].textContent.trim() : 'This name';
+}
+
+async function handleCreateUser(event) {
+    event.preventDefault();
+    const form = event.target;
+    const button = document.getElementById('create-user-btn');
+
+    const empty = firstEmptyRequired(form);
+    if (empty) {
+        const label = form.querySelector('label[for="' + empty.id + '"]');
+        const name = label ? label.childNodes[0].textContent.trim() : 'This field';
+        notifyWarning(name + ' is required.', 'Fill in the form');
+        empty.focus();
+        return;
+    }
+
+    const badName = firstBadName(form);
+    if (badName) {
+        notifyWarning(nameBoxLabel(form, badName) + ' can only have letters. Take out any numbers or symbols.',
+            'Check the name');
+        badName.focus();
+        return;
+    }
+
+    const phoneProblem = phoneComplaint(form.elements.phone);
+    if (phoneProblem) {
+        notifyWarning(phoneProblem, 'Check the phone number');
+        form.elements.phone.focus();
+        return;
+    }
+
+    if (button) { button.disabled = true; button.textContent = 'Checking...'; }
+    const phoneFree = await checkPhoneFree(form.elements.phone);
+    if (!phoneFree) {
+        if (button) { button.disabled = false; button.textContent = 'Create'; }
+        form.elements.phone.focus();
+        return;
+    }
+
+    const emailFree = await checkEmailFree(form.elements.email);
+    if (!emailFree) {
+        if (button) { button.disabled = false; button.textContent = 'Create'; }
+        form.elements.email.focus();
+        return;
+    }
+
+    const data = {
+        firstName: form.elements.firstName.value.trim(),
+        middleName: form.elements.middleName.value.trim(),
+        lastName: form.elements.lastName.value.trim(),
+        phone: phoneToStore(form.elements.phone),
+        email: form.elements.email.value.trim().toLowerCase(),
+        roleId: parseInt(form.elements.roleId.value, 10)
+    };
+
+    try {
+        const review = await apiReviewNewAccount(data);
+        if (button) { button.disabled = false; button.textContent = 'Create'; }
+        if (!review) return;
+
+        closeModal('create-modal');
+        showWorking(creatingCard(review));
+        let result;
+        try {
+            result = await apiCreateAccount(review.draftId);
+        } finally {
+            if (result) await finishWorking('Account created'); else hideWorking();
+        }
+        if (!result) {
+            showModal('create-modal');
+            return;
+        }
+
+        clearCreateForm();
+        showPanel('panel-accounts');
+
+        // the new account shows in the directory: an open one is re-read, a
+        // closed one is loaded now
+        const panel = getDataPanel('admin-users');
+        if (panel) {
+            if (panel.state === 'ready') await panel.refresh(); else await panel.open();
+        }
+
+        await reportFirstPassword(result, result.email, result.name);
+    } catch (error) {
+        notifyOffline();
+    } finally {
+        if (button) { button.disabled = false; button.textContent = 'Create'; }
+    }
+}
+
+async function createLoginAccount() {
+    if (!selectedUser || selectedUser.user_id) return;
+
+    const name = staffName(selectedUser);
+
+    const email = await askInput({
+        title: 'Create a login',
+        eyebrow: 'Accounts Management',
+        message: `${name} has a staff record but no way to sign in yet. The first password is sent to this address.`,
+        label: 'Email address',
+        type: 'email',
+        placeholder: 'name@example.com',
+        confirmLabel: 'Create Login',
+        check: (value) => emailComplaint(value)
+    });
+
+    if (email === false || email === null) return;
+
+    const staffId = selectedUser.staff_id;
+
+    try {
+        const review = await apiReviewLogin(staffId, email.trim().toLowerCase());
+        if (!review) return;
+
+        showWorking(creatingCard(review));
+        let result;
+        try {
+            result = await apiCreateLogin(staffId, review.draftId);
+        } finally {
+            if (result) await finishWorking('Login created'); else hideWorking();
+        }
+        if (!result) return;
+
+        closeModal('user-modal');
+
+        const panel = getDataPanel('admin-users');
+        if (panel && panel.state === 'ready') await panel.refresh();
+
+        await reportFirstPassword(result, result.email, result.name || name);
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// Archived accounts: the row opens the person, and Restore is one labelled
+// action on that card rather than a button on every row.
+let selectedArchived = null;
+
+function buildArchivePanel() {
+    createDataPanel({
+        key: 'admin-archive',
+        tableId: 'archive-table',
+        columns: 5,
+        pagerId: 'archive-pager',
+        idField: 'staff_id',
+
+        gate: {
+            title: 'The archive is not loaded',
+            text: 'Press Load Data to read the deactivated staff accounts, or type a name.',
+            button: 'Load Data'
+        },
+
+        load: () => apiGetStaff('?status=inactive'),
+
+        match: (user, query) => prefixMatch(userSearchFields(user), query),
+
+        renderRow: (user, index) => `
+            <tr class="row-clickable row-reveal" style="animation-delay: ${(index % 10) * 28}ms"
+                onclick="openRestoreCard(${user.staff_id})" title="Click to open the restoration card">
+                <td class="cell-id">#${escapeHtml(user.staff_id)}</td>
+                <td class="cell-name">${escapeHtml(staffName(user))}</td>
+                <td>${user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>'}</td>
+                <td>${escapeHtml(user.role_name)}</td>
+                <td>${user.archived_at ? escapeHtml(user.archived_at) : '<span class="muted">Not recorded</span>'}</td>
+            </tr>`
+    });
+}
+
+function openRestoreCard(staffId) {
+    const panel = getDataPanel('admin-archive');
+    selectedArchived = panel ? panel.find(staffId, 'staff_id') : null;
+    if (!selectedArchived) return;
+
+    const user = selectedArchived;
+    const name = staffName(user);
+
+    document.getElementById('restore-name').textContent = name;
+    document.getElementById('restore-role').textContent = user.role_name;
+    document.getElementById('restore-avatar').textContent =
+        (user.first_name[0] + user.last_name[0]).toUpperCase();
+
+    document.getElementById('restore-details').innerHTML =
+        detailRow('Staff ID', '#' + escapeHtml(user.staff_id)) +
+        detailRow('Email', user.email
+            ? escapeHtml(user.email)
+            : '<span class="muted">No login account</span>') +
+        detailRow('Role', escapeHtml(user.role_name)) +
+        detailRow('Phone', user.phone
+            ? '<span class="mono">' + escapeHtml(phoneForDisplay(user.phone)) + '</span>'
+            : '<span class="muted">Not set</span>') +
+        detailRow('Date Archived', user.archived_at
+            ? escapeHtml(user.archived_at)
+            : '<span class="muted">Not recorded</span>') +
+        detailRow('Archived By', user.archived_by
+            ? escapeHtml(user.archived_by)
+            : '<span class="muted">Not recorded</span>') +
+        detailRow('Hired On', escapeHtml(user.staff_created_at)) +
+        detailRow('Last Login', user.last_login
+            ? escapeHtml(user.last_login)
+            : '<span class="muted">Never signed in</span>') +
+        detailRow('Password State', user.must_change_password
+            ? '<span class="badge badge-warning">Temporary</span>'
+            : '<span class="badge badge-neutral">Set by user</span>');
+
+    // an account with no login cannot sign in whatever its state
+    const warning = document.getElementById('restore-warning');
+
+    if (user.email) {
+        warning.textContent = 'Restoring puts this account back on the active list. ' + name +
+              ' can sign in again straight away with the password they had before.';
+    } else {
+        warning.textContent = 'Restoring puts this staff record back on the active list. ' + name +
+              ' still has no login account, so use Create Login afterwards.';
+    }
+
+    showModal('restore-modal');
+}
+
+async function restoreSelectedAccount() {
+    if (!selectedArchived) return;
+
+    const user = selectedArchived;
+    const name = staffName(user);
+
+    const yes = await askConfirm(
+        `${name} goes back on the active staff list as a ${user.role_name}.`,
+        {
+            title: 'Restore this account?',
+            eyebrow: 'Archived Accounts',
+            confirmLabel: 'Restore the account',
+            detail: user.email
+                ? ['They can sign in again immediately with their previous password.',
+                   'Everything their role can reach becomes available to them again.']
+                : ['The staff record becomes active again.',
+                   'They still cannot sign in until a login account is created for them.']
+        });
+
+    if (!yes) return;
+
+    try {
+        const response = await apiSetStaffActive(user.staff_id, true);
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error);
+            return;
+        }
+
+        notifySuccess(name + ' is on the active list again.', 'Account restored');
+        closeModal('restore-modal');
+        selectedArchived = null;
+
+        const panel = getDataPanel('admin-archive');
+        if (panel) await panel.refresh();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// Access control: one table, the roles down the left and the modules across
+// the top. A box stands for every screen of that module the role's dashboard
+// can draw. A click saves at once: the server is told one screen at a time,
+// and each is written to the audit trail.
+let featureMatrix = null;       // what /api/features last answered
+let featureState = {};          // "screen key|role id" -> on, as saved
+let featureSaving = false;      // true while a click is being saved
+
+async function loadFeatureMatrix() {
+    const table = document.getElementById('features-matrix');
+    if (!table) return;
+
+    try {
+        featureMatrix = await apiGetScreenSwitches();
+    } catch (error) {
+        table.querySelector('tbody').innerHTML =
+            '<tr><td class="table-empty">Cannot read the screens. Is the server running?</td></tr>';
+        return;
+    }
+
+    renderFeatureMatrix();
+}
+
+// the module names, in the order their screens come
+function featureModules() {
+    const modules = [];
+    (featureMatrix.features || []).forEach((feature) => {
+        if (!modules.includes(feature.module)) modules.push(feature.module);
+    });
+    return modules;
+}
+
+// the screens of one module that one role's dashboard can draw
+function moduleScreensFor(module, roleName) {
+    return (featureMatrix.features || []).filter((feature) =>
+        feature.module === module && feature.roles[roleName] && feature.roles[roleName].available);
+}
+
+function renderFeatureMatrix() {
+    const table = document.getElementById('features-matrix');
+    if (!table || !featureMatrix) return;
+
+    const roles = featureMatrix.roles || [];
+    const modules = featureModules();
+
+    // what each role has for each screen now
+    featureState = {};
+    (featureMatrix.features || []).forEach((feature) => {
+        roles.forEach((role) => {
+            const cell = feature.roles[role.role_name];
+            if (cell && cell.available) featureState[feature.key + '|' + role.role_id] = cell.held;
+        });
+    });
+
+    table.querySelector('thead tr').innerHTML = '<th>Role</th>' +
+        modules.map((module) => '<th>' + escapeHtml(module) + '</th>').join('');
+
+    // one row per role, one box per module
+    table.querySelector('tbody').innerHTML = roles.map((role) => {
+        const boxes = modules.map((module) => '<td><input type="checkbox" class="access-box"' +
+            ' data-module="' + escapeHtml(module) + '"' +
+            ' data-role="' + escapeHtml(String(role.role_id)) + '"' +
+            ' data-role-name="' + escapeHtml(role.role_name) + '"' +
+            ' aria-label="' + escapeHtml(module + ' for ' + role.role_name) + '"' +
+            ' onchange="onModuleBoxChange(this)"></td>').join('');
+        return '<tr><td class="access-role">' + escapeHtml(role.role_name) + '</td>' + boxes + '</tr>';
+    }).join('');
+
+    syncModuleBoxes();
+}
+
+// Each box shows its screens: ticked when all are on, a dash when only some
+// are, empty when none are. Hovering it lists the screens and which are on.
+function syncModuleBoxes() {
+    document.querySelectorAll('#features-matrix .access-box').forEach((box) => {
+        const screens = moduleScreensFor(box.dataset.module, box.dataset.roleName);
+        if (screens.length === 0) {
+            box.checked = false;
+            box.indeterminate = false;
+            box.title = box.dataset.roleName + ' has no ' + box.dataset.module + ' screens';
+            return;
+        }
+
+        let on = 0;
+        const lines = [];
+        screens.forEach((feature) => {
+            const isOn = featureState[feature.key + '|' + box.dataset.role];
+            if (isOn) on += 1;
+            lines.push(feature.name + ': ' + (isOn ? 'on' : 'off'));
+        });
+
+        box.checked = on === screens.length;
+        box.indeterminate = on > 0 && on < screens.length;
+        box.title = lines.join('\n');
+    });
+}
+
+// A tick turns on every screen of the module for that role; no tick turns
+// them all off. Saved straight away.
+async function onModuleBoxChange(box) {
+    const roleName = box.dataset.roleName;
+    const module = box.dataset.module;
+    const screens = moduleScreensFor(module, roleName);
+
+    // a module this role's dashboard does not have: nothing to switch on
+    if (screens.length === 0) {
+        box.checked = false;
+        notifyInfo(roleName + ' does not have any ' + module + ' screens, so there is nothing to switch on.',
+            'Not available');
+        return;
+    }
+
+    // one click at a time; a click made while one is saving is put back
+    if (featureSaving) {
+        syncModuleBoxes();
+        return;
+    }
+
+    const turnOn = box.checked;
+    const toChange = screens.filter((feature) => featureState[feature.key + '|' + box.dataset.role] !== turnOn);
+    if (toChange.length === 0) {
+        syncModuleBoxes();
+        return;
+    }
+
+    featureSaving = true;
+    let saved = 0;
+    try {
+        for (const feature of toChange) {
+            const response = await apiSetScreenSwitch(feature.key, Number(box.dataset.role), turnOn);
+            const body = await response.json();
+            if (!response.ok) {
+                if (!handleAuthFailure(response, body)) notifyError(body.error, 'Not saved');
+                break;
+            }
+            featureState[feature.key + '|' + box.dataset.role] = turnOn;
+            saved += 1;
+        }
+    } catch (error) {
+        notifyOffline();
+    } finally {
+        featureSaving = false;
+        syncModuleBoxes();
+    }
+
+    if (saved === toChange.length) {
+        notifySuccess(roleName + ': ' + module + (turnOn ? ' switched on.' : ' switched off.') +
+            ' Their signed-in screens follow at once.', 'Saved');
+    }
+}
+
+// The audit trail. The row carries time, person, role, machine and kind;
+// the entry itself carries the before-and-after values.
+const AUDIT_TONE = {
+    CREATE: 'badge-success',
+    UPDATE: 'badge-neutral',
+    DELETE: 'badge-danger',
+    VOID: 'badge-danger',
+    LOGIN_FAILURE: 'badge-danger',
+    RESTORE: 'badge-warning',
+    BACKUP: 'badge-warning',
+    SECURITY: 'badge-warning',
+    PAYMENT: 'badge-success',
+    ACCESS: 'badge-warning',
+    LOGIN: 'badge-neutral',
+    LOGOUT: 'badge-neutral',
+    OTHER: 'badge-neutral'
+};
+
+const AUDIT_LABEL = {
+    CREATE: 'Create',
+    UPDATE: 'Update',
+    DELETE: 'Delete',
+    VOID: 'Void',
+    RESTORE: 'Restore',
+    BACKUP: 'Backup',
+    LOGIN: 'Sign in',
+    LOGOUT: 'Sign out',
+    LOGIN_FAILURE: 'Failed sign-in',
+    SECURITY: 'Security',
+    PAYMENT: 'Payment',
+    ACCESS: 'Access',
+    OTHER: 'Other'
+};
+
+function auditLogQuery() {
+    const parts = [];
+
+    const role = document.getElementById('logs-role');
+    if (role && role.value !== 'all') parts.push('role=' + encodeURIComponent(role.value));
+
+    const from = document.getElementById('logs-from');
+    if (from && from.value) parts.push('from=' + encodeURIComponent(from.value));
+
+    const to = document.getElementById('logs-to');
+    if (to && to.value) parts.push('to=' + encodeURIComponent(to.value));
+
+    return parts.length ? '?' + parts.join('&') : '';
+}
+
+// A role picked before a reload is put back as an option straight away, so the
+// table loads again with it before the role list arrives from the server.
+function keepSavedLogRole() {
+    const select = document.getElementById('logs-role');
+    const saved = (readLoadedPanels()[thisPageName()] || {})['admin-logs'];
+    const role = saved && saved.inputs ? saved.inputs['logs-role'] : '';
+
+    if (!select || !role || role === 'all') return;
+    select.add(new Option(role, role));
+    select.value = role;
+}
+
+// the role box and the two date boxes narrow the query itself
+async function refreshAuditLogs() {
+    syncLogColumns();
+
+    const panel = getDataPanel('admin-logs');
+    if (panel) await panel.open();
+}
+
+function buildLogsPanel() {
+    createDataPanel({
+        key: 'admin-logs',
+        inputs: ['logs-role', 'logs-from', 'logs-to'],
+        tableId: 'logs-table',
+        columns: 6,
+        pagerId: 'logs-pager',
+        idField: 'log_id',
+
+        gate: {
+            title: 'The audit trail is not loaded',
+            text: 'Pick a date range or a role, then press Load Data. ' +
+                  'Nothing is read from the trail until you ask for it.',
+            button: 'Load Data'
+        },
+
+        load: () => apiGetAuditLogs(auditLogQuery()),
+
+        match: (log, query) => prefixMatch([
+            log.staff_name, log.role_name, log.action, log.details, log.ip_address
+        ], query),
+
+        renderRow: (log, index) => {
+            const tone = AUDIT_TONE[log.action_type] || 'badge-neutral';
+            const label = AUDIT_LABEL[log.action_type] || log.action_type;
+
+            return `
+            <tr class="row-clickable row-reveal" style="animation-delay: ${(index % 10) * 28}ms"
+                onclick="openLogEntry(${log.log_id})" title="Click to read the full entry">
+                <td class="cell-id">${escapeHtml(log.created_at)}</td>
+                <td class="cell-name">${escapeHtml(log.staff_name)}${
+                    log.staff_id ? ' <span class="muted">#' + escapeHtml(log.staff_id) + '</span>' : ''}</td>
+                <td>${escapeHtml(log.role_name)}</td>
+                <td class="cell-id">${log.ip_address ? escapeHtml(log.ip_address) : '<span class="muted">Not recorded</span>'}</td>
+                <td><span class="badge ${tone}">${escapeHtml(label)}</span></td>
+                <td>${escapeHtml(log.details || log.action)}</td>
+            </tr>`;
+        }
+    });
+}
+
+// Export: the same filters as the table (type, dates, and the search box),
+// written by the server as an Excel workbook or a PDF and downloaded.
+function exportAuditLogs(format) {
+    const query = auditLogQuery();
+    const search = document.getElementById('logs-search');
+    const text = search ? search.value.trim() : '';
+
+    let url = '/api/audit-logs/export/' + encodeURIComponent(format) + query;
+    if (text !== '') url += (query ? '&' : '?') + 'search=' + encodeURIComponent(text);
+
+    notifyInfo('The audit trail is being written to a ' + (format === 'pdf' ? 'PDF' : 'Excel') +
+        ' file and saved to your downloads folder.', 'Exporting');
+    window.location.href = url;
+}
+
+function openLogEntry(logId) {
+    const panel = getDataPanel('admin-logs');
+    const log = panel ? panel.find(logId, 'log_id') : null;
+    if (!log) return;
+
+    const label = AUDIT_LABEL[log.action_type] || log.action_type;
+    const tone = AUDIT_TONE[log.action_type] || 'badge-neutral';
+
+    document.getElementById('log-action').textContent = prettyLabel(log.action);
+    document.getElementById('log-when').textContent = whenText(log.created_at);
+    document.getElementById('log-avatar').textContent = label.slice(0, 2).toUpperCase();
+
+    document.getElementById('log-details').innerHTML =
+        detailRow('Entry', '#' + escapeHtml(log.log_id)) +
+        detailRow('Timestamp', escapeHtml(log.created_at)) +
+        detailRow('User', escapeHtml(log.staff_name)) +
+        detailRow('User ID', log.staff_id
+            ? '#' + escapeHtml(log.staff_id)
+            : '<span class="muted">Not a signed-in action</span>') +
+        detailRow('Role', escapeHtml(log.role_name)) +
+        detailRow('IP Address', log.ip_address
+            ? '<span class="mono">' + escapeHtml(log.ip_address) + '</span>'
+            : '<span class="muted">Not recorded</span>') +
+        detailRow('Action', escapeHtml(log.action)) +
+        detailRow('Action Type', '<span class="badge ' + tone + '">' + escapeHtml(label) + '</span>') +
+        detailRow('Detail', escapeHtml(log.details || 'None recorded'));
+
+    showModal('log-modal');
+}
+
+// Backup & recovery. A backup is one .sql file of the whole system, written
+// into backups/ under the date and time. Actions open in a drawer with the
+// one backup they belong to.
+let selectedBackup = null;
+
+function formatBytes(bytes) {
+    const size = Number(bytes || 0);
+    if (size < 1024) return size + ' B';
+    if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
+    return (size / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function backupTakenAt(fileName) {
+    const parts = /_(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})/.exec(fileName);
+    if (!parts) return { day: fileName, time: '' };
+
+    const date = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
+    const day = date.toLocaleDateString('en-PH', { day: 'numeric', month: 'long', year: 'numeric' });
+    return { day: day, time: `${parts[4]}:${parts[5]}` };
+}
+
+// "02:00" for an hour of the day
+function hourText(hour) {
+    return String(Number(hour) || 0).padStart(2, '0') + ':00';
+}
+
+// Every fact on this card comes from the server, so a dead timer cannot keep
+// reading "backing up every day". A failure is said in plain words.
+function renderAutoBackupCard(auto, procedures) {
+    const card = document.getElementById('auto-backup-card');
+    const state = document.getElementById('auto-backup-state');
+    const text = document.getElementById('auto-backup-text');
+    if (!card || !state || !text) return;
+
+    // the switch says what pressing it will do, and only shows once the server has answered
+    const toggle = document.getElementById('auto-backup-toggle');
+    if (toggle) {
+        toggle.style.display = auto ? '' : 'none';
+        toggle.disabled = false;
+        if (auto) {
+            toggle.textContent = auto.enabled ? 'Turn Off' : 'Turn On';
+            toggle.className = auto.enabled ? 'btn btn-ghost auto-backup-toggle' : 'btn btn-accent auto-backup-toggle';
+            toggle.title = auto.enabled
+                ? 'Stop the daily backup. The files already saved stay.'
+                : 'Start the daily backup again.';
+        }
+    }
+
+    if (!auto) {
+        card.className = 'card auto-backup';
+        state.textContent = 'Unknown';
+        text.textContent = 'This server did not say whether it backs itself up.';
+        return;
+    }
+
+    // missing stored procedures outrank anything this card would say about backups
+    if (procedures && procedures.loaded < procedures.expected) {
+        card.className = 'card auto-backup is-bad';
+        state.textContent = 'Read this';
+        text.textContent = `Only ${procedures.loaded} of ${procedures.expected} stored procedures are loaded, ` +
+            `so backups cannot run. Run 2-RUN-SECOND-stored-procedures.sql, then reload.`;
+        return;
+    }
+
+    if (!auto.enabled) {
+        card.className = 'card auto-backup is-off';
+        state.textContent = 'Off';
+        text.textContent = 'Daily backup is off. Only Run Backup Now saves a backup.';
+        return;
+    }
+
+    if (auto.lastError) {
+        card.className = 'card auto-backup is-bad';
+        state.textContent = 'Failing';
+        text.textContent = `Last daily backup failed: ${auto.lastError}. ` +
+            `Take one by hand until it is fixed.`;
+        return;
+    }
+
+    card.className = 'card auto-backup is-on';
+    state.textContent = 'On';
+    text.textContent = `Backs up daily at ${hourText(auto.hour)} and deletes backups older than ${auto.keep} days.` +
+        (auto.lastFileName ? ` Latest: ${auto.lastFileName}.` : '');
+}
+
+// the limits under Saved Backups, from the server
+function renderBackupLimits(limits) {
+    const note = document.getElementById('backup-limit-note');
+    if (!note || !limits) return;
+    note.textContent = `${limits.manualCount} of ${limits.manual} manual backups used. ` +
+        `Backups older than ${limits.keepDays} days are deleted automatically.`;
+}
+
+// reads the state without opening the table
+async function loadAutoBackupState() {
+    try {
+        const body = await apiGetBackups();
+        renderAutoBackupCard(body.auto, body.procedures);
+        renderBackupLimits(body.limits);
+    } catch (error) {
+        renderAutoBackupCard(null);
+    }
+}
+
+// The switch on the card. Off stops the daily backup; the files already
+// there stay until they are deleted by hand.
+async function toggleAutoBackup() {
+    const toggle = document.getElementById('auto-backup-toggle');
+    const turningOff = toggle && toggle.textContent.trim() === 'Turn Off';
+
+    const yes = await askConfirm(
+        turningOff
+            ? 'The system stops saving a backup every day. The backups already saved stay, and Run Backup Now still works.'
+            : 'The system saves one backup every day again.',
+        {
+            title: turningOff ? 'Turn the daily backup off?' : 'Turn the daily backup on?',
+            eyebrow: 'Automatic backup',
+            confirmLabel: turningOff ? 'Turn it off' : 'Turn it on'
+        });
+
+    if (!yes) return;
+
+    if (toggle) { toggle.disabled = true; toggle.textContent = turningOff ? 'Turning off...' : 'Turning on...'; }
+
+    try {
+        const body = await apiSetAutoBackup(!turningOff);
+        if (!body) return;
+
+        notifySuccess(body.message, turningOff ? 'Daily backup off' : 'Daily backup on');
+    } catch (error) {
+        notifyOffline();
+    } finally {
+        // the card re-reads the server rather than trusting what was just pressed
+        await loadAutoBackupState();
+    }
+}
+
+function buildBackupPanel() {
+    createDataPanel({
+        key: 'admin-backups',
+        remember: false,   // it loads by itself whenever its screen opens
+        tableId: 'backup-table',
+        columns: 6,
+        pagerId: 'backup-pager',
+        idField: 'fileName',
+
+        gate: {
+            title: 'Reading the backup folder',
+            text: 'The saved backups load as soon as this screen opens.',
+            button: 'Load Data'
+        },
+
+        load: async () => {
+            const body = await apiGetBackups();
+            renderAutoBackupCard(body.auto, body.procedures);
+            renderBackupLimits(body.limits);
+            return body.files || [];
+        },
+
+        match: (file, query) => prefixMatch([file.fileName], query),
+
+        renderRow: (file, index) => {
+            const when = backupTakenAt(file.fileName);
+
+            let kind;
+            if (file.automatic) {
+                kind = '<span class="badge badge-neutral">Automatic</span>';
+            } else {
+                kind = '<span class="badge badge-success">Manual</span>';
+            }
+
+            // the name goes through a handler so it can never close the quote it sits in
+            return '<tr class="row-clickable row-reveal" style="animation-delay:' +
+                    (index % 10) * 28 + 'ms" ' +
+                    'onclick="openBackupDrawer(' + index + ')" ' +
+                    'title="Click to download, restore or delete this backup">' +
+                '<td><span class="backup-day">' + escapeHtml(when.day) + '</span></td>' +
+                '<td><span class="backup-time">' + escapeHtml(when.time) + '</span></td>' +
+                '<td class="cell-id">' + escapeHtml(file.fileName) + '</td>' +
+                '<td>' + kind + '</td>' +
+                '<td>' + backupMadeBy(file) + '</td>' +
+                '<td class="cell-num">' + escapeHtml(formatBytes(file.bytes)) + '</td>' +
+                '</tr>';
+        }
+    });
+}
+
+// who made a backup, as the server read it from the audit log
+function backupMadeBy(file) {
+    if (file.madeBy) return escapeHtml(file.madeBy);
+    return '<span class="muted">Not recorded</span>';
+}
+
+function openBackupDrawer(index) {
+    const panel = getDataPanel('admin-backups');
+    selectedBackup = panel ? panel.visible[index] : null;
+    if (!selectedBackup) return;
+
+    const when = backupTakenAt(selectedBackup.fileName);
+
+    document.getElementById('backup-drawer-title').textContent = selectedBackup.fileName;
+    document.getElementById('backup-drawer-details').innerHTML =
+        detailRow('Taken On', escapeHtml(when.day)) +
+        detailRow('Taken At', escapeHtml(when.time)) +
+        detailRow('File Name', '<span class="mono">' + escapeHtml(selectedBackup.fileName) + '</span>') +
+        detailRow('Size', escapeHtml(formatBytes(selectedBackup.bytes))) +
+        detailRow('Kind', selectedBackup.automatic ? 'Automatic' : 'Manual') +
+        detailRow('Made By', backupMadeBy(selectedBackup));
+
+    // only a backup made by hand can be deleted; the system's own ones stay
+    // until the system removes them after the days it keeps them
+    const deleteButton = document.getElementById('backup-delete-btn');
+    if (deleteButton) deleteButton.hidden = Boolean(selectedBackup.automatic);
+    const autoNote = document.getElementById('backup-auto-note');
+    if (autoNote) autoNote.hidden = !selectedBackup.automatic;
+
+    document.getElementById('backup-drawer').classList.add('open');
+    document.getElementById('backup-shade').classList.add('open');
+}
+
+function closeBackupDrawer() {
+    const drawer = document.getElementById('backup-drawer');
+    const shade = document.getElementById('backup-shade');
+    if (drawer) drawer.classList.remove('open');
+    if (shade) shade.classList.remove('open');
+    selectedBackup = null;
+}
+
+document.addEventListener('keydown', function (event) {
+    // a confirm card over the drawer answers its own Escape (modals.js stops it reaching here)
+    if (event.key === 'Escape') closeBackupDrawer();
+});
+
+async function runBackup() {
+    const yes = await askConfirm(
+        'A new backup file is saved, holding the system exactly as it stands now.',
+        {
+            title: 'Run a backup now?',
+            eyebrow: 'Backup',
+            confirmLabel: 'Run the backup',
+            detail: [
+                'Nothing currently in the system is changed or removed.'
+            ]
+        });
+
+    if (!yes) return;
+
+    const button = document.getElementById('run-backup-btn');
+    if (button) button.disabled = true;
+
+    // a loading card covers the screen while the backup is written
+    showWorking({
+        title: 'Backing up data',
+        eyebrow: 'Backup',
+        message: 'Please wait while the system saves a copy of everything. Do not close this page.',
+        steps: ['Reading every table, view and procedure', 'Writing the backup file', 'Writing it in the audit trail']
+    });
+
+    let body = null;
+    try {
+        const response = await apiMakeBackup();
+        body = await response.json();
+
+        if (!response.ok) {
+            hideWorking();
+            if (!handleAuthFailure(response, body)) notifyError(body.error, 'Backup failed');
+            return;
+        }
+
+        await finishWorking('Backup saved');
+        notifySuccess(
+            `${body.fileName} holds ${body.rowCount} rows across ${body.tableCount} tables, ` +
+            `${body.viewCount} views and ${body.procedureCount} procedures (${formatBytes(body.bytes)}).`,
+            'Backup saved');
+
+        const panel = getDataPanel('admin-backups');
+        if (panel) await panel.open();
+    } catch (error) {
+        hideWorking();
+        notifyOffline();
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
+function downloadSelectedBackup() {
+    if (!selectedBackup) return;
+
+    apiDownloadBackup(selectedBackup.fileName);
+    notifyInfo(selectedBackup.fileName + ' is being saved to your downloads folder.', 'Downloading');
+}
+
+async function restoreSelectedBackup() {
+    if (!selectedBackup) return;
+
+    const fileName = selectedBackup.fileName;
+    const when = backupTakenAt(fileName);
+
+    const yes = await askDanger(
+        `Everything in the system will be replaced by the data as it stood on ${when.day} at ${when.time}.`,
+        {
+            title: 'Restore this backup?',
+            eyebrow: 'Recovery',
+            confirmLabel: 'Restore this backup',
+            detail: [
+                'Every sale, delivery and account recorded since then is lost.',
+                'Everyone signed in now is signed out.',
+                'This cannot be undone. Run a backup first if you are not certain.'
+            ]
+        });
+
+    if (!yes) return;
+
+    closeBackupDrawer();
+    notifyInfo('Rebuilding the database from ' + fileName + '.', 'Restore running');
+
+    try {
+        const response = await apiRestoreBackup(fileName);
+        const body = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, body)) notifyError(body.error, 'Restore failed');
+            return;
+        }
+
+        notifySuccess(body.message, 'Database restored');
+
+        const panel = getDataPanel('admin-backups');
+        if (panel) await panel.open();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+async function deleteSelectedBackup() {
+    if (!selectedBackup || selectedBackup.automatic) return;
+
+    const fileName = selectedBackup.fileName;
+
+    const yes = await askDanger(
+        fileName + ' is removed from the backup folder.',
+        {
+            title: 'Delete this backup?',
+            eyebrow: 'Recovery',
+            confirmLabel: 'Delete this backup',
+            detail: [
+                'The file is gone for good; it is not moved to a recycle bin.',
+                'The data inside the system itself is not touched.'
+            ]
+        });
+
+    if (!yes) return;
+
+    closeBackupDrawer();
+
+    try {
+        const response = await apiDeleteBackup(fileName);
+        const body = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, body)) notifyError(body.error, 'Nothing was deleted');
+            return;
+        }
+
+        notifySuccess(body.message, 'Backup deleted');
+
+        const panel = getDataPanel('admin-backups');
+        if (panel) await panel.open();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+function chooseRestoreFile() {
+    const picker = document.getElementById('restore-file');
+    if (picker) picker.click();
+}
+
+async function handleRestoreFile(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    event.target.value = '';
+
+    if (!/\.sql$/i.test(file.name)) {
+        notifyWarning('A backup is a .sql file. ' + file.name + ' is not one.', 'Wrong kind of file');
+        return;
+    }
+
+    const yes = await askDanger(
+        `Everything in the system will be replaced by whatever ${file.name} contains.`,
+        {
+            title: 'Restore from this file?',
+            eyebrow: 'Recovery',
+            confirmLabel: 'Restore from this file',
+            detail: [
+                'Anything recorded since that file was made is lost.',
+                'This system cannot check what is inside the file before running it.',
+                'This cannot be undone.'
+            ]
+        });
+
+    if (!yes) return;
+
+    notifyInfo('Rebuilding the database from ' + file.name + '.', 'Restore running');
+
+    try {
+        const sql = await file.text();
+        const response = await apiRestoreFromFile(sql);
+        const body = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, body)) notifyError(body.error, 'Restore failed');
+            return;
+        }
+
+        notifySuccess(body.message, 'Database restored');
+
+        const panel = getDataPanel('admin-backups');
+        if (panel) await panel.open();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+
+// Receipt maintenance: what every invoice claims about the business. Above
+// the 3,000,000 threshold a shop is VAT-registered with 12% inside its
+// prices; below it charges no VAT. Each sale carries the registration and
+// rate it was issued under, so changing this touches no past sale.
+let storeSettings = null;
+
+// A TIN is nine digits and a branch code, 000-000-000-00000 (00000 for the
+// head office; an older three-digit branch code is widened with two zeros).
+// The box works like the phone box: digits only, dashes put in as typed.
+// The same rule is enforced again in validation.js.
+const TIN_BASE_DIGITS = 9;
+const TIN_BRANCH_DIGITS = 5;
+
+function tinDigits(value) {
+    return String(value === null || value === undefined ? '' : value)
+        .replace(/\D/g, '')
+        .slice(0, TIN_BASE_DIGITS + TIN_BRANCH_DIGITS);
+}
+
+function tinFormat(digits) {
+    const parts = [digits.slice(0, 3), digits.slice(3, 6), digits.slice(6, 9), digits.slice(9)];
+    return parts.filter((part) => part !== '').join('-');
+}
+
+// oninput on the TIN box; rewrites rather than blocks so paste works
+function onTinInput(input) {
+    if (!input) return;
+
+    const shaped = tinFormat(tinDigits(input.value));
+    if (shaped !== input.value) input.value = shaped;
+
+    // no verdict while empty: the form says so at submit
+    input.classList.toggle('is-bad', shaped !== '' && tinComplaint(shaped) !== null);
+}
+
+// the sentence said about a bad TIN, or null; returned, not shown
+function tinComplaint(value) {
+    const digits = tinDigits(value);
+
+    if (digits === '') {
+        return 'The shop needs a TIN. It is printed on every invoice.';
+    }
+
+    if (digits.length !== TIN_BASE_DIGITS &&
+        digits.length !== TIN_BASE_DIGITS + 3 &&
+        digits.length !== TIN_BASE_DIGITS + TIN_BRANCH_DIGITS) {
+        return `A TIN is ${TIN_BASE_DIGITS} digits and a branch code, ` +
+               `written 000-000-000-00000. That one has ${digits.length} digits.`;
+    }
+
+    if (/^0+$/.test(digits.slice(0, TIN_BASE_DIGITS))) {
+        return '000-000-000 is the placeholder, not a TIN. Enter the number on the ' +
+               'shop\'s BIR certificate of registration.';
+    }
+
+    return null;
+}
+
+// the stored form; a value that does not pass is handed back as it was
+function tinToStore(value) {
+    const digits = tinDigits(value);
+    if (tinComplaint(digits) !== null) return String(value || '').trim();
+
+    const base = digits.slice(0, TIN_BASE_DIGITS);
+    const branch = digits.slice(TIN_BASE_DIGITS).padStart(TIN_BRANCH_DIGITS, '0');
+    return tinFormat(base + branch);
+}
+
+// the receipt's switches, by the name of their checkbox (show_<name>)
+const RECEIPT_SWITCHES = ['proprietor', 'cashier', 'customer', 'payment', 'reference',
+                          'item_count', 'tax', 'bank', 'note'];
+const RECEIPT_LINE_MAX = 10;        // lines in the header, and in the footer
+const RECEIPT_LINE_LENGTH = 80;     // characters in one line
+
+// Reset puts the saved details back, after asking if there is anything to lose.
+async function resetStoreForm() {
+    if (storeFormDirty() &&
+        !(await askDiscardChanges('Reset puts back the details as last saved. ' +
+                                  'The changes made since then are thrown away.', 'Receipt Maintenance'))) {
+        return;
+    }
+    await loadStoreSettingsForm();
+}
+
+async function loadStoreSettingsForm() {
+    const form = document.getElementById('store-form');
+    if (!form) return;
+
+    try {
+        storeSettings = await apiGetStoreSettings();
+    } catch (error) {
+        notifyOffline();
+        return;
+    }
+
+    form.elements.storeName.value = storeSettings.store_name || '';
+    form.elements.proprietor.value = storeSettings.proprietor || '';
+    form.elements.address.value = storeSettings.address || '';
+    form.elements.tin.value = tinToStore(storeSettings.tin || '');
+    form.elements.tin.classList.remove('is-bad');
+    form.elements.registrationType.value = storeSettings.registration_type || 'VAT';
+    form.elements.invoiceNote.value = storeSettings.invoice_note || '';
+    form.elements.bankName.value = storeSettings.bank_name || '';
+    form.elements.bankAccountName.value = storeSettings.bank_account_name || '';
+    form.elements.bankAccountNumber.value = storeSettings.bank_account_number || '';
+
+    // a non-VAT shop stores a zero rate; a useless value to put back in the box
+    const rate = Number(storeSettings.vat_rate) || 0;
+    form.elements.vatRate.value = rate > 0 ? rate : 12;
+
+    // the layout, as the database holds it
+    const layout = receiptLayoutOf(storeSettings);
+    form.elements.paperWidth.value = String(layout.paperWidth);
+    form.elements.fontSize.value = String(layout.fontSize);
+    form.elements.title.value = layout.title;
+    RECEIPT_SWITCHES.forEach((name) => {
+        const box = form.elements['show_' + name];
+        if (box) box.checked = receiptShows(layout, name);
+    });
+    renderReceiptLines('header', layout.headerLines);
+    renderReceiptLines('footer', layout.footerLines);
+
+    onBankInput();
+    onRegistrationChange(form.elements.registrationType.value);
+
+    showStoreVerdict('');
+    markFormClean(form, document.getElementById('store-save-btn'));
+}
+
+// ---------- Delivery Area: the places the shop delivers to ----------
+// The cashier can only pick from this list when making a delivery. Every add
+// or remove is saved at once (there is no Save button), so the list is shown
+// again from what the server answers. It is a plain list, not a table, so each
+// place can hold its own remove button.
+let deliveryAreas = [];
+const AREA_MIN_LENGTH = 3;
+const AREA_MAX_LENGTH = 150;
+
+async function loadDeliveryAreas() {
+    try {
+        const body = await apiGetDeliveryAreas();
+        deliveryAreas = body.areas || [];
+    } catch (error) {
+        // error.status is set when the server answered but said no (an older
+        // copy of the server, still running, does not know this list yet)
+        if (error.status) {
+            notifyError('The server answered but did not give the delivery areas. ' +
+                'Restart the server so it runs the latest version, then try again.', 'Delivery areas not read');
+        } else {
+            notifyOffline();
+        }
+        return;
+    }
+    renderDeliveryAreas();
+}
+
+function renderDeliveryAreas() {
+    const list = document.getElementById('area-list');
+    if (!list) return;
+
+    if (deliveryAreas.length === 0) {
+        list.innerHTML = '<li class="area-empty">No delivery area yet. ' +
+            'Deliveries cannot be made until at least one area is added.</li>';
+        return;
+    }
+
+    list.innerHTML = deliveryAreas.map((area, index) =>
+        '<li>' +
+            '<span class="area-text">' + escapeHtml(area) + '</span>' +
+            '<button type="button" class="btn btn-ghost btn-sm area-remove" title="Remove this area" ' +
+                'aria-label="Remove ' + escapeHtml(area) + '" onclick="removeDeliveryArea(' + index + ')">&times;</button>' +
+        '</li>').join('');
+}
+
+// While one add or remove is running, Add and every x are switched off, so a
+// second click cannot start another change before the first one is answered.
+let areaBusy = false;
+
+function setAreaBusy(busy) {
+    areaBusy = busy;
+
+    const button = document.getElementById('area-add-btn');
+    if (button) button.disabled = busy;
+    document.querySelectorAll('.area-remove').forEach((remove) => { remove.disabled = busy; });
+}
+
+// Sends one change (add or remove) and shows the list the server answers with.
+// "send" starts the request. Gives back true when the server made the change.
+async function changeDeliveryArea(send, title) {
+    if (areaBusy) return false;
+    setAreaBusy(true);
+
+    let changed = false;
+    let refused = false;
+    try {
+        const response = await send();
+        const result = await response.json();
+
+        if (!response.ok) {
+            refused = true;
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not saved');
+        } else {
+            deliveryAreas = result.areas;
+            notifySuccess(result.message, title);
+            changed = true;
+        }
+    } catch (error) {
+        notifyOffline();
+    }
+
+    renderDeliveryAreas();
+    setAreaBusy(false);
+
+    // refused: another administrator may have changed the list, so read it again
+    if (refused) await loadDeliveryAreas();
+    return changed;
+}
+
+async function handleAddDeliveryArea(event) {
+    event.preventDefault();
+
+    const box = document.getElementById('area-input');
+    if (!box || areaBusy) return;
+
+    // many spaces become one, like the server does
+    const area = box.value.trim().replace(/\s+/g, ' ');
+
+    if (area.length < AREA_MIN_LENGTH || area.length > AREA_MAX_LENGTH) {
+        notifyError('A delivery area is ' + AREA_MIN_LENGTH + ' to ' + AREA_MAX_LENGTH + ' characters, ' +
+                    'such as Brgy. San Isidro, Antipolo City.', 'Not added');
+        box.focus();
+        return;
+    }
+    if (deliveryAreas.some((saved) => saved.toLowerCase() === area.toLowerCase())) {
+        notifyError(area + ' is already on the list.', 'Not added');
+        box.focus();
+        return;
+    }
+
+    const added = await changeDeliveryArea(() => apiAddDeliveryArea(area), 'Delivery area added');
+    if (added) box.value = '';
+    box.focus();
+}
+
+async function removeDeliveryArea(index) {
+    const area = deliveryAreas[index];
+    if (area === undefined) return;
+
+    await changeDeliveryArea(() => apiRemoveDeliveryArea(area), 'Delivery area removed');
+}
+
+// ---------- the header and footer lines: added, moved (header only) and removed here ----------
+function receiptLineList(kind) {
+    return document.getElementById('store-' + kind + '-lines');
+}
+
+function readReceiptLines(kind) {
+    const list = receiptLineList(kind);
+    if (!list) return [];
+    return Array.from(list.querySelectorAll('input'))
+        .map((input) => input.value.trim())
+        .filter((value) => value !== '');
+}
+
+function renderReceiptLines(kind, lines) {
+    const list = receiptLineList(kind);
+    if (!list) return;
+
+    const values = Array.isArray(lines) ? lines : [];
+    list.innerHTML = values.map((line, index) => {
+        // The header lines can be put in a different order. The footer lines
+        // have no arrows: the footer always prints at the bottom of the
+        // receipt, in the order the lines were added.
+        let arrows = '';
+        if (kind === 'header') {
+            arrows =
+                '<button type="button" class="btn btn-ghost btn-sm" title="Move up" aria-label="Move up"' +
+                    (index === 0 ? ' disabled' : '') + ' onclick="moveReceiptLine(\'' + kind + '\', ' + index + ', -1)">&uarr;</button>' +
+                '<button type="button" class="btn btn-ghost btn-sm" title="Move down" aria-label="Move down"' +
+                    (index === values.length - 1 ? ' disabled' : '') + ' onclick="moveReceiptLine(\'' + kind + '\', ' + index + ', 1)">&darr;</button>';
+        }
+
+        return '<div class="line-row">' +
+            '<input type="text" class="form-control" name="' + kind + 'Line_' + index + '" data-untracked' +
+                ' maxlength="' + RECEIPT_LINE_LENGTH + '" value="' + escapeHtml(line) + '"' +
+                ' aria-label="' + (kind === 'header' ? 'Header' : 'Footer') + ' line ' + (index + 1) + '">' +
+            arrows +
+            '<button type="button" class="btn btn-ghost btn-sm line-remove" title="Remove" aria-label="Remove"' +
+                ' onclick="removeReceiptLine(\'' + kind + '\', ' + index + ')">&times;</button>' +
+        '</div>';
+    }).join('');
+}
+
+// the lines as typed, empty ones kept, so a box just added stays on screen
+function typedReceiptLines(kind) {
+    const list = receiptLineList(kind);
+    return list ? Array.from(list.querySelectorAll('input')).map((input) => input.value) : [];
+}
+
+function receiptLinesChanged(kind, lines, focusIndex) {
+    renderReceiptLines(kind, lines);
+    const form = document.getElementById('store-form');
+    if (form) form.dispatchEvent(new Event('input', { bubbles: true }));
+    queuePreviewFollow(kind + 'Line_' + (focusIndex === undefined ? -1 : focusIndex), true);
+    if (focusIndex !== undefined) {
+        const boxes = receiptLineList(kind).querySelectorAll('input');
+        if (boxes[focusIndex]) boxes[focusIndex].focus();
+    }
+}
+
+function addReceiptLine(kind) {
+    const lines = typedReceiptLines(kind);
+    if (lines.length >= RECEIPT_LINE_MAX) {
+        notifyWarning('A receipt holds up to ' + RECEIPT_LINE_MAX + ' lines here.', 'Too many lines');
+        return;
+    }
+    lines.push('');
+    receiptLinesChanged(kind, lines, lines.length - 1);
+}
+
+function moveReceiptLine(kind, index, step) {
+    const lines = typedReceiptLines(kind);
+    const target = index + step;
+    if (target < 0 || target >= lines.length) return;
+    const moved = lines.splice(index, 1)[0];
+    lines.splice(target, 0, moved);
+    receiptLinesChanged(kind, lines, target);
+}
+
+function removeReceiptLine(kind, index) {
+    const lines = typedReceiptLines(kind);
+    lines.splice(index, 1);
+    receiptLinesChanged(kind, lines);
+}
+
+// everything about the layout, as it is sent to the server
+function readReceiptLayout(form) {
+    const show = {};
+    RECEIPT_SWITCHES.forEach((name) => {
+        const box = form.elements['show_' + name];
+        show[name] = box ? box.checked : true;
+    });
+    return {
+        paperWidth: Number(form.elements.paperWidth.value),
+        fontSize: Number(form.elements.fontSize.value),
+        title: form.elements.title.value.trim(),
+        // not a box on the form: the fixed wording the server sends, so the preview shows it
+        paidLabel: receiptLayoutOf(storeSettings).paidLabel,
+        headerLines: readReceiptLines('header'),
+        footerLines: readReceiptLines('footer'),
+        show: show
+    };
+}
+
+// the rate box only means anything to a VAT-registered shop
+function onRegistrationChange(value) {
+    const field = document.getElementById('store-rate-field');
+    if (field) field.style.display = value === 'VAT' ? 'block' : 'none';
+    renderStorePreview();
+}
+
+// The bank account is required: the till shows it whenever Bank Transfer is
+// chosen. The same rule as the server's (admin.js bankDetailsFrom).
+const BANK_FIELDS = ['bankName', 'bankAccountName', 'bankAccountNumber'];
+
+function bankComplaint(form) {
+    const values = BANK_FIELDS.map((name) => form.elements[name].value.trim());
+    if (values.some((value) => value === '')) {
+        return 'The bank, the account name and the account number are all required.';
+    }
+    const number = values[2];
+    if (!/^[0-9][0-9 -]*[0-9]$/.test(number) || number.replace(/\D/g, '').length < 6) {
+        return 'An account number is digits, with spaces or dashes where the bank prints them.';
+    }
+    return null;
+}
+
+// marks the box that is wrong, as it is typed
+function onBankInput() {
+    const form = document.getElementById('store-form');
+    const note = document.getElementById('store-bank-note');
+    if (!form || !note || !form.elements.bankName) return;
+
+    const values = BANK_FIELDS.map((name) => form.elements[name].value.trim());
+    const numberBad = values[2] !== '' && bankComplaint(form) !== null && values.every((v) => v !== '');
+    form.elements.bankAccountNumber.classList.toggle('is-bad', numberBad);
+
+    note.className = numberBad ? 'store-bank-note is-stop' : 'store-bank-note';
+    note.textContent = numberBad ? bankComplaint(form) : '';
+}
+
+function showStoreVerdict(text) {
+    const box = document.getElementById('store-verdict');
+    if (!box) return;
+    box.className = text ? 'store-verdict is-stop' : 'store-verdict';
+    box.textContent = text || '';
+}
+
+async function handleSaveStoreSettings(event) {
+    event.preventDefault();
+    const form = event.target;
+    const registration = form.elements.registrationType.value;
+
+    if (!isFormDirty(form)) {
+        notifyInfo('Nothing on this form has been changed, so there is nothing to save.', 'No changes');
+        return;
+    }
+
+    // every box marked * first, with the bank boxes marked as well
+    const empty = firstEmptyRequired(form);
+    if (empty) {
+        const label = form.querySelector('label[for="' + empty.id + '"]');
+        const name = label ? label.childNodes[0].textContent.trim() : 'This field';
+        showStoreVerdict(name + ' is required.');
+        empty.classList.add('is-bad');
+        empty.focus();
+        return;
+    }
+
+    const tinProblem = tinComplaint(form.elements.tin.value);
+    if (tinProblem) {
+        showStoreVerdict(tinProblem);
+        form.elements.tin.classList.add('is-bad');
+        form.elements.tin.focus();
+        return;
+    }
+
+    const bankProblem = bankComplaint(form);
+    if (bankProblem) {
+        showStoreVerdict(bankProblem);
+        onBankInput();
+        form.elements.bankAccountNumber.focus();
+        return;
+    }
+
+    if (registration === 'VAT') {
+        const rate = parseFloat(form.elements.vatRate.value);
+        if (!(rate > 0 && rate <= 100)) {
+            showStoreVerdict('The VAT rate is a number above 0 and up to 100.');
+            form.elements.vatRate.focus();
+            return;
+        }
+    }
+
+    // One card for the whole save: what changes, and what that does to invoices.
+    // Switching the registration changes what every future invoice claims.
+    const registrationChanged = Boolean(storeSettings) && storeSettings.registration_type !== registration;
+
+    let consequence = 'Invoices printed from now on use these details. Sales already rung up keep the ones they were issued with.';
+    if (registrationChanged) {
+        consequence = 'This shop is recorded as ' + storeSettings.registration_type +
+            ' and you are changing it to ' + registration + '. ' +
+            (registration === 'VAT'
+                ? 'Invoices from now on will show a VAT breakdown and read VAT REG TIN.'
+                : 'Invoices from now on will show no VAT at all and read NON-VAT REG TIN.') +
+            ' Sales already rung up keep the registration they were issued under.';
+    }
+
+    // the rate is only part of a VAT shop; a shop becoming VAT lists the rate it starts on
+    const becomesVat = registrationChanged && registration === 'VAT';
+    const changes = formChangeLines(form, (name) => name === 'vatRate' && (registration !== 'VAT' || becomesVat));
+    if (becomesVat) changes.push('VAT rate: \u2014 \u2192 ' + (parseFloat(form.elements.vatRate.value) || 0) + '%');
+
+    const saved = JSON.parse(formBaselines.get(form) || '{}');
+    [['header', 'Header lines'], ['footer', 'Footer lines']].forEach((entry) => {
+        const now = readReceiptLines(entry[0]);
+        const was = saved[entry[0] + 'Lines'] || [];
+        if (JSON.stringify(now) === JSON.stringify(was)) return;
+        changes.push(entry[1] + ': ' + (was.length ? clipValue(was.join(' | ')) : '(none)') +
+            ' \u2192 ' + (now.length ? clipValue(now.join(' | ')) : '(none)'));
+    });
+
+    const yes = await askConfirm(consequence, {
+        title: 'Save these changes?',
+        eyebrow: 'Receipt Maintenance',
+        confirmLabel: registrationChanged ? 'Change it and save' : 'Save details',
+        tone: registrationChanged ? 'danger' : undefined,
+        detail: changeListFor(changes)
+    });
+
+    if (!yes) return;
+
+    try {
+        const response = await apiSaveStoreSettings({
+                storeName: form.elements.storeName.value.trim(),
+                proprietor: form.elements.proprietor.value.trim(),
+                address: form.elements.address.value.trim(),
+                tin: tinToStore(form.elements.tin.value),
+                registrationType: registration,
+                vatRate: registration === 'VAT' ? parseFloat(form.elements.vatRate.value) : 0,
+                invoiceNote: form.elements.invoiceNote.value.trim(),
+                bankName: form.elements.bankName.value.trim(),
+                bankAccountName: form.elements.bankAccountName.value.trim(),
+                bankAccountNumber: form.elements.bankAccountNumber.value.trim(),
+                receiptLayout: readReceiptLayout(form)
+            });
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) showStoreVerdict(result.error);
+            return;
+        }
+
+        showStoreVerdict('');
+
+        // saved: nothing is left to lose, even if the re-read below cannot reach the server
+        markFormClean(form, document.getElementById('store-save-btn'));
+
+        notifySuccess(result.message, 'Receipt saved');
+        await loadStoreSettingsForm();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// the settings as the form has them now, in the shape the till reads
+function storeFromForm(form) {
+    return {
+        store_name: form.elements.storeName.value.trim(),
+        proprietor: form.elements.proprietor.value.trim(),
+        address: form.elements.address.value.trim(),
+        tin: form.elements.tin.value.trim(),
+        invoice_note: form.elements.invoiceNote.value.trim(),
+        bank_name: form.elements.bankName.value.trim(),
+        bank_account_name: form.elements.bankAccountName.value.trim(),
+        bank_account_number: form.elements.bankAccountNumber.value.trim(),
+        receipt_layout: readReceiptLayout(form)
+    };
+}
+
+// A worked example: one sale of one thousand pesos, drawn by the same
+// builder as the till's invoice from what is in the boxes now.
+function renderStorePreview() {
+    const box = document.getElementById('store-preview');
+    const form = document.getElementById('store-form');
+    if (!box || !form || !form.elements.paperWidth) return;
+
+    const shop = storeFromForm(form);
+    const registration = form.elements.registrationType.value;
+    const rate = registration === 'VAT' ? (parseFloat(form.elements.vatRate.value) || 0) : 0;
+    const total = 1000;
+
+    // the same arithmetic the database does: rate extracted from the total, VAT rounded first
+    const vat = rate > 0 ? Math.round(total * rate / (100 + rate) * 100) / 100 : 0;
+    const vatable = rate > 0 ? total - vat : 0;
+
+    let tax;
+    if (registration === 'VAT') {
+        tax = '<div class="rc-tax">' +
+              '<div><span>VATable Sale</span><span>' + peso(vatable) + '</span></div>' +
+              '<div><span>VAT (' + rate.toFixed(0) + '%)</span><span>' + peso(vat) + '</span></div>' +
+              '<div><span>VAT-Exempt Sale</span><span>' + peso(0) + '</span></div>' +
+              '<div><span>Zero-Rated Sale</span><span>' + peso(0) + '</span></div></div>';
+    } else {
+        tax = '<div class="rc-tax">' +
+              '<div><span>Sales Subject to Percentage Tax</span><span>' + peso(total) + '</span></div>' +
+              '<div><span>Exempt Sales</span><span>' + peso(0) + '</span></div></div>';
+    }
+
+    let bank = '';
+    if (shop.bank_account_number) {
+        bank = '<div class="rc-rule"></div><div class="rc-bank">' +
+            '<p class="rc-bank-head">Paid by bank transfer</p>' +
+            '<div><span>Bank</span><span>' + escapeHtml(shop.bank_name) + '</span></div>' +
+            '<div><span>Account name</span><span>' + escapeHtml(shop.bank_account_name) + '</span></div>' +
+            '<div><span>Account no.</span><span>' + escapeHtml(shop.bank_account_number) + '</span></div></div>';
+    }
+
+    const now = new Date();
+    applyReceiptPaper(box, shop);
+    box.innerHTML = receiptHtml(shop, {
+        registration: registration,
+        receiptNo: 'OR-000001',
+        meta: [
+            { key: 'date', label: 'Date', value: now.toLocaleString('en-PH') },
+            { key: 'cashier', label: 'Cashier', value: getCurrentUser() ? staffName(getCurrentUser()) : 'Cashier' },
+            { key: 'customer', label: 'Customer', value: 'Walk-in' },
+            { key: 'payment', label: 'Payment', value: 'Bank Transfer' },
+            { key: 'reference', label: 'Reference', value: 'REF-12345' }
+        ],
+        itemsHtml: '<tr><td>Sample item<br><span class="rc-qty">1 pc x ' + peso(total) + '</span></td>' +
+                   '<td class="rc-amt">' + peso(total) + '</td></tr>',
+        itemCount: '1',
+        totals: [
+            { label: 'Subtotal', value: peso(total) },
+            { label: 'Total Due', value: peso(total), due: true },
+            { label: 'Tendered', value: peso(total) },
+            { label: 'Change', value: peso(0) }
+        ],
+        taxHtml: tax,
+        paid: true,
+        bankHtml: bank
+    });
+}
+
+// ---------- the preview follows the box being changed ----------
+// Each box is matched to the part of the receipt it draws. After a pause in
+// typing, the preview scrolls that part into view -- inside the preview, never
+// the page, so the box being typed in stays where it is -- and washes it with
+// a colour that fades (.rc-flash in system-admin.css). A box whose part is not
+// drawn (a switch turned off, an empty line) shows the place it was.
+const PREVIEW_FOLLOW_DELAY = 200;     // quiet needed after a keystroke before the preview moves
+const PREVIEW_FLASH_MS = 1100;        // as long as the fade in system-admin.css
+
+let previewFollowTimer = null;
+let previewFlashTimer = null;
+
+// the receipt's parts for a box: { parts: [elements] }, or { whole: true }
+function previewPartsFor(box, form, name) {
+    const all = (selector) => Array.from(box.querySelectorAll(selector));
+    const firstFound = (...lists) => lists.find((list) => list.length > 0) || [];
+
+    // address (when there is one), TIN, then the shop's own lines, all one class
+    const headLines = all('.rc-head .rc-addr');
+    const lead = form.elements.address.value.trim() ? 1 : 0;
+
+    // a row of the meta grid is two cells: the label, then the value
+    const metaRow = (label) => {
+        const cells = all('.rc-meta > span');
+        const at = cells.findIndex((cell, index) => index % 2 === 0 && cell.textContent === label);
+        return at < 0 ? [] : [cells[at], cells[at + 1]];
+    };
+
+    // the nth line typed counts only the lines before it that are not empty
+    const lineRank = (kind, index) => {
+        const typed = typedReceiptLines(kind);
+        if (index < 0 || !typed[index] || typed[index].trim() === '') return -1;
+        return typed.slice(0, index).filter((line) => line.trim() !== '').length;
+    };
+
+    const metaOf = { show_cashier: 'Cashier', show_customer: 'Customer', show_payment: 'Payment', show_reference: 'Reference' };
+    const line = /^(header|footer)Line_(-?\d+)$/.exec(name);
+
+    if (line) {
+        const rank = lineRank(line[1], parseInt(line[2], 10));
+        if (line[1] === 'header') {
+            return { parts: firstFound(rank < 0 ? [] : [headLines[lead + 1 + rank]].filter(Boolean), all('.rc-head')) };
+        }
+        return { parts: firstFound(rank < 0 ? [] : [all('.rc-thanks')[rank]].filter(Boolean), all('.rc-thanks').slice(-1), all('.rc-foot')) };
+    }
+
+    if (metaOf[name]) return { parts: firstFound(metaRow(metaOf[name]), all('.rc-meta'), all('.rc-head')) };
+
+    switch (name) {
+        case 'storeName':         return { parts: all('.rc-shop') };
+        case 'proprietor':
+        case 'show_proprietor':   return { parts: firstFound(all('.rc-prop'), all('.rc-shop')) };
+        case 'address':           return { parts: firstFound(lead ? headLines.slice(0, 1) : [], all('.rc-shop')) };
+        case 'tin':               return { parts: headLines.slice(lead, lead + 1) };
+        case 'registrationType':
+        case 'vatRate':
+        case 'show_tax':          return { parts: firstFound(all('.rc-tax'), all('.rc-totals')) };
+        case 'bankName':
+        case 'bankAccountName':
+        case 'bankAccountNumber':
+        case 'show_bank':         return { parts: firstFound(all('.rc-bank'), all('.rc-foot')) };
+        case 'title':             return { parts: firstFound(all('.rc-line'), all('.rc-no')) };
+        case 'show_item_count':   return { parts: all('.rc-due') };
+        case 'invoiceNote':
+        case 'show_note':         return { parts: firstFound(all('.rc-note'), all('.rc-foot')) };
+        case 'paperWidth':
+        case 'fontSize':          return { whole: true };
+        default:                  return { parts: [] };
+    }
+}
+
+function clearPreviewFlash() {
+    clearTimeout(previewFlashTimer);
+    document.querySelectorAll('#store-preview.rc-flash, #store-preview .rc-flash').forEach((node) => node.classList.remove('rc-flash'));
+}
+
+// Scrolls the preview's own stage, not the page; nothing moves when the part is already in view.
+function scrollPreviewTo(element) {
+    const stage = element.closest('.store-preview-stage');
+    if (!stage || stage.scrollHeight <= stage.clientHeight + 1) return;
+
+    const area = stage.getBoundingClientRect();
+    const part = element.getBoundingClientRect();
+    const margin = 12;
+    if (part.top >= area.top + margin && part.bottom <= area.bottom - margin) return;
+
+    const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    stage.scrollTo({
+        top: Math.max(0, stage.scrollTop + part.top - area.top - (stage.clientHeight - part.height) / 2),
+        behavior: calm ? 'auto' : 'smooth'
+    });
+}
+
+function followPreview(name) {
+    const box = document.getElementById('store-preview');
+    const form = document.getElementById('store-form');
+    if (!box || !form || !form.elements.address) return;
+
+    const found = previewPartsFor(box, form, name);
+    const parts = found.whole ? [box] : found.parts;
+    if (parts.length === 0) return;
+
+    clearPreviewFlash();
+    void box.offsetWidth;   // a reflow between the class going and coming back, so the fade starts again
+    if (!found.whole) scrollPreviewTo(parts[0]);
+
+    parts.forEach((part) => part.classList.add('rc-flash'));
+    previewFlashTimer = setTimeout(clearPreviewFlash, PREVIEW_FLASH_MS);
+}
+
+// typing waits for a pause; a switch or a list is followed at once
+function queuePreviewFollow(name, atOnce) {
+    clearTimeout(previewFollowTimer);
+    previewFollowTimer = setTimeout(() => followPreview(name), atOnce ? 0 : PREVIEW_FOLLOW_DELAY);
+}
+
+function followFormEvent(event) {
+    const field = event.target;
+    if (!field || !field.name) return;
+
+    const discrete = field.type === 'checkbox' || field.tagName === 'SELECT';
+    if (event.type === 'change' && !discrete) return;   // typing was followed as it happened
+    queuePreviewFollow(field.name, discrete);
+}
+
+// prints the preview alone, at the roll's width, to try the printer
+function printStorePreview() {
+    const form = document.getElementById('store-form');
+    if (!form) return;
+    clearTimeout(previewFollowTimer);
+    clearPreviewFlash();   // the wash is for the screen
+    renderStorePreview();
+    setReceiptPageSize(storeFromForm(form));
+    document.body.classList.add('printing-receipt');
+    window.print();
+    setTimeout(function () { document.body.classList.remove('printing-receipt'); }, 400);
+}
+
+function syncTopbarHeight() {
+    const bar = document.querySelector('.topbar');
+    if (bar) document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
+}
+
+// ==========================================
+// SYSTEM PAGE BOOT
+// ==========================================
+if (window.location.pathname.toLowerCase().endsWith('system.html')) {
+    document.addEventListener('DOMContentLoaded', async function () {
+        buildUsersPanel();
+        buildArchivePanel();
+        buildLogsPanel();
+        keepSavedLogRole();
+        buildBackupPanel();
+
+        // a switch thrown by another administrator reaches this matrix, unless a click is saving
+        if (typeof onLiveChange === 'function') {
+            onLiveChange(['features'], function () {
+                const panel = document.getElementById('panel-features');
+                if (!panel || panel.style.display === 'none') return;
+                if (featureSaving) return;
+                loadFeatureMatrix();
+            });
+        }
+
+        showAccountsList();
+        unfoldSidebarAtOpenScreen();
+
+        // the receipt preview sticks below the top bar, whatever height that bar has
+        syncTopbarHeight();
+        window.addEventListener('resize', syncTopbarHeight);
+
+        // the preview redraws as the boxes are typed into
+        const storeForm = document.getElementById('store-form');
+        if (storeForm) {
+            storeForm.addEventListener('input', (event) => {
+                if (event.target && event.target.classList && event.target.id !== 'store-tin') {
+                    event.target.classList.remove('is-bad');
+                }
+                renderStorePreview();
+                followFormEvent(event);
+            });
+            storeForm.addEventListener('change', (event) => {
+                renderStorePreview();
+                followFormEvent(event);
+            });
+        }
+
+        watchFormEdits(storeForm, document.getElementById('store-save-btn'));
+        watchFormEdits(document.getElementById('edit-user-form'),
+                       document.getElementById('edit-user-save-btn'));
+
+        // the browser remembers dropdowns across a reload
+        syncDirectoryColumns();
+        syncLogColumns();
+
+        await loadRoles();
+        loadNotifications();
+    });
+}

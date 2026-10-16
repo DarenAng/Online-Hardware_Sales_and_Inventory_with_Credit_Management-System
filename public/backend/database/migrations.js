@@ -1,0 +1,1152 @@
+// ============================================================
+// migrations.js -- the start-up work on the database: add what an older database lacks, load the stored procedures
+// Loaded by: server.js (migrateOneAtATime, once at start-up) and access-control.js (the procedure count).
+// Never sent to a browser.
+//
+// What is in this file:
+//   - the migrate... functions: each adds one column or table an older database is missing
+//   - the stored-procedure helpers: count them, spot an old version, load
+//     public/database/2-RUN-SECOND-stored-procedures.sql when they are missing
+//   - migrateDatabase and migrateOneAtATime, which run them all in order
+//
+// loadProceduresIfMissing needs a way to run a whole SQL file; routes/admin.js owns
+// that (runSqlScript), so server.js hands it in.
+// ============================================================
+
+const path = require("path");
+const fs = require("fs");
+const database = require("./connection");
+const db = database.db;
+const DB_NAME = database.DB_NAME;
+const passwords = require("../services/passwords");
+const hashPassword = passwords.hashPassword;
+const isHashed = passwords.isHashed;
+const verifyPassword = passwords.verifyPassword;
+const validation = require("../validation");
+const cleanPhone = validation.cleanPhone;
+const phoneComplaint = validation.phoneComplaint;
+const DEFAULT_RECEIPT_LAYOUT = require("../store-settings").DEFAULT_RECEIPT_LAYOUT;
+
+async function hashLegacyPasswords() {
+  const [rows] = await db.query("SELECT user_id, password FROM users");
+  // find the passwords that are still plain text (not hashed yet)
+  const plain = [];
+  for (const row of rows) {
+    if (!isHashed(row.password)) {
+      plain.push(row);
+    }
+  }
+
+  if (plain.length === 0) return;
+
+  for (const row of plain) {
+    await db.query("UPDATE users SET password = ? WHERE user_id = ?",
+      [await hashPassword(row.password), row.user_id]);
+  }
+  console.log(`Hashed ${plain.length} password(s) that were stored as readable text.`);
+}
+
+// The password in the seed file ("admin123") is public. An administrator
+// account still using it is open to anyone who has read that file, so the
+// server says so when it starts. This only warns: no row is changed, because
+// the owner may have a reason, and a changed password is theirs to choose.
+async function warnIfAdminPasswordIsDefault() {
+  try {
+    const [rows] = await db.query(
+      "SELECT password FROM users WHERE email = 'admin@hardware.com'");
+    if (rows.length === 0) return;
+    if (await verifyPassword("admin123", rows[0].password)) {
+      console.warn("WARNING: admin@hardware.com still uses the password from the seed file " +
+        "(admin123). Sign in and change it now: anyone who has read the project files can sign in as the administrator.");
+    }
+  } catch (error) {
+    // a warning that cannot be worked out must never stop the server starting
+    console.warn("Could not check the administrator's password:", error.message);
+  }
+}
+
+async function migrateSignInHold() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'users'
+       AND COLUMN_NAME IN ('failed_attempts', 'held_until')`,
+    [DB_NAME]
+  );
+  if (columns.length === 2) return;
+
+  const names = columns.map((row) => row.COLUMN_NAME);
+  if (names.indexOf("failed_attempts") === -1) {
+    await db.query(
+      "ALTER TABLE users ADD COLUMN failed_attempts INT NOT NULL DEFAULT 0 AFTER must_change_password");
+  }
+  if (names.indexOf("held_until") === -1) {
+    await db.query(
+      "ALTER TABLE users ADD COLUMN held_until TIMESTAMP NULL AFTER failed_attempts");
+  }
+  console.log("Added users.failed_attempts and users.held_until for the sign-in hold.");
+}
+
+// One-time upgrade: staff.middle_initial -> staff.middle_name. full_name is
+// a generated column reading it, so it is dropped and rebuilt in the same
+// statement. Does nothing once the column is already middle_name.
+async function migrateMiddleNameColumn() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'staff'
+       AND COLUMN_NAME IN ('middle_initial', 'middle_name')`,
+    [DB_NAME]
+  );
+
+  const names = columns.map((row) => row.COLUMN_NAME);
+  if (names.indexOf("middle_initial") === -1) return;   // already migrated, or no staff table
+
+  await db.query("ALTER TABLE staff DROP COLUMN full_name");
+  await db.query(
+    "ALTER TABLE staff CHANGE COLUMN middle_initial middle_name VARCHAR(100) NULL"
+  );
+  await db.query(
+    `ALTER TABLE staff ADD COLUMN full_name VARCHAR(220) AS (
+       CONCAT(first_name,
+              IF(middle_name IS NULL OR middle_name = '', '',
+                 CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),
+              ' ', last_name)
+     ) VIRTUAL AFTER created_at`
+  );
+
+  console.log("Upgraded staff.middle_initial to staff.middle_name. " +
+    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+}
+
+async function migratePhoneNumbers() {
+  const [rows] = await db.query(
+    "SELECT staff_id, phone FROM staff WHERE phone IS NOT NULL AND phone <> ''");
+
+  // find the phone numbers that are not written in the +63 form yet
+  const wrong = [];
+  for (const row of rows) {
+    if (row.phone !== cleanPhone(row.phone)) {
+      wrong.push(row);
+    }
+  }
+  if (wrong.length === 0) return;
+
+  let emptied = 0;
+
+  for (const row of wrong) {
+    // a number we can fix is rewritten; a number that makes no sense is cleared
+    let fixed = null;
+    if (phoneComplaint(row.phone) === null) {
+      fixed = cleanPhone(row.phone);
+    } else {
+      emptied += 1;
+    }
+
+    await db.query("UPDATE staff SET phone = ? WHERE staff_id = ?", [fixed, row.staff_id]);
+  }
+
+  let message = `Rewrote ${wrong.length} staff phone number(s) to +63 form.`;
+  if (emptied > 0) {
+    message += ` ${emptied} of them was not a usable number and was cleared; re-enter it on the staff record.`;
+  }
+  console.log(message);
+}
+
+async function migrateMeasuredQuantities() {
+  const columns = [
+    ["inventory", "quantity_in_stock", "NOT NULL DEFAULT 0"],
+    ["stock_adjustments", "quantity_before", "NOT NULL"],
+    ["stock_adjustments", "quantity_change", "NOT NULL"],
+    ["stock_adjustments", "quantity_after", "NOT NULL"],
+    ["sale_items", "quantity", "NOT NULL"],
+    ["returned_items", "quantity", "NOT NULL"]
+  ];
+
+  let widened = 0;
+  for (const item of columns) {
+    const table = item[0];
+    const column = item[1];
+    const rest = item[2];
+    const [rows] = await db.query(
+      `SELECT DATA_TYPE FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
+      [DB_NAME, table, column]);
+    if (!rows[0] || String(rows[0].DATA_TYPE).toLowerCase() !== "int") continue;
+
+    if (table === "sale_items") {
+      await db.query("ALTER TABLE sale_items DROP COLUMN subtotal");
+      await db.query(`ALTER TABLE sale_items MODIFY quantity DECIMAL(12,3) ${rest}`);
+      await db.query("ALTER TABLE sale_items ADD COLUMN subtotal DECIMAL(12,2) AS (quantity * unit_price) STORED");
+    } else {
+      await db.query(`ALTER TABLE ${table} MODIFY ${column} DECIMAL(12,3) ${rest}`);
+    }
+    widened += 1;
+  }
+
+  if (widened > 0) {
+    console.log(`Widened ${widened} quantity column(s) to take fractions (kilos, metres). ` +
+      "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures take them too.");
+  }
+}
+
+async function migrateAccessControlTables() {
+  const [tables] = await db.query(
+    `SELECT TABLE_NAME FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'role_feature_permissions'`,
+    [DB_NAME]
+  );
+  const have = [];
+  for (const row of tables) {
+    have.push(row.TABLE_NAME);
+  }
+  let created = 0;
+
+  // the switches for which screens each role's menu holds; one row per override
+  if (!have.includes("role_feature_permissions")) {
+    await db.query(
+      `CREATE TABLE role_feature_permissions (
+         permission_id INT AUTO_INCREMENT PRIMARY KEY,
+         role_id INT NOT NULL,
+         feature_key VARCHAR(40) NOT NULL,
+         is_granted BOOLEAN NOT NULL DEFAULT TRUE,
+         note VARCHAR(255) NULL,
+         granted_by_staff_id INT NULL,
+         granted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+         UNIQUE KEY uq_role_feature (role_id, feature_key),
+         FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE ON UPDATE CASCADE,
+         FOREIGN KEY (granted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+       )`);
+    created += 1;
+  }
+
+  const [typeColumn] = await db.query(
+    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'audit_logs' AND COLUMN_NAME = 'action_type'`,
+    [DB_NAME]
+  );
+  let widened = false;
+  if (typeColumn[0] && !/'ACCESS'/i.test(typeColumn[0].COLUMN_TYPE)) {
+    await db.query(
+      `ALTER TABLE audit_logs MODIFY action_type
+         ENUM('CREATE','UPDATE','DELETE','VOID','RESTORE','BACKUP',
+              'LOGIN','LOGOUT','LOGIN_FAILURE','SECURITY','PAYMENT',
+              'ACCESS','OTHER') NOT NULL DEFAULT 'OTHER'`);
+    widened = true;
+  }
+
+  if (widened) {
+    console.log("Added the access control table and widened the audit types.");
+  } else if (created > 0) {
+    console.log("Added the access control table.");
+  }
+}
+
+// One-time upgrade: the sizes a product also sells in (nails kept by the
+// kilo, sold by the sack). product_units holds them, and a sale line says
+// which one it was charged in: quantity stays in the product's own unit so
+// stock comes off it directly, sold_unit and sold_quantity carry the size,
+// and subtotal is rebuilt to multiply the sold figure by the price of one.
+async function migrateSellingUnits() {
+  const [tables] = await db.query(
+    `SELECT TABLE_NAME FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'product_units'`,
+    [DB_NAME]
+  );
+  let created = false;
+
+  if (tables.length === 0) {
+    await db.query(
+      `CREATE TABLE product_units (
+         product_unit_id INT AUTO_INCREMENT PRIMARY KEY,
+         product_id INT NOT NULL,
+         unit_name VARCHAR(20) NOT NULL,
+         units_per DECIMAL(12,3) NOT NULL,
+         price DECIMAL(10,2) NULL,
+         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+         UNIQUE KEY uq_product_unit (product_id, unit_name),
+         FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE
+       )`);
+    created = true;
+  }
+
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'sale_items' AND COLUMN_NAME = 'sold_unit'`,
+    [DB_NAME]
+  );
+  let widened = false;
+
+  if (columns.length === 0) {
+    await db.query("ALTER TABLE sale_items ADD COLUMN sold_unit VARCHAR(20) NULL AFTER quantity");
+    await db.query("ALTER TABLE sale_items ADD COLUMN sold_quantity DECIMAL(12,3) NULL AFTER sold_unit");
+    // subtotal is generated, so it is dropped and put back reading the sold figure
+    await db.query("ALTER TABLE sale_items DROP COLUMN subtotal");
+    await db.query(
+      `ALTER TABLE sale_items ADD COLUMN subtotal DECIMAL(12,2)
+         AS (ROUND(COALESCE(sold_quantity, quantity) * unit_price, 2)) STORED`);
+    widened = true;
+  }
+
+  if (created || widened) {
+    console.log("Added selling units (product_units, sale_items.sold_unit). " +
+      "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the sale procedure takes them.");
+  }
+}
+
+// The clerk raises an order For Approval and the manager decides it; a
+// database made before that has neither the status nor the columns the
+// decision is written to, and sp_decide_purchase_order fails on it.
+async function migratePurchaseOrderApproval() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'
+       AND COLUMN_NAME IN ('raised_by_staff_id', 'confirmed_by_staff_id',
+                           'confirmed_at', 'decision_note', 'discount')`,
+    [DB_NAME]
+  );
+  const [status] = await db.query(
+    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'status'`,
+    [DB_NAME]
+  );
+  const hasApproval = status.length > 0 && status[0].COLUMN_TYPE.indexOf("For Approval") !== -1;
+  if (columns.length === 5 && hasApproval) return;
+
+  const names = columns.map((row) => row.COLUMN_NAME);
+  if (!hasApproval) {
+    // existing rows keep their status; only new orders start For Approval
+    await db.query(
+      `ALTER TABLE purchase_orders MODIFY COLUMN status
+         ENUM('For Approval', 'Pending', 'Received', 'Cancelled') NOT NULL DEFAULT 'For Approval'`);
+  }
+  if (names.indexOf("raised_by_staff_id") === -1) {
+    await db.query(
+      `ALTER TABLE purchase_orders ADD COLUMN raised_by_staff_id INT NULL AFTER status,
+         ADD FOREIGN KEY (raised_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE`);
+  }
+  if (names.indexOf("confirmed_by_staff_id") === -1) {
+    await db.query(
+      `ALTER TABLE purchase_orders ADD COLUMN confirmed_by_staff_id INT NULL AFTER raised_by_staff_id,
+         ADD FOREIGN KEY (confirmed_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE`);
+  }
+  if (names.indexOf("confirmed_at") === -1) {
+    await db.query(
+      "ALTER TABLE purchase_orders ADD COLUMN confirmed_at TIMESTAMP NULL AFTER confirmed_by_staff_id");
+  }
+  if (names.indexOf("decision_note") === -1) {
+    await db.query(
+      "ALTER TABLE purchase_orders ADD COLUMN decision_note VARCHAR(255) NULL AFTER confirmed_at");
+  }
+  if (names.indexOf("discount") === -1) {
+    await db.query(
+      "ALTER TABLE purchase_orders ADD COLUMN discount DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER decision_note");
+  }
+  console.log("Added the purchase-order approval columns (purchase_orders.raised_by_staff_id, " +
+    "confirmed_by_staff_id, confirmed_at, decision_note, discount). " +
+    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+}
+
+// Orders and deliveries are counted in packs (a box of 20); a database made
+// before that has nowhere to keep the pack, and the order procedures fail.
+async function migratePackSizes() {
+  const wanted = [
+    ["products", "pack_name", "VARCHAR(20) NULL"],
+    ["products", "pack_size", "DECIMAL(12,3) NULL"],
+    ["purchase_order_items", "pack_name", "VARCHAR(20) NULL"],
+    ["purchase_order_items", "pack_size", "DECIMAL(12,3) NULL"],
+    ["purchase_order_items", "pack_count", "DECIMAL(12,3) NULL"]
+  ];
+  const [columns] = await db.query(
+    `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('products', 'purchase_order_items')
+       AND COLUMN_NAME IN ('pack_name', 'pack_size', 'pack_count')`,
+    [DB_NAME]
+  );
+  // "have" = the columns the database already has, written as "table.column"
+  const have = [];
+  for (const row of columns) {
+    have.push(row.TABLE_NAME + "." + row.COLUMN_NAME);
+  }
+
+  // "missing" = the wanted columns that are not in "have"
+  const missing = [];
+  for (const item of wanted) {
+    if (have.indexOf(item[0] + "." + item[1]) === -1) {
+      missing.push(item);
+    }
+  }
+  if (missing.length === 0) return;
+
+  // item[0] = table, item[1] = column, item[2] = column type
+  for (const item of missing) {
+    await db.query(`ALTER TABLE ${item[0]} ADD COLUMN ${item[1]} ${item[2]}`);
+  }
+  console.log(`Added ${missing.length} pack column(s) to products and purchase_order_items. ` +
+    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+}
+
+// The late-payment penalty: the shop's rate, an account's own rate, and the
+// charge stamped on a sale the day it falls overdue. amount_due is the bill
+// with the penalty on it, and every balance reads it. A database made before
+// this has none of them, and the credit views and procedures fail.
+async function migrateLatePenalties() {
+  const wanted = [
+    ["store_settings", "penalty_rate", "DECIMAL(5,2) NOT NULL DEFAULT 3.00 AFTER invoice_note"],
+    ["customer_credits", "penalty_rate", "DECIMAL(5,2) NULL AFTER standing"],
+    ["sales", "penalty_rate", "DECIMAL(5,2) NULL AFTER change_given"],
+    ["sales", "penalty_months", "INT NOT NULL DEFAULT 0 AFTER penalty_rate"],
+    ["sales", "penalty_amount", "DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER penalty_months"],
+    ["sales", "penalty_applied_at", "TIMESTAMP NULL AFTER penalty_amount"],
+    ["sales", "amount_due", "DECIMAL(12,2) AS (total_amount - discount + penalty_amount) STORED AFTER penalty_applied_at"]
+  ];
+  const [columns] = await db.query(
+    `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('store_settings', 'customer_credits', 'sales')
+       AND COLUMN_NAME IN ('penalty_rate', 'penalty_months', 'penalty_amount', 'penalty_applied_at', 'amount_due')`,
+    [DB_NAME]
+  );
+  const [notif] = await db.query(
+    `SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'notif_type'`,
+    [DB_NAME]
+  );
+  const hasAlert = notif.length > 0 && notif[0].COLUMN_TYPE.indexOf("Late Penalty") !== -1;
+
+  // "have" = the columns the database already has, written as "table.column"
+  const have = [];
+  for (const row of columns) {
+    have.push(row.TABLE_NAME + "." + row.COLUMN_NAME);
+  }
+
+  // "missing" = the wanted columns that are not in "have"
+  const missing = [];
+  for (const item of wanted) {
+    if (have.indexOf(item[0] + "." + item[1]) === -1) {
+      missing.push(item);
+    }
+  }
+  if (missing.length === 0 && hasAlert) return;
+
+  // Added in the order listed: amount_due uses penalty_amount, so it comes last.
+  // item[0] = table, item[1] = column, item[2] = column type
+  for (const item of missing) {
+    await db.query(`ALTER TABLE ${item[0]} ADD COLUMN ${item[1]} ${item[2]}`);
+  }
+  if (!hasAlert) {
+    await db.query(
+      `ALTER TABLE notifications MODIFY COLUMN notif_type
+         ENUM('Low Stock', 'Out of Stock', 'Damage Report', 'Refund Report', 'Purchase Order',
+              'Stock Adjustment', 'Delivery', 'Credit Request', 'Late Penalty') NOT NULL`);
+  }
+  console.log("Added the late-payment penalty columns (store_settings.penalty_rate, " +
+    "customer_credits.penalty_rate, sales.penalty_rate, penalty_months, penalty_amount, penalty_applied_at, amount_due). " +
+    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the views and procedures match.");
+}
+
+// A refund on a sale comes off what the customer owes: sales.refunded_amount
+// holds the part of the refunds that did, and amount_due is worked out from it.
+// public/database/4-MIGRATION-refunds-lower-balance.sql does the same by hand.
+// This only does the column. The procedures that use it are checked and loaded
+// again by loadProceduresIfMissing, from what the database holds (see
+// routinesAreOld), not from anything remembered while this ran.
+async function migrateRefundedAmount() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME, GENERATION_EXPRESSION FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'sales'
+       AND COLUMN_NAME IN ('refunded_amount', 'amount_due')`,
+    [DB_NAME]
+  );
+  const hasRefunded = columns.some((row) => row.COLUMN_NAME === "refunded_amount");
+  const due = columns.find((row) => row.COLUMN_NAME === "amount_due");
+  const dueUsesIt = due && String(due.GENERATION_EXPRESSION).indexOf("refunded_amount") !== -1;
+  if (hasRefunded && dueUsesIt) return;
+  if (!due) return;   // no amount_due yet: migrateLatePenalties could not add it
+
+  if (!hasRefunded) {
+    // placed before amount_due, which is worked out from it
+    await db.query(
+      "ALTER TABLE sales ADD COLUMN refunded_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER penalty_applied_at");
+  }
+  await db.query(
+    `ALTER TABLE sales MODIFY COLUMN amount_due DECIMAL(12,2)
+       AS (total_amount - discount + penalty_amount - refunded_amount) STORED`);
+  console.log("Added sales.refunded_amount: a refund now comes off what the customer owes " +
+    "(amount_due is worked out from it).");
+}
+
+// The cashier's note is kept in deliveries.cashier_remarks, because
+// deliveries.remarks is overwritten by every driver or manager status note.
+// A Pending delivery has not been written over yet, so its remarks are still
+// the cashier's note and are copied over. Older deliveries that already moved
+// on lost the cashier's note, so those stay empty.
+async function migrateCashierRemarks() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'deliveries'
+       AND COLUMN_NAME IN ('delivery_id', 'cashier_remarks', 'booking_remarks')`,
+    [DB_NAME]
+  );
+  const names = columns.map((row) => row.COLUMN_NAME);
+  if (names.indexOf("delivery_id") === -1) return;     // no deliveries table yet
+  if (names.indexOf("cashier_remarks") !== -1) return;  // already added
+
+  // an earlier test version named this column booking_remarks: rename it
+  if (names.indexOf("booking_remarks") !== -1) {
+    await db.query("ALTER TABLE deliveries RENAME COLUMN booking_remarks TO cashier_remarks");
+    console.log("Renamed deliveries.booking_remarks to cashier_remarks.");
+    return;
+  }
+
+  await db.query("ALTER TABLE deliveries ADD COLUMN cashier_remarks TEXT NULL AFTER remarks");
+  await db.query("UPDATE deliveries SET cashier_remarks = remarks WHERE status = 'Pending'");
+  console.log("Added deliveries.cashier_remarks to keep the cashier's note apart from status notes.");
+}
+
+// The proprietor's name on the invoice head. A database made before it
+// has no column, and sp_update_store_settings fails.
+async function migrateProprietorName() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'proprietor'`,
+    [DB_NAME]
+  );
+  if (columns.length > 0) return;
+
+  await db.query("ALTER TABLE store_settings ADD COLUMN proprietor VARCHAR(150) NULL AFTER store_name");
+  console.log("Added store_settings.proprietor for the invoice head. " +
+    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+}
+
+// A refund the cashier takes back now waits for the clerk to inspect it:
+// disposition is empty until then, and the inspection is recorded on the
+// report. A database made before this has the column NOT NULL and none of
+// the inspection columns, and filing a refund fails.
+async function migrateReturnInspection() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME, IS_NULLABLE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'returned_items'
+       AND COLUMN_NAME IN ('disposition', 'inspected_by_staff_id', 'inspected_at', 'inspection_note')`,
+    [DB_NAME]
+  );
+  const have = columns.map((row) => row.COLUMN_NAME);
+  const disposition = columns.find((row) => row.COLUMN_NAME === "disposition");
+  const nullable = disposition && disposition.IS_NULLABLE === "YES";
+  if (nullable && have.length === 4) return;
+
+  if (!nullable) {
+    await db.query(
+      "ALTER TABLE returned_items MODIFY COLUMN disposition ENUM('Return to Stock', 'Write-Off') NULL");
+  }
+  if (have.indexOf("inspected_by_staff_id") === -1) {
+    await db.query(
+      `ALTER TABLE returned_items ADD COLUMN inspected_by_staff_id INT NULL AFTER reported_by_staff_id,
+         ADD FOREIGN KEY (inspected_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE`);
+  }
+  if (have.indexOf("inspected_at") === -1) {
+    await db.query("ALTER TABLE returned_items ADD COLUMN inspected_at TIMESTAMP NULL AFTER inspected_by_staff_id");
+  }
+  if (have.indexOf("inspection_note") === -1) {
+    await db.query("ALTER TABLE returned_items ADD COLUMN inspection_note VARCHAR(255) NULL AFTER inspected_at");
+  }
+  console.log("Added the return-inspection columns (returned_items.inspected_by_staff_id, inspected_at, " +
+    "inspection_note; disposition may now be empty until the clerk inspects). " +
+    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+}
+
+// Goods missing from a supplier's delivery: a returned_items row of type
+// Missing, with the purchase order it is about in po_id. A database made
+// before this has neither, and filing a report fails.
+// public/database/5-MIGRATION-missing-delivery-reports.sql does the same by hand.
+// This only does the table. The procedures that use it are loaded again by
+// loadProceduresIfMissing (see routinesAreOld).
+async function migrateMissingReports() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'returned_items'
+       AND COLUMN_NAME IN ('report_type', 'po_id')`,
+    [DB_NAME]
+  );
+  const type = columns.find((row) => row.COLUMN_NAME === "report_type");
+  if (!type) return;   // no returned_items table yet
+  const hasPo = columns.some((row) => row.COLUMN_NAME === "po_id");
+  const hasMissing = String(type.COLUMN_TYPE).indexOf("'Missing'") !== -1;
+  if (hasMissing && hasPo) return;
+
+  if (!hasMissing) {
+    await db.query(
+      "ALTER TABLE returned_items MODIFY COLUMN report_type ENUM('Return', 'Damaged', 'Refunded', 'Missing') NOT NULL DEFAULT 'Return'");
+  }
+  if (!hasPo) {
+    await db.query(
+      `ALTER TABLE returned_items ADD COLUMN po_id INT NULL AFTER sale_id,
+         ADD FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE RESTRICT ON UPDATE CASCADE`);
+  }
+  console.log("Added the Missing report type and returned_items.po_id: the clerk can now report goods " +
+    "missing from a delivery. Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+}
+
+// The account a customer sends a bank transfer to: shown at the till and
+// printed on the invoice. A database made before it has none of the columns,
+// and the store settings read and sp_update_store_bank_details fail.
+async function migrateBankDetails() {
+  const wanted = [
+    ["bank_name", "VARCHAR(100) NULL AFTER penalty_rate"],
+    ["bank_account_name", "VARCHAR(150) NULL AFTER bank_name"],
+    ["bank_account_number", "VARCHAR(50) NULL AFTER bank_account_name"]
+  ];
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'
+       AND COLUMN_NAME IN ('bank_name', 'bank_account_name', 'bank_account_number')`,
+    [DB_NAME]
+  );
+  const have = [];
+  for (const row of columns) {
+    have.push(row.COLUMN_NAME);
+  }
+
+  const missing = [];
+  for (const item of wanted) {
+    if (have.indexOf(item[0]) === -1) {
+      missing.push(item);
+    }
+  }
+  if (missing.length === 0) return;
+
+  // Added in the order listed, because each one is placed after the one before it.
+  // item[0] = column, item[1] = column type
+  for (const item of missing) {
+    await db.query(`ALTER TABLE store_settings ADD COLUMN ${item[0]} ${item[1]}`);
+  }
+  console.log("Added the bank transfer details (store_settings.bank_name, bank_account_name, " +
+    "bank_account_number). Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+}
+
+// The receipt's layout (paper width, title, the shop's own header and footer
+// lines, what is shown) lives in store_settings.receipt_layout as JSON. A
+// database made before it gets the column, filled with the defaults.
+async function migrateReceiptLayout() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'receipt_layout'`,
+    [DB_NAME]
+  );
+  if (columns.length === 0) {
+    await db.query("ALTER TABLE store_settings ADD COLUMN receipt_layout TEXT NULL AFTER bank_account_number");
+    console.log("Added store_settings.receipt_layout for the receipt's layout.");
+  }
+  await db.query(
+    "UPDATE store_settings SET receipt_layout = ? WHERE setting_id = 1 AND receipt_layout IS NULL",
+    [JSON.stringify(DEFAULT_RECEIPT_LAYOUT)]);
+}
+
+// The places the shop delivers to, kept in System Admin as a JSON list of
+// one-line texts in store_settings.delivery_areas. The cashier must pick one
+// when making a delivery. NULL means the list is empty, so no value is filled in.
+async function migrateDeliveryAreas() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'delivery_areas'`,
+    [DB_NAME]
+  );
+  if (columns.length === 0) {
+    await db.query("ALTER TABLE store_settings ADD COLUMN delivery_areas TEXT NULL AFTER receipt_layout");
+    console.log("Added store_settings.delivery_areas for the places the shop delivers to.");
+  }
+}
+
+// The codes behind "Forgot your password?". Only the scrypt hash of a code is
+// kept, never the code. A database made before it has no table, and asking
+// for a code fails.
+async function migratePasswordResets() {
+  const [tables] = await db.query(
+    `SELECT TABLE_NAME FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'password_resets'`,
+    [DB_NAME]
+  );
+  if (tables.length > 0) return;
+
+  await db.query(
+    `CREATE TABLE password_resets (
+       reset_id INT AUTO_INCREMENT PRIMARY KEY,
+       user_id INT NOT NULL,
+       code_hash VARCHAR(255) NOT NULL,
+       expires_at TIMESTAMP NOT NULL,
+       attempts INT NOT NULL DEFAULT 0,
+       used_at TIMESTAMP NULL,
+       requested_ip VARCHAR(45) NULL,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       INDEX idx_password_resets_user (user_id, created_at),
+       FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE ON UPDATE CASCADE
+     )`);
+  console.log("Added the password_resets table for signing in again with a code sent by email.");
+}
+
+// The supplier's answer to an approved order. The printed order (and the
+// mail, when the clerk emails it) carries a link with the order's code and a
+// QR code of it; the supplier's Accept or Decline lands in the columns after
+// it. The code is kept as it is, not hashed, so every reprint carries the same
+// working link; it lets its holder answer that one order and nothing else.
+// An early version kept only a hash (supplier_token_hash); that is dropped.
+async function migrateSupplierResponse() {
+  const [columns] = await db.query(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'
+       AND COLUMN_NAME IN ('supplier_code', 'supplier_sent_at', 'supplier_response',
+                           'supplier_responded_at', 'supplier_note', 'supplier_token_hash')`,
+    [DB_NAME]
+  );
+  const names = columns.map((row) => row.COLUMN_NAME);
+  const wanted = ["supplier_code", "supplier_sent_at", "supplier_response", "supplier_responded_at", "supplier_note"];
+  if (wanted.every((name) => names.indexOf(name) !== -1) && names.indexOf("supplier_token_hash") === -1) return;
+
+  if (names.indexOf("supplier_code") === -1) {
+    await db.query(
+      `ALTER TABLE purchase_orders ADD COLUMN supplier_code VARCHAR(64) NULL,
+         ADD UNIQUE INDEX idx_purchase_orders_supplier_code (supplier_code)`);
+  }
+  if (names.indexOf("supplier_sent_at") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN supplier_sent_at TIMESTAMP NULL");
+  }
+  if (names.indexOf("supplier_response") === -1) {
+    await db.query(
+      "ALTER TABLE purchase_orders ADD COLUMN supplier_response ENUM('Accepted', 'Declined') NULL");
+  }
+  if (names.indexOf("supplier_responded_at") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN supplier_responded_at TIMESTAMP NULL");
+  }
+  if (names.indexOf("supplier_note") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN supplier_note VARCHAR(255) NULL");
+  }
+  if (names.indexOf("supplier_token_hash") !== -1) {
+    await db.query("ALTER TABLE purchase_orders DROP COLUMN supplier_token_hash");
+  }
+  console.log("Added the supplier-response columns (purchase_orders.supplier_code, supplier_sent_at, " +
+    "supplier_response, supplier_responded_at, supplier_note).");
+}
+
+// The supplier, accepting from the link, says when the order ships and may
+// correct a price that does not match what they sell. The corrected price
+// goes on the line; the shop's own price is kept beside it (original_unit_cost)
+// so the change is never lost.
+async function migrateSupplierQuote() {
+  const [columns] = await db.query(
+    `SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = ?
+       AND ((TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'supplier_ship_date')
+         OR (TABLE_NAME = 'purchase_order_items' AND COLUMN_NAME = 'original_unit_cost'))`,
+    [DB_NAME]
+  );
+  const names = columns.map((row) => row.COLUMN_NAME);
+  if (names.length === 2) return;
+
+  if (names.indexOf("supplier_ship_date") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN supplier_ship_date DATE NULL");
+  }
+  if (names.indexOf("original_unit_cost") === -1) {
+    await db.query("ALTER TABLE purchase_order_items ADD COLUMN original_unit_cost DECIMAL(10,2) NULL");
+  }
+  console.log("Added the supplier-quote columns (purchase_orders.supplier_ship_date, " +
+    "purchase_order_items.original_unit_cost).");
+}
+
+// Every GCash or Maya payment tried by QR code. The same table as
+// public/database/3-ADD-qr-payments.sql, which does this by hand.
+async function migrateQrPayments() {
+  const [tables] = await db.query(
+    `SELECT TABLE_NAME FROM information_schema.TABLES
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'qr_payments'`,
+    [DB_NAME]
+  );
+  if (tables.length > 0) return;
+
+  await db.query(
+    `CREATE TABLE qr_payments (
+       qr_payment_id INT AUTO_INCREMENT PRIMARY KEY,
+       provider ENUM('paymongo','sim') NOT NULL,
+       mode ENUM('test','live') NOT NULL,
+       provider_intent_id VARCHAR(80) NOT NULL,
+       provider_payment_id VARCHAR(80) NULL,
+       amount DECIMAL(12,2) NOT NULL,
+       wallet ENUM('GCash','PayMaya') NOT NULL,
+       purpose ENUM('sale','credit_payment') NOT NULL,
+       status ENUM('pending','paid','failed','expired','cancelled') NOT NULL DEFAULT 'pending',
+       error_message VARCHAR(255) NULL,
+       sale_id INT NULL,
+       created_by_staff_id INT NULL,
+       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+       expires_at TIMESTAMP NULL,
+       paid_at TIMESTAMP NULL,
+       closed_at TIMESTAMP NULL,
+       UNIQUE KEY uq_qr_payments_intent (provider_intent_id),
+       INDEX idx_qr_payments_created (created_at),
+       INDEX idx_qr_payments_status (status),
+       FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE SET NULL ON UPDATE CASCADE,
+       FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+     )`);
+  console.log("Added the qr_payments table for GCash and Maya payments by QR code.");
+}
+
+// Four rules the database itself enforces, so a bug in a procedure or a hand
+// edit cannot leave a negative figure behind: stock on hand, a sale's discount
+// and amount paid, and a refund amount. Every flow already refuses these
+// before it writes (the procedures check them), so this is the last guard.
+// Each rule has a name so it is added only once. MySQL 8.0.16 and later
+// enforce CHECK; an older MySQL accepts the line and ignores it.
+// public/database/1-RUN-FIRST-database.sql has the same four for new installs.
+const CHECK_RULES = [
+  ["inventory", "chk_inventory_stock_not_negative", "quantity_in_stock >= 0"],
+  ["sales", "chk_sales_discount_not_negative", "discount >= 0"],
+  ["sales", "chk_sales_amount_paid_not_negative", "amount_paid >= 0"],
+  ["returned_items", "chk_returned_items_refund_not_negative", "refund_amount >= 0"]
+];
+
+async function migrateCheckConstraints() {
+  for (const [table, name, rule] of CHECK_RULES) {
+    const [found] = await db.query(
+      `SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS
+       WHERE CONSTRAINT_SCHEMA = ? AND TABLE_NAME = ? AND CONSTRAINT_NAME = ?
+         AND CONSTRAINT_TYPE = 'CHECK'`,
+      [DB_NAME, table, name]
+    );
+    if (found.length > 0) continue;   // already there
+
+    // The table, name and rule above are fixed text, not user input.
+    try {
+      await db.query(`ALTER TABLE ${table} ADD CONSTRAINT ${name} CHECK (${rule})`);
+      console.log(`Added the rule "${rule}" to the ${table} table.`);
+    } catch (error) {
+      // Usually a row that already breaks the rule. Start-up goes on without
+      // this rule; fix the row, then restart to add it.
+      console.warn(`Could not add the rule "${rule}" to the ${table} table (${error.message}). ` +
+        "Fix the rows that break it, then restart the server.");
+    }
+  }
+}
+
+// The tables the server keeps for itself, so that any copy of it can answer
+// any request (Vercel runs many): who is signed in, the live-update log,
+// account drafts waiting for a second look, backups when there is no disk to
+// keep them on, a few switches, and the offline payment simulator. They are
+// not shop data, so a backup leaves them out and a restore leaves them be.
+// Times are milliseconds since 1970 (Date.now()), free of any time zone.
+const SERVER_TABLES = ["user_sessions", "live_changes", "account_drafts",
+                       "backup_files", "app_flags", "qr_sim_intents"];
+
+async function migrateServerTables() {
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS user_sessions (
+       token_hash CHAR(64) PRIMARY KEY,
+       staff_id INT NOT NULL,
+       user_id INT NOT NULL,
+       role_id INT NOT NULL,
+       role_name VARCHAR(50) NOT NULL,
+       email VARCHAR(100) NOT NULL,
+       started_at BIGINT NOT NULL,
+       last_seen BIGINT NOT NULL,
+       expires_at BIGINT NOT NULL,
+       ended_reason VARCHAR(255) NULL,
+       ended_at BIGINT NULL,
+       INDEX idx_user_sessions_staff (staff_id),
+       INDEX idx_user_sessions_expires (expires_at)
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS live_changes (
+       change_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+       scope VARCHAR(30) NOT NULL,
+       detail VARCHAR(255) NULL,
+       origin VARCHAR(64) NULL,
+       created_at BIGINT NOT NULL
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS account_drafts (
+       draft_hash CHAR(64) PRIMARY KEY,
+       staff_id INT NOT NULL,
+       kind VARCHAR(10) NOT NULL,
+       payload TEXT NOT NULL,
+       expires_at BIGINT NOT NULL
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS backup_files (
+       file_name VARCHAR(100) PRIMARY KEY,
+       bytes INT NOT NULL,
+       created_at BIGINT NOT NULL,
+       content LONGBLOB NOT NULL
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS app_flags (
+       flag_key VARCHAR(50) PRIMARY KEY,
+       flag_value VARCHAR(255) NULL,
+       updated_at BIGINT NOT NULL
+     )`);
+  await db.query(
+    `CREATE TABLE IF NOT EXISTS qr_sim_intents (
+       intent_id VARCHAR(40) PRIMARY KEY,
+       token VARCHAR(40) NOT NULL UNIQUE,
+       amount DECIMAL(12,2) NOT NULL,
+       wallet VARCHAR(20) NOT NULL,
+       description VARCHAR(255) NULL,
+       return_url VARCHAR(500) NOT NULL,
+       status VARCHAR(10) NOT NULL,
+       payment_id VARCHAR(40) NULL,
+       error_message VARCHAR(255) NULL,
+       created_at BIGINT NOT NULL
+     )`);
+}
+
+// a named figure so adding a procedure changes one number, not two
+const EXPECTED_PROCEDURES = 37;
+
+// Nearly every write goes through a stored procedure, so a database with the
+// tables but not the procedures (file 1 run, file 2 not) reads fine and
+// cannot be written to. The count is remembered and the guard below turns
+// those writes into one sentence naming the fix. Re-checked whenever it is
+// bad, so loading file 2 is picked up without a restart.
+let proceduresLoaded = null;      // null until the first count
+let procedureCheckAt = 0;
+const PROCEDURE_RECHECK_MS = 5000;
+
+async function countProcedures() {
+  const [rows] = await db.query(
+    "SELECT COUNT(*) AS total FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ?",
+    [DB_NAME]
+  );
+  proceduresLoaded = rows[0].total;
+  procedureCheckAt = Date.now();
+  return proceduresLoaded;
+}
+
+// once the full set has been seen it is believed
+async function proceduresAreMissing() {
+  if (proceduresLoaded !== null && proceduresLoaded >= EXPECTED_PROCEDURES) return false;
+  if (Date.now() - procedureCheckAt < PROCEDURE_RECHECK_MS) return true;
+
+  try {
+    return (await countProcedures()) < EXPECTED_PROCEDURES;
+  } catch (error) {
+    return false;   // the database is unreachable; that is a different message
+  }
+}
+
+// admin.js reads the count through these rather than the variable itself,
+// so forgetting it after a restore reaches the copy that matters
+function proceduresLoadedCount() {
+  return proceduresLoaded;
+}
+
+function forgetProcedureCount() {
+  proceduresLoaded = null;
+  procedureCheckAt = 0;
+}
+
+// The views and procedures live in one file. When the database has fewer
+// than the code was built for (file 1 run without file 2, or an old copy of
+// file 2 run from a stale editor tab), the server loads that file itself,
+// after the column migrations so the views find every column they read.
+// The file drops and recreates views and procedures only; no row is touched.
+const PROCEDURES_FILE = path.join(__dirname, "..", "..", "database", "2-RUN-SECOND-stored-procedures.sql");
+
+// A database that has all the procedures can still hold older versions of the
+// ones that were rewritten later (the column was added by hand, or by an older
+// copy of this server). The text of the new versions has words the old ones do
+// not: v_refunded_before in sp_file_return_report, refunded_amount in
+// sp_apply_late_penalties, least( in the credit view. A second word in each of
+// two procedures marks the payment and refund checks: "nothing to refund" only
+// the newest sp_file_return_report has, "already paid in full" only the newest
+// sp_record_credit_payment. The routines that were made safe against two
+// people at once carry a word the old ones lack: FOR UPDATE in
+// sp_restore_archive and sp_update_delivery_status, "AND status = 'Open'" in
+// sp_resolve_return_report (and "v_type = 'Missing'", which closes a report of
+// goods missing from a delivery), p_inside_batch in sp_file_return_report (it
+// can file one item of a many-item report), "refund instead" in sp_archive_record,
+// p_driver_staff_id in sp_create_delivery, and p_qr_payment_id in
+// sp_create_sale_transaction and sp_record_credit_payment ("kept for the down
+// payment" there is the reference a payment may not borrow). The business
+// rules carry a word of their own: "Discount cannot be negative" in
+// sp_create_sale_transaction (it also holds COD to the credit hold and
+// limit), and "Add and Remove need a quantity" in sp_adjust_stock. Every
+// procedure with an EXIT HANDLER must also have GET DIAGNOSTICS (checked once
+// for all of them below). A few small reads, and once file 2 has been loaded
+// they all pass, so nothing reloads on later starts.
+// Add a word here whenever a routine is rewritten and a database already holds
+// the old one.
+async function routinesAreOld() {
+  // [routine, a word only its newest version contains]
+  const newestWords = [
+    ["sp_file_return_report", "v_refunded_before"],
+    ["sp_file_return_report", "nothing to refund"],
+    ["sp_file_return_report", "p_inside_batch"],
+    ["sp_file_return_report", "is already received, so its delivery"],
+    ["sp_apply_late_penalties", "refunded_amount"],
+    ["sp_record_credit_payment", "already paid in full"],
+    ["sp_record_credit_payment", "p_qr_payment_id"],
+    ["sp_record_credit_payment", "kept for the down payment"],
+    ["sp_create_sale_transaction", "p_qr_payment_id"],
+    ["sp_create_sale_transaction", "Discount cannot be negative"],
+    ["sp_adjust_stock", "Add and Remove need a quantity"],
+    ["sp_resolve_return_report", "AND status = 'Open'"],
+    ["sp_resolve_return_report", "v_type = 'Missing'"],
+    ["sp_archive_record", "refund instead"],
+    ["sp_restore_archive", "FOR UPDATE"],
+    ["sp_create_delivery", "p_driver_staff_id"],
+    ["sp_update_delivery_status", "FOR UPDATE"]
+  ];
+
+  const [routines] = await db.query(
+    `SELECT ROUTINE_NAME, ROUTINE_DEFINITION FROM information_schema.ROUTINES
+     WHERE ROUTINE_SCHEMA = ?
+       AND ROUTINE_NAME IN ('sp_file_return_report', 'sp_apply_late_penalties', 'sp_record_credit_payment',
+                            'sp_create_sale_transaction', 'sp_resolve_return_report', 'sp_archive_record',
+                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',
+                            'sp_adjust_stock')`,
+    [DB_NAME]
+  );
+  for (const row of routines) {
+    const text = String(row.ROUTINE_DEFINITION || "");
+    if (text === "") continue;   // not readable by this user: do not reload on every start
+    for (const [name, word] of newestWords) {
+      if (row.ROUTINE_NAME === name && text.indexOf(word) === -1) return true;
+    }
+  }
+
+  // Every procedure's EXIT HANDLER now reads the real error with GET DIAGNOSTICS.
+  // A routine that has a handler but no GET DIAGNOSTICS is from before that, so
+  // one check covers all of them. (LIKE is not case sensitive here.)
+  // Only the procedures file 2 itself creates are looked at: a leftover one that
+  // file 2 no longer makes would never be fixed by loading it, and would make
+  // the file load again on every start.
+  let ownNames = [];
+  try {
+    const fileText = fs.readFileSync(PROCEDURES_FILE, "utf8");
+    ownNames = [...fileText.matchAll(/^CREATE PROCEDURE (w+)/gm)].map((match) => match[1]);
+  } catch (error) {
+    // file 2 cannot be read, so loading it is not possible either
+  }
+  if (ownNames.length > 0) {
+    const [oldHandlers] = await db.query(
+      `SELECT COUNT(*) AS n FROM information_schema.ROUTINES
+       WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = 'PROCEDURE' AND ROUTINE_NAME IN (?)
+         AND ROUTINE_DEFINITION LIKE '%EXIT HANDLER%'
+         AND ROUTINE_DEFINITION NOT LIKE '%GET DIAGNOSTICS%'`,
+      [DB_NAME, ownNames]
+    );
+    if (oldHandlers[0].n > 0) return true;
+  }
+
+  const [views] = await db.query(
+    `SELECT VIEW_DEFINITION FROM information_schema.VIEWS
+     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'vw_customer_credit_facts'`,
+    [DB_NAME]
+  );
+  const viewText = views.length > 0 ? String(views[0].VIEW_DEFINITION || "").toLowerCase() : "";
+  if (viewText !== "" && viewText.indexOf("least(") === -1) return true;
+
+  return false;
+}
+
+async function loadProceduresIfMissing(runSqlScript) {
+  const before = await countProcedures();
+  const older = before >= EXPECTED_PROCEDURES && await routinesAreOld();
+  if (before >= EXPECTED_PROCEDURES && !older) return;
+
+  let sql;
+  try {
+    sql = fs.readFileSync(PROCEDURES_FILE, "utf8");
+  } catch (error) {
+    console.warn(`Cannot read ${PROCEDURES_FILE}: ${error.message}. Run it by hand.`);
+    return;
+  }
+
+  if (before >= EXPECTED_PROCEDURES) {
+    console.log("Some stored procedures in this database are an older version; loading " +
+      "public/database/2-RUN-SECOND-stored-procedures.sql again (views and procedures only, no rows).");
+  } else {
+    console.log(`${before} of ${EXPECTED_PROCEDURES} stored procedures are loaded; ` +
+      "loading public/database/2-RUN-SECOND-stored-procedures.sql now (views and procedures only, no rows).");
+  }
+  try {
+    await runSqlScript(sql);
+    forgetProcedureCount();
+    const after = await countProcedures();
+    if (after >= EXPECTED_PROCEDURES) {
+      console.log(`All ${EXPECTED_PROCEDURES} stored procedures are loaded.`);
+    } else {
+      console.warn(`Still ${after} of ${EXPECTED_PROCEDURES} after loading the file; ` +
+        "the file on disk may be older than the code. Nothing can be saved until they match.");
+    }
+  } catch (error) {
+    console.error("Loading the stored procedures failed:", error.message);
+    console.error("Run public/database/2-RUN-SECOND-stored-procedures.sql by hand; it touches no row.");
+  }
+}
+
+function procedureAdvice() {
+  return `This database has ${proceduresLoaded} of ${EXPECTED_PROCEDURES} stored ` +
+    "procedures, so nothing can be saved. Restart the server: it loads " +
+    "public/database/2-RUN-SECOND-stored-procedures.sql itself on start-up. " +
+    "That file touches no table and no row. Nothing else is wrong: your data is intact.";
+}
+
+// The start-up work below runs once per copy of the server. On a PC that is
+// once; on Vercel it is every time a new copy wakes up, and the first request
+// waits for it (see the hook after this) so it never meets a missing table.
+async function migrateDatabase(runSqlScript) {
+  // first: sign-in reads user_sessions on every request
+  await migrateServerTables();
+
+  const total = await countProcedures();
+  if (total >= EXPECTED_PROCEDURES) {
+    console.log(`All ${EXPECTED_PROCEDURES} stored procedures are loaded.`);
+  }
+  // otherwise they are loaded from the file below, once the columns they read exist
+
+  await migrateSignInHold();
+  await migrateMiddleNameColumn();
+  await migratePhoneNumbers();
+  await migrateAccessControlTables();
+  await migrateMeasuredQuantities();
+  await migrateSellingUnits();
+  await migratePurchaseOrderApproval();
+  await migratePackSizes();
+  await migrateLatePenalties();
+  await migrateRefundedAmount();
+  await migrateCashierRemarks();
+  await migrateProprietorName();
+  await migrateReturnInspection();
+  await migrateMissingReports();
+  await migrateBankDetails();
+  await migrateReceiptLayout();
+  await migrateDeliveryAreas();
+  await migratePasswordResets();
+  await migrateSupplierResponse();
+  await migrateSupplierQuote();
+  await migrateQrPayments();
+  await migrateCheckConstraints();
+  await loadProceduresIfMissing(runSqlScript);
+  await hashLegacyPasswords();
+  await warnIfAdminPasswordIsDefault();
+}
+
+// Two copies starting together (Vercel waking several at once) would both
+// see a column missing and both add it, and one fails. A MySQL lock, held on
+// its own connection, makes them take turns; the second finds nothing to do.
+async function migrateOneAtATime(runSqlScript) {
+  const lockName = `${DB_NAME}.startup`;
+  const connection = await db.getConnection();
+  try {
+    const [locked] = await connection.query("SELECT GET_LOCK(?, 120) AS got", [lockName]);
+    if (Number(locked[0].got) !== 1) throw new Error("another copy of the server held the start-up lock too long");
+    try {
+      await migrateDatabase(runSqlScript);
+    } finally {
+      await connection.query("SELECT RELEASE_LOCK(?)", [lockName]);
+    }
+  } finally {
+    connection.release();
+  }
+}
+
+module.exports = {
+  EXPECTED_PROCEDURES, SERVER_TABLES, migrateOneAtATime, countProcedures, proceduresAreMissing,
+  proceduresLoadedCount, forgetProcedureCount, loadProceduresIfMissing, procedureAdvice
+};

@@ -2,11 +2,11 @@
   "name": "capstone-project2",
   "version": "1.0.0",
   "description": "Lucelyn Hardware - online sales and inventory with credit management",
-  "main": "public/Back-end/server.js",
+  "main": "public/backend/server.js",
   "scripts": {
-    "start": "node public/Back-end/server.js",
-    "recover-password": "node public/Back-end/recover-password.js",
-    "vercel-build-static": "node scripts/vercel-build.js"
+    "start": "node public/backend/server.js",
+    "recover-password": "node public/backend/tools/recover-password.js",
+    "vercel-build-static": "node public/deployment/vercel-build.js"
   },
   "keywords": [],
   "author": "",

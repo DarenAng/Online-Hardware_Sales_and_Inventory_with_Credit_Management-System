@@ -8,8 +8,6 @@ node_modules/
 backups/
 tests/
 shots/
-launch/
-_reorganize/
 Capstone outputs/
 vercel-static/
 *.bat

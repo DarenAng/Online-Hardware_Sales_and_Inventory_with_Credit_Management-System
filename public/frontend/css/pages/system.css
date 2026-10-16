@@ -1,0 +1,410 @@
+/* ==========================================================================
+   system.css -- styles only the System Administrator page uses
+   Loads after general-ui.css and responsive.css, so anything here wins.
+   ========================================================================== */
+
+/* ==========================================================================
+   THE WORKING CARD
+   ========================================================================== */
+/* ---------- my own credentials ---------- */
+.cred-note {
+    margin: 0 0 16px;
+    padding: 11px 13px;
+    background: var(--paper);
+    border-left: var(--rule) solid var(--go);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 14px;
+    color: var(--steel);
+}
+
+/* ==========================================================================
+   THE SIDE DRAWER
+   ========================================================================== */
+.drawer-shade {
+    position: fixed; inset: 0;
+    background: rgba(20, 24, 29, 0.42);
+    opacity: 0; visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s;
+    z-index: 1200;
+}
+.drawer-shade.open { opacity: 1; visibility: visible; }
+
+.drawer-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 20px 22px 16px;
+    background: var(--chrome);
+    color: #fff;
+    border-left: var(--rule) solid var(--role-tint);
+}
+.drawer-head h3 { font-size: 19.5px; margin: 0 0 3px; color: #fff; }
+.drawer-eyebrow {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.62);
+    margin-bottom: 5px;
+}
+.drawer-close {
+    background: none; border: none; cursor: pointer;
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 28px; line-height: 1;
+    padding: 0 2px;
+}
+.drawer-close:hover { color: #fff; }
+
+.drawer-body { padding: 20px 22px; overflow-y: auto; flex: 1; }
+.drawer-foot {
+    padding: 16px 22px;
+    border-top: 1px solid var(--line);
+    background: var(--paper);
+    display: flex; flex-wrap: wrap; gap: 8px;
+}
+.drawer-foot .btn { flex: 1 1 auto; }
+
+/* A backup is named after the moment it was taken. The day reads as a date
+   and the time reads as a figure, because that is what each one is. */
+.backup-day {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+}
+.backup-time {
+    font-family: var(--font-figure);
+    font-size: 13.5px;
+    color: var(--steel-soft);
+    font-variant-numeric: tabular-nums;
+}
+
+/* AUDIT LOGS -- every row is one line, so every page of ten is the same
+   height and Previous / Next stay in the same place. A long detail ends in
+   "..."; clicking the row opens the whole entry. (A phone shows cards instead.) */
+@media (min-width: 641px) {
+    #logs-table {
+        table-layout: fixed;   /* the columns keep the widths below */
+        min-width: 960px;      /* a narrow screen scrolls sideways rather than squeezing */
+    }
+    #logs-table td {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    /* a little less padding, so the Detail column gets more room */
+    #logs-table th,
+    #logs-table td { padding-left: 10px; padding-right: 10px; }
+    #logs-table th:nth-child(1) { width: 150px; }   /* Timestamp */
+    #logs-table th:nth-child(2) { width: 160px; }   /* User */
+    #logs-table th:nth-child(3) { width: 180px; }   /* Role */
+    #logs-table th:nth-child(4) { width: 120px; }   /* IP Address */
+    #logs-table th:nth-child(5) { width: 130px; }   /* Action Type */
+    /* Detail takes the rest of the width */
+}
+
+/* On a phone an audit card shows only the name, the date and time, the
+   action type and the detail; Role and IP Address are in the full entry
+   that opens when the card is tapped. */
+@media (max-width: 640px) {
+    #logs-table td:nth-child(3),   /* Role */
+    #logs-table td:nth-child(4) {  /* IP Address */
+        display: none;
+    }
+}
+
+/* the safe tile and the destructive one should not look alike */
+#panel-maintenance .tile .btn { margin-top: 2px; }
+
+/* ==========================================================================
+   IS THIS SYSTEM BACKING ITSELF UP? -- green for fine, crimson for broken,
+   grey for switched off
+   ========================================================================== */
+/* Bootstrap's .card is a flex column; this one is a row, with the state
+   word beside the heading rather than above it. */
+.auto-backup {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 14px;
+    border-left: var(--rule) solid var(--steel-soft);
+}
+.auto-backup .auto-backup-body { min-width: 0; flex: 1; }
+.auto-backup h3 { margin-bottom: 2px; }
+.auto-backup .panel-sub { margin-bottom: 0; text-align: justify; hyphens: auto; }
+
+/* the switch sits at the far end of the card, level with the title */
+.auto-backup-toggle { flex: none; align-self: flex-start; min-width: 96px; }
+
+.auto-backup-state {
+    flex: none;
+    margin-top: 2px;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--paper);
+    font-size: 12px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--steel);
+    white-space: nowrap;
+}
+
+.auto-backup.is-on { border-left-color: var(--ok); }
+.auto-backup.is-on .auto-backup-state {
+    border-color: rgba(14, 122, 95, 0.35);
+    background: var(--ok-dim);
+    color: var(--ok-ink);
+}
+
+.auto-backup.is-bad { border-left-color: var(--stop); background: var(--stop-dim); }
+.auto-backup.is-bad .auto-backup-state {
+    border-color: rgba(158, 27, 50, 0.4);
+    background: var(--surface);
+    color: var(--stop-hi);
+}
+
+.auto-backup.is-off { border-left-color: var(--steel-soft); }
+
+@media (max-width: 640px) {
+    .auto-backup { flex-direction: column; gap: 10px; }
+    .auto-backup-toggle { align-self: stretch; }
+}
+
+/* ==========================================================================
+   THE STAFF DIRECTORY -- the middle name takes the same box as the others
+   ========================================================================== */
+/* Create Account, as a popup over the directory */
+.create-box { max-width: 640px; }
+#create-modal .grid-2 { align-items: start; }
+
+/* what is wrong with a box, said under it */
+.field-error {
+    display: block;
+    margin-top: 5px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--stop);
+}
+.field-error[hidden] { display: none; }
+.form-control.is-bad { border-color: var(--stop); }
+.form-control.is-bad:focus { box-shadow: 0 0 0 3px var(--stop-dim); }
+
+/* Deactivate is the last button in the row and the only red one on the
+   screen: it is where a person stops being able to sign in. */
+#modal-status-btn { min-width: 168px; }
+
+/* ==========================================================================
+   ACCESS CONTROL -- one table: the roles down the left, the modules across
+   the top, a checkbox where the two meet. A click saves at once.
+   ========================================================================== */
+.access-table th,
+.access-table td { text-align: center; vertical-align: middle; }
+.access-table th:first-child,
+.access-table td:first-child { text-align: left; }
+.access-role { font-weight: 600; color: var(--ink); white-space: nowrap; }
+.access-box {
+    width: 18px; height: 18px;
+    margin: 0;
+    accent-color: var(--go);
+    cursor: pointer;
+}
+.access-hint { margin: 12px 0 0; font-size: 13px; color: var(--steel); }
+
+/* ==========================================================================
+   ON A PHONE
+   ========================================================================== */
+@media (max-width: 640px) {
+    /* the whole footer of the user popup is destructive-adjacent; each
+       button gets its own line so none of them is pressed by accident */
+    #user-modal .modal-foot .btn { width: 100%; }
+    #modal-status-btn { min-width: 0; }
+}
+
+/* ==========================================================================
+   RECEIPT MAINTENANCE -- the form on the left, a printed-looking preview
+   on the right, both on one screen
+   ========================================================================== */
+.store-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 400px;
+    gap: 18px;
+    align-items: start;
+}
+.store-layout .card { margin-bottom: 0; }
+.store-layout .card:has(> .form-sheet) { max-width: none; }
+.store-layout .form-sheet { max-width: none; }
+
+/* DELIVERY AREA -- a card under the form, in the left column; the preview
+   beside them runs down both rows. The places are a plain list, not a table. */
+.store-layout .store-preview-card { grid-column: 2; grid-row: 1 / span 2; }
+.area-help { margin: 0 0 12px; font-size: 14px; line-height: 1.5; color: var(--steel); }
+.area-add { display: flex; gap: 8px; margin-bottom: 12px; }
+.area-add .form-control { flex: 1; min-width: 0; }
+.area-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.area-list li {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 8px 6px 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+.area-list .area-text { min-width: 0; font-size: 15px; overflow-wrap: anywhere; }
+.area-list .area-remove { flex: none; color: var(--stop); }
+.area-list li.area-empty { display: block; padding: 10px 12px; font-size: 14.5px; line-height: 1.5; color: var(--steel); border-style: dashed; }
+.store-preview-card {
+    /* below the sticky top bar (its height is measured into --topbar-h by system-admin.js) */
+    position: sticky; top: calc(var(--topbar-h, 62px) + 16px);
+    display: flex; flex-direction: column;
+    max-height: calc(100vh - var(--topbar-h, 62px) - 32px);    /* the receipt can be taller than the screen: its stage scrolls */
+}
+
+/* the bank account a transfer is sent to: its three boxes read as one thing */
+.store-bank .is-bad { border-color: var(--stop); }
+.store-bank-note { margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
+.store-bank-note:empty { display: none; }
+.store-bank-note.is-stop { color: var(--stop); }
+
+/* the form's parts, one framed section each */
+.store-section {
+    margin: 0 0 16px;
+    padding: 12px 14px 4px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+.store-section.store-bank { background: var(--paper); }
+.store-section legend { float: left; width: 100%; margin-bottom: 10px; }
+.store-section legend + * { clear: both; }
+.store-section > .btn { margin-bottom: 12px; }
+.store-subhead {
+    display: block;
+    margin: 4px 0 8px;
+    font-size: 13px; font-weight: 600;
+    color: var(--steel);
+}
+.store-checks {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+    gap: 8px 14px;
+    margin-bottom: 14px;
+}
+.store-checks label {
+    display: flex; align-items: center; gap: 8px;
+    margin: 0;
+    font-size: 14.5px;
+    cursor: pointer;
+}
+.store-checks input { width: 18px; height: 18px; accent-color: var(--go); }
+
+/* one header or footer line: the words, then move up, move down, remove */
+.line-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.line-list:empty { display: none; }
+.line-row { display: flex; gap: 6px; align-items: center; }
+.line-row .form-control { flex: 1; min-width: 0; min-height: 38px; padding: 7px 10px; font-size: 15px; }
+.line-row .btn { flex: none; min-width: 36px; min-height: 38px; padding: 4px 8px; }
+.line-row .line-remove { color: var(--stop); }
+
+/* The paper is the roll's real width (set by format.js applyReceiptPaper),
+   so what is seen here is what the printer gets. */
+.store-preview-stage {
+    display: flex;
+    justify-content: center;
+    padding: 14px 0;
+    background: var(--paper);
+    border-radius: var(--radius);
+    overflow-x: hidden;
+    overflow-y: auto;
+    min-height: 0;
+    overscroll-behavior: contain;
+}
+.store-preview {
+    flex: none;
+    max-width: 100%;      /* a phone narrower than the roll shrinks it; print keeps the width */
+    box-sizing: border-box;
+    padding: 4mm 3mm;
+    background: var(--surface);
+    box-shadow: 0 1px 4px rgba(20, 24, 29, 0.18);
+}
+
+/* the part of the receipt the box being changed draws: a wash that fades.
+   Screen only; with reduced motion it stays steady until the script takes it off. */
+@media screen {
+    .store-preview .rc-flash,
+    .store-preview.rc-flash {
+        animation: rc-flash 1.1s ease-out;
+    }
+}
+@keyframes rc-flash {
+    0%, 35% { background-color: rgba(245, 179, 1, 0.45); box-shadow: 0 0 0 3px rgba(245, 179, 1, 0.45); }
+    100%    { background-color: rgba(245, 179, 1, 0);    box-shadow: 0 0 0 3px rgba(245, 179, 1, 0); }
+}
+/* the whole paper (width, text size) fades back to its own white and shadow */
+.store-preview.rc-flash { animation-name: rc-flash-paper; }
+@keyframes rc-flash-paper {
+    0%, 35% { background-color: rgba(245, 179, 1, 0.45); box-shadow: 0 0 0 3px rgba(245, 179, 1, 0.45); }
+    100%    { background-color: var(--surface);          box-shadow: 0 1px 4px rgba(20, 24, 29, 0.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .store-preview .rc-flash,
+    .store-preview.rc-flash {
+        animation: none;
+        background-color: rgba(245, 179, 1, 0.45);
+        box-shadow: 0 0 0 3px rgba(245, 179, 1, 0.45);
+    }
+}
+
+/* only the preview reaches the paper when Print Test is pressed */
+@media print {
+    body.printing-receipt .wrapper > *:not(.main-content),
+    body.printing-receipt .topbar,
+    body.printing-receipt .toast-deck,
+    body.printing-receipt .modal { display: none !important; }
+    body.printing-receipt .content-area > *:not(#panel-store),
+    body.printing-receipt .store-layout > .card:not(.store-preview-card),
+    body.printing-receipt .store-preview-card .panel-head { display: none !important; }
+    body.printing-receipt .main-content,
+    body.printing-receipt .content-area,
+    body.printing-receipt .store-layout,
+    body.printing-receipt .store-preview-card,
+    body.printing-receipt .store-preview-stage {
+        display: block !important;
+        max-height: none !important; overflow: visible !important;
+        margin: 0 !important; padding: 0 !important;
+        border: none !important; box-shadow: none !important;
+        background: none !important;
+    }
+    body.printing-receipt .store-preview { box-shadow: none; padding: 0; }
+}
+
+@media (max-width: 1100px) {
+    .store-layout { grid-template-columns: 1fr; }
+    .store-preview-card { position: static; max-height: none; }
+    .store-layout .store-preview-card { grid-column: auto; grid-row: auto; }
+}
+
+/* the TIN box says whether it is happy as it is filled in, like the phone box */
+#store-tin {
+    font-family: var(--font-figure);
+    letter-spacing: 0.04em;
+    font-variant-numeric: tabular-nums;
+}
+#store-tin.is-bad { border-color: var(--signal-hi); }
+#store-tin.is-bad:focus {
+    border-color: var(--signal-hi);
+    box-shadow: 0 0 0 3px var(--signal-dim);
+}
+
+/* what the server refused, said next to the boxes rather than only as a card
+   in the corner that has gone by the time the form is read again */
+.store-verdict {
+    margin: 4px 0 0;
+    padding: 9px 12px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+}
+.store-verdict:empty { display: none; }
+.store-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }

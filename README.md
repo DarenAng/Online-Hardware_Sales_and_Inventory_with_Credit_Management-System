@@ -4,7 +4,7 @@ A point of sale, inventory, and customer credit system. Node with Express on the
 server, plain HTML, CSS, Bootstrap 5 and JavaScript on the client, MySQL 8 for
 the data.
 
-> **Putting it online?** [DEPLOY-VERCEL-AIVEN.md](DEPLOY-VERCEL-AIVEN.md) runs the same
+> **Putting it online?** [DEPLOY-VERCEL-AIVEN.md](public/deployment/DEPLOY-VERCEL-AIVEN.md) runs the same
 > app on Vercel with the database on Aiven MySQL.
 
 ## Setup on a new computer
@@ -105,7 +105,7 @@ DB_PORT=3306
 
 `DB_PASSWORD` is the MySQL root password on the new machine. The file is
 read by `dotenv` when the server starts and is ignored by git, so the password
-never lands in the repository; `server.js` warns at startup if it is missing
+never lands in the repository; `database/connection.js` warns at startup if it is missing
 or still a placeholder.
 
 Everything else the server can be told is in the same file, and every one of
@@ -149,7 +149,7 @@ is signed with the shop's name from System Administration. Since `.env` is in
 `.gitignore`, the account stays on the machine and never reaches GitHub; every
 computer this is set up on fills in its own. (A machine set up before these
 settings existed may still have the password in
-`public/Back-end/mail-password.txt`; that still works, and `MAIL_PASSWORD` wins
+`public/backend/services/mail-password.txt`; that still works, and `MAIL_PASSWORD` wins
 when both are present.)
 
 **For a Gmail account,** `MAIL_PASSWORD` is not the password you sign in to
@@ -164,15 +164,15 @@ STARTTLS, which is what it defaults to on any other port (`MAIL_SECURE=false`).
 Port 25 is not offered: it is unencrypted, and this connection carries a
 password.
 
-There is no package to install. `mailer.js` speaks SMTP over Node's own `tls`,
+There is no package to install. `services/mailer.js` speaks SMTP over Node's own `tls`,
 for the same reason passwords are hashed with Node's own scrypt rather than with
 bcrypt off npm: `npm install` should fetch as little as possible on a machine
 this is being set up on.
 
-The server code in `public/Back-end/` — `server.js`, `mailer.js`, the old
-`mail-password.txt` — stays on the server; only `public/Back-end/modules/` and
-the `*-connection.js` files in `public/Back-end/Connections/` (the browser
-scripts) are handed to a browser.
+The server code in `public/backend/` — `server.js`, `services/mailer.js`, the old
+`services/mail-password.txt` — stays on the server; only `public/frontend/`
+(the pages, `css/`, the browser scripts in `scripts/` and the calls in
+`connections/`) and `public/vendor/` are handed to a browser.
 
 ### 6. Start the server
 
@@ -285,8 +285,8 @@ on a Friday afternoon while meaning to save one.
 
 Every one of those pairs was measured rather than eyeballed: text clears 4.5:1
 against its own background and every edge clears 3:1. The whole palette is the
-`:root` block at the top of `css/general-ui.css`, and changing the system's
-colours means changing those values and nothing else.
+`:root` block at the top of `css/shared/general-ui.css`, and changing the
+system's colours means changing those values and nothing else.
 
 ## The register
 
@@ -392,7 +392,7 @@ account thinking they took the money for it:
 | Credit, the whole amount paid now | **Complete Sale** |
 | Cash on Delivery | **Place COD Order** |
 
-It is worked out in `checkoutLabel()` in `cashier.js`, from the same totals
+It is worked out in `checkoutLabel()` in `scripts/cashier.js`, from the same totals
 the order panel shows.
 
 **A payment reference, so the money can be traced.** Money that is not handed
@@ -456,7 +456,7 @@ of the record on top, then one line per value with the name of its column
 beside it, then whatever you can do to that record as a full-width button at
 the bottom. Nothing has to be repeated in the markup for this — the column
 names are read off the table's own headings by `labelTableCells()` in
-`Back-end/modules/shared/tables.js` and stamped onto every cell as it is
+`frontend/scripts/shared/tables.js` and stamped onto every cell as it is
 filled in, so the thirty-odd functions that draw these tables did not change.
 
 The rest of it:
@@ -502,7 +502,7 @@ account's password is made, mailed to the address on file, every screen the
 person has open signed out, and a password of their own chosen on the next
 sign-in — or, when nothing else is left, a script run on the server's own
 computer. The server refuses the two own-password routes whichever screen sends
-them (`notOwnCredentials` in `server.js`), and the refusal names the ways
+them (`notOwnCredentials` in `routes/shared.js`), and the refusal names the ways
 that do work.
 
 **The System Administrator is the other way round.** They keep the Password
@@ -513,7 +513,7 @@ things to itself with nobody else on the audit trail. An administrator's own
 details are changed by another administrator from the staff directory, and
 the directory refuses the administrator's own row: their card has no Edit tab
 and its buttons are off, and the server refuses the requests whichever screen
-sends them (`notOwnAccount` in `server.js`).
+sends them (`notOwnAccount` in `access-control.js`).
 
 **Changing a password ends every session the account holds**, the one that
 made the change included, and the browser is sent back to sign in with the
@@ -650,12 +650,12 @@ is your password. It is chosen by you, so it is not a temporary one.
   and goes on the audit trail as `PASSWORD_RESET_BY_CODE`; codes sent,
   refused and mistyped are on it as well.
 - The mail has **no link**, for the same reason the first password has none
-  (`passwordResetMessage()` in `mailer.js`).
+  (`passwordResetMessage()` in `services/mailer.js`).
 - If mail is not set up, the page says so and names who can help instead.
 
 Routes: `POST /api/password-reset/request` and
 `POST /api/password-reset/confirm`, both open (nobody is signed in yet), in
-`Back-end/Connections/login.js`; the page is `shared/password-reset.js`.
+`routes/login.js`; the page is `shared/password-reset.js`.
 
 ### 2. A manager's Staff Passwords screen
 
@@ -663,7 +663,7 @@ For cashiers, inventory clerks and delivery personnel, when mail does not
 work or the person cannot reach it. **Staff Passwords** on the manager's menu
 lists everyone in those three roles with a login, and **Reset Password** does
 exactly what the administrator's does — it is the same function
-(`resetStaffPassword` in `Connections/admin.js`, passed to `Connections/manager.js` rather than
+(`resetStaffPassword` in `routes/admin.js`, passed to `routes/manager.js` rather than
 copied): a generated password, emailed, shown once on the manager's screen if
 the mail cannot go, every session ended, the hold released, and a new one
 chosen on the next sign-in. The server refuses a Manager's or a System
@@ -717,7 +717,7 @@ nobody could be sure of dialling.
 
 The picker below still knows every country, because the rule is one line
 (`PHONE_ONLY_COUNTRY` in `phone-picker.js`, and `phoneComplaint` in
-`format.js` and `server.js`) and a shop that one day takes a number from
+`format.js` and `validation.js`) and a shop that one day takes a number from
 abroad sets it to `null` and gets the button back. Until then the country
 beside the box is printed, not pressed.
 
@@ -751,7 +751,7 @@ reshaped into a Philippine number it never was.
 An incomplete number turns the box amber while it is being filled in, and says
 nothing at all while it is empty, because the number is optional.
 
-The same rule is enforced again in `server.js`, because a check that only exists
+The same rule is enforced again in `validation.js`, because a check that only exists
 in a browser is a check anybody can skip with `curl`. A number is stored as
 `+639171234567` and shown as `+63 917 123 4567`, spaced the way it is read out.
 
@@ -777,8 +777,8 @@ Figures read down their column. In a table a figure is marked `cell-num` and
 set to the right in tabular figures, and `alignTableColumns()` in
 `shared/tables.js` sets the heading over it to match. An amount typed into a
 number box is set the same way (`input[type="number"].form-control` in
-`general-ui.css`); the order's − / + quantity boxes are not form controls and
-keep their centred figure.
+`shared/general-ui.css`); the order's − / + quantity boxes are not form controls
+and keep their centred figure.
 
 The credit screens use the same four words everywhere: **Credit Limit**, the
 most an account may owe; **Balance**, what it owes now; **Available
@@ -882,7 +882,7 @@ On a cloud host, set `TZ=Asia/Manila` so the hour is the shop's, and point
 `HARDWARE_BACKUP_DIR` at a disk that survives a redeploy. The folder's path is
 never sent to the browser. On Vercel, which has no lasting disk, backups are
 kept in the database instead (`HARDWARE_BACKUP_STORE=database`) and the daily
-one is taken by Vercel Cron; see [DEPLOY-VERCEL-AIVEN.md](DEPLOY-VERCEL-AIVEN.md).
+one is taken by Vercel Cron; see [DEPLOY-VERCEL-AIVEN.md](public/deployment/DEPLOY-VERCEL-AIVEN.md).
 
 A restore and the backup never overlap. A restore drops and rebuilds every table
 in turn, and a backup taken then would be a dump of a half-restored database,
@@ -1041,14 +1041,14 @@ Once loaded, a table shows **ten rows at a time** with Previous and Next under
 it, and it is the same height whether the page holds two rows or ten, so
 nothing walks up and down the screen while somebody reads.
 
-The whole of it lives in `Back-end/modules/shared/data-panel.js`, so a table
+The whole of it lives in `frontend/scripts/shared/data-panel.js`, so a table
 that loads on demand and a table that pages are the same table in two states
 rather than thirty copies of the same logic.
 
 ## Who may do what
 
 Access is decided on the server, in one table — `ACCESS_RULES` in
-`server.js` — that names, for every `/api` route, which roles may call it.
+`access-control.js` — that names, for every `/api` route, which roles may call it.
 Anything under `/api` with no rule is refused. The routes that replace or
 destroy data (backups, restores, the receipt details, credit limits and
 decisions) carry `requireRole(...)` on the route as well, so that a rule
@@ -1072,7 +1072,7 @@ loads the van could not be shown the delivery schedule without being made a
 manager, and a clerk who should not be resolving returns kept the screen
 because every clerk did.
 
-So every screen is now an entry in a catalogue (`FEATURES` in `server.js`):
+So every screen is now an entry in a catalogue (`FEATURES` in `features.js`):
 its name, the roles whose page can draw it, the roles that hold it by role,
 and the routes it is made of. **Access Control**, one link on the
 administrator's menu, is that catalogue in two columns: the **roles down
@@ -1117,7 +1117,7 @@ has to be able to draw itself on any page; its menu item is in each page's
 markup, hidden until the role has it.
 
 **How it is enforced.** Not by the menu. Each screen lists the routes it is
-made of, and the access hook in `server.js` reads them after `ACCESS_RULES`
+made of, and the access hook in `access-control.js` reads them after `ACCESS_RULES`
 has had its say:
 
 - a route is **refused once every screen using it is switched off** for the
@@ -1276,7 +1276,7 @@ route anyway.
 server emails the order to the supplier at the address on the supplier's
 record: plain text, with the order number to quote, the date, where it is to be
 delivered, every line (quantity, unit, unit cost, line cost) and the total
-(`purchaseOrderMessage()` in `mailer.js`). The confirm dialog says where it
+(`purchaseOrderMessage()` in `services/mailer.js`). The confirm dialog says where it
 is going before the button is pressed. The decision never waits on the mail:
 if the supplier has no address on file, mail is not set up, or the mail server
 refuses it, the order is still confirmed and the manager is told, in a card
@@ -1595,52 +1595,33 @@ new route is covered the day it is written.
 ## Project layout
 
 ```
-launch/launch.json          starts the app from the editor (node public/Back-end/server.js)
-tests/                      automated checks (not used by the app; see tests/ui/stub.js)
+api/index.js                the way into the app on Vercel (loads public/backend/server.js)
+vercel.json                 Vercel settings: build step, regions, the daily job
+package.json               npm start, npm run recover-password
+.env.example               the settings to copy into .env
+backups/                    dated .sql backups
 public/
-  Front-end/                what the user sees: the pages and their styles
+  frontend/                 everything a browser is sent
     Login.html, change-password.html
     system.html               System Administrator dashboard
     manager.html              Manager page
     inventory-dashboard.html  Inventory Clerk dashboard
     cashier-dashboard.html    Cashier dashboard
     delivery.html             Delivery Personnel page
+    supplier-order.html       the page a supplier opens from the printed order
 
     css/
-      general-ui.css          colours, type, the shell, and every component
-                              two or more roles share
-      responsive.css          the phone layout, for every role
-      purchase-orders.css     the order form, the printed order and the count
-                              sheet, on the manager's page and the clerk's
-      modules/                one stylesheet per role
+      shared/
+        general-ui.css        colours, type, the shell, and every component
+                              two or more pages share
+        responsive.css        the phone layout, for every page; the purchase
+                              order and sign-in rules two pages share are at
+                              its end
+      pages/                  one stylesheet per page, named after it
+                              (Login.css, manager.css, ...): the rules only
+                              that page uses
 
-  Back-end/                 every JavaScript file
-    server.js               Express, sessions, the audit trail, live sync,
-                            the access table, screens by role
-    passwords.js            hashing and making passwords
-    mailer.js               sending email (SMTP)
-    recover-password.js     npm run recover-password: the last resort, run on
-                            the server's own computer
-
-    Connections/            both halves of every connection, side by side
-      database.js                     the MySQL connection (settings from .env)
-      login.js                        server: sign in, sign out, heartbeat, passwords
-      shared-connection.js            browser: calls used by more than one kind of user
-      admin.js                        server: System Administrator routes
-      admin-connection.js             browser: System Administrator calls
-      manager.js                      server: Manager routes
-      manager-connection.js           browser: Manager calls
-      cashier.js                      server: Cashier routes
-      cashier-connection.js           browser: Cashier calls
-      inventory-clerk.js              server: Inventory Clerk routes
-      inventory-clerk-connection.js   browser: Inventory Clerk calls
-      delivery.js                     server: Delivery Personnel routes
-      delivery-connection.js          browser: Delivery Personnel calls
-                            (every browser function that talks to the server
-                            starts with "api"; only the *-connection.js files
-                            are ever sent to a browser)
-
-    modules/                the page scripts, run in the browser
+    scripts/                the page scripts, run in the browser
       shared/               screen code every page shares (menus, tables,
                             popups, sign-in, notifications, purchase orders,
                             icons)
@@ -1649,15 +1630,76 @@ public/
       inventory-clerk.js    inventory-dashboard.html
       cashier.js            cashier-dashboard.html
       delivery-personnel.js delivery.html
+      supplier-order.js     supplier-order.html
+
+    connections/            the browser's calls to the server
+      shared-connection.js            calls used by more than one kind of user
+      admin-connection.js             System Administrator calls
+      manager-connection.js           Manager calls
+      cashier-connection.js           Cashier calls
+      inventory-clerk-connection.js   Inventory Clerk calls
+      delivery-connection.js          Delivery Personnel calls
+                            (every browser function that talks to the server
+                            starts with "api")
+
+  backend/                  the server; none of it is ever sent to a browser
+    server.js               starts the app: Express, the static folders, the
+                            start-up database work, and loading the routes
+    routes/                 what each role's screens ask the server for
+      login.js                sign in, sign out, heartbeat, first-sign-in password
+      admin.js                System Administrator
+      manager.js              Manager
+      cashier.js              Cashier
+      inventory-clerk.js      Inventory Clerk
+      delivery.js             Delivery Personnel
+      qr-payments.js          GCash and Maya paid by QR code
+      shared.js               routes every signed-in role uses: the live channel,
+                              My Account, records, archives, the daily job
+    database/
+      connection.js           the MySQL connection (settings from .env)
+      migrations.js           the start-up work: add what an older database
+                              lacks, load the stored procedures
+      procedures/             every stored-procedure CALL, one file per role
+        admin-procedures.js, manager-procedures.js, cashier-procedures.js,
+        delivery-procedures.js, inventory-clerk-procedures.js,
+        qr-payment-procedures.js, shared-procedures.js (also callProcedure)
+    services/               things the routes use
+      mailer.js               sending email (SMTP)
+      passwords.js            hashing and making passwords
+      purchase-order-pdf.js   a purchase order as a PDF
+      spreadsheet.js          reports as Excel workbooks
+      sql-script.js           splitting a .sql file into statements
+      qr-provider-paymongo.js, qr-provider-sim.js   the QR payment providers
+      mail-password.txt       the mail password, if not in .env (not committed)
+    tools/
+      recover-password.js     npm run recover-password: the last resort, run on
+                              the server's own computer
+    sessions.js             signed-in sessions, the cookie, who is present
+    access-control.js       who may call which /api route
+    features.js             screens by role (what the administrator switches)
+    audit-log.js            the audit trail
+    live-changes.js         the live channel
+    validation.js           phone, password, name and TIN rules
+    helpers.js              word-start search, date text
+    shared-sql.js           SQL text several routes use
+    store-settings.js       the shop's default settings and receipt layout
+    roles.js                the five role names and each role's page
+    env-settings.js         reading a number from .env
+
+  database/
+    0-READ-ME-FIRST.md                    how to run the SQL files
+    1-RUN-FIRST-database.sql              the tables and the demo data
+    2-RUN-SECOND-stored-procedures.sql    the views and stored procedures
+    3-, 4-, 5-...                         upgrade files for a database that already holds data
+
+  deployment/
+    vercel-build.js         the Vercel build step: copies the browser files to vercel-static/
+    load-sql.js             loads .sql files into a cloud database (Aiven)
+    DEPLOY-VERCEL-AIVEN.md  putting the app online
 
   vendor/bootstrap/         Bootstrap 5, kept in the project, no internet needed
   vendor/bootstrap-icons/   Bootstrap Icons (the font and its stylesheet), also kept here;
                             shared/icons.js puts them on buttons, tabs, titles and cards
-  database/
-    0-READ-ME-FIRST.md                    how to run the two files below
-    1-RUN-FIRST-database.sql              the tables and the demo data
-    2-RUN-SECOND-stored-procedures.sql    the views and stored procedures
-backups/                    dated .sql backups
 ```
 
 ### Which address serves which folder
@@ -1665,23 +1707,24 @@ backups/                    dated .sql backups
 The pages keep short addresses; server.js maps them onto the folders:
 
 ```
-/Login.html, /css/...   ->  public/Front-end/
-/modules/...            ->  public/Back-end/modules/
-/connections/*-connection.js -> public/Back-end/Connections/ (browser files only)
-/vendor/...             ->  public/vendor/
+/Login.html, /css/..., /scripts/..., /connections/...  ->  public/frontend/
+/vendor/...                                            ->  public/vendor/
 ```
 
-Nothing else is served, so the server code in `public/Back-end/` and the SQL
-files in `public/database/` never reach a browser.
+Nothing else is served. The server code is in `public/backend/`, not next to the
+browser files, so it, the SQL files in `public/database/` and the tools in
+`public/deployment/` never reach a browser.
 
 ### Which files a page loads
 
-Every page loads the same shared set, then the files for its own role:
+Every page loads the same shared set, then the files for its own page and role:
 
 ```
-css:  general-ui.css  ->  responsive.css  ->  modules/<role>.css
-js:   modules/shared/*  ->  connections/shared-connection.js
-      ->  connections/<role>-connection.js  ->  modules/<role>.js
+css:  shared/general-ui.css  ->  shared/responsive.css  ->  pages/<page>.css
+      (supplier-order.html stops after general-ui.css; <page> is the name of the
+      page's .html file)
+js:   scripts/shared/*  ->  connections/shared-connection.js
+      ->  connections/<role>-connection.js  ->  scripts/<role>.js
 ```
 
 A screen never writes a server address itself. It calls a function from
@@ -1691,9 +1734,8 @@ server, open the connection file of that role.
 
 ## Notes
 
-- Express serves only `Front-end/`, `Back-end/modules/`, the
-  `*-connection.js` files in `Back-end/Connections/`, and `vendor/`.
-  The server code and `database/` are never handed out.
+- Express serves only `public/frontend/` and `public/vendor/`. The server code
+  and `database/` are never handed out.
 - Passwords are stored as scrypt hashes, never as readable text. A database
   restored from an older backup that still holds readable passwords is upgraded
   automatically the first time each person signs in.

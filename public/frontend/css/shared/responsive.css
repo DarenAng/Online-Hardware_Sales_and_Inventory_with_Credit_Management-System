@@ -1,0 +1,945 @@
+/* ==========================================================================
+   RESPONSIVE -- the same system on a phone, for every role
+   Load order: shared/general-ui.css -> shared/responsive.css -> pages/<page>.css
+
+     up to 1024px   the menu slides in over the page, behind a shade
+     up to 640px    each table row becomes a card carrying its column names
+     up to 420px    the last of the horizontal padding goes
+
+   The last two sections (purchase orders, sign-in pages) are rules two pages
+   share. They sit at the end on purpose: they have to load after the phone
+   rules above, as they did when they were files of their own.
+
+   Everything pressed is at least 44px; fields are 16px so iOS does not zoom.
+   ========================================================================== */
+
+/* ==========================================================================
+   UP TO 1024px  --  the menu slides over the page
+   ========================================================================== */
+@media (max-width: 1024px) {
+    .wrapper { min-height: 100dvh; }
+
+    .sidebar {
+        position: fixed;
+        left: 0; top: 0;
+        height: 100%;
+        height: 100dvh;
+        z-index: 1000;
+        transform: translateX(-100%);
+        box-shadow: none;
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+    .sidebar.active {
+        transform: translateX(0);
+        box-shadow: 0 0 44px rgba(0, 0, 0, 0.45);
+    }
+
+    /* the shade behind the menu; untouchable until the menu opens */
+    .sidebar-shade { display: block; }
+    .sidebar-shade.visible { opacity: 1; pointer-events: auto; }
+    body.sidebar-open { overflow: hidden; }
+
+    .menu-toggle { display: inline-flex; }
+
+    .topbar {
+        padding-left: max(14px, env(safe-area-inset-left));
+        padding-right: max(14px, env(safe-area-inset-right));
+    }
+    .content-area {
+        padding: 18px max(14px, env(safe-area-inset-left)) 40px
+                      max(14px, env(safe-area-inset-right));
+    }
+
+    .grid-2 { grid-template-columns: 1fr; }
+    .detail-grid { grid-template-columns: 1fr; }
+    .search-wrap { max-width: 100%; }
+    .topbar-user span[data-current-user] { display: none; }
+}
+
+/* ==========================================================================
+   UP TO 640px  --  a phone
+   ========================================================================== */
+@media (max-width: 640px) {
+    /* ---------- room ---------- */
+    .content-area { padding-top: 14px; padding-bottom: 34px; }
+    .card { padding: 16px 14px; margin-bottom: 12px; }
+    .topbar { padding-top: 8px; padding-bottom: 8px; }
+    .topbar-title { font-size: 18px; }
+
+    /* the row of tabs is wider than the screen and is meant to be swiped,
+       so it is given an edge that shows there is more of it */
+    .subnav {
+        gap: 18px;
+        margin-left: -14px;
+        margin-right: -14px;
+        padding-left: 14px;
+        padding-right: 14px;
+        -webkit-mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+                mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+    }
+    .subnav-tab { font-size: 15px; }
+
+    h1 { font-size: 29px; }
+    h2 { font-size: 23.5px; }
+    h3 { font-size: 20px; }
+
+    .panel-head {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 12px;
+    }
+    /* one above the other: the heading is as tall as its words, not 280px */
+    .panel-head > div:first-child { flex: 0 0 auto; }
+    .panel-actions { width: 100%; }
+    .panel-actions .btn { flex: 1 1 auto; }
+    .panel-sub { max-width: none; }
+    /* a count is as wide as its own words, not as wide as the card */
+    .panel-head > .pill { align-self: flex-start; }
+
+    /* every target a thumb has to find */
+    .btn { min-height: 44px; padding: 10px 16px; }
+    .btn-sm { min-height: 36px; }
+    .form-footer { flex-direction: column; }
+    .form-footer .btn { width: 100%; }
+
+    .kpi-card { padding: 10px 12px; }
+    .kpi-label { font-size: 13px; }
+    .kpi-value { font-size: 21px; }
+    .kpi-note { font-size: 12.5px; }
+
+    .filter-row, .track-legend { gap: 6px; }
+
+    .table-responsive { overflow-x: visible; }
+
+    table { display: block; margin-top: 0; }
+    table thead { display: none; }
+    table tbody { display: block; }
+
+    /* the card leads with the name; the other values sit two to a row
+       (label on top, value under it) so a card is short */
+    table tbody tr {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 12px;
+        row-gap: 8px;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-left: var(--rule) solid var(--line);
+        border-radius: var(--radius);
+        margin-bottom: 8px;
+        padding: 10px 12px;
+    }
+    table tbody tr:nth-child(even) { background: var(--surface); }
+    table tbody tr:last-child { margin-bottom: 0; }
+    /* cards are not a grid of rows; a short page is simply shorter */
+    table tbody tr.row-filler { display: none; }
+    table tbody tr.row-clickable { border-left-color: var(--go); }
+    table tbody tr.row-clickable:hover { background: var(--surface); }
+
+    /* one small box per value: its column name on top, the value under it */
+    table tbody td {
+        display: block;
+        min-width: 0;
+        padding: 0;
+        border-bottom: none;
+        text-align: left;
+        font-size: 14.5px;
+        /* a long value (a file name) wraps inside its half instead of running into the next one */
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    table tbody td::before {
+        content: attr(data-column);
+        display: block;
+        margin-bottom: 1px;
+        font-size: 12px;
+        font-weight: 400;
+        color: var(--steel-soft);
+    }
+
+    /* the hover rule from the desktop table would otherwise take this
+       pseudo-element over and the labels would disappear */
+    table tbody tr.row-clickable td:first-child::before {
+        content: attr(data-column);
+        position: static;
+        width: auto;
+        height: auto;
+        background: none;
+        transform: none;
+        transition: none;
+    }
+    /* a phone counts a tapped card as hovered; its first label must not vanish */
+    table tbody tr.row-clickable:hover td:first-child::before { transform: none; }
+
+    /* the name of the record leads the card across its full width and needs no label */
+    table tbody td.cell-name {
+        order: -2;
+        grid-column: 1 / -1;
+        font-size: 16px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--line);
+    }
+    table tbody td.cell-name::before { display: none; }
+
+    /* numbers stay on the right, with their label */
+    table tbody td.cell-num { text-align: right; font-size: 14.5px; white-space: nowrap; }
+    table tbody td.cell-id  { order: -1; font-size: 13.5px; white-space: normal; }
+
+    /* An odd number of values would leave the last one alone on its line
+       with an empty space beside it, so it takes the whole line instead.
+       (The name has a line of its own, so it is not counted.) */
+    table tbody tr:has(td.cell-name) td:last-child:nth-child(even),
+    table tbody tr:not(:has(td.cell-name)) td:last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+    }
+
+    /* "Loading..." and "nothing here" span the table and name no column */
+    table tbody td:not([data-column]) {
+        grid-column: 1 / -1;
+        text-align: center;
+        padding: 22px 13px;
+    }
+    /* that row is a message, not a record, so it does not take a card */
+    table tbody tr:has(td:not([data-column])) {
+        border: none;
+        background: none;
+        margin-bottom: 0;
+        padding: 0;
+    }
+
+    /* the receipt's item lines are printed paper, not records: they stay a
+       plain table (item on the left, amount on the right) on a phone too */
+    .receipt-paper .rc-items { display: table; }
+    .receipt-paper .rc-items tbody { display: table-row-group; }
+    .receipt-paper .rc-items tbody tr {
+        display: table-row;
+        border: none;
+        background: none;
+        margin: 0;
+        padding: 0;
+    }
+    .receipt-paper .rc-items tbody td {
+        display: table-cell;
+        padding: 4px 0;
+        text-align: left;
+    }
+    .receipt-paper .rc-items tbody td.rc-amt { text-align: right; }
+
+    /* inside a popup the same thing happens, one step smaller */
+    .mini-table tbody tr { margin-bottom: 8px; padding: 8px 11px; }
+    .mini-table tbody td { padding: 0; }
+
+    /* ---------- popups become sheets ---------- */
+    .modal {
+        padding: 0;
+        align-items: flex-end;
+    }
+    .modal.open { align-items: flex-end; }
+    .modal-box {
+        max-width: none;
+        margin: 0;
+        border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+        max-height: 94dvh;
+        animation: sheet-up 0.24s cubic-bezier(0.2, 0.7, 0.3, 1);
+    }
+    /* the sheet fits what it holds, up to 94% of the phone's screen */
+    .modal-tabs + .modal-body,
+    .modal-steps + .modal-body { height: auto; }
+    @keyframes sheet-up {
+        from { transform: translateY(28px); opacity: 0; }
+        to   { transform: translateY(0); opacity: 1; }
+    }
+    .modal-head { padding: 14px 16px; }
+    .modal-head h3 { font-size: 19.5px; }
+    .modal-tabs, .modal-steps { padding: 0 16px; gap: 18px; }
+    .modal-body {
+        padding: 16px;
+        flex: 1 1 auto;
+        overflow: hidden;
+    }
+    .modal-foot {
+        flex-direction: column-reverse;
+        padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    }
+    .modal-foot .btn { width: 100%; }
+    /* My Account's Cancel and Save share one row, so the foot stays short */
+    #account-foot .detail-foot-actions { flex-wrap: nowrap; }
+    #account-foot .detail-foot-actions .btn { flex: 1 1 0; width: auto; }
+    .modal-pager { margin-right: 0; justify-content: space-between; }
+    .modal-pager .btn { width: auto; }
+    .avatar { width: 38px; height: 38px; font-size: 15px; }
+
+    /* ---------- the corner ---------- */
+    .account-chip-name, .account-caret { display: none; }
+    .account-chip { padding: 4px; }
+    .account-drop {
+        position: fixed;
+        top: 64px; right: 10px; left: 10px;
+        width: auto;
+    }
+    .notif-drop {
+        top: 64px; right: 10px; left: 10px;
+        width: auto;
+        max-height: calc(100dvh - 88px);
+    }
+    .toast-deck {
+        width: auto;
+        left: 2px; right: 2px;
+        bottom: calc(2px + env(safe-area-inset-bottom));
+        max-height: calc(100dvh - 16px);
+    }
+    /* With a popup open, the cards go to the top so they do not cover its buttons at the bottom */
+    html:has(.modal.open) .toast-deck {
+        top: calc(2px + env(safe-area-inset-top));
+        bottom: auto;
+    }
+    .toast-title { font-size: 16px; }
+}
+
+/* ==========================================================================
+   UP TO 420px  --  a small phone held in one hand
+   ========================================================================== */
+@media (max-width: 420px) {
+    .content-area { padding-left: 10px; padding-right: 10px; }
+    .card { padding: 14px 12px; }
+    /* small enough that ₱12,345,678.90 still fits half the width */
+    .kpi-value { font-size: 17px; }
+    .topbar { gap: 8px; }
+    .topbar-title { font-size: 17px; }
+}
+
+/* ==========================================================================
+   A SHORT WINDOW -- the menu scrolls itself and the popup does not grow
+   past the window
+   ========================================================================== */
+@media (max-height: 560px) {
+    .modal { padding: 10px; }
+    .modal-box { max-height: calc(100dvh - 20px); display: flex; flex-direction: column; }
+    .modal-body { overflow: hidden; }
+}
+
+/* ==========================================================================
+   POINTING WITH A FINGER -- hover states are dropped on touch screens
+   ========================================================================== */
+@media (hover: none) {
+    .row-clickable:hover { background: transparent; }
+    .row-clickable:hover td:first-child::before { transform: scaleX(0); }
+}
+
+/* ==========================================================================
+   PURCHASE ORDERS -- manager.html and inventory-dashboard.html
+   The same screens on both pages, so the rules live here. What only one of the
+   two pages uses is in that page's own file (pages/inventory-dashboard.css).
+   They are last in this file on purpose: they must load after the phone rules
+   above, as they did when they were a file of their own, so a .po-* rule still
+   wins over a general .btn or .card rule at the same weight.
+   ========================================================================== */
+
+/* ==========================================================================
+   BUILDING A PURCHASE ORDER -- two numbered sections (the supplier, then the
+   materials); each material is a card of its own, and every card, the new
+   company and the new material alike, is drawn the same way: a thin border
+   with the orange rule down its left edge
+   ========================================================================== */
+/* one line: its number and Remove across the top, the fields in one row */
+.po-line {
+    margin-bottom: 12px;
+    padding: 12px 16px 16px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--chrome);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+.po-line-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.po-line-title {
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--steel-soft);
+}
+.po-line-fields {
+    display: grid;
+    grid-template-columns: minmax(0, 2.2fr) repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    align-items: start;
+}
+.po-line .form-group { margin-bottom: 0; min-width: 0; }
+
+/* Remove is quiet until pointed at: a line is removed on purpose */
+.po-remove { min-height: 30px; padding: 3px 10px; color: var(--stop); border-color: transparent; }
+.po-remove:hover { background: var(--stop-dim); color: var(--stop); border-color: transparent; }
+
+/* the figures on the line are set as figures */
+.po-qty, .po-cost {
+    font-family: var(--font-figure);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.po-line-total { font-weight: 600; }
+.po-in { margin-top: 6px; }
+
+/* the new-material fields drop below the line they belong to, full width */
+.po-line .make-card,
+.recv-line .make-card {
+    grid-column: 1 / -1;
+    order: 99;
+}
+
+/* Add another material: full width above the first line (a new line goes on
+   top, right under it), dashed like a space waiting to be filled, in the
+   orange that means "add" */
+.po-add-line {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    width: 100%;
+    margin: 0 0 14px;
+    padding: 11px 16px;
+    min-height: 48px;
+    border: 2px dashed var(--go);
+    background: var(--surface);
+    color: var(--go-ink);
+    font-size: 15.5px;
+    font-weight: 700;
+}
+.po-add-line:hover,
+.po-add-line:focus-visible { background: var(--go-dim); color: var(--go-ink); border-color: var(--go); }
+
+/* until the company is settled there are no lines to add to; the note says why */
+.po-add-line[hidden] { display: none; }
+
+/* the lines are shut until the company is settled */
+#po-lines[hidden] { display: none; }
+
+.btn.is-inactive { opacity: 0.45; }
+
+#po-lines:empty::before {
+    content: 'No lines yet. Press Add line to start the order.';
+    display: block;
+    padding: 20px 0;
+    color: var(--steel-soft);
+    font-size: 14.5px;
+}
+
+/* The running total under the lines, so the order is priced before it is
+   sent rather than after the supplier has answered. */
+.po-sum {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 16px;
+    margin-top: 4px;
+    padding: 12px 16px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--chrome);
+    background: var(--paper);
+    border-radius: var(--radius);
+}
+.po-sum-label { font-size: 14px; color: var(--steel); }
+.po-sum-value {
+    font-family: var(--font-figure);
+    font-size: 21.5px;
+    font-weight: 600;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   THE FORM AND THE ROSTER -- the order on the left, the companies on file on
+   the right; the roster keeps up with the page as the lines grow
+   ========================================================================== */
+.po-roster-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: calc(100vh - 300px);
+    min-height: 120px;
+    overflow-y: auto;
+}
+.po-roster-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 9px 10px;
+    border-left: var(--rule) solid transparent;
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+.po-roster-item:hover,
+.po-roster-item:focus-visible { background: var(--go-dim); outline: none; }
+.po-roster-item.is-active {
+    background: var(--ok-dim);
+    border-left-color: var(--ok);
+}
+.po-roster-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+}
+.po-roster-name { font-size: 14.5px; font-weight: 600; color: var(--ink); line-height: 1.3; }
+.po-roster-figure {
+    font-family: var(--font-figure);
+    font-size: 12.5px;
+    color: var(--steel);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.po-roster-sub { font-size: 12.5px; color: var(--steel-soft); }
+.po-roster-empty { padding: 14px 10px; font-size: 13.5px; color: var(--steel-soft); }
+
+@media (max-width: 900px) {
+    .po-roster-list { max-height: 320px; }
+}
+
+/* ==========================================================================
+   RECEIVING WHAT ACTUALLY ARRIVED -- a count sheet: ordered on the left,
+   what came off the lorry on the right, and a way to add an extra
+   ========================================================================== */
+.recv-line {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px dashed var(--line);
+}
+.recv-line:last-of-type { border-bottom: none; }
+.recv-name { font-size: 15px; font-weight: 600; color: var(--ink); }
+.recv-meta { font-size: 12.5px; color: var(--steel-soft); }
+.recv-ordered {
+    font-family: var(--font-figure);
+    font-size: 15px;
+    color: var(--steel);
+    font-variant-numeric: tabular-nums;
+}
+.recv-qty {
+    width: 110px;
+    font-family: var(--font-figure);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+/* a line that does not match the order wears amber; as ordered is grey */
+.recv-verdict { font-size: 12.5px; line-height: 1.4; }
+.recv-verdict.is-short { color: var(--signal-ink); font-weight: 500; }
+.recv-verdict.is-over  { color: var(--signal-ink); font-weight: 500; }
+.recv-verdict.is-exact { color: var(--steel-soft); }
+
+/* an extra line, never ordered, carries its own left rule */
+.recv-line.is-extra {
+    border-left: var(--rule) solid var(--brand);
+    padding-left: 12px;
+    margin-left: -12px;
+    background: var(--paper);
+}
+
+/* ==========================================================================
+   THE PURCHASE ORDER AS A DOCUMENT -- built to be printed and handed to a
+   supplier: a sheet with three signature rules at the foot. The hazard
+   stripe is the last of its two uses in the system.
+   ========================================================================== */
+.po-doc {
+    max-width: 860px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+.po-doc-stripe { height: 8px; background: var(--hazard); }
+.po-doc-inner { padding: 30px 34px 34px; }
+
+.po-doc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding-bottom: 18px;
+    border-bottom: 2px solid var(--chrome);
+}
+.po-doc-shop { min-width: 0; }
+.po-doc-shop-name {
+    font-size: 24.5px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    line-height: 1.15;
+}
+.po-doc-shop-line {
+    font-size: 13.5px;
+    color: var(--steel);
+    line-height: 1.5;
+}
+.po-doc-kind { text-align: right; }
+.po-doc-kind-title {
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--go);
+}
+.po-doc-ref {
+    font-family: var(--font-figure);
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1.2;
+}
+.po-doc-date {
+    font-family: var(--font-figure);
+    font-size: 13px;
+    color: var(--steel);
+}
+
+.po-doc-parties {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 24px;
+    padding: 20px 0;
+}
+.po-doc-party-label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--steel-soft);
+    margin-bottom: 5px;
+}
+.po-doc-party-name { font-size: 17px; font-weight: 600; color: var(--ink); }
+.po-doc-party-line { font-size: 14px; color: var(--steel); line-height: 1.55; }
+
+.po-doc table { width: 100%; border-collapse: collapse; }
+.po-doc thead th {
+    background: var(--chrome);
+    color: #fff;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    padding: 9px 10px;
+}
+.po-doc tbody td {
+    padding: 10px;
+    border-bottom: 1px solid var(--line);
+    font-size: 14.5px;
+    vertical-align: top;
+}
+.po-doc .num {
+    text-align: right;
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+/* a figure column's heading sits over its figures, in the heading's own type */
+.po-doc thead th.num { font-family: inherit; }
+.po-doc tfoot td {
+    padding: 11px 10px;
+    font-size: 15px;
+    font-weight: 600;
+    border-top: 2px solid var(--chrome);
+}
+.po-doc tfoot .po-doc-total {
+    font-family: var(--font-figure);
+    font-size: 19.5px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* the approved order's QR code: the supplier scans it to accept or decline */
+.po-doc-answer {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-top: 18px;
+    padding: 14px 16px;
+    border: 1px solid var(--line);
+    break-inside: avoid;
+}
+.po-doc-qr { width: 120px; height: 120px; flex-shrink: 0; image-rendering: pixelated; }
+.po-doc-answer-text { min-width: 0; font-size: 13.5px; line-height: 1.5; }
+.po-doc-answer-text p { margin: 4px 0 8px; }
+.po-doc-answer-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--go);
+}
+.po-doc-link { font-family: var(--font-figure); font-size: 11.5px; color: var(--go-ink); overflow-wrap: anywhere; }
+
+.po-doc-signs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 26px;
+    margin-top: 40px;
+}
+.po-doc-sign-rule {
+    border-top: 1px solid var(--ink);
+    padding-top: 6px;
+    font-size: 12.5px;
+    color: var(--steel);
+}
+.po-doc-sign-role { display: block; font-weight: 600; color: var(--ink); font-size: 13.5px; }
+
+.po-doc-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+}
+
+/* a unit cost the supplier corrected from the link, in the order's card */
+.po-answer {
+    font-size: 12px;
+    white-space: nowrap;
+}
+.po-answer.is-warn { display: inline; color: var(--signal-ink); font-weight: 600; }
+
+/* AN ORDER'S CARD -- the facts on the left, every material on the right */
+.po-detail-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+    gap: 20px;
+    align-items: start;
+}
+.po-detail-lines .detail-subhead:first-child { margin-top: 0; }
+.po-detail-facts .detail-grid + .detail-subhead { margin-top: 22px; }
+@media (max-width: 900px) {
+    .po-detail-layout { grid-template-columns: 1fr; }
+    .po-detail-lines .detail-subhead:first-child { margin-top: 4px; }
+}
+
+/* Print PDF on an order's card or its page: the order's document alone, wherever
+   the screen was (shared/purchase-orders.js printPurchaseOrderNow) */
+@media print {
+    body.printing-po .sidebar,
+    body.printing-po .sidebar-shade,
+    body.printing-po .topbar,
+    body.printing-po .modal,
+    body.printing-po .toast-deck,
+    body.printing-po .po-doc-actions,
+    body.printing-po .content-area > :not(#panel-po-doc) { display: none !important; }
+    body.printing-po #panel-po-doc { display: block !important; }
+    body.printing-po .main-content,
+    body.printing-po .content-area { margin: 0 !important; padding: 0 !important; }
+}
+
+@media print {
+    .po-doc {
+        max-width: none;
+        border: none;
+        border-radius: 0;
+    }
+    .po-doc-inner { padding: 0; }
+    .po-doc-stripe {
+        height: 8px;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .po-doc thead th {
+        background: #222 !important;
+        color: #fff !important;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+    .po-doc-kind-title { color: #000; }
+    .po-doc-signs { margin-top: 56px; }
+}
+
+/* ==========================================================================
+   ON A PHONE -- every figure gets a full-width field
+   ========================================================================== */
+@media (max-width: 640px) {
+    .po-line-fields,
+    .recv-line {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+    .recv-line { padding: 14px 0; }
+    .po-line { padding: 12px 12px 14px; }
+    .recv-qty { width: 100%; }
+
+    .po-doc-inner { padding: 20px 16px 24px; }
+    .po-doc-head { gap: 14px; }
+    .po-doc-kind { text-align: left; }
+    .po-doc-ref { font-size: 23.5px; }
+    .po-doc-actions .btn { flex: 1 1 100%; }
+}
+
+/* the packs a line comes to, under its quantity */
+.po-line-note { margin: 4px 0 0; }
+
+/* ==========================================================================
+   WHAT THE LINE COSTS -- the price is the one on file for the material, so
+   the field shows it rather than takes it: read-only on purpose.
+   ========================================================================== */
+.po-cost[readonly] {
+    background: var(--paper);
+    border-style: dashed;
+    color: var(--ink);
+    cursor: default;
+}
+.po-cost[readonly]:focus { box-shadow: none; }
+.po-line-amount {
+    margin: 4px 0 0;
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+}
+
+/* the material under the box, in one quiet line: what it is, and what it is
+   kept at ("Cement · counted in bags  ₱190.00 / bags") */
+.mat-desc {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 10px;
+    row-gap: 2px;
+    margin-top: 6px;
+}
+.mat-desc[hidden] { display: none; }
+.mat-desc-line {
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--steel);
+}
+.mat-desc-price {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+    font-family: var(--font-figure);
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.mat-desc-per { font-family: var(--font-ui); font-size: 12.5px; font-weight: 400; color: var(--steel-soft); }
+
+/* ==========================================================================
+   THE ORDER LIST -- an order waiting on this page wears the signal rule
+   and sorts first
+   ========================================================================== */
+#po-table tr.row-attention td:first-child { box-shadow: inset var(--rule) 0 0 var(--signal); }
+
+/* the popup's opening line: what happens next with this order */
+.po-next { margin: 0 0 14px; }
+
+/* ==========================================================================
+   SIGN-IN PAGES -- Login.html and change-password.html
+   The only two screens with no menu, no top bar and no role. One card on the
+   dark ground, and the measured grid behind it: the graph paper a hardware
+   order is written on. The grid is kept here and nowhere else, so it reads as
+   the front door rather than as wallpaper. Login.html adds a left panel on a
+   laptop or larger (see THE TWO PANELS in pages/Login.css).
+   Last in this file for the same reason as the purchase orders above: these
+   have to load after the phone rules, so the card and its button still win.
+   ========================================================================== */
+
+.login-body {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background-color: var(--chrome);
+    background-image:
+        repeating-linear-gradient(0deg,  rgba(255,255,255,0.03) 0 1px, transparent 1px 26px),
+        repeating-linear-gradient(90deg, rgba(255,255,255,0.03) 0 1px, transparent 1px 26px);
+    padding: 24px max(24px, env(safe-area-inset-left))
+             calc(24px + env(safe-area-inset-bottom))
+             max(24px, env(safe-area-inset-right));
+}
+
+/* the card's top edge carries the hazard stripe of the printed order and the
+   supplier's page, so the front door is in the shop's own orange */
+.login-card {
+    position: relative;
+    overflow: hidden;
+    background: var(--surface);
+    padding: 40px 36px 30px;
+    border-radius: var(--radius-lg);
+    width: 100%; max-width: 420px;
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.34);
+}
+.login-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 6px;
+    background: var(--hazard);
+}
+
+.login-brand {
+    display: flex; align-items: center; gap: 12px;
+    padding-bottom: 20px; margin-bottom: 26px;
+    border-bottom: 1px solid var(--line);
+}
+.login-brand .brand-name {
+    display: block;
+    font-size: 20.5px; font-weight: 700; letter-spacing: -0.015em;
+    color: var(--ink);
+    line-height: 1.1;
+}
+.login-brand .brand-sub {
+    display: block;
+    font-size: 13.5px;
+    color: var(--steel-soft);
+}
+
+.login-card h2 { margin-bottom: 22px; }
+
+/* the sentence under the heading on the password screen; the heading
+   closes up to it */
+.login-card h2:has(+ .login-lead) { margin-bottom: 6px; }
+.login-lead {
+    font-size: 15px;
+    color: var(--steel);
+    line-height: 1.6;
+    margin-bottom: 22px;
+    max-width: 44ch;
+}
+
+/* Show sits inside the password box like the envelope sits in the email box:
+   the same white, a quiet word, no grey block hanging off the end */
+.login-card .password-toggle {
+    background: var(--surface);
+    border-left: none;
+    color: var(--steel);
+    padding: 0 14px;
+}
+.login-card .password-toggle:hover { background: var(--paper); color: var(--ink); }
+
+.login-submit { width: 100%; margin-top: 8px; min-height: 50px; font-size: 16.5px; }
+
+/* only one of the two cards shows; the phone layout below sets display on it */
+.login-card[hidden] { display: none; }
+
+/* ==========================================================================
+   ON A PHONE
+   The card gives up its own margins and becomes the screen. Nothing here
+   needs to be smaller; it needs to be closer to the thumb.
+   ========================================================================== */
+@media (max-width: 480px) {
+    .login-body { padding: 0; align-items: stretch; }
+
+    .login-card {
+        max-width: none;
+        min-height: 100dvh;
+        border-radius: 0;
+        box-shadow: none;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 28px max(20px, env(safe-area-inset-left))
+                 calc(28px + env(safe-area-inset-bottom))
+                 max(20px, env(safe-area-inset-right));
+    }
+}

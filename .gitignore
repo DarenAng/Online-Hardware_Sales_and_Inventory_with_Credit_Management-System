@@ -4,7 +4,6 @@ node_modules/
 # editor, tool and OS files
 .vscode/
 .claude/
-launch/
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -33,12 +32,6 @@ shots/
 # local folder-tidying scripts
 *.bat
 
-# old copies the app no longer loads
-# (the app now runs from public/Front-end, public/Back-end and public/vendor)
-_reorganize/
-public/css/
-public/javascript/
-public/Back-end/javascript/
 
 # old snapshots kept locally only
 _unused/

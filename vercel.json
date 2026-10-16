@@ -2,12 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "installCommand": "npm install",
-  "buildCommand": "node scripts/vercel-build.js",
+  "buildCommand": "node public/deployment/vercel-build.js",
   "outputDirectory": "vercel-static",
   "regions": ["sin1"],
   "functions": {
     "api/index.js": {
-      "includeFiles": "{public/Front-end/**,public/database/**,node_modules/pdfkit/js/standard-fonts/**,node_modules/pdfkit/js/data/**}",
+      "includeFiles": "{public/frontend/**,public/database/**,node_modules/pdfkit/js/standard-fonts/**,node_modules/pdfkit/js/data/**}",
       "maxDuration": 300
     }
   },

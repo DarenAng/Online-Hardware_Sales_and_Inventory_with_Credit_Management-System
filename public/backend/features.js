@@ -1,0 +1,325 @@
+// ============================================================
+// features.js -- screens by role: which screens exist, and which roles hold them
+// Loaded by: server.js (handed on to routes/admin.js) and access-control.js.
+// Never sent to a browser.
+// ============================================================
+
+const db = require("./database/connection").db;
+const IS_VERCEL = require("./database/connection").IS_VERCEL;
+const roles = require("./roles");
+const ADMIN = roles.ADMIN;
+const MANAGER = roles.MANAGER;
+const CLERK = roles.CLERK;
+const CASHIER = roles.CASHIER;
+const DRIVER = roles.DRIVER;
+
+// ==========================================
+// SCREENS BY ROLE
+//
+// Every entry is one screen: the roles whose page can draw it, the roles that
+// hold it by role, and the routes it is made of. The administrator grants or
+// revokes a screen per role; an override is one row in role_feature_permissions.
+//
+// Enforcement in the access hook:
+//   revoked  a route is refused when every screen using it is off for the role
+//   granted  a route the role table would refuse is allowed when the role
+//            holds a screen needing it BY GRANT (not by default)
+// Read from the database and cached in memory between writes.
+// ==========================================
+const FEATURES = [
+  // --- selling and the counter ---
+  { key: "pos", name: "New Transaction", module: "Point of Sale",
+    description: "The register: ring a sale up, take the payment, book the delivery.",
+    available: [CASHIER], defaults: [CASHIER],
+    routes: [["POST", /^\/api\/sales$/], ["POST", /^\/api\/deliveries$/],
+             ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
+             ["POST", /^\/api\/qr-payments\/\d+\/cancel$/]] },
+  { key: "refunds", name: "Refunds", module: "Point of Sale",
+    description: "Take a sold item back and refund it at the counter; the stockroom inspects it before it can be sold again.",
+    available: [CASHIER], defaults: [CASHIER],
+    // the screen's "Sales in the Past 3 Days" list and a receipt's items
+    routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/],
+             ["GET", /^\/api\/sales$/], ["GET", /^\/api\/sales\/\d+$/]] },
+  { key: "sales-report", name: "Sales Report", module: "Point of Sale",
+    description: "The cashier's own sales, by day and by method.",
+    available: [CASHIER], defaults: [CASHIER],
+    routes: [["GET", /^\/api\/sales$/], ["GET", /^\/api\/sales\/\d+$/], ["GET", /^\/api\/reports\/daily-tally$/]] },
+  { key: "qr-payments", name: "QR Payments", module: "Point of Sale",
+    description: "Every GCash and Maya payment tried by QR code and how it ended, as a tab of Sales Transactions.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/qr-payments$/]] },
+  { key: "daily-summary", name: "Daily Summary", module: "Point of Sale",
+    description: "What the till took today.",
+    available: [CASHIER], defaults: [CASHIER],
+    routes: [["GET", /^\/api\/cashier\/summary$/]] },
+
+  // --- credit ---
+  { key: "credit", name: "Customer Credit", module: "Credit",
+    description: "Every credit account and its credit rating; the cashier's copy adds customers and files extension requests, the manager's decides limits.",
+    available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
+    routes: [["GET", /^\/api\/credit\/customers$/], ["GET", /^\/api\/credit\/customers\/\d+$/],
+             ["PUT", /^\/api\/credit\/customers\/\d+\/limit$/], ["GET", /^\/api\/customers\/\d+\/history$/],
+             ["GET", /^\/api\/credit\/policy$/], ["PUT", /^\/api\/credit\/policy$/],
+             ["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests$/],
+             ["POST", /^\/api\/customers$/]] },
+  { key: "debt-payments", name: "Debt Payments", module: "Credit",
+    description: "Take a payment against what a customer still owes, sale by sale, from the customer's card.",
+    available: [CASHIER], defaults: [CASHIER],
+    routes: [["GET", /^\/api\/credit\/open-sales$/], ["POST", /^\/api\/sales\/\d+\/payment$/],
+             ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
+             ["POST", /^\/api\/qr-payments\/\d+\/cancel$/]] },
+  { key: "credit-requests", name: "Extension Requests", module: "Credit",
+    description: "The queue of credit-limit requests waiting for a decision.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests\/\d+\/decide$/]] },
+
+  // --- the manager's reporting ---
+  { key: "income", name: "Income", module: "Reports",
+    description: "Collected, billed, outstanding and discounts over any period.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/reports\/income$/]] },
+  { key: "reports", name: "Reports", module: "Reports",
+    description: "Everything staff have filed, plus payment methods, receivables, repeat customers and staff performance.",
+    available: [MANAGER], defaults: [MANAGER],
+    // the day's tally is the manager's side of the cashier's end-of-shift card
+    routes: [["GET", /^\/api\/reports\/activity$/], ["GET", /^\/api\/reports\/overview$/],
+             ["GET", /^\/api\/reports\/daily-tally$/]] },
+  { key: "sales", name: "Sales", module: "Reports",
+    description: "Every sale rung up, with its lines and its payments.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/sales$/], ["GET", /^\/api\/sales\/\d+$/], ["POST", /^\/api\/sales\/\d+\/payment$/],
+             ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
+             ["POST", /^\/api\/qr-payments\/\d+\/cancel$/]] },
+
+  // --- stock ---
+  { key: "material-list", name: "Material List", module: "Inventory",
+    description: "Everything on the shelf, with what is in stock, the sizes each material sells in, and the pack it is delivered in.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["GET", /^\/api\/inventory\/summary$/],
+             ["POST", /^\/api\/inventory\/products\/\d+\/units$/],
+             ["DELETE", /^\/api\/inventory\/products\/\d+\/units\/\d+$/],
+             ["PUT", /^\/api\/inventory\/products\/\d+\/pack$/]] },
+  { key: "stock-adjustment", name: "Stock Adjustment", module: "Inventory",
+    description: "Correct a stock figure by hand, open a record for a material the shop has never stocked, and check a delivery against its purchase order.",
+    available: [CLERK], defaults: [CLERK],
+    // the two purchase order reads are for the delivery check; Purchase Orders holds them too
+    routes: [["POST", /^\/api\/inventory\/adjust$/], ["POST", /^\/api\/materials$/],
+             ["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/]] },
+  { key: "adjustment-history", name: "Adjustment History", module: "Inventory",
+    description: "Every correction made, by whom and why.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["GET", /^\/api\/inventory\/adjustments$/]] },
+  { key: "reorder-points", name: "Reorder Point", module: "Inventory",
+    description: "Where each material's reorder point sits, and the formula behind it.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["PUT", /^\/api\/inventory\/reorder\/\d+$/]] },
+  { key: "reorder-alerts", name: "Reorder Alerts", module: "Inventory",
+    description: "The materials at or under their reorder point today.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/stocks$/], ["PUT", /^\/api\/stocks\/\d+\/reorder-policy$/]] },
+  { key: "stock-reports", name: "Stocks Overview", module: "Inventory",
+    description: "The whole inventory to read, sort and print, and where a product's selling price is set.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/stocks$/], ["PUT", /^\/api\/stocks\/\d+\/price$/]] },
+  { key: "returns", name: "Returned Items", module: "Inventory",
+    description: "Returns and damage reports: inspecting what the counter took back, and putting it back on the shelf or writing it off.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/], ["POST", /^\/api\/returns\/\d+\/resolve$/]] },
+  { key: "damage-report", name: "Make a Report", module: "Inventory",
+    description: "Report damaged goods and take them off the shelf, or goods missing from a delivery.",
+    available: [CLERK], defaults: [CLERK],
+    // the two purchase order reads are for picking the order the missing goods were on
+    routes: [["POST", /^\/api\/returns$/], ["POST", /^\/api\/returns\/batch$/],
+             ["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/]] },
+  { key: "purchase-orders", name: "Purchase Orders", module: "Inventory",
+    description: "Orders to suppliers: the clerk raises one, the manager confirms it and counts the delivery in.",
+    available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
+    routes: [["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/],
+             ["GET", /^\/api\/purchase-orders\/\d+\/document$/], ["POST", /^\/api\/purchase-orders$/],
+             ["POST", /^\/api\/purchase-orders\/\d+\/decide$/],
+             ["POST", /^\/api\/purchase-orders\/\d+\/receive$/]] },
+
+  // --- deliveries ---
+  { key: "deliveries", name: "Delivery Tracking", module: "Deliveries",
+    description: "Every delivery booked and where it has got to; the manager's copy can move one along.",
+    available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
+    routes: [["GET", /^\/api\/deliveries$/], ["GET", /^\/api\/deliveries\/\d+\/items$/],
+             ["PATCH", /^\/api\/deliveries\/\d+\/status$/]] },
+  { key: "delivery-runs", name: "Delivery Runs", module: "Deliveries",
+    description: "The driver's own round: every active delivery in one list, with the cash collected when it is handed over.",
+    available: [DRIVER], defaults: [DRIVER],
+    routes: [["GET", /^\/api\/delivery\/list$/], ["GET", /^\/api\/deliveries\/\d+\/items$/],
+             ["PATCH", /^\/api\/deliveries\/\d+\/status$/],
+             ["POST", /^\/api\/delivery\/\d+\/claim$/],
+             ["POST", /^\/api\/delivery\/\d+\/payment$/]] },
+  { key: "delivery-refunds", name: "Refund at the Door", module: "Deliveries",
+    description: "Record a refund for an item the customer turns away at the door; the stockroom inspects it before it can be sold again.",
+    available: [DRIVER], defaults: [DRIVER],
+    routes: [["POST", /^\/api\/returns$/]] },
+  { key: "delivery-reports", name: "Delivery Reports", module: "Deliveries",
+    description: "The driver's deliveries and collections over a period.",
+    available: [DRIVER], defaults: [DRIVER],
+    routes: [["GET", /^\/api\/delivery\/summary$/]] },
+  // drawn by script (shared/delivery-schedule.js), so every page can draw it
+  { key: "delivery-schedule", name: "Delivery Schedule", module: "Deliveries",
+    description: "Deliveries still to go out, by the day they are due: overdue, today, tomorrow, later.",
+    available: [MANAGER, CASHIER, CLERK, DRIVER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/deliveries$/], ["GET", /^\/api\/deliveries\/\d+\/items$/]] },
+
+  // --- records ---
+  { key: "records", name: "Records", module: "Records",
+    description: "Suppliers, customers, products, categories and units. The clerk sees suppliers, products, categories and units, and cannot add any.",
+    available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
+    routes: [] },
+  { key: "archives", name: "Archives", module: "Records",
+    description: "What has been put away, and restoring it.",
+    available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
+    routes: [["GET", /^\/api\/archives$/], ["POST", /^\/api\/archives\/archive$/], ["POST", /^\/api\/archives\/restore$/]] },
+
+  // --- staff accounts ---
+  // Off for everyone until the administrator switches it on for managers.
+  // routes/admin.js still refuses a hold on an administrator or a manager.
+  { key: "release-holds", name: "Lift Sign-in Hold", module: "Staff",
+    description: "See the cashiers, inventory clerks and drivers locked out after too many wrong passwords, and let them sign in again. Never for an administrator or another manager.",
+    available: [MANAGER], defaults: [],
+    routes: [["GET", /^\/api\/users\/held$/], ["POST", /^\/api\/users\/\d+\/release-hold$/]] }
+];
+
+const FEATURE_ROLES = [MANAGER, CLERK, CASHIER, DRIVER];   // the matrix's columns
+
+// the accounts a manager may lift a sign-in hold on (the administrator may lift any)
+const HOLD_LIFTED_BY_MANAGER = [CASHIER, CLERK, DRIVER];
+
+// "available" is the list of dashboards that have a menu entry for the screen.
+// Access Control only offers a switch where flipping it shows or hides
+// something: a screen granted to a role whose page cannot draw it would save
+// and then appear nowhere.
+
+// finds a screen by its key, e.g. findFeature("pos"); null when there is none
+function findFeature(key) {
+  const wanted = String(key || "").toLowerCase();
+  for (const feature of FEATURES) {
+    if (feature.key === wanted) {
+      return feature;
+    }
+  }
+  return null;
+}
+
+// every screen that uses this route (method + address)
+function featuresCovering(method, pathname) {
+  const found = [];
+  for (const feature of FEATURES) {
+    for (const route of feature.routes) {
+      const routeMethod = route[0];
+      const routePattern = route[1];
+      if (routeMethod === method && routePattern.test(pathname)) {
+        found.push(feature);
+        break;   // this feature is counted once; go to the next feature
+      }
+    }
+  }
+  return found;
+}
+
+// the overrides, cached between writes:
+// role name -> Map(feature key -> { granted, note, grantedBy, grantedAt, updatedAt })
+// On Vercel a write on one copy of the server cannot clear another copy's
+// cache, so there it is only trusted for a few seconds.
+let featureOverrides = null;
+let featureOverridesAt = 0;
+const FEATURE_CACHE_MS = IS_VERCEL ? 10 * 1000 : Infinity;
+
+async function loadFeatureOverrides() {
+  if (featureOverrides && Date.now() - featureOverridesAt < FEATURE_CACHE_MS) return featureOverrides;
+
+  const byRole = new Map();
+  try {
+    const [rows] = await db.query(
+      `SELECT r.role_name, p.feature_key, p.is_granted, p.note,
+              p.granted_at, p.updated_at, gb.full_name AS granted_by
+       FROM role_feature_permissions p
+       JOIN roles r ON r.role_id = p.role_id
+       LEFT JOIN staff gb ON gb.staff_id = p.granted_by_staff_id`);
+
+    for (const row of rows) {
+      if (!byRole.has(row.role_name)) byRole.set(row.role_name, new Map());
+      byRole.get(row.role_name).set(row.feature_key, {
+        granted: Boolean(row.is_granted),
+        note: row.note,
+        grantedBy: row.granted_by,
+        grantedAt: row.granted_at,
+        updatedAt: row.updated_at
+      });
+    }
+  } catch (error) {
+    // the table may not exist yet; then there are simply no overrides
+  }
+
+  featureOverrides = byRole;
+  featureOverridesAt = Date.now();
+  return byRole;
+}
+
+function forgetFeatureOverrides() {
+  featureOverrides = null;
+}
+
+// what one role holds: the defaults with the overrides applied
+async function featuresOf(roleName) {
+  const allOverrides = await loadFeatureOverrides();
+  const overrides = allOverrides.get(roleName) || new Map();
+
+  const result = [];
+  for (const feature of FEATURES) {
+    if (!feature.available.includes(roleName) && roleName !== ADMIN) {
+      continue;   // this role can never have this screen
+    }
+
+    // does the role have this screen when nobody has changed anything?
+    const byDefault = roleName === ADMIN || feature.defaults.includes(roleName);
+
+    // has the administrator switched it on or off for this role?
+    const override = overrides.get(feature.key) || null;
+
+    const item = {
+      key: feature.key,
+      name: feature.name,
+      module: feature.module,
+      held: byDefault,
+      byDefault: byDefault,
+      overridden: false,
+      note: null,
+      grantedBy: null,
+      updatedAt: null
+    };
+
+    if (override) {
+      item.held = override.granted;
+      item.overridden = override.granted !== byDefault;
+      item.note = override.note;
+      item.grantedBy = override.grantedBy;
+      item.updatedAt = override.updatedAt || override.grantedAt;
+    }
+
+    result.push(item);
+  }
+  return result;
+}
+
+// everything held, and the part held by grant rather than by role
+async function heldFeatures(roleName) {
+  const held = new Set();
+  const granted = new Set();
+  for (const feature of await featuresOf(roleName)) {
+    if (!feature.held) continue;
+    held.add(feature.key);
+    if (!feature.byDefault) granted.add(feature.key);
+  }
+  return { held, granted };
+}
+
+module.exports = {
+  FEATURES, FEATURE_ROLES, HOLD_LIFTED_BY_MANAGER, findFeature, featuresCovering,
+  featuresOf, heldFeatures, forgetFeatureOverrides
+};
