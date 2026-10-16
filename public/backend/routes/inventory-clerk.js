@@ -360,9 +360,8 @@ function registerInventoryRoutes(app, deps) {
       const text = String(typedNames[i] || "").trim();
       if (text !== "") typed.push(text);
     }
-    // two lists side by side: what was typed (in loose form) -> the name on file
-    const typedKeys = [];
-    const fileNames = [];
+    // what was typed (in loose form) -> the name on file, one { key, name } for each
+    const matches = [];
     if (typed.length === 0) return { onFile: function (value) { return value; } };
 
     const rowsResult = await db.query(sql);
@@ -386,17 +385,18 @@ function registerInventoryRoutes(app, deps) {
         }
       }
       if (!same) return { missing: value };
-      typedKeys.push(looseName(value));
-      fileNames.push(same.name);
+      matches.push({ key: looseName(value), name: same.name });
     }
 
     return {
       onFile: function (value) {
         const text = String(value || "").trim();
         if (text === "") return value;
-        const position = typedKeys.indexOf(looseName(text));
-        if (position === -1) return text;
-        return fileNames[position] || text;
+        const key = looseName(text);
+        for (let i = 0; i < matches.length; i++) {
+          if (matches[i].key === key) return matches[i].name || text;
+        }
+        return text;
       }
     };
   }

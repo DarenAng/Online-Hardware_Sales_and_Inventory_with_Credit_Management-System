@@ -239,29 +239,32 @@ function turnModalPage(modal, direction) {
 }
 
 // ---- when to lay the pages out again ----
-// Two lists side by side: pendingModals[i] is a card waiting to be laid out,
-// and pendingReset[i] says whether it goes back to page one.
+// The cards waiting to be laid out. Each one is { modal: the card, reset: true
+// if it goes back to page one }.
 const pendingModals = [];
-const pendingReset = [];
 
 function schedulePaginate(modal, resetPage) {
-    let index = pendingModals.indexOf(modal);
-    const already = index !== -1;
-    if (!already) {
-        pendingModals.push(modal);
-        pendingReset.push(false);
-        index = pendingModals.length - 1;
+    // is this card already waiting?
+    let entry = null;
+    for (let i = 0; i < pendingModals.length; i++) {
+        if (pendingModals[i].modal === modal) {
+            entry = pendingModals[i];
+            break;
+        }
     }
-    pendingReset[index] = Boolean(resetPage) || pendingReset[index];
+    const already = entry !== null;
+    if (!already) {
+        entry = { modal: modal, reset: false };
+        pendingModals.push(entry);
+    }
+    entry.reset = Boolean(resetPage) || entry.reset;
     if (already || pendingModals.length > 1) return;
     // a timeout rather than a frame: frames stop in a background tab
     setTimeout(function () {
-        const batchModals = pendingModals.slice();
-        const batchReset = pendingReset.slice();
+        const batch = pendingModals.slice();
         pendingModals.length = 0;
-        pendingReset.length = 0;
-        for (let i = 0; i < batchModals.length; i++) {
-            paginateModal(batchModals[i], batchReset[i]);
+        for (let i = 0; i < batch.length; i++) {
+            paginateModal(batch[i].modal, batch[i].reset);
         }
         modalWatcher.takeRecords();   // the layout's own edits are not a reason to lay out again
     });

@@ -1382,7 +1382,7 @@ function registerManagerRoutes(app, deps) {
 
   // Open an account from Customers Record (the Add Customer form). The
   // procedure sets the limit to zero and the standing to Good; moving the limit
-  // is manager-only. A name already on the books (any case, extra spaces
+  // is manager-only. A name already on record (any case, extra spaces
   // ignored) is refused with 409 -- the till no longer opens accounts by
   // typing a name, so this is the one place an account starts.
   app.post("/api/customers", async function (request, response) {
@@ -1416,7 +1416,7 @@ function registerManagerRoutes(app, deps) {
       const same = sameResult[0];
       if (same.length > 0) {
         return response.status(409).json({
-          error: fullName + " is already on the books. Find them in Customers Record instead of adding them again.",
+          error: fullName + " is already on record. Find them in Customers Record instead of adding them again.",
           customerId: same[0].customer_id
         });
       }
@@ -1690,7 +1690,7 @@ function registerManagerRoutes(app, deps) {
   });
   // The late-payment sweep: once at startup and every hour after. The rule
   // is in sp_apply_late_penalties; here each run that charged something is
-  // logged and announced on the live channel, so an open credit book redraws.
+  // logged and announced on the live channel, so an open credit screen redraws.
   const PENALTY_SWEEP_MS = 60 * 60 * 1000;
 
   async function runPenaltySweep() {

@@ -22,7 +22,7 @@
 /* ==========================================================================
    COUNTERS AND FILTERS
    ========================================================================== */
-/* the policy strip above the credit book: the rate in force, and the way to change it */
+/* the policy strip above the credit records: the rate in force, and the way to change it */
 .policy-strip {
     display: flex; align-items: center; justify-content: space-between; gap: 14px;
     margin-bottom: 14px; padding: 10px 14px;

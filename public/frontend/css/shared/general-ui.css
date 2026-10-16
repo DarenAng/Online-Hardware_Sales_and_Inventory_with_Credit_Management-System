@@ -66,7 +66,7 @@
     --role-tint:   var(--brand);
 
     /* The second structural device, mixed once here and used twice: on a
-       purchase order and on the not-on-the-books callout. */
+       purchase order and on the not-on-record callout. */
     --hazard: repeating-linear-gradient(
         -45deg,
         var(--brand) 0 10px,
@@ -2983,7 +2983,7 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 .pick-verdict.is-new  { color: var(--signal-ink); font-weight: 500; }
 
 /* ==========================================================================
-   THE MATERIAL THAT IS NOT ON THE BOOKS YET -- the last row of the list is
+   THE MATERIAL THAT IS NOT ON RECORD YET -- the last row of the list is
    the way out of it, and looks unlike a suggestion on purpose
    ========================================================================== */
 .suggest-item.is-make {
@@ -3015,7 +3015,7 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 .suggest-item.is-make .make-quoted { color: var(--ink); }
 
 /* the form that opens under the box. Drawn like the new-supplier card on the
-   purchase order: an addition to the books wears the orange rule on its left */
+   purchase order: an addition to the records wears the orange rule on its left */
 .make-card {
     margin-top: 12px;
     border: 1px solid var(--line);

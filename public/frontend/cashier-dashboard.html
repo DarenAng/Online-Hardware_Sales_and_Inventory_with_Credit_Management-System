@@ -170,7 +170,7 @@
                 </div>
 
                 <!-- ============================================================
-                     DELIVERIES -- tracking only; booking happens at the till. Starts empty.
+                     DELIVERIES -- tracking only; deliveries are created at the till. Starts empty.
                      ============================================================ -->
                 <div class="card" id="panel-delivery" data-panel style="display: none;">
                     <div class="panel-head">
@@ -418,7 +418,7 @@
             </div>
 
             <div class="modal-body">
-                <!-- the amount due, and what happens to it: change, what is short, what goes on the book -->
+                <!-- the amount due, and what happens to it: change, what is short, what goes on account -->
                 <div class="cart-totals pay-totals" id="pay-totals"></div>
 
                 <form id="checkout-form" onsubmit="handleCheckout(event)" autocomplete="off">
@@ -466,7 +466,7 @@
                         <input type="number" id="pay-amount" name="amountPaid" class="form-control amount-field" min="0" step="0.01" placeholder="0.00" oninput="renderCart()">
                     </div>
 
-                    <!-- PART PAYMENT -- what is handed over is taken now; the rest goes on the book -->
+                    <!-- PART PAYMENT -- what is handed over is taken now; the rest goes on account -->
                     <div id="downpayment-field" style="display: none;">
                         <div class="grid-2">
                             <div class="form-group">
@@ -656,7 +656,7 @@
     </div>
 
     <!-- ============================================================
-         MAKE A DELIVERY -- the booked date is the sale's own date, set by the server
+         MAKE A DELIVERY -- the delivery's date is the sale's own date, set by the server
          ============================================================ -->
     <!-- data-modal-locked: neither a backdrop click nor Escape closes this form,
          which would throw away a typed address; the two buttons are the ways out -->

@@ -54,7 +54,7 @@ function intentFrom(row) {
 }
 
 const store = {
-  async forgetBefore(time) {
+  forgetBefore: async function (time) {
     if (!db) {
       for (const id in memory) {
         if (memory[id].createdAt < time) {
@@ -66,7 +66,7 @@ const store = {
     await db.query("DELETE FROM qr_sim_intents WHERE created_at < ?", [time]);
   },
 
-  async add(intent) {
+  add: async function (intent) {
     if (!db) {
       memory[intent.id] = Object.assign({}, intent);
       return;
@@ -80,7 +80,7 @@ const store = {
   },
 
   // by "id" or by "token" (the secret in the pay page's address)
-  async find(field, value) {
+  find: async function (field, value) {
     const wanted = String(value || "");
     if (!db) {
       for (const id in memory) {
@@ -96,7 +96,7 @@ const store = {
   },
 
   // only a code still waiting can be settled, and only once: true if this one was
-  async settle(id, status, paymentId, errorMessage) {
+  settle: async function (id, status, paymentId, errorMessage) {
     if (!db) {
       const key = String(id || "");
       let intent;

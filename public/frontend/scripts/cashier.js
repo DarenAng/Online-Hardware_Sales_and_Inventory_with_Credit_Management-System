@@ -958,7 +958,7 @@ function renderCustomerVerdict() {
 
     if (id) {
         box.className = 'customer-verdict is-good';
-        box.textContent = 'On the books. This sale goes on their record.';
+        box.textContent = 'A customer on record. This sale is saved under their name.';
         return;
     }
 
@@ -971,10 +971,10 @@ function renderCustomerVerdict() {
     // a name that matches nobody is a stop until the account is opened
     box.className = 'customer-verdict is-stop';
     if (offerAdd) {
-        box.textContent = 'Not a customer on the books. Press Add Customer to open their account, ' +
+        box.textContent = 'Not a customer on record. Press Add Customer to open their account, ' +
             'or clear the box for a walk-in.';
     } else {
-        box.textContent = 'Not a customer on the books. Add them under Customers Record first, then pick them here, ' +
+        box.textContent = 'Not a customer on record. Add them under Customers Record first, then pick them here, ' +
             'or clear the box for a walk-in.';
     }
 }
@@ -1259,11 +1259,11 @@ function cartTotals() {
     }
 
     // what goes on the customer's account (still owed after this sale)
-    let onBook = 0;
+    let amountOnAccount = 0;
     if (onCredit) {
-        onBook = due - down;
+        amountOnAccount = due - down;
     } else if (method === 'COD') {
-        onBook = due;
+        amountOnAccount = due;
     }
 
     return {
@@ -1276,7 +1276,7 @@ function cartTotals() {
         onAccount: onAccount,
         onCredit: onCredit,
         down: down,
-        onBook: onBook
+        amountOnAccount: amountOnAccount
     };
 }
 
@@ -1407,10 +1407,10 @@ function renderCartFigures() {
         if (t.onCredit) {
             // credit: part paid now, the rest goes on the account
             html += '<div class="total-row"><span>Paid now</span><span>' + peso(t.down) + '</span></div>';
-            if (t.onBook > 0) {
-                html += '<div class="total-row total-short"><span>On account</span><span>' + peso(t.onBook) + '</span></div>';
+            if (t.amountOnAccount > 0) {
+                html += '<div class="total-row total-short"><span>On account</span><span>' + peso(t.amountOnAccount) + '</span></div>';
             } else {
-                html += '<div class="total-row total-change"><span>Paid in full</span><span>' + peso(t.onBook) + '</span></div>';
+                html += '<div class="total-row total-change"><span>Paid in full</span><span>' + peso(t.amountOnAccount) + '</span></div>';
             }
         } else if (t.onAccount) {
             // cash on delivery: nothing is paid at the counter
@@ -1458,7 +1458,7 @@ function renderCartFigures() {
 function checkoutLabel(t) {
     if (t.method === 'COD') return 'Place COD Order';
     if (t.onCredit) {
-        if (cart.length > 0 && t.onBook <= 0) return 'Complete Sale';
+        if (cart.length > 0 && t.amountOnAccount <= 0) return 'Complete Sale';
         if (t.down > 0) return 'Take Part Payment & Charge the Rest';
         return 'Charge to Account';
     }
@@ -2036,7 +2036,7 @@ function renderCreditVerdict(totals) {
     if (!selectedCustomerCredit) {
         box.className = 'credit-verdict is-watch';
         if (t.onCredit) {
-            box.textContent = 'A credit sale is settled later, so it has to be booked against a named customer.';
+            box.textContent = 'A credit sale is settled later, so it has to be charged to a named customer.';
         } else {
             box.textContent = 'A COD order is paid on delivery, so it needs a named customer.';
         }
@@ -2053,19 +2053,19 @@ function renderCreditVerdict(totals) {
             box.className = 'credit-verdict is-stop';
             box.innerHTML = escapeHtml(name) + ' is <strong>on hold</strong>, so a COD order cannot be placed. ' +
                 'Take the full ' + peso(t.due) + ' now, or ask a manager to lift the hold.';
-        } else if (t.onBook > available) {
+        } else if (t.amountOnAccount > available) {
             box.className = 'credit-verdict is-stop';
-            box.innerHTML = 'This COD order is over the limit by <strong>' + peso(t.onBook - available) + '</strong>. ' +
+            box.innerHTML = 'This COD order is over the limit by <strong>' + peso(t.amountOnAccount - available) + '</strong>. ' +
                 'Take payment now, or ask for a higher limit from <kbd>Customers Record</kbd>.';
         } else {
             box.className = 'credit-verdict is-good';
-            box.innerHTML = peso(t.onBook) + ' goes on ' + escapeHtml(name) + "'s account until delivery, leaving " +
-                peso(available - t.onBook) + ' of their limit.';
+            box.innerHTML = peso(t.amountOnAccount) + ' goes on ' + escapeHtml(name) + "'s account until delivery, leaving " +
+                peso(available - t.amountOnAccount) + ' of their limit.';
         }
         return;
     }
 
-    if (t.onBook === 0) {
+    if (t.amountOnAccount === 0) {
         box.className = 'credit-verdict is-good';
         box.innerHTML = 'Paid in full at the counter. Nothing goes on ' + escapeHtml(name) + "'s account.";
         return;
@@ -2078,8 +2078,8 @@ function renderCreditVerdict(totals) {
         return;
     }
 
-    if (t.onBook > available) {
-        const short = t.onBook - available;
+    if (t.amountOnAccount > available) {
+        const short = t.amountOnAccount - available;
         box.className = 'credit-verdict is-stop';
         box.innerHTML = 'Over the limit by <strong>' + peso(short) + '</strong>. ' +
             'Take at least ' + peso((t.down || 0) + short) + ' now, or ask for a higher limit ' +
@@ -2088,8 +2088,8 @@ function renderCreditVerdict(totals) {
     }
 
     box.className = 'credit-verdict is-good';
-    box.innerHTML = peso(t.onBook) + ' goes on ' + escapeHtml(name) + "'s account, leaving " +
-        peso(available - t.onBook) + ' of their limit.';
+    box.innerHTML = peso(t.amountOnAccount) + ' goes on ' + escapeHtml(name) + "'s account, leaving " +
+        peso(available - t.amountOnAccount) + ' of their limit.';
 }
 
 function fillDownPayment(share) {
@@ -2158,16 +2158,16 @@ function checkoutQuestion(t, customerName) {
         detail.push('Goes on account: ' + peso(t.due));
     } else if (t.onCredit) {
         detail.push('Paid now: ' + peso(t.down) + (t.down > 0 ? ' by ' + downPaymentMethod() : ''));
-        if (t.onBook > 0) {
+        if (t.amountOnAccount > 0) {
             if (t.down > 0) {
-                title = 'Take part payment and book the rest?';
-                confirmLabel = 'Take ' + peso(t.down) + ' and book the rest';
+                title = 'Take part payment and put the rest on account?';
+                confirmLabel = 'Take ' + peso(t.down) + ' and put the rest on account';
             } else {
                 title = 'Put this sale on account?';
-                confirmLabel = 'Book it to their account';
+                confirmLabel = 'Put it on their account';
             }
-            message = peso(t.onBook) + ' of this sale goes on ' + customerName + "'s account.";
-            detail.push('Goes on account: ' + peso(t.onBook));
+            message = peso(t.amountOnAccount) + ' of this sale goes on ' + customerName + "'s account.";
+            detail.push('Goes on account: ' + peso(t.amountOnAccount));
         } else {
             detail.push('Balance on account: ' + peso(0));
         }
@@ -2209,7 +2209,7 @@ async function handleCheckout(event, viaQr) {
             renderCustomerVerdict();
         } else {
             notifyWarning(
-                '"' + typedName + '" is not a customer on the books. Add them under Customers Record first, ' +
+                '"' + typedName + '" is not a customer on record. Add them under Customers Record first, ' +
                 'then pick them from the list here, or clear the box to ring this up as a walk-in.',
                 'Not a customer yet');
             renderCustomerVerdict();
@@ -2222,7 +2222,7 @@ async function handleCheckout(event, viaQr) {
     // a settled-later sale needs a customer, not just a walk-in
     if (t.onAccount && !customerId) {
         notifyWarning(
-            'A ' + t.method + ' sale is settled later, so it has to be booked against a customer. '
+            'A ' + t.method + ' sale is settled later, so it has to be charged to a customer. '
             + 'Pick them from the list.',
             'Name the customer');
         const box = customerNameBox();
@@ -2262,7 +2262,7 @@ async function handleCheckout(event, viaQr) {
     // or the balance that goes on the account. Paying by QR is its own
     // confirmation (the customer pays the code), except that a balance left on
     // the account is still asked about.
-    if (!viaQr || (t.onCredit && t.onBook > 0)) {
+    if (!viaQr || (t.onCredit && t.amountOnAccount > 0)) {
         const question = checkoutQuestion(t, checkoutCustomerName());
         const yes = await askConfirm(question.message, {
             title: question.title,
@@ -2348,7 +2348,7 @@ async function handleCheckout(event, viaQr) {
 
         // the delivery is written against the sale before the till is cleared, so a
         // failure is reported while the details are still on screen
-        const deliveryMade = await bookAttachedDelivery(result.saleId);
+        const deliveryMade = await createAttachedDelivery(result.saleId);
 
         // the sale stands; a reference the server could not keep is said, not hidden
         if (result.referenceNote) notifyWarning(result.referenceNote, 'Reference not saved');
@@ -2841,7 +2841,7 @@ async function openDeliveryForm() {
         if (cart.length === 0) {
             sub.textContent = 'Add items to the order first';
         } else {
-            sub.textContent = 'Booked when you complete this sale';
+            sub.textContent = 'Created when you complete this sale';
         }
     }
 
@@ -2930,7 +2930,7 @@ function saveDeliveryForm(event) {
 
     closeModal('delivery-modal');
     renderDeliveryAttached();
-    notifyInfo('It will be booked when you complete this sale.', 'Delivery attached');
+    notifyInfo('It will be created when you complete this sale.', 'Delivery attached');
 }
 
 // Cancel closes the form and leaves whatever was already attached alone;
@@ -3013,13 +3013,13 @@ async function attachedAreaIsStillListed() {
 }
 
 // posted once the sale exists; a failure here does not undo the sale
-async function bookAttachedDelivery(saleId) {
+async function createAttachedDelivery(saleId) {
     if (!pendingDelivery) return true;
 
     const d = pendingDelivery;
 
     try {
-        const response = await apiBookDelivery({
+        const response = await apiCreateDelivery({
                 saleId: saleId,
                 area: d.area,
                 street: d.street,

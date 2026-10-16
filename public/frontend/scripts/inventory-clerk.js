@@ -265,7 +265,7 @@ function attentionMessage(text) {
 // whether the Stock Adjustment screen is the one showing
 function adjustScreenOpen() {
     const panel = document.getElementById('panel-adjust');
-    return !!panel && panel.style.display === 'block';
+    return Boolean(panel) && panel.style.display === 'block';
 }
 
 // Once the materials are in: draw the list, and bring the material picked in the
@@ -2834,6 +2834,16 @@ function openReturnDetail(returnId) {
         inspection = '';
     }
 
+    // what the Inspected field says when nobody has inspected the goods
+    let notInspected;
+    if (awaiting) {
+        notInspected = 'Not yet';
+    } else if (missing) {
+        notInspected = 'Nothing to inspect';
+    } else {
+        notInspected = 'Decided when filed';
+    }
+
     const context = '<div class="detail-grid">' +
         detailField('Filed By', escapeHtml(r.reported_by)) +
         detailField('Filed On', escapeHtml(r.return_date)) +
@@ -2843,7 +2853,7 @@ function openReturnDetail(returnId) {
         detailField('Goods Went', returnDispositionBadge(r)) +
         detailField('Inspected', r.inspected_by
             ? escapeHtml(r.inspected_by) + ' <span class="muted">' + escapeHtml(String(r.inspected_at || '').slice(0, 16)) + '</span>'
-            : '<span class="muted">' + (awaiting ? 'Not yet' : (missing ? 'Nothing to inspect' : 'Decided when filed')) + '</span>') +
+            : '<span class="muted">' + notInspected + '</span>') +
         '</div>' +
         '<p class="detail-note">' + escapeHtml(r.reason || 'No reason given.') + '</p>' +
         (r.inspection_note

@@ -16,8 +16,8 @@ function apiCreateCustomer(customer) {
     return sendJson('/api/customers', 'POST', customer);
 }
 
-// POST /api/deliveries -- book a delivery for a sale
-function apiBookDelivery(delivery) {
+// POST /api/deliveries -- create a delivery for a sale
+function apiCreateDelivery(delivery) {
     return sendJson('/api/deliveries', 'POST', delivery);
 }
 

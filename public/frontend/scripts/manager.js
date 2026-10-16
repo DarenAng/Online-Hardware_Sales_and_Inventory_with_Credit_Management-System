@@ -1157,31 +1157,38 @@ function fillCountedOptions(id, values, allLabel) {
     if (!select) return;
     const picked = select.value;
 
-    // two lists side by side: each value (as text) and how many rows hold it
-    const unique = [];
-    const counts = [];
+    // each value (as text) once, with how many rows hold it: { value, count }
+    const options = [];
     for (let i = 0; i < values.length; i++) {
         const value = values[i];
         if (value === null || value === undefined || value === '') continue;
-        const at = unique.indexOf(String(value));
-        if (at === -1) {
-            unique.push(String(value));
-            counts.push(1);
+        const text = String(value);
+        let option = null;
+        for (let j = 0; j < options.length; j++) {
+            if (options[j].value === text) {
+                option = options[j];
+                break;
+            }
+        }
+        if (option === null) {
+            options.push({ value: text, count: 1 });
         } else {
-            counts[at] += 1;
+            option.count += 1;
         }
     }
-    const sorted = unique.slice().sort(function (a, b) {
-        return a.localeCompare(b);
+    options.sort(function (a, b) {
+        return a.value.localeCompare(b.value);
     });
 
     let html = '<option value="all">' + escapeHtml(allLabel) + ' (' + values.length + ')</option>';
-    for (let i = 0; i < sorted.length; i++) {
-        html += '<option value="' + escapeHtml(sorted[i]) + '">' + escapeHtml(sorted[i]) +
-            ' (' + counts[unique.indexOf(sorted[i])] + ')</option>';
+    let pickedStillListed = false;
+    for (let i = 0; i < options.length; i++) {
+        html += '<option value="' + escapeHtml(options[i].value) + '">' + escapeHtml(options[i].value) +
+            ' (' + options[i].count + ')</option>';
+        if (options[i].value === picked) pickedStillListed = true;
     }
     select.innerHTML = html;
-    select.value = sorted.indexOf(picked) !== -1 ? picked : 'all';
+    select.value = pickedStillListed ? picked : 'all';
     if (select.dataset.filterTable) syncFilteredColumns(select.dataset.filterTable);
 }
 
@@ -1735,7 +1742,7 @@ const STANDING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'ba
 const STANDING_WORD = { Good: 'Good', Watch: 'Watch', Hold: 'On hold' };
 
 // the shop's late-payment policy, read once the credit screen is built and
-// again after every save; what the strip above the credit book shows
+// again after every save; what the strip above the credit records shows
 let penaltyPolicy = null;
 
 let creditCustomer = null;
@@ -1776,7 +1783,7 @@ function buildCreditPanels() {
         filters: { owing: 'all' },
 
         gate: {
-            title: 'The credit book is not loaded',
+            title: 'The credit records are not loaded',
             text: 'Search for a customer, filter by balance, or press Load Data for every account.',
             button: 'Load Data'
         },
@@ -3090,7 +3097,7 @@ async function voidSale(saleId) {
             detail: [
                 'It reads Voided everywhere and counts for nothing.',
                 'Every item on it goes back on the shelf, with a line in the stock log.',
-                'A delivery booked for it and not yet on the road is cancelled with it.',
+                'A delivery created for it and not yet on the road is cancelled with it.',
                 'Money already taken is not refunded by this; hand it back at the counter.'
             ]
         });

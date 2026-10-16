@@ -190,7 +190,7 @@ function registerCashierRoutes(app, deps) {
   const REFERENCE_OPTIONAL = ["GCash", "PayMaya", "PayPal"];
 
   // Ring up a sale. The procedure deducts stock, checks the limit and standing,
-  // and decides paid, part paid or on the book. downPaymentMethod is how the
+  // and decides paid, part paid or on account. downPaymentMethod is how the
   // money on a Credit sale actually arrived.
   app.post("/api/sales", async function (request, response) {
     const customerId = request.body.customerId;
@@ -214,16 +214,16 @@ function registerCashierRoutes(app, deps) {
     }
 
     // A walk-in is a sale with no customer and no name. A name is only ever a
-    // customer picked from the book, sent as customerId: a bare name opens no
-    // account at the till any more, so it is refused here, before any QR payment
-    // below is checked or spent on it.
+    // customer picked from the customer list, sent as customerId: a bare name
+    // opens no account at the till any more, so it is refused here, before any
+    // QR payment below is checked or spent on it.
     let typedName = "";
     if (typeof walkInName === "string") {
       typedName = walkInName.trim();
     }
     if (typedName !== "" && !customerId) {
       return response.status(400).json({
-        error: "\"" + typedName.slice(0, 80) + "\" is not a customer on the books. " +
+        error: "\"" + typedName.slice(0, 80) + "\" is not a customer on record. " +
                "Add them under Customers Record first, then pick them from the list " +
                "(or leave the customer empty for a walk-in)."
       });
@@ -502,8 +502,8 @@ function registerCashierRoutes(app, deps) {
         deliveryId: output.delivery_id
       });
     } catch (error) {
-      console.error("Book delivery failed:", error.message);
-      response.status(500).json({ error: "Unable to book the delivery" });
+      console.error("Create delivery failed:", error.message);
+      response.status(500).json({ error: "Unable to create the delivery" });
     }
   });
 

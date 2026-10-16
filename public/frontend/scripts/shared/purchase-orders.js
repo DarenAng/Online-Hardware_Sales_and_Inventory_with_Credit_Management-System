@@ -1669,33 +1669,38 @@ function renderPurchaseTotalsSuppliers(rows) {
     const select = document.getElementById('po-totals-supplier');
     if (!select) return;
 
-    // each supplier once: its id (as text) and name, in the order first seen
-    const sorted = [];
-    const nameOf = {};          // supplier id (as text) -> supplier name
+    // each supplier once, in the order first seen: { id (as text), name }
+    // (a supplier seen again keeps the newest name)
+    const suppliers = [];
     for (let i = 0; i < rows.length; i++) {
-        const supplierKey = String(rows[i].supplier_id);
-        if (poHas(nameOf, supplierKey)) {
-            nameOf[supplierKey] = rows[i].supplier_name;
-            for (let j = 0; j < sorted.length; j++) {
-                if (sorted[j][0] === supplierKey) sorted[j][1] = rows[i].supplier_name;
+        const supplierId = String(rows[i].supplier_id);
+        let supplier = null;
+        for (let j = 0; j < suppliers.length; j++) {
+            if (suppliers[j].id === supplierId) {
+                supplier = suppliers[j];
+                break;
             }
+        }
+        if (supplier === null) {
+            suppliers.push({ id: supplierId, name: rows[i].supplier_name });
         } else {
-            nameOf[supplierKey] = rows[i].supplier_name;
-            sorted.push([supplierKey, rows[i].supplier_name]);
+            supplier.name = rows[i].supplier_name;
         }
     }
-    sorted.sort(function (a, b) {
-        return String(a[1]).localeCompare(String(b[1]));
+    suppliers.sort(function (a, b) {
+        return String(a.name).localeCompare(String(b.name));
     });
 
     const current = select.value;
     let supplierOptions = '';
-    for (let i = 0; i < sorted.length; i++) {
-        supplierOptions += '<option value="' + escapeHtml(sorted[i][0]) + '">' +
-            escapeHtml(sorted[i][1]) + '</option>';
+    let currentStillListed = false;
+    for (let i = 0; i < suppliers.length; i++) {
+        supplierOptions += '<option value="' + escapeHtml(suppliers[i].id) + '">' +
+            escapeHtml(suppliers[i].name) + '</option>';
+        if (suppliers[i].id === current) currentStillListed = true;
     }
     select.innerHTML = '<option value="all">Every supplier</option>' + supplierOptions;
-    select.value = poHas(nameOf, current) ? current : 'all';
+    select.value = currentStillListed ? current : 'all';
 }
 
 // this year as the order dates write it: "2026"

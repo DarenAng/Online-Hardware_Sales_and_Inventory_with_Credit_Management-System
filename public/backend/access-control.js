@@ -196,7 +196,7 @@ const ACCESS_RULES = [
   // every sale still carrying a balance, for taking payments at the counter
   ["GET",   /^\/api\/credit\/open-sales$/,             [MANAGER, CASHIER]],
   ["PUT",   /^\/api\/credit\/customers\/\d+\/limit$/,  [MANAGER]],
-  // the late-payment policy: everyone on the credit book reads it, the manager sets it
+  // the late-payment policy: everyone who works with credit records reads it, the manager sets it
   ["GET",   /^\/api\/credit\/policy$/,                 [MANAGER, CASHIER]],
   ["PUT",   /^\/api\/credit\/policy$/,                 [MANAGER]],
   ["GET",   /^\/api\/credit\/requests$/,               [MANAGER, CASHIER]],

@@ -210,7 +210,8 @@ function registerQrPaymentRoutes(app, deps) {
     const id = row.qr_payment_id;
     if (checking[id] !== undefined) return checking[id];
 
-    const work = (async function () {
+    // the look at the provider; the work promise below starts it and tidies up after
+    async function lookAtProvider() {
       let state;
       try {
         state = await provider.getStatus(row.provider_intent_id);
@@ -237,7 +238,9 @@ function registerQrPaymentRoutes(app, deps) {
         }
       }
       return readRow(id);
-    })().finally(function () {
+    }
+
+    const work = lookAtProvider().finally(function () {
       delete checking[id];
     });
 

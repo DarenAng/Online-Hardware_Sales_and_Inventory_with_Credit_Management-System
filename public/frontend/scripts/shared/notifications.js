@@ -36,7 +36,7 @@ const NOTIF_ABOUT = {
     'Refund Report':    ['Returns report',    'A refund was filed at the counter.'],
     'Purchase Order':   ['Purchase order',    'An order to a supplier was raised, confirmed or declined, or its delivery came up short.'],
     'Stock Adjustment': ['Stock adjustment',  'A stock figure was corrected by hand.'],
-    'Delivery':         ['Delivery',          'A delivery was booked and needs a driver.'],
+    'Delivery':         ['Delivery',          'A delivery was created and needs a driver.'],
     'Credit Request':   ['Credit request',    'A cashier asked for a higher credit limit for a customer, and a manager has to decide it.'],
     'Late Penalty':     ['Late payment',      'A credit sale is another month past its due date still unpaid, and the month\'s late-payment penalty was added to it.']
 };

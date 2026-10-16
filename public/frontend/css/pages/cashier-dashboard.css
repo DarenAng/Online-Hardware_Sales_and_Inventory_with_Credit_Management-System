@@ -316,7 +316,7 @@
     .receipt-box { max-width: none; }
 }
 
-/* the due date on the cashier's credit book: the date, then how far off */
+/* the due date on the cashier's credit records: the date, then how far off */
 .cell-due-date { white-space: nowrap; }
 .due-date { font-family: var(--font-figure); font-size: 13.5px; margin-right: 6px; }
 

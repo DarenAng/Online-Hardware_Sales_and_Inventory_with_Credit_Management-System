@@ -29,7 +29,7 @@ const DRIVER = roles.DRIVER;
 const FEATURES = [
   // --- selling and the counter ---
   { key: "pos", name: "New Transaction", module: "Point of Sale",
-    description: "The register: ring a sale up, take the payment, book the delivery.",
+    description: "The register: ring a sale up, take the payment, create the delivery.",
     available: [CASHIER], defaults: [CASHIER],
     routes: [["POST", /^\/api\/sales$/], ["POST", /^\/api\/deliveries$/],
              ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
@@ -141,7 +141,7 @@ const FEATURES = [
 
   // --- deliveries ---
   { key: "deliveries", name: "Delivery Tracking", module: "Deliveries",
-    description: "Every delivery booked and where it has got to; the manager's copy can move one along.",
+    description: "Every delivery created and where it has got to; the manager's copy can move one along.",
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
     routes: [["GET", /^\/api\/deliveries$/], ["GET", /^\/api\/deliveries\/\d+\/items$/],
              ["PATCH", /^\/api\/deliveries\/\d+\/status$/]] },

@@ -121,7 +121,7 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
     if (!d) return;
 
     const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
-    const isDriver = !!user && user.role_name === 'Delivery Personnel';
+    const isDriver = Boolean(user) && user.role_name === 'Delivery Personnel';
 
     // No sale number and no driver on any card. Delivered At only shows once it is Delivered.
     const routeGrid = '<div class="detail-grid">' +

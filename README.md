@@ -225,7 +225,7 @@ rang up every sale, the driver ran every delivery, the clerk made every stock
 movement, and the manager took every credit decision. No other staff exist.
 
 None of it is special. Every row is the kind a day's trading writes, and the
-credit book deliberately holds one account of each standing worked out by the
+credit records deliberately hold one account of each standing worked out by the
 rules below rather than typed in: one over its limit, one whose oldest debt
 has passed ninety days, one being watched at forty-odd days, and the rest in
 good standing. It is generated from a script with a fixed seed, so it is the
@@ -375,13 +375,13 @@ insisted on for those two), and a line under the form says what the balance
 becomes before the button is pressed. The server records it through
 `sp_record_credit_payment`, which refuses anything over the balance and
 marks the sale *Paid* when it reaches zero. When the form closes the card
-comes back with the new balance, and the credit book and a customer picked
+comes back with the new balance, and the credit records and a customer picked
 at the till follow at once. Taking payments is still a switch in the
 catalogue (`debt-payments`), so the administrator can turn it off for the
 cashiers; the tab and the button then do not appear.
 
 **The button says what pressing it does.** The checkout button's words follow
-the payment method and what has been typed, so nobody books a sale to an
+the payment method and what has been typed, so nobody puts a sale on an
 account thinking they took the money for it:
 
 | The sale as it stands | The button says |
@@ -692,7 +692,7 @@ stays signed in until the server restarts; restart it to end those.
 
 The bell in the top right corner holds every alert for your role: low stock,
 out of stock, damage and refund reports, a purchase order the clerk should
-expect a delivery against, and deliveries that have just been booked. Unread
+expect a delivery against, and deliveries that have just been created. Unread
 ones are marked and carry a yellow edge.
 
 Every alert says three things, in the panel and on the popup card alike: what
@@ -1193,7 +1193,7 @@ different figures to four different people:
 | **Outstanding** | what is still owed on it |
 | **Discounts** | what was given away to get the sale |
 
-Collected leads, because this is a shop with a credit book and billed income
+Collected leads, because this is a shop with credit records and billed income
 that never arrives is not income.
 
 Under the figures and the chart sits one table at a time — Payment Method,
@@ -1285,7 +1285,7 @@ audit trail says which (`PURCHASE_ORDER_SENT` or `PURCHASE_ORDER_NOT_SENT`),
 and the route answers with `supplierNotified` and `supplierNote`.
 
 Once confirmed, receiving is the clerk's: the count sheet — what was ordered
-on the left, what came off the lorry typed on the right — books the goods
+on the left, what came off the lorry typed on the right — puts the goods
 onto the shelf and closes the order. An order the manager has not confirmed
 yet cannot be received, and the server refuses that too.
 
@@ -1366,18 +1366,18 @@ Every screen that shows the badge also says **why**: the reason names the
 first rule that applied, in the same order the tier was decided — "Over the
 limit by 1,200.00", "Oldest unpaid sale is 97 days old; the limit is 90",
 "Owes 76% of the limit; watched from 75%", "Put on hold by a manager: cheque
-returned in July". It is a tooltip on the badge in the credit book, a line on
+returned in July". It is a tooltip on the badge in the credit records, a line on
 the account card, and the note under the credit strip at the till, so a
 cashier told the sale will not go through is told the reason in the same
 breath. The sale procedure reads the same computed standing, so the till and
 the manager's screen cannot disagree about who may buy on account.
 
-**On the cashier's own credit book** the last column is not the standing
+**On the cashier's own credit records** the last column is not the standing
 but the **due date**: the oldest unpaid sale plus the shop's term of thirty
 days — the same thirty days after which an account's standing turns to
 Watch, so the two screens agree about who is late. Each row says the date and
 how far off it is, *due in 12 days*, *3 days overdue*, and the filter beside
-the search narrows the book to what is overdue, due within the week, owing,
+the search narrows the list to what is overdue, due within the week, owing,
 or clear. The question at a counter is "when does this customer have to pay",
 and a tier is one word further from it than a date.
 
@@ -1385,7 +1385,7 @@ and a tier is one word further from it than a date.
 customer — the limit, what is owed, and what can still be taken — rather than
 finding out when the till refuses the sale with somebody watching. A sale can
 be **part paid**: whatever is handed over is taken now, the rest goes on the
-account, and the receipt shows both. Half now and half on the book is the
+account, and the receipt shows both. Half now and half on account is the
 commonest credit transaction a hardware shop does and there was nowhere to put
 it before.
 
@@ -1419,12 +1419,12 @@ the last one was, so the charge can be read back later whatever the policy
 becomes; the manager and the cashier are each told of every charge under
 *Late Penalty* in their alerts, and the audit trail records it. The penalty
 sits on the sale as `amount_due` — the bill with the penalty on it — and
-**every balance in the system reads that**: the credit book, the account
+**every balance in the system reads that**: the credit records, the account
 card, the cashier's balances-due sheet and the payment it takes, the receipt
 reprinted later, the income figures and the standing rules. The sale itself,
 `final_amount`, is untouched, so the sales figures are still the sales.
 
-**The rate is the manager's.** The strip above the manager's credit book says
+**The rate is the manager's.** The strip above the manager's credit records says
 the shop's rate in force and what is owed in penalties; *Change the rate*
 sets another, anywhere from 1 to 3, with a worked example before it is
 saved. A change applies from the next month charged and never rewrites a
@@ -1495,7 +1495,7 @@ it, and the two sets cannot drift apart.
 
 **Voiding a sale puts the stock back.** Every line on it goes back on the
 shelf with an entry in the stock log saying which sale was voided, a delivery
-booked for it and not yet on the road is cancelled with it, and restoring the
+created for it and not yet on the road is cancelled with it, and restoring the
 sale takes the stock off again — and is refused if that stock has since been
 sold to somebody else. Money already taken is not touched: a void is for a
 sale rung up twice, and the cash for the duplicate is handed back at the
@@ -1520,7 +1520,7 @@ Anything that cannot be taken back asks first, and the dialogue says what will
 happen as a short list rather than a paragraph — a list of three lines gets
 counted, prose gets skimmed. Deactivating an account, restoring over a live
 database, deleting a backup, putting a customer on hold, writing stock off and
-booking a sale to an account all go through it.
+putting a sale on an account all go through it.
 
 The dangerous ones look different from the routine ones on purpose. A dialogue
 that asks "are you sure?" in the same voice for a saved filter and a wiped
