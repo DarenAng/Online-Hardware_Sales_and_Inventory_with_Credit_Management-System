@@ -272,9 +272,62 @@ function registerAdminRoutes(app, deps) {
     };
   }
 
+  // The staff a manager sees under Account Management: cashier, clerk and
+  // driver accounts only, with just what the Staff Accounts table and card
+  // show. No other role, no failed-attempt count, no presence.
+  async function sendManagedStaff(response) {
+    try {
+      let marks = "";
+      for (let i = 0; i < ROLES_MANAGED_BY_MANAGER.length; i++) {
+        marks += (i === 0 ? "?" : ", ?");
+      }
+
+      const rowsResult = await db.query(
+        "SELECT s.staff_id, s.full_name, s.phone, s.is_active, r.role_name, " +
+        "u.email, u.must_change_password, u.last_login, " +
+        "IF(u.held_until IS NOT NULL AND u.held_until > NOW(), " +
+        "CEIL(TIMESTAMPDIFF(SECOND, NOW(), u.held_until) / 60), NULL) AS minutes_left " +
+        "FROM staff s " +
+        "JOIN roles r ON r.role_id = s.role_id " +
+        "LEFT JOIN users u ON u.staff_id = s.staff_id " +
+        "WHERE s.archived_at IS NULL AND r.role_name IN (" + marks + ") " +
+        "ORDER BY s.staff_id",
+        ROLES_MANAGED_BY_MANAGER);
+      const rows = rowsResult[0];
+
+      const staff = [];
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        staff.push({
+          staff_id: row.staff_id,
+          full_name: row.full_name,
+          role_name: row.role_name,
+          email: row.email,
+          phone: row.phone,
+          is_active: row.is_active === 1 || row.is_active === true,
+          has_login: row.email !== null,
+          must_change_password: row.must_change_password === 1 || row.must_change_password === true,
+          last_login: row.last_login,
+          minutes_left: row.minutes_left === null ? null : Number(row.minutes_left)
+        });
+      }
+
+      response.json(staff);
+    } catch (error) {
+      console.error("Loading the staff accounts failed:", error.message);
+      response.status(500).json({ error: "Unable to load the staff accounts" });
+    }
+  }
+
   // Every staff member, including anyone with no login, with presence. The
   // filters are applied here so a large directory need not travel in full.
+  // The administrator sees everyone; a manager (allowed in by the Account
+  // Management screen) is handed to sendManagedStaff above.
   app.get("/api/users", async function (request, response) {
+    if (request.actor.roleName !== ADMIN) {
+      return sendManagedStaff(response);
+    }
+
     const status = String(request.query.status || "all").toLowerCase();
     const search = String(request.query.search || "").trim();
 
@@ -306,8 +359,9 @@ function registerAdminRoutes(app, deps) {
 
   // The accounts on a sign-in hold right now, soonest to end first. This must
   // stay above "/api/users/:staffId" or Express would read "held" as an id.
-  // The administrator sees every account; a manager (allowed in by the
-  // Account Management screen) only sees the roles a manager may release.
+  // The administrator sees every account. The manager's screen no longer asks
+  // for this (it reads GET /api/users), so access-control.js lets only the
+  // administrator in; the role filter below is kept as a second guard.
   app.get("/api/users/held", async function (request, response) {
     try {
       const rowsResult = await db.query(

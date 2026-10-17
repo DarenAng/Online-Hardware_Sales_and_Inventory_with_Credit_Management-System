@@ -12,8 +12,8 @@
 //   - credit: customer limits and extension requests
 //   - deliveries, records (suppliers, customers, products...), archives
 //   - the Account Management screen: creating cashier, clerk and driver accounts,
-//     and the accounts held after wrong passwords with lifting one (only on the
-//     menu when the administrator switches it on)
+//     the list of those accounts, and lifting a hold after wrong passwords (only
+//     on the menu when the administrator switches it on)
 //   - the popups that show one sale, delivery, customer, ... in full
 //   - the page start-up code at the very bottom ("MANAGER PAGE BOOT")
 // ============================================================
@@ -197,11 +197,9 @@ function showSalesTransactions(event) {
     showReport(wanted, event);
 }
 
-// Account Management: the list of held accounts is read fresh every time the screen is opened
+// Account Management: the staff list is not read here; Load Data on the screen reads it
 function showAccountManagement(event) {
     showManagerPanel('panel-accounts', 'Account Management', event);
-    const panel = getDataPanel('mgr-holds');
-    if (panel) panel.open();
 }
 
 // Sales Summary. Named periods count back from today rather than snapping
@@ -3635,6 +3633,11 @@ async function confirmNewAccount() {
         accountReview = null;
         clearAccountForm();
         closeModal('account-modal');
+
+        // a list that is already loaded shows the new account (one not loaded stays closed)
+        const staffPanel = getDataPanel('mgr-staff');
+        if (staffPanel && staffPanel.state === 'ready') staffPanel.refresh();
+
         await reportFirstPassword(result);
     } catch (error) {
         notifyOffline();
@@ -3673,36 +3676,56 @@ async function reportFirstPassword(result) {
         });
 }
 
-// ---------- sign-in holds ----------
+// ---------- staff accounts ----------
 // The server lists only cashier, clerk and driver accounts, and refuses a
-// lift on anyone else, so nothing here decides who may be released.
-function buildHeldAccountsPanel() {
+// lift on anyone else, so nothing here decides who may be seen or released.
+// The table is read only when Load Data is pressed.
+function buildStaffAccountsPanel() {
     createDataPanel({
-        key: 'mgr-holds',
-        tableId: 'holds-table',
-        columns: 4,
-        pagerId: 'holds-pager',
+        key: 'mgr-staff',
+        tableId: 'staff-table',
+        columns: 6,
+        pagerId: 'staff-pager',
         idField: 'staff_id',
-        remember: false,   // read again each time the screen is opened
+        filters: { status: 'all' },
+        remember: false,       // a reload of the page closes it again
+        loadOnFilter: false,   // picking a status before Load Data reads nothing
+        loadOnSearch: false,   // nor does typing in the search box
         gate: {
-            title: 'Not loaded',
-            text: 'Open this screen to see who is on hold.',
-            button: false
+            title: 'The staff accounts are not loaded',
+            text: 'Press Load Data to list the cashier, inventory clerk and driver accounts.',
+            button: 'Load Data'
         },
         empty: {
-            title: 'All clear',
-            text: 'No accounts are on hold right now.'
+            title: 'No staff accounts yet',
+            text: 'Use Create Account to add the first one.'
         },
         load: function () {
-            return apiGetHeldAccounts();
+            return apiGetManagedStaff();
+        },
+        match: function (row, query) {
+            return prefixMatch([row.full_name, row.role_name, row.email], query);
+        },
+        filter: function (row, filters) {
+            const state = staffAccountState(row);
+            if (filters.status === 'hold') return state === 'hold';
+            if (filters.status === 'inactive') return state === 'inactive';
+            if (filters.status === 'active') return state === 'active' || state === 'newpass' || state === 'nologin';
+            return true;
+        },
+        onLoaded: function () {
+            // Refresh is for a list that is already showing
+            document.getElementById('staff-refresh').style.display = '';
         },
         renderRow: function (row, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                    'onclick="openHeldAccount(' + row.staff_id + ')">' +
+                    'onclick="openStaffAccount(' + row.staff_id + ')">' +
                 '<td class="cell-name">' + escapeHtml(row.full_name) + '</td>' +
                 '<td>' + escapeHtml(row.role_name) + '</td>' +
-                '<td>' + escapeHtml(row.email) + '</td>' +
-                '<td class="cell-num">' + minutesText(row.minutes_left) + '</td></tr>';
+                '<td>' + (row.email ? escapeHtml(row.email) : '<span class="muted">No login</span>') + '</td>' +
+                '<td>' + (row.phone ? '<span class="mono">' + escapeHtml(phoneForDisplay(row.phone)) + '</span>' : '<span class="muted">Not set</span>') + '</td>' +
+                '<td>' + staffStatusBadge(row) + '</td>' +
+                '<td>' + (row.last_login ? escapeHtml(whenText(row.last_login)) : '<span class="muted">Never</span>') + '</td></tr>';
         }
     });
 }
@@ -3711,28 +3734,71 @@ function minutesText(minutes) {
     return minutes + (minutes === 1 ? ' minute' : ' minutes');
 }
 
-// A row opens a card with the account and the button that lifts the hold.
-// Pressing "Lift hold" is the confirmation, so there is no second question.
-function openHeldAccount(staffId) {
-    const panel = getDataPanel('mgr-holds');
+// what to say about an account: 'inactive', 'nologin' (no way to sign in yet),
+// 'hold' (locked out after wrong passwords), 'newpass' (still on the password
+// it was given) or 'active'
+function staffAccountState(account) {
+    if (!account.is_active) return 'inactive';
+    if (!account.has_login) return 'nologin';
+    if (account.minutes_left !== null) return 'hold';
+    if (account.must_change_password) return 'newpass';
+    return 'active';
+}
+
+function staffStatusBadge(account) {
+    const state = staffAccountState(account);
+
+    let tone = 'badge-success';
+    let text = 'Active';
+    if (state === 'inactive') {
+        tone = 'badge-danger';
+        text = 'Inactive';
+    } else if (state === 'nologin') {
+        tone = 'badge-neutral';
+        text = 'No login';
+    } else if (state === 'hold') {
+        tone = 'badge-warning';
+        text = 'On hold · ' + minutesText(account.minutes_left);
+    } else if (state === 'newpass') {
+        tone = 'badge-info';
+        text = 'Must set password';
+    }
+
+    return '<span class="badge ' + tone + '">' + escapeHtml(text) + '</span>';
+}
+
+// A row opens a card with the account. One on a hold also gets the button
+// that lifts it; pressing "Lift hold" is the confirmation, so there is no second question.
+function openStaffAccount(staffId) {
+    const panel = getDataPanel('mgr-staff');
     const account = panel ? panel.find(staffId) : null;
     if (!account) return;
 
-    const body = '<div class="detail-grid">' +
+    const onHold = staffAccountState(account) === 'hold';
+
+    let body = '<div class="detail-grid">' +
         detailField('Name', escapeHtml(account.full_name)) +
         detailField('Role', escapeHtml(account.role_name)) +
-        detailField('Email', escapeHtml(account.email)) +
-        detailField('Hold Ends In', minutesText(account.minutes_left)) +
-        '</div>' +
-        '<p class="detail-note">Lifting the hold lets them sign in again straight away with the ' +
-        'password they already have. Their password is not changed, they get a full set of tries ' +
-        'again, and the change is written to the audit trail in your name.</p>';
+        detailField('Email', account.email ? escapeHtml(account.email) : '<span class="muted">No login</span>') +
+        detailField('Phone', account.phone
+            ? '<span class="mono">' + escapeHtml(phoneForDisplay(account.phone)) + '</span>'
+            : '<span class="muted">Not set</span>') +
+        detailField('Status', staffStatusBadge(account)) +
+        detailField('Last Sign-in', account.last_login ? escapeHtml(whenText(account.last_login)) : '<span class="muted">Never</span>');
+    body += '</div>';
 
-    const foot = '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
-        '<button type="button" class="btn btn-accent" id="lift-hold-button" ' +
-        'onclick="liftHeldAccount(' + account.staff_id + ')">Lift hold</button>';
+    let foot = '';
+    if (onHold) {
+        body += '<p class="detail-note">Lifting the hold lets them sign in again straight away with the ' +
+            'password they already have. Their password is not changed, they get a full set of tries ' +
+            'again, and the change is written to the audit trail in your name.</p>';
 
-    openDetailModal(account.full_name, account.role_name + ' · on hold',
+        foot = '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
+            '<button type="button" class="btn btn-accent" id="lift-hold-button" ' +
+            'onclick="liftHeldAccount(' + account.staff_id + ')">Lift hold</button>';
+    }
+
+    openDetailModal(account.full_name, account.role_name,
         initialsOf(account.full_name), [{ label: 'Account', body: body }], foot);
 }
 
@@ -3754,8 +3820,8 @@ async function liftHeldAccount(staffId) {
         // the card closes and the list is read again either way:
         // the hold may have ended or been lifted already
         closeModal('detail-modal');
-        const panel = getDataPanel('mgr-holds');
-        if (panel) await panel.open();
+        const panel = getDataPanel('mgr-staff');
+        if (panel) await panel.refresh();
     } catch (error) {
         if (button) button.disabled = false;
         notifyOffline();
@@ -3778,7 +3844,7 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
         buildCreditPanels();
         buildRecordsPanel();
         buildArchivePanel();
-        buildHeldAccountsPanel();
+        buildStaffAccountsPanel();
 
         // the schedule follows what the administrator switched on for managers
         configureDeliverySchedule({

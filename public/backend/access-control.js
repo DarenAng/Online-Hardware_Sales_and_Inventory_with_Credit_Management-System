@@ -63,8 +63,8 @@ const ACCESS_RULES = [
 
   // --- staff accounts, administrator only ---
   // A manager given the Account Management screen (see FEATURES) also gets
-  // the lookups, the two create steps and the held list below; the routes then
-  // narrow them to the roles in ROLES_MANAGED_BY_MANAGER.
+  // the lookups, the staff list, the two create steps and the hold lift below;
+  // the routes then narrow them to the roles in ROLES_MANAGED_BY_MANAGER.
   ["GET",   /^\/api\/roles$/,                          [ADMIN]],
   ["GET",   /^\/api\/users$/,                          [ADMIN]],
   ["GET",   /^\/api\/users\/email-check$/,              [ADMIN]],

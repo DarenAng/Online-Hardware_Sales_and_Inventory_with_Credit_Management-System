@@ -135,9 +135,9 @@ function apiCreateAccount(draftId) {
     return postJson('/api/users', { draftId: draftId });
 }
 
-// GET /api/users/held -- the accounts on a sign-in hold that a manager may lift
-function apiGetHeldAccounts() {
-    return getJson('/api/users/held');
+// GET /api/users -- the cashier, clerk and driver accounts (a manager is sent no other role)
+function apiGetManagedStaff() {
+    return getJson('/api/users');
 }
 
 // POST /api/users/:id/release-hold -- lift the hold, keep the password

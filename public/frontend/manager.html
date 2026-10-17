@@ -1155,17 +1155,17 @@
                 </div>
 
                 <!-- ============================================================
-                     ACCOUNT MANAGEMENT -- create cashier, clerk and driver accounts,
-                     and lift the sign-in hold of accounts locked out after too many
-                     wrong passwords. Only on the menu when the administrator has
-                     switched it on; the server only creates, lists and lifts cashier,
-                     clerk and driver accounts.
+                     ACCOUNT MANAGEMENT -- list the cashier, clerk and driver accounts,
+                     create new ones, and lift the sign-in hold of accounts locked out
+                     after too many wrong passwords. Only on the menu when the
+                     administrator has switched it on; the server only creates, lists
+                     and lifts cashier, clerk and driver accounts.
                      ============================================================ -->
                 <div class="card" id="panel-accounts" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
                             <h3>Account Management</h3>
-                            <p class="panel-sub">Create accounts for cashiers, inventory clerks and drivers, and lift the sign-in hold of accounts locked out after too many wrong passwords.</p>
+                            <p class="panel-sub">Create accounts for cashiers, inventory clerks and drivers, see them all, and lift the sign-in hold of accounts locked out after too many wrong passwords.</p>
                         </div>
                         <div class="panel-actions no-print">
                             <button type="button" class="btn btn-success" onclick="openCreateAccount()">Create Account</button>
@@ -1174,23 +1174,40 @@
 
                     <div class="panel-head">
                         <div>
-                            <h3>Sign-in Holds</h3>
-                            <p class="panel-sub">Open a row to lift its hold. The list is as of when this screen was opened; press Refresh to update it.</p>
-                        </div>
-                        <div class="panel-actions no-print">
-                            <button type="button" class="btn btn-sm" onclick="dataPanelOpen('mgr-holds')">Refresh</button>
+                            <h3>Staff Accounts</h3>
+                            <p class="panel-sub">Every cashier, inventory clerk and driver. Open a row to see the account; one on a sign-in hold can be lifted there. The list is as of when it was loaded; press Refresh to update it.</p>
                         </div>
                     </div>
 
+                    <div class="panel-toolbar no-print">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="staff-search"
+                                   placeholder="Search staff accounts"
+                                   oninput="dataPanelSearchInput('mgr-staff', event)" onkeydown="dataPanelSearchKey('mgr-staff', event)" title="Type one letter or more; it finds words that start with it">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="staff-status">Status</label>
+                            <select id="staff-status" onchange="dataPanelFilter('mgr-staff', 'status', this.value)">
+                                <option value="all">All</option>
+                                <option value="hold">On hold</option>
+                                <option value="active">Active</option>
+                                <option value="inactive">Inactive</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                        <!-- shown once the list is loaded (manager.js) -->
+                        <button type="button" class="btn btn-sm" id="staff-refresh" style="display: none;" onclick="dataPanelOpen('mgr-staff')">Refresh</button>
+                    </div>
+
                     <div class="table-responsive grid-10">
-                        <table id="holds-table">
+                        <table id="staff-table">
                             <thead>
-                                <tr><th>Name</th><th>Role</th><th>Email</th><th>Hold Ends In</th></tr>
+                                <tr><th>Name</th><th>Role</th><th>Email</th><th>Phone</th><th>Status</th><th>Last Sign-in</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
                     </div>
-                    <div class="pager is-single" id="holds-pager"></div>
+                    <div class="pager is-single" id="staff-pager"></div>
                 </div>
 
             </div>

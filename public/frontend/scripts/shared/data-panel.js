@@ -18,6 +18,7 @@
 //       gate: { title, text, button },  // what the closed state says
 //       empty: { title, text },        // optional; a loaded table with no rows
 //       loadOnFilter: false,           // optional; see dataPanelFilter
+//       loadOnSearch: false,           // optional; typing in the search box does not load a closed table
 //       inputs: ['sales-from'],        // optional; ids of other boxes that decide what load() reads
 //       remember: false                // optional; do not load this table again after a reload
 //   });
@@ -369,7 +370,8 @@ const dataPanelMethods = {
     },
 
     // ---------- searching and filtering ----------
-    // Typing on a closed table also loads it.
+    // Typing on a closed table also loads it, unless loadOnSearch is false
+    // (the typed text is kept and applied when the table is loaded).
     search: async function (text) {
         this.query = searchText(text);
 
@@ -378,6 +380,7 @@ const dataPanelMethods = {
 
         if (this.state === 'closed' || this.state === 'error') {
             if (this.query === '') return;
+            if (this.config.loadOnSearch === false) return;
             await this.open();
             return;
         }

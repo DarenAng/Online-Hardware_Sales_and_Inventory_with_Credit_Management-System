@@ -186,12 +186,12 @@ const FEATURES = [
   // Off for everyone until the administrator switches it on for managers.
   // routes/admin.js still refuses an account or a hold on an administrator or a manager.
   { key: "account-management", name: "Account Management", module: "Staff",
-    description: "Create cashier, inventory clerk and driver accounts, and let the ones locked out after too many wrong passwords sign in again. Never an administrator or manager account.",
+    description: "See the cashier, inventory clerk and driver accounts, create new ones, and let the ones locked out after too many wrong passwords sign in again. Never an administrator or manager account.",
     available: [MANAGER], defaults: [],
-    routes: [["GET", /^\/api\/roles$/],
+    routes: [["GET", /^\/api\/roles$/], ["GET", /^\/api\/users$/],
              ["GET", /^\/api\/users\/email-check$/], ["GET", /^\/api\/users\/phone-check$/],
              ["POST", /^\/api\/users\/draft$/], ["POST", /^\/api\/users$/],
-             ["GET", /^\/api\/users\/held$/], ["POST", /^\/api\/users\/\d+\/release-hold$/]] }
+             ["POST", /^\/api\/users\/\d+\/release-hold$/]] }
 ];
 
 const FEATURE_ROLES = [MANAGER, CLERK, CASHIER, DRIVER];   // the matrix's columns
