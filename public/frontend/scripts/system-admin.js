@@ -2548,6 +2548,23 @@ function onRegistrationChange(value) {
 // chosen. The same rule as the server's (admin.js bankDetailsFrom).
 const BANK_FIELDS = ['bankName', 'bankAccountName', 'bankAccountNumber'];
 
+// Philippine bank accounts run from 10 digits (BPI, Landbank) to 13 (Metrobank)
+// and a few more; 10 to 16 covers them
+const BANK_DIGITS_MIN = 10;
+const BANK_DIGITS_MAX = 16;
+
+// what is wrong with an account number, or null when it is fine
+function bankNumberComplaint(number) {
+    // groups of digits with one space or one dash between them, e.g. "0012 3456 7890"
+    const digitCount = number.replace(/\D/g, '').length;
+    if (!/^[0-9]+([ -][0-9]+)*$/.test(number) ||
+        digitCount < BANK_DIGITS_MIN || digitCount > BANK_DIGITS_MAX) {
+        return 'An account number is ' + BANK_DIGITS_MIN + ' to ' + BANK_DIGITS_MAX +
+               ' digits, with one space or dash where the bank prints one.';
+    }
+    return null;
+}
+
 function bankComplaint(form) {
     const values = [];
     for (let i = 0; i < BANK_FIELDS.length; i++) {
@@ -2558,33 +2575,41 @@ function bankComplaint(form) {
             return 'The bank, the account name and the account number are all required.';
         }
     }
-    const number = values[2];
-    // digits, with spaces or dashes allowed in the middle, starting and ending on a digit;
-    // and at least 6 digits once everything that is not a digit is taken out
-    if (!/^[0-9][0-9 -]*[0-9]$/.test(number) || number.replace(/\D/g, '').length < 6) {
-        return 'An account number is digits, with spaces or dashes where the bank prints them.';
-    }
-    return null;
+    return bankNumberComplaint(values[2]);
 }
 
-// marks the box that is wrong, as it is typed
+// only digits, spaces and dashes get into the account number box; anything
+// else typed or pasted is taken out, with a line saying so
+function onBankNumberInput(input) {
+    const typed = input.value;
+    const cleaned = typed.replace(/[^0-9 -]/g, '');   // keep digits, spaces and dashes
+    if (cleaned !== typed) {
+        const cursor = Math.max(0, input.selectionStart - (typed.length - cleaned.length));
+        input.value = cleaned;
+        input.setSelectionRange(cursor, cursor);
+    }
+    onBankInput();
+
+    const note = document.getElementById('store-bank-note');
+    if (cleaned !== typed && note) {
+        note.className = 'store-bank-note is-stop';
+        note.textContent = 'Digits only. Letters and symbols cannot be typed here.';
+    }
+}
+
+// marks the account number box as soon as what is in it is wrong
 function onBankInput() {
     const form = document.getElementById('store-form');
     const note = document.getElementById('store-bank-note');
     if (!form || !note || !form.elements.bankName) return;
 
-    const values = [];
-    let allFilled = true;
-    for (let i = 0; i < BANK_FIELDS.length; i++) {
-        const value = form.elements[BANK_FIELDS[i]].value.trim();
-        values.push(value);
-        if (value === '') allFilled = false;
-    }
-    const numberBad = values[2] !== '' && bankComplaint(form) !== null && allFilled;
-    form.elements.bankAccountNumber.classList.toggle('is-bad', numberBad);
+    const number = form.elements.bankAccountNumber.value.trim();
+    let problem = null;
+    if (number !== '') problem = bankNumberComplaint(number);
 
-    note.className = numberBad ? 'store-bank-note is-stop' : 'store-bank-note';
-    note.textContent = numberBad ? bankComplaint(form) : '';
+    form.elements.bankAccountNumber.classList.toggle('is-bad', problem !== null);
+    note.className = problem ? 'store-bank-note is-stop' : 'store-bank-note';
+    note.textContent = problem || '';
 }
 
 function showStoreVerdict(text) {

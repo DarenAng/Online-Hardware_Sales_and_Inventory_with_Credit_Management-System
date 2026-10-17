@@ -2699,11 +2699,12 @@ function registerAdminRoutes(app, deps) {
     if (filled < 3) {
       return { error: "The bank, the account name and the account number are all required." };
     }
-    // digits, with spaces or dashes allowed in between, and at least 6 digits in total
+    // groups of digits with one space or one dash between them, 10 to 16 digits
+    // in all (Philippine banks use 10 to 13); the same rule as the admin page's
     // the pattern matches every character that is not a digit, so only digits are counted
     const digitCount = bank.bank_account_number.replace(/\D/g, "").length;
-    if (!/^[0-9][0-9 -]*[0-9]$/.test(bank.bank_account_number) || digitCount < 6) {
-      return { error: "An account number is digits, with spaces or dashes where the bank prints them. " +
+    if (!/^[0-9]+([ -][0-9]+)*$/.test(bank.bank_account_number) || digitCount < 10 || digitCount > 16) {
+      return { error: "An account number is 10 to 16 digits, with one space or dash where the bank prints one. " +
                       "Copy it from the passbook or the bank's letter." };
     }
     return { bank: bank };
