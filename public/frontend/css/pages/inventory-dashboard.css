@@ -513,26 +513,45 @@ td.cell-num .stock-level { margin-left: auto; }
 }
 
 /* Purchase Order Reference: the received orders on the left, the open order on the right */
-.po-ref { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
-.po-ref-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; padding-right: 4px; }
-.po-ref-head { margin: 0 0 4px; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--steel-soft); }
+.po-ref { display: grid; grid-template-columns: 270px 1fr; gap: 22px; align-items: start; }
+.po-ref-side { display: flex; flex-direction: column; gap: 8px; }
+.po-ref-head { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--steel-soft); }
+.po-ref-search { font-size: 14px; }
+.po-ref-list { display: flex; flex-direction: column; gap: 6px; max-height: 58vh; overflow-y: auto; padding-right: 4px; }
 .po-ref-item {
     display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left;
     padding: 10px 12px; background: var(--surface); border: 1px solid var(--line); border-left: 3px solid transparent;
     border-radius: 6px; cursor: pointer; transition: background 0.14s, border-color 0.14s;
 }
+.po-ref-item[hidden] { display: none; }
 .po-ref-item:hover { background: var(--go-dim); }
 .po-ref-item:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
 .po-ref-item.is-picked { background: var(--go-dim); border-color: var(--go); border-left-color: var(--go); }
 .po-ref-no { font-weight: 600; font-size: 14px; }
 .po-ref-supplier { font-size: 13.5px; }
 .po-ref-when { font-size: 12.5px; color: var(--steel-soft); }
+.po-ref-none { margin: 6px 2px; font-size: 13.5px; color: var(--steel-soft); }
+
 .po-ref-main { min-width: 0; }
-.po-ref-title { margin: 0 0 4px; font-size: 17px; font-weight: 600; }
-.po-ref-facts { margin: 0 0 14px; font-size: 13.5px; color: var(--steel-soft); }
+.po-ref-title { margin: 0 0 10px; font-size: 18px; font-weight: 600; }
+.po-ref-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+.po-ref-fact { display: flex; flex-direction: column; padding: 9px 12px; background: var(--paper); border-radius: 6px; }
+.po-ref-fact-label { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--steel-soft); }
+.po-ref-fact-value { font-size: 15px; font-weight: 600; }
+.po-ref-fact-who { font-size: 13px; color: var(--steel); }
+
+/* the answer first: green complete, amber some differ, grey an old order */
+.po-ref-verdict { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 10px 13px; border-radius: 6px; font-size: 14.5px; font-weight: 600; }
+.po-ref-verdict .bi { font-size: 17px; }
+.po-ref-verdict.is-complete { background: var(--ok-dim); color: var(--ok-ink); }
+.po-ref-verdict.is-short { background: var(--signal-dim); color: var(--signal-ink); }
+.po-ref-verdict.is-old { background: var(--paper); color: var(--steel); font-weight: 500; }
+
+.po-ref-table tbody tr.po-ref-differs td { background: var(--signal-dim); }
 
 /* on a phone the list sits above the order */
 @media (max-width: 760px) {
     .po-ref { grid-template-columns: 1fr; }
     .po-ref-list { max-height: 220px; }
+    .po-ref-facts { grid-template-columns: 1fr; }
 }

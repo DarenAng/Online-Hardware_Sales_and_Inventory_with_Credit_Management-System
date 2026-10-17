@@ -2082,8 +2082,9 @@ function reportShortFromCheck() {
 // ---------- Stock Adjustment: the Reference card ----------
 // A received purchase order, each line with what was ordered beside what
 // arrived, so the clerk can see the right goods came in. Read only.
-// choices: the received orders, newest first; data: the open order's reference
-let poReference = { poId: null, choices: [], data: null };
+// choices: the received orders, newest first; data: the open order's reference;
+// search: what is typed in the box above the list
+let poReference = { poId: null, choices: [], data: null, search: '' };
 
 // the card's one page; the card is still the open one while detailPages holds it
 let poReferencePageObject = null;
@@ -2091,7 +2092,7 @@ let poReferencePageObject = null;
 // poId: optional; the order to open on (an Adjustment History entry names one).
 // Without it the card opens on the newest received order.
 async function openPoReference(poId) {
-    poReference = { poId: poId || null, choices: [], data: null };
+    poReference = { poId: poId || null, choices: [], data: null, search: '' };
     poReferencePageObject = { label: 'Reference', body: '<p class="detail-note">Loading the purchase orders...</p>' };
     openDetailModal('Purchase Order Reference', 'What was ordered beside what arrived', 'PO',
         [poReferencePageObject],
@@ -2136,6 +2137,7 @@ function redrawPoReference(body) {
     if (!poReferenceIsOpen()) return;
     poReferencePageObject.body = body;
     renderDetailPage();
+    filterPoReference(poReference.search);   // a search typed before an order was picked still applies
 
     // the list scrolls on its own; keep the open order in view
     const picked = document.querySelector('.po-ref-list .is-picked');
@@ -2179,7 +2181,10 @@ function poReferencePage(message) {
         const when = po.received_at
             ? 'Received ' + poWhen(po.received_at).slice(0, 10)
             : 'Ordered ' + poWhen(po.order_date).slice(0, 10);
+        // what the search box matches: the number and the supplier
+        const words = ('PO #' + po.po_id + ' ' + po.po_id + ' ' + po.supplier_name).toLowerCase();
         list += '<button type="button" class="po-ref-item' + (picked ? ' is-picked' : '') + '" ' +
+                'data-search="' + escapeHtml(words) + '" ' +
                 'onclick="onPoReferencePick(' + po.po_id + ')">' +
             '<span class="po-ref-no">PO #' + po.po_id + '</span>' +
             '<span class="po-ref-supplier">' + escapeHtml(po.supplier_name) + '</span>' +
@@ -2192,75 +2197,112 @@ function poReferencePage(message) {
     if (!main) main = '<p class="detail-note">Pick an order on the left to see it.</p>';
 
     return '<div class="po-ref">' +
-            '<div class="po-ref-list">' +
+            '<div class="po-ref-side">' +
                 '<p class="po-ref-head">Received orders (' + poReference.choices.length + ')</p>' +
-                list +
+                '<input type="search" class="form-control po-ref-search" id="po-ref-search" ' +
+                    'placeholder="Search PO number or supplier" autocomplete="off" ' +
+                    'value="' + escapeHtml(poReference.search) + '" oninput="filterPoReference(this.value)">' +
+                '<div class="po-ref-list">' + list +
+                    '<p class="po-ref-none" id="po-ref-none" hidden>No order matches that search.</p>' +
+                '</div>' +
             '</div>' +
             '<div class="po-ref-main">' + main + '</div>' +
         '</div>';
 }
 
-// the order in one heading and one line, then each material with what was
-// ordered and what arrived
+// hides the orders the search does not match; the list is not drawn again,
+// so the box keeps its cursor while typing
+function filterPoReference(text) {
+    poReference.search = text;
+    const wanted = String(text || '').trim().toLowerCase();
+    const items = document.querySelectorAll('.po-ref-list .po-ref-item');
+    let shown = 0;
+    for (let i = 0; i < items.length; i++) {
+        const match = wanted === '' || items[i].getAttribute('data-search').indexOf(wanted) !== -1;
+        items[i].hidden = !match;
+        if (match) shown++;
+    }
+    const none = document.getElementById('po-ref-none');
+    if (none) none.hidden = shown > 0;
+}
+
+// one fact beside another: "Ordered" over its date and who raised it
+function poReferenceFact(label, when, who) {
+    return '<div class="po-ref-fact">' +
+            '<span class="po-ref-fact-label">' + label + '</span>' +
+            '<span class="po-ref-fact-value">' + when + '</span>' +
+            (who ? '<span class="po-ref-fact-who">by ' + escapeHtml(who) + '</span>' : '') +
+        '</div>';
+}
+
+// the order's name, when it was ordered and received, a one-line verdict, then
+// each material with what was ordered and what arrived
 function poReferenceDetails(data) {
     const order = data.order;
 
-    // "Ordered 2026-10-17 10:35 by Rafael Andino · Received 2026-10-17 10:42 by Rafael Andino"
-    let facts = 'Ordered ' + poWhen(order.order_date);
-    if (order.raised_by) facts += ' by ' + order.raised_by;
-    facts += ' · ';
-    facts += order.received_at ? 'Received ' + poWhen(order.received_at) : 'Received (date not recorded)';
-    if (order.received_by) facts += ' by ' + order.received_by;
-
-    let html = '<h4 class="po-ref-title">PO #' + order.po_id + ' · ' + escapeHtml(order.supplier_name) + '</h4>' +
-        '<p class="po-ref-facts">' + escapeHtml(facts) + '</p>';
-
-    if (!data.kept) {
-        html += '<p class="detail-note detail-warn">This order was received before the system kept what was ordered, ' +
-            'so only what arrived is shown.</p>';
-    }
-
-    const rows = [];
+    let rows = '';
     let differs = 0;
     for (let i = 0; i < data.lines.length; i++) {
         const line = data.lines[i];
         const check = poReferenceCheck(line, data.kept);
         if (check.differs) differs++;
 
-        rows.push([
-            escapeHtml(line.product_name),
-            line.ordered ? escapeHtml(poQuantityText(line.ordered))
-                         : '<span class="muted">' + (data.kept ? 'Not ordered' : 'Not recorded') + '</span>',
-            line.received ? escapeHtml(poQuantityText(line.received))
-                          : escapeHtml(qtyText(0, line.unit_name || '')),
-            '<span class="recv-verdict ' + check.tone + '">' + escapeHtml(check.text) + '</span>'
-        ]);
-    }
-    html += detailTable(['Material', 'Ordered', 'Received', 'Check'], rows, [1, 2]);
+        const ordered = line.ordered
+            ? escapeHtml(poQuantityText(line.ordered))
+            : '<span class="muted">' + (data.kept ? 'Not ordered' : 'Not recorded') + '</span>';
+        const received = line.received
+            ? escapeHtml(poQuantityText(line.received))
+            : escapeHtml(qtyText(0, line.unit_name || ''));
 
-    if (data.kept) {
-        if (differs === 0) {
-            html += '<p class="check-summary is-complete">Complete: every item arrived as ordered.</p>';
-        } else {
-            html += '<p class="check-summary is-short">' + differs +
-                (differs === 1 ? ' item differs' : ' items differ') + ' from the order.</p>';
-        }
+        rows += '<tr' + (check.differs ? ' class="po-ref-differs"' : '') + '>' +
+            '<td>' + escapeHtml(line.product_name) + '</td>' +
+            '<td class="cell-num">' + ordered + '</td>' +
+            '<td class="cell-num">' + received + '</td>' +
+            '<td><span class="badge ' + check.badge + '">' + escapeHtml(check.text) + '</span></td>' +
+            '</tr>';
     }
-    return html;
+
+    // the verdict comes first, so the answer is read before the details
+    let verdict;
+    if (!data.kept) {
+        verdict = '<p class="po-ref-verdict is-old"><i class="bi bi-info-circle" aria-hidden="true"></i>' +
+            'Received before the system kept what was ordered, so only what arrived is shown.</p>';
+    } else if (differs === 0) {
+        verdict = '<p class="po-ref-verdict is-complete"><i class="bi bi-check-circle" aria-hidden="true"></i>' +
+            'Complete: all ' + data.lines.length + (data.lines.length === 1 ? ' item' : ' items') +
+            ' arrived as ordered.</p>';
+    } else {
+        verdict = '<p class="po-ref-verdict is-short"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i>' +
+            differs + ' of ' + data.lines.length + ' items ' + (differs === 1 ? 'differs' : 'differ') +
+            ' from the order. They are shaded below.</p>';
+    }
+
+    return '<h4 class="po-ref-title">PO #' + order.po_id + ' · ' + escapeHtml(order.supplier_name) + '</h4>' +
+        '<div class="po-ref-facts">' +
+            poReferenceFact('Ordered', escapeHtml(poWhen(order.order_date)), order.raised_by) +
+            poReferenceFact('Received', order.received_at
+                ? escapeHtml(poWhen(order.received_at))
+                : '<span class="muted">Not recorded</span>', order.received_by) +
+        '</div>' +
+        verdict +
+        '<div class="table-responsive"><table class="mini-table po-ref-table">' +
+            '<thead><tr><th>Material</th><th class="col-num">Ordered</th><th class="col-num">Received</th><th>Check</th></tr></thead>' +
+            '<tbody>' + rows + '</tbody></table></div>';
 }
 
 // What one line came to, in the material's own unit: as ordered, short,
 // more than ordered, not ordered at all, or did not arrive.
+// badge: the colour of its label (green as ordered, amber short, red missing)
 function poReferenceCheck(line, kept) {
     const unit = line.unit_name || '';
-    if (!kept) return { text: 'Arrived', tone: 'is-exact', differs: false };
-    if (!line.ordered) return { text: 'Not on the order', tone: 'is-over', differs: true };
-    if (!line.received) return { text: 'Did not arrive', tone: 'is-short', differs: true };
+    if (!kept) return { text: 'Arrived', badge: 'badge-neutral', differs: false };
+    if (!line.ordered) return { text: 'Not on the order', badge: 'badge-info', differs: true };
+    if (!line.received) return { text: 'Did not arrive', badge: 'badge-danger', differs: true };
 
     const difference = Number(line.received.quantity) - Number(line.ordered.quantity);
-    if (difference < 0) return { text: 'Short by ' + qtyText(-difference, unit), tone: 'is-short', differs: true };
-    if (difference > 0) return { text: qtyText(difference, unit) + ' more than ordered', tone: 'is-over', differs: true };
-    return { text: 'As ordered', tone: 'is-exact', differs: false };
+    if (difference < 0) return { text: 'Short by ' + qtyText(-difference, unit), badge: 'badge-warning', differs: true };
+    if (difference > 0) return { text: qtyText(difference, unit) + ' more than ordered', badge: 'badge-info', differs: true };
+    return { text: 'As ordered', badge: 'badge-success', differs: false };
 }
 
 // ---------- archive ----------
