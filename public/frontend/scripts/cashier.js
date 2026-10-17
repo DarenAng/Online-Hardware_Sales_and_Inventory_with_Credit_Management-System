@@ -2253,11 +2253,6 @@ async function handleCheckout(event, viaQr) {
         return;
     }
 
-    // An attached delivery goes to an area on the administrator's list, which
-    // may have changed since it was attached. It is read again before any money
-    // is taken, so the sale is never saved with a delivery that cannot be created.
-    if (pendingDelivery && !(await attachedAreaIsStillListed())) return;
-
     // Asked before anything is sent: the amount due, the method, and the change
     // or the balance that goes on the account. Paying by QR is its own
     // confirmation (the customer pays the code), except that a balance left on
@@ -2570,80 +2565,8 @@ function fillDeliveryFromCustomer() {
     fields.contactName.value = account ? account.name : typedCustomerName();
     phoneFill(fields.contactPhone, account && account.phone ? account.phone : '');
 
-    // The saved address only helps pick the area: the area on the list that
-    // appears in it is chosen. The house number and street stay for the cashier.
-    chooseDeliveryArea(fields, areaInAddress(account && account.address ? account.address : ''));
-    fields.street.value = '';
-}
-
-// The places the shop delivers to (System Admin, Delivery Area). They are read
-// each time the form opens, so a change made there since is right here.
-let deliveryAreaList = [];
-// true when the last read of the list failed, so the form says "connection"
-// and not "no area is set"
-let deliveryAreasUnreadable = false;
-
-async function loadDeliveryAreaChoices() {
-    const select = document.getElementById('dl-area');
-    const note = document.getElementById('delivery-area-note');
-    if (!select) return;
-
-    let problem = '';
-    try {
-        const body = await apiGetDeliveryAreas();
-        deliveryAreaList = body.areas || [];
-        deliveryAreasUnreadable = false;
-        if (deliveryAreaList.length === 0) {
-            problem = 'No delivery area is set. Ask the administrator to add one in System Admin › Receipt Maintenance.';
-        }
-    } catch (error) {
-        deliveryAreaList = [];
-        deliveryAreasUnreadable = true;
-        // error.status is set when the server answered but said no
-        if (error.status) {
-            problem = 'The server did not give the delivery areas. Ask the administrator to restart the server.';
-        } else {
-            problem = 'The delivery areas could not be read. Check the connection and try again.';
-        }
-    }
-
-    let areaOptions = '<option value="">Choose an area</option>';
-    for (let i = 0; i < deliveryAreaList.length; i++) {
-        const area = deliveryAreaList[i];
-        areaOptions += '<option value="' + escapeHtml(area) + '">' + escapeHtml(area) + '</option>';
-    }
-    select.innerHTML = areaOptions;
-    if (note) note.textContent = problem;
-}
-
-// The area on the list whose text appears in the address (any letter case), or ''.
-// When more than one appears ("Antipolo" and "Brgy. San Isidro, Antipolo City"),
-// the longest is the most exact one.
-function areaInAddress(address) {
-    const text = String(address || '').toLowerCase();
-    if (text === '') return '';
-
-    let found = '';
-    for (let i = 0; i < deliveryAreaList.length; i++) {
-        const area = deliveryAreaList[i];
-        if (text.includes(area.toLowerCase()) && area.length > found.length) {
-            found = area;
-        }
-    }
-    return found;
-}
-
-// selects an area in the box; one no longer on the list leaves "Choose an area"
-function chooseDeliveryArea(fields, area) {
-    const wanted = String(area || '').toLowerCase();
-    let found;
-    for (let i = 0; i < deliveryAreaList.length; i++) {
-        if (deliveryAreaList[i].toLowerCase() === wanted) {
-            found = deliveryAreaList[i];
-            break;
-        }
-    }
-    fields.area.value = found || '';
+    // the customer's saved address, which the cashier can change
+    fields.address.value = account && account.address ? account.address : '';
 }
 
 // The driver box: type to search the active drivers, pick one from the list.
@@ -2803,26 +2726,14 @@ function onDriverKey(event) {
     if (event.key === 'Escape' || event.key === 'Tab') hideDriverSuggestions();
 }
 
-// true while the form waits for the area list, so a double click does not open it twice
-let deliveryFormOpening = false;
-
-async function openDeliveryForm() {
+function openDeliveryForm() {
     const fields = deliveryFormFields();
-    if (!fields || deliveryFormOpening) return;
-
-    // the area box is filled before anything is chosen in it
-    deliveryFormOpening = true;
-    try {
-        await loadDeliveryAreaChoices();
-    } finally {
-        deliveryFormOpening = false;
-    }
+    if (!fields) return;
 
     if (pendingDelivery) {
         fields.contactName.value = pendingDelivery.contactName;
         phoneFill(fields.contactPhone, pendingDelivery.contactPhone);
-        chooseDeliveryArea(fields, pendingDelivery.area);
-        fields.street.value = pendingDelivery.street;
+        fields.address.value = pendingDelivery.address;
         fields.scheduledDate.value = pendingDelivery.scheduledDate;
         fields.remarks.value = pendingDelivery.remarks;
     } else {
@@ -2869,29 +2780,17 @@ function saveDeliveryForm(event) {
     const contactName = fields.contactName.value.trim();
     const contactPhone = phoneToStore(fields.contactPhone);
     const phoneProblem = phoneComplaint(fields.contactPhone);
-    const area = fields.area.value;
     // many spaces become one, like the server does
-    const street = fields.street.value.trim().replace(/\s+/g, ' ');
+    const address = fields.address.value.trim().replace(/\s+/g, ' ');
     const scheduledDate = fields.scheduledDate.value;
 
     if (contactName === '') { complain('A delivery needs somebody to ask for at the gate.'); fields.contactName.focus(); return; }
     if (contactPhone === '') { complain('A driver who cannot ring ahead is a driver who comes back with the goods.'); fields.contactPhone.focus(); return; }
     if (phoneProblem) { complain(phoneProblem); fields.contactPhone.focus(); return; }
 
-    // with no area on the list, no delivery can be attached at all; the note
-    // above the address already says why and what to do, so this stays short
-    if (deliveryAreaList.length === 0) {
-        if (deliveryAreasUnreadable) {
-            complain('A delivery cannot be attached until the delivery areas can be read.');
-        } else {
-            complain('A delivery cannot be attached until a delivery area is set.');
-        }
-        return;
-    }
-    if (area === '') { complain('Choose the area the delivery goes to.'); fields.area.focus(); return; }
-    if (street.length < 3 || street.length > 120) {
-        complain('Enter the house number and street (3 to 120 characters).');
-        fields.street.focus();
+    if (address.length < 5 || address.length > 255) {
+        complain('Enter the delivery address: house no., street, barangay, city (5 to 255 characters).');
+        fields.address.focus();
         return;
     }
 
@@ -2917,10 +2816,7 @@ function saveDeliveryForm(event) {
     pendingDelivery = {
         contactName: contactName,
         contactPhone: contactPhone,
-        area: area,
-        street: street,
-        // shown on the strip and the confirm card: the street, then the area
-        address: street + ', ' + area,
+        address: address,
         scheduledDate: scheduledDate,
         remarks: fields.remarks.value.trim(),
         driverId: driverId,
@@ -2984,34 +2880,6 @@ function renderDeliveryAttached() {
         '</p>';
 }
 
-// true when the area of the attached delivery is still on the list; if not, says what to do
-async function attachedAreaIsStillListed() {
-    try {
-        const body = await apiGetDeliveryAreas();
-        deliveryAreaList = body.areas || [];
-        deliveryAreasUnreadable = false;
-    } catch (error) {
-        // error.status is set when the server answered but said no
-        if (error.status) {
-            notifyError('The server answered but did not give the delivery areas, so the sale was stopped. ' +
-                'Nothing has been charged. Ask the administrator to restart the server.', 'Delivery areas not read');
-        } else {
-            notifyOffline();
-        }
-        return false;
-    }
-
-    const wanted = String(pendingDelivery.area).toLowerCase();
-    for (let i = 0; i < deliveryAreaList.length; i++) {
-        if (deliveryAreaList[i].toLowerCase() === wanted) return true;
-    }
-
-    notifyWarning('The delivery area "' + pendingDelivery.area + '" is no longer on the list. ' +
-        'Press Edit Delivery and choose the area again, or remove the delivery. Nothing has been charged.',
-        'Delivery area changed');
-    return false;
-}
-
 // posted once the sale exists; a failure here does not undo the sale
 async function createAttachedDelivery(saleId) {
     if (!pendingDelivery) return true;
@@ -3021,8 +2889,7 @@ async function createAttachedDelivery(saleId) {
     try {
         const response = await apiCreateDelivery({
                 saleId: saleId,
-                area: d.area,
-                street: d.street,
+                address: d.address,
                 contactName: d.contactName,
                 contactPhone: d.contactPhone,
                 scheduledDate: d.scheduledDate || null,
@@ -3149,33 +3016,9 @@ function openCashierDeliveryDetail(deliveryId) {
     if (panel) showDeliveryRecord(panel.find(deliveryId));
 }
 // ---------- refunds ----------
-// The remarks (a sentence, not a word) are compulsory. Where the goods go is
-// not the counter's call: the refund is filed awaiting inspection, and the
-// inventory clerk decides whether it can be sold again.
-const MINIMUM_RETURN_REASON = 10;
-
-// counts up to the minimum: "have you said enough yet"
-function onReturnReasonInput() {
-    const field = document.getElementById('return-reason');
-    const counter = document.getElementById('reason-counter');
-    if (!field || !counter) return;
-
-    const length = field.value.trim().length;
-
-    if (length === 0) {
-        counter.className = 'reason-counter';
-        counter.textContent = 'Required. One sentence saying what happened.';
-    } else if (length < MINIMUM_RETURN_REASON) {
-        counter.className = 'reason-counter is-short';
-        counter.textContent = (MINIMUM_RETURN_REASON - length) +
-            ' more character' + (MINIMUM_RETURN_REASON - length === 1 ? '' : 's') +
-            ' before this is usable as a record.';
-    } else {
-        counter.className = 'reason-counter is-good';
-        counter.textContent = 'That will read back on its own in three months.';
-    }
-}
-
+// The reason is compulsory. Where the goods go is not the counter's call:
+// the refund is filed awaiting inspection, and the inventory clerk decides
+// whether it can be sold again.
 async function handleIssueRefund(event) {
     event.preventDefault();
     const form = event.target;
@@ -3201,9 +3044,8 @@ async function handleIssueRefund(event) {
         refundAmount: parseFloat(form.elements.refundAmount.value) || 0
     };
 
-    if (reason.length < MINIMUM_RETURN_REASON) {
-        notifyWarning('Say what happened, in a sentence. A write-off queried three months from ' +
-            'now has to be explainable from this line alone.', 'The remarks are required');
+    if (reason === '') {
+        notifyWarning('Type the reason for the refund.', 'A reason is required');
         const field = document.getElementById('return-reason');
         if (field) field.focus();
         return;
@@ -3240,7 +3082,6 @@ async function handleIssueRefund(event) {
         // form.reset() knows nothing about the hidden id, the strip or the suggested figure
         clearRefundProduct();
         refundAmountSuggested = null;
-        onReturnReasonInput();
         catalogLoaded = false;
         await loadRecentSales();
     } catch (error) {
@@ -4268,7 +4109,6 @@ function resetHistoryFilters() {
 // One form: the new limit and why. The reason is required, here and at the
 // server. The customer's card steps aside while the form is up (the form
 // would otherwise sit beneath it) and comes back if the request is dropped.
-const MINIMUM_LIMIT_REASON = 5;
 let limitReturnCustomer = null;
 
 function askForExtension() {
@@ -4309,28 +4149,9 @@ function askForExtension() {
     setTimeout(function () { form.elements.requestedLimit.focus(); }, 60);
 }
 
-// counts up to the minimum: "have you said enough yet"
+// an earlier complaint goes once the form is being fixed
 function renderLimitVerdict() {
-    const form = document.getElementById('limit-form');
-    const counter = document.getElementById('limit-counter');
     const verdict = document.getElementById('limit-verdict');
-    if (!form || !counter) return;
-
-    const length = form.elements.reason.value.trim().length;
-
-    if (length === 0) {
-        counter.className = 'reason-counter';
-        counter.textContent = 'Required. One line is enough: a manager reading this later will not have the customer in front of them.';
-    } else if (length < MINIMUM_LIMIT_REASON) {
-        counter.className = 'reason-counter is-short';
-        counter.textContent = (MINIMUM_LIMIT_REASON - length) + ' more character' +
-            (MINIMUM_LIMIT_REASON - length === 1 ? '' : 's') + ' before this can be sent.';
-    } else {
-        counter.className = 'reason-counter is-good';
-        counter.textContent = 'That will do.';
-    }
-
-    // an earlier complaint goes once the form is being fixed
     if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
 }
 
@@ -4368,9 +4189,8 @@ async function handleLimitRequest(event) {
         complain('It has to be more than the current ' + peso(current) + '.', form.elements.requestedLimit);
         return;
     }
-    if (reason.length < MINIMUM_LIMIT_REASON) {
-        complain('Say why the limit should go up (at least ' + MINIMUM_LIMIT_REASON + ' characters). ' +
-            'The manager deciding it will not have the customer in front of them.', form.elements.reason);
+    if (reason === '') {
+        complain('Type the reason for the higher limit.', form.elements.reason);
         return;
     }
 
@@ -4597,7 +4417,6 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
             'Late Penalty':   creditAlert
         });
 
-        onReturnReasonInput();
         renderCatalogEmpty();
         renderCustomerVerdict();
         renderRefundProductVerdict();

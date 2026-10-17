@@ -250,6 +250,8 @@ CREATE TABLE purchase_orders (
     confirmed_by_staff_id INT NULL,
     confirmed_at TIMESTAMP NULL,
     decision_note VARCHAR(255) NULL,
+    -- when the delivery was counted in (sp_receive_purchase_order)
+    received_at TIMESTAMP NULL,
     -- the supplier prices the order: unit costs go on the lines and any
     -- discount goes here when the delivery is counted in, not when it is raised
     discount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
@@ -276,6 +278,21 @@ CREATE TABLE purchase_order_items (
     line_cost DECIMAL(12,2) AS (quantity * unit_cost) STORED,
     -- how the line was ordered when it was ordered in packs: 20 box of 20 kg
     -- is quantity 400; the pack is kept so the printed order says "20 box"
+    pack_name VARCHAR(20) NULL,
+    pack_size DECIMAL(12,3) NULL,
+    pack_count DECIMAL(12,3) NULL,
+    FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+
+-- Receiving corrects the order's lines to what arrived, so the lines as they
+-- were ordered are copied here first (sp_receive_purchase_order). The clerk's
+-- Reference card on Stock Adjustment puts the two side by side.
+CREATE TABLE purchase_order_ordered_items (
+    ordered_item_id INT AUTO_INCREMENT PRIMARY KEY,
+    po_id INT NOT NULL,
+    product_id INT NOT NULL,
+    quantity INT NOT NULL,
     pack_name VARCHAR(20) NULL,
     pack_size DECIMAL(12,3) NULL,
     pack_count DECIMAL(12,3) NULL,
@@ -344,10 +361,6 @@ CREATE TABLE store_settings (
     -- stamp, the shop's own header and footer lines, and what is shown. Set in
     -- Receipt Maintenance; the server fills it with its defaults on first start.
     receipt_layout TEXT NULL,
-    -- the places the shop delivers to, as a JSON list of one-line texts such as
-    -- "Brgy. San Isidro, Antipolo City". Kept in System Admin; NULL is an empty
-    -- list, and the cashier can make no delivery until one area is added.
-    delivery_areas TEXT NULL,
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by_staff_id INT NULL,
     CONSTRAINT chk_store_settings_single_row CHECK (setting_id = 1),

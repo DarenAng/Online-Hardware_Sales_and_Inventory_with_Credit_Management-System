@@ -146,13 +146,3 @@ function apiRestoreFromFile(sql) {
 function apiSaveStoreSettings(settings) {
     return sendJson('/api/store-settings', 'PUT', settings);
 }
-
-// POST /api/delivery-areas -- adds one place the shop delivers to
-function apiAddDeliveryArea(area) {
-    return sendJson('/api/delivery-areas', 'POST', { area: area });
-}
-
-// DELETE /api/delivery-areas -- removes one place, by its text
-function apiRemoveDeliveryArea(area) {
-    return sendJson('/api/delivery-areas', 'DELETE', { area: area });
-}

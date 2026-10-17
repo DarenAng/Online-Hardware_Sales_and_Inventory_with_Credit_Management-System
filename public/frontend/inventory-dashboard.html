@@ -141,6 +141,9 @@
                                 <div class="panel-actions">
                                     <!-- compares a delivery with its purchase order; moves no stock -->
                                     <button type="button" class="btn btn-ghost" onclick="openPoCheck()">Check a Purchase Order</button>
+                                    <!-- a received order: what was ordered beside what arrived;
+                                         hidden by showAdjust when po-reference is switched off -->
+                                    <button type="button" class="btn btn-ghost" id="adjust-reference" onclick="openPoReference()">Reference</button>
                                 </div>
                             </div>
 
@@ -204,7 +207,7 @@
                                     <div class="form-group">
                                         <label for="adjust-reason">Reason</label>
                                         <input type="text" id="adjust-reason" name="reason" class="form-control"
-                                               placeholder="Delivery received, breakage, recount" required>
+                                               maxlength="255" placeholder="Recount" required>
                                     </div>
                                 </div>
 
@@ -612,7 +615,7 @@
                         </div>
                         <div class="form-group">
                             <label for="report-reason">Reason</label>
-                            <textarea id="report-reason" name="reason" class="form-control" rows="3" placeholder="What happened to the item" required></textarea>
+                            <input type="text" id="report-reason" name="reason" class="form-control" maxlength="255" placeholder="Cracked" required>
                         </div>
                         <div class="form-footer">
                             <button type="submit" class="btn btn-success">File Report</button>

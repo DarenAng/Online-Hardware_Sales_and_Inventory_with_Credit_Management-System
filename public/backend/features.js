@@ -105,6 +105,12 @@ const FEATURES = [
     // the two purchase order reads are for the delivery check; Purchase Orders holds them too
     routes: [["POST", /^\/api\/inventory\/adjust$/], ["POST", /^\/api\/materials$/],
              ["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/]] },
+  // the Reference button on Stock Adjustment and on a received entry in
+  // Adjustment History; switched on and off by itself, apart from those screens
+  { key: "po-reference", name: "Purchase Order Reference", module: "Inventory",
+    description: "See a received purchase order with what was ordered beside what arrived, to check the right goods came in. Read only.",
+    available: [CLERK], defaults: [CLERK],
+    routes: [["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/reference$/]] },
   { key: "adjustment-history", name: "Adjustment History", module: "Inventory",
     description: "Every correction made, by whom and why.",
     available: [CLERK], defaults: [CLERK],

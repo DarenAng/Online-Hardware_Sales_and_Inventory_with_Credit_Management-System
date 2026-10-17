@@ -32,11 +32,11 @@ function scopeOf(pathname) {
   if (/^\/api\/(users|roles|staff)/.test(pathname)) return "staff";
   if (/^\/api\/(inventory|purchase-orders|stocks|units|materials|suppliers|categories)/.test(pathname)) return "inventory";
   if (/^\/api\/returns/.test(pathname)) return "returns";
-  // "delivery/" with its slash, so /api/delivery-areas is not taken for a delivery
+  // "delivery/" with its slash, so a path that only starts with "delivery" is not taken for a delivery
   if (/^\/api\/(deliveries|delivery\/)/.test(pathname)) return "deliveries";
   if (/^\/api\/(credit|customers)/.test(pathname)) return "credit";
   if (/^\/api\/sales/.test(pathname)) return "sales";
-  if (/^\/api\/(backups|restore|store-settings|delivery-areas)/.test(pathname)) return "system";
+  if (/^\/api\/(backups|restore|store-settings)/.test(pathname)) return "system";
   if (/^\/api\/archives/.test(pathname)) return "archives";
   if (/^\/api\/notifications/.test(pathname)) return "notifications";
   // a screen switched on or off for a role changes every menu that role has open

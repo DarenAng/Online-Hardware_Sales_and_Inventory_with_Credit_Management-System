@@ -155,6 +155,10 @@
                         <div>
                             <h3>Access Control</h3>
                         </div>
+                        <div class="panel-actions">
+                            <!-- one role, one screen at a time: opens the Grant Access card -->
+                            <button type="button" class="btn btn-success" onclick="openGrantAccess()">Grant Access</button>
+                        </div>
                     </div>
 
                     <!-- drawn by system-admin.js renderFeatureMatrix -->
@@ -165,7 +169,8 @@
                         </table>
                     </div>
                     <p class="access-hint">A tick gives the role every screen of that module; a click saves it at once.
-                        A dash means only some of its screens are on; ticking it turns them all on.</p>
+                        A dash means only some of its screens are on; ticking it turns them all on.
+                        To give a role only the screens it needs, press Grant Access or click the role.</p>
                 </div>
 
                 <!-- AUDIT LOGS -->
@@ -262,6 +267,19 @@
                                 <h3>Saved Backups</h3>
                                 <p class="panel-sub" id="backup-limit-note"></p>
                             </div>
+                        </div>
+
+                        <div class="panel-toolbar">
+                            <div class="toolbar-field">
+                                <label for="backup-folder">Folder</label>
+                                <select id="backup-folder"
+                                        onchange="dataPanelFilter('admin-backups', 'folder', this.value)">
+                                    <option value="all">Every backup</option>
+                                    <option value="manual">Manual backups</option>
+                                    <option value="automatic">Automatic backups</option>
+                                </select>
+                            </div>
+                            <div class="toolbar-spacer"></div>
                         </div>
 
                         <div class="table-responsive grid-10">
@@ -432,28 +450,6 @@
                                 <button type="button" class="btn btn-ghost" onclick="resetStoreForm()">Reset</button>
                             </div>
                         </form>
-                    </div>
-
-                    <!-- DELIVERY AREA -- the places the shop delivers to. Every add or remove is
-                         saved at once, so this card stands apart from the store form above,
-                         which has its own Save button -->
-                    <div class="card delivery-area-card">
-                        <div class="panel-head">
-                            <div>
-                                <h3>Delivery Area</h3>
-                            </div>
-                        </div>
-
-                        <p class="area-help">The cashier can only send a delivery to one of these places.
-                            Write each one on a single line, such as Brgy. San Isidro, Antipolo City.</p>
-
-                        <form class="area-add" onsubmit="handleAddDeliveryArea(event)" autocomplete="off" novalidate>
-                            <input type="text" id="area-input" class="form-control" maxlength="150"
-                                   placeholder="Brgy. San Isidro, Antipolo City" aria-label="New delivery area">
-                            <button type="submit" class="btn btn-success" id="area-add-btn">Add</button>
-                        </form>
-
-                        <ul class="area-list" id="area-list"></ul>
                     </div>
 
                     <div class="card store-preview-card">
@@ -651,6 +647,35 @@
             <div class="modal-foot">
                 <button type="button" class="btn btn-ghost" onclick="closeModal('restore-modal')">Cancel</button>
                 <button type="button" class="btn btn-success" onclick="restoreSelectedAccount()">Restore Account</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- GRANT ACCESS -- one role's screens, one tick each; drawn by system-admin.js openGrantAccess -->
+    <div class="modal" id="grant-modal" onclick="closeModalOnBackdrop(event, 'grant-modal')">
+        <div class="modal-box modal-wide">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">GA</div>
+                    <div>
+                        <h3>Grant Access</h3>
+                        <span class="modal-role">Choose a role, then tick only the screens it needs</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('grant-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="grant-role">Role</label>
+                    <select id="grant-role" class="form-control" onchange="renderGrantScreens()"></select>
+                </div>
+                <div id="grant-screens"></div>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('grant-modal')">Cancel</button>
+                <button type="button" class="btn btn-success" id="grant-save" onclick="saveGrantAccess()">Save Access</button>
             </div>
         </div>
     </div>

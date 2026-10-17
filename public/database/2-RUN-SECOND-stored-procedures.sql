@@ -2399,7 +2399,8 @@ END //
 --   { "new_name": "Anchor bolt M12", "unit_name": "pcs",
 --     "quantity": 24, "unit_cost": 30.00 }                    never ordered
 -- A line missing from the sheet is received in full; a quantity of zero did
--- not arrive. The order's own lines are corrected to match what arrived.
+-- not arrive. The order's own lines are corrected to match what arrived; a
+-- copy of them as they were ordered goes to purchase_order_ordered_items first.
 -- ==========================================
 CREATE PROCEDURE sp_receive_purchase_order (
     IN p_po_id INT,
@@ -2471,6 +2472,12 @@ PROC_BODY: BEGIN
     END IF;
 
     START TRANSACTION;
+
+    -- ---- 0. the order as it was ordered, before the sheet corrects it ----
+    -- the clerk's Reference card compares this with what arrived
+    INSERT INTO purchase_order_ordered_items (po_id, product_id, quantity, pack_name, pack_size, pack_count)
+    SELECT po_id, product_id, quantity, pack_name, pack_size, pack_count
+    FROM purchase_order_items WHERE po_id = p_po_id;
 
     -- ---- 1. anything on the sheet that was never on the order ----
     -- done first, so an extra material becomes a line and is stocked by the same loop
@@ -2571,7 +2578,7 @@ PROC_BODY: BEGIN
     DELETE FROM purchase_order_items WHERE po_id = p_po_id AND quantity <= 0;
 
     UPDATE purchase_orders
-    SET status = 'Received', discount = GREATEST(IFNULL(p_discount, 0.00), 0.00)
+    SET status = 'Received', received_at = NOW(), discount = GREATEST(IFNULL(p_discount, 0.00), 0.00)
     WHERE po_id = p_po_id;
 
     INSERT INTO audit_logs (staff_id, action, action_type, details)
@@ -2701,12 +2708,10 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- the bar is a sentence rather than a word
-    IF p_reason IS NULL OR CHAR_LENGTH(TRIM(p_reason)) < 10 THEN
+    -- every report keeps its reason
+    IF p_reason IS NULL OR TRIM(p_reason) = '' THEN
         SET p_status_code = 400;
-        SET p_message = CONCAT('Say what happened, in a sentence. ',
-                               'A write-off queried three months from now has to be ',
-                               'explainable from this line alone.');
+        SET p_message = 'A reason is required for every report.';
         LEAVE PROC_BODY;
     END IF;
 

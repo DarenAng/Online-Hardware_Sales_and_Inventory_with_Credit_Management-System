@@ -544,16 +544,6 @@
 .disposition-verdict.is-good { border-left-color: var(--ok);   background: var(--ok-dim); }
 .disposition-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
 
-/* Counting up to the minimum rather than down from a maximum: the question is
-   "have you said enough yet", not "how much room is left". */
-.reason-counter {
-    margin: 6px 0 0;
-    font-size: 13px;
-    color: var(--steel-soft);
-}
-.reason-counter.is-short { color: var(--signal-ink); font-weight: 500; }
-.reason-counter.is-good  { color: var(--ok-ink); }
-
 @media (max-width: 640px) {
     .disposition-choice { grid-template-columns: 1fr; }
 }

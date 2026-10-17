@@ -50,7 +50,6 @@ function registerCashierRoutes(app, deps) {
   const phoneComplaint = deps.phoneComplaint;
   const cleanPhone = deps.cleanPhone;
   const qrPayments = deps.qrPayments;
-  const readDeliveryAreas = deps.readDeliveryAreas;
 
   // ==========================================
   // THE SALES LIST
@@ -391,8 +390,7 @@ function registerCashierRoutes(app, deps) {
 
   app.post("/api/deliveries", async function (request, response) {
     const saleId = request.body.saleId;
-    const area = request.body.area;
-    const street = request.body.street;
+    const typedAddress = request.body.address;
     const scheduledDate = request.body.scheduledDate;
     const remarks = request.body.remarks;
     const contactName = request.body.contactName;
@@ -404,12 +402,14 @@ function registerCashierRoutes(app, deps) {
       return response.status(400).json({ error: "A sale is required" });
     }
 
-    // the address is two parts: a house number and street typed by the cashier
-    // (many spaces become one), and an area chosen from the administrator's list
-    if (typeof street !== "string") {
-      return response.status(400).json({ error: "Enter the house number and street (3 to 120 characters)." });
+    // the whole address is typed by the cashier, anywhere in the Philippines
+    // (many spaces become one)
+    const address = String(typedAddress || "").trim().replace(/\s+/g, " ");
+    if (address.length < 5 || address.length > 255) {
+      return response.status(400).json({
+        error: "Enter the delivery address: house no., street, barangay, city (5 to 255 characters)."
+      });
     }
-    const streetText = street.trim().replace(/\s+/g, " ");
 
     if (!String(contactPhone || "").trim()) {
       return response.status(400).json({ error: "A delivery needs a phone number the driver can call" });
@@ -431,32 +431,6 @@ function registerCashierRoutes(app, deps) {
     const phone = cleanPhone(contactPhone);
 
     try {
-      // The area must be one on the saved list. The list's own spelling is what
-      // is kept, so "antipolo city" typed in another letter case saves as listed.
-      const savedAreas = await readDeliveryAreas();
-      if (savedAreas.length === 0) {
-        return response.status(400).json({
-          error: "No delivery area is set. Ask the administrator to add one in System Admin › Receipt Maintenance."
-        });
-      }
-      const wantedArea = String(area || "").trim().toLowerCase();
-      // the saved area that matches what was typed (ignoring case), if any
-      let listedArea;
-      for (let areaIndex = 0; areaIndex < savedAreas.length; areaIndex++) {
-        if (savedAreas[areaIndex].trim().toLowerCase() === wantedArea) {
-          listedArea = savedAreas[areaIndex];
-          break;
-        }
-      }
-      if (!listedArea) {
-        return response.status(400).json({ error: "Choose a delivery area from the list." });
-      }
-      if (streetText.length < 3 || streetText.length > 120) {
-        return response.status(400).json({ error: "Enter the house number and street (3 to 120 characters)." });
-      }
-      // the street first, then the area, as one line of text
-      const address = streetText + ", " + listedArea;
-
       // checked before the delivery is made, so a bad pick never leaves a half-made delivery
       let driverName = null;
       if (driverId) {

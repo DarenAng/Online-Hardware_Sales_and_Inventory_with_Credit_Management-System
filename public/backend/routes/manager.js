@@ -1231,14 +1231,10 @@ function registerManagerRoutes(app, deps) {
     }
 
     // A manager reading the request later does not have the customer in front
-    // of them, so it always says why: not blank, and more than a word.
-    const MINIMUM_REQUEST_REASON = 5;
+    // of them, so it always says why: the reason is never blank.
     const why = typeof reason === "string" ? reason.trim().replace(/\s+/g, " ") : "";
-    if (why.length < MINIMUM_REQUEST_REASON) {
-      return response.status(400).json({
-        error: "Say why the limit should go up, so the manager deciding it can see the reason " +
-               "(at least " + MINIMUM_REQUEST_REASON + " characters)."
-      });
+    if (why === "") {
+      return response.status(400).json({ error: "A reason is required." });
     }
     if (why.length > 255) {
       return response.status(400).json({ error: "The reason is at most 255 characters." });

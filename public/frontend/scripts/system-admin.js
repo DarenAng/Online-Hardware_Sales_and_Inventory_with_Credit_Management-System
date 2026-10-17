@@ -82,7 +82,7 @@ function showMaintenance(event) {
     const panel = getDataPanel('admin-backups');
     if (panel) panel.open(); else loadAutoBackupState();
 }
-function showStoreSettings(event) { showPanel('panel-store', event); loadStoreSettingsForm(); loadDeliveryAreas(); }
+function showStoreSettings(event) { showPanel('panel-store', event); loadStoreSettingsForm(); }
 
 // one small request, read on opening; not re-read while a click is saving
 function showAccessControl(event) {
@@ -1382,7 +1382,9 @@ function renderFeatureMatrix() {
                 ' aria-label="' + escapeHtml(module + ' for ' + role.role_name) + '"' +
                 ' onchange="onModuleBoxChange(this)"></td>';
         }
-        rows += '<tr><td class="access-role">' + escapeHtml(role.role_name) + '</td>' + boxes + '</tr>';
+        // a click on the row (not on a box) opens Grant Access for this role
+        rows += '<tr class="row-clickable" onclick="onAccessRowClick(event, ' + Number(role.role_id) + ')">' +
+            '<td class="access-role">' + escapeHtml(role.role_name) + '</td>' + boxes + '</tr>';
     }
     table.querySelector('tbody').innerHTML = rows;
 
@@ -1473,6 +1475,141 @@ async function onModuleBoxChange(box) {
     if (saved === toChange.length) {
         notifySuccess(roleName + ': ' + module + (turnOn ? ' switched on.' : ' switched off.') +
             ' Their signed-in screens follow at once.', 'Saved');
+    }
+}
+
+// ---------- Grant Access: one role, one screen at a time ----------
+// The table above switches a whole module; this card lists every screen the
+// role's dashboard can draw, each with its own tick, so a role gets only the
+// screens it needs. Nothing is saved until Save Access is pressed.
+let grantTicks = {};   // screen key -> ticked in the card
+
+function onAccessRowClick(event, roleId) {
+    // a click on a box switches the module; it does not open the card
+    if (event.target.tagName === 'INPUT') return;
+    openGrantAccess(roleId);
+}
+
+// roleId: optional; the role to open on (a clicked row). Otherwise the first role.
+async function openGrantAccess(roleId) {
+    if (!featureMatrix) {
+        try {
+            featureMatrix = await apiGetScreenSwitches();
+        } catch (error) {
+            notifyOffline();
+            return;
+        }
+        renderFeatureMatrix();
+    }
+
+    const roles = featureMatrix.roles || [];
+    let options = '';
+    for (let i = 0; i < roles.length; i++) {
+        options += '<option value="' + roles[i].role_id + '"' +
+            (roles[i].role_id === roleId ? ' selected' : '') + '>' +
+            escapeHtml(roles[i].role_name) + '</option>';
+    }
+    document.getElementById('grant-role').innerHTML = options;
+
+    renderGrantScreens();
+    showModal('grant-modal');
+}
+
+// the role chosen in the card: { role_id, role_name }
+function grantRole() {
+    const roleId = Number(document.getElementById('grant-role').value);
+    const roles = featureMatrix.roles || [];
+    for (let i = 0; i < roles.length; i++) {
+        if (roles[i].role_id === roleId) return roles[i];
+    }
+    return null;
+}
+
+// every screen this role's dashboard can draw, under its module, ticked when it is on
+function renderGrantScreens() {
+    const box = document.getElementById('grant-screens');
+    const role = grantRole();
+    grantTicks = {};
+    if (!role) {
+        box.innerHTML = '<p class="detail-empty">There is no role to grant access to.</p>';
+        return;
+    }
+
+    const modules = featureModules();
+    let html = '';
+    for (let m = 0; m < modules.length; m++) {
+        const screens = moduleScreensFor(modules[m], role.role_name);
+        if (screens.length === 0) continue;
+
+        html += '<p class="grant-module">' + escapeHtml(modules[m]) + '</p>';
+        for (let s = 0; s < screens.length; s++) {
+            const feature = screens[s];
+            const isOn = featureState[feature.key + '|' + role.role_id] === true;
+            grantTicks[feature.key] = isOn;
+            html += '<label class="grant-line" id="grant-line-' + escapeHtml(feature.key) + '">' +
+                '<input type="checkbox"' + (isOn ? ' checked' : '') +
+                    ' onchange="onGrantTick(\'' + escapeHtml(feature.key) + '\', this.checked)">' +
+                '<span><span class="grant-name">' + escapeHtml(feature.name) + '</span>' +
+                '<span class="grant-desc">' + escapeHtml(feature.description || '') + '</span></span>' +
+                '</label>';
+        }
+    }
+    box.innerHTML = html || '<p class="detail-empty">The ' + escapeHtml(role.role_name) +
+        ' dashboard has no screens to switch.</p>';
+}
+
+// a tick that differs from what is saved is marked "(changed)"
+function onGrantTick(key, checked) {
+    grantTicks[key] = checked;
+    const role = grantRole();
+    const line = document.getElementById('grant-line-' + key);
+    if (line && role) {
+        line.classList.toggle('grant-changed', checked !== (featureState[key + '|' + role.role_id] === true));
+    }
+}
+
+// Saves only the ticks that changed, one screen at a time; each one goes in the audit trail.
+async function saveGrantAccess() {
+    const role = grantRole();
+    if (!role || featureSaving) return;
+
+    const toChange = [];
+    for (const key in grantTicks) {
+        if (grantTicks[key] !== (featureState[key + '|' + role.role_id] === true)) toChange.push(key);
+    }
+    if (toChange.length === 0) {
+        notifyInfo('Nothing was changed for ' + role.role_name + '.', 'Nothing to save');
+        return;
+    }
+
+    const button = document.getElementById('grant-save');
+    if (button) button.disabled = true;
+    featureSaving = true;
+    let saved = 0;
+    try {
+        for (let i = 0; i < toChange.length; i++) {
+            const key = toChange[i];
+            const response = await apiSetScreenSwitch(key, role.role_id, grantTicks[key]);
+            const body = await response.json();
+            if (!response.ok) {
+                if (!handleAuthFailure(response, body)) notifyError(body.error, 'Not saved');
+                break;
+            }
+            featureState[key + '|' + role.role_id] = grantTicks[key];
+            saved += 1;
+        }
+    } catch (error) {
+        notifyOffline();
+    } finally {
+        featureSaving = false;
+        if (button) button.disabled = false;
+        syncModuleBoxes();
+    }
+
+    if (saved === toChange.length) {
+        notifySuccess(role.role_name + ': ' + saved + (saved === 1 ? ' screen' : ' screens') +
+            ' changed. Their signed-in screens follow at once.', 'Access saved');
+        closeModal('grant-modal');
     }
 }
 
@@ -1797,6 +1934,14 @@ function buildBackupPanel() {
 
         match: function (file, query) {
             return prefixMatch([file.fileName], query);
+        },
+
+        // the Folder dropdown: Manual backups (Run Backup Now) or Automatic backups (the system's own)
+        filters: { folder: 'all' },
+        filter: function (file, filters) {
+            if (filters.folder === 'manual') return !file.automatic;
+            if (filters.folder === 'automatic') return file.automatic;
+            return true;
         },
 
         renderRow: function (file, index) {
@@ -2199,143 +2344,6 @@ async function loadStoreSettingsForm() {
 
     showStoreVerdict('');
     markFormClean(form, document.getElementById('store-save-btn'));
-}
-
-// ---------- Delivery Area: the places the shop delivers to ----------
-// The cashier can only pick from this list when making a delivery. Every add
-// or remove is saved at once (there is no Save button), so the list is shown
-// again from what the server answers. It is a plain list, not a table, so each
-// place can hold its own remove button.
-let deliveryAreas = [];
-const AREA_MIN_LENGTH = 3;
-const AREA_MAX_LENGTH = 150;
-
-async function loadDeliveryAreas() {
-    try {
-        const body = await apiGetDeliveryAreas();
-        deliveryAreas = body.areas || [];
-    } catch (error) {
-        // error.status is set when the server answered but said no (an older
-        // copy of the server, still running, does not know this list yet)
-        if (error.status) {
-            notifyError('The server answered but did not give the delivery areas. ' +
-                'Restart the server so it runs the latest version, then try again.', 'Delivery areas not read');
-        } else {
-            notifyOffline();
-        }
-        return;
-    }
-    renderDeliveryAreas();
-}
-
-function renderDeliveryAreas() {
-    const list = document.getElementById('area-list');
-    if (!list) return;
-
-    if (deliveryAreas.length === 0) {
-        list.innerHTML = '<li class="area-empty">No delivery area yet. ' +
-            'Deliveries cannot be made until at least one area is added.</li>';
-        return;
-    }
-
-    let html = '';
-    for (let index = 0; index < deliveryAreas.length; index++) {
-        const area = deliveryAreas[index];
-        html += '<li>' +
-            '<span class="area-text">' + escapeHtml(area) + '</span>' +
-            '<button type="button" class="btn btn-ghost btn-sm area-remove" title="Remove this area" ' +
-                'aria-label="Remove ' + escapeHtml(area) + '" onclick="removeDeliveryArea(' + index + ')">&times;</button>' +
-        '</li>';
-    }
-    list.innerHTML = html;
-}
-
-// While one add or remove is running, Add and every x are switched off, so a
-// second click cannot start another change before the first one is answered.
-let areaBusy = false;
-
-function setAreaBusy(busy) {
-    areaBusy = busy;
-
-    const button = document.getElementById('area-add-btn');
-    if (button) button.disabled = busy;
-    const removes = document.querySelectorAll('.area-remove');
-    for (let i = 0; i < removes.length; i++) {
-        removes[i].disabled = busy;
-    }
-}
-
-// Sends one change (add or remove) and shows the list the server answers with.
-// "send" starts the request. Gives back true when the server made the change.
-async function changeDeliveryArea(send, title) {
-    if (areaBusy) return false;
-    setAreaBusy(true);
-
-    let changed = false;
-    let refused = false;
-    try {
-        const response = await send();
-        const result = await response.json();
-
-        if (!response.ok) {
-            refused = true;
-            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not saved');
-        } else {
-            deliveryAreas = result.areas;
-            notifySuccess(result.message, title);
-            changed = true;
-        }
-    } catch (error) {
-        notifyOffline();
-    }
-
-    renderDeliveryAreas();
-    setAreaBusy(false);
-
-    // refused: another administrator may have changed the list, so read it again
-    if (refused) await loadDeliveryAreas();
-    return changed;
-}
-
-async function handleAddDeliveryArea(event) {
-    event.preventDefault();
-
-    const box = document.getElementById('area-input');
-    if (!box || areaBusy) return;
-
-    // many spaces become one, like the server does
-    const area = box.value.trim().replace(/\s+/g, ' ');
-
-    if (area.length < AREA_MIN_LENGTH || area.length > AREA_MAX_LENGTH) {
-        notifyError('A delivery area is ' + AREA_MIN_LENGTH + ' to ' + AREA_MAX_LENGTH + ' characters, ' +
-                    'such as Brgy. San Isidro, Antipolo City.', 'Not added');
-        box.focus();
-        return;
-    }
-    let alreadyThere = false;
-    for (let i = 0; i < deliveryAreas.length; i++) {
-        if (deliveryAreas[i].toLowerCase() === area.toLowerCase()) alreadyThere = true;
-    }
-    if (alreadyThere) {
-        notifyError(area + ' is already on the list.', 'Not added');
-        box.focus();
-        return;
-    }
-
-    const added = await changeDeliveryArea(function () {
-        return apiAddDeliveryArea(area);
-    }, 'Delivery area added');
-    if (added) box.value = '';
-    box.focus();
-}
-
-async function removeDeliveryArea(index) {
-    const area = deliveryAreas[index];
-    if (area === undefined) return;
-
-    await changeDeliveryArea(function () {
-        return apiRemoveDeliveryArea(area);
-    }, 'Delivery area removed');
 }
 
 // ---------- the header and footer lines: added, moved (header only) and removed here ----------

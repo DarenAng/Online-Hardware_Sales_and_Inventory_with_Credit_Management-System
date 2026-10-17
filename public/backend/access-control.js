@@ -166,6 +166,8 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/purchase-orders$/,                [CLERK, MANAGER]],
   ["GET",   /^\/api\/purchase-orders\/\d+\/items$/,    [CLERK, MANAGER]],
   ["GET",   /^\/api\/purchase-orders\/\d+\/document$/, [CLERK, MANAGER]],
+  // a received order beside what arrived: the clerk's Reference card
+  ["GET",   /^\/api\/purchase-orders\/\d+\/reference$/, [CLERK]],
   ["POST",  /^\/api\/purchase-orders$/,                [CLERK]],
   ["POST",  /^\/api\/purchase-orders\/\d+\/decide$/,   [MANAGER]],
   ["POST",  /^\/api\/purchase-orders\/\d+\/receive$/,  [CLERK]],
@@ -217,12 +219,6 @@ const ACCESS_RULES = [
   // every dashboard prints an invoice, so reading is open; changing is the administrator's
   ["GET",   /^\/api\/store-settings$/,                 SIGNED_IN],
   ["PUT",   /^\/api\/store-settings$/,                 [ADMIN]],
-  // where the shop delivers to: the administrator keeps the list, and whoever
-  // makes a delivery (cashier, manager) reads it to pick from
-  ["GET",   /^\/api\/delivery-areas$/,                 [ADMIN, MANAGER, CASHIER]],
-  // one area at a time, so two people changing the list never overwrite each other
-  ["POST",  /^\/api\/delivery-areas$/,                 [ADMIN]],
-  ["DELETE", /^\/api\/delivery-areas$/,                [ADMIN]],
 
   // --- notifications ---
   ["GET",   /^\/api\/notifications$/,                  SIGNED_IN],

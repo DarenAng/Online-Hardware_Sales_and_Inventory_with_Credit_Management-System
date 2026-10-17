@@ -268,15 +268,10 @@
                                            min="1" placeholder="Receipt number" style="max-width: 220px;" required>
                                 </div>
 
-                                <!-- MANDATORY REMARKS -- a sentence, not a word -->
                                 <div class="form-group">
-                                    <label for="return-reason">Remarks
-                                        <span class="label-hint">required &mdash; say what happened</span></label>
-                                    <textarea name="reason" id="return-reason" class="form-control" rows="3"
-                                              minlength="10" required
-                                              oninput="onReturnReasonInput()"
-                                              placeholder="Two tins arrived dented in the delivery and cannot be sold."></textarea>
-                                    <p class="reason-counter" id="reason-counter"></p>
+                                    <label for="return-reason">Reason <span class="label-hint">required</span></label>
+                                    <input type="text" name="reason" id="return-reason" class="form-control"
+                                           maxlength="255" placeholder="Wrong item" required>
                                 </div>
                                 <div class="form-footer">
                                     <button type="submit" class="btn btn-success">Issue Refund</button>
@@ -639,10 +634,8 @@
                     </div>
                     <div class="form-group">
                         <label for="limit-reason">Reason <span class="label-hint">required</span></label>
-                        <textarea id="limit-reason" name="reason" class="form-control" rows="3" maxlength="255"
-                                  oninput="renderLimitVerdict()"
-                                  placeholder="Regular contractor, pays on the 15th, needs cement for a job this week."></textarea>
-                        <p class="reason-counter" id="limit-counter"></p>
+                        <input type="text" id="limit-reason" name="reason" class="form-control" maxlength="255"
+                               oninput="renderLimitVerdict()" placeholder="Contractor">
                     </div>
                     <p class="delivery-verdict" id="limit-verdict"></p>
                 </form>
@@ -693,22 +686,13 @@
                         </div>
                     </div>
 
-                    <!-- the address is a place from the administrator's list (System Admin,
-                         Delivery Area) plus the house number and street typed here -->
-                    <div class="grid-2">
-                        <div class="form-group">
-                            <label for="dl-area">Delivery area</label>
-                            <select id="dl-area" name="area" class="form-control" required>
-                                <option value="">Choose an area</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="dl-street">House no. / Street</label>
-                            <input type="text" id="dl-street" name="street" class="form-control"
-                                   minlength="3" maxlength="120" placeholder="House no., street" required>
-                        </div>
+                    <!-- any address in the Philippines, typed in full -->
+                    <div class="form-group">
+                        <label for="dl-address">Delivery address</label>
+                        <input type="text" id="dl-address" name="address" class="form-control"
+                               minlength="5" maxlength="255"
+                               placeholder="House no., street, barangay, city, province" required>
                     </div>
-                    <p class="delivery-verdict is-stop" id="delivery-area-note"></p>
 
                     <div class="form-group">
                         <label for="dl-scheduled">Scheduled for</label>
@@ -736,8 +720,8 @@
 
                     <div class="form-group">
                         <label for="dl-remarks">Remarks <span class="label-hint">optional</span></label>
-                        <textarea id="dl-remarks" name="remarks" class="form-control" rows="2"
-                                  placeholder="Gate code, landmark, best time to arrive"></textarea>
+                        <input type="text" id="dl-remarks" name="remarks" class="form-control" maxlength="255"
+                               placeholder="Landmark">
                     </div>
 
                     <p class="delivery-verdict" id="delivery-verdict"></p>

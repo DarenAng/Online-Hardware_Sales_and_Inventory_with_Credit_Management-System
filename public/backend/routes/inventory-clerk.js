@@ -635,7 +635,7 @@ function registerInventoryRoutes(app, deps) {
     try {
       const rowsResult = await db.query(
         "SELECT po.po_id, po.status, po.order_date, " +
-        "po.confirmed_at, po.decision_note, " +
+        "po.confirmed_at, po.decision_note, po.received_at, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
         "po.supplier_ship_date, " +
         "rb.full_name AS raised_by, cb.full_name AS confirmed_by, " +
@@ -651,7 +651,7 @@ function registerInventoryRoutes(app, deps) {
         "LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id " +
         "LEFT JOIN staff cb ON cb.staff_id = po.confirmed_by_staff_id " +
         "LEFT JOIN purchase_order_items i ON i.po_id = po.po_id " +
-        "GROUP BY po.po_id, po.status, po.order_date, po.confirmed_at, po.decision_note, po.discount, " +
+        "GROUP BY po.po_id, po.status, po.order_date, po.confirmed_at, po.decision_note, po.received_at, po.discount, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
         "po.supplier_ship_date, rb.full_name, cb.full_name, " +
         "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, s.email " +
@@ -687,6 +687,94 @@ function registerInventoryRoutes(app, deps) {
     } catch (error) {
       console.error("PO items failed:", error.message);
       response.status(500).json({ error: error.message });
+    }
+  });
+
+  // The clerk's Reference card: a received order, each line with what was
+  // ordered beside what arrived. Receiving corrects the order's own lines to
+  // what arrived; the lines as they were ordered are the copy
+  // sp_receive_purchase_order kept in purchase_order_ordered_items. An order
+  // received before that copy was kept has none: "kept" is then false and
+  // every line's ordered figure is null.
+  app.get("/api/purchase-orders/:poId/reference", async function (request, response) {
+    const poId = Number(request.params.poId);
+    try {
+      const ordersResult = await db.query(
+        "SELECT po.po_id, po.status, po.order_date, po.confirmed_at, po.received_at, s.supplier_name, " +
+        "rb.full_name AS raised_by, cb.full_name AS confirmed_by, " +
+        "(SELECT st.full_name FROM audit_logs a JOIN staff st ON st.staff_id = a.staff_id " +
+        " WHERE a.action = 'PO_RECEIVED' AND a.details LIKE CONCAT('PO #', po.po_id, ' received%') " +
+        " ORDER BY a.log_id DESC LIMIT 1) AS received_by " +
+        "FROM purchase_orders po " +
+        "JOIN suppliers s ON s.supplier_id = po.supplier_id " +
+        "LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id " +
+        "LEFT JOIN staff cb ON cb.staff_id = po.confirmed_by_staff_id " +
+        "WHERE po.po_id = ?",
+        [poId]
+      );
+      const orders = ordersResult[0];
+      if (orders.length === 0) return response.status(404).json({ error: "That purchase order does not exist" });
+      const order = orders[0];
+      if (order.status !== "Received") {
+        return response.status(400).json({ error: "Purchase order #" + poId + " has not been received yet." });
+      }
+
+      // what was ordered (the copy) and what arrived (the corrected lines)
+      const orderedResult = await db.query(
+        "SELECT o.product_id, o.quantity, o.pack_name, o.pack_size, o.pack_count, " +
+        "p.product_name, u.unit_name " +
+        "FROM purchase_order_ordered_items o " +
+        "JOIN products p ON p.product_id = o.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "WHERE o.po_id = ? ORDER BY o.ordered_item_id",
+        [poId]
+      );
+      const ordered = orderedResult[0];
+      const receivedResult = await db.query(
+        "SELECT i.product_id, i.quantity, i.pack_name, i.pack_size, i.pack_count, " +
+        "p.product_name, u.unit_name " +
+        "FROM purchase_order_items i " +
+        "JOIN products p ON p.product_id = i.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "WHERE i.po_id = ? ORDER BY i.po_item_id",
+        [poId]
+      );
+      const received = receivedResult[0];
+
+      // one line per material: the ordered lines first, in their order, then
+      // anything that arrived without being ordered
+      const lines = [];
+      for (let i = 0; i < ordered.length; i++) {
+        lines.push({
+          product_id: ordered[i].product_id,
+          product_name: ordered[i].product_name,
+          unit_name: ordered[i].unit_name,
+          ordered: ordered[i],
+          received: null
+        });
+      }
+      for (let i = 0; i < received.length; i++) {
+        let line = null;
+        for (let j = 0; j < lines.length; j++) {
+          if (lines[j].product_id === received[i].product_id) line = lines[j];
+        }
+        if (line === null) {
+          line = {
+            product_id: received[i].product_id,
+            product_name: received[i].product_name,
+            unit_name: received[i].unit_name,
+            ordered: null,
+            received: null
+          };
+          lines.push(line);
+        }
+        line.received = received[i];
+      }
+
+      response.json({ order: order, kept: ordered.length > 0, lines: lines });
+    } catch (error) {
+      console.error("PO reference failed:", error.message);
+      response.status(500).json({ error: "Unable to open the purchase order" });
     }
   });
 
@@ -1410,13 +1498,13 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // Filing a return: a reason (a sentence) is compulsory. So is a disposition,
+  // Filing a return: a reason is compulsory. So is a disposition,
   // except on a refund from the counter, which the clerk inspects before it
   // is decided: a cashier never says where the goods go, whatever is sent.
   // A driver's refund at the customer's door is treated the same way.
   // restock is still accepted from older callers and mapped across.
   const RETURN_DISPOSITIONS = ["Return to Stock", "Write-Off"];
-  const MINIMUM_RETURN_REASON = 10;
+  const LONGEST_RETURN_REASON = 255;
 
   // A driver's figures may be off by rounding: a quantity is kept to three
   // decimals and an amount to cents, so these small margins are let through.
@@ -1501,11 +1589,11 @@ function registerInventoryRoutes(app, deps) {
     if (typeof reason === "string") {
       explanation = reason.trim();
     }
-    if (explanation.length < MINIMUM_RETURN_REASON) {
-      return response.status(400).json({
-        error: "Say what happened, in a sentence. A write-off queried three months " +
-               "from now has to be explainable from this line alone."
-      });
+    if (explanation === "") {
+      return response.status(400).json({ error: "A reason is required." });
+    }
+    if (explanation.length > LONGEST_RETURN_REASON) {
+      return response.status(400).json({ error: "The reason is at most " + LONGEST_RETURN_REASON + " characters." });
     }
 
     // A refund amount, when one is sent, is a real number of zero or more. A
@@ -1651,11 +1739,11 @@ function registerInventoryRoutes(app, deps) {
     if (typeof body.reason === "string") {
       explanation = body.reason.trim();
     }
-    if (explanation.length < MINIMUM_RETURN_REASON) {
-      return response.status(400).json({
-        error: "Say what happened, in a sentence. A write-off queried three months " +
-               "from now has to be explainable from this line alone."
-      });
+    if (explanation === "") {
+      return response.status(400).json({ error: "A reason is required." });
+    }
+    if (explanation.length > LONGEST_RETURN_REASON) {
+      return response.status(400).json({ error: "The reason is at most " + LONGEST_RETURN_REASON + " characters." });
     }
 
     // the items: each material once, with a quantity above zero

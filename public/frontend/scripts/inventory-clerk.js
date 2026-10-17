@@ -71,6 +71,10 @@ function showInventoryHome(event) {
 function showAdjust(event) {
     showInventoryPanel('panel-adjust', 'Stock Adjustment', event);
 
+    // Reference is its own switch in Access Control
+    const referenceButton = document.getElementById('adjust-reference');
+    if (referenceButton) referenceButton.hidden = !holdsFeature('po-reference');
+
     // the "Needs attention" list is drawn from the same material list, so it waits for it
     if (invLoaded) renderAttentionList();
     else attentionMessage('Loading materials...');
@@ -1793,9 +1797,7 @@ function showReportSections(type) {
     const form = document.getElementById('report-form');
     if (form) {
         form.elements.restock.value = type === 'Damaged' ? 'false' : 'true';
-        form.elements.reason.placeholder = missing
-            ? 'What did not arrive, and what the supplier or driver said'
-            : 'What happened to the item';
+        form.elements.reason.placeholder = missing ? 'Short delivery' : 'Cracked';
     }
 
     // the refund box shows on a refund or a plain return
@@ -1826,7 +1828,7 @@ async function startMissingReport(po, items, shortLines) {
     renderReportPoLines();
 
     if (form.elements.reason.value.trim() === '') {
-        form.elements.reason.value = 'Short on the delivery for purchase order #' + po.po_id + '.';
+        form.elements.reason.value = 'Short delivery';
     }
 }
 
@@ -2120,6 +2122,182 @@ function reportShortFromCheck() {
     closeModal('detail-modal');
     showDamageReport();
     startMissingReport(po, items, shortLines);
+}
+
+// ---------- Stock Adjustment: the Reference card ----------
+// A received purchase order, each line with what was ordered beside what
+// arrived, so the clerk can see the right goods came in. Read only.
+// choices: the received orders, newest first; data: the open order's reference
+let poReference = { poId: null, choices: [], data: null };
+
+// the card's one page; the card is still the open one while detailPages holds it
+let poReferencePageObject = null;
+
+// poId: optional; the order to open on (an Adjustment History entry names one).
+// Without it the card opens on the newest received order.
+async function openPoReference(poId) {
+    poReference = { poId: poId || null, choices: [], data: null };
+    poReferencePageObject = { label: 'Reference', body: '<p class="detail-note">Loading the purchase orders...</p>' };
+    openDetailModal('Purchase Order Reference', 'What was ordered beside what arrived', 'PO',
+        [poReferencePageObject],
+        '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Close</button>',
+        { wide: true, scroll: true });
+
+    try {
+        const rows = await apiGetPurchaseOrders();
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i].status === 'Received') poReference.choices.push(rows[i]);
+        }
+    } catch (error) {
+        redrawPoReference('<p class="detail-note detail-warn">The purchase orders could not be loaded. Close this and try again.</p>');
+        return;
+    }
+
+    if (!poReference.poId) poReference.poId = lastReceivedPoId(poReference.choices);
+    await onPoReferencePick(poReference.poId);
+}
+
+// the order counted in most lately; an order received before the day was kept
+// has none, and comes after every one that has it
+function lastReceivedPoId(orders) {
+    let latest = null;
+    for (let i = 0; i < orders.length; i++) {
+        const when = String(orders[i].received_at || '');
+        if (latest === null || when > String(latest.received_at || '')) latest = orders[i];
+    }
+    return latest ? latest.po_id : null;
+}
+
+// true while this card is the one open: it may have been closed, or another
+// card opened, while an order was loading
+function poReferenceIsOpen() {
+    const modal = document.getElementById('detail-modal');
+    return Boolean(modal && modal.classList.contains('open') &&
+                   poReferencePageObject && detailPages[0] === poReferencePageObject);
+}
+
+// draws the card's page again without opening it again
+function redrawPoReference(body) {
+    if (!poReferenceIsOpen()) return;
+    poReferencePageObject.body = body;
+    renderDetailPage();
+}
+
+async function onPoReferencePick(value) {
+    const poId = parseInt(value, 10);
+    poReference.poId = poId || null;
+    poReference.data = null;
+
+    if (poId) {
+        redrawPoReference(poReferencePage() + '<p class="detail-note">Opening the order...</p>');
+        try {
+            const data = await apiGetPurchaseOrderReference(poId);
+            // the card may have been closed, or another order chosen, while this one was loading
+            if (!poReferenceIsOpen() || poReference.poId !== poId) return;
+            poReference.data = data;
+        } catch (error) {
+            redrawPoReference(poReferencePage() + '<p class="detail-note detail-warn">That purchase order could not be opened. Try again.</p>');
+            return;
+        }
+    }
+    redrawPoReference(poReferencePage());
+}
+
+function poReferencePage() {
+    let options = '';
+    for (let i = 0; i < poReference.choices.length; i++) {
+        const po = poReference.choices[i];
+        const when = po.received_at
+            ? 'received ' + poWhen(po.received_at).slice(0, 10)
+            : 'ordered ' + poWhen(po.order_date).slice(0, 10);
+        options += '<option value="' + po.po_id + '"' + (po.po_id === poReference.poId ? ' selected' : '') + '>' +
+            escapeHtml('PO #' + po.po_id + ' · ' + po.supplier_name + ' · ' + when) +
+            '</option>';
+    }
+
+    let html = '<p class="detail-note">Compare what came in with what the purchase order asked for. ' +
+        'This only shows the order; it does not change the stock.</p>' +
+        '<div class="form-group">' +
+            '<label for="reference-po">Received purchase order</label>' +
+            '<select id="reference-po" class="form-control" onchange="onPoReferencePick(this.value)">' +
+                (poReference.choices.length === 0 ? '<option value="">No received orders</option>' : '') +
+                options +
+            '</select>' +
+        '</div>';
+
+    if (poReference.choices.length === 0) {
+        html += '<p class="detail-note">No purchase order has been received yet. ' +
+            'Press Receive on a purchase order when its delivery is counted in.</p>';
+    }
+    if (poReference.data) html += poReferenceDetails(poReference.data);
+    return html;
+}
+
+// the order's facts, then each material with what was ordered and what arrived
+function poReferenceDetails(data) {
+    const order = data.order;
+
+    let html = '<div class="detail-grid">' +
+        detailField('PO Number', 'PO #' + order.po_id) +
+        detailField('Supplier', escapeHtml(order.supplier_name)) +
+        detailField('Ordered', escapeHtml(poWhen(order.order_date))) +
+        detailField('Received', order.received_at
+            ? escapeHtml(poWhen(order.received_at))
+            : '<span class="muted">Not recorded</span>') +
+        detailField('Raised By', order.raised_by
+            ? escapeHtml(order.raised_by)
+            : '<span class="muted">Not recorded</span>') +
+        detailField('Received By', order.received_by
+            ? escapeHtml(order.received_by)
+            : '<span class="muted">Not recorded</span>') +
+        '</div>';
+
+    if (!data.kept) {
+        html += '<p class="detail-note detail-warn">This order was received before the system kept what was ordered, ' +
+            'so only what arrived is shown.</p>';
+    }
+
+    const rows = [];
+    let differs = 0;
+    for (let i = 0; i < data.lines.length; i++) {
+        const line = data.lines[i];
+        const check = poReferenceCheck(line, data.kept);
+        if (check.differs) differs++;
+
+        rows.push([
+            escapeHtml(line.product_name),
+            line.ordered ? escapeHtml(poQuantityText(line.ordered))
+                         : '<span class="muted">' + (data.kept ? 'Not ordered' : 'Not recorded') + '</span>',
+            line.received ? escapeHtml(poQuantityText(line.received))
+                          : escapeHtml(qtyText(0, line.unit_name || '')),
+            '<span class="recv-verdict ' + check.tone + '">' + escapeHtml(check.text) + '</span>'
+        ]);
+    }
+    html += detailTable(['Material', 'Ordered', 'Received', 'Check'], rows, [1, 2]);
+
+    if (data.kept) {
+        if (differs === 0) {
+            html += '<p class="check-summary is-complete">Complete: every item arrived as ordered.</p>';
+        } else {
+            html += '<p class="check-summary is-short">' + differs +
+                (differs === 1 ? ' item differs' : ' items differ') + ' from the order.</p>';
+        }
+    }
+    return html;
+}
+
+// What one line came to, in the material's own unit: as ordered, short,
+// more than ordered, not ordered at all, or did not arrive.
+function poReferenceCheck(line, kept) {
+    const unit = line.unit_name || '';
+    if (!kept) return { text: 'Arrived', tone: 'is-exact', differs: false };
+    if (!line.ordered) return { text: 'Not on the order', tone: 'is-over', differs: true };
+    if (!line.received) return { text: 'Did not arrive', tone: 'is-short', differs: true };
+
+    const difference = Number(line.received.quantity) - Number(line.ordered.quantity);
+    if (difference < 0) return { text: 'Short by ' + qtyText(-difference, unit), tone: 'is-short', differs: true };
+    if (difference > 0) return { text: qtyText(difference, unit) + ' more than ordered', tone: 'is-over', differs: true };
+    return { text: 'As ordered', tone: 'is-exact', differs: false };
 }
 
 // ---------- archive ----------
@@ -2784,11 +2962,18 @@ function openAdjustmentDetail(adjustmentId) {
         detailField('When', escapeHtml(a.created_at)) +
         '</div><p class="detail-note">' + escapeHtml(a.reason) + '</p>';
 
+    // stock that came in on a purchase order opens that order's Reference card,
+    // when Purchase Order Reference is switched on in Access Control
+    const fromOrder = /^Received on purchase order #(\d+)/.exec(a.reason || '');
+    const footActions = fromOrder && holdsFeature('po-reference')
+        ? '<button type="button" class="btn btn-ghost" onclick="openPoReference(' + Number(fromOrder[1]) + ')">Reference</button>'
+        : '';
+
     openDetailModal('Adjustment #' + a.adjustment_id, a.product_name + ' · ' + a.adjustment_type,
         'A' + a.adjustment_id, [
             { label: 'Change', body: change },
             { label: 'Reason', body: why }
-        ]);
+        ], footActions);
 }
 
 function openReturnDetail(returnId) {

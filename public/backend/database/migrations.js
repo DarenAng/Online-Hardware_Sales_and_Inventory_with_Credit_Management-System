@@ -722,19 +722,20 @@ async function migrateReceiptLayout() {
     [JSON.stringify(DEFAULT_RECEIPT_LAYOUT)]);
 }
 
-// The places the shop delivers to, kept in System Admin as a JSON list of
-// one-line texts in store_settings.delivery_areas. The cashier must pick one
-// when making a delivery. NULL means the list is empty, so no value is filled in.
-async function migrateDeliveryAreas() {
+// The delivery address is now typed in full by the cashier, anywhere in the
+// Philippines, so the list of delivery areas kept in System Admin is gone.
+// A database made while it was there still has store_settings.delivery_areas;
+// the column is dropped.
+async function migrateRemoveDeliveryAreas() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
       "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings' AND COLUMN_NAME = 'delivery_areas'",
     [DB_NAME]
   );
   const columns = columnsResult[0];
-  if (columns.length === 0) {
-    await db.query("ALTER TABLE store_settings ADD COLUMN delivery_areas TEXT NULL AFTER receipt_layout");
-    console.log("Added store_settings.delivery_areas for the places the shop delivers to.");
+  if (columns.length > 0) {
+    await db.query("ALTER TABLE store_settings DROP COLUMN delivery_areas");
+    console.log("Dropped store_settings.delivery_areas: delivery addresses are typed in full now.");
   }
 }
 
@@ -764,6 +765,54 @@ async function migratePasswordResets() {
       "       FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE ON UPDATE CASCADE\n" +
       "     )");
   console.log("Added the password_resets table for signing in again with a code sent by email.");
+}
+
+// The clerk's Reference card on Stock Adjustment. Receiving corrects a
+// purchase order's lines to what arrived; the lines as they were ordered are
+// copied into purchase_order_ordered_items first, and the day it was received
+// goes in purchase_orders.received_at. A database made before them has
+// neither, and receiving fails. sp_receive_purchase_order is loaded again
+// afterwards by loadProceduresIfMissing (see routinesAreOld). Orders received
+// before this have no copy: the card shows only what arrived for them.
+async function migrateOrderReference() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'received_at'",
+    [DB_NAME]
+  );
+  if (columnsResult[0].length === 0) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN received_at TIMESTAMP NULL AFTER decision_note");
+    // an order already received: the day its receipt went in the audit trail
+    await db.query(
+      "UPDATE purchase_orders po SET po.received_at = (\n" +
+        "       SELECT MAX(a.created_at) FROM audit_logs a\n" +
+        "        WHERE a.action = 'PO_RECEIVED' AND a.details LIKE CONCAT('PO #', po.po_id, ' received%'))\n" +
+        "     WHERE po.status = 'Received'");
+    console.log("Added purchase_orders.received_at, the day a delivery was counted in.");
+  }
+
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_order_ordered_items'",
+    [DB_NAME]
+  );
+  const tables = tablesResult[0];
+  if (tables.length > 0) return;
+
+  await db.query(
+    "CREATE TABLE purchase_order_ordered_items (\n" +
+      "       ordered_item_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+      "       po_id INT NOT NULL,\n" +
+      "       product_id INT NOT NULL,\n" +
+      "       quantity INT NOT NULL,\n" +
+      "       pack_name VARCHAR(20) NULL,\n" +
+      "       pack_size DECIMAL(12,3) NULL,\n" +
+      "       pack_count DECIMAL(12,3) NULL,\n" +
+      "       FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE CASCADE ON UPDATE CASCADE,\n" +
+      "       FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE\n" +
+      "     )");
+  console.log("Added the purchase_order_ordered_items table: a received order keeps what was ordered " +
+    "beside what arrived.");
 }
 
 // The supplier's answer to an approved order. The printed order (and the
@@ -1062,7 +1111,12 @@ const PROCEDURES_FILE = path.join(__dirname, "..", "..", "database", "2-RUN-SECO
 // payment" there is the reference a payment may not borrow). The business
 // rules carry a word of their own: "Discount cannot be negative" in
 // sp_create_sale_transaction (it also holds COD to the credit hold and
-// limit), and "Add and Remove need a quantity" in sp_adjust_stock. Every
+// limit), "Add and Remove need a quantity" in sp_adjust_stock, and "A reason
+// is required for every report" in sp_file_return_report (a one-word reason
+// is accepted; the old one asked for ten characters).
+// purchase_order_ordered_items and "received_at = NOW()" in
+// sp_receive_purchase_order mark the one that keeps the order's lines as they
+// were ordered and the day it was received. Every
 // procedure with an EXIT HANDLER must also have GET DIAGNOSTICS (checked once
 // for all of them below). A few small reads, and once file 2 has been loaded
 // they all pass, so nothing reloads on later starts.
@@ -1075,6 +1129,7 @@ async function routinesAreOld() {
     ["sp_file_return_report", "nothing to refund"],
     ["sp_file_return_report", "p_inside_batch"],
     ["sp_file_return_report", "is already received, so its delivery"],
+    ["sp_file_return_report", "A reason is required for every report"],
     ["sp_apply_late_penalties", "refunded_amount"],
     ["sp_record_credit_payment", "already paid in full"],
     ["sp_record_credit_payment", "p_qr_payment_id"],
@@ -1088,7 +1143,9 @@ async function routinesAreOld() {
     ["sp_restore_archive", "FOR UPDATE"],
     ["sp_create_delivery", "p_driver_staff_id"],
     ["sp_create_delivery", "DELIVERY_CREATED"],
-    ["sp_update_delivery_status", "FOR UPDATE"]
+    ["sp_update_delivery_status", "FOR UPDATE"],
+    ["sp_receive_purchase_order", "purchase_order_ordered_items"],
+    ["sp_receive_purchase_order", "received_at = NOW()"]
   ];
 
   const routinesResult = await db.query(
@@ -1097,7 +1154,7 @@ async function routinesAreOld() {
       "       AND ROUTINE_NAME IN ('sp_file_return_report', 'sp_apply_late_penalties', 'sp_record_credit_payment',\n" +
       "                            'sp_create_sale_transaction', 'sp_resolve_return_report', 'sp_archive_record',\n" +
       "                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',\n" +
-      "                            'sp_adjust_stock')",
+      "                            'sp_adjust_stock', 'sp_receive_purchase_order')",
     [DB_NAME]
   );
   const routines = routinesResult[0];
@@ -1233,8 +1290,9 @@ async function migrateDatabase(runSqlScript) {
   await migrateMissingReports();
   await migrateBankDetails();
   await migrateReceiptLayout();
-  await migrateDeliveryAreas();
+  await migrateRemoveDeliveryAreas();
   await migratePasswordResets();
+  await migrateOrderReference();
   await migrateSupplierResponse();
   await migrateSupplierQuote();
   await migrateQrPayments();

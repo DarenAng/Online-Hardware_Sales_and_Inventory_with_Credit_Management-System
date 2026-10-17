@@ -173,8 +173,6 @@ const notOwnAccount = accessControl.notOwnAccount;
 const storeSettings = require("./store-settings");
 const DEFAULT_STORE_SETTINGS = storeSettings.DEFAULT_STORE_SETTINGS;
 const receiptLayoutFrom = storeSettings.receiptLayoutFrom;
-const deliveryAreasFrom = storeSettings.deliveryAreasFrom;
-const readDeliveryAreas = storeSettings.readDeliveryAreas;
 
 const sharedSql = require("./shared-sql");
 const USER_SELECT = sharedSql.USER_SELECT;
@@ -397,8 +395,7 @@ const adminModule = registerAdminRoutes(app, {
   forgetProcedureCount: forgetProcedureCount, loadProceduresIfMissing: loadProceduresIfMissing,
   FEATURES: FEATURES, FEATURE_ROLES: FEATURE_ROLES, findFeature: findFeature,
   featuresOf: featuresOf, forgetFeatureOverrides: forgetFeatureOverrides,
-  receiptLayoutFrom: receiptLayoutFrom, HOLD_LIFTED_BY_MANAGER: HOLD_LIFTED_BY_MANAGER,
-  readDeliveryAreas: readDeliveryAreas, deliveryAreasFrom: deliveryAreasFrom
+  receiptLayoutFrom: receiptLayoutFrom, HOLD_LIFTED_BY_MANAGER: HOLD_LIFTED_BY_MANAGER
 });
 
 // ==========================================
@@ -432,7 +429,7 @@ const qrPayments = registerQrPaymentRoutes(app, {
 registerCashierRoutes(app, {
   db: db, getActorId: getActorId, DRIVER: DRIVER, CASHIER: CASHIER, isDateText: isDateText,
   SALE_CUSTOMER_SQL: SALE_CUSTOMER_SQL, phoneComplaint: phoneComplaint, cleanPhone: cleanPhone,
-  qrPayments: qrPayments, readDeliveryAreas: readDeliveryAreas
+  qrPayments: qrPayments
 });
 
 // ==========================================

@@ -165,12 +165,10 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- the bar is a sentence rather than a word
-    IF p_reason IS NULL OR CHAR_LENGTH(TRIM(p_reason)) < 10 THEN
+    -- every report keeps its reason
+    IF p_reason IS NULL OR TRIM(p_reason) = '' THEN
         SET p_status_code = 400;
-        SET p_message = CONCAT('Say what happened, in a sentence. ',
-                               'A write-off queried three months from now has to be ',
-                               'explainable from this line alone.');
+        SET p_message = 'A reason is required for every report.';
         LEAVE PROC_BODY;
     END IF;
 

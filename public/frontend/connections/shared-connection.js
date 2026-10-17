@@ -346,12 +346,6 @@ function apiGetStoreSettings() {
     return getJson('/api/store-settings');
 }
 
-// GET /api/delivery-areas -- { areas: [...] }, the places the shop delivers to
-function apiGetDeliveryAreas() {
-    return getJson('/api/delivery-areas');
-}
-
-
 // ==========================================
 // SALES AND CREDIT (cashier and manager)
 // ==========================================

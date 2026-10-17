@@ -1,45 +1,8 @@
 // ============================================================
-// store-settings.js -- the shop's default settings, receipt layout and delivery areas
+// store-settings.js -- the shop's default settings and receipt layout
 // Loaded by: server.js (handed on to the route files) and database/migrations.js.
 // Never sent to a browser.
 // ============================================================
-
-const db = require("./database/connection").db;
-
-// The text saved in store_settings.delivery_areas as a plain array of texts.
-// Nothing saved yet, or a value that is not a list, reads as an empty list.
-function deliveryAreasFrom(savedText) {
-  if (!savedText) {
-    return [];
-  }
-
-  try {
-    const list = JSON.parse(savedText);
-    if (Array.isArray(list)) {
-      // keep only the texts
-      const areas = [];
-      for (let i = 0; i < list.length; i++) {
-        if (typeof list[i] === "string") {
-          areas.push(list[i]);
-        }
-      }
-      return areas;
-    }
-  } catch (error) {
-    // not valid JSON: treat it as no list
-  }
-  return [];
-}
-
-// The saved delivery areas, read from the database.
-async function readDeliveryAreas() {
-  const result = await db.query("SELECT delivery_areas FROM store_settings WHERE setting_id = 1");
-  const rows = result[0];
-  if (rows.length === 0) {
-    return [];
-  }
-  return deliveryAreasFrom(rows[0].delivery_areas);
-}
 
 // Who the shop is and how it is registered. Above the 3,000,000 threshold a
 // shop is VAT-registered with 12% inside its prices; below it charges no VAT.
@@ -147,7 +110,5 @@ function receiptLayoutFrom(raw) {
 module.exports = {
   DEFAULT_STORE_SETTINGS: DEFAULT_STORE_SETTINGS,
   DEFAULT_RECEIPT_LAYOUT: DEFAULT_RECEIPT_LAYOUT,
-  receiptLayoutFrom: receiptLayoutFrom,
-  deliveryAreasFrom: deliveryAreasFrom,
-  readDeliveryAreas: readDeliveryAreas
+  receiptLayoutFrom: receiptLayoutFrom
 };

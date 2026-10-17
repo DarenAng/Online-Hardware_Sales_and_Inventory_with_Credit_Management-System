@@ -31,6 +31,11 @@ function apiSaveReorderPoint(productId, reorderPoint) {
     return sendJson('/api/inventory/reorder/' + productId, 'PUT', { reorderPoint: reorderPoint });
 }
 
+// GET /api/purchase-orders/:id/reference -- a received order: what was ordered beside what arrived
+function apiGetPurchaseOrderReference(poId) {
+    return getJson('/api/purchase-orders/' + poId + '/reference');
+}
+
 // POST /api/returns/batch -- file one report for several items (or goods missing from a delivery)
 function apiFileReportItems(data) {
     return sendJson('/api/returns/batch', 'POST', data);

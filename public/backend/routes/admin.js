@@ -80,8 +80,6 @@ function registerAdminRoutes(app, deps) {
   const forgetFeatureOverrides = deps.forgetFeatureOverrides;
   const receiptLayoutFrom = deps.receiptLayoutFrom;
   const HOLD_LIFTED_BY_MANAGER = deps.HOLD_LIFTED_BY_MANAGER;
-  const readDeliveryAreas = deps.readDeliveryAreas;
-  const deliveryAreasFrom = deps.deliveryAreasFrom;
 
   // the first name, middle name and last name, checked in that order; the
   // sentence about the first bad one, or null when all three are letters only
@@ -2769,129 +2767,6 @@ function registerAdminRoutes(app, deps) {
       console.error("Save store settings failed:", error.message);
       response.status(500).json({ error: "Unable to save the store settings" });
     }
-  });
-
-  // ==========================================
-  // DELIVERY AREAS -- the places the shop delivers to. The administrator keeps
-  // the list (System Admin, Receipt Maintenance); the cashier's delivery form
-  // reads it, and POST /api/deliveries refuses an address outside it.
-  // ==========================================
-  const AREA_MIN_LENGTH = 3;
-  const AREA_MAX_LENGTH = 150;
-  const AREA_MAX_COUNT = 200;
-
-  app.get("/api/delivery-areas", async function (request, response) {
-    try {
-      response.json({ areas: await readDeliveryAreas() });
-    } catch (error) {
-      console.error("Delivery areas failed:", error.message);
-      response.status(500).json({ error: "Unable to read the delivery areas" });
-    }
-  });
-
-  // Adds or removes ONE area. The list is not sent whole: two people (or two
-  // quick clicks) changing it at once would overwrite each other. Instead the
-  // saved list is read with its row locked (FOR UPDATE), changed, and saved
-  // inside one transaction, so the second change waits for the first and then
-  // works on the list the first one left.
-  async function changeDeliveryAreas(request, response, adding) {
-    const sent = request.body && request.body.area;
-    if (typeof sent !== "string") {
-      return response.status(400).json({ error: "The delivery area was not understood." });
-    }
-
-    // trimmed, and many spaces become one
-    const area = sent.trim().replace(/\s+/g, " ");
-    if (adding && (area.length < AREA_MIN_LENGTH || area.length > AREA_MAX_LENGTH)) {
-      return response.status(400).json({
-        error: "A delivery area is " + AREA_MIN_LENGTH + " to " + AREA_MAX_LENGTH + " characters, such as " +
-               "\"Brgy. San Isidro, Antipolo City\"."
-      });
-    }
-    if (area === "") {
-      return response.status(400).json({ error: "Say which delivery area to remove." });
-    }
-
-    let connection = null;
-    try {
-      connection = await db.getConnection();
-      await connection.beginTransaction();
-
-      const rowsResult = await connection.query(
-        "SELECT delivery_areas FROM store_settings WHERE setting_id = 1 FOR UPDATE"
-      );
-      const rows = rowsResult[0];
-
-      // the reason this change is refused, if it is
-      let refusal = null;
-      let after = [];
-
-      if (rows.length === 0) {
-        refusal = { status: 500, error: "The store settings are not set up yet, so nothing was saved." };
-      } else {
-        const before = deliveryAreasFrom(rows[0].delivery_areas);
-        // the same place in a different letter case is the same place
-        let position = -1;
-        for (let i = 0; i < before.length; i++) {
-          if (before[i].toLowerCase() === area.toLowerCase()) {
-            position = i;
-            break;
-          }
-        }
-
-        if (adding && position !== -1) {
-          refusal = { status: 400, error: "\"" + area + "\" is already on the list." };
-        } else if (adding && before.length >= AREA_MAX_COUNT) {
-          refusal = { status: 400, error: "There can be at most " + AREA_MAX_COUNT + " delivery areas." };
-        } else if (!adding && position === -1) {
-          refusal = { status: 404, error: "\"" + area + "\" is not on the list. It may already have been removed." };
-        } else if (adding) {
-          after = before.concat([area]);
-        } else {
-          // every area except the one at this position
-          after = [];
-          for (let i = 0; i < before.length; i++) {
-            if (i !== position) after.push(before[i]);
-          }
-        }
-      }
-
-      if (refusal) {
-        await connection.rollback();
-        return response.status(refusal.status).json({ error: refusal.error });
-      }
-
-      await connection.query(
-        "UPDATE store_settings SET delivery_areas = ?, updated_by_staff_id = ? WHERE setting_id = 1",
-        [JSON.stringify(after), getActorId(request)]
-      );
-      await connection.commit();
-
-      if (adding) {
-        await writeAuditLog(request, "CREATE_DELIVERY_AREA", "Delivery area added: " + area, { area: area });
-      } else {
-        await writeAuditLog(request, "REMOVE_DELIVERY_AREA", "Delivery area removed: " + area, { area: area });
-      }
-
-      response.json({ message: adding ? "Delivery area added." : "Delivery area removed.", areas: after });
-    } catch (error) {
-      console.error("Change delivery areas failed:", error.message);
-      // a half-done transaction must not keep the row locked
-      if (connection) {
-        try { await connection.rollback(); } catch (rollbackError) { /* already over */ }
-      }
-      response.status(500).json({ error: "Unable to save the delivery areas" });
-    } finally {
-      if (connection) connection.release();
-    }
-  }
-
-  app.post("/api/delivery-areas", requireRole(ADMIN), function (request, response) {
-    return changeDeliveryAreas(request, response, true);
-  });
-
-  app.delete("/api/delivery-areas", requireRole(ADMIN), function (request, response) {
-    return changeDeliveryAreas(request, response, false);
   });
 
   return {
