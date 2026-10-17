@@ -806,7 +806,7 @@ function registerManagerRoutes(app, deps) {
       "IF(sa.reason IS NULL OR sa.reason = '', '', CONCAT(' - ', sa.reason))) " +
       "FROM stock_adjustments sa JOIN products pr ON pr.product_id = sa.product_id " +
       "UNION ALL " +
-      "SELECT 'DELIVERY', COALESCE(d.booked_date, d.scheduled_date, d.updated_at), d.delivery_staff_id, d.delivery_id, " +
+      "SELECT 'DELIVERY', COALESCE(d.created_date, d.scheduled_date, d.updated_at), d.delivery_staff_id, d.delivery_id, " +
       "CONCAT('Sale #', d.sale_id, ' to ', " +
       "COALESCE(NULLIF(d.contact_name, ''), CONCAT(c.first_name, ' ', c.last_name), " +
       "NULLIF(s.walk_in_name, ''), 'the customer'), " +

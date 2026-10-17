@@ -550,6 +550,32 @@ async function migrateCashierRemarks() {
   console.log("Added deliveries.cashier_remarks to keep the cashier's note apart from status notes.");
 }
 
+// A delivery is created from a sale at the counter, so the day it was written
+// up is deliveries.created_date and its audit action is DELIVERY_CREATED.
+// An older database calls them booked_date and DELIVERY_BOOKED: rename the
+// column and the old audit rows. sp_create_delivery is loaded again afterwards
+// by loadProceduresIfMissing (see routinesAreOld).
+async function migrateDeliveryCreatedDate() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'deliveries'\n" +
+      "       AND COLUMN_NAME IN ('created_date', 'booked_date')",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.indexOf("booked_date") !== -1 && names.indexOf("created_date") === -1) {
+    await db.query("ALTER TABLE deliveries RENAME COLUMN booked_date TO created_date");
+    console.log("Renamed deliveries.booked_date to created_date.");
+  }
+
+  const auditResult = await db.query(
+    "UPDATE audit_logs SET action = 'DELIVERY_CREATED' WHERE action = 'DELIVERY_BOOKED'");
+  const changed = auditResult[0].affectedRows;
+  if (changed > 0) {
+    console.log("Renamed " + changed + " audit trail entries from DELIVERY_BOOKED to DELIVERY_CREATED.");
+  }
+}
+
 // The proprietor's name on the invoice head. A database made before it
 // has no column, and sp_update_store_settings fails.
 async function migrateProprietorName() {
@@ -1031,7 +1057,7 @@ const PROCEDURES_FILE = path.join(__dirname, "..", "..", "database", "2-RUN-SECO
 // sp_resolve_return_report (and "v_type = 'Missing'", which closes a report of
 // goods missing from a delivery), p_inside_batch in sp_file_return_report (it
 // can file one item of a many-item report), "refund instead" in sp_archive_record,
-// p_driver_staff_id and p_created_date in sp_create_delivery, and p_qr_payment_id in
+// p_driver_staff_id and DELIVERY_CREATED in sp_create_delivery, and p_qr_payment_id in
 // sp_create_sale_transaction and sp_record_credit_payment ("kept for the down
 // payment" there is the reference a payment may not borrow). The business
 // rules carry a word of their own: "Discount cannot be negative" in
@@ -1061,7 +1087,7 @@ async function routinesAreOld() {
     ["sp_archive_record", "refund instead"],
     ["sp_restore_archive", "FOR UPDATE"],
     ["sp_create_delivery", "p_driver_staff_id"],
-    ["sp_create_delivery", "p_created_date"],
+    ["sp_create_delivery", "DELIVERY_CREATED"],
     ["sp_update_delivery_status", "FOR UPDATE"]
   ];
 
@@ -1201,6 +1227,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateLatePenalties();
   await migrateRefundedAmount();
   await migrateCashierRemarks();
+  await migrateDeliveryCreatedDate();
   await migrateProprietorName();
   await migrateReturnInspection();
   await migrateMissingReports();

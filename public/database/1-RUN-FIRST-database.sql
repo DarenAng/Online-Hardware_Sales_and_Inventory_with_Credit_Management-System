@@ -437,7 +437,7 @@ CREATE TABLE deliveries (
     -- overwritten by the driver's or manager's latest status note
     cashier_remarks TEXT NULL,
     -- the day it was written up, kept apart from the day it is meant to arrive
-    booked_date DATE NULL,
+    created_date DATE NULL,
     -- "Tuesday 2pm", not "Tuesday": the hour matters when moving a delivery
     scheduled_date DATETIME NULL,
     delivered_at TIMESTAMP NULL,
@@ -1336,7 +1336,7 @@ INSERT INTO credit_payments (customer_id, sale_id, amount, payment_method, refer
 
 UPDATE sales SET is_archived = TRUE, archived_at = DATE_ADD(sale_date, INTERVAL 40 MINUTE), archived_by_staff_id = 2 WHERE sale_id IN (62, 68);
 
-INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, contact_name, contact_phone, status, remarks, booked_date, scheduled_date, delivered_at, is_archived, archived_at, archived_by_staff_id) VALUES
+INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, contact_name, contact_phone, status, remarks, created_date, scheduled_date, delivered_at, is_archived, archived_at, archived_by_staff_id) VALUES
 (13, 5, 'Brgy. Bunducan, Nasugbu, Batangas', 'Arturo Salazar', '0978-574-6318', 'Delivered', 'Rescheduled by customer', '2026-03-24', '2026-03-27 13:00:17', '2026-03-27 14:18:17', TRUE, '2026-09-12 02:00:00', NULL),
 (19, 5, 'Brgy. Dayap, Nasugbu, Batangas', 'Gerardo Lumbao', '0931-216-7099', 'Delivered', NULL, '2026-03-31', '2026-04-02 09:00:44', '2026-04-02 10:10:44', TRUE, '2026-09-12 02:00:00', NULL),
 (21, 5, 'Brgy. Kaylaway, Nasugbu, Batangas', 'Dominador Torres', '0995-376-8737', 'Failed', 'Deliver before noon', '2026-04-04', '2026-04-07 10:00:58', NULL, FALSE, NULL, NULL),

@@ -3400,14 +3400,14 @@ PROC_BODY: BEGIN
     END IF;
 
     INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, contact_name, contact_phone,
-                            status, remarks, cashier_remarks, booked_date, scheduled_date)
+                            status, remarks, cashier_remarks, created_date, scheduled_date)
     VALUES (p_sale_id, p_driver_staff_id, p_address, v_contact_name, v_contact_phone,
             'Pending', p_remarks, p_remarks, v_created, p_scheduled_date);
 
     SET p_delivery_id = LAST_INSERT_ID();
 
     INSERT INTO audit_logs (staff_id, action, action_type, details)
-    VALUES (p_staff_id, 'DELIVERY_BOOKED', 'CREATE', CONCAT('Delivery #', p_delivery_id, ' for sale #', p_sale_id));
+    VALUES (p_staff_id, 'DELIVERY_CREATED', 'CREATE', CONCAT('Delivery #', p_delivery_id, ' for sale #', p_sale_id));
 
     INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)
     VALUES (5, 'Delivery', CONCAT('Delivery #', p_delivery_id, ' created'),
