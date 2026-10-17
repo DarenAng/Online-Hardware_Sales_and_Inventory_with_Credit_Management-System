@@ -1899,8 +1899,9 @@ function renderAutoBackupCard(auto, procedures) {
         return;
     }
 
-    // missing stored procedures outrank anything this card would say about backups
-    if (procedures && procedures.loaded < procedures.expected) {
+    // missing stored procedures outrank anything this card would say about backups;
+    // a count the server did not give (null) is not a reason to warn
+    if (procedures && typeof procedures.loaded === 'number' && procedures.loaded < procedures.expected) {
         card.className = 'card auto-backup is-bad';
         state.textContent = 'Read this';
         text.textContent = 'Only ' + procedures.loaded + ' of ' + procedures.expected + ' stored procedures are loaded, ' +

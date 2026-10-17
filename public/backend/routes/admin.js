@@ -2395,6 +2395,11 @@ function registerAdminRoutes(app, deps) {
       }
       const lastError = await backupStore.readError();
 
+      // null when this copy of the server has not counted them yet (a fresh
+      // start on Vercel, or just after a restore), so count them now
+      let proceduresLoaded = proceduresLoadedCount();
+      if (proceduresLoaded === null) proceduresLoaded = await countProcedures();
+
       response.json({
         files: files,
         auto: {
@@ -2416,7 +2421,7 @@ function registerAdminRoutes(app, deps) {
         },
         // so the screen can say the one thing that stops every write
         procedures: {
-          loaded: proceduresLoadedCount(),
+          loaded: proceduresLoaded,
           expected: EXPECTED_PROCEDURES
         }
       });
