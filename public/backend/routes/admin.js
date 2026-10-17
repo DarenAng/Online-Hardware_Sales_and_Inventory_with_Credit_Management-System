@@ -1616,9 +1616,29 @@ function registerAdminRoutes(app, deps) {
 
   // A DEFINER names a MySQL account that may not exist on another computer,
   // so it is removed. Example: "DEFINER=`root`@`localhost` " -> ""
+  // A procedure made in ANSI mode (Aiven) has DEFINER="root"@"localhost" instead.
   function stripDefiner(sql) {
-    // matches DEFINER=`user`@`host` and any spaces after it
-    return String(sql).replace(/DEFINER\s*=\s*`[^`]*`@`[^`]*`\s*/gi, "");
+    // matches DEFINER=`user`@`host` or DEFINER="user"@"host", and any spaces after it
+    return String(sql).replace(/DEFINER\s*=\s*(`[^`]*`|"[^"]*")@(`[^`]*`|"[^"]*")\s*/gi, "");
+  }
+
+  // MySQL on Aiven runs in ANSI mode, and in that mode SHOW CREATE TABLE writes
+  // names in "double quotes" instead of `backticks`. A restore then reads
+  // "audit_logs" as text and stops with a syntax error. So the backup turns
+  // ANSI and ANSI_QUOTES off on its own connection, and MySQL writes backticks,
+  // which every MySQL reads. Returns the mode it replaced, to be put back.
+  async function turnOffAnsiQuotes(connection) {
+    const rowsResult = await connection.query("SELECT @@SESSION.sql_mode AS mode");
+    const oldMode = rowsResult[0][0].mode;
+    const parts = String(oldMode).split(",");
+    const kept = [];
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] !== "" && parts[i] !== "ANSI" && parts[i] !== "ANSI_QUOTES") {
+        kept.push(parts[i]);
+      }
+    }
+    await connection.query("SET SESSION sql_mode = ?", [kept.join(",")]);
+    return oldMode;
   }
 
   // Writes the whole database to one .sql file. Pass AUTO_PREFIX for a rotating one.
@@ -1639,7 +1659,13 @@ function registerAdminRoutes(app, deps) {
 
     let rowTotal = 0;
 
+    // the SHOW CREATE statements run on this one connection, with backticks on
+    const showConnection = await db.getConnection();
+    let oldMode = null;
+
     try {
+      oldMode = await turnOffAnsiQuotes(showConnection);
+
       await write(
         "-- Lucelyn Hardware - full database backup\n" +
         "-- Database : " + DB_NAME + "\n" +
@@ -1660,7 +1686,7 @@ function registerAdminRoutes(app, deps) {
 
       for (let t = 0; t < tables.length; t++) {
         const table = tables[t];
-        const createdRowsResult = await db.query("SHOW CREATE TABLE " + sqlName(table));
+        const createdRowsResult = await showConnection.query("SHOW CREATE TABLE " + sqlName(table));
         const createdRows = createdRowsResult[0];
         const created = createdRows[0];
         await write("-- ----------------------------------------\n");
@@ -1718,7 +1744,7 @@ function registerAdminRoutes(app, deps) {
 
       for (let i = 0; i < views.length; i++) {
         const view = views[i];
-        const createdRowsResult = await db.query("SHOW CREATE VIEW " + sqlName(view));
+        const createdRowsResult = await showConnection.query("SHOW CREATE VIEW " + sqlName(view));
         const createdRows = createdRowsResult[0];
         const created = createdRows[0];
         await write("-- View: " + view + "\n");
@@ -1733,11 +1759,17 @@ function registerAdminRoutes(app, deps) {
 
         for (let i = 0; i < procedures.length; i++) {
           const procedure = procedures[i];
-          const createdRowsResult = await db.query("SHOW CREATE PROCEDURE " + sqlName(procedure));
+          const createdRowsResult = await showConnection.query("SHOW CREATE PROCEDURE " + sqlName(procedure));
           const createdRows = createdRowsResult[0];
           const created = createdRows[0];
+          // A procedure keeps the sql_mode it was made in, so one made on Aiven
+          // still comes back as CREATE PROCEDURE "sp_name"(...; its name is put
+          // in backticks here (the body is kept as it was written).
+          // matches CREATE PROCEDURE followed by the name in double quotes
+          const definition = stripDefiner(created["Create Procedure"])
+            .replace(/^CREATE\s+PROCEDURE\s+"[^"]*"/i, "CREATE PROCEDURE " + sqlName(procedure));
           await write("DROP PROCEDURE IF EXISTS " + sqlName(procedure) + " //\n");
-          await write(stripDefiner(created["Create Procedure"]) + " //\n\n");
+          await write(definition + " //\n\n");
         }
 
         await write("DELIMITER ;\n\n");
@@ -1747,6 +1779,12 @@ function registerAdminRoutes(app, deps) {
     } catch (error) {
       await out.abandon();
       throw error;
+    } finally {
+      // the connection goes back to the pool with the mode it came with
+      if (oldMode !== null) {
+        await showConnection.query("SET SESSION sql_mode = ?", [oldMode]).catch(function () {});
+      }
+      showConnection.release();
     }
 
     // close the file (or save the row) and wait until it is done
@@ -1783,11 +1821,26 @@ function registerAdminRoutes(app, deps) {
       throw new Error("That file contains no SQL statements.");
     }
 
+    // Backups taken on Aiven before turnOffAnsiQuotes (above) was added have
+    // their names in "double quotes": CREATE TABLE "audit_logs" ( "log_id" ...
+    // Those files are read with ANSI_QUOTES on, so they still restore.
+    // matches CREATE TABLE followed by a name in double quotes
+    const usesDoubleQuotes = /CREATE TABLE\s+"/i.test(sql);
+
     const connection = await db.getConnection();
     restoreInProgress = true;
 
+    // the file changes sql_mode; the connection goes back to the pool with the mode it came with
+    let oldMode = null;
+
     try {
+      const modeResult = await connection.query("SELECT @@SESSION.sql_mode AS mode");
+      oldMode = modeResult[0][0].mode;
+
       await connection.query("SET FOREIGN_KEY_CHECKS = 0");
+      if (usesDoubleQuotes) {
+        await connection.query("SET SESSION sql_mode = CONCAT(@@SESSION.sql_mode, ',ANSI_QUOTES')");
+      }
 
       for (let j = 0; j < statements.length; j++) {
         const statement = statements[j];
@@ -1795,12 +1848,21 @@ function registerAdminRoutes(app, deps) {
         // matches a statement that starts with the word USE, in any letter case
         if (/^use[\s`]/i.test(statement)) continue;
         await connection.query(statement);
+
+        // the file's own SET SQL_MODE line would turn ANSI_QUOTES off again
+        // matches a statement that starts with SET SQL_MODE or SET SESSION SQL_MODE
+        if (usesDoubleQuotes && /^set\s+(session\s+)?sql_mode\s*=/i.test(statement)) {
+          await connection.query("SET SESSION sql_mode = CONCAT(@@SESSION.sql_mode, ',ANSI_QUOTES')");
+        }
       }
 
       await connection.query("SET FOREIGN_KEY_CHECKS = 1");
       return statements.length;
     } finally {
       restoreInProgress = false;
+      if (oldMode !== null) {
+        await connection.query("SET SESSION sql_mode = ?", [oldMode]).catch(function () {});
+      }
       connection.release();
     }
   }
