@@ -292,7 +292,7 @@ function showQueuedCards() {
 
 // One alert, laid out like a mail: subject, sender and time, then the message.
 function openNotification(id) {
-    const n = invNotifications.find((item) => String(item.notification_id) === String(id));
+    const n = findNotificationById(id);
     if (!n) return;
 
     const tone = NOTIF_TONE[n.notif_type] || 'info';
