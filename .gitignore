@@ -20,6 +20,7 @@ mail-password.txt
 
 # dated backups written by the Backup & Recovery screen
 backups/*.sql
+backups/**/*.sql
 backups/auto-backup.json
 
 # paper drafts
