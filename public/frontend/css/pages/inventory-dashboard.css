@@ -511,3 +511,9 @@ td.cell-num .stock-level { margin-left: auto; }
     .report-line.has-refund { grid-template-columns: 1fr; gap: 8px; }
     .report-line .recv-qty { max-width: none; }
 }
+
+/* Purchase Order Reference: the received orders, listed in full; the open one is marked */
+.po-pick-head { margin: 4px 0 6px; font-size: 13px; font-weight: 600; color: var(--steel-soft); }
+.po-pick-list { max-height: 240px; overflow-y: auto; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 6px; }
+.po-pick-list tr.is-picked td { background: var(--go-dim); font-weight: 600; }
+.po-pick-mark { font-size: 12px; font-weight: 600; color: var(--go); }

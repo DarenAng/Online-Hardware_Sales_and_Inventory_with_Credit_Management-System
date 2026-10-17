@@ -2136,6 +2136,10 @@ function redrawPoReference(body) {
     if (!poReferenceIsOpen()) return;
     poReferencePageObject.body = body;
     renderDetailPage();
+
+    // the list scrolls on its own; keep the open order's row in view
+    const picked = document.querySelector('.po-pick-list tr.is-picked');
+    if (picked) picked.scrollIntoView({ block: 'nearest' });
 }
 
 async function onPoReferencePick(value) {
@@ -2158,27 +2162,34 @@ async function onPoReferencePick(value) {
     redrawPoReference(poReferencePage());
 }
 
+// The received orders are listed in full so every one can be seen at once;
+// the open one is marked, and clicking a row opens that order below the list.
 function poReferencePage() {
-    let options = '';
+    let rows = '';
     for (let i = 0; i < poReference.choices.length; i++) {
         const po = poReference.choices[i];
+        const picked = po.po_id === poReference.poId;
         const when = po.received_at
-            ? 'received ' + poWhen(po.received_at).slice(0, 10)
-            : 'ordered ' + poWhen(po.order_date).slice(0, 10);
-        options += '<option value="' + po.po_id + '"' + (po.po_id === poReference.poId ? ' selected' : '') + '>' +
-            escapeHtml('PO #' + po.po_id + ' · ' + po.supplier_name + ' · ' + when) +
-            '</option>';
+            ? poWhen(po.received_at).slice(0, 10)
+            : '<span class="muted">Not recorded</span>';
+        rows += '<tr class="row-clickable' + (picked ? ' is-picked' : '') + '" ' +
+                'onclick="onPoReferencePick(' + po.po_id + ')">' +
+            '<td>PO #' + po.po_id + '</td>' +
+            '<td>' + escapeHtml(po.supplier_name) + '</td>' +
+            '<td>' + when + '</td>' +
+            '<td>' + (picked ? '<span class="po-pick-mark">Showing</span>' : '') + '</td>' +
+            '</tr>';
     }
 
     let html = '<p class="detail-note">Compare what came in with what the purchase order asked for. ' +
-        'This only shows the order; it does not change the stock.</p>' +
-        '<div class="form-group">' +
-            '<label for="reference-po">Received purchase order</label>' +
-            '<select id="reference-po" class="form-control" onchange="onPoReferencePick(this.value)">' +
-                (poReference.choices.length === 0 ? '<option value="">No received orders</option>' : '') +
-                options +
-            '</select>' +
-        '</div>';
+        'This only shows the order; it does not change the stock.</p>';
+
+    if (poReference.choices.length > 0) {
+        html += '<p class="po-pick-head">Received purchase orders</p>' +
+            '<div class="table-responsive po-pick-list"><table class="mini-table">' +
+            '<thead><tr><th>PO Number</th><th>Supplier</th><th>Received</th><th></th></tr></thead>' +
+            '<tbody>' + rows + '</tbody></table></div>';
+    }
 
     if (poReference.choices.length === 0) {
         html += '<p class="detail-note">No purchase order has been received yet. ' +
