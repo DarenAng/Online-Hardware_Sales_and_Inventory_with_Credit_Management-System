@@ -46,8 +46,9 @@ function registerDeliveryRoutes(app, deps) {
 
     try {
       const result = await db.query(
+        // delivery_staff_id: a driver's card offers status buttons only on their own delivery
         "SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks, d.cashier_remarks, " +
-        "d.scheduled_date, d.created_date, d.delivered_at, d.updated_at, " +
+        "d.scheduled_date, d.created_date, d.delivered_at, d.updated_at, d.delivery_staff_id, " +
         DELIVERY_CONTACT_SQL + " AS customer_name, " +
         DELIVERY_PHONE_SQL + " AS customer_phone, " +
         "COALESCE(st.full_name, 'Unassigned') AS driver_name, " +

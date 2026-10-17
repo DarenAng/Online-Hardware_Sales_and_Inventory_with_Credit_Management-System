@@ -148,29 +148,44 @@
                     <div class="pager is-single" id="archive-pager"></div>
                 </div>
 
-                <!-- ACCESS CONTROL -- one table: the roles down the left, the modules
-                     across the top, a checkbox for each. A click saves straight away. -->
+                <!-- ACCESS CONTROL -- the roles down the left, the picked role's screens
+                     on the right. Every role's switches are kept in the page so a change
+                     made under one role survives looking at another before Grant Access. -->
                 <div class="card" id="panel-features" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
                             <h3>Access Control</h3>
                         </div>
                         <div class="panel-actions">
-                            <!-- one role, one screen at a time: opens the Grant Access card -->
-                            <button type="button" class="btn btn-success" onclick="openGrantAccess()">Grant Access</button>
+                            <button type="button" class="btn btn-success" id="features-save-btn"
+                                    onclick="saveFeatureMatrix()" disabled title="Nothing has changed yet">Grant Access</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" id="features-search" class="form-control search-input"
+                                   placeholder="Search screens by name or module"
+                                   oninput="filterFeatureScreens(this.value)">
                         </div>
                     </div>
 
                     <!-- drawn by system-admin.js renderFeatureMatrix -->
-                    <div class="table-responsive">
-                        <table class="access-table" id="features-matrix">
-                            <thead><tr><th>Role</th></tr></thead>
-                            <tbody><tr><td class="table-empty">Loading the roles</td></tr></tbody>
-                        </table>
+                    <div class="access-layout">
+                        <aside class="access-roles" aria-label="Roles">
+                            <span class="eyebrow">Roles</span>
+                            <div class="role-list" id="features-role" role="tablist" aria-label="Pick a role">
+                                <p class="muted">Loading the roles</p>
+                            </div>
+                        </aside>
+
+                        <div class="access-screens">
+                            <div id="features-matrix" class="feature-strips" aria-live="polite">
+                                <p class="table-empty">Loading the screens</p>
+                            </div>
+                            <p class="table-empty" id="features-no-match" hidden>No screen matches that search.</p>
+                        </div>
                     </div>
-                    <p class="access-hint">A tick gives the role every screen of that module; a click saves it at once.
-                        A dash means only some of its screens are on; ticking it turns them all on.
-                        To give a role only the screens it needs, press Grant Access or click the role.</p>
                 </div>
 
                 <!-- AUDIT LOGS -->
@@ -647,35 +662,6 @@
             <div class="modal-foot">
                 <button type="button" class="btn btn-ghost" onclick="closeModal('restore-modal')">Cancel</button>
                 <button type="button" class="btn btn-success" onclick="restoreSelectedAccount()">Restore Account</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- GRANT ACCESS -- one role's screens, one tick each; drawn by system-admin.js openGrantAccess -->
-    <div class="modal" id="grant-modal" onclick="closeModalOnBackdrop(event, 'grant-modal')">
-        <div class="modal-box modal-wide">
-            <div class="modal-head">
-                <div class="modal-identity">
-                    <div class="avatar">GA</div>
-                    <div>
-                        <h3>Grant Access</h3>
-                        <span class="modal-role">Choose a role, then tick only the screens it needs</span>
-                    </div>
-                </div>
-                <button type="button" class="modal-close" onclick="closeModal('grant-modal')" aria-label="Close">&times;</button>
-            </div>
-
-            <div class="modal-body">
-                <div class="form-group">
-                    <label for="grant-role">Role</label>
-                    <select id="grant-role" class="form-control" onchange="renderGrantScreens()"></select>
-                </div>
-                <div id="grant-screens"></div>
-            </div>
-
-            <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closeModal('grant-modal')">Cancel</button>
-                <button type="button" class="btn btn-success" id="grant-save" onclick="saveGrantAccess()">Save Access</button>
             </div>
         </div>
     </div>

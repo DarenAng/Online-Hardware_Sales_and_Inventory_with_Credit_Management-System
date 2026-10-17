@@ -213,8 +213,19 @@ function buildDriverPanels() {
 let paymentDeliveryId = null;
 let paymentRemarks = null;     // the note typed in the delivery's card; it goes with Delivered
 
-function openDriverPayment(deliveryId, remarks) {
-    const d = findDriverDelivery(deliveryId);
+async function openDriverPayment(deliveryId, remarks) {
+    let d = findDriverDelivery(deliveryId);
+
+    // opened from the Delivery Schedule before Pending Deliveries was loaded: read the list now
+    if (!d) {
+        try {
+            await fetchDriverDeliveries();
+        } catch (error) {
+            notifyOffline();
+            return;
+        }
+        d = findDriverDelivery(deliveryId);
+    }
     if (!d) {
         notifyWarning('Reload the list and open the delivery again.', 'Delivery not found');
         return;

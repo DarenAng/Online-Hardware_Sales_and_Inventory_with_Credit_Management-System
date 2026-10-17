@@ -18,7 +18,6 @@
 // ============================================================
 let invProducts = [];
 let invLoaded = false;
-let returnFilter = 'All';
 
 // what is chosen on the adjustment form; typed text that matches nothing is not a choice
 let adjustMaterial = null;
@@ -1276,10 +1275,6 @@ function buildReturnsPanel() {
             return true;
         },
 
-        onLoaded: function (rows) {
-            renderReturnFilters(rows);
-        },
-
         renderRow: function (r, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openReturnDetail(' + r.return_id + ')">' +
@@ -1323,46 +1318,6 @@ function returnDispositionBadge(row) {
 async function loadReturns() {
     const panel = getDataPanel('clerk-returns');
     if (panel && panel.state !== 'closed') await panel.refresh();
-}
-
-function renderReturnFilters(rows) {
-    const box = document.getElementById('return-filters');
-    if (!box) return;
-
-    // the worklist first: what the counter took back and nobody has looked at
-    const types = ['To inspect', 'All', 'Damaged', 'Refunded', 'Return', 'Missing'];
-
-    let chips = '';
-    for (let t = 0; t < types.length; t++) {
-        const type = types[t];
-        let count = 0;
-        if (type === 'All') {
-            count = rows.length;
-        } else {
-            for (let i = 0; i < rows.length; i++) {
-                if (type === 'To inspect') {
-                    if (returnAwaiting(rows[i])) count++;
-                } else if (rows[i].report_type === type) {
-                    count++;
-                }
-            }
-        }
-
-        chips += '<button type="button" class="filter-chip' + (returnFilter === type ? ' active' : '') +
-            (type === 'To inspect' && count > 0 ? ' track-chip-alert' : '') +
-            '" onclick="setReturnFilter(\'' + type + '\')">' + statusWord(type) +
-            ' <span class="chip-count">' + count + '</span></button>';
-    }
-    box.innerHTML = chips;
-}
-
-function setReturnFilter(type) {
-    returnFilter = type;
-
-    const panel = getDataPanel('clerk-returns');
-    if (panel) renderReturnFilters(panel.rows);
-
-    dataPanelFilter('clerk-returns', 'type', type);
 }
 
 async function resolveReturn(reportId) {

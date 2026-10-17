@@ -350,6 +350,19 @@ function openScheduledDelivery(deliveryId) {
             break;
         }
     }
+    if (!delivery) return;
+
     const body = document.getElementById('schedule-body');
-    showDeliveryRecord(delivery, Boolean(body && body.dataset.canUpdate), Boolean(body && body.dataset.canArchive));
+    let canUpdate = Boolean(body && body.dataset.canUpdate);
+
+    // A driver moves only a delivery assigned to them; another driver's, or one
+    // nobody has taken yet (taken from Pending Deliveries), is only shown here.
+    const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+    if (canUpdate && user && user.role_name === 'Delivery Personnel') {
+        if (delivery.delivery_staff_id == null || Number(delivery.delivery_staff_id) !== Number(user.staff_id)) {
+            canUpdate = false;
+        }
+    }
+
+    showDeliveryRecord(delivery, canUpdate, Boolean(body && body.dataset.canArchive));
 }
