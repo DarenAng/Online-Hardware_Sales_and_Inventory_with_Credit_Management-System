@@ -1031,7 +1031,7 @@ const PROCEDURES_FILE = path.join(__dirname, "..", "..", "database", "2-RUN-SECO
 // sp_resolve_return_report (and "v_type = 'Missing'", which closes a report of
 // goods missing from a delivery), p_inside_batch in sp_file_return_report (it
 // can file one item of a many-item report), "refund instead" in sp_archive_record,
-// p_driver_staff_id in sp_create_delivery, and p_qr_payment_id in
+// p_driver_staff_id and p_created_date in sp_create_delivery, and p_qr_payment_id in
 // sp_create_sale_transaction and sp_record_credit_payment ("kept for the down
 // payment" there is the reference a payment may not borrow). The business
 // rules carry a word of their own: "Discount cannot be negative" in
@@ -1061,6 +1061,7 @@ async function routinesAreOld() {
     ["sp_archive_record", "refund instead"],
     ["sp_restore_archive", "FOR UPDATE"],
     ["sp_create_delivery", "p_driver_staff_id"],
+    ["sp_create_delivery", "p_created_date"],
     ["sp_update_delivery_status", "FOR UPDATE"]
   ];
 

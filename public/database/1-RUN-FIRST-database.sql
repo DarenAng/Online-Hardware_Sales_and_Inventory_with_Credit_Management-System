@@ -358,7 +358,7 @@ CREATE TABLE store_settings (
 CREATE TABLE sales (
     sale_id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NULL,
-    -- the name of somebody not on the credit book; NULL means nobody asked
+    -- the name of somebody without a credit account; NULL means nobody asked
     walk_in_name VARCHAR(150) NULL,
     cashier_staff_id INT NOT NULL,
     total_amount DECIMAL(12,2) NOT NULL,
@@ -428,7 +428,7 @@ CREATE TABLE deliveries (
     sale_id INT NOT NULL,
     delivery_staff_id INT NULL,
     delivery_address TEXT NOT NULL,
-    -- who the driver is looking for, as written when booked; wins over the customer row
+    -- who the driver is looking for, as written at the counter; wins over the customer row
     contact_name VARCHAR(150) NULL,
     contact_phone VARCHAR(30) NULL,
     status ENUM('Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed') NOT NULL DEFAULT 'Pending',
@@ -735,7 +735,7 @@ INSERT INTO notifications (target_role_id, notif_type, title, message, product_i
 (2, 'Low Stock',    'Latex Paint White is low',     'Stock is 8, reorder point is 15. Raise a purchase order.', 4, 3, TRUE,  '2026-08-27 14:10:00'),
 (3, 'Damage Report','Damage filed for Cordless Drill 18V', '1 unit reported damaged: defective battery pack.',  1, 3, FALSE, '2026-08-22 11:00:00'),
 (2, 'Damage Report','Damage filed for Cordless Drill 18V', '1 unit reported damaged: defective battery pack.',  1, 3, FALSE, '2026-08-22 11:00:00'),
-(5, 'Delivery',     'Delivery #3 booked',           'Sale #4 needs delivering to Caloocan City, Metro Manila.', NULL, 4, FALSE, '2026-08-28 09:20:00'),
+(5, 'Delivery',     'Delivery #3 created',          'Sale #4 needs delivering to Caloocan City, Metro Manila.', NULL, 4, FALSE, '2026-08-28 09:20:00'),
 (2, 'Purchase Order','Purchase order #3 raised',    '2 line(s) ordered, awaiting delivery.',                    NULL, 3, TRUE,  '2026-08-29 08:05:00');
 
 -- ==========================================
@@ -743,7 +743,7 @@ INSERT INTO notifications (target_role_id, notif_type, title, message, product_i
 --
 -- Six months of trading for a hardware shop in Nasugbu, Batangas, generated
 -- by a script with a fixed seed so it is the same on every machine. The
--- credit book holds one account of each standing, worked out by the rules
+-- credit customers hold one account of each standing, worked out by the rules
 -- in vw_customer_credit. Ids continue from the demo data above. Every row
 -- is the work of one of the five accounts; there are no other staff.
 -- ==========================================
@@ -1388,11 +1388,11 @@ INSERT INTO stock_adjustments (product_id, adjustment_type, quantity_before, qua
 (1, 'Add', 52, 22, 74, 'pcs', 'Found in the back store during count', 3, '2026-04-24 11:15:27'),
 (27, 'Recount', 31, 2, 33, 'set', 'Recount after a shelf move', 3, '2026-05-01 09:50:50'),
 (40, 'Recount', 64, -3, 61, 'sheet', 'Recount after a shelf move', 3, '2026-05-08 14:00:42'),
-(33, 'Add', 111, 43, 154, 'roll', 'Supplier replacement stock booked in', 3, '2026-05-15 08:00:20'),
+(33, 'Add', 111, 43, 154, 'roll', 'Supplier replacement stock received', 3, '2026-05-15 08:00:20'),
 (38, 'Recount', 47, -1, 46, 'sack', 'Monthly physical count corrected the figure', 3, '2026-05-22 12:45:55'),
 (21, 'Recount', 103, -2, 101, 'pcs', 'Quarter-end count', 3, '2026-05-29 08:40:49'),
 (3, 'Recount', 63, -3, 60, 'meter', 'Monthly physical count corrected the figure', 3, '2026-06-05 08:45:47'),
-(22, 'Add', 104, 48, 152, 'meter', 'Supplier replacement stock booked in', 3, '2026-06-12 13:05:48'),
+(22, 'Add', 104, 48, 152, 'meter', 'Supplier replacement stock received', 3, '2026-06-12 13:05:48'),
 (11, 'Recount', 27, -2, 25, 'pcs', 'Monthly physical count corrected the figure', 3, '2026-06-19 15:35:59'),
 (2, 'Recount', 10, -1, 9, 'pcs', 'Recount after a shelf move', 3, '2026-06-26 09:20:43'),
 (51, 'Add', 8, 15, 23, 'liter', 'Delivery received against purchase order', 3, '2026-07-03 08:00:56'),
@@ -1402,7 +1402,7 @@ INSERT INTO stock_adjustments (product_id, adjustment_type, quantity_before, qua
 (4, 'Recount', 103, 2, 105, 'liter', 'Monthly physical count corrected the figure', 3, '2026-07-31 12:25:40'),
 (33, 'Recount', 79, 1, 80, 'roll', 'Monthly physical count corrected the figure', 3, '2026-08-07 12:25:14'),
 (46, 'Recount', 56, -3, 53, 'kilogram', 'Recount after a shelf move', 3, '2026-08-14 13:45:08'),
-(3, 'Add', 92, 44, 136, 'meter', 'Supplier replacement stock booked in', 3, '2026-08-21 09:10:02'),
+(3, 'Add', 92, 44, 136, 'meter', 'Supplier replacement stock received', 3, '2026-08-21 09:10:02'),
 (39, 'Add', 14, 18, 32, 'sheet', 'Found in the back store during count', 3, '2026-08-28 10:25:30'),
 (1, 'Add', 72, 51, 123, 'pcs', 'Delivery received against purchase order', 3, '2026-09-04 11:30:10'),
 (34, 'Add', 20, 45, 65, 'pcs', 'Found in the back store during count', 3, '2026-09-11 08:45:44');
@@ -1436,8 +1436,8 @@ INSERT INTO notifications (target_role_id, notif_type, title, message, product_i
 (2, 'Refund Report', 'Refund filed for Tox Screw Set 100pc', '10 packs refunded at the counter: customer needed a larger gauge.', 45, 4, TRUE, '2026-09-01 10:30:35'),
 (3, 'Purchase Order', 'Purchase order #13 raised', '3 line(s) ordered from Luzon Electrical Supply, awaiting delivery.', NULL, 2, FALSE, '2026-09-11 12:40:52'),
 (3, 'Purchase Order', 'Purchase order #12 raised', '2 line(s) ordered from Batangas Builders Depot, awaiting delivery.', NULL, 2, TRUE, '2026-09-08 13:05:30'),
-(5, 'Delivery', 'Delivery booked for Brgy. Wawa, Nasugbu', 'A COD order needs a driver tomorrow morning.', NULL, 4, FALSE, '2026-09-11 13:15:15'),
-(5, 'Delivery', 'Delivery booked for Poblacion, Nasugbu', 'Cement and hollow blocks, two stops.', NULL, 4, TRUE, '2026-09-09 14:15:26'),
+(5, 'Delivery', 'New delivery to Brgy. Wawa, Nasugbu', 'A COD order needs a driver tomorrow morning.', NULL, 4, FALSE, '2026-09-11 13:15:15'),
+(5, 'Delivery', 'New delivery to Poblacion, Nasugbu', 'Cement and hollow blocks, two stops.', NULL, 4, TRUE, '2026-09-09 14:15:26'),
 (2, 'Stock Adjustment', 'Recount on Hollow Block 4"', 'The monthly count corrected the figure by -3.', 36, 3, TRUE, '2026-09-04 12:30:14');
 
 INSERT INTO audit_logs (staff_id, role_name, ip_address, action, action_type, details, metadata, created_at) VALUES

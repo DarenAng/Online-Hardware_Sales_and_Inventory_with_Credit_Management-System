@@ -739,7 +739,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Credit accepts a down payment and books the rest; COD takes nothing at
+    -- Credit accepts a down payment and puts the rest on account; COD takes nothing at
     -- the register.
     SET v_on_credit = (p_payment_method = 'Credit');
     SET v_on_account = (p_payment_method IN ('Credit', 'COD'));
@@ -872,7 +872,7 @@ PROC_BODY: BEGIN
 
     IF v_on_account THEN
         IF v_on_credit THEN
-            -- a down payment cannot exceed the bill: there is no change on a sale going on the book
+            -- a down payment cannot exceed the bill: there is no change on a sale going on account
             IF v_amount_paid < 0 THEN
                 SET v_amount_paid = 0.00;
             END IF;
@@ -894,7 +894,7 @@ PROC_BODY: BEGIN
         -- first has committed or rolled back. The limit and the balance are
         -- then read FOR UPDATE as well, because a plain read in this
         -- transaction would still see the snapshot taken before the wait
-        -- and miss the sale that just went on the book.
+        -- and miss the sale that just went on account.
         SELECT c.customer_id, COALESCE(cc.credit_limit, 0.00)
         INTO v_locked_customer_id, v_credit_limit
         FROM customers c
@@ -954,7 +954,7 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- paid, part paid, or wholly on the book; COD is always unpaid until delivery
+        -- paid, part paid, or wholly on account; COD is always unpaid until delivery
         IF NOT v_on_credit THEN
             SET v_payment_status = 'Unpaid';
         ELSEIF v_amount_paid >= v_final_amount THEN
@@ -1331,7 +1331,7 @@ PROC_BODY: BEGIN
         JOIN sale_items si ON si.product_id = i.product_id AND si.sale_id = p_record_id
         SET i.quantity_in_stock = i.quantity_in_stock + si.quantity;
 
-        -- a delivery booked for it and not yet on the road is cancelled with it
+        -- a delivery made for it and not yet on the road is cancelled with it
         UPDATE deliveries
         SET is_archived = TRUE, archived_at = NOW(), archived_by_staff_id = p_staff_id
         WHERE sale_id = p_record_id AND is_archived = FALSE;
@@ -1983,7 +1983,7 @@ END //
 -- ==========================================
 -- 14. A MATERIAL, FOUND OR MADE
 --
--- A name matching a material on the books returns it (archived ones
+-- A name matching a material already on file returns it (archived ones
 -- included, so a returning material keeps its history); a new name creates
 -- it with its unit, category and brand, and an inventory row at zero. No
 -- transaction control here: the caller owns it.
@@ -3281,7 +3281,7 @@ PROC_BODY: BEGIN
 END //
 
 -- ==========================================
--- 20. BOOK A DELIVERY FOR A SALE
+-- 20. CREATE A DELIVERY FOR A SALE
 -- ==========================================
 CREATE PROCEDURE sp_create_delivery (
     IN p_sale_id INT,
@@ -3293,7 +3293,7 @@ CREATE PROCEDURE sp_create_delivery (
     IN p_contact_name VARCHAR(150),
     IN p_contact_phone VARCHAR(30),
     -- defaults to today when the caller does not say
-    IN p_booked_date DATE,
+    IN p_created_date DATE,
     IN p_staff_id INT,
     -- optional: the driver the cashier picked at the counter; NULL leaves the
     -- delivery open for any driver to take
@@ -3308,7 +3308,7 @@ PROC_BODY: BEGIN
     DECLARE v_driver_ok INT DEFAULT 0;
     DECLARE v_contact_name VARCHAR(150) DEFAULT NULL;
     DECLARE v_contact_phone VARCHAR(30) DEFAULT NULL;
-    DECLARE v_booked DATE DEFAULT NULL;
+    DECLARE v_created DATE DEFAULT NULL;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -3356,7 +3356,7 @@ PROC_BODY: BEGIN
     IF v_already > 0 THEN
         ROLLBACK;
         SET p_status_code = 409;
-        SET p_message = 'This sale already has a delivery booked.';
+        SET p_message = 'This sale already has a delivery.';
         LEAVE PROC_BODY;
     END IF;
 
@@ -3376,7 +3376,7 @@ PROC_BODY: BEGIN
         END IF;
     END IF;
 
-    SET v_booked = IFNULL(p_booked_date, CURDATE());
+    SET v_created = IFNULL(p_created_date, CURDATE());
     SET v_contact_name  = NULLIF(TRIM(IFNULL(p_contact_name, '')), '');
     SET v_contact_phone = NULLIF(TRIM(IFNULL(p_contact_phone, '')), '');
 
@@ -3402,7 +3402,7 @@ PROC_BODY: BEGIN
     INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, contact_name, contact_phone,
                             status, remarks, cashier_remarks, booked_date, scheduled_date)
     VALUES (p_sale_id, p_driver_staff_id, p_address, v_contact_name, v_contact_phone,
-            'Pending', p_remarks, p_remarks, v_booked, p_scheduled_date);
+            'Pending', p_remarks, p_remarks, v_created, p_scheduled_date);
 
     SET p_delivery_id = LAST_INSERT_ID();
 
@@ -3888,7 +3888,7 @@ PROC_BODY: BEGIN
         SET p_customer_id = v_existing;
         SET p_status_code = 200;
 
-        -- the name as the book already spells it
+        -- the name as the customer record already spells it
         SELECT CONCAT(TRIM(CONCAT(first_name, ' ', IFNULL(last_name, ''))),
                       ' already has an account. This sale was attached to it.')
         INTO p_message
