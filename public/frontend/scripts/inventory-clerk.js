@@ -2137,8 +2137,8 @@ function redrawPoReference(body) {
     poReferencePageObject.body = body;
     renderDetailPage();
 
-    // the list scrolls on its own; keep the open order's row in view
-    const picked = document.querySelector('.po-pick-list tr.is-picked');
+    // the list scrolls on its own; keep the open order in view
+    const picked = document.querySelector('.po-ref-list .is-picked');
     if (picked) picked.scrollIntoView({ block: 'nearest' });
 }
 
@@ -2148,75 +2148,72 @@ async function onPoReferencePick(value) {
     poReference.data = null;
 
     if (poId) {
-        redrawPoReference(poReferencePage() + '<p class="detail-note">Opening the order...</p>');
+        redrawPoReference(poReferencePage('<p class="detail-note">Opening the order...</p>'));
         try {
             const data = await apiGetPurchaseOrderReference(poId);
             // the card may have been closed, or another order chosen, while this one was loading
             if (!poReferenceIsOpen() || poReference.poId !== poId) return;
             poReference.data = data;
         } catch (error) {
-            redrawPoReference(poReferencePage() + '<p class="detail-note detail-warn">That purchase order could not be opened. Try again.</p>');
+            redrawPoReference(poReferencePage('<p class="detail-note detail-warn">That purchase order could not be opened. Try again.</p>'));
             return;
         }
     }
     redrawPoReference(poReferencePage());
 }
 
-// The received orders are listed in full so every one can be seen at once;
-// the open one is marked, and clicking a row opens that order below the list.
-function poReferencePage() {
-    let rows = '';
+// Two columns: every received order on the left, the open one marked; the
+// open order on the right. Clicking an order on the left opens it.
+// message: optional, shown on the right instead of the order (loading, failed)
+function poReferencePage(message) {
+    if (poReference.choices.length === 0) {
+        return '<p class="detail-note">No purchase order has been received yet. ' +
+            'Press Receive on a purchase order when its delivery is counted in.</p>';
+    }
+
+    let list = '';
     for (let i = 0; i < poReference.choices.length; i++) {
         const po = poReference.choices[i];
         const picked = po.po_id === poReference.poId;
+        // an order received before the day was kept has no date; its order date is shown
         const when = po.received_at
-            ? poWhen(po.received_at).slice(0, 10)
-            : '<span class="muted">Not recorded</span>';
-        rows += '<tr class="row-clickable' + (picked ? ' is-picked' : '') + '" ' +
+            ? 'Received ' + poWhen(po.received_at).slice(0, 10)
+            : 'Ordered ' + poWhen(po.order_date).slice(0, 10);
+        list += '<button type="button" class="po-ref-item' + (picked ? ' is-picked' : '') + '" ' +
                 'onclick="onPoReferencePick(' + po.po_id + ')">' +
-            '<td>PO #' + po.po_id + '</td>' +
-            '<td>' + escapeHtml(po.supplier_name) + '</td>' +
-            '<td>' + when + '</td>' +
-            '<td>' + (picked ? '<span class="po-pick-mark">Showing</span>' : '') + '</td>' +
-            '</tr>';
+            '<span class="po-ref-no">PO #' + po.po_id + '</span>' +
+            '<span class="po-ref-supplier">' + escapeHtml(po.supplier_name) + '</span>' +
+            '<span class="po-ref-when">' + escapeHtml(when) + '</span>' +
+            '</button>';
     }
 
-    let html = '<p class="detail-note">Compare what came in with what the purchase order asked for. ' +
-        'This only shows the order; it does not change the stock.</p>';
+    let main = message || '';
+    if (!main && poReference.data) main = poReferenceDetails(poReference.data);
+    if (!main) main = '<p class="detail-note">Pick an order on the left to see it.</p>';
 
-    if (poReference.choices.length > 0) {
-        html += '<p class="po-pick-head">Received purchase orders</p>' +
-            '<div class="table-responsive po-pick-list"><table class="mini-table">' +
-            '<thead><tr><th>PO Number</th><th>Supplier</th><th>Received</th><th></th></tr></thead>' +
-            '<tbody>' + rows + '</tbody></table></div>';
-    }
-
-    if (poReference.choices.length === 0) {
-        html += '<p class="detail-note">No purchase order has been received yet. ' +
-            'Press Receive on a purchase order when its delivery is counted in.</p>';
-    }
-    if (poReference.data) html += poReferenceDetails(poReference.data);
-    return html;
+    return '<div class="po-ref">' +
+            '<div class="po-ref-list">' +
+                '<p class="po-ref-head">Received orders (' + poReference.choices.length + ')</p>' +
+                list +
+            '</div>' +
+            '<div class="po-ref-main">' + main + '</div>' +
+        '</div>';
 }
 
-// the order's facts, then each material with what was ordered and what arrived
+// the order in one heading and one line, then each material with what was
+// ordered and what arrived
 function poReferenceDetails(data) {
     const order = data.order;
 
-    let html = '<div class="detail-grid">' +
-        detailField('PO Number', 'PO #' + order.po_id) +
-        detailField('Supplier', escapeHtml(order.supplier_name)) +
-        detailField('Ordered', escapeHtml(poWhen(order.order_date))) +
-        detailField('Received', order.received_at
-            ? escapeHtml(poWhen(order.received_at))
-            : '<span class="muted">Not recorded</span>') +
-        detailField('Raised By', order.raised_by
-            ? escapeHtml(order.raised_by)
-            : '<span class="muted">Not recorded</span>') +
-        detailField('Received By', order.received_by
-            ? escapeHtml(order.received_by)
-            : '<span class="muted">Not recorded</span>') +
-        '</div>';
+    // "Ordered 2026-10-17 10:35 by Rafael Andino · Received 2026-10-17 10:42 by Rafael Andino"
+    let facts = 'Ordered ' + poWhen(order.order_date);
+    if (order.raised_by) facts += ' by ' + order.raised_by;
+    facts += ' · ';
+    facts += order.received_at ? 'Received ' + poWhen(order.received_at) : 'Received (date not recorded)';
+    if (order.received_by) facts += ' by ' + order.received_by;
+
+    let html = '<h4 class="po-ref-title">PO #' + order.po_id + ' · ' + escapeHtml(order.supplier_name) + '</h4>' +
+        '<p class="po-ref-facts">' + escapeHtml(facts) + '</p>';
 
     if (!data.kept) {
         html += '<p class="detail-note detail-warn">This order was received before the system kept what was ordered, ' +
