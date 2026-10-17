@@ -11,8 +11,9 @@
 //   - reports, stocks, stock movements, the selling price and the reorder policy
 //   - credit: customer limits and extension requests
 //   - deliveries, records (suppliers, customers, products...), archives
-//   - the Lift Sign-in Hold screen: accounts held after wrong passwords, and
-//     lifting one (only on the menu when the administrator switches it on)
+//   - the Account Management screen: creating cashier, clerk and driver accounts,
+//     and the accounts held after wrong passwords with lifting one (only on the
+//     menu when the administrator switches it on)
 //   - the popups that show one sale, delivery, customer, ... in full
 //   - the page start-up code at the very bottom ("MANAGER PAGE BOOT")
 // ============================================================
@@ -196,9 +197,9 @@ function showSalesTransactions(event) {
     showReport(wanted, event);
 }
 
-// Lift Sign-in Hold: the list is read fresh every time the screen is opened
-function showHeldAccounts(event) {
-    showManagerPanel('panel-holds', 'Lift Sign-in Hold', event);
+// Account Management: the list of held accounts is read fresh every time the screen is opened
+function showAccountManagement(event) {
+    showManagerPanel('panel-accounts', 'Account Management', event);
     const panel = getDataPanel('mgr-holds');
     if (panel) panel.open();
 }
@@ -3299,8 +3300,380 @@ async function openCustomerDetail(customerId) {
 }
 
 // ==========================================
-// LIFT SIGN-IN HOLD -- accounts held after too many wrong passwords
+// ACCOUNT MANAGEMENT -- creating a cashier, clerk or driver account
 // ==========================================
+// Three steps, the same two the administrator's Create Account has: the form,
+// then the review (the server makes the first password and keeps a draft),
+// then Confirm. The server only offers, and only creates, cashier, clerk and
+// driver accounts, so nothing here decides which roles a manager may create.
+let accountReview = null;     // the server's review: draft id, password and the details
+let accountBusy = false;      // a request is running; buttons ignore a second press
+
+// matches words made only of letters and accent marks, with single spaces between the words
+const ACCOUNT_NAME_LETTERS = /^[\p{L}\p{M}]+( [\p{L}\p{M}]+)*$/u;
+// matches name@domain.tld
+const ACCOUNT_EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
+
+// the boxes that cannot be left empty, and what to call them
+const ACCOUNT_REQUIRED = [
+    ['firstName', 'First name'],
+    ['lastName', 'Last name'],
+    ['phone', 'Phone'],
+    ['roleId', 'Role'],
+    ['email', 'Email']
+];
+
+function openCreateAccount() {
+    const form = document.getElementById('account-form');
+    if (!form) return;
+
+    clearAccountForm();
+    showAccountStep('form');
+    showModal('account-modal');
+    loadAccountRoles();
+    setTimeout(function () {
+        document.getElementById('account-first').focus();
+    }, 60);
+}
+
+// the form emptied, so the next person does not find a half-typed account
+function clearAccountForm() {
+    const form = document.getElementById('account-form');
+    form.reset();
+    accountReview = null;
+
+    // reset() does not clear the phone box's own state, nor the red lines under the boxes
+    phoneFill(form.elements.phone, '');
+    const names = ['firstName', 'middleName', 'lastName', 'phone', 'email'];
+    for (let i = 0; i < names.length; i++) {
+        setAccountError(form.elements[names[i]], '');
+    }
+}
+
+// the roles the server allows this manager to create, as the Role box's choices
+async function loadAccountRoles() {
+    const select = document.getElementById('account-role');
+    select.innerHTML = '<option value="">Loading...</option>';
+
+    try {
+        const response = await apiGetRoles();
+        const roles = await response.json();
+        if (!response.ok) {
+            select.innerHTML = '<option value="">No roles</option>';
+            if (!handleAuthFailure(response, roles)) notifyError(roles.error, 'Roles not loaded');
+            return;
+        }
+
+        let options = '<option value="">Choose a role</option>';
+        for (let i = 0; i < roles.length; i++) {
+            options += '<option value="' + roles[i].role_id + '">' + escapeHtml(roles[i].role_name) + '</option>';
+        }
+        select.innerHTML = options;
+    } catch (error) {
+        select.innerHTML = '<option value="">No roles</option>';
+        notifyOffline();
+    }
+}
+
+// which half of the card shows: 'form' or 'review'
+function showAccountStep(step) {
+    const reviewing = step === 'review';
+    document.getElementById('account-form').hidden = reviewing;
+    document.getElementById('account-review').hidden = !reviewing;
+    document.getElementById('account-review-btn').hidden = reviewing;
+    document.getElementById('account-confirm-btn').hidden = !reviewing;
+    document.getElementById('account-back').hidden = !reviewing;
+    document.getElementById('account-subtitle').textContent =
+        reviewing ? 'Review before creating' : 'Account Management';
+}
+
+function closeAccountModal() {
+    if (accountBusy) return;
+    clearAccountForm();
+    closeModal('account-modal');
+}
+
+function backToAccountForm() {
+    if (accountBusy) return;
+    accountReview = null;
+    showAccountStep('form');
+}
+
+// ---------- the boxes ----------
+
+// the line under a box, and its red edge; an empty text puts both away
+function setAccountError(input, text) {
+    if (!input) return;
+    const box = document.getElementById(input.id + '-error');
+
+    // a badly written phone number keeps its red edge (format.js put it there);
+    // only a well written one that is taken gets it from here
+    const badlyWritten = input.name === 'phone' && input.value !== '' && phoneComplaint(input) !== null;
+    input.classList.toggle('is-bad', Boolean(text) || badlyWritten);
+    if (box) {
+        box.textContent = text || '';
+        box.hidden = !text;
+    }
+}
+
+// names are letters only: numbers and symbols are taken out as they are typed or pasted
+function onAccountNameInput(input) {
+    const typed = input.value;
+    const cleaned = typed.replace(/[^\p{L}\p{M} ]/gu, '');   // keep letters, accents and spaces
+
+    if (cleaned === typed) {
+        setAccountError(input, '');
+        return;
+    }
+
+    // keep the cursor where it was, less the characters taken out
+    const cursor = Math.max(0, input.selectionStart - (typed.length - cleaned.length));
+    input.value = cleaned;
+    input.setSelectionRange(cursor, cursor);
+    setAccountError(input, 'Letters only. Numbers and symbols cannot be typed here.');
+}
+
+// spaces cannot be part of an address, so they never get into the box
+function onAccountEmailInput(input) {
+    const cleaned = input.value.replace(/\s+/g, '');
+    if (cleaned !== input.value) input.value = cleaned;
+    setAccountError(input, '');
+}
+
+function accountEmailComplaint(value) {
+    const email = String(value || '').trim();
+    if (email === '') return 'An email address is required.';
+    if (!ACCOUNT_EMAIL_PATTERN.test(email)) return 'Enter an email address, for example name@example.com.';
+    return null;
+}
+
+// Asked when the box is left: does another account already sign in with this
+// address? Every role counts. The server asks again, so this is only for
+// saying it early. Gives back true when the address may be used.
+async function checkAccountEmailFree(input) {
+    const email = input.value.trim();
+    if (email === '') {
+        setAccountError(input, '');
+        return true;
+    }
+
+    const problem = accountEmailComplaint(email);
+    if (problem) {
+        setAccountError(input, problem);
+        return false;
+    }
+
+    try {
+        const answer = await apiCheckEmail(email);
+
+        // typed something else while the answer was coming: that address gets its own check
+        if (input.value.trim() !== email) return true;
+
+        if (answer && answer.taken) {
+            setAccountError(input, 'This email is already used by another account (' + answer.roleName + ').');
+            return false;
+        }
+    } catch (error) {
+        // offline: the server says so on Review
+    }
+    setAccountError(input, '');
+    return true;
+}
+
+// Asked when the box is left: does another staff member already have this
+// number? Gives back true when the number may be used.
+async function checkAccountPhoneFree(input) {
+    const phone = phoneToStore(input);   // like +639171234567, the way it is stored
+
+    // an empty or badly written number is not a clash; Review says what is wrong with it
+    if (phone === '' || phoneComplaint(input) !== null) {
+        setAccountError(input, '');
+        return true;
+    }
+
+    try {
+        const answer = await apiCheckPhone(phone);
+
+        // typed something else while the answer was coming: that number gets its own check
+        if (phoneToStore(input) !== phone) return true;
+
+        if (answer && answer.taken) {
+            setAccountError(input, 'This number is already used by another staff member (' + answer.roleName + ').');
+            return false;
+        }
+    } catch (error) {
+        // offline: the server says so on Review
+    }
+    setAccountError(input, '');
+    return true;
+}
+
+// ---------- step 1 to 2: Review ----------
+async function reviewNewAccount(event) {
+    event.preventDefault();
+    if (accountBusy) return;
+    const form = event.target;
+
+    for (let i = 0; i < ACCOUNT_REQUIRED.length; i++) {
+        const input = form.elements[ACCOUNT_REQUIRED[i][0]];
+        if (input.value.trim() === '') {
+            notifyWarning(ACCOUNT_REQUIRED[i][1] + ' is required.', 'Fill in the form');
+            input.focus();
+            return;
+        }
+    }
+
+    const nameBoxes = [['firstName', 'First name'], ['middleName', 'Middle name'], ['lastName', 'Last name']];
+    for (let i = 0; i < nameBoxes.length; i++) {
+        const input = form.elements[nameBoxes[i][0]];
+        const value = input.value.trim().replace(/\s+/g, ' ');
+        if (value !== '' && !ACCOUNT_NAME_LETTERS.test(value)) {
+            notifyWarning(nameBoxes[i][1] + ' can only have letters. Take out any numbers or symbols.', 'Check the name');
+            input.focus();
+            return;
+        }
+    }
+
+    const phoneProblem = phoneComplaint(form.elements.phone);
+    if (phoneProblem) {
+        notifyWarning(phoneProblem, 'Check the phone number');
+        form.elements.phone.focus();
+        return;
+    }
+
+    const emailProblem = accountEmailComplaint(form.elements.email.value);
+    if (emailProblem) {
+        setAccountError(form.elements.email, emailProblem);
+        form.elements.email.focus();
+        return;
+    }
+
+    // switched off while the requests run, so a double click sends one request
+    const button = document.getElementById('account-review-btn');
+    accountBusy = true;
+    button.disabled = true;
+    button.textContent = 'Checking...';
+
+    try {
+        if (!(await checkAccountPhoneFree(form.elements.phone))) {
+            form.elements.phone.focus();
+            return;
+        }
+        if (!(await checkAccountEmailFree(form.elements.email))) {
+            form.elements.email.focus();
+            return;
+        }
+
+        const review = await apiReviewNewAccount({
+            firstName: form.elements.firstName.value.trim(),
+            middleName: form.elements.middleName.value.trim(),
+            lastName: form.elements.lastName.value.trim(),
+            phone: phoneToStore(form.elements.phone),
+            email: form.elements.email.value.trim().toLowerCase(),
+            roleId: parseInt(form.elements.roleId.value, 10)
+        });
+        if (!review) return;   // refused: the server's reason is already on the screen
+
+        accountReview = review;
+        showAccountReview(review);
+        showAccountStep('review');
+    } catch (error) {
+        notifyOffline();
+    } finally {
+        accountBusy = false;
+        button.disabled = false;
+        button.textContent = 'Review';
+    }
+}
+
+// the details the server will create, and how the first password reaches them
+// (the password itself is not shown until the account exists and the mail failed)
+function showAccountReview(review) {
+    let sentText = 'Mail is not set up, so the password will be shown after you confirm';
+    if (review.willEmail) {
+        sentText = 'Will be emailed to ' + escapeHtml(review.email);
+    }
+
+    const minutes = Math.max(1, Math.round(review.expiresInSeconds / 60));
+
+    document.getElementById('account-review').innerHTML =
+        '<div class="detail-grid">' +
+        detailField('Name', escapeHtml(review.fullName)) +
+        detailField('Role', escapeHtml(review.roleName)) +
+        detailField('Email', escapeHtml(review.email)) +
+        detailField('Phone', '<span class="mono">' + escapeHtml(phoneForDisplay(review.phone)) + '</span>') +
+        detailField('First Password', sentText) +
+        '</div>' +
+        '<p class="detail-note">Nothing is saved until you press Confirm. ' + escapeHtml(review.firstName) +
+        ' must change the password the first time they sign in, and the new account is written to the ' +
+        'audit trail in your name. This review is held for ' + minutes + (minutes === 1 ? ' minute.' : ' minutes.') + '</p>';
+}
+
+// ---------- step 2 to done: Confirm ----------
+async function confirmNewAccount() {
+    if (!accountReview || accountBusy) return;
+    const review = accountReview;
+
+    // switched off while the request runs, so a double click sends one request
+    const button = document.getElementById('account-confirm-btn');
+    const back = document.getElementById('account-back');
+    accountBusy = true;
+    button.disabled = true;
+    back.disabled = true;
+    button.textContent = 'Creating...';
+
+    try {
+        const result = await apiCreateAccount(review.draftId);
+
+        if (!result) {
+            // refused: the server's reason is on the screen and the draft is used up, so start the form again
+            accountReview = null;
+            showAccountStep('form');
+            return;
+        }
+
+        accountReview = null;
+        clearAccountForm();
+        closeModal('account-modal');
+        await reportFirstPassword(result);
+    } catch (error) {
+        notifyOffline();
+    } finally {
+        accountBusy = false;
+        button.disabled = false;
+        back.disabled = false;
+        button.textContent = 'Confirm';
+    }
+}
+
+// Emailed is a corner card; not emailed keeps the password on screen in a dialog.
+async function reportFirstPassword(result) {
+    if (result.emailed) {
+        notifySuccess('The first password was emailed to ' + result.email + '. ' +
+            result.name + ' must change it the first time they sign in.', 'Account created');
+        return;
+    }
+
+    await askConfirm(
+        'The account exists, but the password could not be sent. Read it out to ' +
+        result.name + ' now: it is not shown again after this card.',
+        {
+            title: 'The password was not sent',
+            eyebrow: 'Account Management',
+            mark: '!',
+            confirmLabel: 'I have written it down',
+            cancelLabel: 'Close',
+            tone: 'danger',
+            detail: [
+                'Password: ' + result.password,
+                'Signs in with: ' + result.email,
+                result.reason || 'The password could not be emailed.',
+                result.name + ' must change it the first time they sign in.'
+            ]
+        });
+}
+
+// ---------- sign-in holds ----------
 // The server lists only cashier, clerk and driver accounts, and refuses a
 // lift on anyone else, so nothing here decides who may be released.
 function buildHeldAccountsPanel() {

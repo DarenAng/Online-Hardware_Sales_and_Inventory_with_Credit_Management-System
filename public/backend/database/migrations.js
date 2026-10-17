@@ -576,6 +576,22 @@ async function migrateDeliveryCreatedDate() {
   }
 }
 
+// The Lift Sign-in Hold screen became Account Management, so a switch the
+// administrator already gave a role is stored under the new key. A role that
+// somehow has both rows keeps the new one (role_id + feature_key is unique,
+// so IGNORE skips the row that would clash and the DELETE clears it).
+async function migrateAccountManagementKey() {
+  const oldRowsResult = await db.query(
+    "SELECT role_id FROM role_feature_permissions WHERE feature_key = 'release-holds'");
+  const oldRows = oldRowsResult[0];
+  if (oldRows.length === 0) return;
+
+  await db.query(
+    "UPDATE IGNORE role_feature_permissions SET feature_key = 'account-management' WHERE feature_key = 'release-holds'");
+  await db.query("DELETE FROM role_feature_permissions WHERE feature_key = 'release-holds'");
+  console.log("Renamed the release-holds screen switch to account-management for " + oldRows.length + " role(s).");
+}
+
 // The proprietor's name on the invoice head. A database made before it
 // has no column, and sp_update_store_settings fails.
 async function migrateProprietorName() {
@@ -1285,6 +1301,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateRefundedAmount();
   await migrateCashierRemarks();
   await migrateDeliveryCreatedDate();
+  await migrateAccountManagementKey();
   await migrateProprietorName();
   await migrateReturnInspection();
   await migrateMissingReports();
@@ -1326,6 +1343,7 @@ module.exports = {
   EXPECTED_PROCEDURES: EXPECTED_PROCEDURES,
   SERVER_TABLES: SERVER_TABLES,
   migrateOneAtATime: migrateOneAtATime,
+  migrateAccountManagementKey: migrateAccountManagementKey,
   countProcedures: countProcedures,
   proceduresAreMissing: proceduresAreMissing,
   proceduresLoadedCount: proceduresLoadedCount,

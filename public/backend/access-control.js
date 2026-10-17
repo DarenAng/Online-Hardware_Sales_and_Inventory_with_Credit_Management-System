@@ -62,12 +62,14 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/me\/password$/,                   SIGNED_IN],
 
   // --- staff accounts, administrator only ---
+  // A manager given the Account Management screen (see FEATURES) also gets
+  // the lookups, the two create steps and the held list below; the routes then
+  // narrow them to the roles in ROLES_MANAGED_BY_MANAGER.
   ["GET",   /^\/api\/roles$/,                          [ADMIN]],
   ["GET",   /^\/api\/users$/,                          [ADMIN]],
   ["GET",   /^\/api\/users\/email-check$/,              [ADMIN]],
   ["GET",   /^\/api\/users\/phone-check$/,              [ADMIN]],
-  // accounts on a sign-in hold; a manager gets in through the Lift Sign-in
-  // Hold screen (see FEATURES), and the route then narrows what is listed
+  // accounts on a sign-in hold
   ["GET",   /^\/api\/users\/held$/,                    [ADMIN]],
   ["GET",   /^\/api\/users\/\d+$/,                     [ADMIN]],
   // the review step creates nothing but does make a readable password

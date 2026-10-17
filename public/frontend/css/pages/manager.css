@@ -298,6 +298,24 @@
 #panel-archives .filter-row { margin-bottom: 16px; }
 
 /* ==========================================================================
+   ACCOUNT MANAGEMENT -- Create Account, as a popup over the screen
+   ========================================================================== */
+.create-box { max-width: 640px; }
+#account-modal .grid-2 { align-items: start; }
+
+/* what is wrong with a box, said under it */
+.field-error {
+    display: block;
+    margin-top: 5px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--stop);
+}
+.field-error[hidden] { display: none; }
+.form-control.is-bad { border-color: var(--stop); }
+.form-control.is-bad:focus { box-shadow: 0 0 0 3px var(--stop-dim); }
+
+/* ==========================================================================
    ON PAPER -- the table is unpaged; the Sales Summary prints both tables
    ========================================================================== */
 /* The Totals table at the foot of a printed report (printReport adds it just

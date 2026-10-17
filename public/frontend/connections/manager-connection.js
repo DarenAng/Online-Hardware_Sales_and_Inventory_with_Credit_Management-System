@@ -102,7 +102,38 @@ function apiArchiveDelivery(deliveryId) {
     return postJson('/api/archives/archive', { module: 'Delivery', recordId: deliveryId });
 }
 
-// ---------- sign-in holds ----------
+// ---------- account management (creating accounts, sign-in holds) ----------
+
+// GET /api/roles -- gives back the Response; for a manager only the roles a
+// manager may create (Cashier, Inventory Clerk, Delivery Personnel)
+function apiGetRoles() {
+    return fetch('/api/roles', { headers: apiHeaders() });
+}
+
+// GET /api/users/email-check -- { taken, roleName } for an address
+function apiCheckEmail(email) {
+    return getJson('/api/users/email-check?email=' + encodeURIComponent(email));
+}
+
+// GET /api/users/phone-check -- { taken, roleName, name } for a stored-style
+// number (+639171234567)
+function apiCheckPhone(phone) {
+    return getJson('/api/users/phone-check?phone=' + encodeURIComponent(phone));
+}
+
+// Creating an account is two steps: review (the server makes a password
+// and keeps a "draft"), then confirm the draft.
+// These give back the answer, or null if refused.
+
+// POST /api/users/draft -- step 1
+function apiReviewNewAccount(data) {
+    return postJson('/api/users/draft', data);
+}
+
+// POST /api/users -- step 2
+function apiCreateAccount(draftId) {
+    return postJson('/api/users', { draftId: draftId });
+}
 
 // GET /api/users/held -- the accounts on a sign-in hold that a manager may lift
 function apiGetHeldAccounts() {

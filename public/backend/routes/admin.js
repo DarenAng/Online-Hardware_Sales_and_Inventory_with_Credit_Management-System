@@ -4,9 +4,10 @@
 //
 // What is in this file:
 //   - staff accounts: create (in 2 steps: review, then confirm), edit,
-//     activate/deactivate, reset password
+//     activate/deactivate, reset password (a manager given the Account
+//     Management screen may create cashier, clerk and driver accounts)
 //   - sign-in holds: the list of held accounts and lifting one (the
-//     administrator, or a manager given the Lift Sign-in Hold screen)
+//     administrator, or a manager given the Account Management screen)
 //   - the audit trail (who did what, and when)
 //   - backup and recovery: writing a .sql backup file, restoring one,
 //     the daily automatic backup, and the daily archive sweep
@@ -26,6 +27,7 @@ const express = require("express");   // only for the restore upload's own JSON 
 const mailer = require("../services/mailer");
 const splitSqlStatements = require("../services/sql-script").splitSqlStatements;
 const adminProcedures = require("../database/procedures/admin-procedures");
+const migrateAccountManagementKey = require("../database/migrations").migrateAccountManagementKey;
 const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
 const firstPasswordMessage = mailer.firstPasswordMessage;
@@ -79,7 +81,7 @@ function registerAdminRoutes(app, deps) {
   const featuresOf = deps.featuresOf;
   const forgetFeatureOverrides = deps.forgetFeatureOverrides;
   const receiptLayoutFrom = deps.receiptLayoutFrom;
-  const HOLD_LIFTED_BY_MANAGER = deps.HOLD_LIFTED_BY_MANAGER;
+  const ROLES_MANAGED_BY_MANAGER = deps.ROLES_MANAGED_BY_MANAGER;
 
   // the first name, middle name and last name, checked in that order; the
   // sentence about the first bad one, or null when all three are letters only
@@ -92,11 +94,24 @@ function registerAdminRoutes(app, deps) {
   // ==========================================
   // LOOKUPS
   // ==========================================
+  // The administrator gets every role; a manager (allowed in by the Account
+  // Management screen) only the roles a manager may create.
   app.get("/api/roles", async function (request, response) {
     try {
       const rowsResult = await db.query("SELECT role_id, role_name FROM roles ORDER BY role_id");
       const rows = rowsResult[0];
-      response.json(rows);
+
+      if (request.actor.roleName === ADMIN) {
+        return response.json(rows);
+      }
+
+      const allowedRoles = [];
+      for (let i = 0; i < rows.length; i++) {
+        if (ROLES_MANAGED_BY_MANAGER.includes(rows[i].role_name)) {
+          allowedRoles.push(rows[i]);
+        }
+      }
+      response.json(allowedRoles);
     } catch (error) {
       response.status(500).json({ error: error.message });
     }
@@ -239,7 +254,7 @@ function registerAdminRoutes(app, deps) {
     const row = rows[0];
     if (Number(row.expires_at) <= Date.now()) return expired;
     if (row.staff_id !== staffId) {
-      return { error: "That review belongs to another administrator's session." };
+      return { error: "That review belongs to another person's session." };
     }
     if (row.kind !== kind) {
       return { error: "That review was for a different kind of account." };
@@ -291,8 +306,8 @@ function registerAdminRoutes(app, deps) {
 
   // The accounts on a sign-in hold right now, soonest to end first. This must
   // stay above "/api/users/:staffId" or Express would read "held" as an id.
-  // The administrator sees every account; a manager (allowed in by the Lift
-  // Sign-in Hold screen) only sees the roles a manager may release.
+  // The administrator sees every account; a manager (allowed in by the
+  // Account Management screen) only sees the roles a manager may release.
   app.get("/api/users/held", async function (request, response) {
     try {
       const rowsResult = await db.query(
@@ -309,7 +324,7 @@ function registerAdminRoutes(app, deps) {
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const allowed = request.actor.roleName === ADMIN ||
-                        HOLD_LIFTED_BY_MANAGER.includes(row.role_name);
+                        ROLES_MANAGED_BY_MANAGER.includes(row.role_name);
         if (allowed) {
           held.push({
             staff_id: row.staff_id,
@@ -358,6 +373,10 @@ function registerAdminRoutes(app, deps) {
     try {
       const owner = await findPhoneOwner(request.query.phone, request.query.staffId);
       if (!owner) return response.json({ taken: false });
+      // another person's name is the administrator's to see; a manager is only told whose role
+      if (request.actor.roleName !== ADMIN) {
+        return response.json({ taken: true, roleName: owner.role_name });
+      }
       response.json({ taken: true, roleName: owner.role_name, name: owner.full_name });
     } catch (error) {
       console.error("Phone check failed:", error.message);
@@ -380,6 +399,14 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
+  // the sentence for a phone number another staff member has: the administrator is
+  // told who, a manager only the role
+  function phoneTaken(request, owner) {
+    if (request.actor.roleName === ADMIN) return phoneTakenMessage(owner);
+    return "That phone number is already used by another staff account (" + owner.role_name + "). " +
+           "Each staff account needs its own phone number.";
+  }
+
   // Step 1 of 2: check everything, make the password, hand the account back to
   // be read. Nothing is in the database when this returns.
   app.post("/api/users/draft", async function (request, response) {
@@ -389,6 +416,7 @@ function registerAdminRoutes(app, deps) {
     const phone = request.body.phone;
     const roleId = request.body.roleId;
     const email = request.body.email;
+    const roleIdNumber = Number(roleId);
 
     if (!firstName || !lastName || !roleId || !email || !String(phone || "").trim()) {
       return response.status(400).json({ error: "Name, phone, role and email are required" });
@@ -407,12 +435,25 @@ function registerAdminRoutes(app, deps) {
     const phoneProblem = phoneComplaint(phone);
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
+    // digits only, above zero: "2abc" and "0x1" are not role ids
+    // (matches a text of nothing but digits)
+    if (!/^\d+$/.test(String(roleId).trim()) || !Number.isSafeInteger(roleIdNumber) || roleIdNumber < 1) {
+      return response.status(400).json({ error: "The selected role does not exist." });
+    }
+
     try {
       const rolesResult = await db.query(
-        "SELECT role_name FROM roles WHERE role_id = ?", [roleId]);
+        "SELECT role_name FROM roles WHERE role_id = ?", [roleIdNumber]);
       const roles = rolesResult[0];
       if (roles.length === 0) {
         return response.status(400).json({ error: "The selected role does not exist." });
+      }
+
+      // checked here against the real role, never taken from the screen
+      if (request.actor.roleName !== ADMIN && !ROLES_MANAGED_BY_MANAGER.includes(roles[0].role_name)) {
+        return response.status(403).json({
+          error: "You can only create a cashier, an inventory clerk or a delivery driver account."
+        });
       }
 
       // the procedure checks this too; checking here keeps the answer in front of the form
@@ -432,7 +473,7 @@ function registerAdminRoutes(app, deps) {
       // each staff member has their own phone number
       const phoneOwner = await findPhoneOwner(phone, 0);
       if (phoneOwner) {
-        return response.status(409).json({ error: phoneTakenMessage(phoneOwner) });
+        return response.status(409).json({ error: phoneTaken(request, phoneOwner) });
       }
 
       const details = {
@@ -440,7 +481,7 @@ function registerAdminRoutes(app, deps) {
         middleName: cleanMiddleName(middleName),
         lastName: String(lastName).trim(),
         phone: cleanPhone(phone),
-        roleId: Number(roleId),
+        roleId: roleIdNumber,
         roleName: roles[0].role_name,
         email: address
       };
@@ -456,12 +497,11 @@ function registerAdminRoutes(app, deps) {
       }
       fullName += " " + details.lastName;
 
-      // the answer: the draft id, the password, and every field of "details"
-      // (the one place a readable password crosses the wire on purpose)
+      // the answer: the draft id and every field of "details". The password is not
+      // in it: it is read out only after Confirm, and only when the mail did not go.
       const answer = Object.assign({
         draftId: draft.draftId,
         expiresInSeconds: draft.expiresInSeconds,
-        password: password,
         willEmail: isMailConfigured()
       }, details);
       answer.fullName = fullName;
@@ -482,11 +522,18 @@ function registerAdminRoutes(app, deps) {
     const draft = draftResult.draft;
     const details = draft.details;
 
+    // the draft was checked when it was made; checking again costs nothing
+    if (request.actor.roleName !== ADMIN && !ROLES_MANAGED_BY_MANAGER.includes(details.roleName)) {
+      return response.status(403).json({
+        error: "You can only create a cashier, an inventory clerk or a delivery driver account."
+      });
+    }
+
     try {
       // the draft may be minutes old: someone else could have taken the number since
       const phoneOwner = await findPhoneOwner(details.phone, 0);
       if (phoneOwner) {
-        return response.status(409).json({ error: phoneTakenMessage(phoneOwner) });
+        return response.status(409).json({ error: phoneTaken(request, phoneOwner) });
       }
 
       const output = await adminProcedures.createStaffAccount(
@@ -900,7 +947,7 @@ function registerAdminRoutes(app, deps) {
   // Lift a sign-in hold (too many wrong passwords) without touching the
   // password: the person signs in again with the one they already have, and
   // gets a full set of tries. The administrator may lift any hold; a manager
-  // (given the Lift Sign-in Hold screen) only on a cashier, clerk or driver.
+  // (given the Account Management screen) only on a cashier, clerk or driver.
   app.post("/api/users/:staffId/release-hold", notOwnAccount, async function (request, response) {
     const staffId = Number(request.params.staffId);
     try {
@@ -918,7 +965,7 @@ function registerAdminRoutes(app, deps) {
 
       // checked here against the account's real role, never taken from the screen
       const byAdmin = request.actor.roleName === ADMIN;
-      if (!byAdmin && !HOLD_LIFTED_BY_MANAGER.includes(rows[0].role_name)) {
+      if (!byAdmin && !ROLES_MANAGED_BY_MANAGER.includes(rows[0].role_name)) {
         return response.status(403).json({
           error: "You can only lift the hold on a cashier, an inventory clerk or a delivery driver."
         });
@@ -2519,6 +2566,14 @@ function registerAdminRoutes(app, deps) {
   // and file 2 is loaded again straight away if anything is missing or old.
   // Returns "" when all is well.
   async function restoreShortfall() {
+    // a backup from before Account Management brings the old screen key back
+    try {
+      await migrateAccountManagementKey();
+      forgetFeatureOverrides();
+    } catch (error) {
+      console.error("Renaming the old screen key after a restore failed:", error.message);
+    }
+
     try {
       forgetProcedureCount();                  // force a fresh count
       await loadProceduresIfMissing();

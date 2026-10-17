@@ -184,17 +184,21 @@ const FEATURES = [
 
   // --- staff accounts ---
   // Off for everyone until the administrator switches it on for managers.
-  // routes/admin.js still refuses a hold on an administrator or a manager.
-  { key: "release-holds", name: "Lift Sign-in Hold", module: "Staff",
-    description: "See the cashiers, inventory clerks and drivers locked out after too many wrong passwords, and let them sign in again. Never for an administrator or another manager.",
+  // routes/admin.js still refuses an account or a hold on an administrator or a manager.
+  { key: "account-management", name: "Account Management", module: "Staff",
+    description: "Create cashier, inventory clerk and driver accounts, and let the ones locked out after too many wrong passwords sign in again. Never an administrator or manager account.",
     available: [MANAGER], defaults: [],
-    routes: [["GET", /^\/api\/users\/held$/], ["POST", /^\/api\/users\/\d+\/release-hold$/]] }
+    routes: [["GET", /^\/api\/roles$/],
+             ["GET", /^\/api\/users\/email-check$/], ["GET", /^\/api\/users\/phone-check$/],
+             ["POST", /^\/api\/users\/draft$/], ["POST", /^\/api\/users$/],
+             ["GET", /^\/api\/users\/held$/], ["POST", /^\/api\/users\/\d+\/release-hold$/]] }
 ];
 
 const FEATURE_ROLES = [MANAGER, CLERK, CASHIER, DRIVER];   // the matrix's columns
 
-// the accounts a manager may lift a sign-in hold on (the administrator may lift any)
-const HOLD_LIFTED_BY_MANAGER = [CASHIER, CLERK, DRIVER];
+// the roles whose accounts a manager may create and lift a sign-in hold on
+// (the administrator may do both for any role)
+const ROLES_MANAGED_BY_MANAGER = [CASHIER, CLERK, DRIVER];
 
 // "available" is the list of dashboards that have a menu entry for the screen.
 // Access Control only offers a switch where flipping it shows or hides
@@ -345,7 +349,7 @@ async function heldFeatures(roleName) {
 module.exports = {
   FEATURES: FEATURES,
   FEATURE_ROLES: FEATURE_ROLES,
-  HOLD_LIFTED_BY_MANAGER: HOLD_LIFTED_BY_MANAGER,
+  ROLES_MANAGED_BY_MANAGER: ROLES_MANAGED_BY_MANAGER,
   findFeature: findFeature,
   featuresCovering: featuresCovering,
   featuresOf: featuresOf,

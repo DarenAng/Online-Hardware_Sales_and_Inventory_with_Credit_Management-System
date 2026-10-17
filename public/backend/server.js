@@ -161,7 +161,7 @@ const publishChange = require("./live-changes").publishChange;
 const features = require("./features");
 const FEATURES = features.FEATURES;
 const FEATURE_ROLES = features.FEATURE_ROLES;
-const HOLD_LIFTED_BY_MANAGER = features.HOLD_LIFTED_BY_MANAGER;
+const ROLES_MANAGED_BY_MANAGER = features.ROLES_MANAGED_BY_MANAGER;
 const findFeature = features.findFeature;
 const featuresOf = features.featuresOf;
 const forgetFeatureOverrides = features.forgetFeatureOverrides;
@@ -395,7 +395,7 @@ const adminModule = registerAdminRoutes(app, {
   forgetProcedureCount: forgetProcedureCount, loadProceduresIfMissing: loadProceduresIfMissing,
   FEATURES: FEATURES, FEATURE_ROLES: FEATURE_ROLES, findFeature: findFeature,
   featuresOf: featuresOf, forgetFeatureOverrides: forgetFeatureOverrides,
-  receiptLayoutFrom: receiptLayoutFrom, HOLD_LIFTED_BY_MANAGER: HOLD_LIFTED_BY_MANAGER
+  receiptLayoutFrom: receiptLayoutFrom, ROLES_MANAGED_BY_MANAGER: ROLES_MANAGED_BY_MANAGER
 });
 
 // ==========================================
