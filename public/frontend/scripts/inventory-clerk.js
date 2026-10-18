@@ -2565,8 +2565,8 @@ async function loadInventoryArchive() {
 
 async function archiveMaterial(productId) {
     const yes = await askConfirm(
-        'It drops off the material list, out of the catalogue and out of the register until it is ' +
-        'restored from the Archive screen. Nothing already sold is affected.',
+        'Are you sure you want to archive this material? Once archived, it will no longer show in the POS ' +
+        'or in Inventory. It moves to the Archive screen, where it can be restored at any time.',
         { title: 'Archive this material?', eyebrow: 'Inventory', confirmLabel: 'Archive it', tone: 'danger' });
 
     if (!yes) return;
@@ -2673,7 +2673,6 @@ function openMaterialDetail(productId) {
         detailField('Stock Status', statusBadge(p.stock_status)) +
         detailField('Suggested Order', p.suggested_order + ' ' + unit) +
         detailField('Stock Value', peso(p.stock_value)) +
-        detailField('Product Status', statusBadge(p.status)) +
         detailField('Last Updated', escapeHtml(p.last_updated || 'Never')) +
         detailField('Added On', escapeHtml(p.created_at || 'Unknown')) +
         '</div>' +
@@ -2686,8 +2685,8 @@ function openMaterialDetail(productId) {
     openDetailModal(p.product_name,
         (p.supplier_name ? p.supplier_name : 'No supplier') + ' · ' + (p.category_name || 'Uncategorised'),
         initialsOf(p.product_name), [
-            { label: 'Overview', body: overview },
             { label: 'Stock', body: stock },
+            { label: 'Overview', body: overview },
             { label: 'Selling Units', body: sellingUnitsPage(p) },
             { label: 'Delivered In', body: deliveryPackPage(p) }
         ]);
