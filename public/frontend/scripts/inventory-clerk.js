@@ -1870,6 +1870,15 @@ async function handleFileReport(event) {
         renderReportPoLines();
         // the stock figures have moved; the next search reads them afresh
         invLoaded = false;
+
+        // The live channel skips this screen's own writes, so the lists that
+        // show the new report (Returned Items) and the stock it moved read again here.
+        const keys = ['clerk-returns', 'clerk-materials', 'clerk-reorder'];
+        for (let i = 0; i < keys.length; i++) {
+            const panel = getDataPanel(keys[i]);
+            if (panel && panel.state === 'ready') await panel.refresh();
+        }
+
         await loadStockBanner();
         await loadNotifications();
     } catch (error) {
@@ -2558,11 +2567,6 @@ function openClerkRecord(index) {
     openDetailModal(row.name, kind + ' record', initialsOf(row.name), [{ label: 'Details', body: body }]);
 }
 
-async function loadInventoryArchive() {
-    const panel = getDataPanel('clerk-archive');
-    if (panel && panel.state !== 'closed') await panel.refresh();
-}
-
 async function archiveMaterial(productId) {
     const yes = await askConfirm(
         'Are you sure you want to archive this material? Once archived, it will no longer show in the POS ' +
@@ -2615,7 +2619,14 @@ async function restoreMaterial(productId) {
         notifySuccess('It is back on the material list.', 'Material restored');
         closeModal('detail-modal');
         invLoaded = false;
-        await loadInventoryArchive();
+
+        // the material list and the reorder list read it again, as after archiving
+        const keys = ['clerk-materials', 'clerk-archive', 'clerk-reorder'];
+        for (let i = 0; i < keys.length; i++) {
+            const panel = getDataPanel(keys[i]);
+            if (panel && panel.state === 'ready') await panel.refresh();
+        }
+
         await loadStockBanner();
     } catch (error) {
         if (button) button.disabled = false;

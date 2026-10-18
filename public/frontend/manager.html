@@ -880,7 +880,7 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="po-status">Status</label>
-                            <select id="po-status" data-filter-table="po-table" data-hides-column="6"
+                            <select id="po-status" data-filter-table="po-table" data-hides-column="5"
                                     data-keeps-column-for="PO Accepted|On the way"
                                     onchange="dataPanelFilter('mgr-po', 'status', this.value)">
                                 <option value="all">Every status</option>
@@ -897,7 +897,7 @@
                     <div class="table-responsive grid-10">
                         <table id="po-table">
                             <thead>
-                                <tr><th>PO</th><th>Supplier</th><th>Ordered</th><th>Lines</th>
+                                <tr><th>PO</th><th>Supplier</th><th>Ordered</th>
                                     <th>Order Value</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>

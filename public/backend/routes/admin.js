@@ -27,7 +27,7 @@ const express = require("express");   // only for the restore upload's own JSON 
 const mailer = require("../services/mailer");
 const splitSqlStatements = require("../services/sql-script").splitSqlStatements;
 const adminProcedures = require("../database/procedures/admin-procedures");
-const migrateAccountManagementKey = require("../database/migrations").migrateAccountManagementKey;
+const migrateOneAtATime = require("../database/migrations").migrateOneAtATime;
 const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
 const firstPasswordMessage = mailer.firstPasswordMessage;
@@ -1929,13 +1929,7 @@ function registerAdminRoutes(app, deps) {
     const connection = await db.getConnection();
     restoreInProgress = true;
 
-    // the file changes sql_mode; the connection goes back to the pool with the mode it came with
-    let oldMode = null;
-
     try {
-      const modeResult = await connection.query("SELECT @@SESSION.sql_mode AS mode");
-      oldMode = modeResult[0][0].mode;
-
       await connection.query("SET FOREIGN_KEY_CHECKS = 0");
       if (usesDoubleQuotes) {
         await connection.query("SET SESSION sql_mode = CONCAT(@@SESSION.sql_mode, ',ANSI_QUOTES')");
@@ -1946,7 +1940,16 @@ function registerAdminRoutes(app, deps) {
         // skip "USE some_database" so the file cannot switch to another database
         // matches a statement that starts with the word USE, in any letter case
         if (/^use[\s`]/i.test(statement)) continue;
-        await connection.query(statement);
+        // the server's own tables (sessions, live changes, the backups themselves) are not shop
+        // data, so a file never rewrites them; and mysqldump's GTID lines are refused by Aiven
+        if (touchesServerTable(statement) || isGtidLine(statement)) continue;
+        // a dump from MySQL Workbench or mysqldump names the MySQL account that made it
+        // (DEFINER=`root`@`localhost`), which may not exist here, so it is taken out
+        if (/^create\s/i.test(statement)) {
+          await connection.query(stripDefiner(statement));
+        } else {
+          await connection.query(statement);
+        }
 
         // the file's own SET SQL_MODE line would turn ANSI_QUOTES off again
         // matches a statement that starts with SET SQL_MODE or SET SESSION SQL_MODE
@@ -1959,11 +1962,24 @@ function registerAdminRoutes(app, deps) {
       return statements.length;
     } finally {
       restoreInProgress = false;
-      if (oldMode !== null) {
-        await connection.query("SET SESSION sql_mode = ?", [oldMode]).catch(function () {});
-      }
-      connection.release();
+      // The file sets the time zone, the character set, the key checks and may leave tables
+      // locked on this connection. It is closed, not handed back to the pool (a failed run
+      // would pass those settings on); the pool opens a fresh one, on the shop's time zone.
+      connection.destroy();
     }
+  }
+
+  // true when a statement of the file writes to one of the server's own tables
+  // Example: "INSERT INTO `user_sessions` VALUES (...)" or "DROP TABLE IF EXISTS live_changes"
+  function touchesServerTable(statement) {
+    // the words that start such a statement, then an optional database name, then the table name
+    const found = /^(?:drop\s+table\s+(?:if\s+exists\s+)?|create\s+table\s+(?:if\s+not\s+exists\s+)?|insert\s+(?:ignore\s+)?into\s+|replace\s+(?:into\s+)?|lock\s+tables\s+|alter\s+table\s+|truncate\s+(?:table\s+)?|delete\s+from\s+)(?:[`"]?\w+[`"]?\.)?[`"]?(\w+)/i.exec(statement);
+    return found !== null && SERVER_TABLES.includes(found[1].toLowerCase());
+  }
+
+  // mysqldump's "SET @@SESSION.SQL_LOG_BIN" and "SET @@GLOBAL.GTID_PURGED" lines
+  function isGtidLine(statement) {
+    return /^set\s+@@(session\.sql_log_bin|global\.gtid_purged)/i.test(statement);
   }
 
   // ==========================================
@@ -2619,23 +2635,21 @@ function registerAdminRoutes(app, deps) {
 
   // A backup taken without procedures restores without error and leaves the
   // system unable to save, so the count is taken AFTER the restore and reported
-  // with the success. A backup made before the procedures were last changed
-  // brings the old ones back, and the server's calls would then fail until the
-  // next start-up; so the same check the server runs at start-up is run now,
-  // and file 2 is loaded again straight away if anything is missing or old.
+  // with the success. A backup made before the tables or the procedures were last
+  // changed brings the old ones back (a column the server reads is missing, an old
+  // procedure is in place), and every call would then fail until the next start-up;
+  // so the same start-up work (the migrations, then file 2 if anything is missing
+  // or old) is run now, straight after the restore.
   // Returns "" when all is well.
   async function restoreShortfall() {
-    // a backup from before Account Management brings the old screen key back
-    try {
-      await migrateAccountManagementKey();
-      forgetFeatureOverrides();
-    } catch (error) {
-      console.error("Renaming the old screen key after a restore failed:", error.message);
-    }
+    // a backup can bring old screen switches back, so what was remembered is dropped
+    // first: it stays dropped even if the migration below fails
+    forgetFeatureOverrides();
 
     try {
       forgetProcedureCount();                  // force a fresh count
-      await loadProceduresIfMissing();
+      await migrateOneAtATime(runSqlScript);
+      forgetFeatureOverrides();                // and again: the migration renames old screen keys
       const total = await countProcedures();
       if (total >= EXPECTED_PROCEDURES) return "";
 
@@ -2644,7 +2658,9 @@ function registerAdminRoutes(app, deps) {
         "saved until they are put back. Run " +
         "public/database/2-RUN-SECOND-stored-procedures.sql. Your data is intact.";
     } catch (error) {
-      return "";
+      console.error("Bringing the database up to date after a restore failed:", error.message);
+      return " WARNING: the data is restored, but bringing the database up to date with this " +
+        "version of the system failed (" + error.message + "). Restart the server: it repeats that work on start-up.";
     }
   }
 

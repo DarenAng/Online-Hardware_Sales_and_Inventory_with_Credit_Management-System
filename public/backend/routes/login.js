@@ -17,6 +17,7 @@ const mailer = require("../services/mailer");
 const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
 const passwordResetMessage = mailer.passwordResetMessage;
+const keepAlive = require("../live-changes").keepAlive;
 
 function registerLoginRoutes(app, deps) {
   // take the helpers we need out of "deps" (sent to us by server.js)
@@ -563,12 +564,14 @@ function registerLoginRoutes(app, deps) {
       return response.status(503).json({ error: RESET_NO_MAIL });
     }
 
-    // answered first; the lookup and the mail happen after, whatever the address
+    // answered first; the lookup and the mail happen after, whatever the address.
+    // keepAlive: on Vercel the server is put to sleep once the reply is sent, which
+    // would stop the code being saved and mailed; this keeps it awake until it is done.
     response.json({ message: RESET_SENT, minutes: RESET_CODE_MINUTES });
 
-    sendResetCode(request, email).catch(function (error) {
+    keepAlive(sendResetCode(request, email).catch(function (error) {
       console.error("Password reset request failed:", error.message);
-    });
+    }));
   });
 
   // true when the code is the one waiting for this account (still in time and

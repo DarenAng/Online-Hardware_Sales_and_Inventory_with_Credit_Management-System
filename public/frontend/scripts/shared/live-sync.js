@@ -194,10 +194,16 @@ function noticeChange(scope, change) {
     // dataPanels (data-panel.js) holds every table on this page, by key
     for (const key in dataPanels) {
         const panel = dataPanels[key];
-        if (panel.state !== 'ready') continue;
 
         const scopes = panel.config.scopes || PANEL_SCOPES[panel.key] || [];
         if (scopes.indexOf(scope) === -1) continue;
+
+        // a table still reading may have asked before this change was made: read it once more when it lands
+        if (panel.state === 'loading') {
+            panel.reloadWanted = true;
+            continue;
+        }
+        if (panel.state !== 'ready') continue;
 
         touched += 1;
 

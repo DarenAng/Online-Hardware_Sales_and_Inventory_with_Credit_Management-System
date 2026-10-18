@@ -1724,6 +1724,7 @@ function buildManagerPurchaseOrderPanel() {
         canCreate: false,          // the clerk raises an order
         canDecide: true,           // the manager confirms or declines it
         canReceive: false,         // the clerk counts the delivery in
+        showLines: false,          // the manager's table has no Lines column
         showPanel: function (panelId, title) {
             showManagerPanel(panelId, title);
         },
@@ -2938,8 +2939,20 @@ async function restoreArchive(module, recordId) {
         notifySuccess('The record is back in circulation.', 'Record restored');
         closeModal('detail-modal');
 
-        const panel = getDataPanel('mgr-archives');
-        if (panel) await panel.refresh();
+        // every list the record comes back to reads it again, not only the archive
+        let keys = ['mgr-archives'];
+        if (module === 'Inventory') {
+            keys = keys.concat(['mgr-stocks', 'mgr-reorder', 'mgr-stock-moves', 'mgr-records', 'mgr-po']);
+        } else if (module === 'Sales') {
+            keys = keys.concat(['mgr-sales', 'mgr-unpaid', 'mgr-credit', 'mgr-loyal',
+                'mgr-stocks', 'mgr-reorder', 'mgr-stock-moves', 'mgr-deliveries']);
+        } else if (module === 'Delivery') {
+            keys = keys.concat(['mgr-deliveries']);
+        }
+        for (let i = 0; i < keys.length; i++) {
+            const panel = getDataPanel(keys[i]);
+            if (panel && panel.state === 'ready') await panel.refresh();
+        }
     } catch (error) {
         notifyOffline();
     }
@@ -2980,8 +2993,11 @@ async function openSaleDetail(saleId) {
                     (Number(s.penalty_months) === 1 ? ' month' : ' months') + ' overdue, last charged ' +
                     escapeHtml(String(s.penalty_applied_at || '').slice(0, 10)) + '</span>')
                 : '') +
+            (Number(s.returned_total) > 0
+                ? detailField('Refunded', peso(s.returned_total))
+                : '') +
             (Number(s.refunded_amount) > 0
-                ? detailField('Refunded', peso(s.refunded_amount) + ' <span class="muted">came off what the customer owed</span>')
+                ? detailField('Taken Off the Balance', peso(s.refunded_amount) + ' <span class="muted">of the refund came off what the customer owed</span>')
                 : '') +
             detailField('Amount Due', peso(saleAmountDue(s))) +
             detailField('Amount Paid', peso(s.amount_paid)) +

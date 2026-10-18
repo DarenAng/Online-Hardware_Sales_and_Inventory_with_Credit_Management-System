@@ -27,6 +27,8 @@ const poSetup = {
     historyPanelId: 'panel-po-history',
     historyTitle: 'Order History',
     gateText: 'Press Load Data for every order raised, or filter to the ones still pending.',
+    // false leaves the Lines column out of the history table (the manager's page has no such column)
+    showLines: true,
     afterChange: null
 };
 
@@ -1575,7 +1577,7 @@ function buildPurchaseOrderPanel() {
     createDataPanel({
         key: poSetup.key,
         tableId: 'po-table',
-        columns: 6,
+        columns: poSetup.showLines ? 6 : 5,
         pagerId: 'po-pager',
         idField: 'po_id',
         filters: { status: 'all' },
@@ -1608,7 +1610,7 @@ function buildPurchaseOrderPanel() {
             '<td class="cell-id">#' + po.po_id + '</td>' +
             '<td class="cell-name">' + escapeHtml(po.supplier_name) + '</td>' +
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
-            '<td class="cell-num">' + po.line_count + '</td>' +
+            (poSetup.showLines ? '<td class="cell-num">' + po.line_count + '</td>' : '') +
             '<td class="cell-num">' + poValueCell(po) + '</td>' +
             '<td>' + poStatusBadge(po) + '</td></tr>';
         }

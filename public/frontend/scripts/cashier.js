@@ -2477,8 +2477,9 @@ async function openReceipt(saleId) {
             value: peso(s.penalty_amount)
         });
     }
-    // refunds that came off what the customer owed
-    if (Number(s.refunded_amount) > 0) totals.push({ label: 'Refunded', value: '-' + peso(s.refunded_amount) });
+    // everything refunded on the sale, then the part of it that came off what the customer owed
+    if (Number(s.returned_total) > 0) totals.push({ label: 'Refunded', value: '-' + peso(s.returned_total) });
+    if (Number(s.refunded_amount) > 0) totals.push({ label: 'Taken off the balance', value: '-' + peso(s.refunded_amount) });
     totals.push({ label: 'Tendered', value: peso(s.amount_paid) });
     totals.push({ label: 'Change', value: peso(s.change_given) });
 
@@ -3128,9 +3129,10 @@ function buildRecentSalesPanel() {
         },
 
         renderRow: function (row, index) {
+            // everything refunded on the sale, the cash handed back as well as what came off the balance
             let refundedNote = '';
-            if (Number(row.refunded_amount) > 0) {
-                refundedNote = '<span class="cell-sub">refunded ' + peso(row.refunded_amount) + '</span>';
+            if (Number(row.returned_total) > 0) {
+                refundedNote = '<span class="cell-sub">refunded ' + peso(row.returned_total) + '</span>';
             }
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
                 'onclick="openRecentSale(' + row.sale_id + ')">' +
@@ -3167,8 +3169,9 @@ async function openRecentSale(saleId) {
     const s = data.sale;
     recentSale = { saleId: s.sale_id, items: data.items, picked: -1 };
 
+    // everything refunded on the sale, as the list row says; s.refunded_amount is only the part that came off the balance
     let refundedText = '<span class="muted">Nothing yet</span>';
-    if (Number(s.refunded_amount) > 0) refundedText = peso(s.refunded_amount);
+    if (Number(s.returned_total) > 0) refundedText = peso(s.returned_total);
 
     const facts = '<div class="detail-grid">' +
         detailField('Date', escapeHtml(String(s.sale_date).slice(0, 16))) +

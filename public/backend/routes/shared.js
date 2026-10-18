@@ -34,6 +34,7 @@ const liveChanges = require("../live-changes");
 const changesSince = liveChanges.changesSince;
 const latestChangeVersion = liveChanges.latestChangeVersion;
 const LIVE_POLL_SECONDS = liveChanges.LIVE_POLL_SECONDS;
+const recordChange = liveChanges.recordChange;
 const sessions = require("../sessions");
 const PRESENCE_WINDOW_MS = sessions.PRESENCE_WINDOW_MS;
 const endSessionsForStaff = sessions.endSessionsForStaff;
@@ -143,6 +144,25 @@ const ARCHIVE_ROLES = {
   Delivery: MANAGEMENT,
   Staff: [ADMIN]
 };
+
+// The live channel files every /api/archives write under "archives" (see scopeOf in
+// live-changes.js), which only the manager's Archives table reads. What an archive or a
+// restore really moves is listed here, so the other screens (the material list, the
+// till's catalogue, the sales and delivery lists, the staff list) read it again too.
+const ARCHIVE_SCOPES = {
+  Inventory: ["inventory"],
+  Sales: ["sales", "inventory", "deliveries"],
+  Delivery: ["deliveries"],
+  Staff: ["staff"]
+};
+
+async function announceArchiveChange(request, module, what, recordId) {
+  const scopes = ARCHIVE_SCOPES[module] || [];
+  for (let i = 0; i < scopes.length; i++) {
+    await recordChange(scopes[i], what + " " + module + " #" + recordId,
+      request.headers["x-client-id"] || null);
+  }
+}
 
 function sameSecret(given, expected) {
   const a = crypto.createHash("sha256").update(String(given)).digest();
@@ -437,6 +457,8 @@ function registerSharedRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
+      await announceArchiveChange(request, module, "restored", recordId);
+
       response.json({ message: output.message });
     } catch (error) {
       console.error("Restore failed:", error.message);
@@ -472,6 +494,8 @@ function registerSharedRoutes(app, deps) {
         await endSessionsForStaff(recordId, null,
           "Your account was archived by the System Administrator.");
       }
+
+      await announceArchiveChange(request, module, "archived", recordId);
 
       response.json({ message: output.message });
     } catch (error) {

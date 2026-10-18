@@ -10,7 +10,9 @@
 //   - "DELIMITER //" changes what ends a statement (used around procedures)
 //   - text inside quotes '...' "..." `...` is copied as it is
 //     (a ; inside quotes does not end a statement)
-//   - comments (-- ..., # ..., /* ... */) are skipped
+//   - comments (-- ..., # ..., /* ... */) are skipped, except the ones that start
+//     with /*! (like /*!50003 DROP PROCEDURE ... */): mysqldump and MySQL Workbench
+//     put real statements in them, so what is inside is kept
 //   - the delimiter (normally ;) ends the current statement
 //   - any other character is added to the current statement
 function splitSqlStatements(sql) {
@@ -68,7 +70,7 @@ function splitSqlStatements(sql) {
 
     // a "-- comment" or "# comment": skip to the end of the line
     const isDashComment = rest.startsWith("--") &&
-      (rest[2] === " " || rest[2] === "\t" || rest[2] === "\n");
+      (rest[2] === " " || rest[2] === "\t" || rest[2] === "\r" || rest[2] === "\n");
     if (isDashComment || character === "#") {
       const stop = sql.indexOf("\n", index);
       if (stop === -1) {
@@ -76,6 +78,23 @@ function splitSqlStatements(sql) {
       } else {
         index = stop + 1;
       }
+      continue;
+    }
+
+    // a "/*! ... */" is a comment only to other databases; MySQL runs what is inside.
+    // Example: "/*!50003 DROP PROCEDURE IF EXISTS x */" is the statement DROP PROCEDURE IF EXISTS x
+    if (rest.startsWith("/*!")) {
+      const stop = sql.indexOf("*/", index + 3);
+      let inside = "";
+      if (stop === -1) {
+        inside = sql.slice(index + 3);
+        index = sql.length;
+      } else {
+        inside = sql.slice(index + 3, stop);
+        index = stop + 2;
+      }
+      // the version number after /*! is not part of the statement
+      current += " " + inside.replace(/^\d+/, "") + " ";
       continue;
     }
 

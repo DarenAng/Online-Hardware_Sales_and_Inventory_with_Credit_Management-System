@@ -160,7 +160,11 @@ function registerCashierRoutes(app, deps) {
           "              d.delivery_id, d.status AS delivery_status,\n" +
           "              " + SALE_CUSTOMER_SQL + " AS customer_name,\n" +
           "              st.full_name AS cashier_name,\n" +
-          "              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.sale_id) AS item_count\n" +
+          "              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.sale_id) AS item_count,\n" +
+          // everything refunded or returned on the sale, including the cash handed back
+          // (refunded_amount above is only the part that came off what the customer owed)
+          "              (SELECT COALESCE(SUM(r.refund_amount), 0) FROM returned_items r\n" +
+          "                WHERE r.sale_id = s.sale_id AND r.report_type IN ('Refunded', 'Return')) AS returned_total\n" +
           "       FROM sales s\n" +
           "       LEFT JOIN customers c ON c.customer_id = s.customer_id\n" +
           "       JOIN staff st ON st.staff_id = s.cashier_staff_id\n" +
@@ -662,7 +666,11 @@ function registerCashierRoutes(app, deps) {
       const rowsResult = await db.query(
         "SELECT s.*, " + SALE_CUSTOMER_SQL + " AS customer_name,\n" +
           "              c.phone AS customer_phone, c.address AS customer_address,\n" +
-          "              st.full_name AS cashier_name\n" +
+          "              st.full_name AS cashier_name,\n" +
+          // everything refunded or returned on the sale (the cash handed back as well); the
+          // sale's own refunded_amount is only the part that came off what the customer owed
+          "              (SELECT COALESCE(SUM(r.refund_amount), 0) FROM returned_items r\n" +
+          "                WHERE r.sale_id = s.sale_id AND r.report_type IN ('Refunded', 'Return')) AS returned_total\n" +
           "       FROM sales s\n" +
           "       LEFT JOIN customers c ON c.customer_id = s.customer_id\n" +
           "       JOIN staff st ON st.staff_id = s.cashier_staff_id\n" +

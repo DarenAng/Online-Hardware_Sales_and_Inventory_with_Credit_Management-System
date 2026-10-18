@@ -71,6 +71,8 @@ function publishChange(scope, detail, origin) {
   keepAlive(recordChange(scope, detail, origin));
 }
 
+// Keeps the work running after the response on Vercel (see publishChange).
+// The route files use it too, for work that is done after the reply is sent.
 function keepAlive(promise) {
   if (IS_VERCEL) {
     try {
@@ -129,6 +131,7 @@ module.exports = {
   scopeOf: scopeOf,
   recordChange: recordChange,
   publishChange: publishChange,
+  keepAlive: keepAlive,
   latestChangeVersion: latestChangeVersion,
   changesSince: changesSince
 };
