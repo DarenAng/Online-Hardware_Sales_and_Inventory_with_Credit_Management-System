@@ -1,5 +1,5 @@
 // ============================================================
-// qr-payments.js -- GCash and Maya paid by QR code, and the record of every try
+// qr-payments.js -- GCash, Maya and bank transfers paid by QR code, and the record of every try
 // Loaded by: server.js only (from the routes folder). Never sent to a browser.
 //
 // Routes in this file:
@@ -15,6 +15,12 @@
 // (offline). Both answer the same three calls, and nothing outside this file
 // knows which one is in use.
 //
+// A bank transfer is paid the same way: the cashier gives the customer's bank
+// (one PayMongo can take a transfer from), account name and account number, and
+// the code opens that bank's own online-banking page, where the customer logs in
+// and approves the transfer. The bank and account are kept on the qr_payments
+// row, and copied to payment_details when the money is recorded.
+//
 // Every attempt is a row in qr_payments, written through procedures: made
 // (pending), what became of it (paid, failed, expired, cancelled), and the
 // sale it was recorded on (set inside sp_create_sale_transaction and
@@ -26,6 +32,8 @@
 const os = require("os");
 const QRCode = require("qrcode");
 const qrPaymentProcedures = require("../database/procedures/qr-payment-procedures");
+const paymentDetails = require("../payment-details");
+const helpers = require("../helpers");
 
 // how long a code can be paid; QR_PAYMENT_MINUTES in .env
 let QR_MINUTES = 10;
@@ -33,7 +41,7 @@ if (Number(process.env.QR_PAYMENT_MINUTES) > 0) {
   QR_MINUTES = Number(process.env.QR_PAYMENT_MINUTES);
 }
 
-const WALLETS = ["GCash", "PayMaya"];
+const WALLETS = ["GCash", "PayMaya", "Bank Transfer"];
 const PURPOSES = ["sale", "credit_payment"];
 
 // written on a paid row whose sale could not be saved: money in, nothing recorded
@@ -173,6 +181,9 @@ function registerQrPaymentRoutes(app, deps) {
       status: row.status,
       amount: Number(row.amount),
       wallet: row.wallet,
+      bankName: row.bank_name,
+      accountName: row.account_name,
+      accountNumber: row.account_number,
       purpose: row.purpose,
       reference: row.provider_payment_id,
       saleId: row.sale_id,
@@ -265,7 +276,31 @@ function registerQrPaymentRoutes(app, deps) {
       return response.status(400).json({ error: "Type the amount the QR code is for." });
     }
     if (!WALLETS.includes(wallet)) {
-      return response.status(400).json({ error: "Only GCash and Maya can be paid by QR code." });
+      return response.status(400).json({ error: "Only GCash, Maya and bank transfers can be paid by QR code." });
+    }
+
+    // A bank transfer names the customer's bank (one PayMongo supports) and
+    // account. They are checked here, before anything is made at PayMongo.
+    let bank = null;
+    let accountName = null;
+    let accountNumber = null;
+    if (wallet === "Bank Transfer") {
+      bank = paymentDetails.findBank(String(body.bankCode || ""));
+      if (!bank) {
+        return response.status(400).json({ error: "Pick the customer's bank from the list." });
+      }
+      if (amount < bank.minimum) {
+        return response.status(400).json({
+          error: bank.name + " takes transfers of " + pesoText(bank.minimum) + " or more. This one is " + pesoText(amount) + "."
+        });
+      }
+      accountName = helpers.tidy(body.accountName);
+      const nameProblem = paymentDetails.accountNameProblem(accountName, "");
+      if (nameProblem) return response.status(400).json({ error: nameProblem });
+      accountNumber = paymentDetails.cleanAccountNumber(body.accountNumber);
+      if (accountNumber === null) {
+        return response.status(400).json({ error: "Enter the account number: 6 to 20 digits, no letters." });
+      }
     }
     if (!PURPOSES.includes(purpose)) {
       return response.status(400).json({ error: "A QR code is either for a sale or for a payment on a balance." });
@@ -308,20 +343,27 @@ function registerQrPaymentRoutes(app, deps) {
       made = await provider.createPayment({
         amount: amount,
         wallet: wallet,
+        bank: bank,
         description: description,
         returnUrl: baseUrl + "/pay/done"
       });
     } catch (error) {
       console.error("Making a QR payment failed:", error.message);
+      // say which bank, so the cashier knows another one can be tried
+      let said = error.message;
+      if (bank && error.httpStatus >= 400 && error.httpStatus < 500) {
+        said = bank.name + " could not be used for this transfer: " + error.message;
+      }
       return response.status(error.httpStatus >= 400 && error.httpStatus < 500 ? 400 : 502)
-        .json({ error: error.message });
+        .json({ error: said });
     }
 
     try {
       const output = await qrPaymentProcedures.createQrPayment(
         [provider.name, provider.mode, made.providerIntentId, amount, wallet, purpose,
          Math.round(QR_MINUTES * 60), getActorId(request),
-         purpose === "credit_payment" ? "for OR-" + String(saleId).padStart(6, "0") : "for a sale"]
+         purpose === "credit_payment" ? "for OR-" + String(saleId).padStart(6, "0") : "for a sale",
+         bank ? bank.code : null, bank ? bank.name : null, accountName, accountNumber]
       );
       if (output.status_code !== 201) {
         // not on record, so it must not be payable either
@@ -342,7 +384,8 @@ function registerQrPaymentRoutes(app, deps) {
         secondsLeft: Number(row.seconds_left),
         mode: provider.mode,
         amount: amount,
-        wallet: wallet
+        wallet: wallet,
+        bankName: bank ? bank.name : null
       });
     } catch (error) {
       console.error("Saving a QR payment failed:", error.message);
@@ -514,7 +557,11 @@ function registerQrPaymentRoutes(app, deps) {
   // Checked with the provider again before anything is saved. Gives back
   // { id, reference, release } or throws a QrPaymentError. release() must be
   // called once the sale is saved or has failed.
-  async function verifyForMoney(qrPaymentId, amountNow, wallet, actorId) {
+  // For a Bank Transfer, typedAccount is { bankCode, accountNumber } as the cashier
+  // has them on screen now. The payment's details are copied from its own row when
+  // the money is recorded, so it is only used when they are the same bank and account
+  // (a paid transfer kept from an earlier try must not take another customer's place).
+  async function verifyForMoney(qrPaymentId, amountNow, wallet, actorId, typedAccount) {
     const id = Number(qrPaymentId);
     if (!Number.isInteger(id) || id <= 0) {
       throw new QrPaymentError(400, "That QR payment number is not valid.", "QR_UNKNOWN");
@@ -528,6 +575,16 @@ function registerQrPaymentRoutes(app, deps) {
       const row = await refresh(await readRow(id), actorId);
       const refusal = qrRefusal(row, amountNow, wallet);
       if (refusal) throw new QrPaymentError(refusal.status, refusal.message, refusal.code);
+      if (wallet === "Bank Transfer") {
+        const typed = typedAccount || {};
+        const typedNumber = paymentDetails.cleanAccountNumber(typed.accountNumber);
+        if (String(typed.bankCode || "") !== String(row.bank_code || "") || typedNumber === null ||
+            typedNumber !== String(row.account_number || "")) {
+          throw new QrPaymentError(409,
+            "That transfer was paid from " + row.bank_name + " account " + row.account_number +
+            ", not the bank and account on screen. Nothing was recorded.", "QR_ACCOUNT");
+        }
+      }
       return {
         id: id,
         reference: row.provider_payment_id,
@@ -580,7 +637,7 @@ function registerQrPaymentRoutes(app, deps) {
     if (process.env.VERCEL && provider.name === "sim") {
       lines.push("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
       lines.push("WARNING: this server is on Vercel but QR payments are SIMULATED.");
-      lines.push("A GCash or Maya QR code takes no real money: pressing Pay on the");
+      lines.push("A GCash, Maya or bank-transfer QR code takes no real money: pressing Pay on the");
       lines.push("simulated page marks it paid. Set PAYMENT_PROVIDER=paymongo (and the");
       lines.push("PayMongo keys) in the Vercel environment before real customers pay.");
       lines.push("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");

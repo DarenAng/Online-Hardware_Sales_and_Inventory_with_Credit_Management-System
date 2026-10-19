@@ -46,10 +46,10 @@ function decideCreditRequest(params) {
   );
 }
 
-// sp_create_customer: Opens a customer account.
+// sp_create_customer: Opens a customer account (first, middle and last name, phone, the address as a line and in parts, the staff id).
 function createCustomer(params) {
   return callProcedure(
-    "CALL sp_create_customer(?, ?, ?, ?, ?, @customer_id, @status_code, @message)",
+    "CALL sp_create_customer(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @customer_id, @status_code, @message)",
     params,
     ["customer_id", "status_code", "message"]
   );

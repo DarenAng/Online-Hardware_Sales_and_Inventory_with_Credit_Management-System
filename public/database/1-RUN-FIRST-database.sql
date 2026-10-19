@@ -121,13 +121,29 @@ CREATE TABLE suppliers (
     address TEXT
 );
 
+-- address is the whole address as one line (what every screen and receipt reads);
+-- the address_ columns are the same address in parts, as the Add Customer card
+-- asks for it. A customer added before the parts existed has only the line.
+-- full_name puts the middle name in as an initial, like staff.full_name.
 CREATE TABLE customers (
     customer_id INT AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(100) NOT NULL,
+    middle_name VARCHAR(100) NULL,
     last_name VARCHAR(100) NOT NULL,
     phone VARCHAR(20),
     address TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    address_street VARCHAR(150) NULL,
+    address_barangay VARCHAR(100) NULL,
+    address_city VARCHAR(100) NULL,
+    address_province VARCHAR(100) NULL,
+    address_landmark VARCHAR(150) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    full_name VARCHAR(220) AS (
+        TRIM(CONCAT(first_name,
+                    IF(middle_name IS NULL OR middle_name = '', '',
+                       CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),
+                    ' ', last_name))
+    ) VIRTUAL
 );
 
 -- credit_limit and standing are decisions; balances are derived in a view.
@@ -511,7 +527,7 @@ CREATE TABLE returned_items (
     CONSTRAINT chk_returned_items_refund_not_negative CHECK (refund_amount >= 0)
 );
 
--- Every GCash or Maya payment attempt made by QR code, whatever became of it,
+-- Every GCash, Maya or bank-transfer payment attempt made by QR code, whatever became of it,
 -- so the shop can see which went through and which did not. A row starts
 -- pending and is closed once: paid, failed, expired (not paid in time) or
 -- cancelled (by the cashier). sale_id is filled when the money is recorded
@@ -528,7 +544,14 @@ CREATE TABLE qr_payments (
     -- the provider's own number for the payment: the reference on the invoice
     provider_payment_id VARCHAR(80) NULL,
     amount DECIMAL(12,2) NOT NULL,
-    wallet ENUM('GCash','PayMaya') NOT NULL,
+    -- the way it is paid: an e-wallet, or "Bank Transfer" (the customer's online banking)
+    wallet ENUM('GCash','PayMaya','Bank Transfer') NOT NULL,
+    -- a Bank Transfer's bank (PayMongo's bank code and the name shown) and the
+    -- customer's account, as the cashier typed them; NULL for an e-wallet
+    bank_code VARCHAR(20) NULL,
+    bank_name VARCHAR(80) NULL,
+    account_name VARCHAR(100) NULL,
+    account_number VARCHAR(30) NULL,
     purpose ENUM('sale','credit_payment') NOT NULL,
     status ENUM('pending','paid','failed','expired','cancelled') NOT NULL DEFAULT 'pending',
     error_message VARCHAR(255) NULL,
@@ -543,6 +566,39 @@ CREATE TABLE qr_payments (
     INDEX idx_qr_payments_created (created_at),
     INDEX idx_qr_payments_status (status),
     FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE SET NULL ON UPDATE CASCADE,
+    FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- The bank and account behind a cheque or a bank transfer, one row for each
+-- payment that has them. A sale paid in full has no credit_payments row, so a
+-- row belongs to the sale (sale_id) and, when the money was a payment on an
+-- account (the down payment on a Credit sale, a payment on a balance, money
+-- collected at the door), to that credit_payments row too (payment_id; NULL
+-- for the sale's own payment). Written inside sp_create_sale_transaction and
+-- sp_record_credit_payment, in the same transaction as the money.
+--   Cheque:        account_name and account_number as printed on the cheque,
+--                  the bank and its branch, and the date written on it (the
+--                  cheque number itself is the payment's reference)
+--   Bank Transfer: the customer's bank, account name and number; branch and
+--                  cheque_date stay NULL. qr_payment_id is the PayMongo-verified
+--                  payment (NULL for money a driver took at the door).
+CREATE TABLE payment_details (
+    detail_id INT AUTO_INCREMENT PRIMARY KEY,
+    sale_id INT NOT NULL,
+    payment_id INT NULL,
+    method ENUM('Cheque','Bank Transfer') NOT NULL,
+    account_name VARCHAR(100) NOT NULL,
+    account_number VARCHAR(30) NOT NULL,
+    bank_name VARCHAR(80) NOT NULL,
+    branch VARCHAR(80) NULL,
+    cheque_date DATE NULL,
+    qr_payment_id INT NULL,
+    created_by_staff_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_payment_details_sale (sale_id),
+    FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (payment_id) REFERENCES credit_payments(payment_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (qr_payment_id) REFERENCES qr_payments(qr_payment_id) ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -612,6 +668,8 @@ CREATE TABLE qr_sim_intents (
     token VARCHAR(40) NOT NULL UNIQUE,
     amount DECIMAL(12,2) NOT NULL,
     wallet VARCHAR(20) NOT NULL,
+    -- the bank a Bank Transfer is paid through (the pay page names it)
+    bank_name VARCHAR(80) NULL,
     description VARCHAR(255) NULL,
     return_url VARCHAR(500) NOT NULL,
     status VARCHAR(10) NOT NULL,
@@ -1000,7 +1058,7 @@ INSERT INTO sales (sale_id, customer_id, walk_in_name, cashier_staff_id, total_a
 (15, NULL, NULL, 4, 6800.00, 0.00, 6900.00, 'Cash', 'Paid', NULL, '2026-03-27 11:35:49', 'VAT', 12.00, 6071.43, 728.57),
 (16, 14, NULL, 4, 2160.00, 0.00, 2160.00, 'Credit', 'Paid', NULL, '2026-03-28 14:15:01', 'VAT', 12.00, 1928.57, 231.43),
 (17, 3, NULL, 4, 8130.00, 200.00, 8000.00, 'Cash', 'Paid', NULL, '2026-03-28 12:00:35', 'VAT', 12.00, 7080.36, 849.64),
-(18, NULL, 'Tricycle driver', 4, 7800.00, 50.00, 7750.00, 'Cheque', 'Paid', 'CHQ-319464', '2026-03-29 10:10:34', 'VAT', 12.00, 6919.64, 830.36),
+(18, NULL, NULL, 4, 7800.00, 50.00, 7750.00, 'Cheque', 'Paid', 'CHQ-319464', '2026-03-29 10:10:34', 'VAT', 12.00, 6919.64, 830.36),
 (19, 26, NULL, 4, 7405.00, 200.00, 7300.00, 'Cash', 'Paid', NULL, '2026-03-31 13:45:58', 'VAT', 12.00, 6433.04, 771.96),
 (20, 18, NULL, 4, 7900.00, 0.00, 7900.00, 'PayMaya', 'Paid', 'PM-402162', '2026-04-03 12:55:03', 'VAT', 12.00, 7053.57, 846.43),
 (21, 12, NULL, 4, 4810.00, 200.00, 0.00, 'COD', 'Unpaid', NULL, '2026-04-04 15:20:57', 'VAT', 12.00, 4116.07, 493.93),
@@ -1096,7 +1154,7 @@ INSERT INTO sales (sale_id, customer_id, walk_in_name, cashier_staff_id, total_a
 (111, 13, NULL, 4, 2670.00, 0.00, 2670.00, 'Cash', 'Paid', NULL, '2026-09-04 17:30:21', 'VAT', 12.00, 2383.93, 286.07),
 (112, 6, NULL, 4, 4515.00, 150.00, 0.00, 'Credit', 'Unpaid', NULL, '2026-09-05 12:05:04', 'VAT', 12.00, 3897.32, 467.68),
 (113, 5, NULL, 4, 1374.00, 0.00, 0.00, 'Credit', 'Unpaid', NULL, '2026-09-08 14:20:29', 'VAT', 12.00, 1226.79, 147.21),
-(114, NULL, 'Tricycle driver', 4, 495.00, 0.00, 495.00, 'GCash', 'Paid', 'GC-976658', '2026-09-08 15:15:46', 'VAT', 12.00, 441.96, 53.04),
+(114, NULL, NULL, 4, 495.00, 0.00, 495.00, 'GCash', 'Paid', 'GC-976658', '2026-09-08 15:15:46', 'VAT', 12.00, 441.96, 53.04),
 (115, 6, NULL, 4, 9750.00, 0.00, 4875.00, 'Credit', 'Partial', NULL, '2026-09-09 10:10:31', 'VAT', 12.00, 8705.36, 1044.64);
 INSERT INTO sale_items (sale_id, product_id, quantity, unit_price) VALUES
 (11, 14, 8, 680.00),

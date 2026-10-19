@@ -10,10 +10,10 @@
 
 const callProcedure = require("./shared-procedures").callProcedure;
 
-// sp_create_sale_transaction: Rings up a sale: its lines, stock, payment and (when paid by QR) the QR payment.
+// sp_create_sale_transaction: Rings up a sale: its lines, stock, payment, the bank and account of a cheque or transfer, and (when paid by QR) the QR payment.
 function recordSale(params) {
   return callProcedure(
-    "CALL sp_create_sale_transaction(?, ?, ?, ?, ?, ?, ?, ?, ?, @sale_id, @status_code, @message)",
+    "CALL sp_create_sale_transaction(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @sale_id, @status_code, @message)",
     params,
     ["sale_id", "status_code", "message"]
   );
@@ -49,7 +49,7 @@ function updateDeliveryStatus(params) {
 // sp_record_credit_payment: Takes a payment against what a sale still owes.
 function recordCreditPayment(params) {
   return callProcedure(
-    "CALL sp_record_credit_payment(?, ?, ?, ?, ?, ?, @status_code, @message)",
+    "CALL sp_record_credit_payment(?, ?, ?, ?, ?, ?, ?, @status_code, @message)",
     params,
     ["status_code", "message"]
   );

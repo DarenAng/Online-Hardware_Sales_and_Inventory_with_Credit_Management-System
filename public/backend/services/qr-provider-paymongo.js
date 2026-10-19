@@ -1,12 +1,13 @@
 // ============================================================
-// qr-provider-paymongo.js -- GCash and Maya payments through PayMongo
+// qr-provider-paymongo.js -- GCash, Maya and bank-transfer payments through PayMongo
 // Loaded by: routes/qr-payments.js only, when PAYMENT_PROVIDER=paymongo. Never sent
 // to a browser: it holds the secret key.
 //
 // The same four things as qr-provider-sim.js, so qr-payments.js never needs
 // to know which one it is talking to:
-//   createPayment({ amount, wallet, description, returnUrl })
+//   createPayment({ amount, wallet, bank, description, returnUrl })
 //       -> { providerIntentId, payUrl, status }
+//       (bank is { code, name, type } for a "Bank Transfer", otherwise null)
 //   getStatus(providerIntentId)
 //       -> { status: 'pending'|'paid'|'failed'|'expired', providerPaymentId, errorMessage }
 //   cancel(providerIntentId)
@@ -19,6 +20,12 @@
 // wallet, and the method attached to the intent. The attach answers with the
 // page where the customer approves the payment (next_action.redirect.url);
 // that page's address is what the QR code holds.
+//
+// A bank transfer is PayMongo's "direct online banking": the payment method's
+// type is "dob" (BPI, UnionBank) or "brankas" (BDO, Landbank, Metrobank), with
+// details.bank_code naming the bank, and the intent must allow that type. The
+// redirect page is the bank's own login. Paid, failed and expired are read the
+// same way as for a wallet.
 // ============================================================
 
 const crypto = require("crypto");
@@ -144,21 +151,39 @@ async function attach(intentId, methodId, returnUrl) {
 async function createPayment(options) {
   const amount = options.amount;
   const wallet = options.wallet;
+  const bank = options.bank;
   const description = options.description;
   const returnUrl = options.returnUrl;
-  const type = WALLET_TYPES[wallet];
-  if (!type) throw new PayMongoError("Only GCash and Maya can be paid by QR code.", 400);
 
-  // a) the amount and the wallets it may be paid with
+  // what the customer pays from: a wallet, or a bank's online banking
+  let type = WALLET_TYPES[wallet];
+  let allowed = ["gcash", "paymaya"];
+  let methodAttributes = null;
+  if (wallet === "Bank Transfer") {
+    if (!bank) throw new PayMongoError("Pick the customer's bank.", 400);
+    type = bank.type;
+    allowed = [type];
+    methodAttributes = { type: type, details: { bank_code: bank.code } };
+  }
+  if (!type) throw new PayMongoError("Only GCash, Maya and bank transfers can be paid by QR code.", 400);
+
+  // a) the amount and the ways it may be paid
   const intent = await call("POST", "/payment_intents", {
     amount: toCentavos(amount),
     currency: "PHP",
-    payment_method_allowed: ["gcash", "paymaya"],
+    payment_method_allowed: allowed,
     description: description
   });
 
-  // b) the wallet the customer pays from
-  const method = await call("POST", "/payment_methods", { type: type });
+  // b) the wallet or bank the customer pays from. PayMongo can refuse a bank the
+  // account is not set up for; the intent made above is closed rather than left open.
+  let method;
+  try {
+    method = await call("POST", "/payment_methods", methodAttributes || { type: type });
+  } catch (error) {
+    await cancel(intent.id);
+    throw error;
+  }
 
   // c) the two together, and where the customer's phone goes once they approve.
   // PayMongo may refuse an address it cannot use (a plain-http LAN one); the

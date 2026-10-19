@@ -28,7 +28,7 @@ function setUpIcons() {
         ['sign out', 'box-arrow-right'],
         ['log out', 'box-arrow-right'],
         ['change password', 'key'],
-        ['take a payment', 'cash'],
+        ['credit settlement', 'cash'],
         ['record the payment', 'cash'],
         ['record payment', 'cash'],
         ['back to', 'arrow-left'],

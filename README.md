@@ -36,7 +36,7 @@ public/database/2-RUN-SECOND-stored-procedures.sql
 ```
 
 The names give the order. `1-RUN-FIRST-database.sql` drops and rebuilds
-`hardware_db`, creates the 33 tables, loads the demo data, and then six months
+`hardware_db`, creates the 35 tables, loads the demo data, and then six months
 of mock trading on top of it (see *Mock data* below).
 `2-RUN-SECOND-stored-procedures.sql` loads the 3 views and the 37 stored
 procedures; the tables have to exist before it will run.
@@ -84,6 +84,24 @@ and the `password_resets` table is created for "Forgot your password?". Both
 are added on `npm start`, and the server then finds fewer procedures than it
 expects (31 of 33) and **loads file 2 by itself**, so restarting the server is
 all an existing database needs. Running file 2 by hand does the same.
+
+One more, for customers: `customers` gains `middle_name`, the address in parts
+(`address_street`, `address_barangay`, `address_city`, `address_province`,
+`address_landmark`) and a generated `full_name`, and `sp_create_customer` takes
+them (see *Customers: names, phone and address* below). They are added on
+`npm start`, and the server finds the old `sp_create_customer` and loads file 2
+by itself. Every customer already on record keeps working: no middle name, and
+only the one-line `address` they were saved with.
+
+**Restart the local server and redeploy Vercel together.** The start-up
+migration changes the number of arguments of `sp_create_sale_transaction`,
+`sp_record_credit_payment`, `sp_create_qr_payment` and `sp_create_customer`
+(cheque and bank details, the customer's name and address in parts) and adds the
+`payment_details` table and the bank columns of `qr_payments`. Once any copy of
+the new server has started, the database is migrated, and an older server (an
+un-redeployed Vercel project, or a local server not restarted) calling the old
+argument lists fails on sales, payments and new customers. So after pulling this
+update, restart `npm start` and redeploy Vercel at the same time.
 
 Earlier versions of the project shipped `upgrade.sql` through `upgrade_v8.sql`
 and `fix_patch.sql` for stepping an existing database forward one version at a
@@ -366,13 +384,15 @@ later, at the counter, from **Customers Record**: press the customer's
 name and, when they owe something, their card has an **Unpaid Sales** tab
 listing every sale still carrying a balance — receipt, date, what is left
 and when it falls due (thirty days from the sale, the same term that turns
-an account to Watch), oldest first. Pressing a sale, or *Take a Payment*
+an account to Watch), oldest first. Pressing a sale, or *Credit Settlement*
 in the card's foot (which opens the only sale owing at once, or the tab
-when there are several), opens **Take a Payment**: the balance is filled
-in, a quick-fill row offers a quarter, half or all of it, the method is
-chosen, a cheque or transfer number goes in the reference box (and is
-insisted on for those two), and a line under the form says what the balance
-becomes before the button is pressed. The server records it through
+when there are several), opens **Credit Settlement**: the amount starts at 0, with
+a quick-fill row offering 25%, 50% or 100% of the balance, the method is
+chosen (a cheque asks for its details, and a bank transfer goes through PayMongo:
+see *Cheques* and *Bank transfers* below), and a line under the form says what the
+balance becomes before the button is pressed; the button asks for a confirmation
+first (it lists the cheque's or the transfer's bank and account too), and
+the recorded payment comes back as a printable receipt. The server records it through
 `sp_record_credit_payment`, which refuses anything over the balance and
 marks the sale *Paid* when it reaches zero. When the form closes the card
 comes back with the new balance, and the credit records and a customer picked
@@ -403,12 +423,12 @@ cash:
 | How the money arrives | Reference |
 |---|---|
 | Cheque | required — the cheque number |
-| Bank Transfer | required — the bank's reference for the transfer |
+| Bank Transfer | not typed — PayMongo's own payment number becomes the reference |
 | GCash, PayMaya, PayPal | optional — the e-wallet's reference |
 | Cash, Cash on Delivery | not asked |
 
 On a Credit sale the part payment's own method decides it, and nothing paid now
-asks for nothing. The screen refuses a cheque or a transfer with an empty box
+asks for nothing. The screen refuses a cheque with an empty box
 before anything is sent, and `POST /api/sales` refuses it again whichever
 screen sends it. Once the sale exists the reference is written to
 `sales.reference_no` by `sp_set_sale_reference`, which never overwrites a
@@ -417,23 +437,61 @@ typed later would lose the first) and puts a `SALE_REFERENCE_SET` entry on the
 audit trail. A reference typed against cash is not kept. The invoice prints it
 on the *Reference* line.
 
-**Bank transfers.** The shop's account — bank, account name, account number —
-is kept by the administrator under **Receipt Maintenance**, in a *Bank transfer
-details* box: all three, or none, because a bank with no number, or a number
-with no name on it, sends a customer's money nowhere anyone can find it. The
-screen and the server both hold to that, and the number has to be digits (with
-spaces or dashes where the bank prints them). It is saved through
-`sp_update_store_bank_details`, called only when the account actually
-changed; the audit entry carries only the last four digits.
+**Cheques.** A cheque is recorded with the **account name** and **account
+number** printed on it, the **bank** it is drawn on, its **branch**, the
+**cheque date**, and the cheque number (the Reference box). Wherever the
+cashier can take one — the Payment card (a full payment, or a Credit sale's part
+payment) and *Credit Settlement* — the boxes appear under the method and every
+one is required. The date has to be a real date, not more than six months ago
+(a stale cheque) and not more than a year ahead; the account number is 6 to 20
+digits. The screen checks them as they are typed and `payment-details.js`
+(backend) checks them again. The driver's *Receive Payment* card asks for the
+same details when a cheque is collected at the door.
 
-Whenever **Bank Transfer** is chosen at the till — as the sale's method, as the
-part payment's method on a Credit sale, or on the *Take a Payment* card — a box
-shows the bank, the account name, the account number and the amount to send,
-to be read out to the customer. With no account on file it says so, and says
-who can add one. The invoice prints the account too: as a record when the sale
-was paid by transfer, and as the way to pay when the sale leaves a balance, with
-a line asking the customer to quote the invoice number (*OR-000123*) as the
-transfer reference so the money is matched to the sale when it lands.
+They are saved in the `payment_details` table, written by
+`sp_create_sale_transaction` and `sp_record_credit_payment` in the same
+transaction as the money (a cheque is never recorded without them). A sale paid
+in full has no `credit_payments` row, so a row belongs to the sale
+(`sale_id`) and, when it was a payment on an account (a Credit sale's down
+payment, a settlement, money collected at the door), to that payment too
+(`payment_id`). The invoice, the Credit Settlement receipt, the cashier's sale
+card and the manager's sale card show them, for example *Cheque 001234 · BDO,
+Nasugbu · dated 2026-10-20 · Juan Dela Cruz, account 0123456789*.
+
+**Bank transfers, verified through PayMongo.** At the till a bank transfer is not
+typed in with a reference any more. With **Bank Transfer** chosen (as the sale's
+method, as a Credit sale's part payment, or on *Credit Settlement*) the cashier
+picks the customer's **bank** from the banks PayMongo takes a transfer from — BPI
+and UnionBank (PayMongo's `dob` type) and BDO, Landbank and Metrobank
+(`brankas`) — and types the **account name** and **account number**. The button
+becomes **Pay by Bank Transfer** (Complete Sale is not offered), asks for a
+confirmation that lists the bank and account, and then shows a QR code and a link
+to the bank's own online-banking page. The customer logs in on their phone and
+approves the transfer. The till polls like the GCash and Maya code does and
+records the sale, or the payment on the balance, only when PayMongo says it is
+paid; PayMongo's payment number is the reference, and the bank, account name and
+account number are stored in `payment_details` (copied from the `qr_payments`
+row inside the same transaction). A failed, cancelled or expired transfer
+records nothing, as with the e-wallets. BDO takes ₱100.00 or more, the others
+₱1.00 (checked before PayMongo is asked). In test mode the Brankas page pre-fills
+OTP 123456; UnionBank takes 111111 for success, and BPI account `***0001` with
+OTP 123456. PayMongo may refuse a bank the account is not set up for (this
+project's test account is not enabled for Brankas: BDO, Landbank and Metrobank
+answer *not allowed for your account*); the message is shown to the cashier.
+
+The driver has no QR screen, so a bank transfer shown at the door is written down
+as the customer shows it (bank, account name, account number and the bank's
+reference) and is not checked with PayMongo.
+
+The shop's own account — bank, account name, account number — is still kept by
+the administrator under **Receipt Maintenance** (*Bank transfer details*: all
+three, or none; the number has to be digits, with spaces or dashes where the bank
+prints them; saved through `sp_update_store_bank_details`, the audit entry
+carries only the last four digits). It is no longer shown on the Payment and
+Credit Settlement cards, because a counter transfer now goes through PayMongo. The
+invoice still prints it as the way to pay a balance (*Pay the balance by bank
+transfer*, with the invoice number to quote); it no longer prints it on an invoice
+paid by transfer, which shows the customer's own bank and account instead.
 
 **The customer's history is paged, not scrolled.** A customer's card at the
 till and on the manager's Credit screen shows purchases beside payments; a
@@ -784,12 +842,14 @@ The credit screens use the same four words everywhere: **Credit Limit**, the
 most an account may owe; **Balance**, what it owes now; **Available
 Balance**, what it can still take on account; and **No balance** for an
 account that owes nothing. A payment's method is labelled **Payment method**,
-at checkout and on *Take a Payment* alike.
+at checkout and on *Credit Settlement* alike.
 
-## GCash and Maya by QR code
+## GCash, Maya and bank transfers by QR code
 
 With GCash or PayMaya chosen, the till offers **Pay by QR** beside Complete
-Sale (and on *Take a Payment*). The card shows a QR code holding the address of
+Sale (and on *Credit Settlement*). A bank transfer is paid the same way (see
+*Bank transfers, verified through PayMongo* above): the code opens the customer's
+bank page, with a link to press as well. The card shows a QR code holding the address of
 the page the customer pays on. The customer scans it with the phone's camera
 and approves the payment, and the till sees it within three seconds and
 finishes the sale by itself. The server asks the payment provider again before
@@ -845,6 +905,39 @@ above.
 An email address is a different matter. It is the username, MySQL enforces it as
 unique, and two accounts cannot share one. If the email is already taken the
 create screen says so in plain words and asks for a different one.
+
+## Customers: names, phone and address
+
+**Add Customer** (in Customers Record, and from the register when a typed name
+is not on record) asks for a **first name** and **last name**, an optional
+**middle name**, a **phone number** (required, +63 9XXXXXXXXX) and the address in
+the same parts the **Make a Delivery** card uses: house number and street
+(optional), barangay, town or city, province, and an optional landmark. The
+server joins the parts into one line, with "Brgy." put in front of a barangay
+written without the word, and keeps that line in `customers.address`, so every
+screen, receipt and report that reads `address` is unchanged. The parts are kept
+in their own columns too. Two customers may share a first and last name if the
+middle name differs; the same full name is refused as already on record.
+
+A customer's name is spelled the way a staff name is: the whole middle name is
+stored, and only its first letter is shown (`Maria R. Santos`). That happens once,
+in the generated `customers.full_name` column, which the credit view, the sales
+and delivery names and the reports read. The register and Customers Record
+still find a customer by first and last name alone, by the middle name written
+out, and by phone.
+
+**The recipient of a delivery is a customer on record.** The Recipient name box
+on Make a Delivery is picked the way the Customer box on the Payment card is:
+type, pick from the list, or press Add Customer when the name is nobody's. A
+pick fills the contact number and the address boxes from the customer's record
+(the cashier can still change them for this one delivery). A customer saved
+before address parts existed has only the one line: it is shown in a grey note
+above the boxes, and the boxes are left empty for the cashier to fill in (house
+number and street, barangay, town or city, province). The sale and its delivery share one customer: picking the
+recipient also puts the sale on that customer, picking another customer on the
+Payment card moves the attached delivery to them, and a sale left as a walk-in
+with a delivery attached is saved under the delivery's customer. The server
+refuses a delivery for a walk-in sale.
 
 ## Backup and recovery
 
@@ -1652,7 +1745,7 @@ public/
       cashier.js              Cashier
       inventory-clerk.js      Inventory Clerk
       delivery.js             Delivery Personnel
-      qr-payments.js          GCash and Maya paid by QR code
+      qr-payments.js          GCash, Maya and bank transfers paid by QR code
       shared.js               routes every signed-in role uses: the live channel,
                               My Account, records, archives, the daily job
     database/
@@ -1680,6 +1773,7 @@ public/
     audit-log.js            the audit trail
     live-changes.js         the live channel
     validation.js           phone, password, name and TIN rules
+    payment-details.js      a cheque's or a transfer's bank and account rules, and the PayMongo banks
     helpers.js              word-start search, date text
     shared-sql.js           SQL text several routes use
     store-settings.js       the shop's default settings and receipt layout

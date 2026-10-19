@@ -10,11 +10,16 @@
 //   GET   /api/sales/undelivered           sales that have no delivery yet
 //   GET   /api/cashier/summary             the cashier's end-of-shift numbers
 //   GET   /api/sales/:id                   one sale in full
-//   POST  /api/sales/:id/payment           take a payment on a sale that still owes money
+//   POST  /api/sales/:id/payment           credit settlement: take a payment on a sale that still owes money (the answer carries the receipt)
 //
-// GCash or PayMaya paid by QR code arrives with a QR payment id. It is
-// checked again with the provider (qr-payments.js) before anything is
-// recorded, and is used once: its payment id becomes the sale's reference.
+// GCash, PayMaya or a bank transfer paid by QR code arrives with a QR payment
+// id. It is checked again with the provider (qr-payments.js) before anything
+// is recorded, and is used once: its payment id becomes the sale's reference.
+// A bank transfer is only ever taken this way (verified through PayMongo).
+//
+// A cheque arrives with its account name, account number, bank, branch and date
+// (paymentDetails, checked by payment-details.js). They are saved with the money,
+// in the same transaction, by the procedures (payment_details table).
 //
 // server.js passes in the database and its helpers ("deps"). The access
 // rules in access-control.js have already checked the user's role before any of
@@ -22,6 +27,12 @@
 // ============================================================
 
 const cashierProcedures = require("../database/procedures/cashier-procedures");
+const helpers = require("../helpers");
+const tidy = helpers.tidy;
+const buildFullAddress = helpers.buildFullAddress;
+const addressPartsFrom = helpers.addressPartsFrom;
+const addressPartsProblem = helpers.addressPartsProblem;
+const cleanPaymentDetails = require("../payment-details").cleanPaymentDetails;
 
 // Where a delivery can go from each status: one step at a time. Delayed and
 // Failed can only happen once the delivery is Out for Delivery; a Delayed
@@ -37,8 +48,14 @@ const NEXT_DELIVERY_STATUS = {
 };
 const ALL_DELIVERY_STATUSES = Object.keys(NEXT_DELIVERY_STATUS);
 
-// the methods a customer can pay by scanning the QR code
-const QR_METHODS = ["GCash", "PayMaya"];
+// the methods a customer can pay by scanning the QR code (a bank transfer opens
+// the customer's bank page instead of a wallet)
+const QR_METHODS = ["GCash", "PayMaya", "Bank Transfer"];
+
+// said when a bank transfer is sent without a PayMongo payment behind it
+const TRANSFER_BY_QR_ONLY =
+  "A bank transfer is taken through PayMongo: use Pay by Bank Transfer, and the customer approves " +
+  "it in their bank. Nothing was recorded.";
 
 function registerCashierRoutes(app, deps) {
   const db = deps.db;
@@ -186,10 +203,11 @@ function registerCashierRoutes(app, deps) {
   // ==========================================
 
   // Money that is not handed over in notes is only collected once it clears,
-  // and it is traced by its number: a cheque by the cheque number, a transfer
-  // by the bank's reference. Those two cannot be rung up without one. The
-  // e-wallets print a reference too, taken when the cashier has it.
-  const REFERENCE_REQUIRED = ["Cheque", "Bank Transfer"];
+  // and it is traced by its number: a cheque by the cheque number (with its
+  // account, bank and date, below). A bank transfer needs none typed: its
+  // reference is PayMongo's own payment number. The e-wallets print a
+  // reference too, taken when the cashier has it.
+  const REFERENCE_REQUIRED = ["Cheque"];
   const REFERENCE_OPTIONAL = ["GCash", "PayMaya", "PayPal"];
 
   // Ring up a sale. The procedure deducts stock, checks the limit and standing,
@@ -205,6 +223,7 @@ function registerCashierRoutes(app, deps) {
     const downPaymentMethod = request.body.downPaymentMethod;
     const referenceNo = request.body.referenceNo;
     const qrPaymentId = request.body.qrPaymentId;
+    const typedDetails = request.body.paymentDetails;
 
     if (!paymentMethod || !Array.isArray(items) || items.length === 0) {
       return response.status(400).json({ error: "A payment method and at least one item are required" });
@@ -293,18 +312,30 @@ function registerCashierRoutes(app, deps) {
         what = "The part payment is by " + takenNow.toLowerCase() + ", so it";
       }
 
-      let whichNumber = "transfer reference from the bank";
-      if (takenNow === "Cheque") {
-        whichNumber = "cheque number";
-      }
-
       return response.status(400).json({
-        error: what + " needs its reference: the " + whichNumber + ". " +
+        error: what + " needs its reference: the cheque number. " +
                "It is how the money is traced if it does not arrive."
       });
     }
     if (reference.length > 60) {
       return response.status(400).json({ error: "A reference is at most 60 characters." });
+    }
+
+    // A cheque is recorded with the account name and number printed on it, the
+    // bank, its branch and the date written on it. Refused before any QR payment
+    // below is checked or spent on it.
+    let payDetails = null;
+    if (takenNow === "Cheque") {
+      const cleaned = cleanPaymentDetails("Cheque", typedDetails);
+      if (cleaned.problem) {
+        return response.status(400).json({ error: cleaned.problem });
+      }
+      payDetails = JSON.stringify(cleaned.details);
+    }
+
+    // a bank transfer is verified through PayMongo, so it has a QR payment behind it
+    if (takenNow === "Bank Transfer" && !qrPaymentId) {
+      return response.status(400).json({ error: TRANSFER_BY_QR_ONLY });
     }
 
     // kept only where it means something: a reference typed against cash is dropped
@@ -320,10 +351,10 @@ function registerCashierRoutes(app, deps) {
     let qr = null;
     if (qrPaymentId) {
       if (!QR_METHODS.includes(takenNow)) {
-        return response.status(400).json({ error: "A QR payment can only pay for money taken by GCash or PayMaya." });
+        return response.status(400).json({ error: "A QR payment can only pay for money taken by GCash, PayMaya or bank transfer." });
       }
       try {
-        qr = await qrPayments.verifyForMoney(qrPaymentId, Number(amountPaid) || 0, takenNow, getActorId(request));
+        qr = await qrPayments.verifyForMoney(qrPaymentId, Number(amountPaid) || 0, takenNow, getActorId(request), typedDetails);
       } catch (error) {
         if (!(error instanceof qrPayments.QrPaymentError)) throw error;
         return response.status(error.status).json({ error: error.message, code: error.code });
@@ -336,7 +367,7 @@ function registerCashierRoutes(app, deps) {
     try {
       const output = await cashierProcedures.recordSale(
         [customerId || null, null, getActorId(request), discount || 0, amountPaid || 0,
-         paymentMethod, JSON.stringify(items), downMethod, qr ? qr.id : null]
+         paymentMethod, JSON.stringify(items), downMethod, qr ? qr.id : null, payDetails]
       );
 
       if (output.status_code !== 200) {
@@ -420,40 +451,6 @@ function registerCashierRoutes(app, deps) {
     }
   });
 
-  // Text from a form box: not text -> "", extra spaces become one.
-  function tidy(value) {
-    if (typeof value !== "string") return "";
-    return value.trim().replace(/\s+/g, " ");
-  }
-
-  // The parts of a delivery address and the longest each may be. The cashier
-  // fills them in one by one; they are saved in their own columns, and joined
-  // into the one line every other screen shows.
-  // [key, what it is called, longest, required]. Not every house has a number or
-  // a street, so the house number and street may be left out.
-  const ADDRESS_PARTS = [
-    ["street", "house number and street", 150, false],
-    ["barangay", "barangay", 100, true],
-    ["city", "town or city", 100, true],
-    ["province", "province", 100, true]
-  ];
-
-  // "Wawa" is written "Brgy. Wawa" in the line; a barangay already written
-  // with its word (Brgy., Barangay, Poblacion, Zone, Purok, Sitio) is left alone.
-  function barangayLine(barangay) {
-    if (/^(brgy|barangay|poblacion|zone|purok|sitio)\b/i.test(barangay)) return barangay;
-    return "Brgy. " + barangay;
-  }
-
-  // The whole address as one line: street (when there is one), barangay, town or
-  // city, province, then the landmark in brackets.
-  function buildFullAddress(parts) {
-    let line = barangayLine(parts.barangay) + ", " + parts.city + ", " + parts.province;
-    if (parts.street !== "") line = parts.street + ", " + line;
-    if (parts.landmark !== "") line += " (Landmark: " + parts.landmark + ")";
-    return line;
-  }
-
   app.post("/api/deliveries", async function (request, response) {
     const saleId = request.body.saleId;
     const typedAddress = request.body.address;
@@ -461,23 +458,20 @@ function registerCashierRoutes(app, deps) {
     const remarks = request.body.remarks;
     const contactName = request.body.contactName;
     const contactPhone = request.body.contactPhone;
-    // optional: empty leaves the delivery open for any driver to take
+    // the driver who will deliver it: required
     const driverId = request.body.driverStaffId ? Number(request.body.driverStaffId) : null;
 
     if (!saleId) {
       return response.status(400).json({ error: "A sale is required" });
     }
+    if (!driverId) {
+      return response.status(400).json({ error: "Pick the driver who will deliver it." });
+    }
 
     // The address comes in parts (house and street, barangay, town or city,
     // province, landmark). A caller that sends only the single line is still
     // taken (many spaces become one), so nothing older breaks.
-    const parts = {
-      street: tidy(request.body.street),
-      barangay: tidy(request.body.barangay),
-      city: tidy(request.body.city),
-      province: tidy(request.body.province),
-      landmark: tidy(request.body.landmark)
-    };
+    const parts = addressPartsFrom(request.body);
     const partsGiven = parts.street !== "" || parts.barangay !== "" || parts.city !== "" || parts.province !== "";
 
     let address;
@@ -485,27 +479,8 @@ function registerCashierRoutes(app, deps) {
       if (tidy(contactName) === "") {
         return response.status(400).json({ error: "Enter the recipient's name: the person the driver asks for." });
       }
-      for (let i = 0; i < ADDRESS_PARTS.length; i++) {
-        const key = ADDRESS_PARTS[i][0];
-        const label = ADDRESS_PARTS[i][1];
-        const longest = ADDRESS_PARTS[i][2];
-        const required = ADDRESS_PARTS[i][3];
-        // a barangay can be a single number ("5"); the other parts are at least two characters
-        let shortest = 2;
-        if (key === "barangay") shortest = 1;
-        if (required && parts[key].length < shortest) {
-          return response.status(400).json({ error: "Enter the " + label + " for the delivery address." });
-        }
-        if (!required && parts[key] !== "" && parts[key].length < shortest) {
-          return response.status(400).json({ error: "The " + label + " is too short; leave it empty if there is none." });
-        }
-        if (parts[key].length > longest) {
-          return response.status(400).json({ error: "The " + label + " is at most " + longest + " characters." });
-        }
-      }
-      if (parts.landmark.length > 150) {
-        return response.status(400).json({ error: "The landmark is at most 150 characters." });
-      }
+      const problem = addressPartsProblem(parts, "delivery address");
+      if (problem) return response.status(400).json({ error: problem });
       address = buildFullAddress(parts);
     } else {
       address = tidy(typedAddress);
@@ -557,13 +532,29 @@ function registerCashierRoutes(app, deps) {
 
       // dated the day the order was taken: the sale's own date
       const saleRowsResult = await db.query(
-        "SELECT DATE_FORMAT(sale_date, '%Y-%m-%d') AS sale_day FROM sales WHERE sale_id = ?",
+        "SELECT DATE_FORMAT(sale_date, '%Y-%m-%d') AS sale_day, customer_id FROM sales WHERE sale_id = ?",
         [saleId]
       );
       const saleRows = saleRowsResult[0];
       let orderDay = null;
       if (saleRows.length > 0) {
         orderDay = saleRows[0].sale_day;
+
+        // a delivery is for a customer on record: the driver collects and the
+        // balance is kept against an account, so a walk-in sale cannot have one
+        if (saleRows[0].customer_id === null) {
+          return response.status(400).json({
+            error: "A delivery is for a customer on record. Put this sale under a customer first."
+          });
+        }
+
+        // the name, number and address sent are the sale's customer's: the browser
+        // names that customer, and it has to be the one the sale was rung up for
+        if (Number(request.body.customerId) !== Number(saleRows[0].customer_id)) {
+          return response.status(400).json({
+            error: "The delivery is for a different customer than the sale. Pick the sale's customer as the recipient."
+          });
+        }
       }
 
       const output = await cashierProcedures.createDelivery(
@@ -827,7 +818,7 @@ function registerCashierRoutes(app, deps) {
       const items = itemsResult[0];
 
       const paymentsResult = await db.query(
-        "SELECT cp.amount, cp.payment_method, cp.reference_no, cp.payment_date,\n" +
+        "SELECT cp.payment_id, cp.amount, cp.payment_method, cp.reference_no, cp.payment_date,\n" +
           "              st.full_name AS received_by\n" +
           "       FROM credit_payments cp\n" +
           "       LEFT JOIN staff st ON st.staff_id = cp.received_by_staff_id\n" +
@@ -847,16 +838,25 @@ function registerCashierRoutes(app, deps) {
       );
       const delivery = deliveryResult[0];
 
-      // the GCash or Maya codes paid towards this sale, with PayMongo's reference
+      // the GCash, Maya or bank-transfer codes paid towards this sale, with PayMongo's reference
       const qrPaidResult = await db.query(
-        "SELECT qr_payment_id, status, amount, wallet, purpose, provider, mode, provider_payment_id, paid_at\n" +
+        "SELECT qr_payment_id, status, amount, wallet, bank_name, purpose, provider, mode, provider_payment_id, paid_at\n" +
           "         FROM qr_payments WHERE sale_id = ? ORDER BY qr_payment_id",
         [request.params.saleId]
       );
       const qrPaid = qrPaidResult[0];
 
+      // the bank and account behind each cheque or bank transfer; payment_id says
+      // which payment on the account it belongs to (null: the sale's own payment)
+      const detailsResult = await db.query(
+        "SELECT detail_id, payment_id, method, account_name, account_number, bank_name, branch,\n" +
+          "              DATE_FORMAT(cheque_date, '%Y-%m-%d') AS cheque_date, qr_payment_id\n" +
+          "         FROM payment_details WHERE sale_id = ? ORDER BY detail_id",
+        [request.params.saleId]
+      );
+
       response.json({ sale: rows[0], items: items, payments: payments, delivery: delivery[0] || null,
-                      qrPayments: qrPaid });
+                      qrPayments: qrPaid, paymentDetails: detailsResult[0] });
     } catch (error) {
       console.error("Sale detail failed:", error.message);
       response.status(500).json({ error: error.message });
@@ -868,20 +868,41 @@ function registerCashierRoutes(app, deps) {
     const paymentMethod = request.body.paymentMethod;
     const referenceNo = request.body.referenceNo;
     const qrPaymentId = request.body.qrPaymentId;
+    const typedDetails = request.body.paymentDetails;
 
     if (!amount || !paymentMethod) {
       return response.status(400).json({ error: "Amount and payment method are required" });
     }
 
-    // the same rule as a sale: a QR payment is checked here and used once
+    // the same rules as a sale: a cheque comes with its account, bank and date,
+    // and a bank transfer only through a PayMongo payment
     let reference = referenceNo || null;
+    let payDetails = null;
+    if (paymentMethod === "Cheque") {
+      if (String(referenceNo || "").trim() === "") {
+        return response.status(400).json({
+          error: "A cheque payment needs its reference: the cheque number. " +
+                 "It is how the money is traced if it does not arrive."
+        });
+      }
+      const cleaned = cleanPaymentDetails("Cheque", typedDetails);
+      if (cleaned.problem) {
+        return response.status(400).json({ error: cleaned.problem });
+      }
+      payDetails = JSON.stringify(cleaned.details);
+    }
+    if (paymentMethod === "Bank Transfer" && !qrPaymentId) {
+      return response.status(400).json({ error: TRANSFER_BY_QR_ONLY });
+    }
+
+    // a QR payment is checked here and used once
     let qr = null;
     if (qrPaymentId) {
       if (!QR_METHODS.includes(paymentMethod)) {
-        return response.status(400).json({ error: "A QR payment can only pay for money taken by GCash or PayMaya." });
+        return response.status(400).json({ error: "A QR payment can only pay for money taken by GCash, PayMaya or bank transfer." });
       }
       try {
-        qr = await qrPayments.verifyForMoney(qrPaymentId, Number(amount) || 0, paymentMethod, getActorId(request));
+        qr = await qrPayments.verifyForMoney(qrPaymentId, Number(amount) || 0, paymentMethod, getActorId(request), typedDetails);
       } catch (error) {
         if (!(error instanceof qrPayments.QrPaymentError)) throw error;
         return response.status(error.status).json({ error: error.message, code: error.code });
@@ -892,7 +913,7 @@ function registerCashierRoutes(app, deps) {
 
     try {
       const output = await cashierProcedures.recordCreditPayment(
-        [request.params.saleId, amount, paymentMethod, reference, getActorId(request), qr ? qr.id : null]
+        [request.params.saleId, amount, paymentMethod, reference, getActorId(request), qr ? qr.id : null, payDetails]
       );
 
       if (output.status_code !== 200) {
@@ -904,7 +925,51 @@ function registerCashierRoutes(app, deps) {
       recorded = true;
       if (qr) qrPayments.announceUsed(qr.id);
 
-      response.json({ message: output.message, reference: qr ? qr.reference : null });
+      // What the payment receipt prints: the payment as it was recorded, who took
+      // it, and what the sale owes now. The receipt can still be drawn without it,
+      // so a failed read here only leaves it out.
+      let receipt = null;
+      try {
+        const receiptResult = await db.query(
+          "SELECT cp.payment_id, cp.payment_date, cp.reference_no, st.full_name AS cashier_name,\n" +
+            "       s.tax_registration, GREATEST(s.amount_due - s.amount_paid, 0) AS balance_after,\n" +
+            "       " + SALE_CUSTOMER_SQL + " AS customer_name\n" +
+            "       FROM credit_payments cp\n" +
+            "       JOIN sales s ON s.sale_id = cp.sale_id\n" +
+            "       LEFT JOIN customers c ON c.customer_id = s.customer_id\n" +
+            "       LEFT JOIN staff st ON st.staff_id = cp.received_by_staff_id\n" +
+            "       WHERE cp.sale_id = ? AND cp.received_by_staff_id = ?\n" +
+            "       ORDER BY cp.payment_id DESC LIMIT 1",
+          [request.params.saleId, getActorId(request)]
+        );
+        if (receiptResult[0].length > 0) {
+          const row = receiptResult[0][0];
+          const balanceAfter = Number(row.balance_after);
+          const detailsResult = await db.query(
+            "SELECT method, account_name, account_number, bank_name, branch,\n" +
+              "       DATE_FORMAT(cheque_date, '%Y-%m-%d') AS cheque_date\n" +
+              "       FROM payment_details WHERE payment_id = ? ORDER BY detail_id LIMIT 1",
+            [row.payment_id]
+          );
+          receipt = {
+            details: detailsResult[0][0] || null,
+            paymentId: row.payment_id,
+            paymentDate: row.payment_date,
+            cashierName: row.cashier_name,
+            customerName: row.customer_name,
+            taxRegistration: row.tax_registration,
+            amount: Number(amount),
+            method: paymentMethod,
+            reference: row.reference_no,
+            balanceBefore: Math.round((balanceAfter + Number(amount)) * 100) / 100,
+            balanceAfter: balanceAfter
+          };
+        }
+      } catch (error) {
+        console.error("Reading the payment for its receipt failed:", error.message);
+      }
+
+      response.json({ message: output.message, reference: qr ? qr.reference : null, receipt: receipt });
     } catch (error) {
       console.error("Payment failed:", error.message);
       if (qr && !recorded) await qrPayments.recordUnsaved(qr.id, getActorId(request));

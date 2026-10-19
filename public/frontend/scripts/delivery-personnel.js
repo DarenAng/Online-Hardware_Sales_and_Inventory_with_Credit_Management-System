@@ -257,6 +257,7 @@ async function openDriverPayment(deliveryId, remarks) {
     form.elements.amount.value = Number(d.balance_due).toFixed(2);
     form.elements.paymentMethod.value = 'Cash';
     form.elements.referenceNo.value = '';
+    clearPaymentDetails('door');
     onDriverPayMethodChange();
     onDriverPayAmountChange();
 
@@ -269,14 +270,22 @@ function payNeedsReference(method) {
     return method === 'Cheque' || method === 'Bank Transfer';
 }
 
+// A cheque is collected with the same details the counter takes: the account name and
+// number printed on it, the bank, its branch and the date. A bank transfer is written
+// down as the customer shows it (bank, account name, account number and the bank's
+// reference); the driver has no QR screen, so it is not checked with PayMongo.
+buildPaymentDetailsBox('pay-details-box', 'door', false);
+
 function onDriverPayMethodChange() {
     const form = document.getElementById('pay-form');
     const hint = document.getElementById('pay-ref-hint');
     if (!form || !hint) return;
 
-    const needed = payNeedsReference(form.elements.paymentMethod.value);
+    const method = form.elements.paymentMethod.value;
+    const needed = payNeedsReference(method);
     form.elements.referenceNo.required = needed;
     hint.textContent = needed ? 'required' : 'optional';
+    showPaymentDetails('door', method);
 }
 
 // says what is left after the amount typed, before the button is pressed
@@ -332,8 +341,25 @@ async function handleDriverPayment(event) {
         notifyWarning('The sale only owes ' + peso(owedBefore) + '. Lower the amount received.', 'More than is owed');
         return;
     }
-    if (payNeedsReference(form.elements.paymentMethod.value) && form.elements.referenceNo.value.trim() === '') {
-        notifyWarning('Write the ' + (form.elements.paymentMethod.value === 'Cheque' ? 'cheque number' : 'transfer reference') +
+
+    // the bank and account behind a cheque or a bank transfer
+    const method = form.elements.paymentMethod.value;
+    let details = null;
+    if (method === 'Cheque' || method === 'Bank Transfer') {
+        let read;
+        if (method === 'Cheque') read = readChequeDetails('door');
+        else read = readTransferDetails('door');
+        if (read.problem) {
+            notifyWarning(read.problem, method + ' details needed');
+            const box = document.getElementById(read.field);
+            if (box) box.focus();
+            return;
+        }
+        details = read.details;
+    }
+
+    if (payNeedsReference(method) && form.elements.referenceNo.value.trim() === '') {
+        notifyWarning('Write the ' + (method === 'Cheque' ? 'cheque number' : 'transfer reference') +
             ' in the Reference box.', 'The reference is required');
         form.elements.referenceNo.focus();
         return;
@@ -358,7 +384,8 @@ async function handleDriverPayment(event) {
         const response = await apiCollectPayment(paymentDeliveryId, {
                 amount: amount,
                 paymentMethod: form.elements.paymentMethod.value,
-                referenceNo: form.elements.referenceNo.value.trim() || null
+                referenceNo: form.elements.referenceNo.value.trim() || null,
+                paymentDetails: details
             });
         const result = await response.json();
 

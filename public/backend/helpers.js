@@ -51,8 +51,87 @@ function isDateText(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
 
+// ==========================================
+// ADDRESSES IN PARTS -- a delivery and a customer are both addressed this way
+// ==========================================
+// Text from a form box: not text -> "", extra spaces become one.
+function tidy(value) {
+  if (typeof value !== "string") return "";
+  return value.trim().replace(/\s+/g, " ");
+}
+
+// The parts of an address and the longest each may be. The cashier fills them
+// in one by one; they are saved in their own columns, and joined into the one
+// line every other screen shows.
+// [key, what it is called, longest, required]. Not every house has a number or
+// a street, so the house number and street may be left out.
+const ADDRESS_PARTS = [
+  ["street", "house number and street", 150, false],
+  ["barangay", "barangay", 100, true],
+  ["city", "town or city", 100, true],
+  ["province", "province", 100, true]
+];
+
+// "Wawa" is written "Brgy. Wawa" in the line; a barangay already written
+// with its word (Brgy., Barangay, Poblacion, Zone, Purok, Sitio) is left alone.
+function barangayLine(barangay) {
+  if (/^(brgy|barangay|poblacion|zone|purok|sitio)\b/i.test(barangay)) return barangay;
+  return "Brgy. " + barangay;
+}
+
+// The whole address as one line: street (when there is one), barangay, town or
+// city, province, then the landmark in brackets.
+function buildFullAddress(parts) {
+  let line = barangayLine(parts.barangay) + ", " + parts.city + ", " + parts.province;
+  if (parts.street !== "") line = parts.street + ", " + line;
+  if (parts.landmark !== "") line += " (Landmark: " + parts.landmark + ")";
+  return line;
+}
+
+// The parts of an address out of a request body, tidied.
+function addressPartsFrom(body) {
+  return {
+    street: tidy(body.street),
+    barangay: tidy(body.barangay),
+    city: tidy(body.city),
+    province: tidy(body.province),
+    landmark: tidy(body.landmark)
+  };
+}
+
+// null when the parts are fine, otherwise the one sentence to show. whose is
+// the words after "for the": "delivery address", "customer's address".
+function addressPartsProblem(parts, whose) {
+  for (let i = 0; i < ADDRESS_PARTS.length; i++) {
+    const key = ADDRESS_PARTS[i][0];
+    const label = ADDRESS_PARTS[i][1];
+    const longest = ADDRESS_PARTS[i][2];
+    const required = ADDRESS_PARTS[i][3];
+    // a barangay can be a single number ("5"); the other parts are at least two characters
+    let shortest = 2;
+    if (key === "barangay") shortest = 1;
+    if (required && parts[key].length < shortest) {
+      return "Enter the " + label + " for the " + whose + ".";
+    }
+    if (!required && parts[key] !== "" && parts[key].length < shortest) {
+      return "The " + label + " is too short; leave it empty if there is none.";
+    }
+    if (parts[key].length > longest) {
+      return "The " + label + " is at most " + longest + " characters.";
+    }
+  }
+  if (parts.landmark.length > 150) {
+    return "The landmark is at most 150 characters.";
+  }
+  return null;
+}
+
 module.exports = {
   searchPrefix: searchPrefix,
   wordStartSearch: wordStartSearch,
-  isDateText: isDateText
+  isDateText: isDateText,
+  tidy: tidy,
+  buildFullAddress: buildFullAddress,
+  addressPartsFrom: addressPartsFrom,
+  addressPartsProblem: addressPartsProblem
 };

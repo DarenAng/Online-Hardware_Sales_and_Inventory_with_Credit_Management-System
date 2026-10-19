@@ -2852,8 +2852,9 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
     margin-top: 8px;
 }
 
-/* THE BANK ACCOUNT -- printed when the sale was paid by transfer, or when it
-   leaves a balance to be paid that way */
+/* THE BANK ACCOUNT -- printed when a sale leaves a balance to be paid by transfer;
+   the same block carries the details of a cheque or a bank transfer taken
+   (payment-details.js) */
 .rc-bank-head {
     margin: 0 0 3px;
     text-align: center;
@@ -2865,6 +2866,20 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 .rc-bank div { display: flex; justify-content: space-between; gap: 10px; padding: 1px 0; font-size: 1em; }
 .rc-bank span:first-child { color: var(--steel-soft); }
 .rc-bank span:last-child { text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* THE BANK AND ACCOUNT OF A CHEQUE OR A TRANSFER -- the boxes the cashier (or the
+   driver) fills in under the payment method (payment-details.js) */
+.pay-details {
+    margin: 0 0 14px;
+    padding: 11px 14px 2px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--go);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    background: var(--paper);
+}
+.pay-details[hidden] { display: none; }
+.pay-details-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--ink); }
+.pay-details-note { margin: 0 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
 
 .rc-foot {
     text-align: center;

@@ -93,8 +93,10 @@ const RECORD_QUERIES = {
     "             GROUP BY sup.supplier_id, sup.supplier_name, sup.contact_person,\n" +
     "                      sup.contact_number, sup.email, sup.address\n" +
     "             ORDER BY sup.supplier_name",
-  customer: "SELECT c.customer_id AS id, TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS name,\n" +
-    "                    c.first_name, c.last_name, c.phone, c.address, c.created_at,\n" +
+  customer: "SELECT c.customer_id AS id, c.full_name AS name,\n" +
+    "                    c.first_name, c.middle_name, c.last_name, c.phone, c.address, c.created_at,\n" +
+    "                    c.address_street, c.address_barangay, c.address_city,\n" +
+    "                    c.address_province, c.address_landmark,\n" +
     "                    COALESCE(v.credit_limit, 0) AS credit_limit,\n" +
     "                    COALESCE(v.total_purchase, 0) AS total_purchase,\n" +
     "                    COALESCE(v.current_credit, 0) AS current_credit,\n" +
@@ -102,7 +104,9 @@ const RECORD_QUERIES = {
     "             FROM customers c\n" +
     "             LEFT JOIN vw_customer_credit v ON v.customer_id = c.customer_id\n" +
     "             LEFT JOIN sales s ON s.customer_id = c.customer_id AND s.is_archived = FALSE\n" +
-    "             GROUP BY c.customer_id, c.first_name, c.last_name, c.phone, c.address, c.created_at,\n" +
+    "             GROUP BY c.customer_id, c.first_name, c.middle_name, c.last_name, c.phone, c.address, c.created_at,\n" +
+    "                      c.address_street, c.address_barangay, c.address_city,\n" +
+    "                      c.address_province, c.address_landmark,\n" +
     "                      v.credit_limit, v.total_purchase, v.current_credit\n" +
     "             ORDER BY c.first_name",
   product: "SELECT p.product_id AS id, p.product_name AS name, p.price, p.reorder_point, p.status,\n" +

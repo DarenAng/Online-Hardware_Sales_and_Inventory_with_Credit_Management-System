@@ -440,7 +440,9 @@ function setReceiptPageSize(shop) {
 
 // The head: the registered name, the proprietor, the address, the TIN with
 // its registration, any lines the shop added, the title and the number.
-function receiptHeadHtml(shop, taxRegistration, receiptNo) {
+// title is optional: a page that is not a sales invoice (the payment receipt)
+// puts its own words where the shop's invoice title would go.
+function receiptHeadHtml(shop, taxRegistration, receiptNo, title) {
     const store = shop || {};
     const layout = receiptLayoutOf(store);
 
@@ -461,17 +463,18 @@ function receiptHeadHtml(shop, taxRegistration, receiptNo) {
     for (let i = 0; i < layout.headerLines.length; i++) {
         html += '<span class="rc-addr">' + escapeHtml(layout.headerLines[i]) + '</span>';
     }
-    if (layout.title) html += '<span class="rc-line">' + escapeHtml(layout.title) + '</span>';
+    const headTitle = title || layout.title;
+    if (headTitle) html += '<span class="rc-line">' + escapeHtml(headTitle) + '</span>';
     html += '<span class="rc-no">' + escapeHtml(receiptNo) + '</span>';
     html += '</div>';
     return html;
 }
 
 // The whole invoice. "parts" is what the sale says:
-//   { registration, receiptNo,
+//   { registration, receiptNo, title (optional, instead of the shop's invoice title),
 //     meta: [{ key: 'date'|'cashier'|'customer'|'payment'|'reference', label, value }],
-//     itemsHtml, itemCount, totals: [{ label, value, due }], taxHtml,
-//     paid: true/false, balanceText, bankHtml }
+//     itemsHtml (left out when there are no items, as on a payment receipt), itemCount,
+//     totals: [{ label, value, due }], taxHtml, paid: true/false, balanceText, bankHtml }
 function receiptHtml(shop, parts) {
     const store = shop || {};
     const layout = receiptLayoutOf(store);
@@ -488,7 +491,7 @@ function receiptHtml(shop, parts) {
         }
     }
 
-    let html = receiptHeadHtml(store, parts.registration, parts.receiptNo);
+    let html = receiptHeadHtml(store, parts.registration, parts.receiptNo, parts.title);
 
     if (meta.length > 0) {
         let metaHtml = '';
@@ -511,10 +514,12 @@ function receiptHtml(shop, parts) {
             row.value + '</span></div>';
     }
 
-    html += '<div class="rc-rule"></div>' +
-        '<table class="rc-items"><tbody>' + (parts.itemsHtml || '') + '</tbody></table>' +
-        '<div class="rc-rule"></div>' +
-        '<div class="rc-totals">' + totalsHtml + '</div>';
+    html += '<div class="rc-rule"></div>';
+    if (parts.itemsHtml) {
+        html += '<table class="rc-items"><tbody>' + parts.itemsHtml + '</tbody></table>' +
+            '<div class="rc-rule"></div>';
+    }
+    html += '<div class="rc-totals">' + totalsHtml + '</div>';
 
     if (parts.taxHtml && receiptShows(layout, 'tax')) {
         html += '<div class="rc-rule"></div>' + parts.taxHtml;
@@ -523,13 +528,20 @@ function receiptHtml(shop, parts) {
     html += '<div class="rc-rule"></div>' +
         '<p class="rc-foot">' + escapeHtml(parts.paid ? layout.paidLabel : (parts.balanceText || '')) + '</p>';
 
+    // the bank and account of a cheque or a bank transfer taken (payment-details.js)
+    if (parts.detailsHtml) html += parts.detailsHtml;
+
     if (parts.bankHtml && receiptShows(layout, 'bank')) html += parts.bankHtml;
 
-    if (store.invoice_note && receiptShows(layout, 'note')) {
+    // The invoice note is the shop's note for a sales invoice; a receipt of another kind
+    // (a Credit Settlement payment) leaves it out with parts.noInvoiceNote, and
+    // says its own closing words in parts.footerLines instead of the invoice's.
+    if (store.invoice_note && receiptShows(layout, 'note') && !parts.noInvoiceNote) {
         html += '<p class="rc-note">' + escapeHtml(store.invoice_note) + '</p>';
     }
-    for (let i = 0; i < layout.footerLines.length; i++) {
-        html += '<p class="rc-thanks">' + escapeHtml(layout.footerLines[i]) + '</p>';
+    const footerLines = parts.footerLines || layout.footerLines;
+    for (let i = 0; i < footerLines.length; i++) {
+        html += '<p class="rc-thanks">' + escapeHtml(footerLines[i]) + '</p>';
     }
     return html;
 }

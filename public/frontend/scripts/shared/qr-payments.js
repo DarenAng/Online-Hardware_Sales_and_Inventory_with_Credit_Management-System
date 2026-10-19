@@ -1,5 +1,5 @@
-// qr-payments.js -- the QR Payments screen: every GCash and Maya payment
-// tried by QR code, how it ended, and how many went through
+// qr-payments.js -- the QR Payments screen: every GCash, Maya and bank-transfer
+// payment tried by QR code, how it ended, and how many went through
 // Loaded by: cashier-dashboard.html (the cashier's own) and manager.html (everyone's)
 //
 // The server decides whose rows come back (a cashier only ever gets their
@@ -19,7 +19,15 @@ const QR_STATUS_TONE = {
     pending: 'badge-warning', paid: 'badge-success', failed: 'badge-danger',
     expired: 'badge-neutral', cancelled: 'badge-neutral'
 };
-const QR_WALLET_WORDS = { GCash: 'GCash', PayMaya: 'Maya' };
+const QR_WALLET_WORDS = { GCash: 'GCash', PayMaya: 'Maya', 'Bank Transfer': 'Bank Transfer' };
+
+// "Maya", or "Bank Transfer · BPI" when the customer paid through their bank
+function qrWayWords(row) {
+    const way = QR_WALLET_WORDS[row.wallet] || row.wallet;
+    const bank = row.bankName || row.bank_name;
+    if (row.wallet === 'Bank Transfer' && bank) return way + ' \u00b7 ' + bank;
+    return way;
+}
 
 function qrStatusBadge(status) {
     return '<span class="badge ' + (QR_STATUS_TONE[status] || 'badge-neutral') + '">' +
@@ -64,7 +72,7 @@ function buildQrPaymentsPanel(options) {
 
         gate: {
             title: 'No QR payments loaded',
-            text: 'Pick a period above, or press Load Data to read every GCash and Maya payment tried by QR code.',
+            text: 'Pick a period above, or press Load Data to read every GCash, Maya and bank-transfer payment tried by QR code.',
             button: 'Load Data'
         },
         empty: {
@@ -89,7 +97,7 @@ function buildQrPaymentsPanel(options) {
 
         match: function (row, query) {
             return prefixMatch([
-                row.reference, row.wallet, QR_WALLET_WORDS[row.wallet], row.cashierName, row.errorMessage,
+                row.reference, row.wallet, QR_WALLET_WORDS[row.wallet], row.bankName, row.cashierName, row.errorMessage,
                 QR_STATUS_WORDS[row.status], row.saleId ? qrSaleNumber(row.saleId) : '', '#' + row.id
             ], query);
         },
@@ -103,7 +111,7 @@ function buildQrPaymentsPanel(options) {
                 'onclick="openQrPaymentRow(\'' + options.key + '\', ' + row.id + ')">' +
                 '<td class="cell-id">' + escapeHtml(String(row.createdAt || '').slice(0, 16)) + '</td>' +
                 '<td class="cell-num">' + peso(row.amount) + '</td>' +
-                '<td>' + escapeHtml(QR_WALLET_WORDS[row.wallet] || row.wallet) + '</td>' +
+                '<td>' + escapeHtml(qrWayWords(row)) + '</td>' +
                 '<td>' + qrStatusBadge(row.status) + '</td>' +
                 '<td class="cell-id">' + (row.reference ? escapeHtml(row.reference) : '<span class="muted">None</span>') + '</td>' +
                 '<td class="cell-id">' + (row.saleId ? qrSaleNumber(row.saleId) : '<span class="muted">None</span>') + '</td>' +
@@ -193,7 +201,9 @@ function openQrPaymentRow(key, id) {
         detailField('Attempt', '#' + row.id) +
         detailField('Status', qrStatusBadge(row.status)) +
         detailField('Amount', peso(row.amount)) +
-        detailField('Wallet', escapeHtml(QR_WALLET_WORDS[row.wallet] || row.wallet)) +
+        detailField(row.wallet === 'Bank Transfer' ? 'Paid By' : 'Wallet', escapeHtml(qrWayWords(row))) +
+        (row.wallet === 'Bank Transfer'
+            ? detailField('Account', escapeHtml((row.accountName || '') + ', ' + (row.accountNumber || ''))) : '') +
         detailField('For', row.purpose === 'credit_payment' ? 'A payment on a balance' : 'A sale') +
         detailField('Cashier', escapeHtml(row.cashierName || 'Unknown')) +
         detailField('Made', escapeHtml(String(row.createdAt || ''))) +
@@ -219,7 +229,7 @@ function qrPaymentsOfSaleHtml(list) {
         const q = list[i];
         rows.push([
             '#' + q.qr_payment_id,
-            escapeHtml(QR_WALLET_WORDS[q.wallet] || q.wallet),
+            escapeHtml(qrWayWords(q)),
             peso(q.amount),
             qrStatusBadge(q.status),
             q.provider_payment_id ? escapeHtml(q.provider_payment_id) : '<span class="muted">None</span>'

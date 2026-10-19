@@ -613,6 +613,61 @@ async function migrateDeliveryAddressParts() {
   }
 }
 
+// A customer is now added with a first, a middle (optional) and a last name,
+// and an address in parts, the same parts a delivery has: house and street,
+// barangay, town or city, province, landmark. customers.address still holds
+// the whole address as one line, so every screen, receipt and report that
+// reads it goes on working; a customer added before this has only that line
+// and no middle name. full_name is a generated column that spells the name
+// with the middle name as an initial (like staff.full_name). Each column is
+// added on its own, so running this again changes nothing. The procedure that
+// adds a customer is reloaded afterwards by loadProceduresIfMissing (see
+// routinesAreOld).
+async function migrateCustomerNameAndAddress() {
+  const wanted = [
+    ["middle_name", "VARCHAR(100) NULL"],
+    ["address_street", "VARCHAR(150) NULL"],
+    ["address_barangay", "VARCHAR(100) NULL"],
+    ["address_city", "VARCHAR(100) NULL"],
+    ["address_province", "VARCHAR(100) NULL"],
+    ["address_landmark", "VARCHAR(150) NULL"]
+  ];
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'customers'",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.indexOf("customer_id") === -1) return;     // no customers table yet
+
+  let added = 0;
+  for (let i = 0; i < wanted.length; i++) {
+    if (names.indexOf(wanted[i][0]) === -1) {
+      await db.query("ALTER TABLE customers ADD COLUMN " + wanted[i][0] + " " + wanted[i][1]);
+      added += 1;
+    }
+  }
+
+  // the generated column comes last: it reads middle_name
+  if (names.indexOf("full_name") === -1) {
+    await db.query(
+      "ALTER TABLE customers ADD COLUMN full_name VARCHAR(220) AS (\n" +
+        "       TRIM(CONCAT(first_name,\n" +
+        "                   IF(middle_name IS NULL OR middle_name = '', '',\n" +
+        "                      CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),\n" +
+        "                   ' ', last_name))\n" +
+        "     ) VIRTUAL"
+    );
+    added += 1;
+  }
+
+  if (added > 0) {
+    console.log("Added the customer middle name, address parts and full name " +
+      "(customers.middle_name, address_street, address_barangay, address_city, " +
+      "address_province, address_landmark, full_name).");
+  }
+}
+
 // The credit terms and conditions printed with a customer's credit account: the
 // manager's own wording. Empty (NULL) means the default text in store-settings.js.
 async function migrateCreditTerms() {
@@ -981,7 +1036,7 @@ async function migrateSupplierQuote() {
     "purchase_order_items.original_unit_cost).");
 }
 
-// Every GCash or Maya payment tried by QR code. The same table as
+// Every GCash, Maya or bank-transfer payment tried by QR code. The same table as
 // public/database/3-ADD-qr-payments.sql, which does this by hand.
 async function migrateQrPayments() {
   const tablesResult = await db.query(
@@ -990,7 +1045,10 @@ async function migrateQrPayments() {
     [DB_NAME]
   );
   const tables = tablesResult[0];
-  if (tables.length > 0) return;
+  if (tables.length > 0) {
+    await addBankColumnsToQrPayments();
+    return;
+  }
 
   await db.query(
     "CREATE TABLE qr_payments (\n" +
@@ -1000,7 +1058,11 @@ async function migrateQrPayments() {
       "       provider_intent_id VARCHAR(80) NOT NULL,\n" +
       "       provider_payment_id VARCHAR(80) NULL,\n" +
       "       amount DECIMAL(12,2) NOT NULL,\n" +
-      "       wallet ENUM('GCash','PayMaya') NOT NULL,\n" +
+      "       wallet ENUM('GCash','PayMaya','Bank Transfer') NOT NULL,\n" +
+      "       bank_code VARCHAR(20) NULL,\n" +
+      "       bank_name VARCHAR(80) NULL,\n" +
+      "       account_name VARCHAR(100) NULL,\n" +
+      "       account_number VARCHAR(30) NULL,\n" +
       "       purpose ENUM('sale','credit_payment') NOT NULL,\n" +
       "       status ENUM('pending','paid','failed','expired','cancelled') NOT NULL DEFAULT 'pending',\n" +
       "       error_message VARCHAR(255) NULL,\n" +
@@ -1016,7 +1078,72 @@ async function migrateQrPayments() {
       "       FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE SET NULL ON UPDATE CASCADE,\n" +
       "       FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE\n" +
       "     )");
-  console.log("Added the qr_payments table for GCash and Maya payments by QR code.");
+  console.log("Added the qr_payments table for GCash, Maya and bank-transfer payments by QR code.");
+}
+
+// A qr_payments table made before bank transfers: "Bank Transfer" joins the ways
+// of paying, and the bank and the customer's account get their columns.
+async function addBankColumnsToQrPayments() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'qr_payments'",
+    [DB_NAME]
+  );
+  const columns = columnsResult[0];
+  const wallet = findColumn(columns, "wallet");
+  if (wallet && String(wallet.COLUMN_TYPE).indexOf("Bank Transfer") === -1) {
+    await db.query(
+      "ALTER TABLE qr_payments MODIFY COLUMN wallet ENUM('GCash','PayMaya','Bank Transfer') NOT NULL");
+    console.log("qr_payments.wallet now accepts Bank Transfer.");
+  }
+
+  const wanted = [
+    ["bank_code", "VARCHAR(20)"],
+    ["bank_name", "VARCHAR(80)"],
+    ["account_name", "VARCHAR(100)"],
+    ["account_number", "VARCHAR(30)"]
+  ];
+  for (let i = 0; i < wanted.length; i++) {
+    if (findColumn(columns, wanted[i][0]) === undefined) {
+      await db.query("ALTER TABLE qr_payments ADD COLUMN " + wanted[i][0] + " " + wanted[i][1] + " NULL AFTER wallet");
+      console.log("Added qr_payments." + wanted[i][0] + " for bank transfers.");
+    }
+  }
+}
+
+// The bank and account behind a cheque or a bank transfer, one row for each
+// payment that has them (see the note over payment_details in
+// public/database/1-RUN-FIRST-database.sql). Must run after migrateQrPayments:
+// it points at qr_payments.
+async function migratePaymentDetails() {
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'payment_details'",
+    [DB_NAME]
+  );
+  if (tablesResult[0].length > 0) return;
+
+  await db.query(
+    "CREATE TABLE payment_details (\n" +
+      "       detail_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+      "       sale_id INT NOT NULL,\n" +
+      "       payment_id INT NULL,\n" +
+      "       method ENUM('Cheque','Bank Transfer') NOT NULL,\n" +
+      "       account_name VARCHAR(100) NOT NULL,\n" +
+      "       account_number VARCHAR(30) NOT NULL,\n" +
+      "       bank_name VARCHAR(80) NOT NULL,\n" +
+      "       branch VARCHAR(80) NULL,\n" +
+      "       cheque_date DATE NULL,\n" +
+      "       qr_payment_id INT NULL,\n" +
+      "       created_by_staff_id INT NULL,\n" +
+      "       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n" +
+      "       INDEX idx_payment_details_sale (sale_id),\n" +
+      "       FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE CASCADE ON UPDATE CASCADE,\n" +
+      "       FOREIGN KEY (payment_id) REFERENCES credit_payments(payment_id) ON DELETE CASCADE ON UPDATE CASCADE,\n" +
+      "       FOREIGN KEY (qr_payment_id) REFERENCES qr_payments(qr_payment_id) ON DELETE SET NULL ON UPDATE CASCADE,\n" +
+      "       FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE\n" +
+      "     )");
+  console.log("Added the payment_details table: the bank and account behind a cheque or a bank transfer.");
 }
 
 // Four rules the database itself enforces, so a bug in a procedure or a hand
@@ -1121,6 +1248,7 @@ async function migrateServerTables() {
       "       token VARCHAR(40) NOT NULL UNIQUE,\n" +
       "       amount DECIMAL(12,2) NOT NULL,\n" +
       "       wallet VARCHAR(20) NOT NULL,\n" +
+      "       bank_name VARCHAR(80) NULL,\n" +
       "       description VARCHAR(255) NULL,\n" +
       "       return_url VARCHAR(500) NOT NULL,\n" +
       "       status VARCHAR(10) NOT NULL,\n" +
@@ -1128,6 +1256,16 @@ async function migrateServerTables() {
       "       error_message VARCHAR(255) NULL,\n" +
       "       created_at BIGINT NOT NULL\n" +
       "     )");
+
+  // a simulator table made before bank transfers has no bank column
+  const simColumnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'qr_sim_intents'",
+    [DB_NAME]
+  );
+  if (columnNamesOf(simColumnsResult[0]).indexOf("bank_name") === -1) {
+    await db.query("ALTER TABLE qr_sim_intents ADD COLUMN bank_name VARCHAR(80) NULL AFTER wallet");
+  }
 }
 
 // a named figure so adding a procedure changes one number, not two
@@ -1207,7 +1345,12 @@ const PROCEDURES_FILE = path.join(__dirname, "..", "..", "database", "2-RUN-SECO
 // is accepted; the old one asked for ten characters).
 // purchase_order_ordered_items and "received_at = NOW()" in
 // sp_receive_purchase_order mark the one that keeps the order's lines as they
-// were ordered and the day it was received. Every
+// were ordered and the day it was received. p_address_barangay in
+// sp_create_customer marks the one that takes a middle name and an address in
+// parts (and with it the credit view that reads customers.full_name).
+// p_pay_details in sp_create_sale_transaction and sp_record_credit_payment marks the
+// ones that record a cheque's or a bank transfer's bank and account, and
+// p_bank_code in sp_create_qr_payment the one that takes a bank transfer. Every
 // procedure with an EXIT HANDLER must also have GET DIAGNOSTICS (checked once
 // for all of them below). A few small reads, and once file 2 has been loaded
 // they all pass, so nothing reloads on later starts.
@@ -1226,6 +1369,9 @@ async function routinesAreOld() {
     ["sp_record_credit_payment", "p_qr_payment_id"],
     ["sp_record_credit_payment", "kept for the down payment"],
     ["sp_create_sale_transaction", "p_qr_payment_id"],
+    ["sp_create_sale_transaction", "p_pay_details"],
+    ["sp_record_credit_payment", "p_pay_details"],
+    ["sp_create_qr_payment", "p_bank_code"],
     ["sp_create_sale_transaction", "Discount cannot be negative"],
     ["sp_create_sale_transaction", "has no price yet"],
     ["sp_adjust_stock", "Add and Remove need a quantity"],
@@ -1237,7 +1383,8 @@ async function routinesAreOld() {
     ["sp_create_delivery", "DELIVERY_CREATED"],
     ["sp_update_delivery_status", "FOR UPDATE"],
     ["sp_receive_purchase_order", "purchase_order_ordered_items"],
-    ["sp_receive_purchase_order", "received_at = NOW()"]
+    ["sp_receive_purchase_order", "received_at = NOW()"],
+    ["sp_create_customer", "p_address_barangay"]
   ];
 
   const routinesResult = await db.query(
@@ -1246,7 +1393,8 @@ async function routinesAreOld() {
       "       AND ROUTINE_NAME IN ('sp_file_return_report', 'sp_apply_late_penalties', 'sp_record_credit_payment',\n" +
       "                            'sp_create_sale_transaction', 'sp_resolve_return_report', 'sp_archive_record',\n" +
       "                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',\n" +
-      "                            'sp_adjust_stock', 'sp_receive_purchase_order')",
+      "                            'sp_adjust_stock', 'sp_receive_purchase_order', 'sp_create_customer',\n" +
+      "                            'sp_create_qr_payment')",
     [DB_NAME]
   );
   const routines = routinesResult[0];
@@ -1377,6 +1525,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateRefundedAmount();
   await migrateCashierRemarks();
   await migrateDeliveryAddressParts();
+  await migrateCustomerNameAndAddress();
   await migrateDeliveryCreatedDate();
   await migrateAccountManagementKey();
   await migrateProprietorName();
@@ -1392,6 +1541,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateSupplierResponse();
   await migrateSupplierQuote();
   await migrateQrPayments();
+  await migratePaymentDetails();
   await migrateCheckConstraints();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();

@@ -13,7 +13,7 @@ const callProcedure = require("./shared-procedures").callProcedure;
 // sp_record_credit_payment: Takes the cash a driver collects at the door as a payment on the sale.
 function recordCreditPayment(params) {
   return callProcedure(
-    "CALL sp_record_credit_payment(?, ?, ?, ?, ?, ?, @status_code, @message)",
+    "CALL sp_record_credit_payment(?, ?, ?, ?, ?, ?, ?, @status_code, @message)",
     params,
     ["status_code", "message"]
   );

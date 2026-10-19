@@ -22,7 +22,7 @@
 //     cashier.js         Cashier
 //     inventory-clerk.js Inventory Clerk
 //     delivery.js        Delivery Personnel
-//     qr-payments.js     GCash and Maya paid by QR code (PayMongo)
+//     qr-payments.js     GCash, Maya and bank transfers paid by QR code (PayMongo)
 //     shared.js          routes every signed-in role uses (My Account, the live channel, archives ...)
 //   database/          connection.js (the MySQL pool), migrations.js (start-up work),
 //                      procedures/ (every stored-procedure CALL, one file per role)

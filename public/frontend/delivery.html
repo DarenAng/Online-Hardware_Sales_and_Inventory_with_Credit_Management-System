@@ -27,7 +27,7 @@
             <!-- data-feature names the screen an item opens; shared/features.js hides
                  the ones switched off for this role and mirrors the counts -->
             <ul class="sidebar-nav">
-                <li data-feature="delivery-runs"><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>Pending</a></li>
+                <li data-feature="delivery-runs"><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>Pending Deliveries</a></li>
                 <!-- A folding heading does two things (shared/helpers.js sidebarHeading): its
                      words open the module's first screen, its caret alone folds the list -->
                 <li data-sidebar-dropdown data-feature="delivery-reports">
@@ -312,6 +312,8 @@
                             <option value="Bank Transfer">Bank Transfer</option>
                         </select>
                     </div>
+                    <!-- the bank and account of a cheque or a transfer (payment-details.js) -->
+                    <div id="pay-details-box"></div>
                     <div class="form-group">
                         <label for="pay-ref">Reference no. <span class="label-hint" id="pay-ref-hint">optional</span></label>
                         <input type="text" id="pay-ref" name="referenceNo" class="form-control" maxlength="60"
@@ -379,6 +381,7 @@
     <script src="scripts/shared/features.js"></script>
     <script src="scripts/shared/deliveries.js"></script>
     <script src="scripts/shared/delivery-schedule.js"></script>
+    <script src="scripts/shared/payment-details.js"></script>
     <script src="connections/delivery-connection.js"></script>
     <script src="scripts/delivery-personnel.js"></script>
 </body>

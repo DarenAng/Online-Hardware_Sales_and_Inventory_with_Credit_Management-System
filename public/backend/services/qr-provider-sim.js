@@ -4,7 +4,7 @@
 //
 // The same four things as qr-provider-paymongo.js (see there), so the rest of
 // the app cannot tell them apart:
-//   createPayment({ amount, wallet, description, returnUrl }) -> { providerIntentId, payUrl, status }
+//   createPayment({ amount, wallet, bank, description, returnUrl }) -> { providerIntentId, payUrl, status }
 //   getStatus(providerIntentId) -> { status, providerPaymentId, errorMessage }
 //   cancel(providerIntentId)
 //   name, mode, problem
@@ -44,6 +44,7 @@ function intentFrom(row) {
     token: row.token,
     amount: Number(row.amount),
     wallet: row.wallet,
+    bankName: row.bank_name || "",
     description: row.description || "",
     returnUrl: row.return_url,
     status: row.status,
@@ -73,10 +74,10 @@ const store = {
     }
     await db.query(
       "INSERT INTO qr_sim_intents\n" +
-        "         (intent_id, token, amount, wallet, description, return_url, status, created_at)\n" +
-        "       VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-      [intent.id, intent.token, intent.amount, intent.wallet, String(intent.description).slice(0, 255),
-       intent.returnUrl, intent.status, intent.createdAt]);
+        "         (intent_id, token, amount, wallet, bank_name, description, return_url, status, created_at)\n" +
+        "       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [intent.id, intent.token, intent.amount, intent.wallet, intent.bankName || null,
+       String(intent.description).slice(0, 255), intent.returnUrl, intent.status, intent.createdAt]);
   },
 
   // by "id" or by "token" (the secret in the pay page's address)
@@ -119,6 +120,7 @@ const store = {
 async function createPayment(options) {
   const amount = options.amount;
   const wallet = options.wallet;
+  const bank = options.bank;
   const description = options.description;
   const returnUrl = options.returnUrl;
   const now = Date.now();
@@ -129,6 +131,7 @@ async function createPayment(options) {
     token: crypto.randomBytes(18).toString("base64url"),
     amount: Math.round(Number(amount) * 100) / 100,
     wallet: wallet,
+    bankName: bank ? bank.name : "",
     description: description || "",
     returnUrl: returnUrl,
     status: "pending",
@@ -168,7 +171,7 @@ function escapeHtml(text) {
   });
 }
 
-const WALLET_WORDS = { GCash: "GCash", PayMaya: "Maya" };
+const WALLET_WORDS = { GCash: "GCash", PayMaya: "Maya", "Bank Transfer": "bank transfer" };
 
 // a phone-sized page with nothing to load from elsewhere
 function page(title, body) {
@@ -210,8 +213,14 @@ function registerRoutes(app, database) {
         "<p class=\"muted\">You can return to the cashier.</p>"));
     }
 
+    // a bank transfer names the bank whose online banking this stands in for
+    let who = "Simulated " + wallet + " payment to Lucelyn Hardware";
+    if (intent.wallet === "Bank Transfer" && intent.bankName) {
+      who = "Simulated online banking: " + intent.bankName + " transfer to Lucelyn Hardware";
+    }
+
     response.send(page("Simulated payment",
-      "<p class=\"muted\">Simulated " + escapeHtml(wallet) + " payment to Lucelyn Hardware</p>" +
+      "<p class=\"muted\" id=\"sim-who\">" + escapeHtml(who) + "</p>" +
       "<div class=\"amount\">&#8369;" + intent.amount.toFixed(2) + "</div>" +
       (intent.description ? "<p class=\"muted\">" + escapeHtml(intent.description) + "</p>" : "") +
       "<form method=\"post\"><input type=\"hidden\" name=\"result\" value=\"paid\">" +

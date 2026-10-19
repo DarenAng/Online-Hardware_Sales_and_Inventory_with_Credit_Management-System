@@ -47,13 +47,13 @@ const USER_SELECT = "\n  SELECT s.staff_id, s.first_name, s.middle_name, s.last_
 // NAMES SHARED BY THE MODULES -- how a sale or a delivery says who it is for
 // ==========================================
 // who the sale was for: the account, then the name taken at the till, then walk-in
-const SALE_CUSTOMER_SQL = "\n  COALESCE(NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), ''),\n" +
+const SALE_CUSTOMER_SQL = "\n  COALESCE(NULLIF(c.full_name, ''),\n" +
   "           NULLIF(TRIM(s.walk_in_name), ''),\n" +
   "           'Walk-in')";
 
 // for a delivery the contact name typed for it outranks the customer record
 const DELIVERY_CONTACT_SQL = "\n  COALESCE(NULLIF(TRIM(d.contact_name), ''),\n" +
-  "           NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), ''),\n" +
+  "           NULLIF(c.full_name, ''),\n" +
   "           NULLIF(TRIM(s.walk_in_name), ''),\n" +
   "           'Walk-in')";
 

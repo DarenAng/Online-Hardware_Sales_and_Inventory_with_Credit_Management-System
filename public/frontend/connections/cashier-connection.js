@@ -43,13 +43,14 @@ function apiGetOpenSales() {
     return getJson('/api/credit/open-sales');
 }
 
-// POST /api/sales/:id/payment -- take a payment on a sale
+// POST /api/sales/:id/payment -- a Credit Settlement payment on a sale; the answer has the receipt
 function apiTakePayment(saleId, payment) {
     return sendJson('/api/sales/' + saleId + '/payment', 'POST', payment);
 }
 
-// POST /api/qr-payments -- a QR code for a GCash or PayMaya payment.
-// qr is { amount, wallet, purpose: 'sale' or 'credit_payment', saleId };
+// POST /api/qr-payments -- a QR code for a GCash, PayMaya or bank-transfer payment.
+// qr is { amount, wallet, purpose: 'sale' or 'credit_payment', saleId }, and for a Bank Transfer
+// also { bankCode, accountName, accountNumber } (the customer's bank and account);
 // the answer has id, qrImage (a picture to show), payUrl, secondsLeft and badge
 function apiCreateQrPayment(qr) {
     return sendJson('/api/qr-payments', 'POST', qr);

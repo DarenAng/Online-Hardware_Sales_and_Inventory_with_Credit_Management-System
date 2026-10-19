@@ -15,6 +15,7 @@
 // ============================================================
 
 const deliveryProcedures = require("../database/procedures/delivery-procedures");
+const cleanPaymentDetails = require("../payment-details").cleanPaymentDetails;
 
 function registerDeliveryRoutes(app, deps) {
   const db = deps.db;
@@ -185,6 +186,10 @@ function registerDeliveryRoutes(app, deps) {
   // and the manager's reports all read it from there. Then the cashier and the
   // manager are told, and every screen watching sales, credit and deliveries
   // reads again.
+  // A cheque is collected with the same details the counter takes (account name and
+  // number, bank, branch, date). The driver has no QR screen, so a bank transfer shown
+  // at the door is only taken on the driver's word: the customer's bank, account name
+  // and account number, and the bank's reference. It is not verified through PayMongo.
   const PAYMENT_METHODS = ["Cash", "GCash", "PayMaya", "Cheque", "Bank Transfer"];
   const REFERENCE_NEEDED = ["Cheque", "Bank Transfer"];
 
@@ -226,6 +231,16 @@ function registerDeliveryRoutes(app, deps) {
       return response.status(400).json({ error: "A reference is at most 60 characters." });
     }
 
+    // the bank and account behind a cheque or a bank transfer
+    let payDetails = null;
+    if (paymentMethod === "Cheque" || paymentMethod === "Bank Transfer") {
+      const cleaned = cleanPaymentDetails(paymentMethod, request.body.paymentDetails);
+      if (cleaned.problem) {
+        return response.status(400).json({ error: cleaned.problem });
+      }
+      payDetails = JSON.stringify(cleaned.details);
+    }
+
     try {
       const deliveryResult = await db.query(
         "SELECT d.sale_id, d.delivery_staff_id, s.payment_method FROM deliveries d " +
@@ -251,7 +266,7 @@ function registerDeliveryRoutes(app, deps) {
       const saleId = rows[0].sale_id;
       // the procedure refuses more than the sale still owes, and a sale already paid
       const output = await deliveryProcedures.recordCreditPayment(
-        [saleId, amount, paymentMethod, referenceNo || null, getActorId(request), null]
+        [saleId, amount, paymentMethod, referenceNo || null, getActorId(request), null, payDetails]
       );
 
       if (output.status_code !== 200) {
@@ -355,7 +370,7 @@ function registerDeliveryRoutes(app, deps) {
         "SELECT cp.payment_id, cp.sale_id, cp.amount, cp.payment_method, " +
         "cp.reference_no, cp.payment_date, " +
         "(SELECT MIN(d2.delivery_id) FROM deliveries d2 WHERE d2.sale_id = cp.sale_id AND d2.is_archived = FALSE) AS delivery_id, " +
-        "COALESCE(NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), ''), 'Walk-in') AS customer_name " +
+        "COALESCE(NULLIF(c.full_name, ''), 'Walk-in') AS customer_name " +
         "FROM credit_payments cp " +
         "LEFT JOIN customers c ON c.customer_id = cp.customer_id " +
         "WHERE cp.received_by_staff_id = ? " +

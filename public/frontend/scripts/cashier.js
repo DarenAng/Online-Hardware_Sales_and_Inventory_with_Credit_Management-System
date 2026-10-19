@@ -777,14 +777,43 @@ function typedCustomerName() {
     return box ? box.value.trim().replace(/\s+/g, ' ') : '';
 }
 
-// the account whose name is in the box, only while the text still matches exactly
-function customerMatchingTypedName() {
-    const text = typedCustomerName().toLowerCase();
+// first and last name only, without the middle name: "Maria Santos" for "Maria S. Santos"
+function customerShortName(c) {
+    return (String(c.first_name || '') + ' ' + String(c.last_name || '')).trim();
+}
+
+// the middle name written out: "Maria Reyes Santos" for "Maria R. Santos"
+function customerSpelledName(c) {
+    return (String(c.first_name || '') + ' ' + String(c.middle_name || '') + ' ' + String(c.last_name || '')).replace(/\s+/g, ' ').trim();
+}
+
+// The account a typed name stands for, or null. The name as the record writes it
+// ("Maria R. Santos") comes first. The name with the middle name written out, and the
+// first and last name alone, count only when exactly one customer has that spelling:
+// with a Maria R. Santos and a Maria L. Santos on record, "Maria Santos" is nobody
+// yet, and the list under the box is how the cashier says which.
+function customerMatchingName(typed) {
+    const text = String(typed || '').trim().replace(/\s+/g, ' ').toLowerCase();
     if (text === '') return null;
-    for (let i = 0; i < customerDirectory.length; i++) {
-        if (String(customerDirectory[i].name).trim().toLowerCase() === text) return customerDirectory[i];
+
+    const spellings = [
+        function (c) { return String(c.name).trim().toLowerCase(); },
+        function (c) { return customerSpelledName(c).toLowerCase(); },
+        function (c) { return customerShortName(c).toLowerCase(); }
+    ];
+    for (let k = 0; k < spellings.length; k++) {
+        const found = [];
+        for (let i = 0; i < customerDirectory.length; i++) {
+            if (spellings[k](customerDirectory[i]) === text) found.push(customerDirectory[i]);
+        }
+        if (found.length === 1) return found[0];
     }
     return null;
+}
+
+// the account whose name is in the box, only while the text still matches exactly
+function customerMatchingTypedName() {
+    return customerMatchingName(typedCustomerName());
 }
 
 async function onCustomerInput(value) {
@@ -811,9 +840,18 @@ async function onCustomerInput(value) {
     renderCustomerVerdict();
 }
 
-function renderCustomerSuggestions(text) {
-    const list = document.getElementById('customer-suggest');
-    const box = customerNameBox();
+// The suggestion list is drawn under the Payment card's customer box and under
+// the delivery form's recipient box the same way; only the elements and the
+// function a pick calls differ.
+const CUSTOMER_PICKERS = {
+    payment: { boxId: 'customer-name', listId: 'customer-suggest', pick: 'pickCustomer' },
+    delivery: { boxId: 'dl-name', listId: 'dl-customer-suggest', pick: 'pickDeliveryCustomer' }
+};
+
+function renderCustomerSuggestions(text, where) {
+    const picker = CUSTOMER_PICKERS[where || 'payment'];
+    const list = document.getElementById(picker.listId);
+    const box = document.getElementById(picker.boxId);
     if (!list) return;
 
     const query = String(text || '').trim().toLowerCase();
@@ -834,7 +872,7 @@ function renderCustomerSuggestions(text) {
         const c = customerDirectory[i];
         const name = String(c.name || '').toLowerCase();
         if (name.startsWith(query)) starts.push(c);
-        else if (prefixMatch([name, c.phone], query)) words.push(c);
+        else if (prefixMatch([name, customerShortName(c), customerSpelledName(c), c.phone], query)) words.push(c);
     }
 
     const found = starts.concat(words).slice(0, 6);
@@ -863,7 +901,7 @@ function renderCustomerSuggestions(text) {
 
         suggestHtml += '<li class="suggest-item" role="option" id="suggest-' + i + '" ' +
             'onmousedown="event.preventDefault()" ' +
-            'onclick="pickCustomer(' + c.id + ')">' +
+            'onclick="' + picker.pick + '(' + c.id + ')">' +
             '<span class="suggest-name">' + escapeHtml(c.name) + '</span>' +
             noteHtml +
             '</li>';
@@ -874,9 +912,10 @@ function renderCustomerSuggestions(text) {
     if (box) box.setAttribute('aria-expanded', 'true');
 }
 
-function hideCustomerSuggestions() {
-    const list = document.getElementById('customer-suggest');
-    const box = customerNameBox();
+function hideCustomerSuggestions(where) {
+    const picker = CUSTOMER_PICKERS[where || 'payment'];
+    const list = document.getElementById(picker.listId);
+    const box = document.getElementById(picker.boxId);
     if (list) { list.hidden = true; list.innerHTML = ''; }
     if (box) box.setAttribute('aria-expanded', 'false');
     suggestHighlight = -1;
@@ -884,7 +923,11 @@ function hideCustomerSuggestions() {
 
 // arrow keys and Enter: a cashier's hands are on the keyboard
 function onCustomerKey(event) {
-    const list = document.getElementById('customer-suggest');
+    customerSuggestKey(event, 'customer-suggest', 'payment');
+}
+
+function customerSuggestKey(event, listId, where) {
+    const list = document.getElementById(listId);
     if (!list || list.hidden) {
         if (event.key === 'Enter') event.preventDefault();
         return;
@@ -912,7 +955,7 @@ function onCustomerKey(event) {
         return;
     }
 
-    if (event.key === 'Escape') hideCustomerSuggestions();
+    if (event.key === 'Escape') hideCustomerSuggestions(where);
 }
 
 // The customer in the directory with this id, or undefined
@@ -924,7 +967,13 @@ function findCustomer(customerId) {
 }
 
 async function pickCustomer(customerId) {
-    const found = findCustomer(customerId);
+    let found = findCustomer(customerId);
+    // a customer added a moment ago may not be in the list yet: load it again once
+    if (!found) {
+        customerDirectoryLoaded = false;
+        await loadCustomerDirectory(true);
+        found = findCustomer(customerId);
+    }
     if (!found) return;
 
     const nameBox = customerNameBox();
@@ -939,9 +988,6 @@ async function pickCustomer(customerId) {
     hideCustomerSuggestions();
     await onCustomerChange(String(found.id));
     renderCustomerVerdict();
-
-    // a delivery already filled in for the previous customer follows the change
-    if (pendingDelivery && !pendingDelivery.edited) fillDeliveryFromCustomer();
 }
 
 async function clearCustomer() {
@@ -979,6 +1025,12 @@ function renderCustomerVerdict() {
         return;
     }
 
+    if (typed === '' && pendingDelivery) {
+        box.className = 'customer-verdict is-good';
+        box.textContent = 'The delivery is for ' + pendingDelivery.contactName + ', so this sale is saved under their name.';
+        return;
+    }
+
     if (typed === '') {
         box.className = 'customer-verdict';
         box.textContent = 'Walk-in. To put the sale on a customer, type their name and pick them from the list.';
@@ -1005,10 +1057,8 @@ function canAddCustomers() {
 // name filled in, and the new account is put on the sale once it is saved.
 function addCustomerFromPayment() {
     openAddCustomer();
-    addCustomerForSale = true;
-
-    const form = document.getElementById('add-customer-form');
-    if (form) form.elements.name.value = typedCustomerName();
+    addCustomerFor = 'sale';
+    prefillAddCustomerName(typedCustomerName());
 }
 
 // kept under the old name because the boot sequence and the catalog loader call it
@@ -1235,7 +1285,7 @@ async function clearCart() {
     const form = document.getElementById('checkout-form');
     if (form) {
         form.elements.amountPaid.value = '';
-        if (form.elements.downPayment) form.elements.downPayment.value = '';
+        if (form.elements.downPayment) form.elements.downPayment.value = '0';
     }
 
     // a delivery left attached to an emptied cart is a delivery for goods nobody chose
@@ -1439,6 +1489,10 @@ function renderCartFigures() {
             // cash on delivery: nothing is paid at the counter
             html += '<div class="total-row total-note"><span>Collected on delivery</span><span>' +
                     peso(t.due) + '</span></div>';
+        } else if (t.method === 'Bank Transfer') {
+            // the customer pays through their bank: exactly the bill, so no change
+            html += '<div class="total-row total-note"><span>Paid by bank transfer</span><span>' +
+                    peso(t.due) + '</span></div>';
         } else if (t.tendered < t.due) {
             // paid now, and what was handed over does not cover it yet
             html += '<div class="total-row total-short"><span>Short by</span><span>' +
@@ -1458,18 +1512,24 @@ function renderCartFigures() {
     renderCreditVerdict(t);
     renderSalePaymentExtras(t);
 
+    // A bank transfer is only ever taken through PayMongo (Pay by Bank Transfer),
+    // so Complete Sale is not offered for it.
+    const taken = methodTakenNow(t);
     const button = document.getElementById('checkout-btn');
     if (button) {
         button.disabled = cart.length === 0 || (!t.onAccount && t.tendered < t.due);
+        button.hidden = taken === 'Bank Transfer';
         button.textContent = checkoutLabel(t);
     }
 
-    // GCash or PayMaya taken now: the QR code is the other way to finish, and
-    // needs no amount typed, as the code is for the bill (or the part paid) exactly
+    // GCash, PayMaya or a bank transfer taken now: the QR code is the other way to
+    // finish (the only way for a transfer), and needs no amount typed, as the code
+    // is for the bill (or the part paid) exactly
     const qrButton = document.getElementById('qr-pay-btn');
     if (qrButton) {
-        qrButton.hidden = QR_METHODS.indexOf(methodTakenNow(t)) === -1;
+        qrButton.hidden = QR_METHODS.indexOf(taken) === -1;
         qrButton.disabled = cart.length === 0;
+        qrButton.textContent = taken === 'Bank Transfer' ? 'Pay by Bank Transfer' : 'Pay by QR';
     }
 
     // a code on screen is for the old total; it is cancelled, not paid wrong
@@ -1488,16 +1548,18 @@ function checkoutLabel(t) {
     return 'Complete Sale';
 }
 
-// ---------- how the money arrives: its reference, and where a transfer goes ----------
-// A cheque or a transfer is only money once it clears, and it is traced by its
-// number, so those two need a reference before the sale is rung up. An
-// e-wallet prints one too, taken when the cashier has it. Cash needs none.
-const REFERENCE_REQUIRED = ['Cheque', 'Bank Transfer'];
+// ---------- how the money arrives: its reference, and the bank and account ----------
+// A cheque is only money once it clears, and it is traced by its number, so it
+// needs one before the sale is rung up, with the account name and number printed
+// on it, the bank and its branch, and the date (payment-details.js). A bank
+// transfer is verified through PayMongo: the customer's bank and account are
+// asked for, and the reference is PayMongo's own payment number, not typed.
+// An e-wallet prints a reference too, taken when the cashier has it. Cash needs none.
+const REFERENCE_REQUIRED = ['Cheque'];
 const REFERENCE_OPTIONAL = ['GCash', 'PayMaya', 'PayPal'];
 
 const REFERENCE_WORDS = {
     'Cheque':        { hint: 'required \u2014 the cheque number', placeholder: 'e.g. 001234' },
-    'Bank Transfer': { hint: 'required \u2014 the bank\'s reference for the transfer', placeholder: 'e.g. FT2609230412' },
     'GCash':         { hint: 'optional \u2014 the GCash reference', placeholder: 'e.g. 1012 345 678901' },
     'PayMaya':       { hint: 'optional \u2014 the Maya reference', placeholder: 'e.g. 5A3F9C21' },
     'PayPal':        { hint: 'optional \u2014 the PayPal transaction ID', placeholder: 'e.g. 8TY12345AB678901C' }
@@ -1528,40 +1590,11 @@ function saleReference() {
     return field && !field.hidden && box ? box.value.trim() : '';
 }
 
-// The shop's account, read from the settings the invoice uses. Asked for once
-// when a transfer is first chosen; the box redraws when it arrives.
-let bankSettingsAsked = false;
+// the boxes for a cheque's details and for a bank transfer's (payment-details.js)
+buildPaymentDetailsBox('sale-details-box', 'sale', true);
+buildPaymentDetailsBox('payment-details-box', 'pay-debt', true);
 
-function bankSettingsReady(redraw) {
-    if (storeSettings) return true;
-    if (!bankSettingsAsked) {
-        bankSettingsAsked = true;
-        loadStoreSettings(false).then(redraw);
-    }
-    return false;
-}
-
-function bankBoxHtml(amount, note) {
-    const shop = storeSettings || {};
-
-    if (!shop.bank_account_number) {
-        return '<p class="bank-box-title">No bank account on file</p>' +
-            '<p class="bank-box-note">The shop\'s bank account has not been entered under Receipt ' +
-            'Maintenance, so there is nowhere to tell the customer to send a transfer. Take another ' +
-            'method, or ask the System Administrator to add the account.</p>';
-    }
-
-    return '<p class="bank-box-title">Send the transfer to</p>' +
-        '<dl class="bank-box-grid">' +
-            '<dt>Bank</dt><dd>' + escapeHtml(shop.bank_name) + '</dd>' +
-            '<dt>Account name</dt><dd>' + escapeHtml(shop.bank_account_name) + '</dd>' +
-            '<dt>Account number</dt><dd class="bank-box-number">' + escapeHtml(shop.bank_account_number) + '</dd>' +
-            '<dt>Amount to send</dt><dd class="bank-box-amount">' + peso(amount) + '</dd>' +
-        '</dl>' +
-        (note ? '<p class="bank-box-note">' + note + '</p>' : '');
-}
-
-// the reference box and the bank account under the payment fields
+// the reference box and the cheque or bank-transfer boxes under the payment fields
 function renderSalePaymentExtras(totals) {
     const t = totals || cartTotals();
 
@@ -1585,35 +1618,24 @@ function renderSalePaymentExtras(totals) {
         }
     }
 
-    const bank = document.getElementById('sale-bank-box');
-    if (!bank) return;
-
-    // on a credit sale the box follows the part payment's method even before
-    // an amount is typed, so the cashier can read the account out as it is agreed
-    const transfer = t.onCredit ? downPaymentMethod() === 'Bank Transfer' : t.method === 'Bank Transfer';
-    bank.hidden = !transfer;
-    if (!transfer) return;
-
-    if (!bankSettingsReady(function () { renderSalePaymentExtras(); })) {
-        bank.innerHTML = '<p class="bank-box-note">Reading the shop\'s bank account...</p>';
-        return;
-    }
-
-    const amount = t.onCredit ? t.down : t.due;
-    let bankNote = 'Once it is sent, type the bank\'s reference for it in the box below.';
-    if (t.onCredit && amount <= 0) bankNote = 'Type what is paid now to see the amount to send.';
-    bank.innerHTML = bankBoxHtml(amount, bankNote);
+    // The cheque or the transfer boxes follow the method taken now; on a credit
+    // sale that is the part payment's, even before an amount is typed, so the
+    // cashier can ask for the details as it is agreed.
+    let detailsFor = taken;
+    if (t.onCredit) detailsFor = downPaymentMethod();
+    showPaymentDetails('sale', detailsFor);
 }
 
-// ---------- paying GCash or PayMaya by QR code ----------
+// ---------- paying GCash, PayMaya or a bank transfer by QR code ----------
 // The customer scans a code instead of the cashier typing a reference. The
 // code is made on the server (routes/qr-payments.js) through PayMongo or
 // its offline simulation, and holds the address of the page the customer pays
-// on. The server is asked every three seconds, and at once when the live
+// on (for a bank transfer, their bank's own online-banking page, with the bank
+// and account the cashier typed kept on the QR payment). The server is asked every three seconds, and at once when the live
 // channel says a QR payment changed, whether it has been paid; only then is
 // the sale or the payment sent, carrying the QR payment's id, and the server
 // checks it again before recording anything.
-const QR_METHODS = ['GCash', 'PayMaya'];
+const QR_METHODS = ['GCash', 'PayMaya', 'Bank Transfer'];
 const QR_CHECK_MS = 3000;
 
 // the code on screen, or null; one at a time
@@ -1624,7 +1646,7 @@ let qrSession = null;
 // same amount uses it rather than charging the customer twice.
 let qrPaidUnused = null;
 
-const QR_APP_WORDS = { 'GCash': 'GCash', 'PayMaya': 'Maya' };
+const QR_APP_WORDS = { 'GCash': 'GCash', 'PayMaya': 'Maya', 'Bank Transfer': 'Bank Transfer' };
 
 // a change to any QR payment: the code on screen is asked about straight away
 if (typeof onLiveChange === 'function') {
@@ -1664,14 +1686,23 @@ function payByQr() {
 }
 
 // Shows a code for amount and waits. purpose is 'sale' or 'credit_payment'
-// (then saleId is the sale being paid). Resolves to { id, reference, amount }
-// once paid, or null when the cashier cancelled or chose another method (the
-// reason already said on screen).
-async function collectQrPayment(amount, what, method, purpose, saleId) {
+// (then saleId is the sale being paid). bank is { bankCode, bank, accountName,
+// accountNumber } for a Bank Transfer (readTransferDetails), otherwise null.
+// Resolves to { id, reference, amount } once paid, or null when the cashier
+// cancelled or chose another method (the reason already said on screen).
+async function collectQrPayment(amount, what, method, purpose, saleId, bank) {
     amount = Math.round(amount * 100) / 100;
 
     if (qrPaidUnused) {
-        if (Math.abs(qrPaidUnused.amount - amount) < 0.005 && qrPaidUnused.wallet === method) {
+        // a transfer is only reused for the same bank and account; the details copied
+        // when the money is recorded are the ones on that payment
+        let sameAccount = true;
+        if (method === 'Bank Transfer') {
+            sameAccount = Boolean(qrPaidUnused.bank && bank &&
+                qrPaidUnused.bank.bankCode === bank.bankCode &&
+                qrPaidUnused.bank.accountNumber === bank.accountNumber);
+        }
+        if (Math.abs(qrPaidUnused.amount - amount) < 0.005 && qrPaidUnused.wallet === method && sameAccount) {
             notifyInfo('The customer already paid ' + peso(amount) + ' by QR (' + qrPaidUnused.reference +
                 '), so that payment is used. No new code is needed.', 'Using the earlier QR payment');
             return qrPaidUnused;
@@ -1683,7 +1714,7 @@ async function collectQrPayment(amount, what, method, purpose, saleId) {
 
     return new Promise(function (resolve) {
         const session = {
-            amount: amount, what: what, method: method,
+            amount: amount, what: what, method: method, bank: bank || null,
             purpose: purpose || 'sale', saleId: saleId || null,
             id: null, resolve: resolve, ticker: null, poller: null, inflight: null,
             endsAt: 0, closing: false, over: false, done: false
@@ -1704,10 +1735,16 @@ async function startQrCode(session) {
 
     let made;
     try {
-        const response = await apiCreateQrPayment({
+        const request = {
             amount: session.amount, wallet: session.method,
             purpose: session.purpose, saleId: session.saleId
-        });
+        };
+        if (session.bank) {
+            request.bankCode = session.bank.bankCode;
+            request.accountName = session.bank.accountName;
+            request.accountNumber = session.bank.accountNumber;
+        }
+        const response = await apiCreateQrPayment(request);
         made = await response.json();
         if (!response.ok) {
             if (!handleAuthFailure(response, made)) {
@@ -1742,20 +1779,37 @@ function isModalOpen(id) {
 // being made. The page address the code holds is kept on the image
 // (data-pay-url) for the tests, and is not shown.
 function showQrCard(session, made) {
-    document.getElementById('qr-title').textContent = 'Pay by QR · ' + (QR_APP_WORDS[session.method] || session.method);
+    const isBank = session.method === 'Bank Transfer' && session.bank;
+    if (isBank) {
+        document.getElementById('qr-title').textContent = 'Pay by Bank Transfer · ' + session.bank.bank;
+        document.getElementById('qr-ask').textContent =
+            'Ask the customer to scan the code with their phone\'s camera. It opens ' + session.bank.bank +
+            '\'s page, where they log in and approve the transfer.';
+    } else {
+        document.getElementById('qr-title').textContent = 'Pay by QR · ' + (QR_APP_WORDS[session.method] || session.method);
+        document.getElementById('qr-ask').textContent =
+            'Ask the customer to scan the code with their phone\'s camera and pay with ' +
+            (QR_APP_WORDS[session.method] || session.method) + '.';
+    }
     document.getElementById('qr-sub').textContent = session.what;
-    document.getElementById('qr-ask').textContent =
-        'Ask the customer to scan the code with their phone\'s camera and pay with ' +
-        (QR_APP_WORDS[session.method] || session.method) + '.';
     document.getElementById('qr-amount').textContent = peso(session.amount);
 
     const image = document.getElementById('qr-image');
+    const linkRow = document.getElementById('qr-link-row');
+    const link = document.getElementById('qr-link');
     if (made) {
         image.src = made.qrImage;
         image.setAttribute('data-pay-url', made.payUrl || '');
+        // a bank transfer also gets the page as a link to press
+        if (linkRow && link && isBank && made.payUrl) {
+            link.href = made.payUrl;
+            linkRow.hidden = false;
+        }
     } else {
         image.removeAttribute('src');
         image.removeAttribute('data-pay-url');
+        if (linkRow) linkRow.hidden = true;
+        if (link) link.removeAttribute('href');
     }
 
     document.getElementById('qr-clock').hidden = !made;
@@ -1802,6 +1856,8 @@ function endQr(session, result) {
     const image = document.getElementById('qr-image');
     image.removeAttribute('src');
     image.removeAttribute('data-pay-url');
+    const linkRow = document.getElementById('qr-link-row');
+    if (linkRow) linkRow.hidden = true;
     session.resolve(result);
 }
 
@@ -1812,6 +1868,8 @@ function qrOver(session, text) {
     session.over = true;
     document.querySelector('#qr-modal .qr-box').classList.add('is-over');
     document.getElementById('qr-clock').hidden = true;
+    const linkRow = document.getElementById('qr-link-row');
+    if (linkRow) linkRow.hidden = true;
     setQrStatus(text + ' Nothing was recorded.', 'is-stop');
     setQrButtons('over');
 }
@@ -1825,7 +1883,8 @@ function qrPaid(session, state) {
     // long enough to read before the card closes
     setTimeout(function () {
         endQr(session, {
-            id: session.id, reference: state.reference, amount: session.amount, wallet: session.method
+            id: session.id, reference: state.reference, amount: session.amount, wallet: session.method,
+            bank: session.bank
         });
     }, 700);
 }
@@ -1985,7 +2044,7 @@ function onPaymentMethodChange(method) {
     const onAccount = onCredit || method === 'COD';
 
     // only one of the tender box and the down payment box is ever shown
-    if (tender) tender.style.display = onAccount ? 'none' : 'block';
+    if (tender) tender.style.display = (onAccount || method === 'Bank Transfer') ? 'none' : 'block';
     if (down) down.style.display = onCredit ? 'block' : 'none';
 
     renderCart();
@@ -1998,6 +2057,9 @@ let selectedCustomerCredit = null;
 async function onCustomerChange(customerId) {
     const strip = document.getElementById('credit-strip');
     selectedCustomerCredit = null;
+
+    // a delivery already attached goes to the customer the sale is now for
+    syncDeliveryToSaleCustomer(customerId);
 
     if (!customerId) {
         if (strip) strip.style.display = 'none';
@@ -2202,9 +2264,9 @@ function checkoutQuestion(t, customerName) {
         title = 'Place this COD order?';
         message = 'Nothing is collected now; ' + peso(t.due) + ' goes on ' + customerName + "'s account until the delivery is paid.";
         confirmLabel = 'Place COD Order';
-        detail.push('Goes on account: ' + peso(t.due));
+        detail.push('Balance: ' + peso(t.due));
     } else if (t.onCredit) {
-        detail.push('Paid now: ' + peso(t.down) + (t.down > 0 ? ' by ' + downPaymentMethod() : ''));
+        detail.push('Amount Paid: ' + peso(t.down) + (t.down > 0 ? ' by ' + downPaymentMethod() : ''));
         if (t.amountOnAccount > 0) {
             if (t.down > 0) {
                 title = 'Take part payment and put the rest on account?';
@@ -2214,18 +2276,26 @@ function checkoutQuestion(t, customerName) {
                 confirmLabel = 'Put it on their account';
             }
             message = peso(t.amountOnAccount) + ' of this sale goes on ' + customerName + "'s account.";
-            detail.push('Goes on account: ' + peso(t.amountOnAccount));
+            detail.push('Balance: ' + peso(t.amountOnAccount));
         } else {
-            detail.push('Balance on account: ' + peso(0));
+            detail.push('Balance: ' + peso(0));
         }
+    } else if (t.method === 'Bank Transfer') {
+        detail.push('Paid by bank transfer: ' + peso(t.due));
     } else {
         detail.push('Amount entered: ' + peso(t.tendered));
         detail.push('Change: ' + peso(t.change));
     }
 
-    if (pendingDelivery) detail.push('Delivery: to ' + pendingDelivery.address);
+    if (pendingDelivery) detail.push('Location: ' + pendingDelivery.address);
 
     return { title: title, message: message, confirmLabel: confirmLabel, detail: detail };
+}
+
+// puts the cursor in the box with this id
+function focusBox(id) {
+    const box = document.getElementById(id);
+    if (box) box.focus();
 }
 
 // viaQr: pressed as Pay by QR; the money is taken by the QR code
@@ -2239,6 +2309,9 @@ async function handleCheckout(event, viaQr) {
     const form = event.target;
     const t = cartTotals();
     const typedName = typedCustomerName();
+
+    // a bank transfer is only taken through PayMongo, whichever way the sale was sent (Enter too)
+    if (methodTakenNow(t) === 'Bank Transfer') viaQr = true;
 
     // Walk-in is allowed (nothing typed). A name has to be a customer picked
     // from the list; the till does not open an account from a typed name.
@@ -2266,6 +2339,12 @@ async function handleCheckout(event, viaQr) {
         }
     }
 
+    // a delivery is for a customer on record: when the sale has none, it takes the delivery's
+    if (pendingDelivery && !customerId && pendingDelivery.customerId) {
+        customerId = pendingDelivery.customerId;
+        await pickCustomer(customerId);
+    }
+
     // a settled-later sale needs a customer, not just a walk-in
     if (t.onAccount && !customerId) {
         notifyWarning(
@@ -2282,21 +2361,50 @@ async function handleCheckout(event, viaQr) {
         return;
     }
 
-    // a cheque or a transfer is traced by its number; the server refuses one without it too
+    // A cheque is taken with its account name, account number, bank, branch and
+    // date; a bank transfer with the customer's bank and account. The server
+    // refuses them missing too.
     const taken = methodTakenNow(t);
+    let chequeDetails = null;
+    let transferDetails = null;
+    if (taken === 'Cheque') {
+        const read = readChequeDetails('sale');
+        if (read.problem) {
+            notifyWarning(read.problem, 'Cheque details needed');
+            focusBox(read.field);
+            return;
+        }
+        chequeDetails = read.details;
+    } else if (taken === 'Bank Transfer') {
+        const read = readTransferDetails('sale');
+        if (read.problem) {
+            notifyWarning(read.problem, 'Bank details needed');
+            focusBox(read.field);
+            return;
+        }
+        transferDetails = read.details;
+
+        // PayMongo refuses a transfer below the bank's smallest
+        const bank = paymongoBank(transferDetails.bankCode);
+        const transferAmount = t.onCredit ? t.down : t.due;
+        if (bank && transferAmount < bank.minimum) {
+            notifyWarning(bank.name + ' takes transfers of ' + peso(bank.minimum) + ' or more. This one is ' +
+                peso(transferAmount) + '.', 'Too small for ' + bank.name);
+            focusBox('sale-transfer-bank');
+            return;
+        }
+    }
+
+    // a cheque is traced by its number; the server refuses one without it too
     const reference = saleReference();
     if (REFERENCE_REQUIRED.indexOf(taken) !== -1 && reference === '') {
-        let referenceSubject = 'A ' + taken.toLowerCase() + ' sale';
-        if (t.onCredit) referenceSubject = 'The part payment is by ' + taken.toLowerCase() + ', so it';
-        let referenceWhat = 'the bank\'s reference for the transfer';
-        if (taken === 'Cheque') referenceWhat = 'the cheque number';
+        let referenceSubject = 'A cheque sale';
+        if (t.onCredit) referenceSubject = 'The part payment is by cheque, so it';
         notifyWarning(
             referenceSubject +
-            ' needs its reference: ' + referenceWhat +
-            '. It is how the money is traced if it does not arrive.',
+            ' needs its reference: the cheque number. It is how the money is traced if it does not arrive.',
             'Reference needed');
-        const box = document.getElementById('sale-reference');
-        if (box) box.focus();
+        focusBox('sale-reference');
         return;
     }
 
@@ -2304,8 +2412,21 @@ async function handleCheckout(event, viaQr) {
     // or the balance that goes on the account. Paying by QR is its own
     // confirmation (the customer pays the code), except that a balance left on
     // the account is still asked about.
-    if (!viaQr || (t.onCredit && t.amountOnAccount > 0)) {
+    if (!viaQr || (t.onCredit && t.amountOnAccount > 0) || transferDetails) {
         const question = checkoutQuestion(t, checkoutCustomerName());
+        if (chequeDetails) {
+            question.detail.push('Cheque no.: ' + reference);
+            question.detail.push('Cheque: ' + chequeDetails.bank + ', ' + chequeDetails.branch + ' \u00b7 dated ' + chequeDetails.chequeDate);
+            question.detail.push('Account: ' + chequeDetails.accountName + ', ' + chequeDetails.accountNumber);
+        }
+        if (transferDetails) {
+            question.detail.push('Customer\'s bank: ' + transferDetails.bank);
+            question.detail.push('Account name: ' + transferDetails.accountName);
+            question.detail.push('Account number: ' + transferDetails.accountNumber);
+            question.message += ' A QR code and a link to the bank\'s page are made next; nothing is recorded ' +
+                'until the customer has approved the transfer in their bank.';
+            question.confirmLabel = 'Make the QR code';
+        }
         const yes = await askConfirm(question.message, {
             title: question.title,
             eyebrow: 'Point of Sale',
@@ -2340,7 +2461,7 @@ async function handleCheckout(event, viaQr) {
         if (QR_METHODS.indexOf(taken) === -1) return;
         let qrWhat = 'For this sale';
         if (t.onCredit) qrWhat = 'Paid now on this credit sale';
-        qr = await collectQrPayment(amountPaid, qrWhat, taken, 'sale');
+        qr = await collectQrPayment(amountPaid, qrWhat, taken, 'sale', null, transferDetails);
         if (!qr) return;
     }
 
@@ -2368,6 +2489,7 @@ async function handleCheckout(event, viaQr) {
         downPaymentMethod: downPaymentMethod,
         referenceNo: referenceNo,
         qrPaymentId: qr ? qr.id : null,
+        paymentDetails: chequeDetails || transferDetails,
         items: items
     };
 
@@ -2397,17 +2519,25 @@ async function handleCheckout(event, viaQr) {
 
         cart = [];
         form.elements.amountPaid.value = '';
-        if (form.elements.downPayment) form.elements.downPayment.value = '';
+        if (form.elements.downPayment) form.elements.downPayment.value = '0';
         if (form.elements.referenceNo) form.elements.referenceNo.value = '';
+        clearPaymentDetails('sale');
 
         if (deliveryMade) { pendingDelivery = null; renderDeliveryAttached(); }
 
+        // the balance changed, so the customer list is read again
         if (customerId) {
             customerDirectoryLoaded = false;
             await loadCustomerDirectory(true);
-            await onCustomerChange(String(customerId));
-        } else {
+        }
+
+        // the next sale starts clean: no customer and Cash, so nothing has to be
+        // cleared by hand. A delivery that could not be created keeps its
+        // customer, so the cashier can still see who it was for.
+        if (!pendingDelivery) {
             await clearCustomer();
+            form.elements.paymentMethod.value = 'Cash';
+            onPaymentMethodChange('Cash');
         }
 
         catalogLoaded = false;
@@ -2494,6 +2624,9 @@ async function openReceipt(saleId) {
     const shop = storeSettings || {};
 
     document.getElementById('receipt-heading').textContent = 'Invoice ' + receiptNo;
+    document.getElementById('receipt-avatar').textContent = 'IN';
+    document.getElementById('receipt-role').textContent = 'Sales invoice';
+    document.getElementById('receipt-print-btn').textContent = 'Print Invoice';
     let itemsHtml = '';
     for (let i = 0; i < data.items.length; i++) {
         const it = data.items[i];
@@ -2548,7 +2681,8 @@ async function openReceipt(saleId) {
         taxHtml: receiptTaxBlock(s),
         paid: s.payment_status === 'Paid',
         balanceText: s.payment_status.toUpperCase() + ' BALANCE ' + peso(saleAmountDue(s) - Number(s.amount_paid)),
-        bankHtml: receiptBankBlock(shop, s, data.payments, receiptNo)
+        detailsHtml: paymentDetailsReceiptHtml(paymentDetailItems(data), true),
+        bankHtml: receiptBankBlock(shop, s, receiptNo)
     });
 
     // a credit sale's invoice offers the terms page, when the role may print it
@@ -2560,31 +2694,91 @@ async function openReceipt(saleId) {
     showModal('receipt-modal');
 }
 
-// The shop's account on the invoice: as a record when the sale was paid by
-// transfer, and as the way to pay when it leaves a balance, with the invoice
-// number to quote so the money can be matched to this sale when it lands.
-function receiptBankBlock(shop, sale, payments, receiptNo) {
+// The receipt of one Credit Settlement payment, on the invoice's own paper and head
+// (receiptHtml, format.js): the date, who took it, whose it is, the sale it was put
+// against, how it was paid, and what the sale owed before and after.
+// info: { saleId, paymentId, paymentDate, cashierName, customerName, taxRegistration,
+//         amount, method, reference, balanceBefore, balanceAfter }
+async function showPaymentReceipt(info) {
+    await loadStoreSettings(false);
+    const shop = storeSettings || {};
+
+    const saleNumber = 'OR-' + String(info.saleId).padStart(6, '0');
+
+    // when the server could not send the payment's own number, the receipt does not
+    // borrow the sale's invoice number
+    let receiptNo = 'CS-UNNUMBERED';
+    if (info.paymentId) receiptNo = 'CS-' + String(info.paymentId).padStart(6, '0');
+
+    let paidAt = new Date().toLocaleString('en-PH');
+    if (info.paymentDate) paidAt = String(info.paymentDate).slice(0, 19);
+
+    let cashier = info.cashierName;
+    if (!cashier && getCurrentUser()) cashier = staffName(getCurrentUser());
+
+    let footText = 'BALANCE ' + peso(info.balanceAfter);
+    if (Number(info.balanceAfter) <= 0.004) footText = 'SALE PAID IN FULL';
+
+    document.getElementById('receipt-heading').textContent = 'Payment Receipt';
+    document.getElementById('receipt-avatar').textContent = 'CS';
+    document.getElementById('receipt-role').textContent = 'Credit Settlement';
+    document.getElementById('receipt-print-btn').textContent = 'Print Receipt';
+
+    const paper = document.getElementById('receipt-paper');
+    applyReceiptPaper(paper, shop);
+    paper.innerHTML = receiptHtml(shop, {
+        registration: info.taxRegistration,
+        receiptNo: receiptNo,
+        title: 'CREDIT SETTLEMENT RECEIPT',
+        meta: [
+            { key: 'date', label: 'Date', value: paidAt },
+            { key: 'cashier', label: 'Cashier', value: cashier },
+            { key: 'customer', label: 'Customer', value: info.customerName },
+            { label: 'Applied to', value: saleNumber },
+            { key: 'payment', label: 'Method', value: info.method },
+            { key: 'reference', label: 'Reference', value: info.reference }
+        ],
+        totals: [
+            { label: 'Balance Before', value: peso(info.balanceBefore) },
+            { label: 'Amount Paid', value: peso(info.amount), due: true },
+            { label: 'Balance After', value: peso(info.balanceAfter) }
+        ],
+        paid: false,
+        balanceText: footText,
+        detailsHtml: info.details
+            ? paymentDetailsReceiptHtml([{ detail: info.details, reference: info.reference, label: info.method + ' details' }], true)
+            : '',
+        // a payment receipt, not a sales invoice: no invoice note, its own thanks
+        noInvoiceNote: true,
+        footerLines: ['Thank you for your payment']
+    });
+
+    // it is not a credit sale's invoice: no terms page to offer
+    lastReceipt = null;
+    const termsButton = document.getElementById('receipt-terms-btn');
+    if (termsButton) termsButton.hidden = true;
+
+    showModal('receipt-modal');
+}
+
+// The shop's account on the invoice, as the way to pay when the sale leaves a
+// balance, with the invoice number to quote so the money can be matched to this
+// sale when it lands. (A transfer taken at the counter shows the customer's own
+// bank and account instead: paymentDetailsReceiptHtml.)
+function receiptBankBlock(shop, sale, receiptNo) {
     if (!shop || !shop.bank_account_number) return '';
 
-    let byTransfer = sale.payment_method === 'Bank Transfer';
-    const paymentList = payments || [];
-    for (let i = 0; i < paymentList.length; i++) {
-        if (paymentList[i].payment_method === 'Bank Transfer') byTransfer = true;
-    }
     const balance = saleAmountDue(sale) - Number(sale.amount_paid);
     const owing = sale.payment_status !== 'Paid' && balance > 0.004;
 
-    if (!byTransfer && !owing) return '';
+    if (!owing) return '';
 
-    let quoteHtml = '';
-    if (owing) {
-        quoteHtml = '<p class="rc-bank-note">Quote <strong>' + escapeHtml(receiptNo) + '</strong> as the transfer ' +
-            'reference, so the payment is matched to this invoice.</p>';
-    }
+    const quoteHtml = '<p class="rc-bank-note">Quote <strong>' + escapeHtml(receiptNo) + '</strong> as the transfer ' +
+        'reference, so the payment is matched to this invoice.</p>';
 
     return '<div class="rc-rule"></div>' +
         '<div class="rc-bank">' +
-            '<p class="rc-bank-head">' + (owing ? 'Pay the balance by bank transfer' : 'Paid by bank transfer') + '</p>' +
+            '<p class="rc-bank-head">Pay the balance by bank transfer</p>' +
             '<div><span>Bank</span><span>' + escapeHtml(shop.bank_name) + '</span></div>' +
             '<div><span>Account name</span><span>' + escapeHtml(shop.bank_account_name) + '</span></div>' +
             '<div><span>Account no.</span><span>' + escapeHtml(shop.bank_account_number) + '</span></div>' +
@@ -2615,74 +2809,231 @@ function deliveryFormFields() {
     return form ? form.elements : null;
 }
 
-// A saved customer address is one line ("Brgy. Wawa, Nasugbu, Batangas"). It is
-// split into the boxes only when it can be done without guessing: a trailing
-// "Philippines" and a zip code are dropped, and the part third from the end has
-// to say it is a barangay (Brgy, Brgy., Barangay, Poblacion, or just a number).
-// Then the last part is the province, the one before it the town or city, and
-// whatever is in front of the barangay is the house and street. Any other shape
-// leaves every box empty, and the cashier types them (the line is shown above them).
-const SAVED_BARANGAY = /^(brgy|barangay|poblacion)\b|^\d{1,3}$/i;
+// ---------- the delivery's customer ----------
+// The recipient is a customer on record, picked the way the Payment card picks
+// one (the same suggestion list, the same "Not a customer on record" line with
+// an Add Customer button). A pick fills the contact number and the address
+// boxes from the customer's record; the cashier can still change any of them
+// for this one delivery. The sale and its delivery share one customer: attaching the
+// delivery puts the sale on its customer (a pick alone changes nothing outside this
+// card, so Cancel leaves everything as it was), and picking another customer on the
+// Payment card moves an attached delivery to them (syncDeliveryToSaleCustomer).
+let deliveryFormIsOpen = false;
 
-function splitSavedAddress(text) {
-    const empty = { street: '', barangay: '', city: '', province: '' };
-
-    const pieces = String(text || '').split(',');
-    const parts = [];
-    for (let i = 0; i < pieces.length; i++) {
-        const piece = pieces[i].trim();
-        if (piece !== '') parts.push(piece);
-    }
-
-    // "Philippines" at the end is not a province; a zip code is not part of one
-    while (parts.length > 0 && /^(philippines|ph)$/i.test(parts[parts.length - 1])) parts.pop();
-    if (parts.length > 0 && /^\d{4}$/.test(parts[parts.length - 1])) parts.pop();
-    if (parts.length > 0) parts[parts.length - 1] = parts[parts.length - 1].replace(/\s+\d{4}$/, '');
-
-    if (parts.length < 3 || !SAVED_BARANGAY.test(parts[parts.length - 3])) return empty;
-
-    return {
-        street: parts.slice(0, parts.length - 3).join(', '),
-        // the word "Brgy." is put back when the whole address is joined, so it is not typed twice
-        barangay: parts[parts.length - 3].replace(/^(brgy\.?|barangay)\s*/i, ''),
-        city: parts[parts.length - 2],
-        province: parts[parts.length - 1]
-    };
+function deliveryCustomerIdBox() {
+    const fields = deliveryFormFields();
+    return fields ? fields.customerId : null;
 }
 
-// what the customer box and record already know
-function fillDeliveryFromCustomer() {
+function selectedDeliveryCustomerId() {
+    const box = deliveryCustomerIdBox();
+    return box && box.value ? parseInt(box.value, 10) : null;
+}
+
+function typedDeliveryName() {
+    const fields = deliveryFormFields();
+    return fields ? fields.contactName.value.trim().replace(/\s+/g, ' ') : '';
+}
+
+// A customer's address as the boxes want it. One added through Add Customer has
+// its parts. One from before that has only the old one-line address: every box is
+// left empty and the line is shown above them (oldLine), for the cashier to copy
+// what is needed. It is not put into a box: it already says the barangay, town and
+// province, so the joined address would say them twice.
+function savedAddressParts(account) {
+    const empty = { street: '', barangay: '', city: '', province: '', landmark: '', oldLine: '' };
+    if (!account) return empty;
+
+    const hasParts = account.address_barangay || account.address_city || account.address_province;
+    if (hasParts) {
+        return {
+            street: account.address_street || '',
+            barangay: account.address_barangay || '',
+            city: account.address_city || '',
+            province: account.address_province || '',
+            landmark: account.address_landmark || '',
+            oldLine: ''
+        };
+    }
+
+    empty.oldLine = String(account.address || '').trim();
+    return empty;
+}
+
+// what the customer record knows, put into the contact number and address boxes
+function fillDeliveryFromCustomer(account) {
     const fields = deliveryFormFields();
     if (!fields) return;
 
-    const id = selectedCustomerId();
-    let account = null;
-    if (id) account = findCustomer(id);
-
-    fields.contactName.value = account ? account.name : typedCustomerName();
     phoneFill(fields.contactPhone, account && account.phone ? account.phone : '');
 
-    // the customer's saved address, split into the boxes; the cashier can change any of them
-    const savedLine = account && account.address ? account.address : '';
-    const saved = splitSavedAddress(savedLine);
+    const saved = savedAddressParts(account);
     fields.street.value = saved.street;
     fields.barangay.value = saved.barangay;
     fields.city.value = saved.city;
     fields.province.value = saved.province;
-    fields.landmark.value = '';
+    fields.landmark.value = saved.landmark;
 
-    // an address that could not be split safely is shown, so it can be typed into the boxes
+    // an old one-line address is only shown; the boxes are for the cashier to fill in
     const note = document.getElementById('dl-saved-address');
     if (note) {
-        const split = saved.barangay !== '' || saved.city !== '' || saved.province !== '';
-        if (savedLine !== '' && !split) {
-            note.textContent = 'Address on file: ' + savedLine + ' (fill in the boxes below)';
+        if (saved.oldLine !== '') {
+            note.textContent = 'This customer was saved with one address line: ' + saved.oldLine +
+                '. Fill in the boxes below from it.';
             note.hidden = false;
         } else {
             note.textContent = '';
             note.hidden = true;
         }
     }
+}
+
+// What a customer pick filled in is taken out again: the number, the address boxes
+// and the old-address note. Used when the name no longer says that customer.
+function clearDeliveryFilledBoxes() {
+    fillDeliveryFromCustomer(null);
+}
+
+// one line under the recipient box saying whether it is a customer on record
+function renderDeliveryCustomerVerdict() {
+    const box = document.getElementById('dl-customer-verdict');
+    const addButton = document.getElementById('dl-customer-add-btn');
+    if (!box) return;
+
+    const typed = typedDeliveryName();
+    const id = selectedDeliveryCustomerId();
+
+    const offerAdd = !id && typed !== '' && canAddCustomers();
+    if (addButton) addButton.hidden = !offerAdd;
+
+    if (id) {
+        box.className = 'customer-verdict is-good';
+        box.textContent = 'A customer on record. Their number and address are filled in below.';
+    } else if (typed === '') {
+        box.className = 'customer-verdict';
+        box.textContent = "Type the customer's name and pick them from the list.";
+    } else {
+        // a name that matches nobody is a stop until the account is opened
+        box.className = 'customer-verdict is-stop';
+        if (offerAdd) {
+            box.textContent = 'Not a customer on record. Press Add Customer to open their account, ' +
+                'or clear the box.';
+        } else {
+            box.textContent = 'Not a customer on record. Add them under Customers Record first, then pick them here.';
+        }
+    }
+}
+
+async function onDeliveryCustomerInput(value) {
+    const text = String(value || '').trim();
+    const idBox = deliveryCustomerIdBox();
+    const clear = document.getElementById('dl-customer-clear');
+    if (clear) clear.hidden = text === '';
+
+    if (!customerDirectoryLoaded && text !== '') await loadCustomerDirectory(false);
+
+    // a name that is exactly a customer on record is a pick; any other text is nobody
+    const exact = customerMatchingName(text);
+    if (exact && idBox && idBox.value !== String(exact.id)) {
+        await pickDeliveryCustomer(exact.id);
+        return;
+    }
+    // the text no longer says the customer that was picked: what the pick filled in goes too
+    if (!exact && idBox && idBox.value !== '') {
+        idBox.value = '';
+        clearDeliveryFilledBoxes();
+    }
+
+    // a customer already picked needs no list under the box
+    if (exact) hideCustomerSuggestions('delivery');
+    else renderCustomerSuggestions(text, 'delivery');
+    renderDeliveryCustomerVerdict();
+}
+
+function onDeliveryCustomerKey(event) {
+    customerSuggestKey(event, 'dl-customer-suggest', 'delivery');
+}
+
+async function pickDeliveryCustomer(customerId) {
+    const found = findCustomer(customerId);
+    const fields = deliveryFormFields();
+    if (!found || !fields) return;
+
+    fields.contactName.value = found.name;
+    fields.customerId.value = String(found.id);
+    const clear = document.getElementById('dl-customer-clear');
+    if (clear) clear.hidden = false;
+
+    hideCustomerSuggestions('delivery');
+    fillDeliveryFromCustomer(found);
+    clearDeliveryErrors();
+    renderDeliveryCustomerVerdict();
+    // the sale moves to this customer only when the delivery is attached (saveDeliveryForm);
+    // Cancel leaves the sale as it was
+}
+
+function clearDeliveryCustomer() {
+    const fields = deliveryFormFields();
+    if (!fields) return;
+
+    fields.contactName.value = '';
+    if (fields.customerId.value !== '') clearDeliveryFilledBoxes();
+    fields.customerId.value = '';
+    const clear = document.getElementById('dl-customer-clear');
+    if (clear) clear.hidden = true;
+
+    hideCustomerSuggestions('delivery');
+    renderDeliveryCustomerVerdict();
+    fields.contactName.focus();
+}
+
+// Add Customer from the delivery form: the card opens over it with the typed
+// name filled in, and the new customer is picked once it is saved.
+function addCustomerFromDelivery() {
+    const typed = typedDeliveryName();
+    openAddCustomer();
+    addCustomerFor = 'delivery';
+    prefillAddCustomerName(typed);
+}
+
+// The customer on the Payment card changed while a delivery is attached: the
+// delivery goes to the same customer, with that customer's number and address
+// (the date, the driver and the remarks stay). Not done while the delivery card
+// is open: it is the one making the change.
+function syncDeliveryToSaleCustomer(customerId) {
+    if (!pendingDelivery || deliveryFormIsOpen) return;
+    if (!customerId || pendingDelivery.customerId === Number(customerId)) return;
+
+    const account = findCustomer(Number(customerId));
+    if (!account) return;
+
+    const saved = savedAddressParts(account);
+    const phone = account.phone || '';
+
+    // an address with a required part missing cannot stay attached: the delivery
+    // is made again to finish it (an older customer has only the one line)
+    const complete = phone !== '' && saved.barangay !== '' && saved.city !== '' && saved.province !== '';
+    if (!complete) {
+        pendingDelivery = null;
+        renderDeliveryAttached();
+        notifyWarning('The delivery was for another customer, and ' + account.name + ' has no complete ' +
+            'number and address on record. Press Make a Delivery to fill it in.', 'Delivery removed');
+        return;
+    }
+
+    pendingDelivery.customerId = account.id;
+    pendingDelivery.contactName = account.name;
+    pendingDelivery.contactPhone = phone;
+    pendingDelivery.street = saved.street;
+    pendingDelivery.barangay = saved.barangay;
+    pendingDelivery.city = saved.city;
+    pendingDelivery.province = saved.province;
+    pendingDelivery.landmark = saved.landmark;
+    pendingDelivery.address = fullDeliveryAddress(pendingDelivery);
+
+    renderDeliveryAttached();
+    notifyInfo('The delivery now goes to ' + account.name + '. Press Edit Delivery to check the address.',
+        'Delivery moved');
 }
 
 // The whole address as one line, the way the server joins it: street, barangay,
@@ -2698,7 +3049,7 @@ function fullDeliveryAddress(d) {
 }
 
 // The driver box: type to search the active drivers, pick one from the list.
-// Left empty, the delivery stays open for any driver to take. The roster is
+// A delivery needs a driver, so the box cannot be left empty. The roster is
 // read fresh each time the form opens, so a driver added or switched off since is right.
 let driverRoster = [];
 let driverSuggestHighlight = -1;
@@ -2727,7 +3078,7 @@ async function fillDriverPicker(chosenId, chosenName) {
     try {
         driverRoster = await apiGetDeliveryDrivers();
     } catch (error) {
-        driverRoster = [];   // offline: the delivery can still be left open
+        driverRoster = [];   // offline: no one can be picked until the form is opened again
     }
 }
 
@@ -2862,6 +3213,8 @@ const DELIVERY_ERROR_BOXES = {
     barangay: 'dl-barangay-error',
     city: 'dl-city-error',
     province: 'dl-province-error',
+    landmark: 'dl-landmark-error',
+    remarks: 'dl-remarks-error',
     scheduledDate: 'dl-scheduled-error'
 };
 
@@ -2921,12 +3274,20 @@ function onDeliveryFieldTyped(event) {
     }
 }
 
-function openDeliveryForm() {
+async function openDeliveryForm() {
     const fields = deliveryFormFields();
     if (!fields) return;
 
+    // the customer list is what the recipient box searches
+    await loadCustomerDirectory(false);
+    deliveryFormIsOpen = true;
+
+    const note = document.getElementById('dl-saved-address');
+    if (note) { note.textContent = ''; note.hidden = true; }
+
     if (pendingDelivery) {
         fields.contactName.value = pendingDelivery.contactName;
+        fields.customerId.value = pendingDelivery.customerId ? String(pendingDelivery.customerId) : '';
         phoneFill(fields.contactPhone, pendingDelivery.contactPhone);
         fields.street.value = pendingDelivery.street;
         fields.barangay.value = pendingDelivery.barangay;
@@ -2938,8 +3299,23 @@ function openDeliveryForm() {
     } else {
         fields.scheduledDate.value = '';
         fields.remarks.value = '';
-        fillDeliveryFromCustomer();
+
+        // the customer already chosen on the Payment card is the recipient; so is a name typed there
+        const saleCustomer = selectedCustomerId() ? findCustomer(selectedCustomerId()) : null;
+        if (saleCustomer) {
+            fields.contactName.value = saleCustomer.name;
+            fields.customerId.value = String(saleCustomer.id);
+            fillDeliveryFromCustomer(saleCustomer);
+        } else {
+            fields.contactName.value = typedCustomerName();
+            fields.customerId.value = '';
+            fillDeliveryFromCustomer(null);
+        }
     }
+    hideCustomerSuggestions('delivery');
+    const nameClear = document.getElementById('dl-customer-clear');
+    if (nameClear) nameClear.hidden = fields.contactName.value === '';
+    renderDeliveryCustomerVerdict();
     fillDriverPicker(pendingDelivery ? pendingDelivery.driverId : null,
                      pendingDelivery ? pendingDelivery.driverName : null);
 
@@ -2968,7 +3344,7 @@ function openDeliveryForm() {
     setTimeout(function () { if (fields.contactName) fields.contactName.focus(); }, 60);
 }
 
-function saveDeliveryForm(event) {
+async function saveDeliveryForm(event) {
     if (event && typeof event.preventDefault === 'function') event.preventDefault();
 
     const fields = deliveryFormFields();
@@ -2996,7 +3372,13 @@ function saveDeliveryForm(event) {
         if (!firstBad) firstBad = fields[name];
     }
 
-    if (contactName === '') complain('contactName', 'Enter the name of the person receiving the delivery.');
+    // the recipient is a customer on record, picked from the list (the hidden id is set only by a pick)
+    const customerId = selectedDeliveryCustomerId();
+    if (contactName === '') {
+        complain('contactName', 'Pick the customer who receives the delivery.');
+    } else if (!customerId) {
+        complain('contactName', 'Pick the customer from the list, or press Add Customer if they are not on record.');
+    }
     if (contactPhone === '') {
         complain('contactPhone', 'Enter a number the driver can call.');
     } else if (phoneProblem) {
@@ -3007,22 +3389,31 @@ function saveDeliveryForm(event) {
     if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
     if (province.length < 2) complain('province', 'Enter the province.');
+    // the longest each may be is what the server accepts: a delivery refused there is
+    // refused after the sale is saved, so it is stopped here
+    if (street.length > 150) complain('street', 'The house number and street is at most 150 characters.');
+    if (barangay.length > 100) complain('barangay', 'The barangay is at most 100 characters.');
+    if (city.length > 100) complain('city', 'The town or city is at most 100 characters.');
+    if (province.length > 100) complain('province', 'The province is at most 100 characters.');
+    if (landmark.length > 150) complain('landmark', 'The landmark is at most 150 characters.');
+    if (fields.remarks.value.trim().length > 255) complain('remarks', 'The remarks are at most 255 characters.');
 
     // a slot in the past is almost always a typing slip in the year or month
     if (scheduledDate && new Date(scheduledDate).getTime() < Date.now() - 60000) {
         complain('scheduledDate', 'That date has already passed. Check the date and time.');
     }
 
-    // a name typed but never picked would silently leave the delivery open
+    // the driver is required, and has to be picked from the list: a name typed but never picked is not a driver
     const driverBox = document.getElementById('dl-driver');
     let driverId = null;
     if (fields.driverStaffId && fields.driverStaffId.value) driverId = Number(fields.driverStaffId.value);
     let driverName = null;
     if (driverId && driverBox) driverName = driverBox.value;
-    if (!driverId && driverBox && driverBox.value.trim() !== '') {
+    if (!driverId && driverBox) {
         const driverError = document.getElementById('dl-driver-error');
         if (driverError) {
-            driverError.textContent = 'Pick the driver from the list, or clear the box to leave the delivery open for any driver.';
+            driverError.textContent = 'Pick the driver who will deliver it.';
+            if (driverBox.value.trim() !== '') driverError.textContent = 'Pick the driver from the list.';
             driverError.hidden = false;
         }
         driverBox.classList.add('is-bad');
@@ -3039,8 +3430,11 @@ function saveDeliveryForm(event) {
         return;
     }
 
+    // the name is the customer's own, as it is on the record
+    const account = findCustomer(customerId);
     pendingDelivery = {
-        contactName: contactName,
+        customerId: customerId,
+        contactName: account ? account.name : contactName,
         contactPhone: contactPhone,
         street: street,
         barangay: barangay,
@@ -3056,7 +3450,13 @@ function saveDeliveryForm(event) {
         edited: true
     };
 
+    deliveryFormIsOpen = false;
     closeModal('delivery-modal');
+
+    // the sale is for the same customer as its delivery
+    if (selectedCustomerId() !== customerId) await pickCustomer(customerId);
+    renderCustomerVerdict();
+
     renderDeliveryAttached();
     notifyInfo('It will be created when you complete this sale.', 'Delivery attached');
 }
@@ -3064,14 +3464,17 @@ function saveDeliveryForm(event) {
 // Cancel closes the form and leaves whatever was already attached alone;
 // Remove Delivery is what removes it.
 function cancelDeliveryForm() {
+    deliveryFormIsOpen = false;
     closeModal('delivery-modal');
     clearDeliveryErrors();
 }
 
 function dropDeliveryForm() {
     pendingDelivery = null;
+    deliveryFormIsOpen = false;
     closeModal('delivery-modal');
     renderDeliveryAttached();
+    renderCustomerVerdict();
 }
 
 // the strip above the buttons
@@ -3089,8 +3492,7 @@ function renderDeliveryAttached() {
 
     let whenText = 'No date agreed yet';
     if (d.scheduledDate) whenText = 'Preferred date ' + escapeHtml(String(d.scheduledDate).replace('T', ' '));
-    let driverText = 'Open for any driver to take';
-    if (d.driverId) driverText = 'Driver: ' + escapeHtml(d.driverName);
+    const driverText = 'Driver: ' + escapeHtml(d.driverName);
 
     let remarksLine = '';
     if (d.remarks) remarksLine = '<p class="delivery-attached-line">Remarks: ' + escapeHtml(d.remarks) + '</p>';
@@ -3123,6 +3525,7 @@ async function createAttachedDelivery(saleId) {
     try {
         const response = await apiCreateDelivery({
                 saleId: saleId,
+                customerId: d.customerId,
                 contactName: d.contactName,
                 contactPhone: d.contactPhone,
                 street: d.street,
@@ -3427,6 +3830,7 @@ async function openRecentSale(saleId) {
         '</div>';
 
     const body = facts +
+        paymentDetailsCardHtml(data) +
         '<h4 class="detail-subhead">Items</h4>' +
         '<p class="detail-note" id="recent-sale-pick">Press an item to fill the Product box with it.</p>' +
         recentSaleItemsTable();
@@ -3526,6 +3930,14 @@ async function refundFromRecentSale() {
     else if (!(Number(form.elements.refundAmount.value) > 0)) next = form.elements.refundAmount;
 
     if (next) next.focus();
+
+    // The form may be above or below what is on the screen (a narrow window, a
+    // scrolled page), so it is brought into view and the cashier is told what was
+    // filled in; the popup closing alone looked as if nothing had happened.
+    form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    let filledText = 'Receipt #' + form.elements.saleId.value + ' is in the Sale ID box.';
+    if (refundProduct) filledText = 'Receipt #' + form.elements.saleId.value + ' and ' + refundProduct.product_name + ' are filled in.';
+    notifyInfo(filledText + ' Check the quantity and the reason, then press Issue Refund.', 'Refund started');
 }
 
 // Sales report. The server sends a cashier their own sales and no others, so
@@ -3678,7 +4090,7 @@ async function openPaymentForm(saleId) {
     paymentSale = row;
 
     const balance = Number(row.balance_due) || 0;
-    document.getElementById('payment-title').textContent = 'Take a Payment';
+    document.getElementById('payment-title').textContent = 'Credit Settlement';
     document.getElementById('payment-sub').textContent =
         row.customer_name + ' \u00b7 OR-' + String(row.sale_id).padStart(6, '0');
     document.getElementById('payment-avatar').textContent = initialsOf(row.customer_name);
@@ -3710,10 +4122,12 @@ async function openPaymentForm(saleId) {
 
     const fields = paymentFormFields();
     if (fields) {
-        fields.amount.value = balance.toFixed(2);
+        // starts at nothing: the cashier types what was handed over, or uses a quick fill
+        fields.amount.value = '0';
         fields.amount.max = balance.toFixed(2);
         fields.paymentMethod.value = 'Cash';
         fields.referenceNo.value = '';
+        clearPaymentDetails('pay-debt');
     }
 
     const button = document.getElementById('payment-save-btn');
@@ -3745,26 +4159,6 @@ function fillPayment(share) {
     renderPaymentVerdict();
 }
 
-// where a transfer goes, on the Take a Payment card
-function renderPaymentBankBox(amount) {
-    const bank = document.getElementById('payment-bank-box');
-    const fields = paymentFormFields();
-    if (!bank || !fields) return;
-
-    const transfer = fields.paymentMethod.value === 'Bank Transfer';
-    bank.hidden = !transfer;
-    if (!transfer) return;
-
-    if (!bankSettingsReady(function () { renderPaymentVerdict(); })) {
-        bank.innerHTML = '<p class="bank-box-note">Reading the shop\'s bank account...</p>';
-        return;
-    }
-
-    let bankNote = 'Type the amount to see what to send.';
-    if (amount > 0) bankNote = 'Once it is sent, type the bank\'s reference for it in the reference box.';
-    bank.innerHTML = bankBoxHtml(amount, bankNote);
-}
-
 // what the balance becomes if this is recorded, said before the button
 function renderPaymentVerdict() {
     const box = document.getElementById('payment-verdict');
@@ -3774,14 +4168,15 @@ function renderPaymentVerdict() {
     const balance = Number(paymentSale.balance_due) || 0;
     const amount = parseFloat(fields.amount.value) || 0;
 
-    renderPaymentBankBox(Math.min(Math.max(amount, 0), balance));
+    // the cheque's details, or the customer's bank and account for a transfer
+    showPaymentDetails('pay-debt', fields.paymentMethod.value);
 
     // The reference is on screen only for a method that has a number to trace it
     // by (REFERENCE_WORDS): not for cash. When it goes, so does anything typed.
     const refField = document.getElementById('payment-ref-field');
     const words = REFERENCE_WORDS[fields.paymentMethod.value];
     if (refField) {
-        refField.hidden = !words;
+        refField.classList.toggle('is-blank', !words);
         if (words) {
             const hint = document.getElementById('payment-ref-hint');
             if (hint) hint.textContent = words.hint;
@@ -3791,9 +4186,16 @@ function renderPaymentVerdict() {
         }
     }
 
-    // GCash or PayMaya: the customer can pay by QR code instead of a typed reference
+    // GCash or PayMaya: the customer can pay by QR code instead of a typed reference.
+    // A bank transfer is only taken through PayMongo, so Record the Payment is not offered for it.
+    const isTransfer = fields.paymentMethod.value === 'Bank Transfer';
     const qrButton = document.getElementById('payment-qr-btn');
-    if (qrButton) qrButton.hidden = QR_METHODS.indexOf(fields.paymentMethod.value) === -1;
+    if (qrButton) {
+        qrButton.hidden = QR_METHODS.indexOf(fields.paymentMethod.value) === -1;
+        qrButton.textContent = isTransfer ? 'Pay by Bank Transfer' : 'Pay by QR';
+    }
+    const saveButton = document.getElementById('payment-save-btn');
+    if (saveButton) saveButton.hidden = isTransfer;
     qrAmountChanged('credit_payment', amount);
 
     if (amount <= 0) {
@@ -3841,11 +4243,45 @@ async function handleTakePayment(event, viaQr) {
         fields.amount.focus();
         return;
     }
-    if ((method === 'Cheque' || method === 'Bank Transfer') && reference === '') {
-        notifyWarning('A ' + method.toLowerCase() + ' is traced by its number. Put it in the reference box.',
-            'Reference needed');
-        fields.referenceNo.focus();
-        return;
+
+    // a bank transfer is only taken through PayMongo, whichever way the form was sent (Enter too)
+    if (method === 'Bank Transfer') viaQr = true;
+
+    // A cheque is taken with its account name, account number, bank, branch and
+    // date; a bank transfer with the customer's bank and account.
+    let chequeDetails = null;
+    let transferDetails = null;
+    if (method === 'Cheque') {
+        const read = readChequeDetails('pay-debt');
+        if (read.problem) {
+            notifyWarning(read.problem, 'Cheque details needed');
+            focusBox(read.field);
+            return;
+        }
+        chequeDetails = read.details;
+
+        if (reference === '') {
+            notifyWarning('A cheque is traced by its cheque number. Put it in the Reference box.', 'Reference needed');
+            fields.referenceNo.focus();
+            return;
+        }
+    } else if (method === 'Bank Transfer') {
+        const read = readTransferDetails('pay-debt');
+        if (read.problem) {
+            notifyWarning(read.problem, 'Bank details needed');
+            focusBox(read.field);
+            return;
+        }
+        transferDetails = read.details;
+
+        // PayMongo refuses a transfer below the bank's smallest
+        const bank = paymongoBank(transferDetails.bankCode);
+        if (bank && amount < bank.minimum) {
+            notifyWarning(bank.name + ' takes transfers of ' + peso(bank.minimum) + ' or more. This one is ' +
+                peso(amount) + '.', 'Too small for ' + bank.name);
+            focusBox('pay-debt-transfer-bank');
+            return;
+        }
     }
 
     const button = document.getElementById('payment-save-btn');
@@ -3855,14 +4291,51 @@ async function handleTakePayment(event, viaQr) {
         if (qrButton) qrButton.disabled = false;
     }
 
+    if (viaQr && QR_METHODS.indexOf(method) === -1) return;
+
+    // Asked for every method, before a QR code is made or anything is sent. The
+    // buttons are held while the question is open, so it cannot be asked twice.
+    if (button) button.disabled = true;
+    if (qrButton) qrButton.disabled = true;
+
+    const saleNumber = 'OR-' + String(paymentSale.sale_id).padStart(6, '0');
+    const details = [
+        'Customer: ' + paymentSale.customer_name,
+        'Sale: ' + saleNumber,
+        'Amount: ' + peso(amount),
+        'Method: ' + method
+    ];
+    if (!viaQr && reference !== '') details.push('Reference: ' + reference);
+    if (chequeDetails) {
+        details.push('Cheque: ' + chequeDetails.bank + ', ' + chequeDetails.branch + ' \u00b7 dated ' + chequeDetails.chequeDate);
+        details.push('Account: ' + chequeDetails.accountName + ', ' + chequeDetails.accountNumber);
+    }
+    if (transferDetails) {
+        details.push('Customer\'s bank: ' + transferDetails.bank);
+        details.push('Account name: ' + transferDetails.accountName);
+        details.push('Account number: ' + transferDetails.accountNumber);
+    }
+
+    let question = 'The payment is recorded against this sale, and the balance goes down by this amount.';
+    if (transferDetails) {
+        question = 'A QR code and a link to the bank\'s page are made next. Nothing is recorded until the ' +
+            'customer has approved the transfer in their bank.';
+    } else if (viaQr) {
+        question = 'A QR code is made next. Nothing is recorded until the customer has paid it.';
+    }
+    const yes = await askConfirm(question, {
+        title: 'Record this payment?',
+        eyebrow: 'Credit Settlement',
+        confirmLabel: viaQr ? 'Make the QR code' : 'Record the payment',
+        detail: details
+    });
+    if (!yes) { ready(); return; }
+
     // by QR code: the customer pays the code before anything is recorded
     let qr = null;
     if (viaQr) {
-        if (QR_METHODS.indexOf(method) === -1) return;
-        if (button) button.disabled = true;
-        if (qrButton) qrButton.disabled = true;
         qr = await collectQrPayment(amount, 'Payment on OR-' + String(paymentSale.sale_id).padStart(6, '0'), method,
-            'credit_payment', paymentSale.sale_id);
+            'credit_payment', paymentSale.sale_id, transferDetails);
         if (!qr) { ready(); return; }
     }
 
@@ -3877,7 +4350,8 @@ async function handleTakePayment(event, viaQr) {
             amount: amount,
             paymentMethod: method,
             referenceNo: referenceNo,
-            qrPaymentId: qr ? qr.id : null
+            qrPaymentId: qr ? qr.id : null,
+            paymentDetails: chequeDetails || transferDetails
         });
         const result = await response.json();
 
@@ -3900,7 +4374,24 @@ async function handleTakePayment(event, viaQr) {
             leftText,
             'Payment recorded');
 
+        // The receipt is what the server recorded; when it did not send it, what
+        // this card knew is enough to print one.
+        let receiptInfo = result.receipt;
+        if (!receiptInfo) {
+            receiptInfo = {
+                customerName: paymentSale.customer_name,
+                method: method,
+                reference: referenceNo,
+                amount: amount,
+                balanceBefore: balance,
+                balanceAfter: Math.max(balance - amount, 0)
+            };
+        }
+        receiptInfo.saleId = paymentSale.sale_id;
+
+        clearPaymentDetails('pay-debt');
         closePaymentForm();
+        await showPaymentReceipt(receiptInfo);
 
         // the credit list and a customer picked at the till follow
         const credit = getDataPanel('cash-credit');
@@ -3938,7 +4429,7 @@ function payCustomerSale(saleId) {
     openPaymentForm(saleId);
 }
 
-// Take a Payment in the card's foot: one sale owing is opened at once;
+// Credit Settlement in the card's foot: one sale owing is opened at once;
 // several are listed on the Unpaid Sales tab to pick from.
 function payFromCustomerCard() {
     if (!openCustomer) return;
@@ -3984,7 +4475,7 @@ function renderCustomerUnpaid() {
             empty: 'Nothing is owed on any sale.',
             // the row itself opens the payment form for that sale
             rowAttrs: function (index) {
-                return 'class="row-clickable" title="Take a payment on this sale" ' +
+                return 'class="row-clickable" title="Credit Settlement on this sale" ' +
                     'onclick="payCustomerSale(' + customerOpenSales[index].sale_id + ')"';
             }
         });
@@ -4052,7 +4543,7 @@ function buildCustomerPanel() {
     createDataPanel({
         key: 'cash-credit',
         tableId: 'customers-table',
-        columns: 6,
+        columns: 3,
         pageSize: CASHIER_ROWS_PER_PAGE,
         pagerId: 'customers-pager',
         idField: 'customer_id',
@@ -4090,10 +4581,7 @@ function buildCustomerPanel() {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openCustomerCredit(' + row.customer_id + ')">' +
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
-                '<td>' + escapeHtml(row.phone || 'Not set') + '</td>' +
-                '<td class="cell-num">' + peso(row.credit_limit) + '</td>' +
                 '<td class="cell-num' + (owed > 0 ? ' cell-due' : '') + '">' + peso(owed) + '</td>' +
-                '<td class="cell-num">' + peso(row.available_credit) + '</td>' +
                 '<td class="cell-due-date">' + creditDueCell(row) + '</td></tr>';
         }
     });
@@ -4181,7 +4669,7 @@ async function openCustomerCredit(customerId, tab) {
         renderCustomerPayments();
         renderCustomerUnpaid();
 
-        // the Unpaid Sales tab and Take a Payment, only when there is something to pay
+        // the Unpaid Sales tab and Credit Settlement, only when there is something to pay
         const hasUnpaid = payable && customerOpenSales.length > 0;
         const unpaidTab = document.getElementById('customer-tab-unpaid');
         if (unpaidTab) unpaidTab.hidden = !hasUnpaid;
@@ -4226,7 +4714,7 @@ function showCustomerTab(name) {
 }
 
 // ---------- the history tabs ----------
-// Purchase History and Credit & Payments are a tab each, paged with Previous
+// Purchase History and Credit Payments are a tab each, paged with Previous
 // and Next rather than scrolled, and filtered in the browser over the rows
 // the card already loaded (openCustomer): a date range on both, the sale's
 // status on purchases and the method on payments. Changing a filter starts
@@ -4325,15 +4813,18 @@ function renderCustomerPayments() {
     const paymentRows = [];
     for (let i = 0; i < rows.length; i++) {
         const p = rows[i];
+        // the sale (receipt) the payment was put against
+        let receiptCell = '<span class="muted">&mdash;</span>';
+        if (p.sale_id) receiptCell = '#' + p.sale_id;
         paymentRows.push([
             escapeHtml(dayOfStamp(p.payment_date)),
             peso(p.amount),
-            escapeHtml(p.payment_method) +
-                (p.sale_id ? ' <span class="muted">#' + p.sale_id + '</span>' : '')
+            escapeHtml(p.payment_method),
+            receiptCell
         ]);
     }
 
-    box.innerHTML = pagedTable('cash-payments', ['Date', 'Amount', 'How'],
+    box.innerHTML = pagedTable('cash-payments', ['Date', 'Amount', 'Method', 'Receipt'],
         paymentRows, [1], {
             empty: emptyHistoryNote('No payments recorded.', from, to, how !== 'all' || from || to)
         });
@@ -4484,30 +4975,104 @@ async function handleLimitRequest(event) {
 
 // ---------- Add Customer ----------
 // The one place an account is opened (the till no longer opens one from a
-// typed name). Name is required; the server refuses a name already on the
+// typed name). First name, last name, phone number and the barangay, town or
+// city and province are required; the middle name, the house number and street
+// and the landmark are optional. The server refuses a name already on the
 // list, any case, and gives the account a credit limit of zero.
-let addCustomerForSale = false;   // opened from the payment form: the new account goes on the sale
+let addCustomerFor = '';   // 'sale': opened from the payment form, the new account goes on the sale; 'delivery': from the delivery form
+
+// the boxes that have a red line of words under them
+const ADD_CUSTOMER_ERROR_BOXES = {
+    firstName: 'ac-first-error',
+    lastName: 'ac-last-error',
+    phone: 'ac-phone-error',
+    street: 'ac-street-error',
+    barangay: 'ac-barangay-error',
+    city: 'ac-city-error',
+    province: 'ac-province-error'
+};
+
+function showAddCustomerFieldError(name, text) {
+    const form = document.getElementById('add-customer-form');
+    const box = document.getElementById(ADD_CUSTOMER_ERROR_BOXES[name]);
+    if (box) {
+        box.textContent = text;
+        box.hidden = false;
+    }
+    if (form && form.elements[name]) {
+        form.elements[name].classList.add('is-bad');
+        // the phone box sits in a frame that carries the red edge
+        const frame = form.elements[name].closest('.phone-field');
+        if (frame) frame.classList.add('is-bad');
+    }
+}
+
+function clearAddCustomerFieldError(name) {
+    const form = document.getElementById('add-customer-form');
+    const box = document.getElementById(ADD_CUSTOMER_ERROR_BOXES[name]);
+    if (box) {
+        box.textContent = '';
+        box.hidden = true;
+    }
+    if (form && form.elements[name]) {
+        form.elements[name].classList.remove('is-bad');
+        const frame = form.elements[name].closest('.phone-field');
+        if (frame) frame.classList.remove('is-bad');
+    }
+}
+
+function clearAddCustomerErrors() {
+    for (const name in ADD_CUSTOMER_ERROR_BOXES) clearAddCustomerFieldError(name);
+
+    const verdict = document.getElementById('add-customer-verdict');
+    if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+}
+
+// typing in a box takes its own complaint away
+function onAddCustomerTyped(event) {
+    const target = event.target;
+    if (target && target.name && ADD_CUSTOMER_ERROR_BOXES[target.name]) clearAddCustomerFieldError(target.name);
+
+    const verdict = document.getElementById('add-customer-verdict');
+    if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+}
+
+// a name typed on another card: the first word is the first name, the rest the last name
+function prefillAddCustomerName(typed) {
+    const form = document.getElementById('add-customer-form');
+    if (!form) return;
+
+    const words = String(typed || '').trim().split(/\s+/);
+    if (words[0] === '') return;
+    form.elements.firstName.value = words.shift();
+    form.elements.lastName.value = words.join(' ');
+}
 
 function openAddCustomer() {
-    addCustomerForSale = false;
+    addCustomerFor = '';
 
     const form = document.getElementById('add-customer-form');
     if (!form) return;
 
     form.reset();
     phoneFill(form.elements.phone, '');
+    clearAddCustomerErrors();
 
-    const verdict = document.getElementById('add-customer-verdict');
-    if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+    // typing in any box clears that box's complaint (one listener, set once)
+    if (!form.dataset.typingWired) {
+        form.addEventListener('input', onAddCustomerTyped);
+        form.dataset.typingWired = 'yes';
+    }
+
     const save = document.getElementById('add-customer-save');
     if (save) save.disabled = false;
 
     showModal('add-customer-modal');
-    setTimeout(function () { form.elements.name.focus(); }, 60);
+    setTimeout(function () { form.elements.firstName.focus(); }, 60);
 }
 
 function cancelAddCustomer() {
-    addCustomerForSale = false;
+    addCustomerFor = '';
     closeModal('add-customer-modal');
 }
 
@@ -4518,38 +5083,65 @@ async function handleAddCustomer(event) {
     const verdict = document.getElementById('add-customer-verdict');
     if (!form) return;
 
-    function complain(text, field) {
-        if (verdict) { verdict.className = 'delivery-verdict is-stop'; verdict.textContent = text; }
-        if (field) field.focus();
-    }
+    clearAddCustomerErrors();
 
-    // "Maria  Santos" and "Maria Santos" are one customer
-    const name = form.elements.name.value.trim().replace(/\s+/g, ' ');
+    // many spaces become one, like the server does
+    function tidy(box) { return box.value.trim().replace(/\s+/g, ' '); }
+
+    const firstName = tidy(form.elements.firstName);
+    const middleName = tidy(form.elements.middleName);
+    const lastName = tidy(form.elements.lastName);
     const phone = phoneToStore(form.elements.phone);
     const phoneProblem = phoneComplaint(form.elements.phone);
-    const address = form.elements.address.value.trim();
+    const street = tidy(form.elements.street);
+    const barangay = tidy(form.elements.barangay);
+    const city = tidy(form.elements.city);
+    const province = tidy(form.elements.province);
+    const landmark = tidy(form.elements.landmark);
 
-    if (name === '') { complain('A customer needs a name.', form.elements.name); return; }
-    if (phoneProblem) { complain(phoneProblem, form.elements.phone); return; }
-    if (address === '') { complain('A customer needs an address.', form.elements.address); return; }
+    // every box with a problem is marked at once; the first one gets the cursor
+    let firstBad = null;
+    function complain(name, text) {
+        showAddCustomerFieldError(name, text);
+        if (!firstBad) firstBad = form.elements[name];
+    }
 
-    // the first word is the first name, the rest the surname
-    const parts = name.split(' ');
-    const firstName = parts.shift();
-    const lastName = parts.join(' ');
+    if (firstName === '') complain('firstName', 'Enter the first name.');
+    if (lastName === '') complain('lastName', 'Enter the last name.');
+    if (phone === '') {
+        complain('phone', 'Enter a phone number.');
+    } else if (phoneProblem) {
+        complain('phone', phoneProblem);
+    }
+    // the house number and street is optional, but one letter is not an address
+    if (street !== '' && street.length < 2) complain('street', 'Enter the house number and street, or leave it empty.');
+    if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
+    if (city.length < 2) complain('city', 'Enter the town or city.');
+    if (province.length < 2) complain('province', 'Enter the province.');
+
+    if (firstBad) {
+        firstBad.focus();
+        if (verdict) {
+            verdict.className = 'delivery-verdict is-stop';
+            verdict.textContent = 'Fill in the boxes marked in red, then add the customer.';
+        }
+        return;
+    }
 
     const save = document.getElementById('add-customer-save');
     if (save) save.disabled = true;
 
     try {
         const response = await apiCreateCustomer({
-                firstName: firstName, lastName: lastName, phone: phone, address: address });
+                firstName: firstName, middleName: middleName, lastName: lastName, phone: phone,
+                street: street, barangay: barangay, city: city, province: province, landmark: landmark });
         const result = await response.json();
 
         if (!response.ok) {
             if (save) save.disabled = false;
             if (!handleAuthFailure(response, result)) {
-                complain(result.error || 'The customer was not added.', form.elements.name);
+                if (verdict) { verdict.className = 'delivery-verdict is-stop'; verdict.textContent = result.error || 'The customer was not added.'; }
+                form.elements.firstName.focus();
             }
             return;
         }
@@ -4561,10 +5153,15 @@ async function handleAddCustomer(event) {
         customerDirectoryLoaded = false;
 
         // opened from the payment form: the new account is the sale's customer
-        if (addCustomerForSale) {
-            addCustomerForSale = false;
+        const openedFor = addCustomerFor;
+        addCustomerFor = '';
+        if (openedFor === 'sale') {
             await loadCustomerDirectory(true);
             await pickCustomer(Number(result.customerId));
+        } else if (openedFor === 'delivery') {
+            // opened from the delivery form: the new account is its recipient (and the sale's customer)
+            await loadCustomerDirectory(true);
+            await pickDeliveryCustomer(Number(result.customerId));
         }
 
         const panel = getDataPanel('cash-credit');

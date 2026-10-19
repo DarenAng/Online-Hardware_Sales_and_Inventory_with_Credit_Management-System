@@ -379,36 +379,6 @@
 .credit-verdict.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
 .credit-verdict.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); color: var(--ink); }
 
-/* WHERE A TRANSFER GOES -- the shop's account, read out to the customer at
-   the counter. The number is set in the figure face so no digit is misread. */
-.bank-box {
-    margin: 0 0 14px;
-    padding: 11px 14px;
-    border: 1px solid var(--line);
-    border-left: var(--rule) solid var(--go);
-    border-radius: 0 var(--radius) var(--radius) 0;
-    background: var(--paper);
-}
-.bank-box[hidden] { display: none; }
-.bank-box-title { margin: 0 0 6px; font-size: 14px; font-weight: 600; color: var(--ink); }
-.bank-box-grid {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 3px 14px;
-    margin: 0;
-    font-size: 14px;
-}
-.bank-box-grid dt { color: var(--steel); font-weight: 400; }
-.bank-box-grid dd { margin: 0; text-align: right; color: var(--ink); overflow-wrap: anywhere; }
-.bank-box-number,
-.bank-box-amount {
-    font-family: var(--font-figure);
-    font-variant-numeric: tabular-nums;
-}
-.bank-box-number { font-size: 15.5px; letter-spacing: 0.03em; }
-.bank-box-amount { font-weight: 700; }
-.bank-box-note { margin: 8px 0 0; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
-
 /* PAY BY QR -- the code turned to face the customer: the amount above it large
    enough to read across the counter, the code on white with a quiet margin (a
    scanner needs one), and one line saying what is happening. */
@@ -439,6 +409,8 @@
 }
 .qr-frame img:not([src]) { visibility: hidden; }
 .qr-ask { margin: 12px 0 0; font-size: 15px; color: var(--ink); }
+.qr-link { margin: 8px 0 0; font-size: 14.5px; }
+.qr-link a { color: var(--go); font-weight: 600; overflow-wrap: anywhere; }
 .qr-status { margin: 0 0 4px; min-height: 1.5em; font-size: 14px; font-weight: 600; color: var(--steel); }
 .qr-status.is-good { color: var(--ok-ink); }
 .qr-status.is-stop { color: var(--stop-hi); }
@@ -729,10 +701,14 @@
     color: var(--stop);
 }
 .field-error[hidden] { display: none; }
-#delivery-modal .form-control.is-bad { border-color: var(--stop); }
-#delivery-modal .phone-field.is-bad { border-color: var(--stop); }
-#delivery-modal .detail-subhead { margin-top: 20px; }
-#delivery-modal .detail-subhead.delivery-first-head { margin-top: 0; }
+#delivery-modal .form-control.is-bad,
+#add-customer-modal .form-control.is-bad { border-color: var(--stop); }
+#delivery-modal .phone-field.is-bad,
+#add-customer-modal .phone-field.is-bad { border-color: var(--stop); }
+#delivery-modal .detail-subhead,
+#add-customer-modal .detail-subhead { margin-top: 20px; }
+#delivery-modal .detail-subhead.delivery-first-head,
+#add-customer-modal .detail-subhead.delivery-first-head { margin-top: 0; }
 
 /* Cancel sits apart on the left, Remove is coloured like the destruction
    it is, attaching is the orange one */
@@ -805,3 +781,8 @@
 /* the form's facts read like the customer card's */
 #payment-modal .detail-grid + form { margin-top: 16px; }
 #payment-modal .downpayment-quick { margin-top: 2px; }
+/* The card keeps one size whichever method is picked, so choosing GCash does not
+   make it jump: the reference box keeps its room when it is blank (cash), and the
+   line under the form keeps room for two lines of words. */
+#payment-ref-field.is-blank { visibility: hidden; }
+#payment-modal .credit-verdict { min-height: 64px; }

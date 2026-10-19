@@ -2486,7 +2486,7 @@ function renderCreditHistory(data) {
             p.sale_id ? '#' + p.sale_id : '<span class="muted">On account</span>'
         ]);
     }
-    const payments = pagedTable('mgr-payments', ['Date', 'Amount', 'How', 'Against'],
+    const payments = pagedTable('mgr-payments', ['Date', 'Amount', 'Method', 'Receipt'],
         paymentRows, [1], { empty: 'No payments recorded.' });
 
     let requests;
@@ -2517,7 +2517,7 @@ function renderCreditHistory(data) {
             purchases +
         '</div>' +
         '<div class="history-column">' +
-            '<h4 class="history-head">Credit &amp; Payments' +
+            '<h4 class="history-head">Credit Payments' +
             '<span class="history-total">' +
                 (Number(data.credit.current_credit) > 0
                     ? '<span class="cell-due">' + peso(data.credit.current_credit) + ' balance</span>'
@@ -3261,6 +3261,17 @@ async function openSaleDetail(saleId) {
             { label: 'Items (' + data.items.length + ')', body: items },
             { label: 'Payments (' + data.payments.length + ')', body: payments }
         ];
+
+        // a cheque's or a bank transfer's bank and account
+        const detailItems = paymentDetailItems(data);
+        if (detailItems.length > 0) {
+            let detailsBody = '';
+            for (let i = 0; i < detailItems.length; i++) {
+                detailsBody += '<p class="detail-note">' +
+                    escapeHtml(paymentDetailsSummary(detailItems[i].detail, detailItems[i].reference)) + '</p>';
+            }
+            pages.push({ label: 'Payment Details', body: detailsBody });
+        }
 
         // paid by QR code: each code's status and PayMongo's reference
         const qrPaid = data.qrPayments || [];

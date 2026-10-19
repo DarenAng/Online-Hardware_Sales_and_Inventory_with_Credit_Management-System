@@ -16,6 +16,11 @@
 // ============================================================
 
 const managerProcedures = require("../database/procedures/manager-procedures");
+const helpers = require("../helpers");
+const tidy = helpers.tidy;
+const buildFullAddress = helpers.buildFullAddress;
+const addressPartsFrom = helpers.addressPartsFrom;
+const addressPartsProblem = helpers.addressPartsProblem;
 const DEFAULT_CREDIT_TERMS = require("../store-settings").DEFAULT_CREDIT_TERMS;
 const receiptLayoutFrom = require("../store-settings").receiptLayoutFrom;
 
@@ -782,13 +787,13 @@ function registerManagerRoutes(app, deps) {
       "FROM ( " +
       "SELECT 'SALE' AS kind, s.sale_date AS happened_at, s.cashier_staff_id AS staff_id, s.sale_id AS ref, " +
       "CONCAT('Sale #', s.sale_id, ' for ', " +
-      "COALESCE(CONCAT(c.first_name, ' ', c.last_name), NULLIF(s.walk_in_name, ''), 'a walk-in customer'), " +
+      "COALESCE(c.full_name, NULLIF(s.walk_in_name, ''), 'a walk-in customer'), " +
       "': ', FORMAT(s.final_amount, 2), ' by ', s.payment_method, ', ', s.payment_status, " +
       "IF(s.is_archived, ' (voided)', '')) AS details " +
       "FROM sales s LEFT JOIN customers c ON c.customer_id = s.customer_id " +
       "UNION ALL " +
       "SELECT 'PAYMENT', p.payment_date, p.received_by_staff_id, p.sale_id, " +
-      "CONCAT(COALESCE(CONCAT(c.first_name, ' ', c.last_name), 'Customer'), ' paid ', FORMAT(p.amount, 2), " +
+      "CONCAT(COALESCE(c.full_name, 'Customer'), ' paid ', FORMAT(p.amount, 2), " +
       "' on sale #', p.sale_id, ' by ', p.payment_method) " +
       "FROM credit_payments p LEFT JOIN customers c ON c.customer_id = p.customer_id " +
       "UNION ALL " +
@@ -810,7 +815,7 @@ function registerManagerRoutes(app, deps) {
       "UNION ALL " +
       "SELECT 'DELIVERY', COALESCE(d.created_date, d.scheduled_date, d.updated_at), d.delivery_staff_id, d.delivery_id, " +
       "CONCAT('Sale #', d.sale_id, ' to ', " +
-      "COALESCE(NULLIF(d.contact_name, ''), CONCAT(c.first_name, ' ', c.last_name), " +
+      "COALESCE(NULLIF(d.contact_name, ''), c.full_name, " +
       "NULLIF(s.walk_in_name, ''), 'the customer'), " +
       "': ', d.status, " +
       "IF(d.delivered_at IS NULL, '', CONCAT(', delivered ', DATE_FORMAT(d.delivered_at, '%e %b')))) " +
@@ -831,21 +836,21 @@ function registerManagerRoutes(app, deps) {
       "WHERE po.confirmed_at IS NOT NULL " +
       "UNION ALL " +
       "SELECT 'CREDIT_REQUEST', cr.created_at, cr.requested_by_staff_id, cr.request_id, " +
-      "CONCAT(c.first_name, ' ', c.last_name, ': ', FORMAT(cr.previous_limit, 2), ' to ', " +
+      "CONCAT(c.full_name, ': ', FORMAT(cr.previous_limit, 2), ' to ', " +
       "FORMAT(cr.requested_limit, 2), " +
       "IF(cr.reason IS NULL OR cr.reason = '', '', CONCAT(' - ', cr.reason)), ' (', cr.status, ')') " +
       "FROM credit_requests cr JOIN customers c ON c.customer_id = cr.customer_id " +
       "UNION ALL " +
       "SELECT IF(cr.status = 'Approved', 'CREDIT_APPROVED', 'CREDIT_DECLINED'), cr.decided_at, " +
       "cr.decided_by_staff_id, cr.request_id, " +
-      "CONCAT(c.first_name, ' ', c.last_name, ': request #', cr.request_id, ' ', " +
+      "CONCAT(c.full_name, ': request #', cr.request_id, ' ', " +
       "IF(cr.status = 'Approved', CONCAT('approved at ', FORMAT(cr.requested_limit, 2)), 'declined'), " +
       "IF(cr.decision_note IS NULL OR cr.decision_note = '', '', CONCAT(' - ', cr.decision_note))) " +
       "FROM credit_requests cr JOIN customers c ON c.customer_id = cr.customer_id " +
       "WHERE cr.decided_at IS NOT NULL " +
       "UNION ALL " +
       "SELECT 'CREDIT_LIMIT', cc.updated_at, cc.updated_by_staff_id, cc.customer_id, " +
-      "CONCAT(c.first_name, ' ', c.last_name, ': limit ', FORMAT(cc.credit_limit, 2), ', ', cc.standing) " +
+      "CONCAT(c.full_name, ': limit ', FORMAT(cc.credit_limit, 2), ', ', cc.standing) " +
       "FROM customer_credits cc JOIN customers c ON c.customer_id = cc.customer_id " +
       ") a " +
       "LEFT JOIN staff st ON st.staff_id = a.staff_id " +
@@ -895,7 +900,7 @@ function registerManagerRoutes(app, deps) {
 
       const loyalResult = await db.query(
         "SELECT c.customer_id, " +
-        "TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS customer_name, " +
+        "c.full_name AS customer_name, " +
         "c.phone, " +
         "COUNT(s.sale_id) AS purchase_count, " +
         "COALESCE(SUM(s.final_amount), 0) AS total_spent, " +
@@ -940,7 +945,10 @@ function registerManagerRoutes(app, deps) {
     if (request.query.overLimit === "true") where.push("v.current_credit > v.credit_limit");
 
     if (search !== "") {
-      where.push(wordStartSearch(["v.customer_name", "v.phone"], search, params));
+      // the name is also searched as first and last name only, so "Maria Santos" finds "Maria S. Santos"
+      where.push(wordStartSearch(["v.customer_name", "v.phone",
+        "(SELECT CONCAT(cu.first_name, ' ', cu.last_name) FROM customers cu WHERE cu.customer_id = v.customer_id)"],
+        search, params));
     }
 
     let filter = "";
@@ -975,7 +983,7 @@ function registerManagerRoutes(app, deps) {
     try {
       const rowsResult = await db.query(
         "SELECT s.sale_id, s.sale_date, s.customer_id, " +
-        "CONCAT(c.first_name, ' ', c.last_name) AS customer_name, c.phone, " +
+        "c.full_name AS customer_name, c.phone, " +
         "s.payment_method, s.payment_status, s.final_amount, s.amount_paid, " +
         "s.penalty_rate, s.penalty_months, s.penalty_amount, s.penalty_applied_at, s.amount_due, " +
         "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
@@ -1359,7 +1367,7 @@ function registerManagerRoutes(app, deps) {
     try {
       const rowsResult = await db.query(
         "SELECT r.*, " +
-        "TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS customer_name, " +
+        "c.full_name AS customer_name, " +
         "c.phone, " +
         "rb.full_name AS requested_by, " +
         "db.full_name AS decided_by, " +
@@ -1540,37 +1548,55 @@ function registerManagerRoutes(app, deps) {
 
   // Open an account from Customers Record (the Add Customer form). The
   // procedure sets the limit to zero and the standing to Good; moving the limit
-  // is manager-only. A name already on record (any case, extra spaces
-  // ignored) is refused with 409 -- the till no longer opens accounts by
+  // is manager-only. The name comes as first, middle (optional) and last; the
+  // phone number is required; the address comes in parts (house and street,
+  // barangay, town or city, province, landmark) and is also kept as the one
+  // line every other screen reads. A name already on record (any case, extra
+  // spaces ignored) is refused with 409 -- the till no longer opens accounts by
   // typing a name, so this is the one place an account starts.
   app.post("/api/customers", async function (request, response) {
-    const firstName = request.body.firstName;
-    const lastName = request.body.lastName;
+    const first = tidy(request.body.firstName).slice(0, 100);
+    const middle = tidy(request.body.middleName).slice(0, 100);
+    const last = tidy(request.body.lastName).slice(0, 100);
     const phone = request.body.phone;
-    const address = request.body.address;
 
-    if (!firstName || String(firstName).trim() === "") {
-      return response.status(400).json({ error: "A customer needs a name" });
+    if (first === "") {
+      return response.status(400).json({ error: "A customer needs a first name" });
     }
-    if (!address || String(address).trim() === "") {
-      return response.status(400).json({ error: "A customer needs an address" });
+    if (last === "") {
+      return response.status(400).json({ error: "A customer needs a last name" });
     }
 
-    const first = String(firstName).trim().replace(/\s+/g, " ").slice(0, 100);
-    const last = String(lastName || "").trim().replace(/\s+/g, " ").slice(0, 100);
-    const fullName = (first + " " + last).trim();
-
+    // the phone number is required, and has to be a Philippine mobile number
+    if (!String(phone || "").trim()) {
+      return response.status(400).json({ error: "A customer needs a phone number" });
+    }
     const phoneProblem = phoneComplaint(phone);
     if (phoneProblem) {
       return response.status(400).json({ error: phoneProblem });
     }
     const phoneText = cleanPhone(phone) || "";
 
+    // the address in parts: the house and street and the landmark may be left out
+    const parts = addressPartsFrom(request.body);
+    const addressProblem = addressPartsProblem(parts, "customer's address");
+    if (addressProblem) {
+      return response.status(400).json({ error: addressProblem });
+    }
+    const addressLine = buildFullAddress(parts);
+
+    // the name as it is written on screen, with the middle name as an initial
+    let fullName = first;
+    if (middle !== "") fullName += " " + middle.charAt(0).toUpperCase() + ".";
+    fullName += " " + last;
+
     try {
       const sameResult = await db.query(
         "SELECT customer_id FROM customers " +
-        "WHERE LOWER(TRIM(CONCAT(first_name, ' ', last_name))) = LOWER(?) " +
-        "LIMIT 1", [fullName]);
+        "WHERE LOWER(TRIM(first_name)) = LOWER(?) " +
+        "AND LOWER(TRIM(IFNULL(middle_name, ''))) = LOWER(?) " +
+        "AND LOWER(TRIM(last_name)) = LOWER(?) " +
+        "LIMIT 1", [first, middle, last]);
       const same = sameResult[0];
       if (same.length > 0) {
         return response.status(409).json({
@@ -1580,7 +1606,8 @@ function registerManagerRoutes(app, deps) {
       }
 
       const output = await managerProcedures.createCustomer(
-        [first, last, phoneText, String(address || "").trim().slice(0, 500), getActorId(request)]
+        [first, middle, last, phoneText, addressLine.slice(0, 500),
+         parts.street, parts.barangay, parts.city, parts.province, parts.landmark, getActorId(request)]
       );
 
       // 201: a new account. 200 would mean the procedure found the same name and
@@ -1593,7 +1620,7 @@ function registerManagerRoutes(app, deps) {
       if (created) {
         await writeAuditLog(request, "CREATE_CUSTOMER", "Customer " + fullName + " added",
           { customer_id: Number(output.customer_id), name: fullName,
-            phone: phoneText || null, address: String(address || "").trim() || null });
+            phone: phoneText || null, address: addressLine });
       }
 
       response.status(output.status_code).json({

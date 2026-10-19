@@ -26,7 +26,7 @@ CREATE VIEW vw_customer_credit_facts AS
 
 SELECT
     c.customer_id,
-    TRIM(CONCAT(c.first_name, ' ', c.last_name)) AS customer_name,
+    c.full_name AS customer_name,
     c.phone,
     c.address,
     COALESCE(cc.credit_limit, 0.00) AS credit_limit,
@@ -650,6 +650,10 @@ CREATE PROCEDURE sp_create_sale_transaction (
     -- optional: the paid QR payment the money taken now came in on. The row is
     -- locked, checked and tied to this sale inside the sale's own transaction.
     IN p_qr_payment_id INT,
+    -- optional: the bank and account behind a cheque or a bank transfer taken
+    -- now, as JSON {"bank","branch","accountName","accountNumber","chequeDate"}.
+    -- A bank transfer paid by QR needs none (the QR payment holds them).
+    IN p_pay_details JSON,
     OUT p_sale_id INT,
     OUT p_status_code INT,
     OUT p_message VARCHAR(255)
@@ -692,8 +696,12 @@ PROC_BODY: BEGIN
     DECLARE v_qr_status VARCHAR(12) DEFAULT NULL;
     DECLARE v_qr_sale INT DEFAULT NULL;
     DECLARE v_qr_amount DECIMAL(12,2) DEFAULT 0.00;
-    DECLARE v_qr_wallet VARCHAR(10) DEFAULT NULL;
+    DECLARE v_qr_wallet VARCHAR(20) DEFAULT NULL;
     DECLARE v_qr_method VARCHAR(30) DEFAULT NULL;
+
+    -- how the money taken now arrived, and the credit_payments row it made
+    DECLARE v_taken_method VARCHAR(30) DEFAULT NULL;
+    DECLARE v_payment_row INT DEFAULT NULL;
 
     -- Posted prices include VAT, so it is extracted from the total; VAT is
     -- rounded first so the lines add back exactly. The registration and rate
@@ -1047,6 +1055,33 @@ PROC_BODY: BEGIN
         END IF;
     END IF;
 
+    -- How the money taken now arrived: the sale's own method, or on a Credit
+    -- sale the down payment's; nothing is taken on COD or on credit with none down.
+    -- A cheque is never recorded without its account, bank and date, and a bank
+    -- transfer needs either a paid QR payment or the details typed.
+    IF v_on_credit THEN
+        IF v_amount_paid > 0 THEN
+            SET v_taken_method = v_down_method;
+        END IF;
+    ELSEIF NOT v_on_account THEN
+        SET v_taken_method = p_payment_method;
+    END IF;
+
+    IF v_taken_method = 'Cheque' AND p_pay_details IS NULL THEN
+        ROLLBACK;
+        SET p_status_code = 400;
+        SET p_message = 'A cheque needs its account name, account number, bank, branch and date.';
+        DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
+        LEAVE PROC_BODY;
+    END IF;
+    IF v_taken_method = 'Bank Transfer' AND p_qr_payment_id IS NULL AND p_pay_details IS NULL THEN
+        ROLLBACK;
+        SET p_status_code = 400;
+        SET p_message = 'A bank transfer needs its bank, account name and account number.';
+        DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
+        LEAVE PROC_BODY;
+    END IF;
+
     -- no settings row means mid-install, so the defaults stand
     SELECT registration_type, vat_rate
     INTO v_registration, v_vat_rate
@@ -1126,6 +1161,28 @@ PROC_BODY: BEGIN
                                      reference_no, received_by_staff_id)
         VALUES (p_customer_id, p_sale_id, v_amount_paid, v_down_method,
                 'Down payment at counter', p_cashier_staff_id);
+        SET v_payment_row = LAST_INSERT_ID();
+    END IF;
+
+    -- the bank and account behind a cheque or a bank transfer, in the same
+    -- transaction as the money: from the paid QR payment for a bank transfer,
+    -- otherwise from the details sent
+    IF v_taken_method = 'Bank Transfer' AND p_qr_payment_id IS NOT NULL THEN
+        INSERT INTO payment_details (sale_id, payment_id, method, account_name, account_number,
+                                     bank_name, qr_payment_id, created_by_staff_id)
+        SELECT p_sale_id, v_payment_row, 'Bank Transfer', account_name, account_number,
+               bank_name, qr_payment_id, p_cashier_staff_id
+        FROM qr_payments WHERE qr_payment_id = p_qr_payment_id;
+    ELSEIF v_taken_method IN ('Cheque', 'Bank Transfer') THEN
+        INSERT INTO payment_details (sale_id, payment_id, method, account_name, account_number,
+                                     bank_name, branch, cheque_date, created_by_staff_id)
+        VALUES (p_sale_id, v_payment_row, v_taken_method,
+                JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.accountName')),
+                JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.accountNumber')),
+                JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.bank')),
+                JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.branch')),
+                CAST(JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.chequeDate')) AS DATE),
+                p_cashier_staff_id);
     END IF;
 
     -- the QR payment is tied to this sale in the same transaction, so it is
@@ -1534,6 +1591,10 @@ CREATE PROCEDURE sp_record_credit_payment (
     -- optional: the paid QR payment this money came in on; locked, checked and
     -- tied to the sale inside this transaction
     IN p_qr_payment_id INT,
+    -- optional: the bank and account behind a cheque or a bank transfer, as JSON
+    -- {"bank","branch","accountName","accountNumber","chequeDate"}; a bank
+    -- transfer paid by QR needs none (the QR payment holds them)
+    IN p_pay_details JSON,
     OUT p_status_code INT,
     OUT p_message VARCHAR(255)
 )
@@ -1550,7 +1611,8 @@ PROC_BODY: BEGIN
     DECLARE v_qr_status VARCHAR(12) DEFAULT NULL;
     DECLARE v_qr_sale INT DEFAULT NULL;
     DECLARE v_qr_amount DECIMAL(12,2) DEFAULT 0.00;
-    DECLARE v_qr_wallet VARCHAR(10) DEFAULT NULL;
+    DECLARE v_qr_wallet VARCHAR(20) DEFAULT NULL;
+    DECLARE v_payment_row INT DEFAULT NULL;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -1565,6 +1627,19 @@ PROC_BODY: BEGIN
     IF p_amount IS NULL OR p_amount <= 0 THEN
         SET p_status_code = 400;
         SET p_message = 'Payment amount must be greater than zero.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    -- a cheque is never recorded without its account, bank and date, and a bank
+    -- transfer needs either a paid QR payment or the details typed
+    IF p_payment_method = 'Cheque' AND p_pay_details IS NULL THEN
+        SET p_status_code = 400;
+        SET p_message = 'A cheque needs its account name, account number, bank, branch and date.';
+        LEAVE PROC_BODY;
+    END IF;
+    IF p_payment_method = 'Bank Transfer' AND p_qr_payment_id IS NULL AND p_pay_details IS NULL THEN
+        SET p_status_code = 400;
+        SET p_message = 'A bank transfer needs its bank, account name and account number.';
         LEAVE PROC_BODY;
     END IF;
 
@@ -1678,6 +1753,28 @@ PROC_BODY: BEGIN
 
     INSERT INTO credit_payments (customer_id, sale_id, amount, payment_method, reference_no, received_by_staff_id)
     VALUES (v_customer_id, p_sale_id, p_amount, p_payment_method, p_reference_no, p_staff_id);
+    SET v_payment_row = LAST_INSERT_ID();
+
+    -- the bank and account behind a cheque or a bank transfer, in the same
+    -- transaction as the money: from the paid QR payment for a bank transfer,
+    -- otherwise from the details sent
+    IF p_payment_method = 'Bank Transfer' AND p_qr_payment_id IS NOT NULL THEN
+        INSERT INTO payment_details (sale_id, payment_id, method, account_name, account_number,
+                                     bank_name, qr_payment_id, created_by_staff_id)
+        SELECT p_sale_id, v_payment_row, 'Bank Transfer', account_name, account_number,
+               bank_name, qr_payment_id, p_staff_id
+        FROM qr_payments WHERE qr_payment_id = p_qr_payment_id;
+    ELSEIF p_payment_method IN ('Cheque', 'Bank Transfer') THEN
+        INSERT INTO payment_details (sale_id, payment_id, method, account_name, account_number,
+                                     bank_name, branch, cheque_date, created_by_staff_id)
+        VALUES (p_sale_id, v_payment_row, p_payment_method,
+                JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.accountName')),
+                JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.accountNumber')),
+                JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.bank')),
+                JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.branch')),
+                CAST(JSON_UNQUOTE(JSON_EXTRACT(p_pay_details, '$.chequeDate')) AS DATE),
+                p_staff_id);
+    END IF;
 
     -- tied to the sale in the same transaction: recorded here or not used at all
     IF p_qr_payment_id IS NOT NULL THEN
@@ -3398,8 +3495,7 @@ PROC_BODY: BEGIN
 
     -- nothing typed means the sale already knows: the account customer or the walk-in name
     IF v_contact_name IS NULL THEN
-        SELECT COALESCE(NULLIF(TRIM(CONCAT(IFNULL(c.first_name, ''), ' ',
-                                           IFNULL(c.last_name, ''))), ''),
+        SELECT COALESCE(NULLIF(c.full_name, ''),
                         NULLIF(TRIM(IFNULL(s.walk_in_name, '')), ''))
         INTO v_contact_name
         FROM sales s
@@ -3612,7 +3708,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    SELECT CONCAT(first_name, ' ', last_name) INTO v_name
+    SELECT full_name INTO v_name
     FROM customers WHERE customer_id = p_customer_id;
 
     SELECT current_credit INTO v_owed
@@ -3691,7 +3787,7 @@ PROC_BODY: BEGIN
     START TRANSACTION;
 
     SET v_name = NULL;
-    SELECT CONCAT(first_name, ' ', last_name) INTO v_name
+    SELECT full_name INTO v_name
     FROM customers WHERE customer_id = p_customer_id
     FOR UPDATE;
 
@@ -3806,7 +3902,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    SELECT CONCAT(first_name, ' ', last_name) INTO v_name
+    SELECT full_name INTO v_name
     FROM customers WHERE customer_id = v_customer_id;
 
     UPDATE credit_requests
@@ -3844,13 +3940,21 @@ END //
 --
 -- Creates the record with a zero limit and Good standing; only a manager
 -- moves the limit. The same name and phone hands back the existing account
--- rather than refusing.
+-- rather than refusing. The name comes as first, middle (optional) and last;
+-- the address comes as one line (what every screen reads) and in parts
+-- (house and street, barangay, town or city, province, landmark).
 -- ==========================================
 CREATE PROCEDURE sp_create_customer (
     IN p_first_name VARCHAR(100),
+    IN p_middle_name VARCHAR(100),
     IN p_last_name VARCHAR(100),
     IN p_phone VARCHAR(20),
     IN p_address TEXT,
+    IN p_address_street VARCHAR(150),
+    IN p_address_barangay VARCHAR(100),
+    IN p_address_city VARCHAR(100),
+    IN p_address_province VARCHAR(100),
+    IN p_address_landmark VARCHAR(150),
     IN p_staff_id INT,
     OUT p_customer_id INT,
     OUT p_status_code INT,
@@ -3858,6 +3962,7 @@ CREATE PROCEDURE sp_create_customer (
 )
 PROC_BODY: BEGIN
     DECLARE v_first VARCHAR(100);
+    DECLARE v_middle VARCHAR(100);
     DECLARE v_last VARCHAR(100);
     DECLARE v_phone VARCHAR(20);
     DECLARE v_address TEXT;
@@ -3876,6 +3981,7 @@ PROC_BODY: BEGIN
 
     SET p_customer_id = NULL;
     SET v_first   = NULLIF(TRIM(IFNULL(p_first_name, '')), '');
+    SET v_middle  = NULLIF(TRIM(IFNULL(p_middle_name, '')), '');
     SET v_last    = NULLIF(TRIM(IFNULL(p_last_name, '')), '');
     SET v_phone   = NULLIF(TRIM(IFNULL(p_phone, '')), '');
     SET v_address = NULLIF(TRIM(IFNULL(p_address, '')), '');
@@ -3894,6 +4000,7 @@ PROC_BODY: BEGIN
     SELECT customer_id INTO v_existing
     FROM customers
     WHERE LOWER(TRIM(first_name)) = LOWER(v_first)
+      AND LOWER(TRIM(IFNULL(middle_name, ''))) = LOWER(IFNULL(v_middle, ''))
       AND LOWER(TRIM(IFNULL(last_name, ''))) = LOWER(v_last)
       AND ((v_phone IS NULL AND (phone IS NULL OR TRIM(phone) = ''))
            OR TRIM(IFNULL(phone, '')) = v_phone)
@@ -3905,8 +4012,7 @@ PROC_BODY: BEGIN
         SET p_status_code = 200;
 
         -- the name as the customer record already spells it
-        SELECT CONCAT(TRIM(CONCAT(first_name, ' ', IFNULL(last_name, ''))),
-                      ' already has an account. This sale was attached to it.')
+        SELECT CONCAT(full_name, ' already has an account. This sale was attached to it.')
         INTO p_message
         FROM customers WHERE customer_id = v_existing;
 
@@ -3915,8 +4021,15 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    INSERT INTO customers (first_name, last_name, phone, address)
-    VALUES (v_first, v_last, v_phone, v_address);
+    INSERT INTO customers (first_name, middle_name, last_name, phone, address,
+                           address_street, address_barangay, address_city,
+                           address_province, address_landmark)
+    VALUES (v_first, v_middle, v_last, v_phone, v_address,
+            NULLIF(TRIM(IFNULL(p_address_street, '')), ''),
+            NULLIF(TRIM(IFNULL(p_address_barangay, '')), ''),
+            NULLIF(TRIM(IFNULL(p_address_city, '')), ''),
+            NULLIF(TRIM(IFNULL(p_address_province, '')), ''),
+            NULLIF(TRIM(IFNULL(p_address_landmark, '')), ''));
 
     SET p_customer_id = LAST_INSERT_ID();
 
@@ -3925,15 +4038,17 @@ PROC_BODY: BEGIN
     VALUES (p_customer_id, 0.00, 'Good', p_staff_id);
 
     INSERT INTO audit_logs (staff_id, action, action_type, details)
-    VALUES (p_staff_id, 'CUSTOMER_CREATED', 'CREATE',
-            CONCAT('Customer #', p_customer_id, ' ', TRIM(CONCAT(v_first, ' ', v_last)),
-                   ' opened at the counter with no credit limit'));
+    SELECT p_staff_id, 'CUSTOMER_CREATED', 'CREATE',
+           CONCAT('Customer #', p_customer_id, ' ', full_name,
+                  ' opened at the counter with no credit limit')
+    FROM customers WHERE customer_id = p_customer_id;
 
     COMMIT;
 
     SET p_status_code = 201;
-    SET p_message = CONCAT(TRIM(CONCAT(v_first, ' ', v_last)),
-                           ' now has an account. A manager sets any credit limit.');
+    SELECT CONCAT(full_name, ' now has an account. A manager sets any credit limit.')
+    INTO p_message
+    FROM customers WHERE customer_id = p_customer_id;
 END //
 
 -- ==========================================
@@ -4238,7 +4353,7 @@ BEGIN
 
     DECLARE cur CURSOR FOR
         SELECT s.sale_id, s.customer_id,
-               TRIM(CONCAT(c.first_name, ' ', c.last_name)),
+               c.full_name,
                GREATEST(s.final_amount - s.refunded_amount - s.amount_paid, 0.00),
                s.amount_due - s.amount_paid,
                COALESCE(cc.penalty_rate, (SELECT penalty_rate FROM store_settings WHERE setting_id = 1), 3.00),
@@ -4551,11 +4666,17 @@ CREATE PROCEDURE sp_create_qr_payment (
     IN p_mode VARCHAR(10),
     IN p_provider_intent_id VARCHAR(80),
     IN p_amount DECIMAL(12,2),
-    IN p_wallet VARCHAR(10),
+    IN p_wallet VARCHAR(20),
     IN p_purpose VARCHAR(20),
     IN p_seconds INT,
     IN p_staff_id INT,
     IN p_note VARCHAR(150),
+    -- a Bank Transfer's bank (PayMongo's code and the name shown) and the
+    -- customer's account; NULL for an e-wallet
+    IN p_bank_code VARCHAR(20),
+    IN p_bank_name VARCHAR(80),
+    IN p_account_name VARCHAR(100),
+    IN p_account_number VARCHAR(30),
     OUT p_qr_payment_id INT,
     OUT p_status_code INT,
     OUT p_message VARCHAR(255)
@@ -4579,9 +4700,16 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    IF p_wallet NOT IN ('GCash', 'PayMaya') THEN
+    IF p_wallet NOT IN ('GCash', 'PayMaya', 'Bank Transfer') THEN
         SET p_status_code = 400;
-        SET p_message = 'Only GCash and Maya can be paid by QR code.';
+        SET p_message = 'Only GCash, Maya and bank transfers can be paid by QR code.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF p_wallet = 'Bank Transfer' AND (p_bank_code IS NULL OR p_bank_name IS NULL
+       OR p_account_name IS NULL OR p_account_number IS NULL) THEN
+        SET p_status_code = 400;
+        SET p_message = 'A bank transfer needs the bank, the account name and the account number.';
         LEAVE PROC_BODY;
     END IF;
 
@@ -4594,17 +4722,19 @@ PROC_BODY: BEGIN
     START TRANSACTION;
 
     INSERT INTO qr_payments
-        (provider, mode, provider_intent_id, amount, wallet, purpose, status,
-         created_by_staff_id, expires_at)
+        (provider, mode, provider_intent_id, amount, wallet, bank_code, bank_name,
+         account_name, account_number, purpose, status, created_by_staff_id, expires_at)
     VALUES
-        (p_provider, p_mode, p_provider_intent_id, p_amount, p_wallet, p_purpose, 'pending',
+        (p_provider, p_mode, p_provider_intent_id, p_amount, p_wallet, p_bank_code, p_bank_name,
+         p_account_name, p_account_number, p_purpose, 'pending',
          p_staff_id, NOW() + INTERVAL GREATEST(IFNULL(p_seconds, 600), 1) SECOND);
 
     SET p_qr_payment_id = LAST_INSERT_ID();
 
     INSERT INTO audit_logs (staff_id, action, action_type, details)
     VALUES (p_staff_id, 'QR_PAYMENT_CREATED', 'PAYMENT',
-            CONCAT('QR payment #', p_qr_payment_id, ' made: ', p_wallet, ' ', FORMAT(p_amount, 2),
+            CONCAT('QR payment #', p_qr_payment_id, ' made: ', p_wallet,
+                   IFNULL(CONCAT(' (', p_bank_name, ')'), ''), ' ', FORMAT(p_amount, 2),
                    IFNULL(CONCAT(' ', p_note), ''), ' (', p_provider, ', ', p_mode, ')'));
 
     COMMIT;
@@ -4637,7 +4767,7 @@ PROC_BODY: BEGIN
     DECLARE v_found INT DEFAULT 0;
     DECLARE v_status VARCHAR(12) DEFAULT NULL;
     DECLARE v_error VARCHAR(255) DEFAULT NULL;
-    DECLARE v_wallet VARCHAR(10) DEFAULT NULL;
+    DECLARE v_wallet VARCHAR(20) DEFAULT NULL;
     DECLARE v_amount DECIMAL(12,2) DEFAULT 0;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
