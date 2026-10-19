@@ -260,6 +260,9 @@ function registerInventoryRoutes(app, deps) {
     if (price !== null && (!Number.isFinite(price) || price < 0)) {
       return response.status(400).json({ error: "The price has to be a figure, or left empty." });
     }
+    // a size priced at 0 would sell for nothing, so 0 is treated like an empty box:
+    // the price is worked out from the product's own price
+    if (price === 0) price = null;
 
     try {
       const productsResult = await db.query(
@@ -269,6 +272,14 @@ function registerInventoryRoutes(app, deps) {
       const products = productsResult[0];
       if (products.length === 0) return response.status(404).json({ error: "That material was not found." });
       const product = products[0];
+
+      // the manager prices products; a size price on a product with no price would be ahead of it
+      if (price !== null && !(Number(product.price) > 0)) {
+        return response.status(400).json({
+          error: product.product_name + " has no price yet. Set the product's price first (the manager does that), " +
+                 "then give a size its own price."
+        });
+      }
 
       if (product.unit_name && product.unit_name.toLowerCase() === unitName.toLowerCase()) {
         return response.status(400).json({
@@ -401,47 +412,137 @@ function registerInventoryRoutes(app, deps) {
     };
   }
 
-  // Adding a material from the shop floor: its category and unit must already
-  // be on file; a new brand is created alongside it. An existing name returns
-  // the existing material.
+  // Adding a product from the Material List: its category and unit must already
+  // be on file; a new brand is created alongside it. It starts with no price
+  // (price 0 means "no price set"): the clerk counts, the manager prices, so
+  // the price is not read from the request. The manager is told, and the till
+  // will not sell it until it has a price. An existing name returns the
+  // existing material, and the answer says so (created: false).
   app.post("/api/materials", async function (request, response) {
-    const name = request.body.name;
-    const brandName = request.body.brandName;
-    const categoryName = request.body.categoryName;
-    const unitName = request.body.unitName;
-    const price = request.body.price;
-    const supplierId = request.body.supplierId;
+    const body = request.body || {};
+    const name = String(body.name || "").trim().replace(/\s+/g, " ");
+    const brandName = String(body.brandName || "").trim();
+    const categoryName = String(body.categoryName || "").trim();
+    const unitName = String(body.unitName || "").trim();
+    const supplierId = Number(body.supplierId) || null;
 
-    if (!name || String(name).trim() === "") {
-      return response.status(400).json({ error: "A material needs a name" });
+    if (name === "") {
+      return response.status(400).json({ error: "A product needs a name." });
+    }
+    if (name.length > 150) {
+      return response.status(400).json({ error: "A product name is at most 150 characters." });
+    }
+    if (brandName.length > 100) {
+      return response.status(400).json({ error: "A brand name is at most 100 characters." });
+    }
+    if (categoryName === "") {
+      return response.status(400).json({ error: "Pick the product's category." });
+    }
+    if (unitName === "") {
+      return response.status(400).json({ error: "Pick the unit the product is counted in." });
+    }
+
+    // the reorder point is optional; left blank, the procedure's own default stays
+    let reorderPoint = null;
+    if (body.reorderPoint !== undefined && body.reorderPoint !== null && String(body.reorderPoint).trim() !== "") {
+      reorderPoint = Number(body.reorderPoint);
+      if (!Number.isInteger(reorderPoint) || reorderPoint < 0 || reorderPoint > 100000) {
+        return response.status(400).json({ error: "The reorder point has to be a whole number from 0 to 100000." });
+      }
     }
 
     try {
       const onFile = await namesOnFile([categoryName], [unitName]);
       if (onFile.error) return response.status(400).json({ error: onFile.error });
 
-      const output = await inventoryClerkProcedures.createMaterial(
-        [String(name).trim().slice(0, 150),
-         String(brandName || "").trim().slice(0, 100),
-         String(onFile.category(categoryName) || "").slice(0, 50),
-         String(onFile.unit(unitName) || "").slice(0, 20),
-         Number(price) || 0,
-         Number(supplierId) || null,
-         getActorId(request)]
-      );
+      if (supplierId !== null) {
+        const supplierResult = await db.query("SELECT supplier_id FROM suppliers WHERE supplier_id = ?", [supplierId]);
+        if (supplierResult[0].length === 0) {
+          return response.status(400).json({ error: "That supplier is not on file. Pick one from the list." });
+        }
+      }
+
+      // Two clerks adding the same new name together would both find it missing and make
+      // two records, so adding takes turns: a named MySQL lock, held on its own connection
+      // while the procedure runs (the same way migrations.js makes copies take turns).
+      let output;
+      const lockConnection = await db.getConnection();
+      try {
+        const lockedResult = await lockConnection.query("SELECT GET_LOCK('add-product', 10) AS got");
+        if (Number(lockedResult[0][0].got) !== 1) {
+          return response.status(503).json({ error: "Another product is being added right now. Try again in a moment." });
+        }
+        try {
+          output = await inventoryClerkProcedures.createMaterial(
+            [name, brandName, String(onFile.category(categoryName) || "").slice(0, 50),
+             String(onFile.unit(unitName) || "").slice(0, 20),
+             0, supplierId, getActorId(request)]
+          );
+        } finally {
+          await lockConnection.query("SELECT RELEASE_LOCK('add-product')");
+        }
+      } finally {
+        lockConnection.release();
+      }
 
       if (output.status_code !== 201 && output.status_code !== 200) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
+      const productId = output.product_id;
+
+      // the name was already on file: say so, and say where it is (the
+      // procedure also finds a product that was put away in the Archive)
+      if (output.status_code === 200) {
+        const sameResult = await db.query(
+          "SELECT product_name, is_archived FROM products WHERE product_id = ?", [productId]);
+        const same = sameResult[0][0];
+        const sameName = same ? same.product_name : name;
+        let message = "\"" + sameName + "\" is already on the material list. Nothing was added.";
+        if (same && same.is_archived) {
+          message = "\"" + sameName + "\" is already on file but was put away in the Archive. " +
+                    "Restore it from the Archive screen instead of adding it again.";
+        }
+        return response.json({ message: message, productId: productId, created: false, archived: Boolean(same && same.is_archived) });
+      }
+
+      // the product is already saved: a failure here keeps the default reorder point and the add still stands
+      if (reorderPoint !== null) {
+        try {
+          await db.query("UPDATE products SET reorder_point = ? WHERE product_id = ?", [reorderPoint, productId]);
+        } catch (error) {
+          console.error("The product was added, but its reorder point was not saved:", error.message);
+        }
+      }
+
+      // the manager is told, in the bell, so the price gets set
+      try {
+        const clerkResult = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [getActorId(request)]);
+        let clerkName = "the inventory clerk";
+        if (clerkResult[0].length > 0 && clerkResult[0][0].full_name) clerkName = clerkResult[0][0].full_name;
+
+        await db.query(
+          "INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id) " +
+          "SELECT role_id, 'New Product', ?, ?, ?, ? FROM roles WHERE role_name = 'Manager'",
+          [("New product added: " + name + " by " + clerkName).slice(0, 150),
+           name + " was added to the material list and has no price yet. Set its price under Stocks Overview; " +
+           "until then the till cannot sell it.",
+           productId, getActorId(request)]);
+      } catch (error) {
+        console.error("The product was added, but telling the manager failed:", error.message);
+      }
+
+      // the inventory scope goes out by itself on this address (scopeOf in live-changes.js)
+      publishChange("notifications", "new product " + productId, request.headers["x-client-id"] || null);
+
       response.json({
-        message: output.message,
-        productId: output.product_id,
-        created: output.status_code === 201
+        message: name + " was added to the material list with no price. The manager has been told to set it.",
+        productId: productId,
+        created: true
       });
     } catch (error) {
       console.error("Create material failed:", error.message);
-      response.status(500).json({ error: "Unable to add the material" });
+      response.status(500).json({ error: "Unable to add the product" });
     }
   });
 

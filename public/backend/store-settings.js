@@ -18,8 +18,23 @@ const DEFAULT_STORE_SETTINGS = {
   bank_name: null,
   bank_account_name: null,
   bank_account_number: null,
-  receipt_layout: null
+  receipt_layout: null,
+  credit_terms: null
 };
+
+// The plain terms printed with a customer's credit account, one term to a
+// line, until the manager writes their own (store_settings.credit_terms). They
+// hold no figures: the credit limit, the due date and the late-payment rate are
+// printed above them from the account itself, so they cannot go out of date.
+const DEFAULT_CREDIT_TERMS = [
+  "The customer agrees to pay every credit purchase in full by its due date, as shown above and on the receipt.",
+  "A purchase that is not paid by its due date is charged the late-payment penalty shown above, for every month or part of a month it stays unpaid.",
+  "The store may put the customer's credit on hold, lower the credit limit or stop further credit purchases when payments are late or the credit limit is exceeded.",
+  "Returns and refunds are accepted only for goods in their original condition, with the receipt, and only as the store allows. A refund on a credit purchase first reduces the balance still owed.",
+  "The customer keeps every receipt and payment slip as proof of purchase and of payment.",
+  "The customer tells the store of any change of address or contact number.",
+  "By signing below, the customer confirms the details above are correct and that the terms have been read and accepted."
+].join("\n");
 
 // What the receipt looks like until the administrator changes it in Receipt
 // Maintenance. Written into store_settings.receipt_layout by the migration,
@@ -109,6 +124,7 @@ function receiptLayoutFrom(raw) {
 
 module.exports = {
   DEFAULT_STORE_SETTINGS: DEFAULT_STORE_SETTINGS,
+  DEFAULT_CREDIT_TERMS: DEFAULT_CREDIT_TERMS,
   DEFAULT_RECEIPT_LAYOUT: DEFAULT_RECEIPT_LAYOUT,
   receiptLayoutFrom: receiptLayoutFrom
 };

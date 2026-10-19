@@ -121,6 +121,19 @@ function delayedReason(d) {
     return '<span class="delay-reason">Delayed: ' + escapeHtml(d.remarks) + '</span>';
 }
 
+// What the driver has to collect on a delivery, as a figure in the list; crimson
+// when money is owed, a plain "Paid" when it is not, "On account" for a credit sale
+// (that is paid at the counter, not at the door)
+function collectCell(d) {
+    if (d.payment_method === 'Credit') {
+        return '<td class="cell-num"><span class="muted">On account</span></td>';
+    }
+    if (Number(d.balance_due) > 0) {
+        return '<td class="cell-num cell-due">' + peso(d.balance_due) + '</td>';
+    }
+    return '<td class="cell-num"><span class="muted">Paid</span></td>';
+}
+
 // Clicking a delivery nobody has taken claims it for this driver first.
 async function openPendingDelivery(deliveryId) {
     const d = findDriverDelivery(deliveryId);
@@ -159,7 +172,7 @@ function buildDriverPanels() {
     createDataPanel({
         key: 'driver-pending',
         tableId: 'dpend-table',
-        columns: 5,
+        columns: 6,
         pagerId: 'dpend-pager',
         idField: 'delivery_id',
         // the Status box and the scheduled From / To dates narrow the rows already loaded
@@ -202,6 +215,7 @@ function buildDriverPanels() {
                 '<td class="cell-name">' + escapeHtml(d.customer_name) + ' ' + ownerTag(d) + '</td>' +
                 '<td>' + escapeHtml(d.delivery_address) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
+                collectCell(d) +
                 '<td>' + statusBadge(d.status) + delayedReason(d) + '</td></tr>';
         }
     });
@@ -243,8 +257,47 @@ async function openDriverPayment(deliveryId, remarks) {
     form.elements.amount.value = Number(d.balance_due).toFixed(2);
     form.elements.paymentMethod.value = 'Cash';
     form.elements.referenceNo.value = '';
+    onDriverPayMethodChange();
+    onDriverPayAmountChange();
 
     showModal('pay-modal');
+}
+
+// A cheque and a bank transfer cannot be traced without their number, so the
+// reference is required for those two; for the rest it is optional.
+function payNeedsReference(method) {
+    return method === 'Cheque' || method === 'Bank Transfer';
+}
+
+function onDriverPayMethodChange() {
+    const form = document.getElementById('pay-form');
+    const hint = document.getElementById('pay-ref-hint');
+    if (!form || !hint) return;
+
+    const needed = payNeedsReference(form.elements.paymentMethod.value);
+    form.elements.referenceNo.required = needed;
+    hint.textContent = needed ? 'required' : 'optional';
+}
+
+// says what is left after the amount typed, before the button is pressed
+function onDriverPayAmountChange() {
+    const form = document.getElementById('pay-form');
+    const note = document.getElementById('pay-left');
+    const d = findDriverDelivery(paymentDeliveryId);
+    if (!form || !note || !d) return;
+
+    const amount = parseFloat(form.elements.amount.value) || 0;
+    const left = Math.round((Number(d.balance_due) - amount) * 100) / 100;
+
+    if (amount <= 0) {
+        note.textContent = '';
+    } else if (left < 0) {
+        note.textContent = 'That is ' + peso(-left) + ' more than the balance. Lower the amount.';
+    } else if (left === 0) {
+        note.textContent = 'This pays the sale in full.';
+    } else {
+        note.textContent = peso(left) + ' will still be owed.';
+    }
 }
 
 // Cancel and the x: back to the delivery's card, with the remarks put back
@@ -273,6 +326,18 @@ async function handleDriverPayment(event) {
     const d = findDriverDelivery(paymentDeliveryId);
     const owedBefore = d ? Number(d.balance_due) : 0;
     const stillOwed = Math.round((owedBefore - amount) * 100) / 100;
+
+    // the server refuses these too; saying it here saves the trip
+    if (stillOwed < 0) {
+        notifyWarning('The sale only owes ' + peso(owedBefore) + '. Lower the amount received.', 'More than is owed');
+        return;
+    }
+    if (payNeedsReference(form.elements.paymentMethod.value) && form.elements.referenceNo.value.trim() === '') {
+        notifyWarning('Write the ' + (form.elements.paymentMethod.value === 'Cheque' ? 'cheque number' : 'transfer reference') +
+            ' in the Reference box.', 'The reference is required');
+        form.elements.referenceNo.focus();
+        return;
+    }
 
     // A part payment still closes the delivery, so it is asked about before anything is sent
     if (stillOwed > 0) {
@@ -312,8 +377,9 @@ async function handleDriverPayment(event) {
             notifyError('The payment was recorded, but the delivery is not yet marked Delivered: ' +
                 statusResult.error, 'Payment recorded');
         } else {
-            let message = result.message + ' The delivery is marked Delivered.';
+            let message = peso(amount) + ' received by ' + form.elements.paymentMethod.value + '. The delivery is marked Delivered.';
             if (stillOwed > 0) message += ' ' + peso(stillOwed) + ' is still owed.';
+            else message += ' The sale is paid in full.';
             notifySuccess(message, 'Delivery #' + paymentDeliveryId + ' delivered');
         }
 
@@ -674,7 +740,7 @@ function buildReportPanels() {
         key: 'driver-report-pay',
         inputs: ['dpay-from', 'dpay-to'],
         tableId: 'drep-pay-table',
-        columns: 5,
+        columns: 6,
         pagerId: 'drep-pay-pager',
         idField: 'payment_id',
         // the Method box narrows the rows already loaded
@@ -689,7 +755,7 @@ function buildReportPanels() {
         },
 
         match: function (p, query) {
-            return prefixMatch([p.customer_name, p.payment_method, p.reference_no], query);
+            return prefixMatch([p.customer_name, p.payment_method, p.reference_no, p.delivery_id ? '#' + p.delivery_id : ''], query);
         },
 
         filter: function (p, filters) {
@@ -700,6 +766,7 @@ function buildReportPanels() {
         renderRow: function (p, index) {
             return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
                 '<td class="cell-id">' + escapeHtml(String(p.payment_date).slice(0, 16)) + '</td>' +
+                '<td class="cell-id">' + (p.delivery_id ? '#' + p.delivery_id : '<span class="muted">None</span>') + '</td>' +
                 '<td class="cell-name">' + escapeHtml(p.customer_name) + '</td>' +
                 '<td>' + escapeHtml(p.payment_method) + '</td>' +
                 '<td>' + (p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>') + '</td>' +

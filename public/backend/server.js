@@ -437,7 +437,7 @@ registerCashierRoutes(app, {
 // runs, cash collected at the door, the driver's summary
 // ==========================================
 registerDeliveryRoutes(app, {
-  db: db, getActorId: getActorId, isDateText: isDateText,
+  db: db, getActorId: getActorId, isDateText: isDateText, publishChange: publishChange,
   DELIVERY_CONTACT_SQL: DELIVERY_CONTACT_SQL, DELIVERY_PHONE_SQL: DELIVERY_PHONE_SQL
 });
 

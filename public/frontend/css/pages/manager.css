@@ -34,6 +34,7 @@
 .policy-text { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 14px; color: var(--steel); line-height: 1.5; }
 .policy-rate { font-size: 22px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
 .policy-words .muted { display: inline; }
+.policy-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
 /* ==========================================================================
    TABS
@@ -186,6 +187,7 @@
 
     .policy-strip { flex-direction: column; align-items: flex-start; }
     .policy-strip .btn { align-self: stretch; }
+    .policy-buttons { flex-direction: column; align-self: stretch; }
 }
 
 /* ==========================================================================

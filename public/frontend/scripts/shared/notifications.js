@@ -25,7 +25,8 @@ const NOTIF_TONE = {
     'Stock Adjustment': 'info',
     'Delivery':         'warning',
     'Credit Request':   'info',
-    'Late Penalty':     'danger'
+    'Late Penalty':     'danger',
+    'New Product':      'warning'
 };
 
 // heading shown over the subject line when an alert is opened
@@ -38,7 +39,8 @@ const NOTIF_ABOUT = {
     'Stock Adjustment': ['Stock adjustment',  'A stock figure was corrected by hand.'],
     'Delivery':         ['Delivery',          'A delivery was created and needs a driver.'],
     'Credit Request':   ['Credit request',    'A cashier asked for a higher credit limit for a customer, and a manager has to decide it.'],
-    'Late Penalty':     ['Late payment',      'A credit sale is another month past its due date still unpaid, and the month\'s late-payment penalty was added to it.']
+    'Late Penalty':     ['Late payment',      'A credit sale is another month past its due date still unpaid, and the month\'s late-payment penalty was added to it.'],
+    'New Product':      ['New product',       'The inventory clerk added a product. It has no price yet, so the till cannot sell it until you set one.']
 };
 
 // ---------- Go to: the screen an alert is about ----------

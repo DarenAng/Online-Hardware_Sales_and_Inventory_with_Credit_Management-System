@@ -210,28 +210,6 @@
 }
 
 /* ==========================================================================
-   THE STOCK BANNER -- first thing on the screen, with the meaning rule on its left
-   ========================================================================== */
-.banner {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 14px; flex-wrap: wrap;
-    padding: 13px 16px;
-    margin-bottom: 16px;
-    border: 1px solid var(--line);
-    border-left: var(--rule) solid var(--steel-soft);
-    border-radius: var(--radius);
-    background: var(--surface);
-    font-size: 15px;
-    color: var(--steel);
-}
-.banner-text { line-height: 1.5; }
-.banner strong { color: var(--ink); font-weight: 600; }
-
-.banner-ok     { border-left-color: var(--ok); }
-.banner-warn   { border-left-color: var(--signal); background: rgba(245, 179, 1, 0.08); }
-.banner-danger { border-left-color: var(--stop);   background: var(--stop-dim); }
-
-/* ==========================================================================
    REORDER POINTS, EDITED IN PLACE
    ========================================================================== */
 /* sized so a row holding one is the height of a row of text */
@@ -323,13 +301,6 @@ td.cell-num .stock-level { margin-left: auto; }
    ON A PHONE -- every typed figure gets a full-width field
    ========================================================================== */
 @media (max-width: 640px) {
-    .banner {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-    }
-    .banner .btn { width: 100%; }
-
     /* in a card-shaped row the field fills the line it sits on */
     .inline-input { width: 100%; max-width: 160px; }
     table tbody td .inline-input { max-width: none; }

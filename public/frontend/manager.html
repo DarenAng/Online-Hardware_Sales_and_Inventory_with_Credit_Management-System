@@ -134,6 +134,13 @@
             </header>
 
             <div class="content-area">
+                <!-- NO-PRICE ALERT -- products the clerk added that have no selling price yet; filled by
+                     loadPriceBanner (manager.js), left empty when every product is priced.
+                     Switched on and off by itself in Access Control (price-alert) -->
+                <div id="price-alert" class="no-print" data-feature="price-alert">
+                    <div id="price-banner"></div>
+                </div>
+
                 <!-- ============================================================
                      REPORTS -- the first screen. The tab bar across the top groups the
                      reports: Sales (the summary for a period, and every transaction),
@@ -959,7 +966,11 @@
                             <span class="policy-words" id="penalty-policy-words">late-payment penalty on the goods still unpaid,
                                 for every month a credit sale is past its 30-day due date.</span>
                         </div>
-                        <button type="button" class="btn btn-sm" onclick="openPenaltyPolicy()">Change the rate</button>
+                        <div class="policy-buttons">
+                            <button type="button" class="btn btn-sm" data-feature="credit-terms-text"
+                                    onclick="openCreditTermsText()">Terms and conditions</button>
+                            <button type="button" class="btn btn-sm" onclick="openPenaltyPolicy()">Change the rate</button>
+                        </div>
                     </div>
 
                     <div class="table-responsive grid-10">
@@ -1366,9 +1377,49 @@
             <!-- the buttons belong to the Account tab's form; the foot hides them
                  on the history tab (showCreditTab) -->
             <div class="modal-foot" id="credit-foot">
+                <button type="button" class="btn btn-ghost" id="credit-print-card" onclick="printCreditCardOpen('card')">Print Customer Card</button>
+                <button type="button" class="btn btn-ghost" id="credit-print-terms" onclick="printCreditCardOpen('terms')">Print Terms and Conditions</button>
                 <button type="button" class="btn btn-ghost" onclick="closeModal('credit-modal')">Cancel</button>
                 <button type="submit" form="credit-form" class="btn btn-success">Save Credit Terms</button>
             </div>
+        </div>
+    </div>
+
+    <!-- THE WORDING OF THE CREDIT TERMS AND CONDITIONS -- printed with every credit account.
+         One term to a line; the figures (limit, days to pay, late-payment rate) are not typed here,
+         they are printed from the account. Emptied and saved, the default wording comes back. -->
+    <div class="modal" id="terms-modal" data-modal-locked data-modal-scroll>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar">TC</div>
+                    <div>
+                        <h3>Credit terms and conditions</h3>
+                        <span class="modal-role" id="terms-sub">Printed with every credit account</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('terms-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <form id="terms-form" onsubmit="saveCreditTermsText(event)">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="terms-text">The terms <span class="label-hint">one to a line, up to 20</span></label>
+                        <textarea id="terms-text" name="text" class="form-control" rows="12" maxlength="12000"
+                                  oninput="countCreditTerms()"></textarea>
+                        <span class="label-hint" id="terms-count"></span>
+                    </div>
+                    <p class="detail-note">The page also prints the store's details, the customer, the credit limit,
+                        the days to pay and the late-payment rate from the account itself, then these terms, then
+                        the signature lines. Do not type those figures here: they would go out of date.</p>
+                </div>
+
+                <div class="modal-foot">
+                    <button type="button" class="btn btn-ghost" onclick="closeModal('terms-modal')">Cancel</button>
+                    <button type="button" class="btn btn-ghost" onclick="useDefaultCreditTerms()">Use the default wording</button>
+                    <button type="submit" class="btn btn-success">Save the Terms</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -1666,6 +1717,7 @@
     <script src="scripts/shared/delivery-schedule.js"></script>
     <script src="scripts/shared/purchase-orders.js"></script>
     <script src="scripts/shared/qr-payments.js"></script>
+    <script src="scripts/shared/credit-terms.js"></script>
     <script src="connections/manager-connection.js"></script>
     <script src="scripts/manager.js"></script>
 </body>

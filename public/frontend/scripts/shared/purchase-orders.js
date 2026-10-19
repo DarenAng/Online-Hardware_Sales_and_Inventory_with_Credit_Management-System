@@ -2025,6 +2025,8 @@ async function printPurchaseOrder(poId) {
 // orders section at the end of css/shared/responsive.css, with css/pages/manager.css
 // and css/pages/inventory-dashboard.css)
 function printPurchaseOrderNow() {
+    // a credit page still on the paper is put back first (only the pages that have one)
+    if (typeof finishCreditPrint === 'function') finishCreditPrint();
     document.body.classList.add('printing-po');
     const done = function () {
         document.body.classList.remove('printing-po');

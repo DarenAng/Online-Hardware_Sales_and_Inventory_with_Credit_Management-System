@@ -332,8 +332,12 @@ function incomeQuery() {
 // the figures are on screen (a table can be loaded without them)
 let incomeSummaryShown = false;
 
+// set when a sale or payment changed since incomeData was read
+let incomeStale = false;
+
 async function fetchIncome() {
     incomeData = await apiGetIncome(incomeQuery());
+    incomeStale = false;
     renderIncomeCashiers();
 }
 
@@ -717,6 +721,8 @@ function addPrintTotals(container, panel) {
 }
 
 function printReport(keys) {
+    // a credit page still on the paper is put back first
+    if (typeof finishCreditPrint === 'function') finishCreditPrint();
     // a print still waiting to be put back (a second press) is finished first,
     // or its Totals table would be added twice
     if (printRestore) printRestore();
@@ -845,7 +851,7 @@ function showSummaryTab(paneId) {
 
 // The one Load Data above fills the figures and both tables for the period.
 async function incomeRows(field) {
-    if (!incomeData) await fetchIncome();
+    if (!incomeData || incomeStale) await fetchIncome();
     return incomeData[field];
 }
 
@@ -858,6 +864,16 @@ const INCOME_GATE = {
 function buildIncomePanels() {
     renderIncome();
 
+    // A payment taken at the counter or by a driver at the door changes what was
+    // collected. The two tables below read again through the usual live path
+    // (PANEL_SCOPES in shared/live-sync.js: quietly when nobody is reading or
+    // typing, otherwise a Refresh note); this only says the held figures are old.
+    if (typeof onLiveChange === 'function') {
+        onLiveChange(['sales', 'credit'], function () {
+            incomeStale = true;
+        });
+    }
+
     createDataPanel({
         key: 'mgr-income-methods',
         remember: false,   // the period and cashier above are not kept, so it opens closed
@@ -868,6 +884,10 @@ function buildIncomePanels() {
         gate: INCOME_GATE,
         load: function () {
             return incomeRows('methods');
+        },
+        // the four figures above follow the table when it is read again
+        onLoaded: function () {
+            if (incomeSummaryShown) renderIncome();
         },
         renderRow: function (m) {
             return '<tr><td class="cell-name">' + escapeHtml(m.payment_method) + '</td>' +
@@ -1433,8 +1453,9 @@ function buildStockPanels() {
             return (filters.status === 'all' || p.stock_status === filters.status) &&
                 stockLevelMatches(p, filters.level);
         },
+        // a product with no price yet is always on the top row, whatever the order, the filter or the page
         sort: function (rows, filters) {
-            return sortStockRows(rows, filters.sort);
+            return unpricedFirst(sortStockRows(rows, filters.sort));
         },
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -1443,7 +1464,7 @@ function buildStockPanels() {
                 '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
                 '<td class="cell-num">' + p.effective_rop + ' ' + modeBadge(p) + '</td>' +
-                '<td class="cell-num">' + peso(p.price) + '</td>' +
+                '<td class="cell-num">' + priceOrBadge(p) + '</td>' +
                 '<td class="cell-num">' + peso(p.stock_value) + '</td>' +
                 '<td>' + statusBadge(p.stock_status) + '</td></tr>';
         }
@@ -1511,6 +1532,67 @@ function findCachedStock(productId) {
     return undefined;
 }
 
+// ==========================================
+// THE NO-PRICE ALERT -- "3 products have no price set", across the manager's screens
+// ==========================================
+// A product the clerk adds has price 0. The strip says how many, and its button
+// opens the Stocks Overview with those products on the top rows. It reads the
+// count again whenever the inventory moves (the live channel), after a price is
+// saved here, and when the screens the administrator switched on are applied.
+async function loadPriceBanner() {
+    const box = document.getElementById('price-banner');
+    if (!box) return;
+
+    // the switches are not known yet, or this one is off: no strip, and no request that would be refused
+    if (heldFeatureKeys === null || !holdsFeature('price-alert')) {
+        box.innerHTML = '';
+        return;
+    }
+
+    let count = 0;
+    try {
+        const result = await apiGetUnpricedCount();
+        count = Number(result.unpriced) || 0;
+    } catch (error) {
+        return;   // the strip stays as it was; the next change reads it again
+    }
+
+    if (count === 0) {
+        box.innerHTML = '';
+        return;
+    }
+
+    const words = count === 1 ? '1 product has no price set' : count + ' products have no price set';
+    let button = '';
+    // the Stocks Overview is where the price is set
+    if (holdsFeature('stock-reports')) {
+        button = '<button type="button" class="btn btn-sm" onclick="openUnpricedProducts()">Set prices</button>';
+    }
+    box.innerHTML = '<div class="banner banner-warn">' +
+        '<span class="banner-text"><strong>Prices needed.</strong> ' + words +
+        '. The till cannot sell ' + (count === 1 ? 'it' : 'them') + ' until ' + (count === 1 ? 'it has' : 'they have') +
+        ' a price.</span>' + button + '</div>';
+}
+
+// The Stocks Overview, read afresh, with nothing in the search or the filters that could hide a
+// product without a price; those products come first on their own (see the table's sort).
+function openUnpricedProducts() {
+    showStockReport();
+
+    const panel = getDataPanel('mgr-stocks');
+    if (!panel) return;
+
+    const boxes = ['stocks-search', 'stocks-status', 'stocks-level'];
+    for (let i = 0; i < boxes.length; i++) {
+        const box = document.getElementById(boxes[i]);
+        if (box) box.value = boxes[i] === 'stocks-search' ? '' : 'all';
+    }
+    panel.filters.status = 'all';
+    panel.filters.level = 'all';
+    panel.query = '';
+    panel.open();
+}
+
 // reloads the two stock tables that are showing, after a save
 async function refreshStockPanels() {
     const keys = ['mgr-reorder', 'mgr-stocks'];
@@ -1526,15 +1608,22 @@ async function changePrice(productId) {
 
     const current = Number(product.price) || 0;
     const unit = product.unit_name ? ' per ' + product.unit_name : '';
+    const noPrice = isUnpriced(product);
+
+    let askMessage = product.product_name + ' sells at ' + peso(current) + unit + '. What should it sell at now? ' +
+                     'The till uses the new figure from the next sale on; nothing already sold changes.';
+    if (noPrice) {
+        askMessage = product.product_name + ' has no price yet, so the till cannot sell it. What should it sell at' +
+                     unit + '? The till uses the figure from the next sale on.';
+    }
 
     const asked = await askInput({
-        title: 'Change the price',
+        title: noPrice ? 'Set the price' : 'Change the price',
         eyebrow: 'Stocks Overview',
-        message: product.product_name + ' sells at ' + peso(current) + unit + '. What should it sell at now? ' +
-                 'The till uses the new figure from the next sale on; nothing already sold changes.',
+        message: askMessage,
         label: 'New price' + unit,
         type: 'number',
-        value: current.toFixed(2),
+        value: noPrice ? '' : current.toFixed(2),
         placeholder: '0.00',
         confirmLabel: 'Next',
         check: function (value) {
@@ -1545,6 +1634,7 @@ async function changePrice(productId) {
             // the typed text is checked, not the float: 19.99 * 100 is 1998.9999999999998
             // (matches digits, then optionally a dot and one or two more digits)
             if (!/^\d+(\.\d{1,2})?$/.test(typed)) return 'Two decimal places at most.';
+            if (noPrice && number === 0) return 'Type the figure it should sell at; zero means no price.';
             if (number === current) return 'That is the price it already sells at.';
             return null;
         }
@@ -1564,9 +1654,11 @@ async function changePrice(productId) {
     }
 
     const yes = await askConfirm(
-        product.product_name + ': ' + peso(current) + ' to ' + peso(next) + unit + change + '.',
+        noPrice
+            ? product.product_name + ' will sell at ' + peso(next) + unit + '.'
+            : product.product_name + ': ' + peso(current) + ' to ' + peso(next) + unit + change + '.',
         {
-            title: up ? 'Raise the price?' : 'Lower the price?',
+            title: noPrice ? 'Set the price?' : (up ? 'Raise the price?' : 'Lower the price?'),
             eyebrow: 'Stocks Overview',
             confirmLabel: 'Set the price',
             // a big jump is more often a slipped decimal than a decision
@@ -1594,6 +1686,7 @@ async function changePrice(productId) {
 
         stocksCache = null;
         await refreshStockPanels();
+        loadPriceBanner();
     } catch (error) {
         notifyOffline();
     }
@@ -2002,6 +2095,106 @@ async function savePenaltyPolicy(event) {
     }
 }
 
+// Print Customer Card (the card, then the terms page) or Print Credit Terms (the terms page),
+// for the account that is open
+function printCreditCardOpen(kind) {
+    if (!creditCustomer) return;
+
+    // The printout is made from the saved account. A limit or rate typed in the
+    // boxes and not saved yet would not be on it, so printing waits for the save.
+    const form = document.getElementById('credit-form');
+    const typedLimit = Number(form.elements.creditLimit.value);
+    const savedLimit = Number(creditCustomer.credit_limit);
+    let typedRate = null;
+    if (form.elements.penaltyRate.value.trim() !== '') typedRate = Number(form.elements.penaltyRate.value);
+    let savedRate = null;
+    if (creditCustomer.penalty_rate_override !== null && creditCustomer.penalty_rate_override !== undefined) {
+        savedRate = Number(creditCustomer.penalty_rate_override);
+    }
+    const rateChanged = typedRate !== savedRate;
+    if (typedLimit !== savedLimit || rateChanged) {
+        notifyWarning('The credit limit or rate in the boxes has not been saved yet, and the printout shows the saved account. ' +
+            'Press Save Credit Terms first, then print.', 'Save the changes first');
+        return;
+    }
+    if (kind === 'card') {
+        printCustomerCard(creditCustomer.customer_id);
+    } else {
+        printCreditTerms(creditCustomer.customer_id);
+    }
+}
+
+// ---------- the wording of the credit terms ----------
+// The terms printed with every credit account. One term to a line. The
+// figures on that page come from the account, not from this text.
+let creditTermsDefault = '';
+
+async function openCreditTermsText() {
+    let answer;
+    try {
+        answer = await apiGetCreditTermsText();
+    } catch (error) {
+        explainReadFailure(error, 'The credit terms could not be read.', 'Nothing to show');
+        return;
+    }
+
+    creditTermsDefault = answer.defaultText;
+    const form = document.getElementById('terms-form');
+    form.elements.text.value = answer.text;
+    document.getElementById('terms-sub').textContent =
+        answer.isDefault ? 'The default wording is in use' : 'Your own wording is in use';
+    countCreditTerms();
+
+    showModal('terms-modal');
+    setTimeout(function () { form.elements.text.focus(); }, 60);
+}
+
+// how many terms the box holds, as it is typed
+function countCreditTerms() {
+    const form = document.getElementById('terms-form');
+    const note = document.getElementById('terms-count');
+    if (!form || !note) return;
+
+    let count = 0;
+    const lines = form.elements.text.value.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim() !== '') count++;
+    }
+    if (count === 0) {
+        note.textContent = 'Nothing typed: saving puts the default wording back.';
+    } else if (count > 20) {
+        note.textContent = count + ' terms. At most 20 can be saved.';
+    } else {
+        note.textContent = count + (count === 1 ? ' term' : ' terms') + '. Each prints with its own number.';
+    }
+}
+
+function useDefaultCreditTerms() {
+    const form = document.getElementById('terms-form');
+    form.elements.text.value = creditTermsDefault;
+    countCreditTerms();
+}
+
+async function saveCreditTermsText(event) {
+    event.preventDefault();
+    const form = event.target;
+
+    try {
+        const response = await apiSaveCreditTermsText(form.elements.text.value);
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not saved');
+            return;
+        }
+
+        notifySuccess(result.message, 'Credit terms saved');
+        closeModal('terms-modal');
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
 async function reloadCreditRequests() {
     const panel = getDataPanel('mgr-requests');
     if (panel) await panel.open();
@@ -2072,11 +2265,16 @@ async function openCreditAccount(customerId) {
 
         previewCreditLimit();
         showCreditTab('account');
+
+        // the two prints, each switched on its own (Access Control)
+        document.getElementById('credit-print-card').hidden = !holdsFeature('customer-card-print');
+        document.getElementById('credit-print-terms').hidden = !holdsFeature('credit-terms-print');
+
         showModal('credit-modal');
 
         creditHistory = null;
     } catch (error) {
-        notifyError('That credit account could not be opened.', 'Nothing to show');
+        explainReadFailure(error, 'That credit account could not be opened.', 'Nothing to show');
     }
 }
 
@@ -2655,7 +2853,10 @@ function buildRecordsPanel() {
             return prefixMatch(values, query);
         },
         sort: function (rows, filters) {
-            return sortRecordRows(rows, filters.sort);
+            const sorted = sortRecordRows(rows, filters.sort);
+            // a product with no price yet is always on the top row
+            if (recordType === 'product') return unpricedFirst(sorted);
+            return sorted;
         },
         renderRow: function (row, index) {
             const columns = RECORD_COLUMNS[recordType];
@@ -2666,7 +2867,9 @@ function buildRecordsPanel() {
                 const value = row[column[0]];
                 const money = MONEY_FIELDS.indexOf(column[0]) !== -1;
                 let shown;
-                if (money) {
+                if (money && recordType === 'product' && column[0] === 'price') {
+                    shown = priceOrBadge(row);
+                } else if (money) {
                     shown = peso(value);
                 } else if (value === null || value === undefined || value === '') {
                     shown = '<span class="muted">Not set</span>';
@@ -2953,6 +3156,8 @@ async function restoreArchive(module, recordId) {
             const panel = getDataPanel(keys[i]);
             if (panel && panel.state === 'ready') await panel.refresh();
         }
+        // a restored product with no price counts again
+        if (module === 'Inventory') loadPriceBanner();
     } catch (error) {
         notifyOffline();
     }
@@ -3197,8 +3402,9 @@ function openStockDetail(productId) {
         '<button type="button" class="btn btn-accent" onclick="openReorderPolicy(' + p.product_id + ')">' +
         'Change Reorder Policy</button></div>';
 
+    const noPrice = isUnpriced(p);
     const pricing = '<div class="detail-grid">' +
-        detailField('Unit Price', peso(p.price) +
+        detailField('Unit Price', priceOrBadge(p) +
             (p.unit_name ? ' <span class="muted">per ' + escapeHtml(p.unit_name) + '</span>' : '')) +
         detailField('Stock Value', peso(p.stock_value)) +
         detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
@@ -3206,11 +3412,14 @@ function openStockDetail(productId) {
         detailField('Product Status', statusBadge(p.status)) +
         detailField('Last Updated', escapeHtml(p.last_updated || 'Never')) +
         '</div>' +
-        '<p class="detail-note">A new price reaches the till from the next sale on. Sales already ' +
-        'rung up keep the price they were sold at.</p>' +
+        (noPrice
+            ? '<p class="detail-note detail-warn">This product has no price yet, so the till cannot sell it. ' +
+              'The price reaches the till from the next sale on.</p>'
+            : '<p class="detail-note">A new price reaches the till from the next sale on. Sales already ' +
+              'rung up keep the price they were sold at.</p>') +
         '<div class="detail-actions">' +
         '<button type="button" class="btn btn-accent" onclick="changePrice(' + p.product_id + ')">' +
-        'Change Price</button></div>';
+        (noPrice ? 'Set Price' : 'Change Price') + '</button></div>';
 
     const supplier = '<div class="detail-grid">' +
         detailField('Supplier', escapeHtml(p.supplier_name || 'No supplier')) +
@@ -3218,13 +3427,17 @@ function openStockDetail(productId) {
         detailField('Contact Number', escapeHtml(p.contact_number || 'Not set')) +
         '</div>';
 
+    const pages = [
+        { label: 'Stock', body: stock },
+        { label: 'Reorder Point', body: reorder },
+        { label: 'Pricing', body: pricing },
+        { label: 'Supplier', body: supplier }
+    ];
+    // a product with no price opens on the page where it is set
+    if (noPrice) pages.unshift(pages.splice(2, 1)[0]);
+
     openDetailModal(p.product_name, (p.category_name || 'Uncategorised') + ' · ' + p.stock_status,
-        initialsOf(p.product_name), [
-            { label: 'Stock', body: stock },
-            { label: 'Reorder Point', body: reorder },
-            { label: 'Pricing', body: pricing },
-            { label: 'Supplier', body: supplier }
-        ]);
+        initialsOf(p.product_name), pages);
 }
 
 function openDeliveryDetail(deliveryId) {
@@ -3873,7 +4086,10 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
             home: function () {
                 showReports();
             },
-            onApply: syncViewNavs
+            onApply: function () {
+                syncViewNavs();
+                loadPriceBanner();
+            }
         });
 
         // Go to, on an opened alert: the screen that alert is about
@@ -3910,6 +4126,14 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
                 },
                 key: 'mgr-stock-moves'
             },
+            // a product the clerk added: the Stocks Overview, read afresh with the search and filters cleared
+            // (openUnpricedProducts), where products with no price are on the top rows
+            'New Product':      {
+                label: 'Stocks Overview', panelId: 'panel-stocks',
+                open: function () {
+                    openUnpricedProducts();
+                }
+            },
             'Delivery':         {
                 label: 'Deliveries', panelId: 'panel-deliveries',
                 open: function () {
@@ -3942,6 +4166,10 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
 
         document.addEventListener('datapanel:change', syncExportButtons);
         syncExportButtons();
+
+        // the no-price strip follows products added, priced or put away by anybody (live-sync.js)
+        onLiveChange(['inventory', 'archives'], loadPriceBanner);
+        loadPriceBanner();
 
         showReports();
         unfoldSidebarAtOpenScreen();

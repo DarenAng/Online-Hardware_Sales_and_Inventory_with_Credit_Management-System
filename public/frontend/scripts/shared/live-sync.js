@@ -37,6 +37,8 @@ const PANEL_SCOPES = {
     'mgr-unpaid':         ['sales', 'credit'],
     'mgr-stock-moves':    ['inventory', 'returns'],
     'mgr-loyal':          ['sales', 'credit'],
+    'mgr-income-methods':  ['sales', 'credit'],
+    'mgr-income-products': ['sales'],
     'mgr-staff':          ['staff'],
 
     // inventory clerk
@@ -55,7 +57,9 @@ const PANEL_SCOPES = {
     'cash-summary':       ['sales', 'returns'],
 
     // delivery personnel
-    'driver-pending':     ['deliveries', 'sales']
+    'driver-pending':     ['deliveries', 'sales'],
+    'driver-report':      ['deliveries', 'sales'],
+    'driver-report-pay':  ['sales', 'deliveries']
 };
 
 let liveSource = null;

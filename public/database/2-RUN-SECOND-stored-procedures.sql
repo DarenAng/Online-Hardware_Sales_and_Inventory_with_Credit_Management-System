@@ -818,6 +818,17 @@ PROC_BODY: BEGIN
             SET v_unit_price = IFNULL(v_pack_price, ROUND(v_unit_price * v_units_per, 2));
         END IF;
 
+        -- a product the manager has not priced yet (or a size that works out to
+        -- nothing) cannot be sold: the till greys it out and the route checks too,
+        -- but the price is read here, inside the sale's own transaction
+        IF v_unit_price IS NULL OR v_unit_price <= 0 THEN
+            ROLLBACK;
+            SET p_status_code = 400;
+            SET p_message = CONCAT(v_product_name, ' has no price yet, so it cannot be sold. Ask the manager to set the price.');
+            DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
+            LEAVE PROC_BODY;
+        END IF;
+
         -- every line naming this material is added up in the product's own
         -- unit, so one material on two lines cannot be sold twice against
         -- the same shelf; the tally is checked once the lines are all read

@@ -1417,6 +1417,29 @@ html:has(.modal.open) { overflow: hidden; }
     background: var(--signal-dim);
     color: var(--signal-ink);
 }
+/* what a delivery still has to collect, at the top of its Payment part:
+   crimson when money is owed, green when nothing is (the words say it too) */
+.collect-banner {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
+    margin: 0 0 12px;
+    padding: 11px 13px;
+    border-left: var(--rule) solid var(--stop);
+    background: var(--stop-dim);
+    border-radius: 0 var(--radius) var(--radius) 0;
+}
+.collect-banner.is-paid { border-left-color: var(--ok); background: var(--ok-dim); }
+.collect-banner.is-account { border-left-color: var(--signal); background: var(--signal-dim); }
+.collect-banner.is-account .collect-figure { color: var(--signal-ink); font-size: 17px; }
+.collect-label { font-size: 13.5px; font-weight: 600; color: var(--steel); }
+.collect-figure {
+    font-family: var(--font-figure);
+    font-size: 21px;
+    font-variant-numeric: tabular-nums;
+    color: var(--stop);
+}
+.collect-banner.is-paid .collect-figure { color: var(--ok-ink); font-size: 17px; }
+.collect-note { flex-basis: 100%; font-size: 13.5px; color: var(--steel); line-height: 1.45; }
+
 .detail-empty {
     text-align: center;
     padding: 34px 12px;
@@ -2471,6 +2494,72 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
 }
 
 /* ==========================================================================
+   THE PRINTED CREDIT TERMS AND CUSTOMER CARD (shared/credit-terms.js)
+   Built into #credit-print only while a page is printing; on A4 it is the
+   only thing on the paper. Plain black on white, a page to each sheet.
+   ========================================================================== */
+.credit-print { display: none; }
+
+@media print {
+    body.printing-credit > *:not(#credit-print) { display: none !important; }
+    body.printing-credit { background: #fff; }
+    body.printing-credit .credit-print { display: block; }
+
+    .credit-print {
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 12px;
+        line-height: 1.5;
+        color: #000;
+    }
+    .cp-page { break-after: page; page-break-after: always; }
+    .cp-page:last-child { break-after: auto; page-break-after: auto; }
+
+    .cp-head { text-align: center; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid #000; }
+    .cp-head h1 { margin: 0 0 2px; font-size: 22px; letter-spacing: 0.02em; }
+    .cp-head p { margin: 0; font-size: 11.5px; }
+
+    .credit-print h2 { margin: 6px 0 14px; font-size: 17px; text-align: center; text-transform: uppercase; letter-spacing: 0.06em; }
+    .credit-print h3 {
+        margin: 16px 0 6px;
+        padding-bottom: 3px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        border-bottom: 1px solid #000;
+    }
+
+    /* the printout rules for tables above (grey heads, small type) are for reports;
+       these two lists of facts are plain, so they are set again here */
+    .cp-facts { width: 100%; border-collapse: collapse; }
+    .cp-facts tr, .cp-facts th, .cp-facts td {
+        padding: 4px 8px 4px 0;
+        vertical-align: top;
+        text-align: left;
+        border: none;
+        background: none !important;
+        color: #000 !important;
+        font-family: inherit;
+        font-size: 12px;
+    }
+    .cp-facts th { width: 34%; font-weight: 700; }
+    .cp-facts td.cell-num { text-align: right; font-family: inherit; font-size: 12px; }
+
+    .cp-terms { margin: 0; padding-left: 20px; }
+    .cp-terms li { margin: 0 0 7px; padding-left: 4px; break-inside: avoid; page-break-inside: avoid; }
+
+    .cp-sign { display: flex; gap: 40px; margin-top: 46px; break-inside: avoid; page-break-inside: avoid; }
+    .cp-sign-box { flex: 1; }
+    .cp-sign-box p { margin: 3px 0 0; font-size: 11px; text-align: center; }
+    /* the same height on both sides (room for two lines), so the Date lines sit level */
+    .cp-sign-box .cp-sign-label { min-height: 28px; }
+    .cp-sign-box .cp-sign-name { min-height: 16px; font-weight: 700; font-size: 12px; }
+    .cp-sign-line { height: 34px; border-bottom: 1px solid #000; }
+    .cp-sign-line.cp-date-line { height: 26px; margin-top: 14px; }
+
+    .cp-foot { margin: 24px 0 0; font-size: 10.5px; color: #333; text-align: right; }
+}
+
+/* ==========================================================================
    CREDIT -- purchase history and payment history side by side
    ========================================================================== */
 .history-head {
@@ -3199,4 +3288,35 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
     -webkit-text-fill-color: var(--ink);
     caret-color: var(--ink);
     filter: none;
+}
+
+/* ==========================================================================
+   THE BANNER -- a strip above the screens (the clerk's stock warning, the manager's no-price alert), with the meaning rule on its left
+   ========================================================================== */
+.banner {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 14px; flex-wrap: wrap;
+    padding: 13px 16px;
+    margin-bottom: 16px;
+    border: 1px solid var(--line);
+    border-left: var(--rule) solid var(--steel-soft);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-size: 15px;
+    color: var(--steel);
+}
+.banner-text { line-height: 1.5; }
+.banner strong { color: var(--ink); font-weight: 600; }
+
+.banner-ok     { border-left-color: var(--ok); }
+.banner-warn   { border-left-color: var(--signal); background: rgba(245, 179, 1, 0.08); }
+.banner-danger { border-left-color: var(--stop);   background: var(--stop-dim); }
+
+@media (max-width: 640px) {
+    .banner {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    .banner .btn { width: 100%; }
 }

@@ -36,6 +36,11 @@ function apiGetStocks() {
     return getJson('/api/stocks');
 }
 
+// GET /api/stocks/unpriced -- { unpriced: how many products have no price set }
+function apiGetUnpricedCount() {
+    return getJson('/api/stocks/unpriced');
+}
+
 // PUT /api/stocks/:id/price -- the selling price
 function apiSavePrice(productId, price) {
     return sendJson('/api/stocks/' + productId + '/price', 'PUT', { price: price });

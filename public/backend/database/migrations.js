@@ -576,6 +576,80 @@ async function migrateDeliveryCreatedDate() {
   }
 }
 
+// A delivery's address is now asked for in parts at the counter: house and
+// street, barangay, town or city, province and a landmark. They are kept in
+// their own columns; deliveries.delivery_address still holds the whole address
+// as one line (built when the delivery is made), so the driver's card, the
+// schedule and the receipt read it as before, and a delivery made before this
+// has only that line and shows it unchanged.
+async function migrateDeliveryAddressParts() {
+  // each column is added on its own, whatever else the table has, and none names
+  // another column to sit after, so an older table cannot make one of them fail
+  const wanted = [
+    ["address_street", "VARCHAR(150) NULL"],
+    ["address_barangay", "VARCHAR(100) NULL"],
+    ["address_city", "VARCHAR(100) NULL"],
+    ["address_province", "VARCHAR(100) NULL"],
+    ["address_landmark", "VARCHAR(150) NULL"]
+  ];
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'deliveries'",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.indexOf("delivery_id") === -1) return;     // no deliveries table yet
+
+  let added = 0;
+  for (let i = 0; i < wanted.length; i++) {
+    if (names.indexOf(wanted[i][0]) === -1) {
+      await db.query("ALTER TABLE deliveries ADD COLUMN " + wanted[i][0] + " " + wanted[i][1]);
+      added += 1;
+    }
+  }
+  if (added > 0) {
+    console.log("Added the delivery address parts (deliveries.address_street, address_barangay, " +
+      "address_city, address_province, address_landmark).");
+  }
+}
+
+// The credit terms and conditions printed with a customer's credit account: the
+// manager's own wording. Empty (NULL) means the default text in store-settings.js.
+async function migrateCreditTerms() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.length === 0) return;                         // no store_settings table yet
+  if (names.indexOf("credit_terms") !== -1) return;       // already added
+
+  // no AFTER: the column goes last, whatever an older table has or lacks
+  await db.query("ALTER TABLE store_settings ADD COLUMN credit_terms TEXT NULL");
+  console.log("Added store_settings.credit_terms for the printed credit terms and conditions.");
+}
+
+// A product added by the inventory clerk tells the manager, so the alert has a
+// kind of its own: 'New Product'. The kind is a word in notifications.notif_type,
+// so the column is widened (every kind it already has is kept).
+async function migrateNewProductAlert() {
+  const typeResult = await db.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'notif_type'",
+    [DB_NAME]
+  );
+  const found = typeResult[0];
+  if (found.length === 0) return;                                  // no notifications table yet
+  const current = String(found[0].COLUMN_TYPE);
+  if (current.indexOf("New Product") !== -1) return;               // already added
+
+  // "enum('Low Stock','Out of Stock')" becomes "enum('Low Stock','Out of Stock','New Product')"
+  const wider = current.replace(/\)$/, ",'New Product')");
+  await db.query("ALTER TABLE notifications MODIFY COLUMN notif_type " + wider + " NOT NULL");
+  console.log("Added the New Product kind of alert (notifications.notif_type).");
+}
+
 // The Lift Sign-in Hold screen became Account Management, so a switch the
 // administrator already gave a role is stored under the new key. A role that
 // somehow has both rows keeps the new one (role_id + feature_key is unique,
@@ -1127,7 +1201,8 @@ const PROCEDURES_FILE = path.join(__dirname, "..", "..", "database", "2-RUN-SECO
 // payment" there is the reference a payment may not borrow). The business
 // rules carry a word of their own: "Discount cannot be negative" in
 // sp_create_sale_transaction (it also holds COD to the credit hold and
-// limit), "Add and Remove need a quantity" in sp_adjust_stock, and "A reason
+// limit; "has no price yet" is the check that refuses a line priced at 0),
+// "Add and Remove need a quantity" in sp_adjust_stock, and "A reason
 // is required for every report" in sp_file_return_report (a one-word reason
 // is accepted; the old one asked for ten characters).
 // purchase_order_ordered_items and "received_at = NOW()" in
@@ -1152,6 +1227,7 @@ async function routinesAreOld() {
     ["sp_record_credit_payment", "kept for the down payment"],
     ["sp_create_sale_transaction", "p_qr_payment_id"],
     ["sp_create_sale_transaction", "Discount cannot be negative"],
+    ["sp_create_sale_transaction", "has no price yet"],
     ["sp_adjust_stock", "Add and Remove need a quantity"],
     ["sp_resolve_return_report", "AND status = 'Open'"],
     ["sp_resolve_return_report", "v_type = 'Missing'"],
@@ -1300,6 +1376,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateLatePenalties();
   await migrateRefundedAmount();
   await migrateCashierRemarks();
+  await migrateDeliveryAddressParts();
   await migrateDeliveryCreatedDate();
   await migrateAccountManagementKey();
   await migrateProprietorName();
@@ -1307,6 +1384,8 @@ async function migrateDatabase(runSqlScript) {
   await migrateMissingReports();
   await migrateBankDetails();
   await migrateReceiptLayout();
+  await migrateCreditTerms();
+  await migrateNewProductAlert();
   await migrateRemoveDeliveryAreas();
   await migratePasswordResets();
   await migrateOrderReference();

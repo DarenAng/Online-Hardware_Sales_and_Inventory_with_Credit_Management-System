@@ -113,6 +113,36 @@ function deliveryStepper(d) {
         '</div>';
 }
 
+// How much is to be collected on a delivery, said first in the Payment part of
+// its card: a figure when money is owed, "Paid in full" when it is not. Every
+// list that feeds the card sends balance_due; without it nothing is drawn.
+function collectBanner(d) {
+    if (d.balance_due === undefined || d.balance_due === null) return '';
+
+    // a sale on account is paid at the counter, so the driver collects nothing
+    if (d.payment_method === 'Credit') {
+        let owed = '';
+        if (Number(d.balance_due) > 0) owed = peso(d.balance_due) + ' is owed on account. ';
+        return '<div class="collect-banner is-account"><span class="collect-label">Payment</span>' +
+            '<strong class="collect-figure">On account (due in 30 days)</strong>' +
+            '<span class="collect-note">' + owed + 'Nothing is collected at the door; it is paid at the counter.</span></div>';
+    }
+
+    if (Number(d.balance_due) > 0) {
+        // what the sale comes to now, with any penalty and refund in it
+        let total = d.final_amount;
+        if (d.amount_due !== undefined && d.amount_due !== null) total = d.amount_due;
+        let note = 'Of ' + peso(total) + ', ' + peso(d.amount_paid) + ' is paid already.';
+        if (d.status === 'Delivered') note = 'Delivered, but ' + peso(d.balance_due) + ' is still to be collected. ' + note;
+        return '<div class="collect-banner is-owed"><span class="collect-label">To collect</span>' +
+            '<strong class="collect-figure">' + peso(d.balance_due) + '</strong>' +
+            '<span class="collect-note">' + escapeHtml(note) + '</span></div>';
+    }
+    return '<div class="collect-banner is-paid"><span class="collect-label">Payment</span>' +
+        '<strong class="collect-figure">Paid in full</strong>' +
+        '<span class="collect-note">Nothing to collect on this delivery.</span></div>';
+}
+
 // One delivery popup for every screen. canUpdate adds the status change with
 // a note (not the cashier); canArchive adds putting a closed delivery away
 // (manager only). The driver sees everything on one page; the other roles
@@ -161,7 +191,7 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
     const pages = [
         { label: 'Route', body: route },
         itemsPage,
-        { label: 'Payment', body: '<div class="detail-grid">' + money + '</div>' }
+        { label: 'Payment', body: collectBanner(d) + '<div class="detail-grid">' + money + '</div>' }
     ];
 
     let archiveBlock;
@@ -199,8 +229,10 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
             const s = next[i];
             // The driver collects what is owed on their own delivery before it is closed,
             // so Delivered becomes Proceed to Payment. Nothing owed: plain Delivered.
+            // (the Collect Payment at the Door screen, switched on and off for the role)
             const mine = typeof isMine === 'function' && isMine(d);
-            if (s === 'Delivered' && isDriver && mine && Number(d.balance_due) > 0) {
+            const collectOn = typeof holdsFeature !== 'function' || holdsFeature('delivery-collect');
+            if (s === 'Delivered' && isDriver && mine && collectOn && d.payment_method !== 'Credit' && Number(d.balance_due) > 0) {
                 footActions += '<button type="button" class="btn btn-success" ' +
                     'onclick="proceedToPayment(' + d.delivery_id + ')">Proceed to Payment</button>';
             } else {
@@ -229,7 +261,7 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
             '<div class="drec-layout">' +
                 '<div class="drec-side">' +
                     '<h4 class="detail-subhead">Route</h4>' + route +
-                    '<h4 class="detail-subhead">Payment</h4><div class="detail-grid">' + money + '</div>' +
+                    '<h4 class="detail-subhead">Payment</h4>' + collectBanner(d) + '<div class="detail-grid">' + money + '</div>' +
                 '</div>' +
                 '<div class="drec-main">' +
                     '<h4 class="detail-subhead" id="drec-items-title">Items</h4>' +

@@ -21,6 +21,11 @@ function apiGetStockAdjustments() {
     return getJson('/api/inventory/adjustments');
 }
 
+// POST /api/materials -- add a new product; it starts with no price (the manager sets that)
+function apiAddProduct(data) {
+    return sendJson('/api/materials', 'POST', data);
+}
+
 // POST /api/inventory/adjust -- correct a stock figure
 function apiAdjustStock(data) {
     return sendJson('/api/inventory/adjust', 'POST', data);

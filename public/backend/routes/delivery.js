@@ -7,7 +7,7 @@
 //   GET  /api/deliveries/:id/items       what is being delivered
 //   GET  /api/delivery/list              the driver's own deliveries
 //   POST /api/delivery/:id/claim         a driver takes an unclaimed delivery
-//   POST /api/delivery/:id/payment       cash collected at the customer's door
+//   POST /api/delivery/:id/payment       money collected at the customer's door (any method)
 //   GET  /api/delivery/summary           the driver's report for a date range
 //
 // server.js passes in the database and its helpers ("deps"). The access
@@ -19,6 +19,7 @@ const deliveryProcedures = require("../database/procedures/delivery-procedures")
 function registerDeliveryRoutes(app, deps) {
   const db = deps.db;
   const getActorId = deps.getActorId;
+  const publishChange = deps.publishChange;
   const isDateText = deps.isDateText;
   const DELIVERY_CONTACT_SQL = deps.DELIVERY_CONTACT_SQL;
   const DELIVERY_PHONE_SQL = deps.DELIVERY_PHONE_SQL;
@@ -48,11 +49,12 @@ function registerDeliveryRoutes(app, deps) {
       const result = await db.query(
         // delivery_staff_id: a driver's card offers status buttons only on their own delivery
         "SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks, d.cashier_remarks, " +
+        "d.address_street, d.address_barangay, d.address_city, d.address_province, d.address_landmark, " +
         "d.scheduled_date, d.created_date, d.delivered_at, d.updated_at, d.delivery_staff_id, " +
         DELIVERY_CONTACT_SQL + " AS customer_name, " +
         DELIVERY_PHONE_SQL + " AS customer_phone, " +
         "COALESCE(st.full_name, 'Unassigned') AS driver_name, " +
-        "s.final_amount, s.amount_paid, s.payment_method, s.payment_status, " +
+        "s.final_amount, s.amount_due, s.amount_paid, s.payment_method, s.payment_status, " +
         "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
         FULFILMENT_SQL + " AS fulfilment_state " +
         "FROM deliveries d " +
@@ -118,12 +120,13 @@ function registerDeliveryRoutes(app, deps) {
     try {
       const result = await db.query(
         "SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks, d.cashier_remarks, " +
+        "d.address_street, d.address_barangay, d.address_city, d.address_province, d.address_landmark, " +
         "d.scheduled_date, d.created_date, d.delivered_at, d.updated_at, d.delivery_staff_id, " +
         DELIVERY_CONTACT_SQL + " AS customer_name, " +
         DELIVERY_PHONE_SQL + " AS customer_phone, " +
         "COALESCE(st.full_name, 'Unassigned') AS driver_name, " +
-        "s.final_amount, s.amount_paid, s.payment_method, s.payment_status, " +
-        "(s.amount_due - s.amount_paid) AS balance_due " +
+        "s.final_amount, s.amount_due, s.amount_paid, s.payment_method, s.payment_status, " +
+        "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due " +
         "FROM deliveries d " +
         "JOIN sales s ON s.sale_id = d.sale_id " +
         "LEFT JOIN customers c ON c.customer_id = s.customer_id " +
@@ -177,19 +180,56 @@ function registerDeliveryRoutes(app, deps) {
     }
   });
 
-  // cash on delivery collected at the door
-  app.post("/api/delivery/:deliveryId/payment", async function (request, response) {
-    const amount = request.body.amount;
-    const paymentMethod = request.body.paymentMethod;
-    const referenceNo = request.body.referenceNo;
+  // Money collected at the customer's door, cash or not. The payment goes on the
+  // sale itself (sp_record_credit_payment), so the cashier's lists, the receipt
+  // and the manager's reports all read it from there. Then the cashier and the
+  // manager are told, and every screen watching sales, credit and deliveries
+  // reads again.
+  const PAYMENT_METHODS = ["Cash", "GCash", "PayMaya", "Cheque", "Bank Transfer"];
+  const REFERENCE_NEEDED = ["Cheque", "Bank Transfer"];
 
-    if (!amount || !paymentMethod) {
+  // "\u20B1" is the peso sign, written as an escape to keep this file plain ASCII
+  function pesoText(value) {
+    return "\u20B1" + Number(value || 0).toLocaleString("en-PH",
+      { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  app.post("/api/delivery/:deliveryId/payment", async function (request, response) {
+    const paymentMethod = request.body.paymentMethod;
+    let referenceNo = "";
+    if (typeof request.body.referenceNo === "string") {
+      referenceNo = request.body.referenceNo.trim().replace(/\s+/g, " ");
+    }
+
+    if (!request.body.amount || !paymentMethod) {
       return response.status(400).json({ error: "Amount and payment method are required" });
+    }
+    // rounded to the centavo; it has to be more than nothing
+    const amount = Math.round(Number(request.body.amount) * 100) / 100;
+    if (!(amount > 0)) {
+      return response.status(400).json({ error: "The amount received has to be more than zero." });
+    }
+    if (!PAYMENT_METHODS.includes(paymentMethod)) {
+      return response.status(400).json({ error: "Pick how the customer paid: " + PAYMENT_METHODS.join(", ") + "." });
+    }
+    if (REFERENCE_NEEDED.includes(paymentMethod) && referenceNo === "") {
+      let whichNumber = "transfer reference";
+      if (paymentMethod === "Cheque") {
+        whichNumber = "cheque number";
+      }
+      return response.status(400).json({
+        error: "A " + paymentMethod.toLowerCase() + " payment needs its reference: the " + whichNumber +
+               ". It is how the money is traced if it does not arrive."
+      });
+    }
+    if (referenceNo.length > 60) {
+      return response.status(400).json({ error: "A reference is at most 60 characters." });
     }
 
     try {
       const deliveryResult = await db.query(
-        "SELECT sale_id, delivery_staff_id FROM deliveries WHERE delivery_id = ? AND is_archived = FALSE",
+        "SELECT d.sale_id, d.delivery_staff_id, s.payment_method FROM deliveries d " +
+        "JOIN sales s ON s.sale_id = d.sale_id WHERE d.delivery_id = ? AND d.is_archived = FALSE",
         [request.params.deliveryId]
       );
       const rows = deliveryResult[0];
@@ -201,16 +241,78 @@ function registerDeliveryRoutes(app, deps) {
       if (Number(rows[0].delivery_staff_id) !== Number(request.actor.staffId)) {
         return response.status(403).json({ error: "Take this delivery before collecting on it." });
       }
+      // a sale on account is paid at the counter by its due date, not at the door
+      if (rows[0].payment_method !== "COD") {
+        return response.status(409).json({
+          error: "This sale is on account, so it is paid at the counter, not at the door."
+        });
+      }
 
+      const saleId = rows[0].sale_id;
+      // the procedure refuses more than the sale still owes, and a sale already paid
       const output = await deliveryProcedures.recordCreditPayment(
-        [rows[0].sale_id, amount, paymentMethod, referenceNo || null, getActorId(request), null]
+        [saleId, amount, paymentMethod, referenceNo || null, getActorId(request), null]
       );
 
       if (output.status_code !== 200) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      response.json({ message: output.message });
+      // From here the money is recorded. Whatever goes wrong below (reading the
+      // sale again, writing the alerts) is only logged: the driver is told the
+      // payment was recorded, so it is never taken a second time.
+      const deliveryId = Number(request.params.deliveryId);
+      let sale = null;
+      try {
+        // what the sale owes now, for the answer and for the notification
+        const saleResult = await db.query(
+          "SELECT s.payment_status, s.amount_paid, GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
+          "(SELECT full_name FROM staff WHERE staff_id = ?) AS driver_name " +
+          "FROM sales s WHERE s.sale_id = ?",
+          [request.actor.staffId, saleId]
+        );
+        sale = saleResult[0][0];
+
+        let driverName = "the driver";
+        if (sale && sale.driver_name) driverName = sale.driver_name;
+
+        const title = "Payment collected on delivery #" + deliveryId + ": " + pesoText(amount) +
+                      " by " + driverName;
+        let message = paymentMethod + " payment of " + pesoText(amount) +
+                      " on OR-" + String(saleId).padStart(6, "0") + ".";
+        if (referenceNo !== "") {
+          message += " Reference " + referenceNo + ".";
+        }
+        if (sale && Number(sale.balance_due) > 0) {
+          message += " " + pesoText(sale.balance_due) + " is still owed.";
+        } else if (sale) {
+          message += " The sale is now paid in full.";
+        }
+
+        // the cashier and the manager are told, like the other alerts
+        await db.query(
+          "INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id) " +
+          "SELECT role_id, 'Delivery', ?, ?, ? FROM roles WHERE role_name IN ('Cashier', 'Manager')",
+          [title.slice(0, 150), message, getActorId(request)]
+        );
+      } catch (error) {
+        console.error("The delivery payment was recorded, but telling the cashier failed:", error.message);
+      }
+
+      // The deliveries scope goes out by itself on this address (scopeOf in
+      // live-changes.js). The sale's figures, the credit lists and the bell moved too.
+      const origin = request.headers["x-client-id"] || null;
+      publishChange("sales", "delivery payment " + deliveryId, origin);
+      publishChange("credit", "delivery payment " + deliveryId, origin);
+      publishChange("notifications", "delivery payment " + deliveryId, origin);
+
+      response.json({
+        message: output.message,
+        amount: amount,
+        paymentStatus: sale ? sale.payment_status : null,
+        amountPaid: sale ? sale.amount_paid : null,
+        balanceDue: sale ? sale.balance_due : null
+      });
     } catch (error) {
       console.error("Delivery payment failed:", error.message);
       response.status(500).json({ error: "Unable to record the payment" });
@@ -233,10 +335,11 @@ function registerDeliveryRoutes(app, deps) {
     try {
       const deliveriesResult = await db.query(
         "SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks, d.cashier_remarks, " +
+        "d.address_street, d.address_barangay, d.address_city, d.address_province, d.address_landmark, " +
         "d.scheduled_date, d.created_date, d.delivered_at, " +
         DELIVERY_CONTACT_SQL + " AS customer_name, " +
-        "s.final_amount, s.amount_paid, s.payment_method, s.payment_status, " +
-        "(s.amount_due - s.amount_paid) AS balance_due " +
+        "s.final_amount, s.amount_due, s.amount_paid, s.payment_method, s.payment_status, " +
+        "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due " +
         "FROM deliveries d " +
         "JOIN sales s ON s.sale_id = d.sale_id " +
         "LEFT JOIN customers c ON c.customer_id = s.customer_id " +
@@ -251,6 +354,7 @@ function registerDeliveryRoutes(app, deps) {
       const paymentsResult = await db.query(
         "SELECT cp.payment_id, cp.sale_id, cp.amount, cp.payment_method, " +
         "cp.reference_no, cp.payment_date, " +
+        "(SELECT MIN(d2.delivery_id) FROM deliveries d2 WHERE d2.sale_id = cp.sale_id AND d2.is_archived = FALSE) AS delivery_id, " +
         "COALESCE(NULLIF(TRIM(CONCAT(c.first_name, ' ', c.last_name)), ''), 'Walk-in') AS customer_name " +
         "FROM credit_payments cp " +
         "LEFT JOIN customers c ON c.customer_id = cp.customer_id " +
@@ -264,7 +368,7 @@ function registerDeliveryRoutes(app, deps) {
       // money owed is counted only against the driver actually carrying the order
       const openResult = await db.query(
         "SELECT COUNT(*) AS cod_count, " +
-        "COALESCE(SUM(s.amount_due - s.amount_paid), 0) AS cod_due " +
+        "COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS cod_due " +
         "FROM deliveries d " +
         "JOIN sales s ON s.sale_id = d.sale_id " +
         "WHERE d.is_archived = FALSE " +

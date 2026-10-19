@@ -107,6 +107,8 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/reports\/activity$/,              [MANAGER]],
   ["GET",   /^\/api\/reports\/income$/,                [MANAGER]],
   ["GET",   /^\/api\/stocks$/,                         [MANAGER]],
+  // how many products have no price yet (the alert across the manager's screens)
+  ["GET",   /^\/api\/stocks\/unpriced$/,               [MANAGER]],
   ["PUT",   /^\/api\/stocks\/\d+\/reorder-policy$/,    [MANAGER]],
   // the selling price is the manager's to set; the clerk counts, the manager prices
   ["PUT",   /^\/api\/stocks\/\d+\/price$/,             [MANAGER]],
@@ -181,7 +183,8 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/supplier-order\/[A-Za-z0-9_-]{43}\/pdf$/,     PUBLIC],
   ["POST",  /^\/api\/supplier-order\/[A-Za-z0-9_-]{43}\/respond$/, PUBLIC],
 
-  // opening a record for a material the shop has never stocked
+  // the clerk's Add New Product: a record for a material the shop has never stocked
+  // (no price; the manager sets it)
   ["POST",  /^\/api\/materials$/,                      [CLERK]],
 
   // --- returns, damage and refunds ---
@@ -203,6 +206,11 @@ const ACCESS_RULES = [
   // the late-payment policy: everyone who works with credit records reads it, the manager sets it
   ["GET",   /^\/api\/credit\/policy$/,                 [MANAGER, CASHIER]],
   ["PUT",   /^\/api\/credit\/policy$/,                 [MANAGER]],
+  // the printed credit terms and customer card; the manager writes the wording
+  ["GET",   /^\/api\/credit\/terms\/\d+$/,              [MANAGER, CASHIER]],
+  ["GET",   /^\/api\/credit\/card\/\d+$/,               [MANAGER, CASHIER]],
+  ["GET",   /^\/api\/credit\/terms-text$/,              [MANAGER]],
+  ["PUT",   /^\/api\/credit\/terms-text$/,              [MANAGER]],
   ["GET",   /^\/api\/credit\/requests$/,               [MANAGER, CASHIER]],
   ["POST",  /^\/api\/credit\/requests$/,               [MANAGER, CASHIER]],
   ["POST",  /^\/api\/credit\/requests\/\d+\/decide$/,  [MANAGER]],

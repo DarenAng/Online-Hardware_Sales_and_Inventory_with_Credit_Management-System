@@ -376,6 +376,26 @@ function apiGetCreditCustomer(customerId) {
     return getJson('/api/credit/customers/' + customerId);
 }
 
+// GET /api/credit/terms/:id -- what the printed Credit Terms and Conditions page needs
+function apiGetCreditTerms(customerId) {
+    return getJson('/api/credit/terms/' + customerId);
+}
+
+// GET /api/credit/card/:id -- what the printed Customer Card (and the terms after it) needs
+function apiGetCustomerCard(customerId) {
+    return getJson('/api/credit/card/' + customerId);
+}
+
+// GET /api/credit/terms-text -- the wording of the terms { text, isDefault, defaultText } (manager)
+function apiGetCreditTermsText() {
+    return getJson('/api/credit/terms-text');
+}
+
+// PUT /api/credit/terms-text -- save the wording; empty text puts the default back (manager)
+function apiSaveCreditTermsText(text) {
+    return sendJson('/api/credit/terms-text', 'PUT', { text: text });
+}
+
 // GET /api/customers/:id/history
 function apiGetCustomerHistory(customerId) {
     return getJson('/api/customers/' + customerId + '/history');

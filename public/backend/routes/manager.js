@@ -16,6 +16,8 @@
 // ============================================================
 
 const managerProcedures = require("../database/procedures/manager-procedures");
+const DEFAULT_CREDIT_TERMS = require("../store-settings").DEFAULT_CREDIT_TERMS;
+const receiptLayoutFrom = require("../store-settings").receiptLayoutFrom;
 
 function registerManagerRoutes(app, deps) {
   const db = deps.db;
@@ -1178,6 +1180,166 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
+  // ==========================================
+  // THE PRINTED CREDIT TERMS AND CUSTOMER CARD
+  //
+  // One page of terms and conditions for a customer's credit account, and a
+  // customer card that comes before it. Every figure is read from the account
+  // itself (the limit, the late-payment rate) or from the system's fixed rule
+  // (a credit sale falls due thirty days after it is made, the same thirty the
+  // credit views age an account by); the wording is the manager's, or the default.
+  // The system charges no interest, only the late-payment penalty, so no
+  // interest rate is printed.
+  // ==========================================
+  const CREDIT_DUE_DAYS = 30;
+
+  // The terms text in force: the manager's own wording, else the default.
+  async function creditTermsText() {
+    const rowsResult = await db.query("SELECT credit_terms FROM store_settings WHERE setting_id = 1");
+    const saved = rowsResult[0][0] ? rowsResult[0][0].credit_terms : null;
+    if (saved && String(saved).trim() !== "") return { text: String(saved), isDefault: false };
+    return { text: DEFAULT_CREDIT_TERMS, isDefault: true };
+  }
+
+  // every filled-in line of a text, in order
+  function linesOf(text) {
+    const kept = [];
+    const lines = String(text || "").split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line !== "") kept.push(line);
+    }
+    return kept;
+  }
+
+  // everything the two printed pages need, for one customer
+  async function creditPrintData(customerId, actorId) {
+    const customerResult = await db.query("SELECT * FROM vw_customer_credit WHERE customer_id = ?", [customerId]);
+    const customer = customerResult[0][0];
+    if (!customer) return null;
+
+    const storeResult = await db.query(
+      "SELECT store_name, proprietor, address, tin, receipt_layout FROM store_settings WHERE setting_id = 1");
+    const store = storeResult[0][0] || {};
+    // the shop has no contact column; whatever the administrator put in the
+    // receipt's header lines (a phone number, a branch) is the contact
+    const layout = receiptLayoutFrom(store.receipt_layout);
+
+    const staffResult = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [actorId]);
+    const staff = staffResult[0][0];
+
+    const terms = await creditTermsText();
+    const ownRate = customer.penalty_rate_override !== null && customer.penalty_rate_override !== undefined;
+
+    return {
+      store: {
+        name: store.store_name || "Lucelyn Hardware",
+        proprietor: store.proprietor || null,
+        address: store.address || "",
+        tin: store.tin || "",
+        contact_lines: layout.headerLines
+      },
+      customer: {
+        customer_id: customer.customer_id,
+        name: customer.customer_name,
+        phone: customer.phone,
+        address: customer.address,
+        credit_limit: customer.credit_limit,
+        current_credit: customer.current_credit,
+        available_credit: customer.available_credit,
+        standing: customer.standing,
+        open_sales: customer.open_sales,
+        overdue_sales: customer.overdue_sales,
+        last_purchase: customer.last_purchase,
+        last_payment: customer.last_payment
+      },
+      terms: {
+        due_days: CREDIT_DUE_DAYS,
+        penalty_rate: customer.penalty_rate,
+        penalty_rate_is_own: ownRate,
+        lines: linesOf(terms.text)
+      },
+      prepared_by: staff ? staff.full_name : null,
+      printed_at: new Date().toISOString()
+    };
+  }
+
+  app.get("/api/credit/terms/:customerId", async function (request, response) {
+    try {
+      const data = await creditPrintData(Number(request.params.customerId), getActorId(request));
+      if (!data) return response.status(404).json({ error: "That customer was not found." });
+      response.json(data);
+    } catch (error) {
+      console.error("Credit terms failed:", error.message);
+      response.status(500).json({ error: "Unable to prepare the credit terms" });
+    }
+  });
+
+  app.get("/api/credit/card/:customerId", async function (request, response) {
+    try {
+      const data = await creditPrintData(Number(request.params.customerId), getActorId(request));
+      if (!data) return response.status(404).json({ error: "That customer was not found." });
+      response.json(data);
+    } catch (error) {
+      console.error("Customer card failed:", error.message);
+      response.status(500).json({ error: "Unable to prepare the customer card" });
+    }
+  });
+
+  // The manager reads and writes the wording. An empty text puts the default back.
+  app.get("/api/credit/terms-text", requireRole(MANAGER), async function (request, response) {
+    try {
+      const terms = await creditTermsText();
+      response.json({ text: terms.text, isDefault: terms.isDefault, defaultText: DEFAULT_CREDIT_TERMS });
+    } catch (error) {
+      console.error("Credit terms text failed:", error.message);
+      response.status(500).json({ error: "Unable to read the credit terms" });
+    }
+  });
+
+  app.put("/api/credit/terms-text", requireRole(MANAGER), async function (request, response) {
+    const typed = typeof (request.body || {}).text === "string" ? request.body.text : "";
+    const lines = linesOf(typed);
+
+    if (lines.length > 20) {
+      return response.status(400).json({ error: "At most 20 terms. Put each term on its own line." });
+    }
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].length > 600) {
+        return response.status(400).json({ error: "Term " + (i + 1) + " is longer than 600 characters. Split it into two." });
+      }
+    }
+
+    // nothing typed puts the default back
+    let saved = null;
+    if (lines.length > 0) saved = lines.join("\n");
+
+    try {
+      // only the wording is written: updated_at and updated_by_staff_id are what
+      // the rate and the store settings show as "last changed", so they stay as
+      // they were (updated_at = updated_at stops its automatic refresh)
+      const rowResult = await db.query("SELECT setting_id FROM store_settings WHERE setting_id = 1");
+      if (rowResult[0].length === 0) {
+        return response.status(409).json({ error: "The store settings are not set up yet, so there is nowhere to keep the terms. The administrator fills them in first." });
+      }
+      await db.query(
+        "UPDATE store_settings SET credit_terms = ?, updated_at = updated_at WHERE setting_id = 1",
+        [saved]
+      );
+      await writeAuditLog(request, "UPDATE_CREDIT_TERMS",
+        saved === null ? "Credit terms and conditions set back to the default wording"
+                       : "Credit terms and conditions rewritten (" + lines.length + " terms)");
+
+      response.json({
+        message: saved === null ? "The default wording is back." : "The credit terms are saved. They print on the next page.",
+        isDefault: saved === null
+      });
+    } catch (error) {
+      console.error("Credit terms save failed:", error.message);
+      response.status(500).json({ error: "Unable to save the credit terms" });
+    }
+  });
+
   app.get("/api/credit/requests", async function (request, response) {
     const status = String(request.query.status || "all");
 
@@ -1456,6 +1618,21 @@ function registerManagerRoutes(app, deps) {
   // the typed figure, with the calculated one shown beside it.
   // ==========================================
   const SALES_WINDOW_DAYS = 90;
+
+  // How many products have no price yet (price 0): the alert across the
+  // manager's screens. Archived products are not counted; they are not for sale.
+  app.get("/api/stocks/unpriced", async function (request, response) {
+    try {
+      const countResult = await db.query(
+        "SELECT COUNT(*) AS unpriced FROM products " +
+        "WHERE is_archived = FALSE AND (price IS NULL OR price <= 0)"
+      );
+      response.json({ unpriced: Number(countResult[0][0].unpriced) });
+    } catch (error) {
+      console.error("Unpriced count failed:", error.message);
+      response.status(500).json({ error: "Unable to count the products without a price" });
+    }
+  });
 
   app.get("/api/stocks", async function (request, response) {
     try {

@@ -21,6 +21,31 @@ function peso(value) {
     return CURRENCY_SIGN + text;
 }
 
+// A product with a price of 0 has no price set yet: the clerk added it and
+// the manager has not priced it. The till cannot sell it.
+function isUnpriced(product) {
+    return !(Number(product.price) > 0);
+}
+
+// The price cell's text: the price, or a "No price" badge when it has none
+function priceOrBadge(product) {
+    if (isUnpriced(product)) return '<span class="badge badge-warning">No price</span>';
+    return peso(product.price);
+}
+
+// The rows with no price first, whatever order they came in; inside each
+// group the order is kept. Used by the product lists so a product waiting for
+// a price is always on the top row.
+function unpricedFirst(rows) {
+    const without = [];
+    const priced = [];
+    for (let i = 0; i < rows.length; i++) {
+        if (isUnpriced(rows[i])) without.push(rows[i]);
+        else priced.push(rows[i]);
+    }
+    return without.concat(priced);
+}
+
 // Measured units (kg, m) accept decimals and step by a half; anything not
 // listed here is counted and steps by one.
 const MEASURED_UNITS = {

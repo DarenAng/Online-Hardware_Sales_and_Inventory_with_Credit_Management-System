@@ -148,6 +148,12 @@ function buildMaterialsPanel() {
             return filters.status === 'all' || p.stock_status === filters.status;
         },
 
+        // a product with no price yet (just added, waiting for the manager) is
+        // always on the top row, whatever the search, the filter or the page
+        sort: function (rows) {
+            return unpricedFirst(rows);
+        },
+
         // the catalogue: what it is, who supplies it and what it sells for.
         // Reorder points have their own screen, so they are not repeated here.
         renderRow: function (p, index) {
@@ -159,7 +165,7 @@ function buildMaterialsPanel() {
             '<td>' + (p.supplier_name
                 ? escapeHtml(p.supplier_name)
                 : '<span class="muted">No supplier</span>') + '</td>' +
-            '<td class="cell-num">' + peso(p.price) +
+            '<td class="cell-num">' + priceOrBadge(p) +
                 '<span class="cell-sub">per ' + escapeHtml(p.unit_name || 'unit') + '</span></td>' +
             '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
             '<td>' + statusBadge(p.stock_status) + '</td></tr>';
@@ -203,6 +209,225 @@ async function loadInventoryAll(event) {
     if (link) link.classList.add('active');
 
     loadStockBanner();
+}
+
+// ---------- adding a new product ----------
+// The Add New Product button on the Material List. The clerk names the product
+// and says what it is. The price is the manager's: the product starts with
+// "No price", the manager is told, and the till cannot sell it until it is
+// priced. The first stock comes in by a delivery or a stock adjustment.
+const PRODUCT_NAME_MAX = 150;
+const BRAND_NAME_MAX = 100;
+const REORDER_POINT_MAX = 100000;
+
+// <option>s for a list of records ({ id, name }), with a first line that has no value
+function recordOptions(rows, firstLine) {
+    let html = '<option value="">' + escapeHtml(firstLine) + '</option>';
+    for (let i = 0; i < rows.length; i++) {
+        html += '<option value="' + escapeHtml(rows[i].name) + '">' + escapeHtml(rows[i].name) + '</option>';
+    }
+    return html;
+}
+
+async function openAddProduct() {
+    if (!holdsFeature('product-add')) return;
+
+    let categories = [];
+    let units = [];
+    let suppliers = [];
+    let brands = [];
+    try {
+        const lists = await Promise.all([
+            apiGetRecords('category'), apiGetRecords('unit'),
+            apiGetRecords('supplier'), apiGetRecords('brand')
+        ]);
+        categories = lists[0];
+        units = lists[1];
+        suppliers = lists[2];
+        brands = lists[3];
+    } catch (error) {
+        notifyOffline();
+        return;
+    }
+
+    // only the manager adds a category or a unit (Records), so there is nothing to pick without them
+    if (categories.length === 0 || units.length === 0) {
+        notifyWarning('There is no category or unit on file yet. Ask the manager to add them under Records first.',
+            'Cannot add a product yet');
+        return;
+    }
+
+    let supplierOptions = '<option value="">No supplier</option>';
+    for (let i = 0; i < suppliers.length; i++) {
+        supplierOptions += '<option value="' + suppliers[i].id + '">' + escapeHtml(suppliers[i].name) + '</option>';
+    }
+
+    let brandList = '';
+    for (let i = 0; i < brands.length; i++) {
+        brandList += '<option value="' + escapeHtml(brands[i].name) + '"></option>';
+    }
+
+    const body =
+        '<form id="add-product-form" onsubmit="saveNewProduct(event)" autocomplete="off" novalidate>' +
+            '<div class="form-group">' +
+                '<label for="new-product-name">Product name</label>' +
+                '<input type="text" class="form-control" id="new-product-name" name="productName" ' +
+                    'maxlength="' + PRODUCT_NAME_MAX + '" placeholder="Claw Hammer 16 oz">' +
+            '</div>' +
+            '<div class="grid-2">' +
+                '<div class="form-group">' +
+                    '<label for="new-product-category">Category</label>' +
+                    '<select class="form-control" id="new-product-category" name="categoryName">' +
+                        recordOptions(categories, 'Pick a category') + '</select>' +
+                '</div>' +
+                '<div class="form-group">' +
+                    '<label for="new-product-unit">Unit <span class="label-hint">what it is counted in</span></label>' +
+                    '<select class="form-control" id="new-product-unit" name="unitName">' +
+                        recordOptions(units, 'Pick a unit') + '</select>' +
+                '</div>' +
+            '</div>' +
+            '<div class="grid-2">' +
+                '<div class="form-group">' +
+                    '<label for="new-product-brand">Brand <span class="label-hint">optional</span></label>' +
+                    '<input type="text" class="form-control" id="new-product-brand" name="brandName" ' +
+                        'list="new-product-brands" maxlength="' + BRAND_NAME_MAX + '" placeholder="Pick one or type a new brand">' +
+                    '<datalist id="new-product-brands">' + brandList + '</datalist>' +
+                '</div>' +
+                '<div class="form-group">' +
+                    '<label for="new-product-supplier">Supplier <span class="label-hint">optional</span></label>' +
+                    '<select class="form-control" id="new-product-supplier" name="supplierId">' +
+                        supplierOptions + '</select>' +
+                '</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label for="new-product-reorder">Reorder point <span class="label-hint">optional, 10 when left blank</span></label>' +
+                '<input type="number" class="form-control" id="new-product-reorder" name="reorderPoint" ' +
+                    'min="0" max="' + REORDER_POINT_MAX + '" step="1" placeholder="10">' +
+            '</div>' +
+            '<p class="detail-note">The manager sets the selling price, and the till cannot sell this product until ' +
+                'then. It starts with nothing on the shelf: stock comes in by a delivery or a stock adjustment.</p>' +
+            '<div class="detail-actions">' +
+                '<button type="submit" class="btn btn-accent" id="new-product-save">Add Product</button>' +
+                '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
+            '</div>' +
+        '</form>';
+
+    openDetailModal('Add New Product', 'It starts with no price', '+',
+        [{ label: 'New Product', body: body }], '', { scroll: true });
+
+    const nameBox = document.getElementById('new-product-name');
+    if (nameBox) nameBox.focus();
+}
+
+// Says what is wrong with the form, as { message, field }, or null when it can be sent
+function checkNewProduct(form) {
+    const name = form.elements.productName.value.trim();
+    if (name === '') return { message: 'Type the product\'s name.', field: form.elements.productName };
+    if (name.length > PRODUCT_NAME_MAX) {
+        return { message: 'A product name is at most ' + PRODUCT_NAME_MAX + ' characters.', field: form.elements.productName };
+    }
+    if (form.elements.categoryName.value === '') {
+        return { message: 'Pick the product\'s category.', field: form.elements.categoryName };
+    }
+    if (form.elements.unitName.value === '') {
+        return { message: 'Pick the unit the product is counted in.', field: form.elements.unitName };
+    }
+    if (form.elements.brandName.value.trim().length > BRAND_NAME_MAX) {
+        return { message: 'A brand name is at most ' + BRAND_NAME_MAX + ' characters.', field: form.elements.brandName };
+    }
+
+    const reorder = form.elements.reorderPoint.value.trim();
+    if (reorder !== '') {
+        const number = Number(reorder);
+        if (!Number.isInteger(number) || number < 0 || number > REORDER_POINT_MAX) {
+            return { message: 'The reorder point is a whole number from 0 to ' + REORDER_POINT_MAX + '.',
+                     field: form.elements.reorderPoint };
+        }
+    }
+    return null;
+}
+
+// the material already on the list with this name (any capitals), or undefined
+function findProductByName(name) {
+    const wanted = name.trim().toLowerCase();
+    for (let i = 0; i < invProducts.length; i++) {
+        if (String(invProducts[i].product_name).trim().toLowerCase() === wanted) return invProducts[i];
+    }
+    return undefined;
+}
+
+async function saveNewProduct(event) {
+    event.preventDefault();
+    const form = event.target;
+
+    const problem = checkNewProduct(form);
+    if (problem) {
+        notifyWarning(problem.message, 'Check the form');
+        problem.field.focus();
+        return;
+    }
+
+    const name = form.elements.productName.value.trim().replace(/\s+/g, ' ');
+
+    // the list may already be loaded: no need to ask the server about a name that is on it
+    const same = findProductByName(name);
+    if (same) {
+        notifyWarning('"' + same.product_name + '" is already on the material list. Nothing was added.',
+            'Already on the list');
+        form.elements.productName.focus();
+        return;
+    }
+
+    const button = document.getElementById('new-product-save');
+    if (button) button.disabled = true;
+
+    try {
+        const response = await apiAddProduct({
+            name: name,
+            categoryName: form.elements.categoryName.value,
+            unitName: form.elements.unitName.value,
+            brandName: form.elements.brandName.value.trim(),
+            supplierId: form.elements.supplierId.value,
+            reorderPoint: form.elements.reorderPoint.value.trim()
+        });
+        const result = await response.json();
+
+        if (button) button.disabled = false;
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Product not added');
+            return;
+        }
+
+        // the name was already on file: the server added nothing, and says so
+        if (!result.created) {
+            notifyWarning(result.message, 'Already on file');
+            form.elements.productName.focus();
+            return;
+        }
+
+        closeModal('detail-modal');
+        notifySuccess(result.message, 'Product added');
+        showNewProductRow(name);
+        loadStockBanner();
+    } catch (error) {
+        if (button) button.disabled = false;
+        notifyOffline();
+    }
+}
+
+// Reads the material list again with the new product searched for, so its row is the one on screen
+async function showNewProductRow(name) {
+    const panel = getDataPanel('clerk-materials');
+    if (!panel) return;
+
+    // the search text and the stock filter must not hide it
+    const search = document.getElementById('inv-search');
+    if (search) search.value = name;
+    const status = document.getElementById('inv-status');
+    if (status) status.value = 'all';
+    panel.filters.status = 'all';
+    panel.query = searchText(name);
+    await panel.open();
 }
 
 // ---------- the low stock banner ----------
@@ -2673,7 +2898,7 @@ function openMaterialDetail(productId) {
         '<div class="detail-grid">' +
             detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
             detailField('Brand', escapeHtml(p.brand_name || 'No brand')) +
-            detailField('Unit Price', peso(p.price) + ' <span class="muted">per ' + escapeHtml(p.unit_name || 'unit') + '</span>') +
+            detailField('Unit Price', priceOrBadge(p) + ' <span class="muted">per ' + escapeHtml(p.unit_name || 'unit') + '</span>') +
             detailField('On Hand', p.quantity_in_stock + ' ' + unit + ' ' + statusBadge(p.stock_status)) +
         '</div>';
 

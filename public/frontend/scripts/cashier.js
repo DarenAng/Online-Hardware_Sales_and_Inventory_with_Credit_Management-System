@@ -173,7 +173,9 @@ function setCatalogFilter(name, value) {
 
 const CATALOG_ROW_TITLE = {
     off: 'Press to put it on the order',
-    on: 'Already on the order. Change the amount with + and − on the order.'
+    on: 'Already on the order. Change the amount with + and − on the order.',
+    // a product the clerk added that the manager has not priced yet
+    noPrice: 'No price yet. Ask the manager to set it; it cannot be sold until then.'
 };
 
 // The order line for this product, or undefined when it is not on the order
@@ -195,6 +197,12 @@ function findCatalogProduct(productId) {
 // the click on a row: a product on the order is not added a second time; the
 // line it is on lights up instead, so the cashier can see where to change it
 function pressCatalogRow(productId) {
+    const product = findCatalogProduct(productId);
+    if (product && isUnpriced(product)) {
+        notifyWarning(product.product_name + ' has no price yet, so it cannot be sold. Ask the manager to set the price.',
+            'No price yet');
+        return;
+    }
     if (findCartLine(productId)) {
         flashCartLine(productId);
         return;
@@ -328,6 +336,13 @@ function renderCatalog(rows, keyword) {
             markHidden = '';
             markText = escapeHtml(qtyText(inCart.quantity, inCart.unit)) + ' on order';
         }
+        // no price yet: greyed and cannot be pressed (the server refuses it as well)
+        const noPrice = isUnpriced(p);
+        if (noPrice) {
+            rowClass = ' is-unpriced';
+            rowTitle = CATALOG_ROW_TITLE.noPrice;
+            disabledAttr = ' aria-disabled="true"';
+        }
 
         let sizesHtml = '';
         if (sizes.length > 0) {
@@ -352,7 +367,9 @@ function renderCatalog(rows, keyword) {
             '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
             '<td>' + escapeHtml(p.brand_name || '—') + '</td>' +
             '<td class="cell-unit">' + escapeHtml(p.unit_name || '—') + sizesHtml + '</td>' +
-            '<td class="cell-num catalog-price">' + peso(p.price) + perHtml + '</td>' +
+            '<td class="cell-num catalog-price">' +
+                (noPrice ? '<span class="badge badge-warning">No price yet</span><span class="price-per">ask the manager</span>'
+                         : peso(p.price) + perHtml) + '</td>' +
         '</tr>';
     }
 
@@ -1102,6 +1119,11 @@ function addToCart(productId) {
         notifyWarning(p.product_name + ' is out of stock, so it cannot go on this sale.', 'Nothing to sell');
         return;
     }
+    if (isUnpriced(p)) {
+        notifyWarning(p.product_name + ' has no price yet, so it cannot be sold. Ask the manager to set the price.',
+            'No price yet');
+        return;
+    }
 
     const line = findCartLine(productId);
     if (line) {
@@ -1362,6 +1384,7 @@ function markCatalogRows() {
     const catalogRows = document.querySelectorAll('#catalog-table tr[data-product-row]');
     for (let i = 0; i < catalogRows.length; i++) {
         const row = catalogRows[i];
+        if (row.classList.contains('is-unpriced')) continue;   // it never goes on the order
         const line = findCartLine(Number(row.dataset.productRow));
         row.classList.toggle('is-on-order', Boolean(line));
         row.title = CATALOG_ROW_TITLE[line ? 'on' : 'off'];
@@ -1606,6 +1629,30 @@ const QR_APP_WORDS = { 'GCash': 'GCash', 'PayMaya': 'Maya' };
 // a change to any QR payment: the code on screen is asked about straight away
 if (typeof onLiveChange === 'function') {
     onLiveChange(['qr-payments'], function () { if (qrSession && !qrSession.over) checkQr(qrSession); });
+}
+
+// The inventory moved (somebody added a product, the manager set a price): when the
+// catalogue is loaded it is read again and redrawn, so a product that was just priced
+// stops being greyed without pressing Load Data. Only the catalogue is touched: the
+// order, the customer and the payment boxes stay as they are.
+let catalogRefreshing = false;
+
+async function refreshCatalogQuietly() {
+    if (!catalogLoaded || catalogRefreshing) return;
+    catalogRefreshing = true;
+    try {
+        catalog = await apiGetProducts();
+        fillCatalogCategories();
+        applyCatalogView();
+    } catch (error) {
+        // the catalogue on screen stays as it was; the next change reads it again
+    } finally {
+        catalogRefreshing = false;
+    }
+}
+
+if (typeof onLiveChange === 'function') {
+    onLiveChange(['inventory'], refreshCatalogQuietly);
 }
 
 // Pay by QR, beside Complete Sale: the same checkout, with the money taken by
@@ -2504,6 +2551,12 @@ async function openReceipt(saleId) {
         bankHtml: receiptBankBlock(shop, s, data.payments, receiptNo)
     });
 
+    // a credit sale's invoice offers the terms page, when the role may print it
+    const termsButton = document.getElementById('receipt-terms-btn');
+    if (termsButton) {
+        termsButton.hidden = !(s.payment_method === 'Credit' && s.customer_id && holdsFeature('credit-terms-print'));
+    }
+
     showModal('receipt-modal');
 }
 
@@ -2539,7 +2592,15 @@ function receiptBankBlock(shop, sale, payments, receiptNo) {
         '</div>';
 }
 
+// the Credit Terms and Conditions page for the customer of the invoice on screen
+function printReceiptCreditTerms() {
+    if (!lastReceipt || !lastReceipt.sale.customer_id) return;
+    printCreditTerms(lastReceipt.sale.customer_id);
+}
+
 function printReceipt() {
+    // a credit page still on the paper is put back first
+    if (typeof finishCreditPrint === 'function') finishCreditPrint();
     setReceiptPageSize(storeSettings || {});
     document.body.classList.add('printing-receipt');
     window.print();
@@ -2554,6 +2615,41 @@ function deliveryFormFields() {
     return form ? form.elements : null;
 }
 
+// A saved customer address is one line ("Brgy. Wawa, Nasugbu, Batangas"). It is
+// split into the boxes only when it can be done without guessing: a trailing
+// "Philippines" and a zip code are dropped, and the part third from the end has
+// to say it is a barangay (Brgy, Brgy., Barangay, Poblacion, or just a number).
+// Then the last part is the province, the one before it the town or city, and
+// whatever is in front of the barangay is the house and street. Any other shape
+// leaves every box empty, and the cashier types them (the line is shown above them).
+const SAVED_BARANGAY = /^(brgy|barangay|poblacion)\b|^\d{1,3}$/i;
+
+function splitSavedAddress(text) {
+    const empty = { street: '', barangay: '', city: '', province: '' };
+
+    const pieces = String(text || '').split(',');
+    const parts = [];
+    for (let i = 0; i < pieces.length; i++) {
+        const piece = pieces[i].trim();
+        if (piece !== '') parts.push(piece);
+    }
+
+    // "Philippines" at the end is not a province; a zip code is not part of one
+    while (parts.length > 0 && /^(philippines|ph)$/i.test(parts[parts.length - 1])) parts.pop();
+    if (parts.length > 0 && /^\d{4}$/.test(parts[parts.length - 1])) parts.pop();
+    if (parts.length > 0) parts[parts.length - 1] = parts[parts.length - 1].replace(/\s+\d{4}$/, '');
+
+    if (parts.length < 3 || !SAVED_BARANGAY.test(parts[parts.length - 3])) return empty;
+
+    return {
+        street: parts.slice(0, parts.length - 3).join(', '),
+        // the word "Brgy." is put back when the whole address is joined, so it is not typed twice
+        barangay: parts[parts.length - 3].replace(/^(brgy\.?|barangay)\s*/i, ''),
+        city: parts[parts.length - 2],
+        province: parts[parts.length - 1]
+    };
+}
+
 // what the customer box and record already know
 function fillDeliveryFromCustomer() {
     const fields = deliveryFormFields();
@@ -2566,8 +2662,39 @@ function fillDeliveryFromCustomer() {
     fields.contactName.value = account ? account.name : typedCustomerName();
     phoneFill(fields.contactPhone, account && account.phone ? account.phone : '');
 
-    // the customer's saved address, which the cashier can change
-    fields.address.value = account && account.address ? account.address : '';
+    // the customer's saved address, split into the boxes; the cashier can change any of them
+    const savedLine = account && account.address ? account.address : '';
+    const saved = splitSavedAddress(savedLine);
+    fields.street.value = saved.street;
+    fields.barangay.value = saved.barangay;
+    fields.city.value = saved.city;
+    fields.province.value = saved.province;
+    fields.landmark.value = '';
+
+    // an address that could not be split safely is shown, so it can be typed into the boxes
+    const note = document.getElementById('dl-saved-address');
+    if (note) {
+        const split = saved.barangay !== '' || saved.city !== '' || saved.province !== '';
+        if (savedLine !== '' && !split) {
+            note.textContent = 'Address on file: ' + savedLine + ' (fill in the boxes below)';
+            note.hidden = false;
+        } else {
+            note.textContent = '';
+            note.hidden = true;
+        }
+    }
+}
+
+// The whole address as one line, the way the server joins it: street, barangay,
+// town or city, province, then the landmark in brackets.
+function fullDeliveryAddress(d) {
+    let barangay = d.barangay;
+    if (!/^(brgy|barangay|poblacion|zone|purok|sitio)\b/i.test(barangay)) barangay = 'Brgy. ' + barangay;
+
+    let line = barangay + ', ' + d.city + ', ' + d.province;
+    if (d.street) line = d.street + ', ' + line;
+    if (d.landmark) line += ' (Landmark: ' + d.landmark + ')';
+    return line;
 }
 
 // The driver box: type to search the active drivers, pick one from the list.
@@ -2727,6 +2854,73 @@ function onDriverKey(event) {
     if (event.key === 'Escape' || event.key === 'Tab') hideDriverSuggestions();
 }
 
+// The red words under each box of the delivery form, and the red edge on the box
+const DELIVERY_ERROR_BOXES = {
+    contactName: 'dl-name-error',
+    contactPhone: 'dl-phone-error',
+    street: 'dl-street-error',
+    barangay: 'dl-barangay-error',
+    city: 'dl-city-error',
+    province: 'dl-province-error',
+    scheduledDate: 'dl-scheduled-error'
+};
+
+function showDeliveryFieldError(name, text) {
+    const fields = deliveryFormFields();
+    const box = document.getElementById(DELIVERY_ERROR_BOXES[name]);
+    if (box) {
+        box.textContent = text;
+        box.hidden = false;
+    }
+    if (fields && fields[name]) {
+        fields[name].classList.add('is-bad');
+        // the phone box sits in a frame that carries the red edge
+        const frame = fields[name].closest('.phone-field');
+        if (frame) frame.classList.add('is-bad');
+    }
+}
+
+function clearDeliveryFieldError(name) {
+    const fields = deliveryFormFields();
+    const box = document.getElementById(DELIVERY_ERROR_BOXES[name]);
+    if (box) {
+        box.textContent = '';
+        box.hidden = true;
+    }
+    if (fields && fields[name]) {
+        fields[name].classList.remove('is-bad');
+        const frame = fields[name].closest('.phone-field');
+        if (frame) frame.classList.remove('is-bad');
+    }
+}
+
+function clearDeliveryErrors() {
+    for (const name in DELIVERY_ERROR_BOXES) clearDeliveryFieldError(name);
+
+    const driverBox = document.getElementById('dl-driver-error');
+    if (driverBox) { driverBox.textContent = ''; driverBox.hidden = true; }
+    const driverInput = document.getElementById('dl-driver');
+    if (driverInput) driverInput.classList.remove('is-bad');
+
+    const verdict = document.getElementById('delivery-verdict');
+    if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+}
+
+// typing in a box takes its own complaint away
+function onDeliveryFieldTyped(event) {
+    const target = event.target;
+    if (target && target.name && DELIVERY_ERROR_BOXES[target.name]) clearDeliveryFieldError(target.name);
+
+    // the line at the foot goes once the cashier starts putting things right
+    const verdict = document.getElementById('delivery-verdict');
+    if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+    if (target && target.id === 'dl-driver') {
+        const driverBox = document.getElementById('dl-driver-error');
+        if (driverBox) { driverBox.textContent = ''; driverBox.hidden = true; }
+        target.classList.remove('is-bad');
+    }
+}
+
 function openDeliveryForm() {
     const fields = deliveryFormFields();
     if (!fields) return;
@@ -2734,7 +2928,11 @@ function openDeliveryForm() {
     if (pendingDelivery) {
         fields.contactName.value = pendingDelivery.contactName;
         phoneFill(fields.contactPhone, pendingDelivery.contactPhone);
-        fields.address.value = pendingDelivery.address;
+        fields.street.value = pendingDelivery.street;
+        fields.barangay.value = pendingDelivery.barangay;
+        fields.city.value = pendingDelivery.city;
+        fields.province.value = pendingDelivery.province;
+        fields.landmark.value = pendingDelivery.landmark;
         fields.scheduledDate.value = pendingDelivery.scheduledDate;
         fields.remarks.value = pendingDelivery.remarks;
     } else {
@@ -2757,8 +2955,14 @@ function openDeliveryForm() {
         }
     }
 
-    const verdict = document.getElementById('delivery-verdict');
-    if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+    clearDeliveryErrors();
+
+    // typing in any box clears that box's complaint (one listener, set once)
+    const form = document.getElementById('make-delivery-form');
+    if (form && !form.dataset.typingWired) {
+        form.addEventListener('input', onDeliveryFieldTyped);
+        form.dataset.typingWired = 'yes';
+    }
 
     showModal('delivery-modal');
     setTimeout(function () { if (fields.contactName) fields.contactName.focus(); }, 60);
@@ -2768,38 +2972,45 @@ function saveDeliveryForm(event) {
     if (event && typeof event.preventDefault === 'function') event.preventDefault();
 
     const fields = deliveryFormFields();
-    const verdict = document.getElementById('delivery-verdict');
     if (!fields) return;
 
-    function complain(text) {
-        if (verdict) {
-            verdict.className = 'delivery-verdict is-stop';
-            verdict.textContent = text;
-        }
-    }
+    clearDeliveryErrors();
 
-    const contactName = fields.contactName.value.trim();
+    // many spaces become one, like the server does
+    function tidy(box) { return box.value.trim().replace(/\s+/g, ' '); }
+
+    const contactName = tidy(fields.contactName);
     const contactPhone = phoneToStore(fields.contactPhone);
     const phoneProblem = phoneComplaint(fields.contactPhone);
-    // many spaces become one, like the server does
-    const address = fields.address.value.trim().replace(/\s+/g, ' ');
+    const street = tidy(fields.street);
+    const barangay = tidy(fields.barangay);
+    const city = tidy(fields.city);
+    const province = tidy(fields.province);
+    const landmark = tidy(fields.landmark);
     const scheduledDate = fields.scheduledDate.value;
 
-    if (contactName === '') { complain('A delivery needs somebody to ask for at the gate.'); fields.contactName.focus(); return; }
-    if (contactPhone === '') { complain('A driver who cannot ring ahead is a driver who comes back with the goods.'); fields.contactPhone.focus(); return; }
-    if (phoneProblem) { complain(phoneProblem); fields.contactPhone.focus(); return; }
-
-    if (address.length < 5 || address.length > 255) {
-        complain('Enter the delivery address: house no., street, barangay, city (5 to 255 characters).');
-        fields.address.focus();
-        return;
+    // every box with a problem is marked at once; the first one gets the cursor
+    let firstBad = null;
+    function complain(name, text) {
+        showDeliveryFieldError(name, text);
+        if (!firstBad) firstBad = fields[name];
     }
+
+    if (contactName === '') complain('contactName', 'Enter the name of the person receiving the delivery.');
+    if (contactPhone === '') {
+        complain('contactPhone', 'Enter a number the driver can call.');
+    } else if (phoneProblem) {
+        complain('contactPhone', phoneProblem);
+    }
+    // the house number and street is optional, but one letter is not an address
+    if (street !== '' && street.length < 2) complain('street', 'Enter the house number and street, or leave it empty.');
+    if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
+    if (city.length < 2) complain('city', 'Enter the town or city.');
+    if (province.length < 2) complain('province', 'Enter the province.');
 
     // a slot in the past is almost always a typing slip in the year or month
     if (scheduledDate && new Date(scheduledDate).getTime() < Date.now() - 60000) {
-        complain('That slot has already passed. Check the date and time before attaching it.');
-        fields.scheduledDate.focus();
-        return;
+        complain('scheduledDate', 'That date has already passed. Check the date and time.');
     }
 
     // a name typed but never picked would silently leave the delivery open
@@ -2809,15 +3020,35 @@ function saveDeliveryForm(event) {
     let driverName = null;
     if (driverId && driverBox) driverName = driverBox.value;
     if (!driverId && driverBox && driverBox.value.trim() !== '') {
-        complain('Pick the driver from the list, or clear the box to leave the delivery open for any driver.');
-        driverBox.focus();
+        const driverError = document.getElementById('dl-driver-error');
+        if (driverError) {
+            driverError.textContent = 'Pick the driver from the list, or clear the box to leave the delivery open for any driver.';
+            driverError.hidden = false;
+        }
+        driverBox.classList.add('is-bad');
+        if (!firstBad) firstBad = driverBox;
+    }
+
+    if (firstBad) {
+        firstBad.focus();
+        const verdict = document.getElementById('delivery-verdict');
+        if (verdict) {
+            verdict.className = 'delivery-verdict is-stop';
+            verdict.textContent = 'Fill in the boxes marked in red, then attach the delivery.';
+        }
         return;
     }
 
     pendingDelivery = {
         contactName: contactName,
         contactPhone: contactPhone,
-        address: address,
+        street: street,
+        barangay: barangay,
+        city: city,
+        province: province,
+        landmark: landmark,
+        // the whole address as one line, for the strip, the receipt and the old single address
+        address: fullDeliveryAddress({ street: street, barangay: barangay, city: city, province: province, landmark: landmark }),
         scheduledDate: scheduledDate,
         remarks: fields.remarks.value.trim(),
         driverId: driverId,
@@ -2834,9 +3065,7 @@ function saveDeliveryForm(event) {
 // Remove Delivery is what removes it.
 function cancelDeliveryForm() {
     closeModal('delivery-modal');
-
-    const verdict = document.getElementById('delivery-verdict');
-    if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+    clearDeliveryErrors();
 }
 
 function dropDeliveryForm() {
@@ -2858,10 +3087,13 @@ function renderDeliveryAttached() {
 
     const d = pendingDelivery;
 
-    let whenText = 'No slot agreed yet';
-    if (d.scheduledDate) whenText = 'Scheduled for ' + escapeHtml(String(d.scheduledDate).replace('T', ' '));
+    let whenText = 'No date agreed yet';
+    if (d.scheduledDate) whenText = 'Preferred date ' + escapeHtml(String(d.scheduledDate).replace('T', ' '));
     let driverText = 'Open for any driver to take';
     if (d.driverId) driverText = 'Driver: ' + escapeHtml(d.driverName);
+
+    let remarksLine = '';
+    if (d.remarks) remarksLine = '<p class="delivery-attached-line">Remarks: ' + escapeHtml(d.remarks) + '</p>';
 
     strip.hidden = false;
     strip.innerHTML =
@@ -2878,7 +3110,8 @@ function renderDeliveryAttached() {
         '</p>' +
         '<p class="delivery-attached-line">' +
             driverText +
-        '</p>';
+        '</p>' +
+        remarksLine;
 }
 
 // posted once the sale exists; a failure here does not undo the sale
@@ -2890,9 +3123,13 @@ async function createAttachedDelivery(saleId) {
     try {
         const response = await apiCreateDelivery({
                 saleId: saleId,
-                address: d.address,
                 contactName: d.contactName,
                 contactPhone: d.contactPhone,
+                street: d.street,
+                barangay: d.barangay,
+                city: d.city,
+                province: d.province,
+                landmark: d.landmark || null,
                 scheduledDate: d.scheduledDate || null,
                 remarks: d.remarks || null,
                 driverStaffId: d.driverId || null
@@ -2924,7 +3161,7 @@ function buildDeliveryPanel() {
     createDataPanel({
         key: 'cash-deliveries',
         tableId: 'cdel-table',
-        columns: 6,
+        columns: 7,
         pageSize: CASHIER_ROWS_PER_PAGE,
         pagerId: 'cdel-pager',
         idField: 'delivery_id',
@@ -2963,6 +3200,13 @@ function buildDeliveryPanel() {
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
                 '<td>' + escapeHtml(row.delivery_address) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(scheduleText(row.scheduled_date)) + '</td>' +
+                // what the driver still has to collect; it falls as payments come in.
+                // A sale on account is paid at the counter, so nothing is collected at the door.
+                (row.payment_method === 'Credit'
+                    ? '<td class="cell-num"><span class="muted">On account</span></td>'
+                    : Number(row.balance_due) > 0
+                        ? '<td class="cell-num cell-due">' + peso(row.balance_due) + '</td>'
+                        : '<td class="cell-num"><span class="muted">Paid</span></td>') +
                 '<td>' + statusBadge(row.status) + '</td></tr>';
         }
     });
@@ -3944,6 +4188,10 @@ async function openCustomerCredit(customerId, tab) {
         const pay = document.getElementById('customer-pay-btn');
         if (pay) pay.hidden = !hasUnpaid;
 
+        // the two prints, each switched on its own (Access Control)
+        document.getElementById('customer-print-card').hidden = !holdsFeature('customer-card-print');
+        document.getElementById('customer-print-terms').hidden = !holdsFeature('credit-terms-print');
+
         let open = 'account';
         if (tab === 'unpaid' && hasUnpaid) open = 'unpaid';
         else if (tab === 'history' || tab === 'payments') open = tab;
@@ -3951,6 +4199,17 @@ async function openCustomerCredit(customerId, tab) {
         showModal('customer-modal');
     } catch (error) {
         notifyError('That customer could not be opened.', 'Nothing to show');
+    }
+}
+
+// Print Customer Card (the card, then the terms page) or Print Credit Terms
+// (the terms page alone) for the customer whose card is open
+function printOpenCustomer(kind) {
+    if (!openCustomerId) return;
+    if (kind === 'card') {
+        printCustomerCard(openCustomerId);
+    } else {
+        printCreditTerms(openCustomerId);
     }
 }
 

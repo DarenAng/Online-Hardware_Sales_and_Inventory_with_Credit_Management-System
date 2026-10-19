@@ -322,7 +322,7 @@ CREATE TABLE stock_adjustments (
 CREATE TABLE notifications (
     notification_id INT AUTO_INCREMENT PRIMARY KEY,
     target_role_id INT NULL,
-    notif_type ENUM('Low Stock', 'Out of Stock', 'Damage Report', 'Refund Report', 'Purchase Order', 'Stock Adjustment', 'Delivery', 'Credit Request', 'Late Penalty') NOT NULL,
+    notif_type ENUM('Low Stock', 'Out of Stock', 'Damage Report', 'Refund Report', 'Purchase Order', 'Stock Adjustment', 'Delivery', 'Credit Request', 'Late Penalty', 'New Product') NOT NULL,
     title VARCHAR(150) NOT NULL,
     message TEXT,
     product_id INT NULL,
@@ -361,6 +361,10 @@ CREATE TABLE store_settings (
     -- stamp, the shop's own header and footer lines, and what is shown. Set in
     -- Receipt Maintenance; the server fills it with its defaults on first start.
     receipt_layout TEXT NULL,
+    -- the terms and conditions printed with a customer's credit account, one
+    -- term to a line, in the manager's words. NULL means the default text
+    -- the server holds (DEFAULT_CREDIT_TERMS in store-settings.js).
+    credit_terms TEXT NULL,
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by_staff_id INT NULL,
     CONSTRAINT chk_store_settings_single_row CHECK (setting_id = 1),
@@ -444,6 +448,14 @@ CREATE TABLE deliveries (
     -- who the driver is looking for, as written at the counter; wins over the customer row
     contact_name VARCHAR(150) NULL,
     contact_phone VARCHAR(30) NULL,
+    -- the address as the cashier typed it, in parts. delivery_address above is
+    -- the whole address as one line, built from these when the delivery is made;
+    -- every screen reads that line, and an older delivery has only it.
+    address_street VARCHAR(150) NULL,
+    address_barangay VARCHAR(100) NULL,
+    address_city VARCHAR(100) NULL,
+    address_province VARCHAR(100) NULL,
+    address_landmark VARCHAR(150) NULL,
     status ENUM('Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed') NOT NULL DEFAULT 'Pending',
     remarks TEXT,
     -- the cashier's note written when the delivery was made; remarks above is

@@ -187,7 +187,7 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="cdel-status">Status</label>
-                            <select id="cdel-status" data-filter-table="cdel-table" data-hides-column="6"
+                            <select id="cdel-status" data-filter-table="cdel-table" data-hides-column="7"
                                     onchange="dataPanelFilter('cash-deliveries', 'status', this.value)">
                                 <option value="all">Every status</option>
                                 <option value="Pending">Pending</option>
@@ -206,7 +206,7 @@
                     <div class="table-responsive grid-8">
                         <table id="cdel-table">
                             <thead>
-                                <tr><th>ID</th><th>Sale</th><th>Customer</th><th>Destination</th><th>Scheduled</th><th>Status</th></tr>
+                                <tr><th>ID</th><th>Sale</th><th>Customer</th><th>Destination</th><th>Scheduled</th><th class="col-num">To Collect</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -383,6 +383,7 @@
             </div>
 
             <div class="modal-foot no-print">
+                <button type="button" class="btn btn-ghost" id="receipt-terms-btn" onclick="printReceiptCreditTerms()" hidden>Print Terms and Conditions</button>
                 <button type="button" class="btn btn-accent" onclick="printReceipt()">Print Invoice</button>
             </div>
         </div>
@@ -652,8 +653,11 @@
          MAKE A DELIVERY -- the delivery's date is the sale's own date, set by the server
          ============================================================ -->
     <!-- data-modal-locked: neither a backdrop click nor Escape closes this form,
-         which would throw away a typed address; the two buttons are the ways out -->
-    <div class="modal" id="delivery-modal" data-modal-locked>
+         which would throw away typed details; the two buttons are the ways out.
+         data-modal-scroll: the form is long, so it scrolls instead of turning pages.
+         The address is asked for in parts; the server joins them into the one line that
+         the driver's card, the schedule and the receipt show. -->
+    <div class="modal" id="delivery-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
             <div class="modal-head">
                 <div class="modal-identity">
@@ -667,15 +671,17 @@
             </div>
 
             <div class="modal-body">
-                <form id="make-delivery-form" onsubmit="saveDeliveryForm(event)" autocomplete="off">
+                <form id="make-delivery-form" onsubmit="saveDeliveryForm(event)" autocomplete="off" novalidate>
+                    <h4 class="detail-subhead delivery-first-head">Who receives it</h4>
                     <div class="grid-2">
                         <div class="form-group">
-                            <label for="dl-name">Customer name</label>
+                            <label for="dl-name">Recipient name <span class="req-mark" aria-hidden="true">*</span></label>
                             <input type="text" id="dl-name" name="contactName" class="form-control"
-                                   placeholder="Who the driver asks for" required>
+                                   maxlength="150" placeholder="Who the driver asks for" required>
+                            <span class="field-error" id="dl-name-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="dl-phone">Phone number</label>
+                            <label for="dl-phone">Contact number <span class="req-mark" aria-hidden="true">*</span></label>
                             <div class="phone-field">
                                 <span class="phone-prefix">+63</span>
                                 <input type="text" id="dl-phone" name="contactPhone" class="form-control"
@@ -683,45 +689,78 @@
                                        maxlength="20" placeholder="9XXXXXXXXX"
                                        oninput="onPhoneInput(this)" required>
                             </div>
+                            <span class="field-error" id="dl-phone-error" hidden></span>
                         </div>
                     </div>
 
-                    <!-- any address in the Philippines, typed in full -->
+                    <h4 class="detail-subhead">Where it goes</h4>
+                    <p class="label-hint" id="dl-saved-address" hidden></p>
                     <div class="form-group">
-                        <label for="dl-address">Delivery address</label>
-                        <input type="text" id="dl-address" name="address" class="form-control"
-                               minlength="5" maxlength="255"
-                               placeholder="House no., street, barangay, city, province" required>
+                        <label for="dl-street">House number and street <span class="label-hint">optional</span></label>
+                        <input type="text" id="dl-street" name="street" class="form-control"
+                               maxlength="150" placeholder="Lot 5 Block 2, Rizal Street">
+                        <span class="field-error" id="dl-street-error" hidden></span>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="dl-barangay">Barangay <span class="req-mark" aria-hidden="true">*</span></label>
+                            <input type="text" id="dl-barangay" name="barangay" class="form-control"
+                                   maxlength="100" placeholder="Wawa" required>
+                            <span class="field-error" id="dl-barangay-error" hidden></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="dl-city">Town or city <span class="req-mark" aria-hidden="true">*</span></label>
+                            <input type="text" id="dl-city" name="city" class="form-control"
+                                   maxlength="100" placeholder="Nasugbu" required>
+                            <span class="field-error" id="dl-city-error" hidden></span>
+                        </div>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="dl-province">Province <span class="req-mark" aria-hidden="true">*</span></label>
+                            <input type="text" id="dl-province" name="province" class="form-control"
+                                   maxlength="100" placeholder="Batangas" required>
+                            <span class="field-error" id="dl-province-error" hidden></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="dl-landmark">Landmark <span class="label-hint">optional</span></label>
+                            <input type="text" id="dl-landmark" name="landmark" class="form-control"
+                                   maxlength="150" placeholder="Beside the blue gate, across the chapel">
+                        </div>
                     </div>
 
-                    <div class="form-group">
-                        <label for="dl-scheduled">Scheduled for</label>
-                        <input type="datetime-local" id="dl-scheduled" name="scheduledDate" class="form-control">
-                        <span class="label-hint">Date and time. Leave it empty if the slot is not
-                            agreed yet.</span>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="dl-driver">Driver</label>
-                        <!-- empty means any driver can take it; the hidden id is set only by a pick -->
-                        <div class="suggest-wrap">
-                            <input type="text" id="dl-driver" class="form-control" autocomplete="off"
-                                   role="combobox" aria-expanded="false"
-                                   aria-controls="driver-suggest" aria-autocomplete="list"
-                                   oninput="onDriverInput(this.value)"
-                                   onfocus="onDriverInput(this.value)"
-                                   onkeydown="onDriverKey(event)">
-                            <input type="hidden" name="driverStaffId" value="">
-                            <button type="button" class="suggest-clear" id="driver-clear"
-                                    onclick="clearDriverPick()" aria-label="Clear the driver" hidden>&times;</button>
-                            <ul class="suggest-list" id="driver-suggest" role="listbox" hidden></ul>
+                    <h4 class="detail-subhead">When and who</h4>
+                    <div class="grid-2">
+                        <div class="form-group">
+                            <label for="dl-scheduled">Preferred delivery date <span class="label-hint">optional</span></label>
+                            <input type="datetime-local" id="dl-scheduled" name="scheduledDate" class="form-control">
+                            <span class="label-hint">Date and time. Leave it empty if the slot is not
+                                agreed yet.</span>
+                            <span class="field-error" id="dl-scheduled-error" hidden></span>
+                        </div>
+                        <div class="form-group">
+                            <label for="dl-driver">Driver <span class="label-hint">optional</span></label>
+                            <!-- empty means any driver can take it; the hidden id is set only by a pick -->
+                            <div class="suggest-wrap">
+                                <input type="text" id="dl-driver" class="form-control" autocomplete="off"
+                                       role="combobox" aria-expanded="false"
+                                       aria-controls="driver-suggest" aria-autocomplete="list"
+                                       oninput="onDriverInput(this.value)"
+                                       onfocus="onDriverInput(this.value)"
+                                       onkeydown="onDriverKey(event)">
+                                <input type="hidden" name="driverStaffId" value="">
+                                <button type="button" class="suggest-clear" id="driver-clear"
+                                        onclick="clearDriverPick()" aria-label="Clear the driver" hidden>&times;</button>
+                                <ul class="suggest-list" id="driver-suggest" role="listbox" hidden></ul>
+                            </div>
+                            <span class="field-error" id="dl-driver-error" hidden></span>
                         </div>
                     </div>
 
                     <div class="form-group">
                         <label for="dl-remarks">Remarks <span class="label-hint">optional</span></label>
                         <input type="text" id="dl-remarks" name="remarks" class="form-control" maxlength="255"
-                               placeholder="Landmark">
+                               placeholder="Call before arriving, leave with the guard">
                     </div>
 
                     <p class="delivery-verdict" id="delivery-verdict"></p>
@@ -914,6 +953,8 @@
             </div>
 
             <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" id="customer-print-card" onclick="printOpenCustomer('card')" hidden>Print Customer Card</button>
+                <button type="button" class="btn btn-ghost" id="customer-print-terms" onclick="printOpenCustomer('terms')" hidden>Print Terms and Conditions</button>
                 <button type="button" class="btn btn-accent" id="customer-pay-btn" onclick="payFromCustomerCard()" hidden>Take a Payment</button>
                 <button type="button" class="btn btn-gold" onclick="askForExtension()">Ask for a Higher Limit</button>
             </div>
@@ -979,6 +1020,7 @@
     <script src="scripts/shared/features.js"></script>
     <script src="scripts/shared/deliveries.js"></script>
     <script src="scripts/shared/delivery-schedule.js"></script>
+    <script src="scripts/shared/credit-terms.js"></script>
     <script src="connections/cashier-connection.js"></script>
     <script src="scripts/cashier.js"></script>
 </body>

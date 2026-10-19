@@ -600,6 +600,13 @@
 .catalog-table tbody tr.is-on-order td.cell-name { opacity: 1; }
 .catalog-table tbody tr.is-on-order.row-clickable:hover td { background: transparent; }
 
+/* a product with no price yet (the manager has not set one) cannot be sold: greyed, not pressable */
+.catalog-table tbody tr.is-unpriced,
+.catalog-table tbody tr.is-unpriced.row-clickable { cursor: not-allowed; }
+.catalog-table tbody tr.is-unpriced td { opacity: 0.55; }
+.catalog-table tbody tr.is-unpriced td.catalog-price { opacity: 1; }
+.catalog-table tbody tr.is-unpriced.row-clickable:hover td { background: transparent; }
+
 /* Customers Record's customer card: the filters over a history table */
 .history-filters {
     display: flex; flex-wrap: wrap; gap: 10px 14px;
@@ -710,6 +717,22 @@
 }
 .delivery-verdict:empty { display: none; }
 .delivery-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
+
+/* the delivery form: a red star on what is required, a line of red words under
+   a field that is missing or wrong (the words say it, the colour only helps) */
+.req-mark { color: var(--stop); font-weight: 700; }
+.field-error {
+    display: block;
+    margin-top: 4px;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--stop);
+}
+.field-error[hidden] { display: none; }
+#delivery-modal .form-control.is-bad { border-color: var(--stop); }
+#delivery-modal .phone-field.is-bad { border-color: var(--stop); }
+#delivery-modal .detail-subhead { margin-top: 20px; }
+#delivery-modal .detail-subhead.delivery-first-head { margin-top: 0; }
 
 /* Cancel sits apart on the left, Remove is coloured like the destruction
    it is, attaching is the orange one */

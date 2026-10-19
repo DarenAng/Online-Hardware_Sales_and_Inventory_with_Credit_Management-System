@@ -216,6 +216,34 @@ function registerCashierRoutes(app, deps) {
       return response.status(400).json({ error: "Discount cannot be negative." });
     }
 
+    // A product with no price yet (price 0: the clerk added it and the manager
+    // has not priced it) cannot be sold. Refused before any QR payment below
+    // is checked or spent on it.
+    const ids = [];
+    for (let i = 0; i < items.length; i++) {
+      const id = Number(items[i] && items[i].product_id);
+      if (Number.isInteger(id) && id > 0 && !ids.includes(id)) ids.push(id);
+    }
+    if (ids.length > 0) {
+      try {
+        const marks = ids.map(function () { return "?"; }).join(", ");
+        const unpricedResult = await db.query(
+          "SELECT product_name FROM products WHERE product_id IN (" + marks + ") " +
+          "AND (price IS NULL OR price <= 0) ORDER BY product_name", ids);
+        const unpriced = unpricedResult[0];
+        if (unpriced.length > 0) {
+          const names = unpriced.map(function (row) { return row.product_name; }).join(", ");
+          return response.status(400).json({
+            error: names + (unpriced.length === 1 ? " has" : " have") +
+                   " no price yet, so it cannot be sold. Ask the manager to set the price."
+          });
+        }
+      } catch (error) {
+        console.error("Checking the item prices failed:", error.message);
+        return response.status(500).json({ error: "Unable to check the item prices" });
+      }
+    }
+
     // A walk-in is a sale with no customer and no name. A name is only ever a
     // customer picked from the customer list, sent as customerId: a bare name
     // opens no account at the till any more, so it is refused here, before any
@@ -392,6 +420,40 @@ function registerCashierRoutes(app, deps) {
     }
   });
 
+  // Text from a form box: not text -> "", extra spaces become one.
+  function tidy(value) {
+    if (typeof value !== "string") return "";
+    return value.trim().replace(/\s+/g, " ");
+  }
+
+  // The parts of a delivery address and the longest each may be. The cashier
+  // fills them in one by one; they are saved in their own columns, and joined
+  // into the one line every other screen shows.
+  // [key, what it is called, longest, required]. Not every house has a number or
+  // a street, so the house number and street may be left out.
+  const ADDRESS_PARTS = [
+    ["street", "house number and street", 150, false],
+    ["barangay", "barangay", 100, true],
+    ["city", "town or city", 100, true],
+    ["province", "province", 100, true]
+  ];
+
+  // "Wawa" is written "Brgy. Wawa" in the line; a barangay already written
+  // with its word (Brgy., Barangay, Poblacion, Zone, Purok, Sitio) is left alone.
+  function barangayLine(barangay) {
+    if (/^(brgy|barangay|poblacion|zone|purok|sitio)\b/i.test(barangay)) return barangay;
+    return "Brgy. " + barangay;
+  }
+
+  // The whole address as one line: street (when there is one), barangay, town or
+  // city, province, then the landmark in brackets.
+  function buildFullAddress(parts) {
+    let line = barangayLine(parts.barangay) + ", " + parts.city + ", " + parts.province;
+    if (parts.street !== "") line = parts.street + ", " + line;
+    if (parts.landmark !== "") line += " (Landmark: " + parts.landmark + ")";
+    return line;
+  }
+
   app.post("/api/deliveries", async function (request, response) {
     const saleId = request.body.saleId;
     const typedAddress = request.body.address;
@@ -406,13 +468,55 @@ function registerCashierRoutes(app, deps) {
       return response.status(400).json({ error: "A sale is required" });
     }
 
-    // the whole address is typed by the cashier, anywhere in the Philippines
-    // (many spaces become one)
-    const address = String(typedAddress || "").trim().replace(/\s+/g, " ");
-    if (address.length < 5 || address.length > 255) {
-      return response.status(400).json({
-        error: "Enter the delivery address: house no., street, barangay, city (5 to 255 characters)."
-      });
+    // The address comes in parts (house and street, barangay, town or city,
+    // province, landmark). A caller that sends only the single line is still
+    // taken (many spaces become one), so nothing older breaks.
+    const parts = {
+      street: tidy(request.body.street),
+      barangay: tidy(request.body.barangay),
+      city: tidy(request.body.city),
+      province: tidy(request.body.province),
+      landmark: tidy(request.body.landmark)
+    };
+    const partsGiven = parts.street !== "" || parts.barangay !== "" || parts.city !== "" || parts.province !== "";
+
+    let address;
+    if (partsGiven) {
+      if (tidy(contactName) === "") {
+        return response.status(400).json({ error: "Enter the recipient's name: the person the driver asks for." });
+      }
+      for (let i = 0; i < ADDRESS_PARTS.length; i++) {
+        const key = ADDRESS_PARTS[i][0];
+        const label = ADDRESS_PARTS[i][1];
+        const longest = ADDRESS_PARTS[i][2];
+        const required = ADDRESS_PARTS[i][3];
+        // a barangay can be a single number ("5"); the other parts are at least two characters
+        let shortest = 2;
+        if (key === "barangay") shortest = 1;
+        if (required && parts[key].length < shortest) {
+          return response.status(400).json({ error: "Enter the " + label + " for the delivery address." });
+        }
+        if (!required && parts[key] !== "" && parts[key].length < shortest) {
+          return response.status(400).json({ error: "The " + label + " is too short; leave it empty if there is none." });
+        }
+        if (parts[key].length > longest) {
+          return response.status(400).json({ error: "The " + label + " is at most " + longest + " characters." });
+        }
+      }
+      if (parts.landmark.length > 150) {
+        return response.status(400).json({ error: "The landmark is at most 150 characters." });
+      }
+      address = buildFullAddress(parts);
+    } else {
+      address = tidy(typedAddress);
+      if (address.length < 5 || address.length > 255) {
+        return response.status(400).json({
+          error: "Enter the delivery address: house no., street, barangay, town or city, province."
+        });
+      }
+    }
+    if (String(remarks || "").length > 255) {
+      return response.status(400).json({ error: "The remarks are at most 255 characters." });
     }
 
     if (!String(contactPhone || "").trim()) {
@@ -431,7 +535,7 @@ function registerCashierRoutes(app, deps) {
     }
 
     // trimmed and cut to the size of the database column; empty becomes null
-    const contact = (contactName || "").trim().slice(0, 150) || null;
+    const contact = tidy(contactName).slice(0, 150) || null;
     const phone = cleanPhone(contactPhone);
 
     try {
@@ -468,6 +572,21 @@ function registerCashierRoutes(app, deps) {
 
       if (output.status_code !== 201) {
         return response.status(output.status_code).json({ error: output.message });
+      }
+
+      // The delivery exists, with the whole address as one line. The parts go in
+      // their own columns now; if that fails the delivery still stands and every
+      // screen still reads the line, so it is only logged.
+      if (partsGiven) {
+        try {
+          await db.query(
+            "UPDATE deliveries SET address_street = ?, address_barangay = ?, address_city = ?, " +
+            "address_province = ?, address_landmark = ? WHERE delivery_id = ?",
+            [parts.street || null, parts.barangay, parts.city, parts.province, parts.landmark || null, output.delivery_id]
+          );
+        } catch (error) {
+          console.error("Saving the delivery address parts failed:", error.message);
+        }
       }
 
       // the procedure keeps the cashier's note apart from the later status notes
