@@ -572,6 +572,12 @@ function registerSharedRoutes(app, deps) {
           "ORDER BY archived_at DESC, module"
       );
       const rows = rowsResult[0];
+      // a product's stock without the trailing zeros of the column:
+      // "Stock 44", and "Stock 2.5" for a measured material
+      for (let i = 0; i < rows.length; i++) {
+        const match = /^Stock (-?\d+(?:\.\d+)?)$/.exec(String(rows[i].detail || ""));
+        if (rows[i].module === "Inventory" && match) rows[i].detail = "Stock " + String(Number(match[1]));
+      }
       response.json(rows);
     } catch (error) {
       console.error("Archives failed:", error.message);
