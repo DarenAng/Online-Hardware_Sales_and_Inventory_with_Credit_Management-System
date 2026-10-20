@@ -394,6 +394,56 @@ td.cell-num .stock-level { margin-left: auto; }
 .attention-empty { padding: 14px 0; color: var(--steel); border-top: 1px solid var(--line); }
 .attention-more { margin-top: 12px; }
 
+/* the row whose order, return or material is on the form */
+.attention-row.is-picked { background: var(--signal-dim); box-shadow: inset 3px 0 0 var(--signal); }
+
+/* REFERENCE -- the search and the Type filter sit above the list; the list
+   holds every material, so it scrolls on its own instead of stretching the page */
+.reference-toolbar { margin-bottom: 10px; }
+#panel-adjust .attention-list { max-height: 560px; overflow-y: auto; }
+
+/* ==========================================================================
+   AN ORDER OR A RETURN ON THE ADJUSTMENT FORM
+   ========================================================================== */
+/* which one is being worked, and the way back to a single material */
+.adjust-source {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 10px 13px;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--signal);
+    background: var(--paper);
+}
+.adjust-source[hidden] { display: none; }
+.adjust-source-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.adjust-source-eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--steel-soft); }
+.adjust-source-title { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.adjust-source-sub { font-size: 13px; color: var(--steel); }
+.adjust-source .btn { flex-shrink: 0; white-space: nowrap; }
+
+/* the items: a few rows show, the rest scroll inside the table */
+.adjust-lines { margin-bottom: 14px; }
+.adjust-lines[hidden] { display: none; }
+.adjust-lines-head { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--steel); }
+.adjust-lines-scroll {
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+.adjust-lines-table { margin: 0; width: 100%; }
+.adjust-lines-table thead th { position: sticky; top: 0; z-index: 1; }
+.adjust-lines-table .cell-sub { display: block; font-size: 12px; color: var(--steel-soft); }
+.adjust-line-qty { width: 100px; margin-left: auto; text-align: right; }
+
+@media (max-width: 640px) {
+    .adjust-source { flex-direction: column; }
+    .adjust-line-qty { width: 80px; }
+}
+
 /* a phone: the card heading sits at the left, like the form's (.pair-layout centred it) */
 @media (max-width: 640px) {
     #panel-adjust .panel-head { align-items: stretch; }

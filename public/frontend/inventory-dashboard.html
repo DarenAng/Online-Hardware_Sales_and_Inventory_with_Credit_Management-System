@@ -118,6 +118,28 @@
                                 <option value="Out of Stock">Out of stock</option>
                             </select>
                         </div>
+                        <!-- the choices are filled by fillMaterialFilters from what is on file -->
+                        <div class="toolbar-field">
+                            <label for="inv-supplier">Supplier</label>
+                            <select id="inv-supplier" data-filter-table="inv-table" data-hides-column="3"
+                                    onchange="dataPanelFilter('clerk-materials', 'supplier', this.value)">
+                                <option value="all">Every supplier</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="inv-material">Material</label>
+                            <select id="inv-material"
+                                    onchange="dataPanelFilter('clerk-materials', 'material', this.value)">
+                                <option value="all">Every material</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="inv-category">Category</label>
+                            <select id="inv-category"
+                                    onchange="dataPanelFilter('clerk-materials', 'category', this.value)">
+                                <option value="all">Every category</option>
+                            </select>
+                        </div>
                         <div class="toolbar-spacer"></div>
                     </div>
 
@@ -144,19 +166,20 @@
                                 <div>
                                     <h3>Stock Adjustment</h3>
                                 </div>
-                                <div class="panel-actions">
-                                    <!-- compares a delivery with its purchase order; moves no stock -->
-                                    <button type="button" class="btn btn-ghost" onclick="openPoCheck()">Check a Purchase Order</button>
-                                    <!-- a received order: what was ordered beside what arrived;
-                                         hidden by showAdjust when po-reference is switched off -->
-                                    <button type="button" class="btn btn-ghost" id="adjust-reference" onclick="openPoReference()">Reference</button>
-                                </div>
                             </div>
 
                             <form id="adjust-form" class="form-sheet" onsubmit="handleAdjustStock(event)" autocomplete="off">
+                                <!-- a purchase order or a returned item picked from Reference: which one,
+                                     with a way back to a single material (drawn by renderAdjustSource) -->
+                                <div class="adjust-source" id="adjust-source" hidden></div>
+
+                                <!-- the items of that order or return, in a short scrolling table so a
+                                     long order does not stretch the form (drawn by renderAdjustLines) -->
+                                <div class="adjust-lines" id="adjust-lines" hidden></div>
+
                                 <!-- WHICH MATERIAL -- typed; the strip below is the only thing that says a
                                      choice was made, and the form will not send without one -->
-                                <div class="form-group">
+                                <div class="form-group" id="adjust-material-field">
                                     <label for="adjust-material">Material</label>
                                     <div class="suggest-wrap">
                                         <input type="text" id="adjust-material" class="form-control"
@@ -177,43 +200,35 @@
                                 </div>
 
                                 <div class="grid-2">
-                                    <div class="form-group">
+                                    <!-- the choices follow what was picked (renderAdjustTypeOptions): a material
+                                         is added to or removed from; a returned item goes back on the shelf or
+                                         is discarded; a purchase order is always added, so this is hidden -->
+                                    <div class="form-group" id="adjust-type-field">
                                         <label for="adjust-type">Adjustment type</label>
                                         <select id="adjust-type" name="adjustmentType" class="form-control"
-                                                onchange="renderAdjustUnitVerdict(); renderAdjustPreview()" required>
+                                                onchange="renderAdjustPreview()">
                                             <option value="Add">Add to stock</option>
                                             <option value="Remove">Remove from stock</option>
-                                            <option value="Recount">Recount, set exact figure</option>
                                         </select>
                                     </div>
 
-                                    <!-- COUNTED IN WHAT -- suggests what the shop uses and accepts a new word -->
-                                    <div class="form-group">
-                                        <label for="adjust-unit">Counted in</label>
-                                        <div class="suggest-wrap">
-                                            <input type="text" id="adjust-unit" name="unitName" class="form-control"
-                                                   autocomplete="off" placeholder="pcs, bag, kilogram, box"
-                                                   maxlength="20"
-                                                   role="combobox" aria-expanded="false"
-                                                   aria-controls="unit-suggest" aria-autocomplete="list"
-                                                   oninput="onAdjustUnitInput(this.value)"
-                                                   onfocus="onAdjustUnitInput(this.value)"
-                                                   onkeydown="onAdjustUnitKey(event)">
-                                            <ul class="suggest-list" id="unit-suggest" role="listbox" hidden></ul>
-                                        </div>
-                                        <p class="unit-verdict" id="adjust-unit-verdict"></p>
+                                    <!-- the material's own unit, filled in when it is picked -->
+                                    <div class="form-group" id="adjust-unit-field">
+                                        <label for="adjust-unit">Unit</label>
+                                        <input type="text" id="adjust-unit" name="unitName" class="form-control"
+                                               placeholder="Filled in from the material" readonly tabindex="-1">
                                     </div>
 
-                                    <div class="form-group">
+                                    <div class="form-group" id="adjust-qty-field">
                                         <label for="adjust-qty">Quantity</label>
                                         <input type="number" id="adjust-qty" name="quantity" class="form-control"
-                                               min="0" step="0.001" required oninput="renderAdjustPreview()">
+                                               min="0" step="0.001" oninput="renderAdjustPreview()">
                                     </div>
 
-                                    <div class="form-group">
-                                        <label for="adjust-reason">Reason</label>
+                                    <div class="form-group" id="adjust-reason-field">
+                                        <label for="adjust-reason" id="adjust-reason-label">Reason</label>
                                         <input type="text" id="adjust-reason" name="reason" class="form-control"
-                                               maxlength="255" placeholder="Recount" required>
+                                               maxlength="255" placeholder="Damaged on the shelf">
                                     </div>
                                 </div>
 
@@ -227,14 +242,31 @@
                             </form>
                         </div>
 
-                        <!-- OUT OF STOCK OR LOW -- the same rule as the banner above; drawn by renderAttentionList -->
+                        <!-- REFERENCE -- accepted purchase orders, open returned items and every
+                             material; one click fills the form (drawn by renderAttentionList) -->
                         <div class="card">
                             <div class="panel-head">
                                 <div>
-                                    <h3>Needs attention</h3>
+                                    <h3>Reference</h3>
                                 </div>
                             </div>
-                            <p class="attention-hint">Out of stock or at or below its reorder point, most short first. Click a material to adjust it.</p>
+                            <div class="panel-toolbar reference-toolbar">
+                                <div class="search-wrap">
+                                    <input type="search" class="form-control search-input" id="reference-search"
+                                           placeholder="Search PO, supplier, material or report"
+                                           autocomplete="off" oninput="onReferenceSearch(this.value)">
+                                </div>
+                                <div class="toolbar-field">
+                                    <label for="reference-type">Type</label>
+                                    <select id="reference-type" onchange="onReferenceType(this.value)">
+                                        <option value="all">Every type</option>
+                                        <option value="po">PO</option>
+                                        <option value="return">Returned Items</option>
+                                        <option value="material">Material</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <p class="attention-hint">Accepted purchase orders, open returned items, then every material, most short first. Click one to fill the form.</p>
                             <ul class="attention-list" id="attention-list"></ul>
                             <div class="attention-more" id="attention-more" hidden></div>
                         </div>
