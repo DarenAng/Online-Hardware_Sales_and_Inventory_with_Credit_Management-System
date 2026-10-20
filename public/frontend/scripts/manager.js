@@ -3254,11 +3254,8 @@ async function openRecordDetail(index) {
         detailField('Name', escapeHtml(row.name)) +
         fields +
         '</div>' +
-        (type === 'product'
-            ? (isUnpriced(row)
-                ? '<p class="detail-note detail-warn">This product has no price yet, so the till cannot sell it.</p>'
-                : '<p class="detail-note">A new price reaches the till from the next sale on. Sales already ' +
-                  'rung up keep the price they were sold at.</p>')
+        (type === 'product' && isUnpriced(row)
+            ? '<p class="detail-note detail-warn">This product has no price yet, so the till cannot sell it.</p>'
             : '');
     const pages = [{ label: 'Details', body: body }];
 

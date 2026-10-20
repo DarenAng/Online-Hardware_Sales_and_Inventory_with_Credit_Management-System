@@ -2282,10 +2282,11 @@ const CLERK_RECORD_FIELDS = {
     unit:     [['product_count', 'Products']]
 };
 
-function openClerkRecord(index) {
+async function openClerkRecord(index) {
     const panel = getDataPanel('clerk-records');
     const row = panel ? panel.visible[index] : null;
     if (!row) return;
+    const type = clerkRecordType;
 
     let fields = '';
     const fieldList = CLERK_RECORD_FIELDS[clerkRecordType];
@@ -2306,8 +2307,37 @@ function openClerkRecord(index) {
         fields + '</div>';
 
     // the plural title made singular: "Categories" becomes "Category", "Suppliers" becomes "Supplier"
-    const kind = CLERK_RECORD_TITLES[clerkRecordType].replace(/ies$/, 'y').replace(/s$/, '');
-    openDetailModal(row.name, kind + ' record', initialsOf(row.name), [{ label: 'Details', body: body }]);
+    const kind = CLERK_RECORD_TITLES[type].replace(/ies$/, 'y').replace(/s$/, '');
+    const pages = [{ label: 'Details', body: body }];
+
+    // a supplier lists the products registered to it, a category the products
+    // filed under it and a unit the products counted in it, on a page of their own
+    if (type === 'supplier' || type === 'category' || type === 'unit') {
+        const field = { supplier: 'supplier_name', category: 'category_name', unit: 'unit_name' }[type];
+        try {
+            const allProducts = await apiGetRecords('product');
+            const rows = [];
+            for (let i = 0; i < allProducts.length; i++) {
+                const p = allProducts[i];
+                if (p[field] !== row.name) continue;
+                // a supplier's page names each product's category in place of the supplier
+                const third = type === 'supplier' ? p.category_name : p.supplier_name;
+                rows.push([
+                    escapeHtml(p.name),
+                    p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>',
+                    third ? escapeHtml(third) : '<span class="muted">Not set</span>',
+                    priceOrBadge(p),
+                    escapeHtml(qtyText(p.quantity_in_stock, p.unit_name))
+                ]);
+            }
+            pages.push({ label: 'Products (' + rows.length + ')', body: detailTable(
+                ['Product', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'], rows, [3, 4]) });
+        } catch (error) {
+            pages.push({ label: 'Products', body: '<p class="detail-note detail-warn">The products could not be loaded.</p>' });
+        }
+    }
+
+    openDetailModal(row.name, kind + ' record', initialsOf(row.name), pages, null, { wide: true });
 }
 
 async function archiveMaterial(productId) {
