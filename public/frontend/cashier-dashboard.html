@@ -485,9 +485,8 @@
                 <button type="button" class="btn btn-ghost" onclick="closeCheckoutModal()">Back to the Order</button>
                 <button type="button" class="btn btn-ghost" id="make-delivery-btn"
                         onclick="openDeliveryForm()">Make a Delivery</button>
-                <!-- GCash, PayMaya or Bank Transfer: the customer scans a QR code instead of
-                     the cashier typing a reference (shown by renderCartFigures; for a bank
-                     transfer it is the only way to finish, and Complete Sale is hidden) -->
+                <!-- GCash, PayMaya or Bank Transfer: the customer scans a QR code, the only
+                     way to finish for those, so Complete Sale is hidden (renderCartFigures) -->
                 <button type="button" class="btn" id="qr-pay-btn" data-icon="qr-code"
                         onclick="payByQr()" hidden>Pay by QR</button>
                 <button type="submit" form="checkout-form" class="btn btn-success" id="checkout-btn">Complete Sale</button>

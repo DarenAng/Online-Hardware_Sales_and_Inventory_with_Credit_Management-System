@@ -1559,13 +1559,13 @@ function renderCartFigures() {
     renderCreditVerdict(t);
     renderSalePaymentExtras(t);
 
-    // A bank transfer is only ever taken through PayMongo (Pay by Bank Transfer),
-    // so Complete Sale is not offered for it.
+    // GCash, PayMaya and a bank transfer are only ever taken through PayMongo
+    // (Pay by QR, Pay by Bank Transfer), so Complete Sale is not offered for them.
     const taken = methodTakenNow(t);
     const button = document.getElementById('checkout-btn');
     if (button) {
         button.disabled = cart.length === 0 || (!t.onAccount && t.tendered < t.due);
-        button.hidden = taken === 'Bank Transfer';
+        button.hidden = QR_METHODS.indexOf(taken) !== -1;
         button.textContent = checkoutLabel(t);
     }
 
@@ -2346,8 +2346,9 @@ async function handleCheckout(event, viaQr) {
     const t = cartTotals();
     const typedName = typedCustomerName();
 
-    // a bank transfer is only taken through PayMongo, whichever way the sale was sent (Enter too)
-    if (methodTakenNow(t) === 'Bank Transfer') viaQr = true;
+    // GCash, PayMaya and a bank transfer are only taken through PayMongo, whichever
+    // way the sale was sent (Enter too)
+    if (QR_METHODS.indexOf(methodTakenNow(t)) !== -1) viaQr = true;
 
     // Walk-in is allowed (nothing typed). A name has to be a customer picked
     // from the list; the till does not open an account from a typed name.
@@ -4198,8 +4199,8 @@ function renderPaymentVerdict() {
     // the cheque's details, or the customer's bank and account for a transfer
     showPaymentDetails('pay-debt', fields.paymentMethod.value);
 
-    // GCash or PayMaya: the customer can pay by QR code instead of a typed reference.
-    // A bank transfer is only taken through PayMongo, so Confirm Payment is not offered for it.
+    // GCash, PayMaya and a bank transfer are only taken through PayMongo (the QR
+    // code), so Confirm Payment is not offered for them.
     const isTransfer = fields.paymentMethod.value === 'Bank Transfer';
     const qrButton = document.getElementById('payment-qr-btn');
     if (qrButton) {
@@ -4207,7 +4208,7 @@ function renderPaymentVerdict() {
         qrButton.textContent = isTransfer ? 'Pay by Bank Transfer' : 'Pay by QR';
     }
     const saveButton = document.getElementById('payment-save-btn');
-    if (saveButton) saveButton.hidden = isTransfer;
+    if (saveButton) saveButton.hidden = QR_METHODS.indexOf(fields.paymentMethod.value) !== -1;
     qrAmountChanged('credit_payment', amount);
 
     if (amount <= 0) {
@@ -4259,7 +4260,9 @@ async function handleTakePayment(event, viaQr) {
     }
 
     // a bank transfer is only taken through PayMongo, whichever way the form was sent (Enter too)
-    if (method === 'Bank Transfer') viaQr = true;
+    // GCash, PayMaya and a bank transfer are only taken through PayMongo, whichever
+    // way the form was sent (Enter too)
+    if (QR_METHODS.indexOf(method) !== -1) viaQr = true;
 
     // A cheque is taken with its account name, account number, bank, branch and
     // date; a bank transfer with the customer's bank and account.
