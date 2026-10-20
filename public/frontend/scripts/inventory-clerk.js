@@ -2170,7 +2170,6 @@ function showClerkRecordType(type, event) {
 
     writeClerkRecordHeaders();
     syncClerkRecordAddButton();
-    if (changed) fillClerkRecordSort();
 
     const panel = getDataPanel('clerk-records');
     if (!panel || !changed) return;
@@ -2200,50 +2199,10 @@ function writeClerkRecordHeaders() {
     }
 }
 
-// Products sort by All (name), Category or Brand; the others by name
-function fillClerkRecordSort() {
-    const select = document.getElementById('records-sort');
-    if (!select) return;
-
-    let options;
-    if (clerkRecordType === 'product') {
-        options = [['name-asc', 'All'], ['category_name-asc', 'Category'], ['brand_name-asc', 'Brand']];
-    } else {
-        options = [['name-asc', 'Name, A to Z'], ['name-desc', 'Name, Z to A']];
-    }
-
-    let optionsHtml = '';
-    for (let i = 0; i < options.length; i++) {
-        optionsHtml += '<option value="' + options[i][0] + '">' + escapeHtml(options[i][1]) + '</option>';
-    }
-    select.innerHTML = optionsHtml;
-    select.value = 'name-asc';
-    // only Suppliers offer a sort; products, categories and units read A to Z
-    const field = document.getElementById('records-sort-field');
-    if (field) field.hidden = clerkRecordType !== 'supplier';
-    // set without loading: a closed table stays closed
-    const panel = getDataPanel('clerk-records');
-    if (panel) panel.setFilter('sort', 'name-asc');
-}
-
-function sortClerkRecordRows(rows, order) {
-    const value = String(order || 'name-asc');
-    const descending = value.endsWith('-desc');
-    // the sort order without its "-asc" or "-desc" ending
-    const key = value.replace(/-(asc|desc)$/, '');
-
+// every kind of record reads A to Z by name
+function sortClerkRecordRows(rows) {
     return rows.sort(function (a, b) {
-        const byName = String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
-        let result = byName;
-        if (key === 'category_name' || key === 'brand_name') {
-            // A to Z by category or brand, the ones not set last, then by name
-            const first = String(a[key] || '');
-            const second = String(b[key] || '');
-            if (first === '' && second !== '') result = 1;
-            else if (second === '' && first !== '') result = -1;
-            else result = first.localeCompare(second) || byName;
-        }
-        return descending ? -result : result;
+        return String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
     });
 }
 
@@ -2259,7 +2218,7 @@ function buildClerkRecordsPanel() {
             text: 'Press Load Data to see these records.',
             button: 'Load Data'
         },
-        filters: { sort: 'name-asc' },
+        filters: {},
         load: function () {
             return apiGetRecords(clerkRecordType);
         },
@@ -2270,7 +2229,7 @@ function buildClerkRecordsPanel() {
             return prefixMatch(values, query);
         },
         sort: function (rows, filters) {
-            return sortClerkRecordRows(rows, filters.sort);
+            return sortClerkRecordRows(rows);
         },
 
         // a row opens a card with the whole record
@@ -2638,7 +2597,6 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         buildClerkRecordsPanel();
         writeClerkRecordHeaders();
         syncClerkRecordAddButton();
-        fillClerkRecordSort();
 
         // the schedule follows what the administrator switched on for this role
         configureDeliverySchedule({
