@@ -508,8 +508,6 @@ async function loadStockBanner() {
 // The server marks every material Out of Stock, Low Stock or In Stock. It is
 // the same rule that counts the banner above, so the materials are sorted by
 // that mark: the ones that need stock come first.
-const ATTENTION_SHOWN = 20;
-
 function isShort(p) {
     return p.stock_status === 'Out of Stock' || p.stock_status === 'Low Stock';
 }
@@ -590,7 +588,8 @@ let referenceReturns = [];        // open returned items, grouped (see groupOpen
 let referenceProblem = '';
 let referenceSearch = '';
 let referenceType = 'all';
-let referenceMaterialsShown = ATTENTION_SHOWN;
+let referencePage = 1;
+const REFERENCE_PAGE_SIZE = 8;
 
 async function loadReferenceRecords() {
     const problems = [];
@@ -680,18 +679,19 @@ function returnGroupNames(group) {
 
 function onReferenceSearch(value) {
     referenceSearch = searchText(String(value || ''));
-    referenceMaterialsShown = ATTENTION_SHOWN;
+    referencePage = 1;
     renderAttentionList();
 }
 
 function onReferenceType(value) {
     referenceType = value || 'all';
-    referenceMaterialsShown = ATTENTION_SHOWN;
+    referencePage = 1;
     renderAttentionList();
 }
 
-function showMoreReferenceMaterials() {
-    referenceMaterialsShown += 25;
+// Previous and Next under the list, like the pager under every table
+function turnReferencePage(step) {
+    referencePage += step;
     renderAttentionList();
 }
 
@@ -717,8 +717,7 @@ function renderAttentionList() {
     if (!list || !more) return;
 
     const query = referenceSearch;
-    let listHtml = '';
-    let count = 0;
+    const rows = [];        // every row that matches, in order; one page of them is drawn
 
     // accepted purchase orders
     if (referenceType === 'all' || referenceType === 'po') {
@@ -727,14 +726,13 @@ function renderAttentionList() {
             if (query && !prefixMatch(['PO', String(po.po_id), 'PO #' + po.po_id, po.supplier_name], query)) continue;
             const picked = adjustSource && adjustSource.kind === 'po' && Number(adjustSource.po.po_id) === Number(po.po_id);
             const lines = Number(po.line_count) || 0;
-            listHtml += referenceRowHtml('adjustFromPo(' + Number(po.po_id) + ')',
+            rows.push(referenceRowHtml('adjustFromPo(' + Number(po.po_id) + ')',
                 'Receive purchase order ' + po.po_id,
                 'PO #' + escapeHtml(String(po.po_id)),
                 escapeHtml(po.supplier_name || 'No supplier'),
                 'badge-info', 'Accepted',
                 lines ? lines + (lines === 1 ? ' item' : ' items') : 'PO',
-                picked);
-            count++;
+                picked));
         }
     }
 
@@ -746,20 +744,17 @@ function renderAttentionList() {
             const words = [group.type, returnGroupTitle(group), group.filedBy].concat(names);
             if (query && !prefixMatch(words, query)) continue;
             const picked = adjustSource && adjustSource.kind === 'return' && adjustSource.group.key === group.key;
-            listHtml += referenceRowHtml('adjustFromReturn(' + escapeHtml(JSON.stringify(group.key)) + ')',
+            rows.push(referenceRowHtml('adjustFromReturn(' + escapeHtml(JSON.stringify(group.key)) + ')',
                 'Open returned item ' + returnGroupTitle(group),
                 escapeHtml(returnGroupTitle(group)),
                 joinEscaped(names.slice(0, 3), ', ') + (names.length > 3 ? ' and ' + (names.length - 3) + ' more' : ''),
                 'badge-warning', 'Open',
                 group.items.length + (group.items.length === 1 ? ' item' : ' items'),
-                picked);
-            count++;
+                picked));
         }
     }
 
     // every material, out of stock first, then low, then the rest by name
-    let materialsLeft = 0;
-    let materialCount = 0;
     if (referenceType === 'all' || referenceType === 'material') {
         const materials = [];
         for (let i = 0; i < invProducts.length; i++) {
@@ -775,45 +770,54 @@ function renderAttentionList() {
             return String(a.product_name).localeCompare(String(b.product_name));
         });
 
-        materialCount = materials.length;
-        const shown = materials.slice(0, referenceMaterialsShown);
-        materialsLeft = materials.length - shown.length;
-        for (let i = 0; i < shown.length; i++) {
-            const p = shown[i];
+        for (let i = 0; i < materials.length; i++) {
+            const p = materials[i];
             const unit = p.unit_name ? ' ' + escapeHtml(p.unit_name) : '';
             let badgeClass = 'badge-success';
             if (p.stock_status === 'Out of Stock') badgeClass = 'badge-danger';
             else if (p.stock_status === 'Low Stock') badgeClass = 'badge-warning';
             const picked = !adjustSource && adjustMaterial && adjustMaterial.product_id === p.product_id;
-            listHtml += referenceRowHtml('adjustFromList(' + p.product_id + ')',
+            rows.push(referenceRowHtml('adjustFromList(' + p.product_id + ')',
                 'Adjust ' + p.product_name,
                 escapeHtml(p.product_name),
                 materialKindText(p),
                 badgeClass, (Number(p.quantity_in_stock) || 0) + unit,
                 'Reorder at ' + (Number(p.reorder_point) || 0),
-                picked);
-            count++;
+                picked));
         }
     }
 
     let note = '';
     if (referenceProblem) note = '<li class="attention-empty">' + escapeHtml(referenceProblem) + '</li>';
 
-    if (count === 0) {
+    if (rows.length === 0) {
         let empty = 'Nothing to show.';
         if (query) empty = 'Nothing matches that search.';
         else if (referenceType === 'po') empty = 'No purchase order is waiting for its delivery.';
         else if (referenceType === 'return') empty = 'No returned item is open.';
         else if (referenceType === 'material' && !invLoaded) empty = 'Loading materials...';
         list.innerHTML = note + '<li class="attention-empty">' + escapeHtml(empty) + '</li>';
-    } else {
-        list.innerHTML = note + listHtml;
+        more.hidden = true;
+        more.innerHTML = '';
+        return;
     }
 
-    if (materialsLeft > 0) {
+    // eight rows a page, so the list fits its card without scrolling
+    const pages = Math.max(1, Math.ceil(rows.length / REFERENCE_PAGE_SIZE));
+    referencePage = Math.min(Math.max(1, referencePage), pages);
+    const start = (referencePage - 1) * REFERENCE_PAGE_SIZE;
+    list.innerHTML = note + rows.slice(start, start + REFERENCE_PAGE_SIZE).join('');
+
+    if (pages > 1) {
         more.hidden = false;
-        more.innerHTML = '<button type="button" class="btn btn-ghost btn-sm" onclick="showMoreReferenceMaterials()">' +
-            'Show more materials (' + (materialCount - materialsLeft) + ' of ' + materialCount + ')</button>';
+        more.innerHTML =
+            '<div class="pager-controls">' +
+                '<button type="button" class="btn btn-sm" onclick="turnReferencePage(-1)"' +
+                    (referencePage === 1 ? ' disabled' : '') + '>Previous</button>' +
+                '<span class="pager-page">Page ' + referencePage + ' of ' + pages + '</span>' +
+                '<button type="button" class="btn btn-sm" onclick="turnReferencePage(1)"' +
+                    (referencePage === pages ? ' disabled' : '') + '>Next</button>' +
+            '</div>';
     } else {
         more.hidden = true;
         more.innerHTML = '';
@@ -1432,6 +1436,76 @@ function renderAdjustSource() {
             '<span class="adjust-source-sub">' + sub + '</span>' +
         '</div>' +
         '<button type="button" class="btn btn-ghost btn-sm" onclick="clearAdjustSource()">Adjust a material instead</button>';
+}
+
+// Clear: empties the form and stays on the screen, back to a single material
+function clearAdjustForm() {
+    const form = document.getElementById('adjust-form');
+    if (form) {
+        form.elements.quantity.value = '';
+        form.elements.reason.value = '';
+    }
+    adjustSourceLoading++;
+    adjustSource = null;
+
+    const box = adjustMaterialBox();
+    if (box) box.value = '';
+    const clear = document.getElementById('adjust-material-clear');
+    if (clear) clear.hidden = true;
+    hideAdjustSuggestions();
+    setAdjustMaterial(null);
+
+    const type = document.getElementById('adjust-type');
+    if (type) type.value = 'Add';
+    renderAdjustForm();
+    renderAttentionList();
+}
+
+// ---------- leaving Stock Adjustment with work on the form ----------
+// A purchase order or returned item picked, or a quantity or remarks typed,
+// is work that leaving the screen would lose, so leaving asks first.
+let adjustLeaveConfirmed = false;
+
+function adjustFormHasWork() {
+    if (!adjustScreenOpen()) return false;
+    if (adjustSource) return true;
+    const form = document.getElementById('adjust-form');
+    if (!form) return false;
+    return form.elements.quantity.value.trim() !== '' || form.elements.reason.value.trim() !== '';
+}
+
+// what counts as going to another screen: the menu (not the caret that only
+// folds a heading), the banner's button, and an alert's Go to
+function leavesAdjustScreen(target) {
+    if (!target || target.closest('#panel-adjust')) return null;
+    const menuLink = target.closest('.sidebar a');
+    // Stock Adjustment's own menu entry stays on this screen
+    if (menuLink && menuLink.dataset.panelLink === 'panel-adjust') return null;
+    if (menuLink && !target.closest('.nav-caret')) return menuLink;
+    const other = target.closest('#stock-banner .btn, [onclick^="goToNotification"]');
+    return other || null;
+}
+
+async function guardAdjustLeave(event) {
+    if (adjustLeaveConfirmed || !adjustFormHasWork()) return;
+    const leaving = leavesAdjustScreen(event.target);
+    if (!leaving) return;
+
+    // hold the click until the clerk says what to do
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const yes = await askConfirm('What is on the Stock Adjustment form has not been applied. Leaving clears it.', {
+        title: 'Leave without applying?',
+        eyebrow: 'Stock Adjustment',
+        confirmLabel: 'Leave and clear',
+        tone: 'danger'
+    });
+    if (!yes) return;
+
+    clearAdjustForm();
+    adjustLeaveConfirmed = true;
+    try { leaving.click(); } finally { adjustLeaveConfirmed = false; }
 }
 
 function clearAdjustSource() {
@@ -3442,6 +3516,17 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         fillMaterialFilters();
         unfoldSidebarAtOpenScreen();
         loadNotifications();
+    });
+
+    // going to another screen with work on the Stock Adjustment form asks first;
+    // capture, so the menu's own handler waits for the answer
+    document.addEventListener('click', guardAdjustLeave, true);
+
+    // so does closing or reloading the page
+    window.addEventListener('beforeunload', function (event) {
+        if (!adjustFormHasWork()) return;
+        event.preventDefault();
+        event.returnValue = '';
     });
 
     // a click anywhere else closes whichever suggestion list is open
