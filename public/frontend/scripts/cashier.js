@@ -1939,7 +1939,7 @@ function checkoutQuestion(t, customerName) {
         if (t.amountOnAccount > 0) {
             if (t.down > 0) {
                 title = 'Take part payment and put the rest on account?';
-                confirmLabel = 'Take ' + peso(t.down) + ' and put the rest on account';
+                confirmLabel = 'Confirm';
             } else {
                 title = 'Put this sale on account?';
                 confirmLabel = 'Put it on their account';
@@ -2349,12 +2349,6 @@ async function openReceipt(saleId, fromReport) {
         bankHtml: receiptBankBlock(shop, s, receiptNo)
     });
 
-    // a credit sale's invoice offers the terms page, when the role may print it
-    const termsButton = document.getElementById('receipt-terms-btn');
-    if (termsButton) {
-        termsButton.hidden = !(s.payment_method === 'Credit' && s.customer_id && holdsFeature('credit-terms-print'));
-    }
-
     renderVoidButton(fromReport ? data : null);
     showModal('receipt-modal');
 }
@@ -2469,10 +2463,8 @@ async function showPaymentReceipt(info) {
         footerLines: ['Thank you for your payment']
     });
 
-    // it is not a credit sale's invoice: no terms page to offer, nor a void
+    // it is not a sale's invoice: no void to offer
     lastReceipt = null;
-    const termsButton = document.getElementById('receipt-terms-btn');
-    if (termsButton) termsButton.hidden = true;
     renderVoidButton(null);
 
     showModal('receipt-modal');
@@ -2501,12 +2493,6 @@ function receiptBankBlock(shop, sale, receiptNo) {
             '<div><span>Account no.</span><span>' + escapeHtml(shop.bank_account_number) + '</span></div>' +
             quoteHtml +
         '</div>';
-}
-
-// the Credit Terms and Conditions page for the customer of the invoice on screen
-function printReceiptCreditTerms() {
-    if (!lastReceipt || !lastReceipt.sale.customer_id) return;
-    printCreditTerms(lastReceipt.sale.customer_id);
 }
 
 function printReceipt() {
