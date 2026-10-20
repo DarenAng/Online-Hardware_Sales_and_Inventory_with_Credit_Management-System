@@ -262,7 +262,7 @@
                                 </div>
 
                                 <div class="form-group">
-                                    <label for="refund-sale">Sale ID <span class="label-hint">required &mdash; if the sale still owes money, the refund comes off what is owed</span></label>
+                                    <label for="refund-sale">Sale ID <span class="label-hint">required. If the sale still owes money, the refund comes off what is owed</span></label>
                                     <input type="number" id="refund-sale" name="saleId" class="form-control"
                                            min="1" placeholder="Receipt number" style="max-width: 220px;" required>
                                 </div>
@@ -399,7 +399,6 @@
                         <div class="suggest-wrap">
                             <input type="text" id="customer-name" name="customerName"
                                    class="form-control" autocomplete="off"
-                                   placeholder="Walk-in — or type a name and pick the customer"
                                    role="combobox" aria-expanded="false"
                                    aria-controls="customer-suggest" aria-autocomplete="list"
                                    oninput="onCustomerInput(this.value)"
@@ -750,20 +749,20 @@
                         <div class="form-group">
                             <label for="ac-first">First name <span class="req-mark" aria-hidden="true">*</span></label>
                             <input type="text" id="ac-first" name="firstName" class="form-control"
-                                   maxlength="100" placeholder="Maria" required>
+                                   maxlength="100" required>
                             <span class="field-error" id="ac-first-error" hidden></span>
                         </div>
                         <div class="form-group">
                             <label for="ac-middle">Middle name <span class="label-hint">optional</span></label>
                             <input type="text" id="ac-middle" name="middleName" class="form-control"
-                                   maxlength="100" placeholder="Reyes">
+                                   maxlength="100">
                         </div>
                     </div>
                     <div class="grid-2">
                         <div class="form-group">
                             <label for="ac-last">Last name <span class="req-mark" aria-hidden="true">*</span></label>
                             <input type="text" id="ac-last" name="lastName" class="form-control"
-                                   maxlength="100" placeholder="Santos" required>
+                                   maxlength="100" required>
                             <span class="field-error" id="ac-last-error" hidden></span>
                         </div>
                         <div class="form-group">
@@ -772,7 +771,7 @@
                                 <span class="phone-prefix">+63</span>
                                 <input type="text" id="ac-phone" name="phone" class="form-control"
                                        inputmode="numeric" autocomplete="tel"
-                                       maxlength="20" placeholder="9XXXXXXXXX"
+                                       maxlength="20"
                                        oninput="onPhoneInput(this)" required>
                             </div>
                             <span class="field-error" id="ac-phone-error" hidden></span>
@@ -781,22 +780,22 @@
 
                     <h4 class="detail-subhead">Address</h4>
                     <div class="form-group">
-                        <label for="ac-street">House number and street <span class="req-mark" aria-hidden="true">*</span></label>
+                        <label for="ac-street">House number and street <span class="label-hint">optional</span></label>
                         <input type="text" id="ac-street" name="street" class="form-control"
-                               maxlength="150" placeholder="Lot 5 Block 2, Rizal Street" required>
+                               maxlength="150">
                         <span class="field-error" id="ac-street-error" hidden></span>
                     </div>
                     <div class="grid-2">
                         <div class="form-group">
                             <label for="ac-barangay">Barangay <span class="req-mark" aria-hidden="true">*</span></label>
                             <input type="text" id="ac-barangay" name="barangay" class="form-control"
-                                   maxlength="100" placeholder="Wawa" required>
+                                   maxlength="100" required>
                             <span class="field-error" id="ac-barangay-error" hidden></span>
                         </div>
                         <div class="form-group">
                             <label for="ac-city">Town or city <span class="req-mark" aria-hidden="true">*</span></label>
                             <input type="text" id="ac-city" name="city" class="form-control"
-                                   maxlength="100" placeholder="Nasugbu" required>
+                                   maxlength="100" required>
                             <span class="field-error" id="ac-city-error" hidden></span>
                         </div>
                     </div>
@@ -804,18 +803,16 @@
                         <div class="form-group">
                             <label for="ac-province">Province <span class="req-mark" aria-hidden="true">*</span></label>
                             <input type="text" id="ac-province" name="province" class="form-control"
-                                   maxlength="100" placeholder="Batangas" required>
+                                   maxlength="100" required>
                             <span class="field-error" id="ac-province-error" hidden></span>
                         </div>
                         <div class="form-group">
                             <label for="ac-landmark">Landmark <span class="label-hint">optional</span></label>
                             <input type="text" id="ac-landmark" name="landmark" class="form-control"
-                                   maxlength="150" placeholder="Beside the blue gate, across the chapel">
+                                   maxlength="150">
                         </div>
                     </div>
 
-                    <p class="add-customer-note" id="add-customer-note">The account opens with a credit limit of zero. Only a manager
-                        raises it; the cashier can ask for a higher one from the customer's card.</p>
                     <p class="delivery-verdict" id="add-customer-verdict"></p>
                 </form>
             </div>

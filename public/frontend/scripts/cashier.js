@@ -365,8 +365,8 @@ function renderCatalog(rows, keyword) {
             '<td class="cell-name">' + escapeHtml(p.product_name) +
                 '<span class="on-order-mark" title="On the order"' + markHidden + '>' + markText + '</span></td>' +
             '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
-            '<td>' + escapeHtml(p.brand_name || '—') + '</td>' +
-            '<td class="cell-unit">' + escapeHtml(p.unit_name || '—') + sizesHtml + '</td>' +
+            '<td>' + escapeHtml(p.brand_name || '-') + '</td>' +
+            '<td class="cell-unit">' + escapeHtml(p.unit_name || '-') + sizesHtml + '</td>' +
             '<td class="cell-num catalog-price">' +
                 (noPrice ? '<span class="badge badge-warning">No price yet</span><span class="price-per">ask the manager</span>'
                          : peso(p.price) + perHtml) + '</td>' +
@@ -1606,10 +1606,10 @@ const REFERENCE_REQUIRED = ['Cheque'];
 const REFERENCE_OPTIONAL = ['GCash', 'PayMaya', 'PayPal'];
 
 const REFERENCE_WORDS = {
-    'Cheque':        { hint: 'required \u2014 the cheque number', placeholder: 'e.g. 001234' },
-    'GCash':         { hint: 'optional \u2014 the GCash reference', placeholder: 'e.g. 1012 345 678901' },
-    'PayMaya':       { hint: 'optional \u2014 the Maya reference', placeholder: 'e.g. 5A3F9C21' },
-    'PayPal':        { hint: 'optional \u2014 the PayPal transaction ID', placeholder: 'e.g. 8TY12345AB678901C' }
+    'Cheque':        { hint: 'required, the cheque number', placeholder: 'e.g. 001234' },
+    'GCash':         { hint: 'optional, the GCash reference', placeholder: 'e.g. 1012 345 678901' },
+    'PayMaya':       { hint: 'optional, the Maya reference', placeholder: 'e.g. 5A3F9C21' },
+    'PayPal':        { hint: 'optional, the PayPal transaction ID', placeholder: 'e.g. 8TY12345AB678901C' }
 };
 
 // what the money taken today arrives by: the sale's own method, or on a
@@ -2146,7 +2146,7 @@ function renderCreditStrip() {
 
     let availableText = peso(available);
     if (c.standing === 'Hold') {
-        availableText = 'Nothing &mdash; on hold';
+        availableText = 'Nothing, on hold';
     }
 
     // a short note: why the credit rating is not Good, or the manager's notes
@@ -2707,7 +2707,7 @@ async function openReceipt(saleId) {
     // everything refunded on the sale, then the part of it that came off what the customer owed
     if (Number(s.returned_total) > 0) totals.push({ label: 'Refunded', value: '-' + peso(s.returned_total) });
     if (Number(s.refunded_amount) > 0) totals.push({ label: 'Taken off the balance', value: '-' + peso(s.refunded_amount) });
-    totals.push({ label: 'Tendered', value: peso(s.amount_paid) });
+    totals.push({ label: 'Received Amount', value: peso(s.amount_paid) });
     totals.push({ label: 'Change', value: peso(s.change_given) });
 
     const paper = document.getElementById('receipt-paper');
@@ -3431,8 +3431,9 @@ async function saveDeliveryForm(event) {
     } else if (phoneProblem) {
         complain('contactPhone', phoneProblem);
     }
-    // a customer's address is complete: house number and street, barangay, town or city, province
-    if (street.length < 2) complain('street', 'Enter the house number and street.');
+    // the barangay, town or city and province are needed; the house number and
+    // street may be left out (not every house has them)
+    if (street !== '' && street.length < 2) complain('street', 'The house number and street is too short; leave it empty if there is none.');
     if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
     if (province.length < 2) complain('province', 'Enter the province.');
@@ -4861,7 +4862,7 @@ function renderCustomerPayments() {
     for (let i = 0; i < rows.length; i++) {
         const p = rows[i];
         // the sale (receipt) the payment was put against
-        let receiptCell = '<span class="muted">&mdash;</span>';
+        let receiptCell = '<span class="muted">-</span>';
         if (p.sale_id) receiptCell = '#' + p.sale_id;
         paymentRows.push([
             escapeHtml(dayOfStamp(p.payment_date)),
@@ -5022,8 +5023,8 @@ async function handleLimitRequest(event) {
 
 // ---------- Add Customer ----------
 // The one place an account is opened (the till no longer opens one from a
-// typed name). First name, last name, phone number and the house number and
-// street, barangay, town or city and province are required; the middle name
+// typed name). First name, last name, phone number, barangay, town or city
+// and province are required; the middle name, the house number and street,
 // and the landmark are optional. The server refuses a name already on the
 // list, any case, and gives the account a credit limit of zero.
 let addCustomerFor = '';   // 'sale': opened from the payment form, the new account goes on the sale; 'delivery': from the delivery form
@@ -5102,12 +5103,10 @@ function setAddCustomerMode(editing, name) {
     const title = document.getElementById('add-customer-title');
     const sub = document.getElementById('add-customer-sub');
     const avatar = document.getElementById('add-customer-avatar');
-    const note = document.getElementById('add-customer-note');
     const save = document.getElementById('add-customer-save');
     if (title) title.textContent = editing ? 'Edit Customer' : 'Add Customer';
     if (sub) sub.textContent = editing ? name : 'Opens an account at the counter';
     if (avatar) avatar.textContent = editing ? initialsOf(name) : '+';
-    if (note) note.hidden = editing;
     if (save) save.textContent = editing ? 'Save Changes' : 'Add Customer';
 }
 
@@ -5211,8 +5210,9 @@ async function handleAddCustomer(event) {
     } else if (phoneProblem) {
         complain('phone', phoneProblem);
     }
-    // a customer's address is complete: house number and street, barangay, town or city, province
-    if (street.length < 2) complain('street', 'Enter the house number and street.');
+    // the barangay, town or city and province are needed; the house number and
+    // street may be left out (not every house has them)
+    if (street !== '' && street.length < 2) complain('street', 'The house number and street is too short; leave it empty if there is none.');
     if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
     if (province.length < 2) complain('province', 'Enter the province.');

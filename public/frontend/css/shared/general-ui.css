@@ -317,8 +317,16 @@ input[type="number"].form-control {
     font-variant-numeric: tabular-nums;
 }
 /* the figure lines up on the right, but a hint in words ("Leave blank if not
-   from a sale") reads from the left like every other box, until a number is typed */
-input[type="number"].form-control:placeholder-shown { text-align: left; }
+   from a sale") reads from the left like every other box, until a number is typed.
+   A money box (two decimals, an .amount-field, or a "0.00" hint) keeps its hint on the
+   right, where the amount will be. */
+input[type="number"].form-control:placeholder-shown:not([step="0.01"]):not(.amount-field):not([placeholder="0.00"]) { text-align: left; }
+input[type="number"][step="0.01"],
+input[type="number"].amount-field,
+input[type="number"][placeholder="0.00"] { text-align: right; }
+input[type="number"][step="0.01"]::placeholder,
+input[type="number"].amount-field::placeholder,
+input[type="number"][placeholder="0.00"]::placeholder { text-align: right; }
 
 /* No up / down arrows inside a number box, on any page: they step by 0.01 and
    get in the way of typing an amount. A figure is typed. */

@@ -2871,7 +2871,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     // a price the supplier corrected from the link shows the shop's own struck through
     const unitCostCell = function (it) {
         // a received line where nothing arrived has no cost left on file
-        if (it.unit_cost === null || it.unit_cost === undefined) return '<span class="muted">&mdash;</span>';
+        if (it.unit_cost === null || it.unit_cost === undefined) return '<span class="muted">-</span>';
         const original = it.original_unit_cost;
         if (original === null || original === undefined || Number(original) === Number(it.unit_cost)) {
             return peso(it.unit_cost);
@@ -2886,7 +2886,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
             const it = items[i];
             lineRows.push([
                 escapeHtml(it.product_name), escapeHtml(poQuantityText(it)), unitCostCell(it),
-                it.line_cost === null || it.line_cost === undefined ? '<span class="muted">&mdash;</span>' : peso(it.line_cost)
+                it.line_cost === null || it.line_cost === undefined ? '<span class="muted">-</span>' : peso(it.line_cost)
             ]);
         }
         lines = detailTable(['Material', 'Qty', 'Unit Cost', 'Line Cost'], lineRows, [1, 2, 3]);

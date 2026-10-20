@@ -6,8 +6,8 @@
    ========================================================================== */
 
 /* A refused sign-in, said at the form rather than in the corner of a wide
-   monitor. It carries the system's meaning rule down its left edge — the same
-   3px device that marks everything else in the system that means something —
+   monitor. It carries the system's meaning rule down its left edge, the same
+   3px device that marks everything else in the system that means something,
    so it reads as part of this interface rather than as a stray red box. */
 .login-alert {
     margin-bottom: 18px;

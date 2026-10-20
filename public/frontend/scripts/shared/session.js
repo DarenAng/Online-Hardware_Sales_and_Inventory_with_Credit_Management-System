@@ -118,7 +118,7 @@ async function handleLogin(event) {
                 let advice;
                 if (meant) {
                     advice = ' The address ends in ' + email.slice(email.lastIndexOf('@') + 1) +
-                          ' \u2014 did you mean ' + meant + '? Check the email address, then type the password again.';
+                          '. Did you mean ' + meant + '? Check the email address, then type the password again.';
                 } else {
                     advice = ' Check the email address, then type the password again.';
                 }

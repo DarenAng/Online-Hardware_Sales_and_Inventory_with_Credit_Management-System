@@ -1624,10 +1624,10 @@ function registerManagerRoutes(app, deps) {
     }
     const phoneText = cleanPhone(phone) || "";
 
-    // the address in parts: house number and street, barangay, town or city and
-    // province are required; only the landmark may be left out
+    // the address in parts: barangay, town or city and province are required;
+    // the house number and street and the landmark may be left out
     const parts = addressPartsFrom(request.body);
-    const addressProblem = addressPartsProblem(parts, "customer's address", true);
+    const addressProblem = addressPartsProblem(parts, "customer's address");
     if (addressProblem) {
       return response.status(400).json({ error: addressProblem });
     }
@@ -1927,7 +1927,7 @@ function registerManagerRoutes(app, deps) {
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
     const parts = addressPartsFrom(body);
-    const addressProblem = addressPartsProblem(parts, "customer's address", true);
+    const addressProblem = addressPartsProblem(parts, "customer's address");
     if (addressProblem) return response.status(400).json({ error: addressProblem });
     const addressLine = buildFullAddress(parts).slice(0, 500);
 

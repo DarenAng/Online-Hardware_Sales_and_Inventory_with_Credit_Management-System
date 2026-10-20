@@ -830,3 +830,11 @@ function startSupplierOrderPage() {
 }
 
 startSupplierOrderPage();
+
+// The mouse wheel over a number box being typed in would change the amount by
+// a step; the box lets go of the cursor instead, so the page scrolls and the
+// figure stays as typed.
+document.addEventListener('wheel', function (event) {
+    const box = event.target;
+    if (box && box.matches && box.matches('input[type="number"]') && document.activeElement === box) box.blur();
+}, { passive: true });
