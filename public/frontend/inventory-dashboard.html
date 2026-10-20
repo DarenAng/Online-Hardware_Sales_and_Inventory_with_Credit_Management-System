@@ -647,7 +647,8 @@
                                    placeholder="Search these records"
                                    oninput="dataPanelSearchInput('clerk-records', event)" onkeydown="dataPanelSearchKey('clerk-records', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
-                        <div class="toolbar-field">
+                        <!-- Suppliers only: products, categories and units read A to Z -->
+                        <div class="toolbar-field" id="records-sort-field">
                             <label for="records-sort">Sort by</label>
                             <!-- options follow the kind of record (inventory-clerk.js fillClerkRecordSort) -->
                             <select id="records-sort" onchange="dataPanelFilter('clerk-records', 'sort', this.value)"></select>

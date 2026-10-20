@@ -2218,6 +2218,9 @@ function fillClerkRecordSort() {
     }
     select.innerHTML = optionsHtml;
     select.value = 'name-asc';
+    // only Suppliers offer a sort; products, categories and units read A to Z
+    const field = document.getElementById('records-sort-field');
+    if (field) field.hidden = clerkRecordType !== 'supplier';
     // set without loading: a closed table stays closed
     const panel = getDataPanel('clerk-records');
     if (panel) panel.setFilter('sort', 'name-asc');
