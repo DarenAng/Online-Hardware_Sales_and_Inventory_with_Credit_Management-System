@@ -621,7 +621,7 @@ function syncExportButtons() {
 
         if (ready) {
             if (button.dataset.printKind === 'sheet') {
-                button.title = 'Save every row shown as a spreadsheet';
+                button.title = 'Save every row shown as an Excel file';
             } else {
                 button.title = 'Print every row shown, or save it as a PDF';
             }
@@ -640,7 +640,7 @@ function syncExportButtons() {
             if (!items[i].disabled) any = true;
         }
         toggle.disabled = !any;
-        toggle.title = any ? 'Save as a spreadsheet, or print or save as PDF' : 'Load data first';
+        toggle.title = any ? 'Save as Excel, or print or save as PDF' : 'Load data first';
     }
 }
 
@@ -659,7 +659,7 @@ function exportIncomeSpreadsheet() {
 
     apiDownloadIncomeBreakdown(incomeQuery());
 
-    notifyInfo('The spreadsheet is being saved to your downloads folder.', 'Exporting the Sales Summary');
+    notifyInfo('The Excel file is being saved to your downloads folder.', 'Exporting the Sales Summary');
 }
 
 // ---------- a spreadsheet of what the table shows ----------
@@ -776,7 +776,7 @@ async function exportPanelSpreadsheet(keys, title) {
 
         let total = 0;
         for (let i = 0; i < sheets.length; i++) total += sheets[i].rows.length;
-        notifyInfo(total + (total === 1 ? ' row' : ' rows') + ' saved as ' + file + '.', 'Spreadsheet saved');
+        notifyInfo(total + (total === 1 ? ' row' : ' rows') + ' saved as ' + file + '.', 'Excel file saved');
     } catch (error) {
         notifyOffline();
     }

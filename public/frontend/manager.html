@@ -196,7 +196,7 @@
                                 <div class="panel-actions no-print">
                                     <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
                                             data-print-for="mgr-income-methods"
-                                            onclick="exportIncomeSpreadsheet()" disabled>Spreadsheet</button>
+                                            onclick="exportIncomeSpreadsheet()" disabled>Excel</button>
                                     <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                             data-print-for="mgr-income-methods"
                                             onclick="printReport('mgr-income-methods')"
@@ -260,7 +260,7 @@
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                        data-print-for="mgr-sales" onclick="exportPanelSpreadsheet('mgr-sales', 'Sales Transactions')" disabled>Spreadsheet</button>
+                                        data-print-for="mgr-sales" onclick="exportPanelSpreadsheet('mgr-sales', 'Sales Transactions')" disabled>Excel</button>
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                         data-print-for="mgr-sales" onclick="printReport('mgr-sales')" disabled>Print / PDF</button>
                             </div>
@@ -400,7 +400,7 @@
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                        data-print-for="mgr-unpaid" onclick="exportPanelSpreadsheet('mgr-unpaid', 'Receivables')" disabled>Spreadsheet</button>
+                                        data-print-for="mgr-unpaid" onclick="exportPanelSpreadsheet('mgr-unpaid', 'Receivables')" disabled>Excel</button>
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                         data-print-for="mgr-unpaid" onclick="printReport('mgr-unpaid')" disabled>Print / PDF</button>
                             </div>
@@ -460,7 +460,7 @@
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                        data-print-for="mgr-loyal" onclick="exportPanelSpreadsheet('mgr-loyal', 'Repeat Customers')" disabled>Spreadsheet</button>
+                                        data-print-for="mgr-loyal" onclick="exportPanelSpreadsheet('mgr-loyal', 'Repeat Customers')" disabled>Excel</button>
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                         data-print-for="mgr-loyal" onclick="printReport('mgr-loyal')" disabled>Print / PDF</button>
                             </div>
@@ -525,7 +525,7 @@
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                        data-print-for="po-totals" onclick="exportPanelSpreadsheet('po-totals', 'Total Purchases')" disabled>Spreadsheet</button>
+                                        data-print-for="po-totals" onclick="exportPanelSpreadsheet('po-totals', 'Total Purchases')" disabled>Excel</button>
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                         data-print-for="po-totals" onclick="printReport('po-totals')" disabled>Print / PDF</button>
                             </div>
@@ -547,10 +547,17 @@
                                 <label for="po-totals-month">Month</label>
                                 <!-- type to search, then pick: every month from January 2025 to December
                                      of this year (renderPurchaseTotalsMonths) -->
-                                <input type="text" id="po-totals-month" class="form-control month-search" list="po-totals-month-list"
-                                       autocomplete="off" placeholder="Search a month"
-                                       onchange="purchaseTotalsMonthTyped(this)" onfocus="this.select()">
-                                <datalist id="po-totals-month-list"></datalist>
+                                <div class="suggest-wrap month-wrap">
+                                    <input type="text" id="po-totals-month" class="form-control month-search"
+                                           role="combobox" aria-autocomplete="list" aria-controls="po-totals-month-list"
+                                           aria-expanded="false" autocomplete="off" placeholder="Search a month"
+                                           onfocus="poMonthFocus(this)" onclick="poMonthClick(this)" oninput="poMonthSuggest(false)"
+                                           onkeydown="poMonthKey(event)" onblur="poMonthBlur()">
+                                    <button type="button" class="suggest-clear" id="po-totals-month-clear" tabindex="-1"
+                                            aria-label="Clear the month" onmousedown="event.preventDefault()"
+                                            onclick="poMonthClear()" hidden>&times;</button>
+                                    <ul class="suggest-list month-list" id="po-totals-month-list" role="listbox" hidden></ul>
+                                </div>
                             </div>
                             <div class="toolbar-field" id="po-totals-year-field" hidden>
                                 <label for="po-totals-year">Year</label>
@@ -625,7 +632,7 @@
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                        data-print-for="mgr-stocks" onclick="exportPanelSpreadsheet('mgr-stocks', 'Stocks Overview')" disabled>Spreadsheet</button>
+                                        data-print-for="mgr-stocks" onclick="exportPanelSpreadsheet('mgr-stocks', 'Stocks Overview')" disabled>Excel</button>
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                         data-print-for="mgr-stocks" onclick="printReport('mgr-stocks')" disabled>Print / PDF</button>
                             </div>
@@ -687,7 +694,7 @@
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                        data-print-for="mgr-reorder" onclick="exportPanelSpreadsheet('mgr-reorder', 'Reorder Alerts')" disabled>Spreadsheet</button>
+                                        data-print-for="mgr-reorder" onclick="exportPanelSpreadsheet('mgr-reorder', 'Reorder Alerts')" disabled>Excel</button>
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                         data-print-for="mgr-reorder" onclick="printReport('mgr-reorder')" disabled>Print / PDF</button>
                             </div>
@@ -742,7 +749,7 @@
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                        data-print-for="mgr-stock-moves" onclick="exportPanelSpreadsheet('mgr-stock-moves', 'Stock Movements')" disabled>Spreadsheet</button>
+                                        data-print-for="mgr-stock-moves" onclick="exportPanelSpreadsheet('mgr-stock-moves', 'Stock Movements')" disabled>Excel</button>
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                         data-print-for="mgr-stock-moves" onclick="printReport('mgr-stock-moves')" disabled>Print / PDF</button>
                             </div>
@@ -818,7 +825,7 @@
                         </div>
                         <div class="panel-actions no-print">
                             <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                    data-print-for="mgr-po" onclick="exportPanelSpreadsheet('mgr-po', 'Purchase Orders')" disabled>Spreadsheet</button>
+                                    data-print-for="mgr-po" onclick="exportPanelSpreadsheet('mgr-po', 'Purchase Orders')" disabled>Excel</button>
                             <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                     data-print-for="mgr-po" onclick="printReport('mgr-po')" disabled>Print / PDF</button>
                         </div>
@@ -876,7 +883,7 @@
                         </div>
                         <div class="panel-actions no-print">
                             <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                    data-print-for="mgr-credit" onclick="exportPanelSpreadsheet('mgr-credit', 'Customer Credit')" disabled>Spreadsheet</button>
+                                    data-print-for="mgr-credit" onclick="exportPanelSpreadsheet('mgr-credit', 'Customer Credit')" disabled>Excel</button>
                             <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                     data-print-for="mgr-credit" onclick="printReport('mgr-credit')" disabled>Print / PDF</button>
                         </div>
@@ -1041,7 +1048,7 @@
                         </div>
                         <div class="panel-actions no-print">
                             <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                    data-print-for="mgr-deliveries" onclick="exportPanelSpreadsheet('mgr-deliveries', 'Delivery History')" disabled>Spreadsheet</button>
+                                    data-print-for="mgr-deliveries" onclick="exportPanelSpreadsheet('mgr-deliveries', 'Delivery History')" disabled>Excel</button>
                             <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                     data-print-for="mgr-deliveries" onclick="printReport('mgr-deliveries')" disabled>Print / PDF</button>
                         </div>
@@ -1135,7 +1142,7 @@
                         </div>
                         <div class="panel-actions no-print">
                             <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                    data-print-for="mgr-all" onclick="exportPanelSpreadsheet('mgr-all', 'Activity Log')" disabled>Spreadsheet</button>
+                                    data-print-for="mgr-all" onclick="exportPanelSpreadsheet('mgr-all', 'Activity Log')" disabled>Excel</button>
                             <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                     data-print-for="mgr-all" onclick="printReport('mgr-all')" disabled>Print / PDF</button>
                         </div>
