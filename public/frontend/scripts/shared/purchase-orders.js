@@ -2759,10 +2759,21 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         }
     }
 
+    // the order as it was ordered: a received order's items are its lines as
+    // ordered (the server keeps that copy), so these match what was asked for
+    let orderedLines = Number(po.line_count) || 0;
+    let orderedUnits = Number(po.total_units) || 0;
+    if (items.length > 0) {
+        orderedLines = items.length;
+        orderedUnits = 0;
+        for (let i = 0; i < items.length; i++) orderedUnits += Number(items[i].quantity) || 0;
+    }
+
     // the figures: the invoice once received, the priced lines before
     let money;
     if (po.status === 'Received') {
-        money = detailField('Goods', peso(po.goods_cost)) +
+        // the invoice is for what arrived, which may differ from what was ordered
+        money = detailField('Goods Received', peso(po.goods_cost)) +
                 detailField('Invoice Discount', peso(po.discount)) +
                 detailField('Total Cost', '<strong>' + peso(po.total_cost) + '</strong>');
     } else if (Number(po.discount) > 0) {
@@ -2793,8 +2804,13 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         (po.supplier_ship_date
             ? detailField('Delivery Schedule', escapeHtml(poShipDay(po.supplier_ship_date)))
             : '') +
-        detailField('Items', po.line_count + (Number(po.line_count) === 1 ? ' line' : ' lines') +
-            ' <span class="muted">' + po.total_units + (Number(po.total_units) === 1 ? ' unit' : ' units') + '</span>') +
+        (po.status === 'Received'
+            ? detailField('Received', po.received_at
+                ? escapeHtml(poWhen(po.received_at))
+                : '<span class="muted">Not recorded</span>')
+            : '') +
+        detailField('Items', orderedLines + (orderedLines === 1 ? ' line' : ' lines') +
+            ' <span class="muted">' + orderedUnits + (orderedUnits === 1 ? ' unit' : ' units') + '</span>') +
         money +
         '</div>';
 
@@ -2805,6 +2821,8 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     }
     // a price the supplier corrected from the link shows the shop's own struck through
     const unitCostCell = function (it) {
+        // a received line where nothing arrived has no cost left on file
+        if (it.unit_cost === null || it.unit_cost === undefined) return '<span class="muted">&mdash;</span>';
         const original = it.original_unit_cost;
         if (original === null || original === undefined || Number(original) === Number(it.unit_cost)) {
             return peso(it.unit_cost);
@@ -2818,7 +2836,8 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         for (let i = 0; i < items.length; i++) {
             const it = items[i];
             lineRows.push([
-                escapeHtml(it.product_name), escapeHtml(poQuantityText(it)), unitCostCell(it), peso(it.line_cost)
+                escapeHtml(it.product_name), escapeHtml(poQuantityText(it)), unitCostCell(it),
+                it.line_cost === null || it.line_cost === undefined ? '<span class="muted">&mdash;</span>' : peso(it.line_cost)
             ]);
         }
         lines = detailTable(['Material', 'Qty', 'Unit Cost', 'Line Cost'], lineRows, [1, 2, 3]);
@@ -2880,17 +2899,16 @@ async function openPurchaseOrderDetail(poId, readOnly) {
 // material with how many were missing or over and why (Under-delivery or
 // Over-delivery), then the clerk's remarks.
 function poDeliveryReportHtml(report) {
-    let rows = '';
+    const rows = [];
     for (let i = 0; i < report.lines.length; i++) {
         const line = report.lines[i];
         const under = line.reason === 'Under-delivery';
-        rows += '<tr>' +
-            '<td>' + escapeHtml(line.product_name) + '</td>' +
-            '<td>' + escapeHtml(qtyText(line.quantity, line.unit_name || '')) +
-                ' <span class="muted">' + (under ? 'missing' : 'over') + '</span></td>' +
-            '<td><span class="badge ' + (under ? 'badge-warning' : 'badge-info') + '">' +
-                escapeHtml(line.reason) + '</span></td>' +
-            '</tr>';
+        rows.push([
+            escapeHtml(line.product_name),
+            escapeHtml(qtyText(line.quantity, line.unit_name || '')) +
+                ' <span class="muted">' + (under ? 'missing' : 'over') + '</span>',
+            '<span class="badge ' + (under ? 'badge-warning' : 'badge-info') + '">' + escapeHtml(line.reason) + '</span>'
+        ]);
     }
 
     return '<div class="po-report">' +
@@ -2900,10 +2918,8 @@ function poDeliveryReportHtml(report) {
                 '<p><span class="po-report-label">Date reported:</span> ' +
                     (report.reported_at ? escapeHtml(poWhen(report.reported_at)) : '<span class="muted">Not recorded</span>') + '</p>' +
             '</div>' +
-            '<table class="po-report-table">' +
-                '<thead><tr><th>Material</th><th>Quantity</th><th>Reason</th></tr></thead>' +
-                '<tbody>' + rows + '</tbody>' +
-            '</table>' +
+            // the same table as every other list on the page
+            detailTable(['Material', 'Quantity', 'Reason'], rows, [1]) +
             '<p class="po-report-remarks"><span class="po-report-label">Remarks:</span> ' +
                 (report.remarks ? escapeHtml(report.remarks) : '<span class="muted">None</span>') + '</p>' +
         '</div>';
