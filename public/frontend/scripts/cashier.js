@@ -4134,22 +4134,15 @@ async function openPaymentForm(saleId) {
             escapeHtml(penaltyRateWord(row.penalty_rate)) + ' a month, ' + row.penalty_months +
             monthWord + ' overdue)</span>';
     }
-    let paymentCountNote = '';
-    if (Number(row.payment_count) > 0) {
-        let paymentWord = ' payments';
-        if (row.payment_count === 1) paymentWord = ' payment';
-        paymentCountNote = ' <span class="muted">' + row.payment_count + paymentWord + '</span>';
-    }
-
+    // two to a row; the seventh, Balance, runs the full width under the rest
     document.getElementById('payment-facts').innerHTML =
-        detailField('Customer', escapeHtml(row.customer_name) +
-            (row.phone ? ' <span class="muted">' + escapeHtml(row.phone) + '</span>' : '')) +
-        detailField('Sale', escapeHtml(String(row.sale_date).slice(0, 10)) +
-            ' <span class="muted">' + escapeHtml(row.payment_method) + '</span>') +
-        detailField('Total', peso(row.final_amount) + penaltyNote) +
-        detailField('Paid So Far', peso(row.amount_paid) + paymentCountNote) +
-        detailField('Balance', '<span class="cell-due">' + peso(balance) + '</span>') +
-        detailField('Due', debtDueCell(row));
+        detailField('Customer', escapeHtml(row.customer_name)) +
+        detailField('Phone', row.phone ? escapeHtml(row.phone) : '<span class="muted">No phone on file</span>') +
+        detailField('Sale Date', escapeHtml(String(row.sale_date).slice(0, 10))) +
+        detailField('Due Date', debtDueCell(row)) +
+        detailField('Amount Due', peso(row.final_amount) + penaltyNote) +
+        detailField('Total Payment', peso(row.amount_paid)) +
+        detailField('Balance', '<span class="cell-due">' + peso(balance) + '</span>');
 
     const fields = paymentFormFields();
     if (fields) {
@@ -4161,7 +4154,7 @@ async function openPaymentForm(saleId) {
     }
 
     const button = document.getElementById('payment-save-btn');
-    if (button) { button.disabled = false; button.textContent = 'Record the Payment'; }
+    if (button) { button.disabled = false; button.textContent = 'Confirm Payment'; }
     const qrButton = document.getElementById('payment-qr-btn');
     if (qrButton) qrButton.disabled = false;
 
@@ -4170,9 +4163,9 @@ async function openPaymentForm(saleId) {
     setTimeout(function () { if (fields && fields.amount) { fields.amount.focus(); fields.amount.select(); } }, 60);
 }
 
-// Paid or cancelled, the form goes back to the customer's card it was opened
-// from, read afresh so the balance on it is the new one. Cancelled after it was
-// opened straight from the Credit Payment list, it goes back to that list.
+// Cancelled, the form goes back to where it was opened from: the customer's card
+// (read afresh), or the Credit Payment list when it was opened straight from there.
+// Paid, nothing opens behind it: the receipt is shown on its own.
 function closePaymentForm(cancelled) {
     paymentSale = null;
     closeModal('payment-modal');
@@ -4181,7 +4174,8 @@ function closePaymentForm(cancelled) {
     const toPicker = paymentReturnPicker;
     paymentReturnCustomer = null;
     paymentReturnPicker = false;
-    if (cancelled && toPicker) openCreditPaymentPicker();
+    if (!cancelled) return;
+    if (toPicker) openCreditPaymentPicker();
     else if (customerId) openCustomerCredit(customerId, 'unpaid');
 }
 
@@ -4206,7 +4200,7 @@ function renderPaymentVerdict() {
     showPaymentDetails('pay-debt', fields.paymentMethod.value);
 
     // GCash or PayMaya: the customer can pay by QR code instead of a typed reference.
-    // A bank transfer is only taken through PayMongo, so Record the Payment is not offered for it.
+    // A bank transfer is only taken through PayMongo, so Confirm Payment is not offered for it.
     const isTransfer = fields.paymentMethod.value === 'Bank Transfer';
     const qrButton = document.getElementById('payment-qr-btn');
     if (qrButton) {
@@ -4302,7 +4296,7 @@ async function handleTakePayment(event, viaQr) {
     const button = document.getElementById('payment-save-btn');
     const qrButton = document.getElementById('payment-qr-btn');
     function ready() {
-        if (button) { button.disabled = false; button.textContent = 'Record the Payment'; }
+        if (button) { button.disabled = false; button.textContent = 'Confirm Payment'; }
         if (qrButton) qrButton.disabled = false;
     }
 
