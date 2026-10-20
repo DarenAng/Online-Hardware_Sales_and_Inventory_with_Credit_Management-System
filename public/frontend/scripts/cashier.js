@@ -1826,8 +1826,7 @@ function showQrCard(session, made) {
     if (isBank) {
         document.getElementById('qr-title').textContent = 'Pay by Bank Transfer · ' + session.bank.bank;
         document.getElementById('qr-ask').textContent =
-            'Ask the customer to scan the code with their phone\'s camera. It opens ' + session.bank.bank +
-            '\'s page, where they log in and approve the transfer.';
+            'Ask the customer to scan the code with their phone\'s camera.';
     } else {
         document.getElementById('qr-title').textContent = 'Pay by QR · ' + (QR_APP_WORDS[session.method] || session.method);
         document.getElementById('qr-ask').textContent =
@@ -1843,11 +1842,9 @@ function showQrCard(session, made) {
     if (made) {
         image.src = made.qrImage;
         image.setAttribute('data-pay-url', made.payUrl || '');
-        // a bank transfer also gets the page as a link to press
-        if (linkRow && link && isBank && made.payUrl) {
-            link.href = made.payUrl;
-            linkRow.hidden = false;
-        }
+        // no link to the bank's page on this computer: the bank's page is good
+        // for one opening, and the customer's phone is the one that needs it
+        if (linkRow) linkRow.hidden = true;
     } else {
         image.removeAttribute('src');
         image.removeAttribute('data-pay-url');
