@@ -4068,11 +4068,12 @@ function payCustomerSale(saleId) {
     openPaymentForm(saleId);
 }
 
-// Credit Settlement in the card's foot: one sale owing is opened at once;
-// several are listed on the Unpaid Sales tab to pick from.
+// Credit Settlement in the card's foot opens the payment form on the oldest
+// sale still owing (the top row of Unpaid Sales); pressing a row there pays
+// that sale instead.
 function payFromCustomerCard() {
     if (!openCustomer) return;
-    if (customerOpenSales.length === 1) {
+    if (customerOpenSales.length > 0) {
         payCustomerSale(customerOpenSales[0].sale_id);
     } else {
         showCustomerTab('unpaid');
@@ -4082,16 +4083,6 @@ function payFromCustomerCard() {
 function renderCustomerUnpaid() {
     const box = document.getElementById('customer-unpaid');
     if (!box) return;
-
-    const owed = sumOf(customerOpenSales, 'balance_due');
-    let intro = '';
-    if (customerOpenSales.length !== 0) {
-        let saleWord = ' sales';
-        if (customerOpenSales.length === 1) saleWord = ' sale';
-        intro = '<p class="panel-sub" style="margin-bottom: 12px;">' + peso(owed) + ' owed on ' +
-            customerOpenSales.length + saleWord +
-            ', oldest first. Press the one the money is for.</p>';
-    }
 
     const unpaidRows = [];
     for (let i = 0; i < customerOpenSales.length; i++) {
@@ -4109,7 +4100,7 @@ function renderCustomerUnpaid() {
         ]);
     }
 
-    box.innerHTML = intro + pagedTable('cash-unpaid', ['Receipt', 'Sold', 'Balance', 'Due'],
+    box.innerHTML = pagedTable('cash-unpaid', ['Receipt', 'Sold', 'Balance', 'Due'],
         unpaidRows, [2], {
             empty: 'Nothing is owed on any sale.',
             // the row itself opens the payment form for that sale
@@ -4317,7 +4308,7 @@ async function openCustomerCredit(customerId, tab) {
 
         // the two prints, each switched on its own (Access Control)
         document.getElementById('customer-print-card').hidden = !holdsFeature('customer-card-print');
-        document.getElementById('customer-print-terms').hidden = !holdsFeature('credit-terms-print');
+        // Print Terms and Conditions is not offered on the customer's card
 
         let open = 'account';
         if (tab === 'unpaid' && hasUnpaid) open = 'unpaid';
@@ -4329,8 +4320,8 @@ async function openCustomerCredit(customerId, tab) {
     }
 }
 
-// Print Customer Card (the card, then the terms page) or Print Credit Terms
-// (the terms page alone) for the customer whose card is open
+// Print Customer Card (the card alone) or Print Credit Terms (the terms page
+// alone) for the customer whose card is open
 function printOpenCustomer(kind) {
     if (!openCustomerId) return;
     if (kind === 'card') {
