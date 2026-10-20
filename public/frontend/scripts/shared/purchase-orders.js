@@ -1489,8 +1489,8 @@ function resetPurchaseOrderForm() {
 }
 
 // The history. A row opens the order's card, where the lines are reviewed and
-// the order is approved, declined, sent, printed or referred (an accepted
-// order has its Refer to PO button there, not in the table).
+// the order is approved, declined, emailed or printed. An accepted order's
+// delivery is counted in on Stock Adjustment.
 // The words below are the ones the Status filter offers, and every badge and
 // heading for an order uses the same. They are stages, not the database's
 // status: the database says Pending from the manager's approval until the
@@ -1586,7 +1586,6 @@ function poToSend(po) {
 
 function poRowTitle(po) {
     if (poSetup.canReceive && poToSend(po)) return 'Print this order and send it to the supplier';
-    if (poSetup.canReceive && poCanRefer(po)) return 'Refer the delivery to this order';
     if (poSetup.canDecide && po.status === 'For Approval') return 'Review this order';
     return 'Open this order';
 }
@@ -2218,7 +2217,26 @@ async function printPurchaseOrder(poId) {
         return;
     }
     renderPurchaseOrderDocument();
+    // the QR code is a picture: printing before it has loaded leaves an empty box
+    await poDocumentImagesReady();
     printPurchaseOrderNow();
+}
+
+// Resolves once every picture on the order's document has loaded (or failed),
+// or after two seconds at most, so a slow picture never holds the print back for good.
+function poDocumentImagesReady() {
+    const box = document.getElementById('po-doc');
+    const images = box ? Array.prototype.slice.call(box.querySelectorAll('img')) : [];
+    const waits = images.map(function (image) {
+        if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+        if (typeof image.decode === 'function') return image.decode().catch(function () {});
+        return new Promise(function (resolve) {
+            image.addEventListener('load', resolve, { once: true });
+            image.addEventListener('error', resolve, { once: true });
+        });
+    });
+    const timeout = new Promise(function (resolve) { window.setTimeout(resolve, 2000); });
+    return Promise.race([Promise.all(waits), timeout]);
 }
 
 // only the order's document reaches the paper (the styles are in the Purchase
@@ -2317,14 +2335,6 @@ function renderPurchaseOrderDocument() {
              String(order.supplier_email || '').trim()
                 ? '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + order.po_id + ')">' +
                   'Email to Supplier</button>'
-                : '') +
-            (poSetup.canReceive && poToSend(order)
-                ? '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + order.po_id + ')">' +
-                  'Mark as Sent</button>'
-                : '') +
-            (poSetup.canReceive && poCanRefer(order)
-                ? '<button type="button" class="btn btn-success" ' +
-                  'onclick="openReceiveOrder(' + order.po_id + ')">Refer to PO</button>'
                 : '') +
         '</div>' +
         '<div class="po-doc">' +
@@ -2724,25 +2734,21 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         if (po.confirmed_by) {
             byWhom = ' by ' + escapeHtml(po.confirmed_by);
         }
-        let next;
+        let next = null;
+        // an accepted order needs no note: its facts say who accepted it and the
+        // delivery day, and the delivery is counted in on Stock Adjustment
         if (po.supplier_response === 'Accepted') {
-            next = ' ' + escapeHtml(po.supplier_name) + ' accepted it' +
-                   (po.supplier_ship_date ? ' and delivers it on ' + escapeHtml(poShipDay(po.supplier_ship_date)) : '') +
-                   (po.supplier_note ? ' (' + escapeHtml(po.supplier_note) + ')' : '') + '. ' +
-                   (canReceive
-                       ? 'Once the goods are at the store, press Refer to PO to check them against the order ' +
-                         'and count them in.'
-                       : 'The clerk refers it once the goods have been checked against it.');
+            next = null;
         } else if (po.supplier_sent_at) {
             next = ' Sent to the supplier on ' + escapeHtml(poWhen(po.supplier_sent_at)) + ' and waiting for them ' +
-                   'to accept or decline it. It can be referred once the supplier accepts it.';
+                   'to accept or decline it.';
         } else if (canReceive) {
-            next = ' Print it and send it to the supplier, then press Mark as Sent (emailing it marks it sent by ' +
-                   'itself). The printed order carries a QR code for them to accept or decline it.';
+            next = ' Print it or email it to the supplier. The order carries a QR code for them to accept or ' +
+                   'decline it.';
         } else {
-            next = ' The clerk has not sent it to the supplier yet; you are told when the supplier answers.';
+            next = ' Waiting for the supplier to accept or decline it; you are told when they answer.';
         }
-        note = '<p class="detail-note po-next">Approved' + byWhom + '.' + next + '</p>';
+        note = next === null ? '' : '<p class="detail-note po-next">Approved' + byWhom + '.' + next + '</p>';
     } else {
         let why = '';
         if (po.decision_note) {
@@ -2867,14 +2873,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     if (canReceive && po.status === 'Pending' && !po.supplier_response && po.supplier_email) {
         foot += '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + po.po_id + ')">' +
                 (po.supplier_sent_at ? 'Email It Again' : 'Email to Supplier') + '</button>';
-    }
-    if (canReceive && poToSend(po)) {
-        foot += '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + po.po_id + ')">' +
-                'Mark as Sent</button>';
-    }
-    if (canReceive && poCanRefer(po)) {
-        foot += '<button type="button" class="btn btn-success" onclick="closeModal(\'detail-modal\'); ' +
-                'openReceiveOrder(' + po.po_id + ')">Refer to PO</button>';
     }
 
     // one wide page: the facts and the supplier's contact on the left, every
