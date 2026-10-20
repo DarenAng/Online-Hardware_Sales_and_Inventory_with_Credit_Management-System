@@ -12,6 +12,168 @@ const featuresSetup = {
 };
 
 let heldFeatureKeys = null;         // list of keys (no repeats), null until the server has answered
+let heldFeatureList = [];           // what /api/me/features said about each screen (name, hosts, held)
+
+// ==========================================
+// SCREENS ON ANOTHER ROLE'S DASHBOARD
+// Any screen can be granted to any role (Access Control). A screen this role's
+// own dashboard does not draw is opened on a dashboard that does: its "host"
+// page. The person's own menu gets a More Screens list of links to them, and
+// the host page, when visited, shows only those granted screens and a way back.
+// ==========================================
+const ROLE_PAGES = {
+    'Manager': 'manager.html',
+    'Inventory Clerk': 'inventory-dashboard.html',
+    'Cashier': 'cashier-dashboard.html',
+    'Delivery Personnel': 'delivery.html'
+};
+
+// the screens each dashboard has a menu entry for (its sidebar's data-feature keys)
+const PAGE_SCREENS = {
+    'manager.html': ['income', 'sales', 'reports', 'stock-reports', 'reorder-alerts', 'purchase-orders',
+                     'credit', 'credit-requests', 'deliveries', 'delivery-schedule', 'records',
+                     'credit-maintenance', 'data-terms', 'refund-policy', 'archives', 'account-management'],
+    'inventory-dashboard.html': ['material-list', 'stock-adjustment', 'adjustment-history', 'reorder-points',
+                                 'purchase-orders', 'returns', 'records', 'archives', 'delivery-schedule'],
+    'cashier-dashboard.html': ['pos', 'deliveries', 'refunds', 'credit', 'sales-report', 'delivery-schedule'],
+    'delivery.html': ['delivery-runs', 'delivery-reports', 'delivery-schedule']
+};
+
+const PAGE_TITLES = {
+    'manager.html': 'Manager',
+    'inventory-dashboard.html': 'Inventory',
+    'cashier-dashboard.html': 'Cashier',
+    'delivery.html': 'Delivery'
+};
+
+function currentPageName() {
+    return window.location.pathname.split('/').pop().toLowerCase();
+}
+
+function ownPageName() {
+    const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+    return user ? String(ROLE_PAGES[user.role_name] || '').toLowerCase() : '';
+}
+
+// true on another role's dashboard, opened for a granted screen
+function isVisitingPage() {
+    return document.documentElement.classList.contains('is-visiting');
+}
+
+// the page that draws a screen this role's own page does not: the first host
+// whose menu has it. Null when the own page draws it (or nobody's menu does).
+function foreignPageFor(feature) {
+    const own = ownPageName();
+    if ((PAGE_SCREENS[own] || []).indexOf(feature.key) !== -1) return null;
+    const hosts = feature.hosts || [];
+    for (let i = 0; i < hosts.length; i++) {
+        const page = ROLE_PAGES[hosts[i]];
+        if (page && (PAGE_SCREENS[page] || []).indexOf(feature.key) !== -1) return page;
+    }
+    return null;
+}
+
+// the granted screens drawn on another dashboard, in menu order
+function foreignScreens() {
+    const list = [];
+    for (let i = 0; i < heldFeatureList.length; i++) {
+        const feature = heldFeatureList[i];
+        if (!feature.held) continue;
+        const page = foreignPageFor(feature);
+        if (page) list.push({ key: feature.key, name: feature.name, page: page });
+    }
+    return list;
+}
+
+// On this person's own dashboard: More Screens, one link per granted screen
+// that lives on another dashboard. It goes when there are none.
+function renderMoreScreens() {
+    const nav = document.querySelector('.sidebar-nav');
+    if (!nav) return;
+
+    let block = document.getElementById('more-screens-nav');
+    const screens = isVisitingPage() ? [] : foreignScreens();
+    if (screens.length === 0) {
+        if (block) block.remove();
+        return;
+    }
+
+    let links = '';
+    for (let i = 0; i < screens.length; i++) {
+        const screen = screens[i];
+        const target = screen.page + '#screen=' + encodeURIComponent(screen.key);
+        // the menu's own click handling stays on the page, so the link goes by itself
+        links += '<li><a href="' + target + '" onclick="event.preventDefault(); event.stopPropagation(); ' +
+            'window.location.href = \'' + target + '\'">' +
+            '<i class="bi bi-box-arrow-up-right nav-icon" aria-hidden="true"></i>' +
+            escapeHtml(screen.name) +
+            ' <span class="nav-host">' + escapeHtml(PAGE_TITLES[screen.page] || '') + '</span></a></li>';
+    }
+
+    if (!block) {
+        block = document.createElement('li');
+        block.id = 'more-screens-nav';
+        block.setAttribute('data-sidebar-dropdown', '');
+        nav.appendChild(block);
+    }
+    block.innerHTML =
+        '<a href="#" class="nav-parent" id="more-screens-head" ' +
+            'onclick="toggleSidebarMenu(\'more-screens-head\', \'more-screens-list\', event)">' +
+            '<i class="bi bi-grid nav-icon" aria-hidden="true"></i>More Screens ' +
+            '<span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span></a>' +
+        '<ul id="more-screens-list" class="nav-sub" style="display: none;">' + links + '</ul>';
+}
+
+// On another role's dashboard: only the granted screens it draws are offered,
+// with a way back. With none left, the person goes back to their own dashboard.
+function visitingKeys() {
+    const keys = [];
+    const page = currentPageName();
+    const screens = foreignScreens();
+    for (let i = 0; i < screens.length; i++) {
+        if (screens[i].page === page) keys.push(screens[i].key);
+    }
+    return keys;
+}
+
+function renderVisitBar() {
+    const nav = document.querySelector('.sidebar-nav');
+    if (!nav || document.getElementById('visit-back-nav')) return;
+    const item = document.createElement('li');
+    item.id = 'visit-back-nav';
+    item.innerHTML = '<a href="' + escapeHtml(ownPageName()) + '" onclick="event.preventDefault(); event.stopPropagation(); ' +
+        'window.location.href = \'' + escapeHtml(ownPageName()) + '\'">' +
+        '<i class="bi bi-arrow-left nav-icon" aria-hidden="true"></i>Back to My Dashboard</a>';
+    nav.insertBefore(item, nav.firstChild);
+}
+
+// opens the menu entry for a screen key, the way a click on it would
+function openScreenByKey(key) {
+    const nav = document.querySelector('.sidebar-nav');
+    if (!nav) return false;
+    const marks = nav.querySelectorAll('[data-feature]');
+    for (let i = 0; i < marks.length; i++) {
+        if (featureKeysOf(marks[i]).indexOf(key) === -1) continue;
+        const item = marks[i].closest('li') || marks[i];
+        if (item.hidden) continue;
+        const link = marks[i].tagName === 'A' ? marks[i] : item.querySelector('a');
+        if (link) {
+            link.click();
+            return true;
+        }
+    }
+    return false;
+}
+
+// the screen asked for in the address (#screen=key), or the first one offered
+function openVisitedScreen() {
+    const match = /screen=([\w-]+)/.exec(window.location.hash || '');
+    const keys = visitingKeys();
+    const wanted = match && keys.indexOf(match[1]) !== -1 ? match[1] : keys[0];
+    if (wanted) openScreenByKey(wanted);
+}
+
+let visitOpened = false;
 
 function configureFeatures(options) {
     Object.assign(featuresSetup, options || {});
@@ -84,6 +246,14 @@ function applyFeatureMarks() {
     const nav = document.querySelector('.sidebar-nav');
     if (!nav || heldFeatureKeys === null) return;
 
+    const visiting = isVisitingPage();
+    const visitKeys = visiting ? visitingKeys() : [];
+    if (visiting && heldFeatureList.length > 0 && visitKeys.length === 0) {
+        // nothing here is granted (any more): back to the person's own dashboard
+        window.location.replace(ownPageName() || 'Login.html');
+        return;
+    }
+
     // an <li> marked with the screen it opens, or an <a> inside one
     const marks = nav.querySelectorAll('[data-feature]');
     for (let i = 0; i < marks.length; i++) {
@@ -94,6 +264,14 @@ function applyFeatureMarks() {
             !hasRole.apply(null, item.getAttribute('data-access').split(','))) continue;
         const keys = featureKeysOf(element);
         item.hidden = keys.length > 0 && !holdsAnyFeature(keys);
+        // visiting: only the screens granted from this dashboard
+        if (visiting && keys.length > 0) {
+            let offered = false;
+            for (let k = 0; k < keys.length; k++) {
+                if (visitKeys.indexOf(keys[k]) !== -1) offered = true;
+            }
+            item.hidden = !offered;
+        }
     }
 
     // a heading whose screens have all gone goes with them
@@ -128,6 +306,18 @@ function applyFeatureMarks() {
     }
 
     if (typeof featuresSetup.onApply === 'function') featuresSetup.onApply();
+
+    renderMoreScreens();
+
+    if (visiting && heldFeatureList.length > 0) {
+        renderVisitBar();
+        document.documentElement.classList.add('visit-ready');
+        // the first time: open the screen the link asked for
+        if (!visitOpened) {
+            visitOpened = true;
+            openVisitedScreen();
+        }
+    }
 
     leaveWithdrawnScreen();
 
@@ -175,6 +365,12 @@ function leaveWithdrawnScreen() {
         }
     }
 
+    // visiting: back to a granted screen, not the dashboard's own first screen
+    if (isVisitingPage()) {
+        openVisitedScreen();
+        return;
+    }
+
     if (typeof featuresSetup.home === 'function') {
         featuresSetup.home();
         if (typeof unfoldSidebarAtOpenScreen === 'function') unfoldSidebarAtOpenScreen();
@@ -202,6 +398,7 @@ async function refreshFeatures() {
     } else {
         heldFeatureKeys = [];
     }
+    heldFeatureList = Array.isArray(answer.features) ? answer.features : [];
     rememberFeatureKeys(heldFeatureKeys);
     applyFeatureMarks();
 }

@@ -258,24 +258,19 @@ function initializeSession() {
         return;
     }
 
-    if (pageName === 'manager.html' && currentUser.role_name !== 'Manager') {
-        window.location.replace(getRolePage(currentUser.role_name));
-        return;
-    }
-
-    if (pageName === 'inventory-dashboard.html' && currentUser.role_name !== 'Inventory Clerk') {
-        window.location.replace(getRolePage(currentUser.role_name));
-        return;
-    }
-
-    if (pageName === 'cashier-dashboard.html' && currentUser.role_name !== 'Cashier') {
-        window.location.replace(getRolePage(currentUser.role_name));
-        return;
-    }
-
-    if (pageName === 'delivery.html' && currentUser.role_name !== 'Delivery Personnel') {
-        window.location.replace(getRolePage(currentUser.role_name));
-        return;
+    // The four staff dashboards. Another role's dashboard may be opened to use a
+    // screen the System Administrator granted there (Access Control): the page is
+    // then "visited", and shared/features.js shows only the granted screens, or
+    // sends the person back to their own dashboard when there are none. The
+    // administrator has a page of their own and no staff screens.
+    const STAFF_PAGES = ['manager.html', 'inventory-dashboard.html', 'cashier-dashboard.html', 'delivery.html'];
+    if (STAFF_PAGES.indexOf(pageName) !== -1) {
+        const ownPage = getRolePage(currentUser.role_name).toLowerCase();
+        if (STAFF_PAGES.indexOf(ownPage) === -1) {
+            window.location.replace(getRolePage(currentUser.role_name));
+            return;
+        }
+        if (ownPage !== pageName) document.documentElement.classList.add('is-visiting');
     }
 
     if (currentUser.must_change_password && pageName !== 'change-password.html') {

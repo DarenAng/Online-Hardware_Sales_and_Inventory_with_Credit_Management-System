@@ -2288,6 +2288,7 @@ function registerAdminRoutes(app, deps) {
           name: feature.name,
           module: feature.module,
           description: feature.description,
+          hosts: feature.available,
           roles: cells
         });
       }
@@ -2336,11 +2337,6 @@ function registerAdminRoutes(app, deps) {
 
       if (role.role_name === ADMIN) {
         return response.status(403).json({ error: "The System Administrator holds every screen by role. Nothing here is granted or taken away." });
-      }
-      if (!feature.available.includes(role.role_name)) {
-        return response.status(400).json({
-          error: "The " + role.role_name + " dashboard has no " + feature.name + " screen to show, so it cannot be granted there."
-        });
       }
 
       const before = await roleFeature(role.role_name, feature.key);

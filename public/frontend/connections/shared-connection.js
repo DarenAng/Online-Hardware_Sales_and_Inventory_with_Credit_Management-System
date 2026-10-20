@@ -53,7 +53,11 @@ async function getJson(url) {
         } catch (error) {
             body = null;
         }
-        handleAuthFailure(response, body);
+        // On another role's dashboard (a granted screen, shared/features.js) the page
+        // still reads a few things for screens it does not offer; those refusals
+        // are expected and are not put on the screen.
+        const visiting = document.documentElement.classList.contains('is-visiting');
+        if (!(visiting && response.status === 403)) handleAuthFailure(response, body);
         const failure = new Error('request failed');
         failure.status = response.status;   // data-panel.js forgets a table that is no longer allowed
         // the server answered with a reason: a table shows it instead of "did not answer"
