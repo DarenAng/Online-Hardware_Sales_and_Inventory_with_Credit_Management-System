@@ -453,16 +453,18 @@
                         </div>
                     </form>
 
-                    <aside class="po-roster" aria-label="Suppliers on file">
+                    <!-- CRITICAL STOCKS -- out of stock and low materials; one click puts a
+                         material on the order (shared/purchase-orders.js renderCriticalStocks) -->
+                    <aside class="po-roster" aria-label="Critical stocks">
                         <div class="po-roster-head">
-                            <h4>Suppliers</h4>
+                            <h4>Critical stocks</h4>
                         </div>
                         <input type="search" class="form-control" id="po-roster-filter"
-                               placeholder="Find a company" autocomplete="off"
-                               oninput="renderSupplierRoster()">
+                               placeholder="Find a material or supplier" autocomplete="off"
+                               oninput="renderCriticalStocks()">
                         <ul class="po-roster-list" id="po-roster-list"></ul>
-                        <p class="po-roster-note">Click a company to order from it. A company not
-                            listed here can be typed into the order.</p>
+                        <p class="po-roster-note">Out of stock first, then low. Click a material to add it
+                            to the order with its suggested quantity; its supplier is picked for you.</p>
                     </aside>
                     </div>
                 </div>

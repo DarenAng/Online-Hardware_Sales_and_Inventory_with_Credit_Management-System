@@ -79,8 +79,9 @@ function showPurchaseOrders(event) {
     if (!poSetup.canCreate) { showPurchaseOrderHistory(); return; }
 
     poShowPanel('panel-po', 'New Purchase Order');
-    loadPoSuppliers(false).then(renderSupplierRoster);
-    ensurePoMaterials(false);
+    // the critical list needs the materials, and a click on it the suppliers
+    renderCriticalStocks();
+    Promise.all([loadPoSuppliers(false), ensurePoMaterials(false)]).then(renderCriticalStocks);
     if (poLineCount === 0) addPurchaseLine();
     renderSupplierState();
     renderPoTotals();
@@ -994,65 +995,149 @@ function resetPurchaseLines() {
     addPurchaseLine();
 }
 
-// The roster beside the form: every company on file, one click to order
-// from it. Narrowed by the box above it; the chosen one is marked.
-function renderSupplierRoster() {
+// CRITICAL STOCKS beside the form: every material out of stock or low, the
+// emptiest first. Narrowed by the box above it; a material already on the
+// order is marked. One click puts it on the order (addCriticalToOrder).
+function renderCriticalStocks() {
     const list = document.getElementById('po-roster-list');
-    const count = document.getElementById('po-roster-count');
     if (!list) return;
 
     const filter = document.getElementById('po-roster-filter');
     const query = searchText(filter ? filter.value : '');
 
-    if (!poSuppliersLoaded) {
-        list.innerHTML = '<li class="po-roster-empty">The list could not be loaded.</li>';
-        if (count) count.textContent = 'Offline';
+    if (!poMaterialsLoaded) {
+        list.innerHTML = '<li class="po-roster-empty">' +
+            (poMaterialsFailed ? 'The materials could not be loaded.' : 'Loading the materials...') + '</li>';
         return;
     }
 
-    // the suppliers that match the search, sorted A to Z
-    const rows = [];
-    for (let i = 0; i < poSuppliers.length; i++) {
-        if (prefixMatch([poSuppliers[i].name, poSuppliers[i].contact_person], query)) {
-            rows.push(poSuppliers[i]);
-        }
+    const critical = [];
+    for (let i = 0; i < poMaterials.length; i++) {
+        const p = poMaterials[i];
+        if (p.stock_status !== 'Out of Stock' && p.stock_status !== 'Low Stock') continue;
+        if (!prefixMatch([p.product_name, p.supplier_name, p.category_name, p.brand_name], query)) continue;
+        critical.push(p);
     }
-    rows.sort(function (a, b) {
-        // numeric: true sorts "Supplier 2" before "Supplier 10"
-        return String(a.name).localeCompare(String(b.name), undefined, { numeric: true });
+    // out of stock first; inside each, the one furthest under its reorder point
+    const shortBy = function (p) { return (Number(p.reorder_point) || 0) - (Number(p.quantity_in_stock) || 0); };
+    critical.sort(function (a, b) {
+        const aOut = a.stock_status === 'Out of Stock' ? 0 : 1;
+        const bOut = b.stock_status === 'Out of Stock' ? 0 : 1;
+        if (aOut !== bOut) return aOut - bOut;
+        if (shortBy(a) !== shortBy(b)) return shortBy(b) - shortBy(a);
+        return String(a.product_name).localeCompare(String(b.product_name));
     });
 
-    if (count) count.textContent = poSuppliers.length + (poSuppliers.length === 1 ? ' company' : ' companies');
-
-    if (rows.length === 0) {
+    if (critical.length === 0) {
         list.innerHTML = '<li class="po-roster-empty">' +
-            (poSuppliers.length === 0 ? 'No suppliers on file yet.' : 'No company matches that.') + '</li>';
+            (query ? 'No critical material matches that.' : 'No material is low or out of stock.') + '</li>';
         return;
     }
 
-    let rosterHtml = '';
-    for (let i = 0; i < rows.length; i++) {
-        const s = rows[i];
-        const active = poSupplier && poSupplier.id === s.id;
-        rosterHtml += '<li class="po-roster-item' + (active ? ' is-active' : '') + '" role="button" tabindex="0" ' +
-                'onclick="chooseSupplierFromRoster(' + s.id + ')" ' +
-                'onkeydown="if (event.key === \'Enter\' || event.key === \' \') { event.preventDefault(); chooseSupplierFromRoster(' + s.id + '); }">' +
+    const onOrder = poOrderedProductIds();
+    let html = '';
+    for (let i = 0; i < critical.length; i++) {
+        const p = critical[i];
+        const out = p.stock_status === 'Out of Stock';
+        const unit = p.unit_name || '';
+        html += '<li class="po-roster-item' + (onOrder[p.product_id] ? ' is-active' : '') + '" role="button" tabindex="0" ' +
+                'title="' + (onOrder[p.product_id] ? 'On this order' : 'Add it to the order') + '" ' +
+                'onclick="addCriticalToOrder(' + p.product_id + ')" ' +
+                'onkeydown="if (event.key === \'Enter\' || event.key === \' \') { event.preventDefault(); addCriticalToOrder(' + p.product_id + '); }">' +
             '<span class="po-roster-line">' +
-                '<span class="po-roster-name">' + escapeHtml(s.name) + '</span>' +
-                '<span class="po-roster-figure">' + s.product_count + ' material' +
-                    (Number(s.product_count) === 1 ? '' : 's') + '</span>' +
+                '<span class="po-roster-name">' + escapeHtml(p.product_name) + '</span>' +
+                '<span class="badge ' + (out ? 'badge-danger' : 'badge-warning') + '">' +
+                    escapeHtml(qtyText(Number(p.quantity_in_stock) || 0, unit)) + '</span>' +
             '</span>' +
-            '<span class="po-roster-sub">' + escapeHtml(s.contact_person || 'No contact on file') +
-                (s.contact_number ? ' · ' + escapeHtml(s.contact_number) : '') + '</span>' +
+            '<span class="po-roster-sub">' + escapeHtml(p.supplier_name || 'No supplier on file') +
+                ' · reorder at ' + (Number(p.reorder_point) || 0) + '</span>' +
         '</li>';
     }
-    list.innerHTML = rosterHtml;
+    list.innerHTML = html;
 }
 
-function chooseSupplierFromRoster(supplierId) {
-    pickSupplier(supplierId);
-    const first = document.querySelector('.po-line .form-control');
-    if (first) first.focus();
+// product id -> true for every material picked on an order line
+function poOrderedProductIds() {
+    const ids = {};
+    const rows = document.querySelectorAll('.po-line');
+    for (let i = 0; i < rows.length; i++) {
+        const state = matState(rows[i].dataset.picker);
+        if (state.productId) ids[state.productId] = true;
+    }
+    return ids;
+}
+
+// how many to order: the suggested order, or enough to get back over the
+// reorder point; never less than one
+function criticalOrderQuantity(p) {
+    let quantity = Math.ceil(Number(p.suggested_order) || 0);
+    if (!(quantity > 0)) {
+        quantity = Math.ceil((Number(p.reorder_point) || 0) - (Number(p.quantity_in_stock) || 0)) + 1;
+    }
+    return Math.max(1, quantity);
+}
+
+// A critical material on the order: its supplier is picked (the lines only
+// offer one company's materials), then it goes on an empty line, or a new
+// one, at its suggested quantity. Already on the order: that line is shown.
+function addCriticalToOrder(productId) {
+    const p = poFindProduct(poMaterials, productId);
+    if (!p) return;
+
+    if (!p.supplier_id) {
+        notifyWarning(p.product_name + ' has no supplier on file, so it cannot be ordered from here. ' +
+            'Ask the manager to give it one under Records, Products.', 'No supplier');
+        return;
+    }
+
+    // a material from another company: the order changes company (picked lines go, with a warning)
+    if (!poSupplier || poSupplier.id !== p.supplier_id) {
+        let known = false;
+        for (let i = 0; i < poSuppliers.length; i++) {
+            if (poSuppliers[i].id === p.supplier_id) known = true;
+        }
+        if (!known) {
+            notifyWarning(p.product_name + '\'s supplier is not on the supplier list.', 'Supplier not found');
+            return;
+        }
+        pickSupplier(p.supplier_id);
+    }
+
+    // already on a line: show that line
+    const rows = document.querySelectorAll('.po-line');
+    for (let i = 0; i < rows.length; i++) {
+        if (matState(rows[i].dataset.picker).productId === productId) {
+            rows[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const qty = rows[i].querySelector('.po-qty');
+            if (qty) qty.focus({ preventScroll: true });
+            return;
+        }
+    }
+
+    // an empty line (nothing picked or typed) is used before a new one is added
+    let row = null;
+    for (let i = 0; i < rows.length && !row; i++) {
+        const state = matState(rows[i].dataset.picker);
+        const box = matBox(rows[i].dataset.picker);
+        if (!state.productId && !state.newName && !(box && box.value.trim())) row = rows[i];
+    }
+    if (!row) {
+        addPurchaseLine();
+        row = document.querySelector('.po-line');      // a new line goes on top
+    }
+    if (!row) return;
+
+    matPick(row.dataset.picker, productId);
+
+    // the line may start on the pack the material is delivered in
+    const index = row.id.replace('po-line-', '');
+    const qty = document.getElementById('po-qty-' + index);
+    const pack = poLineIn(row);
+    if (qty) qty.value = pack ? Math.max(1, Math.ceil(criticalOrderQuantity(p) / pack.size)) : criticalOrderQuantity(p);
+    renderPoTotals();
+
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (qty) qty.focus({ preventScroll: true });
 }
 
 // nothing typed, a known company, or a new one
@@ -1063,7 +1148,7 @@ function renderSupplierState() {
     if (!box) return;
 
     const typed = box.value.trim();
-    renderSupplierRoster();
+    renderCriticalStocks();
 
     if (poSupplier) {
         if (known) {
@@ -1269,6 +1354,9 @@ function removePurchaseLine(index) {
 // typed here; harmless on a page without the form. This also keeps the line
 // count and, on a line ordered in packs, says what the packs come to.
 function renderPoTotals() {
+    // the Critical stocks list marks what is on the order
+    renderCriticalStocks();
+
     let goods = 0;
     let priced = 0;
 
@@ -1451,7 +1539,7 @@ async function handleCreatePurchaseOrder(event) {
 
         poMaterialsLoaded = false;
         poSuppliersLoaded = false;
-        loadPoSuppliers(true).then(renderSupplierRoster);
+        Promise.all([loadPoSuppliers(true), ensurePoMaterials(true)]).then(renderCriticalStocks);
         await refreshPurchaseOrders();
         poAfterChange();
 
