@@ -487,6 +487,11 @@ function apiSendPurchaseOrder(poId) {
     return sendJson('/api/purchase-orders/' + poId + '/send', 'POST', {});
 }
 
+// POST /api/purchase-orders/:id/mark-sent -- the clerk handed the printed order over
+function apiMarkPurchaseOrderSent(poId) {
+    return sendJson('/api/purchase-orders/' + poId + '/mark-sent', 'POST', {});
+}
+
 // POST /api/purchase-orders/:id/receive -- the clerk counts the delivery in
 function apiReceivePurchaseOrder(poId, received, discount) {
     return sendJson('/api/purchase-orders/' + poId + '/receive', 'POST', {

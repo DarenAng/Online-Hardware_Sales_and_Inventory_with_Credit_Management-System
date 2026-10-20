@@ -48,12 +48,18 @@ function lineQuantity(item) {
   return quantityText(item.quantity) + " " + unit;
 }
 
-const STATUS_WORDS = {
-  "For Approval": "Waiting for confirmation",
-  "Pending": "Approved, awaiting delivery",
-  "Received": "Received",
-  "Cancelled": "Cancelled"
-};
+// the order's stage, in the same words the screens use
+function statusWords(order) {
+  if (order.status === "For Approval") return "Pending Manager Approval";
+  if (order.status === "Cancelled") return "Declined - Manager";
+  if (order.status === "Pending") {
+    if (order.supplier_response === "Accepted") return "Accepted";
+    if (order.supplier_response === "Declined") return "Declined - Supplier";
+    if (order.supplier_sent_at) return "Pending Supplier Confirmation";
+    return "Approved";
+  }
+  return order.status || "";
+}
 
 // Resolves with the PDF as a Buffer.
 // "details" is { order, items, shop } as GET /api/purchase-orders/:id/document
@@ -115,7 +121,7 @@ function purchaseOrderPdf(details) {
   doc.font("Helvetica-Bold").fontSize(22).fillColor(INK).text(number, { width: width, align: "right" });
   doc.font("Helvetica").fontSize(9.5).fillColor(STEEL)
     .text(pdfText("Raised " + raised), { width: width, align: "right" })
-    .text(pdfText(STATUS_WORDS[order.status] || order.status || ""), { width: width, align: "right" });
+    .text(pdfText(statusWords(order)), { width: width, align: "right" });
 
   y = Math.max(shopBottom, doc.y) + 14;
   doc.moveTo(left, y).lineTo(right, y).lineWidth(1.2).strokeColor(INK).stroke();

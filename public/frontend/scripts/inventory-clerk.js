@@ -2655,7 +2655,10 @@ function writeClerkRecordHeaders() {
     table.querySelector('thead tr').innerHTML = headers;
 
     const panel = getDataPanel('clerk-records');
-    if (panel) panel.config.columns = columns.length;
+    if (panel) {
+        panel.config.columns = columns.length;
+        panel.resetHeaderSort();   // the headers changed: forget the sort, mark the new ones
+    }
 }
 
 // Products sort by All (name), Category or Brand; the others by name

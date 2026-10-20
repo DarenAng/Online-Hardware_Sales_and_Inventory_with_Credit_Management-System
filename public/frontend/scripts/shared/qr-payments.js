@@ -1,15 +1,16 @@
 // qr-payments.js -- the QR Payments screen: every GCash, Maya and bank-transfer
-// payment tried by QR code, how it ended, and how many went through
+// payment that went through by QR code. Only successful (paid) payments are
+// listed; codes that failed, expired, were cancelled or are still waiting are
+// not part of the record.
 // Loaded by: cashier-dashboard.html (the cashier's own) and manager.html (everyone's)
 //
 // The server decides whose rows come back (a cashier only ever gets their
-// own), and counts them: the tiles show its figures for the period picked.
-// The status filter narrows the table only. A row that paid for a sale opens
-// that sale; any other row opens the attempt itself.
+// own) and sends the paid ones only. A row that paid for a sale opens that
+// sale; any other row opens the payment itself.
 //
 //   buildQrPaymentsPanel({ key, prefix, openSale, byStaff })
 //     prefix   the ids in the page: <prefix>-table, -pager, -kpis, -search,
-//              -status, -from, -to and (with byStaff) -staff
+//              -from, -to and (with byStaff) -staff
 //     openSale the page's own way of opening a sale (an invoice, a detail card)
 
 const QR_STATUS_WORDS = {
@@ -65,14 +66,13 @@ function buildQrPaymentsPanel(options) {
         columns: 8,
         pagerId: p + '-pager',
         idField: 'id',
-        filters: { status: 'all' },
         inputs: [p + '-from', p + '-to'],
         // a code paid or closed anywhere, or a sale it was recorded on
         scopes: ['qr-payments', 'sales'],
 
         gate: {
             title: 'No QR payments loaded',
-            text: 'Pick a period above, or press Load Data to read every GCash, Maya and bank-transfer payment tried by QR code.',
+            text: 'Pick a period above, or press Load Data to read every GCash, Maya and bank-transfer payment paid by QR code.',
             button: 'Load Data'
         },
         empty: {
@@ -102,8 +102,9 @@ function buildQrPaymentsPanel(options) {
             ], query);
         },
 
-        filter: function (row, filters) {
-            return filters.status === 'all' || row.status === filters.status;
+        // only successful payments are part of the record
+        filter: function (row) {
+            return row.status === 'paid';
         },
 
         renderRow: function (row, index) {
@@ -123,7 +124,7 @@ function buildQrPaymentsPanel(options) {
     renderQrPaymentTiles(state);
 }
 
-// the period and the person, for the server; the status stays on the screen
+// the period and the person, for the server
 function qrPaymentsQuery(state) {
     const p = state.options.prefix;
     const parts = [];

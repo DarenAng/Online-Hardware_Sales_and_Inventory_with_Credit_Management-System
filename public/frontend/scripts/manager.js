@@ -1413,13 +1413,12 @@ function buildStockPanels() {
     createDataPanel({
         key: 'mgr-reorder',
         tableId: 'reorder-table',
-        columns: 8,
+        columns: 6,
         pagerId: 'reorder-pager',
         idField: 'product_id',
         filters: { status: 'all' },
         sortKeys: ['product_name', function (p) { return Number(p.quantity_in_stock); },
-                   function (p) { return Number(p.effective_rop); }, function (p) { return Number(p.avg_daily_sales); },
-                   function (p) { return p.days_of_cover === null ? '' : Number(p.days_of_cover); },
+                   function (p) { return Number(p.effective_rop); },
                    function (p) { return Number(p.suggested_order); }, 'supplier_name', 'stock_status'],
         gate: {
             title: 'Reorder alerts not loaded',
@@ -1446,10 +1445,6 @@ function buildStockPanels() {
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + '</td>' +
                 '<td class="cell-num">' + p.effective_rop + '</td>' +
-                '<td class="cell-num">' + Number(p.avg_daily_sales).toFixed(2) + '</td>' +
-                '<td class="cell-num">' + (p.days_of_cover === null
-                    ? '<span class="muted">no sales</span>'
-                    : Number(p.days_of_cover).toFixed(0) + ' days') + '</td>' +
                 '<td class="cell-num cell-due">' + p.suggested_order + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
                 '<td>' + escapeHtml(p.supplier_name || 'No supplier') + '</td>' +
                 '<td>' + statusBadge(p.stock_status) + '</td></tr>';

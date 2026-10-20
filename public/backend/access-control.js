@@ -184,6 +184,8 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/purchase-orders\/\d+\/receive$/,  [CLERK]],
   // once approved, the clerk prints the order and may email it to the supplier
   ["POST",  /^\/api\/purchase-orders\/\d+\/send$/,     [CLERK]],
+  // or prints it and hands it over, then marks it as sent
+  ["POST",  /^\/api\/purchase-orders\/\d+\/mark-sent$/, [CLERK]],
   // the supplier, who has no account, opens the order from the link or QR code
   // on the printed order; the code (43 url-safe characters) is the whole of the permission
   ["GET",   /^\/api\/supplier-order\/[A-Za-z0-9_-]{43}$/,          PUBLIC],

@@ -258,6 +258,22 @@ function renderDeliverySchedule() {
         return String(a.scheduled_date || '9999').localeCompare(String(b.scheduled_date || '9999'));
     });
 
+    // a pressed header sorts by its column instead; empty values stay last
+    if (scheduleSort) {
+        const key = SCHEDULE_SORT_KEYS[scheduleSort.column];
+        const descending = scheduleSort.descending;
+        const indexed = rows.map(function (row, at) { return { row: row, value: key(row), at: at }; });
+        indexed.sort(function (x, y) {
+            const xEmpty = x.value === null || x.value === undefined || x.value === '';
+            const yEmpty = y.value === null || y.value === undefined || y.value === '';
+            if (xEmpty !== yEmpty) return xEmpty ? 1 : -1;
+            const result = compareSortValues(x.value, y.value);
+            return (descending ? -result : result) || x.at - y.at;
+        });
+        rows.length = 0;
+        for (let i = 0; i < indexed.length; i++) rows.push(indexed[i].row);
+    }
+
     if (rows.length === 0) {
         body.innerHTML = scheduleRows.length > 0
             ? '<div class="empty-state"><h4>No delivery matches</h4>' +
@@ -301,12 +317,44 @@ function renderDeliverySchedule() {
 
     body.innerHTML = '<div class="table-responsive">' +
         '<table id="schedule-table" data-hidden-columns="' + hidden.join(',') + '">' +
-        '<thead><tr><th>Due</th><th>When</th><th>Customer</th><th>Destination</th>' +
-        '<th>Driver</th><th>Status</th></tr></thead>' +
+        '<thead><tr>' + scheduleHeaders() + '</tr></thead>' +
         '<tbody>' + rowsHtml + '</tbody></table></div>';
 
     body.dataset.canUpdate = canUpdate ? '1' : '';
     body.dataset.canArchive = canArchive ? '1' : '';
+}
+
+// ---------- sorting by pressing a column header ----------
+const SCHEDULE_HEADERS = ['Due', 'When', 'Customer', 'Destination', 'Driver', 'Status'];
+const SCHEDULE_GROUP_ORDER = ['overdue', 'today', 'tomorrow', 'later', 'unset'];
+const SCHEDULE_SORT_KEYS = [
+    function (d) { return d.scheduled_date ? String(d.scheduled_date) : ''; },
+    function (d) { return SCHEDULE_GROUP_ORDER.indexOf(scheduleGroupOf(d)); },
+    function (d) { return d.customer_name || 'Walk-in'; },
+    function (d) { return d.delivery_address || ''; },
+    function (d) { return d.driver_name || 'Unassigned'; },
+    function (d) { return d.status || ''; }
+];
+let scheduleSort = null;    // { column, descending } once a header is pressed
+
+function scheduleHeaders() {
+    let html = '';
+    for (let i = 0; i < SCHEDULE_HEADERS.length; i++) {
+        let state = 'none';
+        if (scheduleSort && scheduleSort.column === i) state = scheduleSort.descending ? 'descending' : 'ascending';
+        html += '<th class="th-sortable" tabindex="0" aria-sort="' + state + '" title="Sort by ' + SCHEDULE_HEADERS[i] + '" ' +
+            'onclick="sortDeliverySchedule(' + i + ')" ' +
+            'onkeydown="if (event.key === \'Enter\' || event.key === \' \') { event.preventDefault(); sortDeliverySchedule(' + i + '); }">' +
+            SCHEDULE_HEADERS[i] + '</th>';
+    }
+    return html;
+}
+
+// pressing a header sorts by it; pressing it again turns the order round
+function sortDeliverySchedule(column) {
+    if (scheduleSort && scheduleSort.column === column) scheduleSort.descending = !scheduleSort.descending;
+    else scheduleSort = { column: column, descending: false };
+    renderDeliverySchedule();
 }
 
 function openScheduledDelivery(deliveryId) {

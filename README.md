@@ -858,8 +858,8 @@ sale's reference. A code lasts 10 minutes. A failed or expired code offers
 **New QR** or **Choose another method**, and nothing is recorded for it.
 
 Every attempt is a row in `qr_payments` with how it ended (paid, failed,
-expired, cancelled), and **QR Payments** lists them with the success rate: the
-cashier their own, the manager everyone's. A paid code whose sale could not be
+expired, cancelled), and **QR Payments** lists the successful (paid) ones only,
+with no status filter: the manager sees everyone's. A paid code whose sale could not be
 saved (an item ran out) stays paid and says *paid but sale not saved – refund
 needed*.
 
@@ -1385,6 +1385,22 @@ on the left, what came off the lorry typed on the right — puts the goods
 onto the shelf and closes the order. An order the manager has not confirmed
 yet cannot be received, and the server refuses that too.
 
+Every order shows one of these statuses (worked out from the stored status,
+whether it was sent, and the supplier's answer):
+
+| Status | When |
+|---|---|
+| **Pending Manager Approval** | sent to the manager, not decided yet |
+| **Approved** | the manager approved it; the clerk has not sent it to the supplier yet |
+| **Declined - Manager** | the manager declined it; remarks saying why are required |
+| **Pending Supplier Confirmation** | sent to the supplier (emailed, or printed and marked **Mark as Sent**), no answer yet |
+| **Accepted** | the supplier accepted it from the link or QR code on the order |
+| **Declined - Supplier** | the supplier declined it |
+| **Received** | the clerk referred it (**Refer to PO**) and counted it in |
+
+An order can only be referred once it is **Accepted**; the server refuses it
+before that.
+
 The screens are one piece of code (`shared/purchase-orders.js`) that each
 page configures with what it is allowed to do, so the two desks cannot
 disagree about what an order is.
@@ -1397,8 +1413,8 @@ suggested order that brings it back to twice the reorder point. The manager
 changes it from the product's card in Stocks; the clerk from the Material List.
 
 How fast a product sells (its average daily sales over the last ninety days of
-trading, and the days of cover that gives) is shown beside it to help pick the
-figure, but nothing is calculated for it. An older database whose products were
+trading, and the days of cover that gives) is shown on the product's card to
+help pick the figure, but nothing is calculated for it. An older database whose products were
 set to a calculated (Dynamic) reorder point is switched to the typed figure on
 the next `npm start`.
 

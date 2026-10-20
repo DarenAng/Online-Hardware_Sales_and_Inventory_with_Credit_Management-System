@@ -453,15 +453,15 @@
                         <div class="toolbar-field">
                             <label for="po-status">Status</label>
                             <select id="po-status" data-filter-table="po-table" data-hides-column="6"
-                                    data-keeps-column-for="PO Accepted|On the way"
                                     onchange="dataPanelFilter('clerk-po', 'status', this.value)">
                                 <option value="all">Every status</option>
-                                <option value="For Approval">Waiting for confirmation</option>
-                                <option value="Pending">Waiting for delivery</option>
-                                <option value="PO Accepted">PO Accepted</option>
-                                <option value="On the way">On the way</option>
+                                <option value="For Approval">Pending Manager Approval</option>
+                                <option value="Approved">Approved</option>
+                                <option value="Declined - Manager">Declined - Manager</option>
+                                <option value="Pending Supplier Confirmation">Pending Supplier Confirmation</option>
+                                <option value="Accepted">Accepted</option>
+                                <option value="Declined - Supplier">Declined - Supplier</option>
                                 <option value="Received">Received</option>
-                                <option value="Cancelled">Cancelled</option>
                             </select>
                         </div>
                         <div class="toolbar-spacer"></div>

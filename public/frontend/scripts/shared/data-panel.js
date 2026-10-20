@@ -17,6 +17,10 @@
 //       sortKeys: ['name', 'qty', null],  // optional; one per column: a row field or
 //                                         // function (row) {...}; null = not sortable.
 //                                         // Pressing a header sorts by it, again reverses it.
+//                                         // Left out, every column sorts by the text its
+//                                         // cell shows (headers that are empty or say
+//                                         // Action(s), or carry class "no-sort", do not).
+//                                         // false turns header sorting off.
 //       renderRow: function (row, index) { return '<tr>...</tr>'; },
 //       gate: { title, text, button },  // what the closed state says
 //       empty: { title, text },        // optional; a loaded table with no rows
@@ -60,8 +64,13 @@ function createDataPanel(config) {
     Object.assign(panel, dataPanelMethods);
     dataPanels[config.key] = panel;
 
+    // no sortKeys given: every column sorts by what its cell shows
+    if (config.sortKeys === undefined || config.sortKeys === null) {
+        config.autoSortKeys = true;
+    }
+
     panel.renderClosed();
-    if (config.sortKeys) wireHeaderSort(panel);
+    if (config.sortKeys || config.autoSortKeys) wireHeaderSort(panel);
     return panel;
 }
 
@@ -92,8 +101,9 @@ function wireHeaderSort(panel) {
 
 // marks the headers that sort, and which one is in use and which way
 function markSortableHeaders(panel) {
-    const keys = panel.config.sortKeys;
     const table = document.getElementById(panel.config.tableId);
+    if (panel.config.autoSortKeys && table) panel.config.sortKeys = autoSortKeys(panel, table);
+    const keys = panel.config.sortKeys;
     if (!keys || !table) return;
 
     const heads = table.querySelectorAll('thead th');
@@ -114,6 +124,83 @@ function markSortableHeaders(panel) {
         }
         th.setAttribute('aria-sort', state);
     }
+}
+
+// ---------- sorting a table that names no sortKeys ----------
+// Each column sorts by the text its cell shows: the row is drawn once with the
+// panel's own renderRow and the cell's text is read back, as a number, a date
+// or words. Columns with no header, or an Action(s) header, do not sort.
+function autoSortKeys(panel, table) {
+    const heads = table.querySelectorAll('thead th');
+    const keys = [];
+    for (let i = 0; i < heads.length; i++) {
+        const th = heads[i];
+        const label = th.textContent.trim();
+        if (label === '' || /^actions?$/i.test(label) || th.classList.contains('no-sort') ||
+            th.querySelector('input, button, select')) {
+            keys.push(null);
+        } else {
+            keys.push(autoSortKey(panel, i));
+        }
+    }
+    return keys;
+}
+
+function autoSortKey(panel, column) {
+    return function (row) {
+        const cells = autoSortCells(panel, row);
+        return column < cells.length ? cells[column] : '';
+    };
+}
+
+// the sort value of every cell in a row, worked out once per row each time
+// the table is sorted (apply starts a fresh cache, so changed rows re-read)
+let autoSortTemplate = null;
+
+function autoSortCells(panel, row) {
+    if (!panel.autoSortCache) panel.autoSortCache = new WeakMap();
+    const cache = panel.autoSortCache;
+    const isObject = row !== null && typeof row === 'object';
+    if (isObject && cache.has(row)) return cache.get(row);
+
+    if (!autoSortTemplate) autoSortTemplate = document.createElement('template');
+    let html = '';
+    try {
+        html = panel.config.renderRow(row, 0) || '';
+    } catch (error) {
+        html = '';
+    }
+    autoSortTemplate.innerHTML = html;
+    const tr = autoSortTemplate.content.querySelector('tr');
+    const values = [];
+    if (tr) {
+        for (let i = 0; i < tr.children.length; i++) {
+            values.push(autoSortValue(tr.children[i].textContent));
+        }
+    }
+    autoSortTemplate.innerHTML = '';
+    if (isObject) cache.set(row, values);
+    return values;
+}
+
+// "₱1,234.50" and "12 pcs" sort as numbers, "4 Sep 2026, 16:45" as a date,
+// anything else as words; a dash or "None" is empty and stays last
+function autoSortValue(text) {
+    const shown = String(text || '').replace(/\s+/g, ' ').trim();
+    if (shown === '' || /^(-|\u2014|\u2013|none|n\/a|not set)$/i.test(shown)) return '';
+
+    const plain = shown.replace(/[\u20B1$,]/g, '').replace(/^PHP\s*/i, '');
+    const number = plain.match(/^(-?\d+(?:\.\d+)?)\s*(%|[a-z.]+(?: [a-z.]+)?)?$/i);
+    if (number) return Number(number[1]);
+
+    const datePart = shown.split('\u00B7')[0].trim();
+    if (/\b\d{4}\b/.test(datePart) &&
+        (/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(datePart) ||
+         /^\d{4}-\d{2}-\d{2}/.test(datePart))) {
+        const time = Date.parse(datePart);
+        if (!isNaN(time)) return time;
+    }
+    return shown.toLowerCase();
 }
 
 // the value a row is sorted by in one column
@@ -487,6 +574,7 @@ const dataPanelMethods = {
             const key = this.config.sortKeys[this.headerSort.column];
             const descending = this.headerSort.descending;
             if (key) {
+                this.autoSortCache = new WeakMap();
                 const indexed = [];
                 for (let i = 0; i < this.visible.length; i++) {
                     indexed.push({ row: this.visible[i], value: headerSortValue(key, this.visible[i]), at: i });
@@ -503,8 +591,10 @@ const dataPanelMethods = {
             }
         }
 
-        // sort is applied to the filtered copy; loaded rows keep server order
-        if (typeof this.config.sort === 'function') {
+        // sort is applied to the filtered copy; loaded rows keep server order.
+        // A table that sorts by its cells keeps the header's order once one is pressed.
+        const headerSorted = this.headerSort && this.config.autoSortKeys;
+        if (typeof this.config.sort === 'function' && !headerSorted) {
             const sorted = this.config.sort(this.visible.slice(), this.filters);
             if (Array.isArray(sorted)) this.visible = sorted;
         }

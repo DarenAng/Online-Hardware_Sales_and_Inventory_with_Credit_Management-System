@@ -1490,37 +1490,43 @@ function resetPurchaseOrderForm() {
 }
 
 // The history. A row opens the order's card, where the lines are reviewed and
-// the order is confirmed, declined, printed or counted in (an order that is
-// accepted or on its way has its Refer to PO button there, not in the table).
-// The words below are the ones the Status filter offers, and every
-// badge and heading for an order uses the same. They are stages, not the
-// database's status: the database says Pending from the manager's approval
-// until the delivery is counted in, and the supplier's answer and ship date
-// split that into the four middle stages.
+// the order is approved, declined, sent, printed or referred (an accepted
+// order has its Refer to PO button there, not in the table).
+// The words below are the ones the Status filter offers, and every badge and
+// heading for an order uses the same. They are stages, not the database's
+// status: the database says Pending from the manager's approval until the
+// delivery is referred, and whether it was sent and the supplier's answer
+// split that into Approved, Pending Supplier Confirmation, Accepted and
+// Declined - Supplier.
 const PO_STATES = [
-    { status: 'For Approval', label: 'Waiting for confirmation' },
-    { status: 'Pending',      label: 'Waiting for delivery' },
-    { status: 'PO Accepted',  label: 'PO Accepted' },
-    { status: 'On the way',   label: 'On the way' },
-    { status: 'Received',     label: 'Received' },
-    { status: 'Cancelled',    label: 'Cancelled' }
+    { status: 'For Approval',                  label: 'Pending Manager Approval' },
+    { status: 'Approved',                      label: 'Approved' },
+    { status: 'Declined - Manager',            label: 'Declined - Manager' },
+    { status: 'Pending Supplier Confirmation', label: 'Pending Supplier Confirmation' },
+    { status: 'Accepted',                      label: 'Accepted' },
+    { status: 'Declined - Supplier',           label: 'Declined - Supplier' },
+    { status: 'Received',                      label: 'Received' }
 ];
 
-// the stage an order is in now: an approved order the supplier has accepted is
-// PO Accepted, and On the way from the day the supplier said it ships (no ship
-// date given: it stays PO Accepted). A declined or unanswered order stays Pending.
+// the stage an order is in now
+//   For Approval                   sent to the manager, not decided yet
+//   Approved                       approved, the clerk has not sent it to the supplier yet
+//   Declined - Manager             the manager declined it, with remarks
+//   Pending Supplier Confirmation  sent to the supplier, not accepted or declined yet
+//   Accepted / Declined - Supplier the supplier's answer
+//   Received                       referred and counted in by the clerk
 function poStage(po) {
-    if (po.status !== 'Pending' || po.supplier_response !== 'Accepted') return po.status;
-
-    const ships = String(po.supplier_ship_date || '').slice(0, 10);
-    if (ships && ships <= todayDateValue()) return 'On the way';
-    return 'PO Accepted';
+    if (po.status === 'Cancelled') return 'Declined - Manager';
+    if (po.status !== 'Pending') return po.status;
+    if (po.supplier_response === 'Accepted') return 'Accepted';
+    if (po.supplier_response === 'Declined') return 'Declined - Supplier';
+    if (po.supplier_sent_at) return 'Pending Supplier Confirmation';
+    return 'Approved';
 }
 
-// the goods are due at the store: the clerk checks them against the order
+// an order is referred only once the supplier has accepted it
 function poCanRefer(po) {
-    const stage = poStage(po);
-    return stage === 'PO Accepted' || stage === 'On the way';
+    return poStage(po) === 'Accepted';
 }
 
 function poStatusWord(stage) {
@@ -1534,15 +1540,28 @@ function poStatusWord(stage) {
     return state ? state.label : statusWord(stage);
 }
 
+// each stage's colour: waiting is amber, approved or accepted blue, declined red
+const PO_STAGE_TONES = {
+    'For Approval': 'badge-warning',
+    'Approved': 'badge-info',
+    'Declined - Manager': 'badge-danger',
+    'Pending Supplier Confirmation': 'badge-warning',
+    'Accepted': 'badge-info',
+    'Declined - Supplier': 'badge-danger',
+    'Received': 'badge-success'
+};
+
 function poStatusBadge(po) {
     const stage = poStage(po);
-    return statusBadge(stage, poStatusWord(stage));
+    return '<span class="badge ' + (PO_STAGE_TONES[stage] || 'badge-neutral') + '">' +
+        escapeHtml(poStatusWord(stage)) + '</span>';
 }
 
 // the orders this page has to act on sort first; newest first after that
 function poNeedsMe(po) {
-    return (poSetup.canDecide && po.status === 'For Approval') ||
-           (poSetup.canReceive && po.status === 'Pending');
+    const stage = poStage(po);
+    return (poSetup.canDecide && stage === 'For Approval') ||
+           (poSetup.canReceive && (stage === 'Approved' || stage === 'Accepted'));
 }
 
 function sortPurchaseOrders(rows) {
@@ -1561,14 +1580,14 @@ function poValueCell(po) {
     return peso(po.goods_cost);
 }
 
-// an approved order the supplier has not answered and was not emailed is
-// still to be printed and sent; after that it waits to be counted in
+// an approved order not sent yet is still to be printed (or emailed) and sent
 function poToSend(po) {
-    return po.status === 'Pending' && !po.supplier_response && !po.supplier_sent_at;
+    return poStage(po) === 'Approved';
 }
 
 function poRowTitle(po) {
     if (poSetup.canReceive && poToSend(po)) return 'Print this order and send it to the supplier';
+    if (poSetup.canReceive && poCanRefer(po)) return 'Refer the delivery to this order';
     if (poSetup.canDecide && po.status === 'For Approval') return 'Review this order';
     return 'Open this order';
 }
@@ -2289,10 +2308,13 @@ function renderPurchaseOrderDocument() {
                 ? '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + order.po_id + ')">' +
                   'Email to Supplier</button>'
                 : '') +
-            (poSetup.canReceive && order.status === 'Pending'
+            (poSetup.canReceive && poToSend(order)
+                ? '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + order.po_id + ')">' +
+                  'Mark as Sent</button>'
+                : '') +
+            (poSetup.canReceive && poCanRefer(order)
                 ? '<button type="button" class="btn btn-success" ' +
-                  'onclick="openReceiveOrder(' + order.po_id + ')">' +
-                  (poCanRefer(order) ? 'Refer to PO' : 'Receive this delivery') + '</button>'
+                  'onclick="openReceiveOrder(' + order.po_id + ')">Refer to PO</button>'
                 : '') +
         '</div>' +
         '<div class="po-doc">' +
@@ -2384,6 +2406,11 @@ function renderPurchaseOrderDocument() {
 // the right, and a way to add something that was never ordered.
 async function openReceiveOrder(poId) {
     if (!poSetup.canReceive) return;
+    const order = findPurchaseOrder(poId);
+    if (order && !poCanRefer(order)) {
+        notifyWarning('A purchase order can only be referred once the supplier has accepted it.', 'Not accepted yet');
+        return;
+    }
 
     poShowPanel('panel-po-receive', 'Receive Delivery');
 
@@ -2681,11 +2708,6 @@ async function openPurchaseOrderDetail(poId) {
         if (po.confirmed_by) {
             byWhom = ' by ' + escapeHtml(po.confirmed_by);
         }
-        let emailed = '';
-        if (po.supplier_sent_at) {
-            emailed = ' Emailed to the supplier on ' + escapeHtml(poWhen(po.supplier_sent_at)) + '.';
-        }
-
         let next;
         if (po.supplier_response === 'Accepted') {
             next = ' ' + escapeHtml(po.supplier_name) + ' accepted it' +
@@ -2694,13 +2716,15 @@ async function openPurchaseOrderDetail(poId) {
                    (poSetup.canReceive
                        ? 'Once the goods are at the store, press Refer to PO to check them against the order ' +
                          'and count them in.'
-                       : 'The clerk receives it once the goods have been checked against it.');
+                       : 'The clerk refers it once the goods have been checked against it.');
+        } else if (po.supplier_sent_at) {
+            next = ' Sent to the supplier on ' + escapeHtml(poWhen(po.supplier_sent_at)) + ' and waiting for them ' +
+                   'to accept or decline it. It can be referred once the supplier accepts it.';
         } else if (poSetup.canReceive) {
-            next = ' Print it and send it to the supplier: the printed order carries a QR code for them to ' +
-                   'accept or decline it.' + emailed + ' Count it in once the goods arrive.';
+            next = ' Print it and send it to the supplier, then press Mark as Sent (emailing it marks it sent by ' +
+                   'itself). The printed order carries a QR code for them to accept or decline it.';
         } else {
-            next = ' The clerk prints it and sends it to the supplier; you are told when the supplier answers.' +
-                   emailed;
+            next = ' The clerk has not sent it to the supplier yet; you are told when the supplier answers.';
         }
         note = '<p class="detail-note po-next">Approved' + byWhom + '.' + next + '</p>';
     } else {
@@ -2708,8 +2732,13 @@ async function openPurchaseOrderDetail(poId) {
         if (po.decision_note) {
             why = ': ' + escapeHtml(po.decision_note);
         }
-        note = '<p class="detail-note po-next">This order was ' + escapeHtml(String(po.status).toLowerCase()) +
-               why + '.</p>';
+        if (po.status === 'Cancelled') {
+            note = '<p class="detail-note detail-warn po-next">Declined by the manager' +
+                   (po.decision_note ? '. Remarks: ' + escapeHtml(po.decision_note) : '') + '.</p>';
+        } else {
+            note = '<p class="detail-note po-next">This order was ' + escapeHtml(String(po.status).toLowerCase()) +
+                   why + '.</p>';
+        }
     }
 
     // the figures: the invoice once received, the priced lines before
@@ -2735,7 +2764,7 @@ async function openPurchaseOrderDetail(poId) {
         detailField('Raised', escapeHtml(String(po.order_date).slice(0, 16)) +
             (po.raised_by ? ' <span class="muted">by ' + escapeHtml(po.raised_by) + '</span>' : '')) +
         (po.confirmed_at
-            ? detailField(po.status === 'Cancelled' ? 'Declined' : 'Approved',
+            ? detailField(po.status === 'Cancelled' ? 'Declined by Manager' : 'Approved',
                 escapeHtml(String(po.confirmed_at).slice(0, 16)) +
                 (po.confirmed_by ? ' <span class="muted">by ' + escapeHtml(po.confirmed_by) + '</span>' : ''))
             : '') +
@@ -2805,10 +2834,13 @@ async function openPurchaseOrderDetail(poId) {
         foot += '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + po.po_id + ')">' +
                 (po.supplier_sent_at ? 'Email It Again' : 'Email to Supplier') + '</button>';
     }
-    if (poSetup.canReceive && po.status === 'Pending') {
+    if (poSetup.canReceive && poToSend(po)) {
+        foot += '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + po.po_id + ')">' +
+                'Mark as Sent</button>';
+    }
+    if (poSetup.canReceive && poCanRefer(po)) {
         foot += '<button type="button" class="btn btn-success" onclick="closeModal(\'detail-modal\'); ' +
-                'openReceiveOrder(' + po.po_id + ')">' +
-                (poCanRefer(po) ? 'Refer to PO' : 'Count In the Delivery') + '</button>';
+                'openReceiveOrder(' + po.po_id + ')">Refer to PO</button>';
     }
 
     // one wide page: the facts and the supplier's contact on the left, every
@@ -2873,8 +2905,8 @@ async function decidePurchaseOrder(poId, approve) {
             title: 'Decline this purchase order?',
             eyebrow: 'Purchase Orders',
             message: 'Order #' + po.po_id + ' to ' + po.supplier_name + ' is cancelled and the clerk is told why.',
-            label: 'Why it is declined',
-            placeholder: 'Say what the clerk should do instead',
+            label: 'Remarks: why it is declined',
+            placeholder: 'Say why it is declined and what the clerk should do instead',
             confirmLabel: 'Decline the order',
             tone: 'danger',
             check: function (value) {
@@ -2941,6 +2973,35 @@ async function sendPurchaseOrder(poId) {
         poAfterChange();
     } catch (error) {
         hideWorking();
+        notifyOffline();
+    }
+}
+
+// The clerk printed an approved order and handed it to the supplier: it now
+// waits for the supplier to accept or decline it (Pending Supplier Confirmation)
+async function markPurchaseOrderSent(poId) {
+    if (!poSetup.canReceive) return;
+    const po = findPurchaseOrder(poId);
+    if (!po || !poToSend(po)) return;
+
+    const yes = await askConfirm(
+        'Order #' + po.po_id + ' is marked as sent to ' + po.supplier_name + '. It then waits for the supplier ' +
+        'to accept or decline it from the QR code or link on the order.',
+        { title: 'Mark this order as sent?', eyebrow: 'Purchase Orders', confirmLabel: 'Mark as Sent' });
+    if (!yes) return;
+
+    try {
+        const response = await apiMarkPurchaseOrderSent(poId);
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error);
+            return;
+        }
+        closeModal('detail-modal');
+        notifySuccess(result.message, 'Order sent');
+        await refreshPurchaseOrders();
+        poAfterChange();
+    } catch (error) {
         notifyOffline();
     }
 }

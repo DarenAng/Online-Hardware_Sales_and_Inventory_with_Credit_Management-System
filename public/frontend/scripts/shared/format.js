@@ -91,25 +91,22 @@ function qtyText(value, unit) {
 }
 
 // label: what to print instead of the stored value (a purchase order says
-// "Waiting for delivery" where the database says Pending)
+// "Pending Manager Approval" where the database says For Approval)
 function statusBadge(text, label) {
     const good = ['Paid', 'Delivered', 'In Stock', 'Active', 'Received'];
     const bad = ['Unpaid', 'Failed', 'Out of Stock', 'Inactive', 'Cancelled'];
     const warn = ['Partial', 'Low Stock', 'Delayed', 'Pending', 'For Approval', 'In Transit', 'Out for Delivery', 'Missing'];
-    // a purchase order the supplier has taken on: in hand, not yet at the store
-    const info = ['PO Accepted', 'On the way'];
 
     let tone = 'badge-neutral';
     if (good.indexOf(text) !== -1) tone = 'badge-success';
     else if (bad.indexOf(text) !== -1) tone = 'badge-danger';
     else if (warn.indexOf(text) !== -1) tone = 'badge-warning';
-    else if (info.indexOf(text) !== -1) tone = 'badge-info';
 
     return '<span class="badge ' + tone + '">' + escapeHtml(label || statusWord(text)) + '</span>';
 }
 
 // how a stored status is said on screen; the stored value is unchanged
-const STATUS_WORDS = { 'For Approval': 'Waiting for confirmation', 'Missing': 'Missing from delivery' };
+const STATUS_WORDS = { 'For Approval': 'Pending Manager Approval', 'Missing': 'Missing from delivery' };
 
 function statusWord(text) {
     return STATUS_WORDS[text] || text;
