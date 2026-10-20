@@ -217,24 +217,27 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
             if (isDriver || allowed[i] !== 'Delivered') next.push(allowed[i]);
         }
 
-        updateBody = next.length === 0
-            ? '<p class="detail-note">This delivery is closed. Nothing further can be recorded against it.</p>' + archiveBlock
-            : '<div class="form-group"><label>Remarks <span class="label-hint">optional</span></label>' +
-              '<textarea class="form-control" id="drec-remarks" rows="3" ' +
-              'placeholder="Gate closed, customer not around, rain on the route"></textarea></div>';
-
-        pages.push({ label: 'Update', body: updateBody });
+        // No remarks box: Delayed and Failed each ask for their reason in their own popup.
+        // A closed delivery still says so, with the archive button.
+        if (next.length === 0) {
+            updateBody = '<p class="detail-note">This delivery is closed. Nothing further can be recorded against it.</p>' + archiveBlock;
+            pages.push({ label: 'Update', body: updateBody });
+        }
 
         for (let i = 0; i < next.length; i++) {
             const s = next[i];
             // The driver collects what is owed on their own delivery before it is closed,
-            // so Delivered becomes Proceed to Payment. Nothing owed: plain Delivered.
+            // so Delivered becomes Proceed Payment. With nothing owed, Proceed Payment
+            // closes the delivery as delivered.
             // (the Collect Payment at the Door screen, switched on and off for the role)
             const mine = typeof isMine === 'function' && isMine(d);
             const collectOn = typeof holdsFeature !== 'function' || holdsFeature('delivery-collect');
             if (s === 'Delivered' && isDriver && mine && collectOn && d.payment_method !== 'Credit' && Number(d.balance_due) > 0) {
                 footActions += '<button type="button" class="btn btn-success" ' +
-                    'onclick="proceedToPayment(' + d.delivery_id + ')">Proceed to Payment</button>';
+                    'onclick="proceedToPayment(' + d.delivery_id + ')">Proceed Payment</button>';
+            } else if (s === 'Delivered' && isDriver) {
+                footActions += '<button type="button" class="btn btn-success" ' +
+                    'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'Delivered\')">Proceed Payment</button>';
             } else {
                 footActions += '<button type="button" class="btn ' + (DELIVERY_STATUS_BUTTON[s] || 'btn-accent') + '" ' +
                     'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'' + s + '\')">' + s + '</button>';
@@ -254,8 +257,8 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
     }
 
     // The driver gets one page: the route and payment on the left,
-    // the goods and the remarks on the right. The items fill their
-    // box when they arrive (fillDeliveryItems).
+    // the goods on the right (and the closed note once it is closed). The items
+    // fill their box when they arrive (fillDeliveryItems).
     if (isDriver) {
         const onePage = [{ label: 'Delivery', body:
             '<div class="drec-layout">' +
@@ -266,7 +269,7 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
                 '<div class="drec-main">' +
                     '<h4 class="detail-subhead" id="drec-items-title">Items</h4>' +
                     '<div id="drec-items">' + itemsPage.body + '</div>' +
-                    (updateBody ? '<h4 class="detail-subhead">Remarks</h4>' + updateBody : '') +
+                    updateBody +
                 '</div>' +
             '</div>' }];
 
@@ -344,17 +347,13 @@ async function fillDeliveryItems(deliveryId, page, pages) {
     }
 }
 
-// A status button in the popup's foot. The note is read before the popup
-// closes; it is only on screen while the Update tab (the driver: the one page) is open.
+// A status button in the popup's foot.
 async function pickDeliveryStatus(deliveryId, status) {
-    const remarks = document.getElementById('drec-remarks');
-    const note = remarks && remarks.value.trim() ? remarks.value.trim() : null;
-
     closeModal('detail-modal');
 
-    // Delayed needs a reason, so it has its own small popup (#delay-modal)
-    if (status === 'Delayed') {
-        openDelayReason(deliveryId, note);
+    // Delayed and Failed need a reason, so they have their own small popup (#delay-modal)
+    if (status === 'Delayed' || status === 'Failed') {
+        openDelayReason(deliveryId, status);
         return;
     }
 
@@ -367,33 +366,43 @@ async function pickDeliveryStatus(deliveryId, status) {
             title: 'Mark as ' + status + '?',
             eyebrow: 'Delivery',
             confirmLabel: 'Mark ' + status,
-            tone: status === 'Failed' ? 'danger' : 'accent'
+            tone: 'accent'
         });
     if (!yes) return;
 
-    await sendDeliveryStatus(deliveryId, status, note);
+    await sendDeliveryStatus(deliveryId, status, null);
 }
 
-// ---------- the reason for a Delayed delivery ----------
+// ---------- the reason for a Delayed or Failed delivery ----------
 let delayDeliveryId = null;
+let delayStatus = 'Delayed';     // which of the two the popup is for
 
-// The remarks already typed in the card are put in the box to start with.
-function openDelayReason(deliveryId, note) {
+// One popup for both: its title, label and button follow the status.
+function openDelayReason(deliveryId, status) {
     delayDeliveryId = deliveryId;
+    delayStatus = status;
+    const failed = status === 'Failed';
 
     document.getElementById('delay-subtitle').textContent = 'Delivery #' + deliveryId;
-    document.getElementById('delay-reason').value = note || '';
+    document.getElementById('delay-title').textContent = failed ? 'Mark Failed' : 'Mark Delayed';
+    document.getElementById('delay-label').textContent = failed ? 'Why it failed' : 'Reason for the delay';
+    document.getElementById('delay-reason').value = '';
+
+    const button = document.getElementById('delay-save');
+    button.textContent = failed ? 'Mark Failed' : 'Mark Delayed';
+    button.className = failed ? 'btn btn-danger' : 'btn btn-gold';
 
     showModal('delay-modal');
 }
 
-// Mark Delayed: the reason is sent as the remarks with the new status
+// Mark Delayed or Failed: the reason is sent as the remarks with the new status
 async function handleDelayReason(event) {
     event.preventDefault();
 
     const reason = document.getElementById('delay-reason').value.trim();
     if (reason.length < 5) {
-        notifyWarning('Say why it is delayed, in a few words.', 'The reason is required');
+        const ask = delayStatus === 'Failed' ? 'Say why it failed, in a few words.' : 'Say why it is delayed, in a few words.';
+        notifyWarning(ask, 'The reason is required');
         document.getElementById('delay-reason').focus();
         return;
     }
@@ -404,21 +413,17 @@ async function handleDelayReason(event) {
     if (button) button.disabled = true;
 
     // The popup stays open until the change is saved, so a failure keeps the typed reason.
-    const saved = await sendDeliveryStatus(delayDeliveryId, 'Delayed', reason);
+    const saved = await sendDeliveryStatus(delayDeliveryId, delayStatus, reason);
     if (saved) closeModal('delay-modal');
 
     if (button) button.disabled = false;
 }
 
-// Proceed to Payment, in the driver's card: the card closes and the Receive
-// Payment card (delivery-personnel.js) opens for the same delivery. The remarks
-// typed in the card go along and are saved when the delivery is marked Delivered.
+// Proceed Payment, in the driver's card: the card closes and the Receive
+// Payment card (delivery-personnel.js) opens for the same delivery.
 function proceedToPayment(deliveryId) {
-    const remarks = document.getElementById('drec-remarks');
-    const note = remarks && remarks.value.trim() ? remarks.value.trim() : null;
-
     closeModal('detail-modal');
-    openDriverPayment(deliveryId, note);
+    openDriverPayment(deliveryId, null);
 }
 
 // ---------- status updates ----------

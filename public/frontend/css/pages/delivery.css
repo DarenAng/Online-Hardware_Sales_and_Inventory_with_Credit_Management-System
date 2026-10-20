@@ -20,19 +20,8 @@
 /* a Pending row nobody has taken yet: tagged beside the customer's name */
 #dpend-table .owner-tag { margin-left: 4px; vertical-align: middle; }
 
-/* why a Delayed delivery is delayed: small muted words under its status */
-.delay-reason {
-    display: block;
-    margin-top: 4px;
-    max-width: 280px;
-    font-size: 13px;
-    line-height: 1.35;
-    color: var(--steel-soft);
-    overflow-wrap: anywhere;
-}
-
 /* ==========================================================================
-   RECEIVE PAYMENT -- the card opened by Proceed to Payment (#pay-modal in delivery.html)
+   RECEIVE PAYMENT -- the card opened by Proceed Payment (#pay-modal in delivery.html)
    One column; the balance is read out first and the amount is set as a figure
    ========================================================================== */
 #pay-form .pay-owed {
@@ -107,13 +96,6 @@
     /* the two dates stay on one line: they are a range, not two questions */
     .panel-toolbar .toolbar-date { flex: 1 1 calc(50% - 5px); min-width: 0; }
     .toolbar-date input { min-width: 0; width: 100%; }
-
-    /* the reason sits on its own line under the badges, across the whole status cell */
-    #dpend-table .delay-reason {
-        flex: 1 1 100%;
-        max-width: none;
-        margin-top: 0;
-    }
 }
 
 /* ==========================================================================

@@ -115,12 +115,6 @@ function ownerTag(d) {
     return '<span class="badge badge-neutral owner-tag">Unassigned</span>';
 }
 
-// A Delayed delivery says why, in small muted words under its status
-function delayedReason(d) {
-    if (d.status !== 'Delayed' || !d.remarks) return '';
-    return '<span class="delay-reason">Delayed: ' + escapeHtml(d.remarks) + '</span>';
-}
-
 // What the driver has to collect on a delivery, as a figure in the list; crimson
 // when money is owed, a plain "Paid" when it is not, "On account" for a credit sale
 // (that is paid at the counter, not at the door)
@@ -134,17 +128,13 @@ function collectCell(d) {
     return '<td class="cell-num"><span class="muted">Paid</span></td>';
 }
 
-// Clicking a delivery nobody has taken claims it for this driver first.
+// Clicking a delivery nobody has taken claims it for this driver first,
+// straight away (no question asked), then opens its card.
 async function openPendingDelivery(deliveryId) {
     const d = findDriverDelivery(deliveryId);
     if (!d) return;
 
     if (!isMine(d)) {
-        const yes = await askConfirm(
-            'Delivery #' + deliveryId + ' to ' + d.customer_name + ' will be assigned to you.',
-            { title: 'Take this delivery?', eyebrow: 'Deliveries', confirmLabel: 'Take Delivery', tone: 'accent' });
-        if (!yes) return;
-
         try {
             const response = await apiClaimDelivery(deliveryId);
             const result = await response.json();
@@ -216,13 +206,13 @@ function buildDriverPanels() {
                 '<td>' + escapeHtml(d.delivery_address) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
                 collectCell(d) +
-                '<td>' + statusBadge(d.status) + delayedReason(d) + '</td></tr>';
+                '<td>' + statusBadge(d.status) + '</td></tr>';
         }
     });
 }
 
 // ---------- receive payment ----------
-// Opens from "Proceed to Payment" in a delivery's card (shared/deliveries.js).
+// Opens from "Proceed Payment" in a delivery's card (shared/deliveries.js).
 // Recording the payment also marks the delivery Delivered.
 let paymentDeliveryId = null;
 let paymentRemarks = null;     // the note typed in the delivery's card; it goes with Delivered
@@ -309,16 +299,12 @@ function onDriverPayAmountChange() {
     }
 }
 
-// Cancel and the x: back to the delivery's card, with the remarks put back
+// Cancel and the x: back to the delivery's card
 function cancelDriverPayment() {
     const deliveryId = paymentDeliveryId;
-    const remarks = paymentRemarks;
 
     closeModal('pay-modal');
     openDriverDetail(deliveryId);
-
-    const box = document.getElementById('drec-remarks');
-    if (box && remarks) box.value = remarks;
 }
 
 async function handleDriverPayment(event) {

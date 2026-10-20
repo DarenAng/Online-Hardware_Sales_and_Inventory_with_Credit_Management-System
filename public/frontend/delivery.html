@@ -278,7 +278,7 @@
         </div>
     </div>
 
-    <!-- RECEIVE PAYMENT -- opened by Proceed to Payment on a delivery's card. Recording the
+    <!-- RECEIVE PAYMENT -- opened by Proceed Payment on a delivery's card. Recording the
          payment also marks the delivery Delivered. Locked and scrolling like the refund form. -->
     <div class="modal" id="pay-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
@@ -329,7 +329,7 @@
         </div>
     </div>
 
-    <!-- WHY IS IT DELAYED -- opened by the Delayed button on a delivery's card. The reason is
+    <!-- WHY IS IT DELAYED OR FAILED -- opened by the Delayed and Failed buttons on a delivery's card. The reason is
          required and is saved as the delivery's remarks. Locked like the other forms that hold typed data. -->
     <div class="modal" id="delay-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
@@ -337,7 +337,7 @@
                 <div class="modal-identity">
                     <div class="avatar">DL</div>
                     <div>
-                        <h3>Mark Delayed</h3>
+                        <h3 id="delay-title">Mark Delayed</h3>
                         <span class="modal-role" id="delay-subtitle">Delivery</span>
                     </div>
                 </div>
@@ -347,7 +347,7 @@
             <div class="modal-body">
                 <form id="delay-form" onsubmit="handleDelayReason(event)" autocomplete="off">
                     <div class="form-group">
-                        <label for="delay-reason">Reason for the delay
+                        <label for="delay-reason"><span id="delay-label">Reason for the delay</span>
                             <span class="label-hint">required</span></label>
                         <textarea id="delay-reason" class="form-control" rows="4" minlength="5" required
                                   placeholder="Gate closed, customer not around, rain on the route"></textarea>
@@ -357,7 +357,7 @@
 
             <div class="modal-foot">
                 <button type="button" class="btn btn-ghost" onclick="closeModal('delay-modal')">Cancel</button>
-                <button type="submit" class="btn btn-gold" form="delay-form">Mark Delayed</button>
+                <button type="submit" class="btn btn-gold" id="delay-save" form="delay-form">Mark Delayed</button>
             </div>
         </div>
     </div>
