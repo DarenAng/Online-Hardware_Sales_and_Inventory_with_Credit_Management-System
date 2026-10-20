@@ -4513,11 +4513,10 @@ async function openCustomerCredit(customerId, tab) {
             (c.phone || 'No phone on file') + ' · Credit Rating: ' + (CASH_RATING_WORD[c.standing] || c.standing);
         document.getElementById('customer-avatar').textContent = initialsOf(c.customer_name);
 
-        let availableCell = peso(c.available_credit);
-        if (c.standing === 'Hold') availableCell = '<span class="cell-due">Nothing, on hold</span>';
-
-        let overdueNote = '';
-        if (Number(c.overdue_sales) > 0) overdueNote = ' <span class="cell-due">' + c.overdue_sales + ' overdue</span>';
+        // nothing left to charge (over the limit, or on hold) reads as zero
+        let available = Math.max(Number(c.available_credit) || 0, 0);
+        if (c.standing === 'Hold') available = 0;
+        const availableCell = '<span class="' + (available > 0 ? '' : 'cell-due') + '">' + peso(available) + '</span>';
 
         let penaltiesFact = '';
         if (Number(c.penalties_owed) > 0) {
@@ -4525,9 +4524,6 @@ async function openCustomerCredit(customerId, tab) {
                 '</span> <span class="muted">of the amount owed, at ' +
                 escapeHtml(penaltyRateWord(c.penalty_rate)) + ' a month</span>');
         }
-
-        let noteFact = '';
-        if (c.credit_notes) noteFact = detailField('Manager Note', escapeHtml(c.credit_notes));
 
         document.getElementById('customer-facts').innerHTML =
             detailField('Credit Limit', peso(c.credit_limit)) +
@@ -4538,12 +4534,10 @@ async function openCustomerCredit(customerId, tab) {
             detailField('Credit Rating', '<span class="badge ' +
                 (CASH_RATING_TONE[c.standing] || 'badge-neutral') + '">' +
                 escapeHtml(CASH_RATING_WORD[c.standing] || c.standing) + '</span>') +
-            detailField('Why', escapeHtml(c.standing_reason || '')) +
-            detailField('Open Sales', String(c.open_sales) + overdueNote) +
+            detailField('Open Sales', String(c.open_sales)) +
             penaltiesFact +
             detailField('Lifetime Purchases', peso(c.total_purchase)) +
-            detailField('Address', c.address ? escapeHtml(c.address) : '<span class="muted">Not on file</span>') +
-            noteFact;
+            detailField('Address', c.address ? escapeHtml(c.address) : '<span class="muted">Not on file</span>');
 
         resetHistoryFilters();
         renderCustomerHistory();
@@ -4642,6 +4636,7 @@ function renderCustomerHistory() {
     const total = document.getElementById('customer-history-total');
     if (total) total.textContent = peso(openCustomer.credit.total_purchase);
 
+    const onlyPaid = status === 'paid';
     const purchaseRows = [];
     for (let i = 0; i < rows.length; i++) {
         const p = rows[i];
@@ -4649,18 +4644,23 @@ function renderCustomerHistory() {
         if (Number(p.penalty_amount) > 0) {
             penaltyNote = '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty</span>';
         }
-        let balanceCell = '<span class="muted">Paid</span>';
-        if (Number(p.balance_due) > 0) balanceCell = '<span class="cell-due">' + peso(p.balance_due) + '</span>';
-        purchaseRows.push([
+        const cells = [
             escapeHtml(dayOfStamp(p.sale_date)),
             '#' + p.sale_id + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
-            peso(p.final_amount) + penaltyNote,
-            balanceCell
-        ]);
+            peso(p.final_amount) + penaltyNote
+        ];
+        if (!onlyPaid) {
+            let balanceCell = '<span class="muted">Paid</span>';
+            if (Number(p.balance_due) > 0) balanceCell = '<span class="cell-due">' + peso(p.balance_due) + '</span>';
+            cells.push(balanceCell);
+        }
+        purchaseRows.push(cells);
     }
 
-    box.innerHTML = pagedTable('cash-purchases', ['Date', 'Sale', 'Amount', 'Balance'],
-        purchaseRows, [2, 3], {
+    // only paid sales listed: every balance would read Paid, so the column goes
+    box.innerHTML = pagedTable('cash-purchases',
+        onlyPaid ? ['Date', 'Sale', 'Amount'] : ['Date', 'Sale', 'Amount', 'Balance'],
+        purchaseRows, onlyPaid ? [2] : [2, 3], {
             empty: emptyHistoryNote('Nothing bought yet.', from, to, status !== 'all' || from || to)
         });
 }
@@ -4697,15 +4697,15 @@ function renderCustomerPayments() {
         // the sale (receipt) the payment was put against
         let receiptCell = '<span class="muted">-</span>';
         if (p.sale_id) receiptCell = '#' + p.sale_id;
-        paymentRows.push([
-            escapeHtml(dayOfStamp(p.payment_date)),
-            peso(p.amount),
-            escapeHtml(p.payment_method),
-            receiptCell
-        ]);
+        const cells = [escapeHtml(dayOfStamp(p.payment_date)), peso(p.amount)];
+        if (how === 'all') cells.push(escapeHtml(p.payment_method));
+        cells.push(receiptCell);
+        paymentRows.push(cells);
     }
 
-    box.innerHTML = pagedTable('cash-payments', ['Date', 'Amount', 'Method', 'Receipt'],
+    // one method picked: every row would say it, so the column goes
+    box.innerHTML = pagedTable('cash-payments',
+        how === 'all' ? ['Date', 'Amount', 'Method', 'Receipt'] : ['Date', 'Amount', 'Receipt'],
         paymentRows, [1], {
             empty: emptyHistoryNote('No payments recorded.', from, to, how !== 'all' || from || to)
         });
