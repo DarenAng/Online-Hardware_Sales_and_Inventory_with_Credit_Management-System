@@ -126,6 +126,10 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/sales\/\d+\/payment$/,            [CASHIER, MANAGER]],
   // voiding a sale on the day it was made (the manager's Sales Transactions)
   ["POST",  /^\/api\/sales\/\d+\/void$/,               MANAGEMENT],
+  // a cashier asks for a sale of the same day to be voided; a manager decides
+  ["POST",  /^\/api\/sales\/\d+\/void-request$/,       [CASHIER]],
+  ["GET",   /^\/api\/void-requests$/,                  MANAGEMENT],
+  ["POST",  /^\/api\/void-requests\/\d+\/(approve|decline)$/, MANAGEMENT],
   ["GET",   /^\/api\/cashier\/summary$/,               [CASHIER]],
 
   // --- GCash or Maya paid by QR code (routes/qr-payments.js): wherever
@@ -202,7 +206,7 @@ const ACCESS_RULES = [
   // a delivery they took, and only the one report type (see inventory-clerk.js)
   ["POST",  /^\/api\/returns$/,                        [CLERK, CASHIER, DRIVER]],
   // the clerk's Make a Report: several items, one report, filed together
-  ["POST",  /^\/api\/returns\/batch$/,                 [CLERK]],
+  ["POST",  /^\/api\/returns\/batch$/,                 [CLERK, CASHIER]],
   ["POST",  /^\/api\/returns\/\d+\/resolve$/,          [CLERK]],
 
   // --- credit management ---

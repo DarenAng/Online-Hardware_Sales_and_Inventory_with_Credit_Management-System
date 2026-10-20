@@ -2000,7 +2000,8 @@ function registerInventoryRoutes(app, deps) {
   // type, the reason, the sale (a refund) or the purchase order (goods missing
   // from a delivery), and the list of items, each with its own quantity (and
   // refund). The procedure files them all in one transaction: if one item is
-  // refused, nothing is filed. Only the clerk can reach this route.
+  // refused, nothing is filed. The clerk files any type; the cashier only a
+  // refund of several items of one sale, which waits for the clerk's inspection.
   const REPORT_TYPES = ["Return", "Damaged", "Refunded", "Missing"];
   const MOST_REPORT_ITEMS = 50;
 
@@ -2010,6 +2011,10 @@ function registerInventoryRoutes(app, deps) {
 
     if (!REPORT_TYPES.includes(reportType)) {
       return response.status(400).json({ error: "Pick the type of report." });
+    }
+    const isCashier = request.actor && request.actor.roleName === CASHIER;
+    if (isCashier && reportType !== "Refunded") {
+      return response.status(403).json({ error: "The counter files refunds only." });
     }
 
     let explanation = "";
@@ -2089,7 +2094,10 @@ function registerInventoryRoutes(app, deps) {
     // sold, so they are written off. A refund the clerk does not decide waits
     // for inspection (no word). Missing goods have nowhere to go.
     let where = null;
-    if (reportType !== "Missing") {
+    if (isCashier) {
+      // goods refunded at the counter wait for the clerk, as with one item
+      where = null;
+    } else if (reportType !== "Missing") {
       if (RETURN_DISPOSITIONS.includes(body.disposition)) {
         where = body.disposition;
       } else if (body.restock === true) {

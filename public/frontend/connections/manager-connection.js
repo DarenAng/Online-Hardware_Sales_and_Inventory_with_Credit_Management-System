@@ -178,3 +178,14 @@ function apiEditRecord(kind, id, data) {
     }[kind];
     return postJson(path, data, 'PUT');
 }
+
+// GET /api/void-requests -- the cashiers' requests to void a sale, still waiting
+function apiGetVoidRequests() {
+    return getJson('/api/void-requests');
+}
+
+// POST /api/void-requests/:id/approve or /decline -- the manager decides; a decline needs a note
+function apiDecideVoidRequest(requestId, approve, note) {
+    return sendJson('/api/void-requests/' + encodeURIComponent(requestId) + (approve ? '/approve' : '/decline'),
+        'POST', { note: note || '' });
+}

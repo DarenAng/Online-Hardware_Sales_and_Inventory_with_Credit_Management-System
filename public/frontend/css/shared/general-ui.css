@@ -2679,7 +2679,9 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 @media print {
     /* the printed sheet: the front and the back side by side, sharing the fold,
        with a dotted line to cut along */
-    .cc-instructions { margin: 0 0 8mm; font-size: 11px; text-align: center; }
+    /* the page has no margin (so the browser prints no date or address), so the
+       card keeps its distance from the paper's edge here */
+    .cc-sheet { padding-top: 16mm; }
     .cc-pair { display: flex; justify-content: center; }
     .cc-pair .cc-card { border-radius: 0; outline: 0.3mm dashed #000; }
     .cc-pair .cc-front { border-right: 0.2mm dotted #999; }
@@ -3472,3 +3474,93 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
 }
 /* the buttons wrap rather than squeeze on a narrow screen */
 .qr-foot { flex-wrap: wrap; }
+
+/* ---------- the preview box, the source strip and the items table: the clerk's
+   Stock Adjustment and the cashier's Issue a Refund ---------- */
+/* ==========================================================================
+   WHAT THIS WILL DO TO THE SHELF -- the material, then "40 pcs -> 45 pcs (+5)":
+   green when the shelf goes up, amber when it goes down, red when it cannot be done
+   ========================================================================== */
+.adjust-preview {
+    margin: 14px 0 0;
+    padding: 10px 13px;
+    font-size: 14px;
+    line-height: 1.5;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+    font-variant-numeric: tabular-nums;
+}
+.adjust-preview:empty { display: none; }
+.adjust-preview.is-good  { border-left-color: var(--ok);   background: var(--ok-dim); }
+.adjust-preview.is-down  { border-left-color: var(--signal); background: var(--signal-dim); }
+.adjust-preview.is-stop  { border-left-color: var(--stop); background: var(--stop-dim); }
+
+.preview-name   { display: block; font-size: 13px; color: var(--steel); }
+.preview-figures { display: block; font-size: 17px; font-weight: 600; color: var(--ink); }
+.adjust-preview.is-good .preview-figures strong { color: var(--ok-ink); }
+.adjust-preview.is-down .preview-figures strong { color: var(--signal-ink); }
+.adjust-preview.is-stop .preview-figures strong { color: var(--stop-hi); }
+.preview-note   { display: block; margin-top: 4px; font-size: 13px; color: var(--signal-ink); }
+
+/* ==========================================================================
+   AN ORDER OR A RETURN ON THE ADJUSTMENT FORM
+   ========================================================================== */
+/* which one is being worked, and the way back to a single material */
+.adjust-source {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 10px 13px;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--signal);
+    background: var(--paper);
+}
+.adjust-source[hidden] { display: none; }
+.adjust-source-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.adjust-source-eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--steel-soft); }
+.adjust-source-title { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.adjust-source-sub { font-size: 13px; color: var(--steel); }
+.adjust-source .btn { flex-shrink: 0; white-space: nowrap; }
+
+/* the items: a few rows show, the rest scroll inside the table */
+.adjust-lines { margin-bottom: 14px; }
+.adjust-lines[hidden] { display: none; }
+.adjust-lines-head { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--steel); }
+.adjust-lines-scroll {
+    max-height: 260px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+.adjust-lines-table { margin: 0; width: 100%; }
+.adjust-lines-table thead th { position: sticky; top: 0; z-index: 1; }
+.adjust-lines-table .cell-sub { display: block; font-size: 12px; color: var(--steel-soft); }
+.adjust-line-qty { width: 100px; margin-left: auto; text-align: right; }
+/* under or over the order, as the clerk types what arrived */
+.adjust-line-note { display: block; font-size: 12px; font-weight: 600; }
+.adjust-line-note:empty { display: none; }
+.adjust-line-note.is-under { color: var(--signal-ink); }
+.adjust-line-note.is-over { color: var(--go); }
+.adjust-line-note.is-bad { color: var(--stop-hi); }
+
+@media (max-width: 640px) {
+    .adjust-source { flex-direction: column; }
+    .adjust-line-qty { width: 80px; }
+}
+
+/* ---------- a cashier's request to void a sale, on the sale's record ---------- */
+.void-request-box {
+    margin: 0 0 14px;
+    padding: 10px 13px;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+}
+.void-request-box.is-waiting { border-left-color: var(--stop); background: var(--stop-dim); }
+.void-request-box p { margin: 0; }
+.void-request-title { font-weight: 600; color: var(--ink); }
+.void-request-reason { margin-top: 2px; color: var(--ink); overflow-wrap: anywhere; }
+.void-request-hint { margin-top: 4px; font-size: 13px; color: var(--steel); }
