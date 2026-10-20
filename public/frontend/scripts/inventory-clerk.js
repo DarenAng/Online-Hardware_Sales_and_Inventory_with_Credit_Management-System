@@ -1289,7 +1289,7 @@ async function handleAdjustStock(event) {
     }
 
     if (data.reason === '') {
-        notifyWarning('Say why this is being recorded.', 'A reason is required');
+        notifyWarning('Add remarks saying why this is being recorded.', 'Remarks are required');
         const reason = document.getElementById('adjust-reason');
         if (reason) reason.focus();
         return;
@@ -1366,21 +1366,6 @@ function renderAdjustForm() {
     show('adjust-qty-field', kind === 'material');
     // an order is always added to stock, so it has no type to choose
     show('adjust-type-field', kind !== 'po');
-    const reasonLabel = document.getElementById('adjust-reason-label');
-    const reason = document.getElementById('adjust-reason');
-    if (reasonLabel) {
-        let label = 'Reason';
-        if (kind === 'return') label = 'Note <span class="label-hint">optional</span>';
-        // an order's remarks go on its delivery Report
-        else if (kind === 'po') label = 'Remarks <span class="label-hint">optional, shown on the order\'s report</span>';
-        reasonLabel.innerHTML = label;
-    }
-    if (reason) {
-        let hint = 'Damaged on the shelf';
-        if (kind === 'return') hint = 'Box unopened, seals intact';
-        else if (kind === 'po') hint = 'Two boxes to follow next week';
-        reason.placeholder = hint;
-    }
 
     renderAdjustTypeOptions(kind);
     renderAdjustSource();

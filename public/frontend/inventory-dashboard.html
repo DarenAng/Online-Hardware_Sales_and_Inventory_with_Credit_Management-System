@@ -226,9 +226,11 @@
                                     </div>
 
                                     <div class="form-group" id="adjust-reason-field">
-                                        <label for="adjust-reason" id="adjust-reason-label">Reason</label>
+                                        <!-- required for a single material; optional on an order
+                                             (shown on its Report) or a return -->
+                                        <label for="adjust-reason">Remarks</label>
                                         <input type="text" id="adjust-reason" name="reason" class="form-control"
-                                               maxlength="255" placeholder="Damaged on the shelf">
+                                               maxlength="255">
                                     </div>
                                 </div>
 
