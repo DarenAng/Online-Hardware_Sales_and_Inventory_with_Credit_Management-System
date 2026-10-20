@@ -2000,6 +2000,7 @@ function fillPenaltyForm(rateRead) {
     form.elements.penaltyRate.disabled = !rateRead;
 
     if (!rateRead) {
+        penaltyRateRead = false;
         form.elements.penaltyRate.value = '';
         document.getElementById('penalty-preview').hidden = true;
         return;
@@ -2007,6 +2008,7 @@ function fillPenaltyForm(rateRead) {
 
     const pct = Number(penaltyPolicy.penalty_rate);
     form.elements.penaltyRate.value = Number.isFinite(pct) ? pct.toFixed(2) : '';
+    penaltyRateRead = true;
     document.getElementById('penalty-preview').hidden = false;
     previewPenaltyPolicy();
 }
@@ -2128,6 +2130,86 @@ function previewCardBack() {
 }
 
 window.addEventListener('resize', function () { previewCardBack(); });
+
+// ---------- unsaved changes on the Policy Maintenance pages ----------
+// A rate or a policy typed and not saved is not lost by a stray click: leaving
+// the page (the menu, the brand corner, an alert's "go to", My Account or Log
+// out) asks first whether to discard the changes or keep editing. Closing or
+// reloading the tab gets the browser's own warning.
+let penaltyRateRead = false;   // the box holds the saved rate (fillPenaltyForm)
+
+function policyChangesUnsaved() {
+    const rateForm = document.getElementById('penalty-form');
+    if (rateForm && penaltyRateRead && penaltyPolicy) {
+        const typed = Number(rateForm.elements.penaltyRate.value);
+        if (rateForm.elements.penaltyRate.value.trim() === '' || typed !== Number(penaltyPolicy.penalty_rate)) {
+            return 'the late-payment rate';
+        }
+    }
+    if (policyData) {
+        for (let i = 0; i < POLICY_KINDS.length; i++) {
+            const kind = POLICY_KINDS[i];
+            const form = document.getElementById('policy-form-' + kind);
+            const saved = policyData.policies[kind];
+            if (form && saved && form.elements.text.value !== saved.text) {
+                return 'the ' + CARD_POLICY_TITLES[kind].toLowerCase();
+            }
+        }
+    }
+    return '';
+}
+
+// puts every box back to what is saved
+function discardPolicyChanges() {
+    if (penaltyRateRead) fillPenaltyForm(true);
+    if (policyData) {
+        for (let i = 0; i < POLICY_KINDS.length; i++) {
+            const form = document.getElementById('policy-form-' + POLICY_KINDS[i]);
+            const saved = policyData.policies[POLICY_KINDS[i]];
+            if (form && saved) form.elements.text.value = saved.text;
+        }
+        previewCardBack();
+    }
+}
+
+// what counts as leaving the page
+const POLICY_LEAVE_SELECTOR = '.sidebar a, .sidebar button, .account-action, #notif-modal .modal-foot .btn';
+let policyLeaveAllowed = false;
+
+document.addEventListener('click', async function (event) {
+    if (policyLeaveAllowed) return;
+    const target = event.target.closest ? event.target.closest(POLICY_LEAVE_SELECTOR) : null;
+    if (!target) return;
+    const unsaved = policyChangesUnsaved();
+    if (!unsaved) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const discard = await askConfirm('Changes to ' + unsaved + ' have not been saved.', {
+        title: 'Discard your changes?',
+        eyebrow: 'Policy Maintenance',
+        mark: '!',
+        confirmLabel: 'Discard changes',
+        cancelLabel: 'Keep editing',
+        detail: ['Discard puts back what was saved and goes on.', 'Keep editing stays on this page; press Save to keep them.']
+    });
+    if (!discard) return;
+
+    discardPolicyChanges();
+    policyLeaveAllowed = true;
+    try {
+        target.click();
+    } finally {
+        policyLeaveAllowed = false;
+    }
+}, true);
+
+window.addEventListener('beforeunload', function (event) {
+    if (!policyChangesUnsaved()) return;
+    event.preventDefault();
+    event.returnValue = '';
+});
 
 function useDefaultPolicy(kind) {
     const form = document.getElementById('policy-form-' + kind);
@@ -2821,7 +2903,7 @@ function buildArchivePanel() {
             for (let i = 0; i < rows.length; i++) {
                 types.push(archiveTypeName(rows[i].module));
             }
-            fillCountedOptions('archives-type', types, 'Every type');
+            fillFilterOptions('archives-type', types, 'Every type');
         },
         renderRow: function (a, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +

@@ -1549,7 +1549,7 @@ either; the server refuses the route to anyone but a manager.
   customer's personal data (Data Privacy Act of 2012).
 - **Refund Policy**: the store's refund rules.
 
-Each policy is one term to a line (up to 20), with *Use the default wording*
+Each policy is one term to a line (up to 20), with *Use Default*
 to put the standard text back; an emptied box saved does the same. They are
 kept in `store_settings.credit_terms`, `data_terms` and `refund_policy` (the
 last two are added on the next `npm start`) and read and saved through
