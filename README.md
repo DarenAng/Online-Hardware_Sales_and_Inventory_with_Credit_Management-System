@@ -858,8 +858,8 @@ sale's reference. A code lasts 10 minutes. A failed or expired code offers
 **New QR** or **Choose another method**, and nothing is recorded for it.
 
 Every attempt is a row in `qr_payments` with how it ended (paid, failed,
-expired, cancelled), and **QR Payments** lists them with the success rate: the
-cashier their own, the manager everyone's. A paid code whose sale could not be
+expired, cancelled), and **QR Payments** lists the successful (paid) ones only,
+with no status filter: the manager sees everyone's. A paid code whose sale could not be
 saved (an item ran out) stays paid and says *paid but sale not saved – refund
 needed*.
 
@@ -1385,6 +1385,22 @@ on the left, what came off the lorry typed on the right — puts the goods
 onto the shelf and closes the order. An order the manager has not confirmed
 yet cannot be received, and the server refuses that too.
 
+Every order shows one of these statuses (worked out from the stored status,
+whether it was sent, and the supplier's answer):
+
+| Status | When |
+|---|---|
+| **Pending Manager Approval** | sent to the manager, not decided yet |
+| **Approved** | the manager approved it; the clerk has not sent it to the supplier yet |
+| **Declined - Manager** | the manager declined it; remarks saying why are required |
+| **Pending Supplier Confirmation** | sent to the supplier (emailed, or printed and marked **Mark as Sent**), no answer yet |
+| **Accepted** | the supplier accepted it from the link or QR code on the order |
+| **Declined - Supplier** | the supplier declined it |
+| **Received** | the clerk referred it (**Refer to PO**) and counted it in |
+
+An order can only be referred once it is **Accepted**; the server refuses it
+before that.
+
 The screens are one piece of code (`shared/purchase-orders.js`) that each
 page configures with what it is allowed to do, so the two desks cannot
 disagree about what an order is.
@@ -1397,8 +1413,8 @@ suggested order that brings it back to twice the reorder point. The manager
 changes it from the product's card in Stocks; the clerk from the Material List.
 
 How fast a product sells (its average daily sales over the last ninety days of
-trading, and the days of cover that gives) is shown beside it to help pick the
-figure, but nothing is calculated for it. An older database whose products were
+trading, and the days of cover that gives) is shown on the product's card to
+help pick the figure, but nothing is calculated for it. An older database whose products were
 set to a calculated (Dynamic) reorder point is switched to the typed figure on
 the next `npm start`.
 
@@ -1513,19 +1529,36 @@ reprinted later, the income figures and the standing rules. The sale itself,
 `final_amount`, is untouched, so the sales figures are still the sales.
 
 **The rate is the manager's.** It is set on the manager's **Credit Maintenance**
-screen (under Customers Record), which says the shop's rate in force and what
-is owed in penalties, and sets another, anywhere from 1 to 3, with a worked
-example before it is saved. The same page holds the wording of the credit
-terms and conditions printed with every credit account, one term to a line,
-with *Use the default wording* to put the standard text back. The screen is
-its own switch in Access Control (`credit-maintenance`, held by managers by
-default, so an existing database needs no migration); the wording half also
-needs `credit-terms-text`. A change applies from the next month charged and never rewrites a
-month already charged. An account can also be given **a rate of its own** on
-its credit terms, beside the limit and the standing override — a loyal
-customer at 1 percent while the shop stays at 3 — and blank there means the
-shop's rate. The cashier reads the rate and sees the penalties but cannot set
+screen, anywhere from 1 to 3, with a worked example before it is saved. A
+change applies from the next month charged and never rewrites a month already
+charged. The cashier reads the rate and sees the penalties but cannot set
 either; the server refuses the route to anyone but a manager.
+
+### Policy Maintenance and the customer card
+
+**Policy Maintenance** in the manager's menu holds three pages:
+
+- **Credit Maintenance**: the late-payment rate and the **Credit Policy**,
+  printed on the credit terms page and on the back of the customer card.
+- **Customer Data Terms**: how the store collects, keeps and uses a
+  customer's personal data (Data Privacy Act of 2012).
+- **Refund Policy**: the store's refund rules.
+
+Each policy is one term to a line (up to 20), with *Use the default wording*
+to put the standard text back; an emptied box saved does the same. They are
+kept in `store_settings.credit_terms`, `data_terms` and `refund_policy` (the
+last two are added on the next `npm start`) and read and saved through
+`GET /api/policies` and `PUT /api/policies/:kind`. Each page is its own switch
+in Access Control (`credit-maintenance` with `credit-terms-text`, `data-terms`,
+`refund-policy`), held by managers by default.
+
+Beside each page is a live preview of **the back of the customer card** with
+all three policies on it. The text shrinks to fit the card, and the preview
+warns when it gets too small to read (under 4.5 pt), so the policies can be
+shortened. **Print Customer Card** prints the physical card at true size
+(85.6 x 54 mm, a bank card's size): the front (the store, the customer, their
+number, contact and credit limit) and the back side by side, to cut out, fold
+and laminate, followed by the credit terms page.
 
 ## Returns: what happened, and where the goods went
 
@@ -1568,44 +1601,59 @@ an undo.
 
 ## What "archived" means, and when it happens
 
-Nothing in this system is deleted. A record that is finished with is
-**archived**: it leaves the live lists and the figures, keeps every field it
-had, shows on the manager's **Archives** screen with who archived it and
-when, and can be restored from there. What "finished with" means is
-different for each of the four kinds of record, and so is who decides:
+Nothing in this system is deleted. Only six kinds of data can be
+**archived**: **customers, products, units, categories, suppliers and users**
+(staff accounts). An archived record leaves the live lists, keeps every field
+it had, shows on the manager's **Archives** screen (filtered by **Type**) with
+who archived it and when, and can be restored from there.
+
+**Sales, deliveries and credit are never archived.** They are the record of
+what happened, so the server refuses to archive them whichever screen asks. A
+sale rung up by mistake is **voided** instead (below); a delivery stays in
+Delivery History for good. Deliveries put away before this rule are brought
+back into Delivery History on the next `npm start` (not one cancelled with a
+voided sale).
 
 | Record | Archived means | By hand | On its own |
 |---|---|---|---|
-| **Staff** | the account is deactivated and cannot sign in | the administrator, from the staff card; the last active administrator cannot be | never — a person leaving is a decision |
-| **Material** | the shop no longer stocks it: off the material list, the catalog and the register | the clerk or a manager, from the material card, and only once nothing is left on the shelf and no purchase order for it is open | nightly, once it has had **no stock, no sale, no stock movement and no open order for 180 days** |
-| **Sale** | it is **voided**: it reads Voided on every screen and counts for nothing | a manager, from the sale's card, **on the day it was made only**, and only while its goods are not out for delivery | never — an old sale is corrected with a return or a refund, which keeps the money trail |
-| **Delivery** | it is closed: Delivered with the sale paid for, or Failed | a manager, from the delivery's card, once it is closed | nightly, **90 days** after it closed |
+| **User** | the account is deactivated and cannot sign in | the administrator, or a manager for cashier, clerk and driver accounts; the last active administrator cannot be | never — a person leaving is a decision |
+| **Product** | the shop no longer stocks it: off the material list, the catalog and the register | the clerk or a manager, and only once nothing is left on the shelf and no purchase order for it is open | nightly, once it has had **no stock, no sale, no stock movement and no open order for 180 days** |
+| **Customer** | off the customer lists | a manager, once they owe nothing | never |
+| **Supplier** | off the supplier lists | a manager, once no purchase order to them is open | never |
+| **Category**, **Unit** | off the pick lists | the clerk or a manager, once no product uses it | never |
 
-The rules live in the database rather than in the screens — `sp_archive_record`
-holds the manual ones and `sp_sweep_archives` the automatic ones — so a
-request that breaks one is refused with the reason whichever screen sends
-it, and the two sets cannot drift apart.
+The rules live on the server: `sp_archive_record` and the archive routes hold
+the manual ones and `sp_sweep_archives` the automatic one. A request that
+breaks one is refused with the reason, whichever screen sends it.
 
-**Voiding a sale puts the stock back.** Every line on it goes back on the
-shelf with an entry in the stock log saying which sale was voided, a delivery
-created for it and not yet on the road is cancelled with it, and restoring the
-sale takes the stock off again — and is refused if that stock has since been
-sold to somebody else. Money already taken is not touched: a void is for a
-sale rung up twice, and the cash for the duplicate is handed back at the
-counter. The same-day rule is what keeps that honest; a sale from last week
-that was wrong is a return, not a void.
+**Voiding a sale puts the stock back.** A manager voids a sale from its card
+in Sales Transactions (`POST /api/sales/:id/void`), **on the day it was made
+only**, and only while its goods are not out for delivery. Every line on it
+goes back on the shelf with an entry in the stock log saying which sale was
+voided, and a delivery created for it and not yet on the road is cancelled
+with it. Money already taken is not touched: a void is for a sale rung up
+twice, and the cash for the duplicate is handed back at the counter. A sale
+from last week that was wrong is a return, not a void. A voided sale reads
+Voided in Sales Transactions; it is not on Archives.
 
-**A material with stock on hand cannot be archived.** A shelf the system has
+**A product with stock on hand cannot be archived.** A shelf the system has
 stopped counting is a shelf somebody counts by hand in three months and
 cannot explain. Sell it off or write it off first, and then it can go.
 
-**The sweep** runs when the server starts and once a day after that. Ninety
-days is three statement cycles — long enough for any query about a drop to
-have come and gone — and a hundred and eighty days with nothing on the shelf
-and no movement is dead stock. Each run that put something away writes one
-line to the audit trail saying what and how many, with no staff id, so the
-Archives screen shows "System" against those rows. Nothing else is ever
-archived automatically.
+**The sweep** runs when the server starts and once a day after that. A
+hundred and eighty days with nothing on the shelf and no movement is dead
+stock. Each run that put something away writes one line to the audit trail,
+with no staff id, so the Archives screen shows "System" against those rows.
+Nothing else is ever archived automatically.
+
+## Typing in a filter
+
+Every dropdown filter in a toolbar can be typed in, like the Month box on Total
+Purchases (`shared/typable-select.js`): press it for the whole list, or type
+and the list narrows to the choices with a word starting with what was typed.
+Enter or a click picks one, Escape puts it back, and the × returns to the
+first choice ("Every ..."). The real dropdown stays underneath and holds the
+value, so every filter works as before.
 
 ## Asking before doing
 

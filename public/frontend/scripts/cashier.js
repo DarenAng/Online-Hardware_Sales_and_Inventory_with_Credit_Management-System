@@ -298,7 +298,7 @@ function renderCatalog(rows, keyword) {
     const pages = Math.max(1, Math.ceil(rows.length / CATALOG_PAGE_ROWS));
     catalogPage = Math.min(Math.max(1, catalogPage), pages);
     const start = (catalogPage - 1) * CATALOG_PAGE_ROWS;
-    const slice = rows.slice(start, start + CATALOG_PAGE_ROWS);
+    const slice = sortedCatalogRows(rows).slice(start, start + CATALOG_PAGE_ROWS);
 
     // one page needs no pager; the count pill already says how many
     let pager = '';
@@ -375,7 +375,7 @@ function renderCatalog(rows, keyword) {
 
     grid.innerHTML =
         '<table class="catalog-table" id="catalog-table">' +
-        '<thead><tr><th>Product</th><th>Category</th><th>Brand</th><th>Sold By</th><th>Price</th></tr></thead>' +
+        '<thead><tr>' + catalogHeaders() + '</tr></thead>' +
         '<tbody>' + rowsHtml +
         // a short page is topped up to ten so the pager stays put (tables.js)
         fillerRows(CATALOG_PAGE_ROWS - slice.length, 5) +
@@ -383,6 +383,53 @@ function renderCatalog(rows, keyword) {
 
     holdTableHeight(document.getElementById('catalog-table'));
     holdBoxHeight(grid);
+}
+
+// ---------- sorting the catalog by pressing a column header ----------
+const CATALOG_HEADERS = ['Product', 'Category', 'Brand', 'Sold By', 'Price'];
+const CATALOG_SORT_KEYS = [
+    function (p) { return p.product_name || ''; },
+    function (p) { return p.category_name || 'Uncategorised'; },
+    function (p) { return p.brand_name || ''; },
+    function (p) { return p.unit_name || ''; },
+    function (p) { return isUnpriced(p) ? '' : Number(p.price); }
+];
+let catalogSort = null;    // { column, descending } once a header is pressed
+
+function sortedCatalogRows(rows) {
+    if (!catalogSort) return rows;
+    const key = CATALOG_SORT_KEYS[catalogSort.column];
+    const descending = catalogSort.descending;
+    const indexed = rows.map(function (row, at) { return { row: row, value: key(row), at: at }; });
+    indexed.sort(function (x, y) {
+        const xEmpty = x.value === null || x.value === undefined || x.value === '';
+        const yEmpty = y.value === null || y.value === undefined || y.value === '';
+        if (xEmpty !== yEmpty) return xEmpty ? 1 : -1;
+        const result = compareSortValues(x.value, y.value);
+        return (descending ? -result : result) || x.at - y.at;
+    });
+    return indexed.map(function (item) { return item.row; });
+}
+
+function catalogHeaders() {
+    let html = '';
+    for (let i = 0; i < CATALOG_HEADERS.length; i++) {
+        let state = 'none';
+        if (catalogSort && catalogSort.column === i) state = catalogSort.descending ? 'descending' : 'ascending';
+        html += '<th class="th-sortable" tabindex="0" aria-sort="' + state + '" title="Sort by ' + CATALOG_HEADERS[i] + '" ' +
+            'onclick="sortCatalog(' + i + ')" ' +
+            'onkeydown="if (event.key === \'Enter\' || event.key === \' \') { event.preventDefault(); sortCatalog(' + i + '); }">' +
+            CATALOG_HEADERS[i] + '</th>';
+    }
+    return html;
+}
+
+// pressing a header sorts by it; pressing it again turns the order round
+function sortCatalog(column) {
+    if (catalogSort && catalogSort.column === column) catalogSort.descending = !catalogSort.descending;
+    else catalogSort = { column: column, descending: false };
+    catalogPage = 1;
+    renderCatalog(catalogShown);
 }
 
 // Load Data: the whole catalog (in stock), ten a page like every other list

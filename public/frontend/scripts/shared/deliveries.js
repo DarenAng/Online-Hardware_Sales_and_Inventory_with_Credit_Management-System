@@ -144,10 +144,10 @@ function collectBanner(d) {
 }
 
 // One delivery popup for every screen. canUpdate adds the status change with
-// a note (not the cashier); canArchive adds putting a closed delivery away
+// a note (not the cashier). A delivery is never archived.
 // (manager only). The driver sees everything on one page; the other roles
 // turn through tabs.
-function showDeliveryRecord(d, canUpdate, canArchive) {
+function showDeliveryRecord(d, canUpdate) {
     if (!d) return;
 
     const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
@@ -194,18 +194,6 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
         { label: 'Payment', body: collectBanner(d) + '<div class="detail-grid">' + money + '</div>' }
     ];
 
-    let archiveBlock;
-    if (!canArchive) {
-        archiveBlock = '';
-    } else if (d.status === 'Delivered' || d.status === 'Failed') {
-        archiveBlock = '<div class="detail-actions">' +
-              '<button type="button" class="btn btn-ghost" onclick="archiveDelivery(' + d.delivery_id + ')">Archive this delivery</button>' +
-              '</div>';
-    } else {
-        archiveBlock = '<p class="detail-note">A delivery is archived once it is Delivered and paid for, or Failed. ' +
-              'The sweep puts it away ninety days after that on its own.</p>';
-    }
-
     // the status moves sit in the popup's foot, one button each, on every tab
     let footActions = '';
     let updateBody = '';
@@ -218,9 +206,9 @@ function showDeliveryRecord(d, canUpdate, canArchive) {
         }
 
         // No remarks box: Delayed and Failed each ask for their reason in their own popup.
-        // A closed delivery still says so, with the archive button.
+        // A closed delivery still says so.
         if (next.length === 0) {
-            updateBody = '<p class="detail-note">This delivery is closed. Nothing further can be recorded against it.</p>' + archiveBlock;
+            updateBody = '<p class="detail-note">This delivery is closed. Nothing further can be recorded against it.</p>';
             pages.push({ label: 'Update', body: updateBody });
         }
 

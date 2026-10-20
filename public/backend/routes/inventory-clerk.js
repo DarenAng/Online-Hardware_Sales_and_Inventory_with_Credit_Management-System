@@ -1125,6 +1125,10 @@ function registerInventoryRoutes(app, deps) {
     if (typeof body.note === "string") {
       note = body.note.trim().slice(0, 255);
     }
+    // a declined order carries the manager's remarks: why it was declined
+    if (!approve && note === "") {
+      return response.status(400).json({ error: "Write the remarks: why the purchase order is declined." });
+    }
 
     try {
       const poId = Number(request.params.poId);
@@ -1217,6 +1221,47 @@ function registerInventoryRoutes(app, deps) {
     } catch (error) {
       console.error("Sending the purchase order failed:", error.message);
       response.status(500).json({ error: "The order could not be sent. Print it and send it to the supplier." });
+    }
+  });
+
+  // The clerk printed an approved order and handed it to the supplier: the
+  // order is marked as sent, so it reads Pending Supplier Confirmation until
+  // the supplier accepts or declines it from the link on the order.
+  app.post("/api/purchase-orders/:poId/mark-sent", async function (request, response) {
+    const poId = Number(request.params.poId);
+    try {
+      const rowsResult = await db.query(
+        "SELECT po.po_id, po.status, po.supplier_response, po.supplier_sent_at, s.supplier_name " +
+        "FROM purchase_orders po JOIN suppliers s ON s.supplier_id = po.supplier_id WHERE po.po_id = ?", [poId]);
+      const order = rowsResult[0][0];
+      if (!order) return response.status(404).json({ error: "That purchase order does not exist" });
+
+      const number = "PO-" + String(order.po_id).padStart(6, "0");
+      if (order.status !== "Pending") {
+        return response.status(409).json({
+          error: order.status === "For Approval"
+            ? number + " is not approved yet. The manager approves it before it goes to the supplier."
+            : number + " is " + String(order.status).toLowerCase() + "; there is nothing to send."
+        });
+      }
+      if (order.supplier_response) {
+        return response.status(409).json({
+          error: order.supplier_name + " has already " + String(order.supplier_response).toLowerCase() + " " + number + "."
+        });
+      }
+
+      await db.query("UPDATE purchase_orders SET supplier_sent_at = COALESCE(supplier_sent_at, NOW()) WHERE po_id = ?",
+        [poId]);
+      await writeAuditLog(request, "PURCHASE_ORDER_SENT", number + " sent to " + order.supplier_name + " (printed copy)",
+        { po_id: order.po_id, supplier: order.supplier_name, emailed: false });
+      if (publishChange) publishChange("inventory", "sent " + number, request.headers["x-client-id"] || null);
+
+      response.json({
+        message: number + " is marked as sent to " + order.supplier_name + ". It waits for the supplier to accept or decline it."
+      });
+    } catch (error) {
+      console.error("Marking the purchase order as sent failed:", error.message);
+      response.status(500).json({ error: "Unable to mark the purchase order as sent" });
     }
   });
 
@@ -1574,6 +1619,17 @@ function registerInventoryRoutes(app, deps) {
     const discount = Math.max(0, Number(body.discount) || 0);
 
     try {
+      // an order is referred (received) only once the supplier has accepted it
+      const stateResult = await db.query(
+        "SELECT status, supplier_response FROM purchase_orders WHERE po_id = ?", [Number(request.params.poId)]);
+      const state = stateResult[0][0];
+      if (!state) return response.status(404).json({ error: "That purchase order does not exist" });
+      if (state.status === "Pending" && state.supplier_response !== "Accepted") {
+        return response.status(409).json({
+          error: "Purchase order #" + request.params.poId + " can only be referred once the supplier has accepted it."
+        });
+      }
+
       const output = await inventoryClerkProcedures.receivePurchaseOrder(
         [request.params.poId, JSON.stringify(sheet), discount, getActorId(request)]
       );

@@ -393,6 +393,10 @@ CREATE TABLE store_settings (
     -- term to a line, in the manager's words. NULL means the default text
     -- the server holds (DEFAULT_CREDIT_TERMS in store-settings.js).
     credit_terms TEXT NULL,
+    -- the customer data terms and the refund policy, printed on the back of
+    -- the customer card. NULL means the default text in store-settings.js.
+    data_terms TEXT NULL,
+    refund_policy TEXT NULL,
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by_staff_id INT NULL,
     CONSTRAINT chk_store_settings_single_row CHECK (setting_id = 1),

@@ -448,9 +448,10 @@ function registerQrPaymentRoutes(app, deps) {
     }
   });
 
-  // ---------- the record of every attempt ----------
+  // ---------- the record of every successful payment ----------
+  // Only paid codes are listed: one that failed, expired, was cancelled or is
+  // still waiting is not a transaction and is not part of the record.
   app.get("/api/qr-payments", async function (request, response) {
-    const status = String(request.query.status || "all");
     const from = String(request.query.from || "");
     const to = String(request.query.to || "");
 
@@ -458,15 +459,12 @@ function registerQrPaymentRoutes(app, deps) {
     let staff = request.query.staff ? Number(request.query.staff) : null;
     if (request.actor.roleName === CASHIER) staff = Number(request.actor.staffId);
 
-    const where = [];
+    const where = ["q.status = 'paid'"];
     const params = [];
     if (isDateText(from)) { where.push("q.created_at >= ?"); params.push(from + " 00:00:00"); }
     if (isDateText(to))   { where.push("q.created_at <= ?"); params.push(to + " 23:59:59"); }
     if (staff)            { where.push("q.created_by_staff_id = ?"); params.push(staff); }
-    let whereSql = "";
-    if (where.length > 0) {
-      whereSql = "WHERE " + where.join(" AND ");
-    }
+    const whereSql = "WHERE " + where.join(" AND ");
 
     try {
       // Codes left waiting past their time (a till closed with one on screen)
@@ -481,13 +479,10 @@ function registerQrPaymentRoutes(app, deps) {
       const rowsResult = await db.query(ROW_SQL + " " + whereSql + " ORDER BY q.created_at DESC, q.qr_payment_id DESC LIMIT 1000",
         params);
       const rows = rowsResult[0];
-      // the tiles count the whole period; the status filter narrows the list only
       const summary = summarize(rows);
       const listed = [];
       for (let i = 0; i < rows.length; i++) {
-        if (status === "all" || rows[i].status === status) {
-          listed.push(shape(rows[i]));
-        }
+        listed.push(shape(rows[i]));
       }
 
       response.json({ rows: listed, summary: summary });

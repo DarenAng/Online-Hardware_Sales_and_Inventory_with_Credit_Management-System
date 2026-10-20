@@ -124,6 +124,8 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/sales$/,                          [CASHIER, MANAGER]],
   ["GET",   /^\/api\/sales\/\d+$/,                     [CASHIER, MANAGER]],
   ["POST",  /^\/api\/sales\/\d+\/payment$/,            [CASHIER, MANAGER]],
+  // voiding a sale on the day it was made (the manager's Sales Transactions)
+  ["POST",  /^\/api\/sales\/\d+\/void$/,               MANAGEMENT],
   ["GET",   /^\/api\/cashier\/summary$/,               [CASHIER]],
 
   // --- GCash or Maya paid by QR code (routes/qr-payments.js): wherever
@@ -165,7 +167,6 @@ const ACCESS_RULES = [
   // the manager corrects a supplier, a customer or a product's details from Records
   ["PUT",   /^\/api\/suppliers\/\d+$/,                 [MANAGER]],
   ["PUT",   /^\/api\/customers\/\d+$/,                 [MANAGER]],
-  ["PUT",   /^\/api\/stocks\/\d+\/details$/,           [MANAGER]],
   ["POST",  /^\/api\/categories$/,                    [CLERK]],
   ["POST",  /^\/api\/units$/,                         [CLERK]],
   ["PUT",   /^\/api\/units\/\d+$/,                     [CLERK]],
@@ -184,6 +185,8 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/purchase-orders\/\d+\/receive$/,  [CLERK]],
   // once approved, the clerk prints the order and may email it to the supplier
   ["POST",  /^\/api\/purchase-orders\/\d+\/send$/,     [CLERK]],
+  // or prints it and hands it over, then marks it as sent
+  ["POST",  /^\/api\/purchase-orders\/\d+\/mark-sent$/, [CLERK]],
   // the supplier, who has no account, opens the order from the link or QR code
   // on the printed order; the code (43 url-safe characters) is the whole of the permission
   ["GET",   /^\/api\/supplier-order\/[A-Za-z0-9_-]{43}$/,          PUBLIC],
@@ -216,8 +219,9 @@ const ACCESS_RULES = [
   // the printed credit terms and customer card; the manager writes the wording
   ["GET",   /^\/api\/credit\/terms\/\d+$/,              [MANAGER, CASHIER]],
   ["GET",   /^\/api\/credit\/card\/\d+$/,               [MANAGER, CASHIER]],
-  ["GET",   /^\/api\/credit\/terms-text$/,              [MANAGER]],
-  ["PUT",   /^\/api\/credit\/terms-text$/,              [MANAGER]],
+  // Policy Maintenance: the credit policy, the customer data terms and the refund policy
+  ["GET",   /^\/api\/policies$/,                         [MANAGER]],
+  ["PUT",   /^\/api\/policies\/(credit|data-terms|refund)$/, [MANAGER]],
   ["GET",   /^\/api\/credit\/requests$/,               [MANAGER, CASHIER]],
   ["POST",  /^\/api\/credit\/requests$/,               [MANAGER, CASHIER]],
   ["POST",  /^\/api\/credit\/requests\/\d+\/decide$/,  [MANAGER]],

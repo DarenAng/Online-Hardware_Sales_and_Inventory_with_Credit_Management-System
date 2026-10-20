@@ -160,7 +160,7 @@ function watchTablesForAlignment() {
 // decides that column: while it holds anything but "all", every row would
 // say the same thing there, so the column is not drawn. Used on every page.
 // A dropdown can name values that keep its column drawn, because the column
-// holds more than the filtered word: data-keeps-column-for="PO Accepted|On the way".
+// holds more than the filtered word: data-keeps-column-for="Delayed".
 // ==========================================
 function syncFilteredColumns(tableId) {
     const table = document.getElementById(tableId);

@@ -22,19 +22,24 @@
 /* ==========================================================================
    COUNTERS AND FILTERS
    ========================================================================== */
-/* Credit Maintenance: the rate in force, as a line above the form that changes it */
-.policy-text {
-    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-    margin-bottom: 14px; padding: 10px 14px;
-    background: var(--paper);
-    border: 1px solid var(--line);
-    border-left: var(--rule) solid var(--signal);
-    border-radius: var(--radius);
-    font-size: 14px; color: var(--steel); line-height: 1.5;
+/* Policy Maintenance: the forms take the screen's width, the back of the
+   customer card stays beside them as they are typed in */
+.policy-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 40%);
+    gap: 18px;
+    align-items: start;
 }
-.policy-rate { font-size: 22px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
-.policy-words .muted { display: inline; }
-#penalty-facts { margin-bottom: 18px; }
+.policy-main > .card:last-child { margin-bottom: 0; }
+.policy-preview-card { position: sticky; top: 16px; margin-bottom: 0; }
+.policy-textarea { min-height: 300px; resize: vertical; }
+.policy-form .form-footer { margin-top: 16px; }
+.card-preview-fit { margin: 10px 0 0; font-size: 13px; color: var(--steel); }
+.card-preview-fit.is-warn { color: var(--stop-hi); font-weight: 600; }
+@media screen and (max-width: 1100px) {
+    .policy-layout { grid-template-columns: 1fr; }
+    .policy-preview-card { position: static; }
+}
 
 /* ==========================================================================
    TABS
@@ -380,9 +385,14 @@
 .form-group > .label-hint { float: right; margin-left: 8px; text-align: right; }
 .form-group > .label-hint { float: none; display: block; }
 
-/* the Note on a credit account saves on its own */
-.note-save-row { display: flex; gap: 8px; align-items: stretch; }
-.note-save-row .form-control { flex: 1; }
+/* a credit account's card is one fixed size on every tab (Account, Purchases,
+   Payments, Extension Requests), so switching tabs never moves its edges */
+@media (min-width: 641px) and (min-height: 561px) {
+    #credit-modal .modal-box {
+        height: min(590px, calc(100vh - 52px - 4vh));
+    }
+    #credit-modal .modal-body { overflow-y: auto; }
+}
 
 /* Custom date puts From and To beside the Period box: the search box gives up
    some width so the row still fits on a laptop screen */

@@ -198,14 +198,24 @@ function showSalesTransactions(event) {
     showReport(wanted, event);
 }
 
-// Credit Maintenance: the shop's late-payment rate and the wording of the credit terms.
-// Both are read again each time the screen is opened.
+// Policy Maintenance. Credit Maintenance: the shop's late-payment rate and the
+// credit policy. Customer Data Terms and Refund Policy: their wording. Each page
+// shows the back of the customer card beside it. Read again each time a page opens.
 async function showCreditMaintenance(event) {
     showManagerPanel('panel-credit-maintenance', 'Credit Maintenance', event);
     const rateRead = await loadPenaltyPolicy();
     fillPenaltyForm(rateRead);
-    // the terms are asked for only by a manager who holds that part of the screen
-    if (holdsFeature('credit-terms-text')) await loadCreditTermsText();
+    await loadPolicies();
+}
+
+async function showDataTerms(event) {
+    showManagerPanel('panel-data-terms', 'Customer Data Terms', event);
+    await loadPolicies();
+}
+
+async function showRefundPolicy(event) {
+    showManagerPanel('panel-refund-policy', 'Refund Policy', event);
+    await loadPolicies();
 }
 
 // Account Management: the staff list is not read here; Load Data on the screen reads it
@@ -1413,13 +1423,12 @@ function buildStockPanels() {
     createDataPanel({
         key: 'mgr-reorder',
         tableId: 'reorder-table',
-        columns: 8,
+        columns: 6,
         pagerId: 'reorder-pager',
         idField: 'product_id',
         filters: { status: 'all' },
         sortKeys: ['product_name', function (p) { return Number(p.quantity_in_stock); },
-                   function (p) { return Number(p.effective_rop); }, function (p) { return Number(p.avg_daily_sales); },
-                   function (p) { return p.days_of_cover === null ? '' : Number(p.days_of_cover); },
+                   function (p) { return Number(p.effective_rop); },
                    function (p) { return Number(p.suggested_order); }, 'supplier_name', 'stock_status'],
         gate: {
             title: 'Reorder alerts not loaded',
@@ -1446,10 +1455,6 @@ function buildStockPanels() {
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + '</td>' +
                 '<td class="cell-num">' + p.effective_rop + '</td>' +
-                '<td class="cell-num">' + Number(p.avg_daily_sales).toFixed(2) + '</td>' +
-                '<td class="cell-num">' + (p.days_of_cover === null
-                    ? '<span class="muted">no sales</span>'
-                    : Number(p.days_of_cover).toFixed(0) + ' days') + '</td>' +
                 '<td class="cell-num cell-due">' + p.suggested_order + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
                 '<td>' + escapeHtml(p.supplier_name || 'No supplier') + '</td>' +
                 '<td>' + statusBadge(p.stock_status) + '</td></tr>';
@@ -1972,46 +1977,7 @@ async function loadPenaltyPolicy() {
     } catch (error) {
         return false;   // the screen keeps whatever it last showed
     }
-    renderPenaltyPolicy();
     return true;
-}
-
-function renderPenaltyPolicy() {
-    const rate = document.getElementById('penalty-policy-rate');
-    const words = document.getElementById('penalty-policy-words');
-    if (!rate || !words || !penaltyPolicy) return;
-
-    const pct = Number(penaltyPolicy.penalty_rate) || 0;
-    const own = Number(penaltyPolicy.own_rate_accounts) || 0;
-    const charged = Number(penaltyPolicy.penalised_sales) || 0;
-    const owed = Number(penaltyPolicy.penalties_owed) || 0;
-
-    rate.textContent = penaltyRateWord(pct) + ' a month';
-
-    words.innerHTML =
-        'late-payment penalty on the goods still unpaid, for every month a credit sale is past its 30-day due date. ' +
-        (charged > 0
-            ? '<span class="muted">' + peso(owed) + ' in penalties is owed on ' + charged +
-              (charged === 1 ? ' sale' : ' sales') + '.</span> '
-            : '') +
-        (own > 0
-            ? '<span class="muted">' + own + (own === 1 ? ' account has' : ' accounts have') +
-              ' a rate of ' + (own === 1 ? 'its' : 'their') + ' own.</span>'
-            : '');
-
-    const facts = document.getElementById('penalty-facts');
-    if (facts) {
-        facts.innerHTML =
-            detailField('Rate Now', penaltyRateWord(pct) + ' a month' + (pct === 3 ? ' <span class="muted">the default</span>' : '')) +
-            detailField('Last Changed', penaltyPolicy.updated_at
-                ? escapeHtml(String(penaltyPolicy.updated_at).slice(0, 16)) +
-                  (penaltyPolicy.updated_by ? ' <span class="muted">by ' + escapeHtml(penaltyPolicy.updated_by) + '</span>' : '')
-                : '<span class="muted">Never</span>') +
-            detailField('Charged So Far', charged > 0
-                ? peso(owed) + ' <span class="muted">on ' + charged + (charged === 1 ? ' open sale' : ' open sales') + '</span>'
-                : '<span class="muted">Nothing outstanding</span>') +
-            detailField('Own-Rate Accounts', String(own));
-    }
 }
 
 // Puts the saved rate in the box, with its worked example. When the rate could not be
@@ -2029,9 +1995,6 @@ function fillPenaltyForm(rateRead) {
 
     if (!rateRead) {
         form.elements.penaltyRate.value = '';
-        document.getElementById('penalty-policy-rate').textContent = 'Rate not read';
-        document.getElementById('penalty-policy-words').textContent = '';
-        document.getElementById('penalty-facts').innerHTML = '';
         document.getElementById('penalty-preview').hidden = true;
         return;
     }
@@ -2093,91 +2056,92 @@ async function savePenaltyPolicy(event) {
     }
 }
 
-// Print Customer Card (the card, then the terms page) or Print Credit Terms (the terms page),
-// for the account that is open
-function printCreditCardOpen(kind) {
-    if (!creditCustomer) return;
+// ---------- the policies and the back of the customer card ----------
+// Three texts, one line to a term: the credit policy, the customer data terms
+// and the refund policy. All three print on the back of the customer card;
+// the credit policy also prints on the credit terms page.
+const POLICY_KINDS = ['credit', 'data-terms', 'refund'];
+let policyData = null;      // what /api/policies answered: { policies, store }
 
-    // The printout is made from the saved account. A limit or rate typed in the
-    // boxes and not saved yet would not be on it, so printing waits for the save.
-    const form = document.getElementById('credit-form');
-    const typedLimit = Number(form.elements.creditLimit.value);
-    const savedLimit = Number(creditCustomer.credit_limit);
-    let typedRate = null;
-    if (form.elements.penaltyRate.value.trim() !== '') typedRate = Number(form.elements.penaltyRate.value);
-    let savedRate = null;
-    if (creditCustomer.penalty_rate_override !== null && creditCustomer.penalty_rate_override !== undefined) {
-        savedRate = Number(creditCustomer.penalty_rate_override);
-    }
-    const rateChanged = typedRate !== savedRate;
-    if (typedLimit !== savedLimit || rateChanged) {
-        notifyWarning('The credit limit or rate in the boxes has not been saved yet, and the printout shows the saved account. ' +
-            'Press Save Credit Terms first, then print.', 'Save the changes first');
-        return;
-    }
-    if (kind === 'card') {
-        printCustomerCard(creditCustomer.customer_id);
-    } else {
-        printCreditTerms(creditCustomer.customer_id);
-    }
-}
-
-// ---------- the wording of the credit terms ----------
-// The terms printed with every credit account. One term to a line. The
-// figures on that page come from the account, not from this text.
-let creditTermsDefault = '';
-
-// reads the saved wording into the box on the Credit Maintenance screen
-async function loadCreditTermsText() {
-    let answer;
+async function loadPolicies() {
     try {
-        answer = await apiGetCreditTermsText();
+        policyData = await apiGetPolicies();
     } catch (error) {
-        explainReadFailure(error, 'The credit terms could not be read.', 'Nothing to show');
+        explainReadFailure(error, 'The policies could not be read.', 'Nothing to show');
         return;
     }
-
-    creditTermsDefault = answer.defaultText;
-    const form = document.getElementById('terms-form');
-    form.elements.text.value = answer.text;
-    document.getElementById('terms-sub').textContent =
-        answer.isDefault ? 'Printed with every credit account. The default wording is in use.'
-                         : 'Printed with every credit account. Your own wording is in use.';
-    countCreditTerms();
-}
-
-// how many terms the box holds, as it is typed
-function countCreditTerms() {
-    const form = document.getElementById('terms-form');
-    const note = document.getElementById('terms-count');
-    if (!form || !note) return;
-
-    let count = 0;
-    const lines = form.elements.text.value.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim() !== '') count++;
+    for (let i = 0; i < POLICY_KINDS.length; i++) {
+        const form = document.getElementById('policy-form-' + POLICY_KINDS[i]);
+        const policy = policyData.policies[POLICY_KINDS[i]];
+        if (form && policy) form.elements.text.value = policy.text;
     }
-    if (count === 0) {
-        note.textContent = 'Nothing typed: saving puts the default wording back.';
-    } else if (count > 20) {
-        note.textContent = count + ' terms. At most 20 can be saved.';
-    } else {
-        note.textContent = count + (count === 1 ? ' term' : ' terms') + '. Each prints with its own number.';
+    previewCardBack();
+}
+
+// the text of a policy as it stands: what is typed in its box, else what was read
+function policyTextNow(kind) {
+    const form = document.getElementById('policy-form-' + kind);
+    if (form) return form.elements.text.value;
+    return policyData && policyData.policies[kind] ? policyData.policies[kind].text : '';
+}
+
+// Draws the back of the card beside each policy page, with what is typed now,
+// scaled to the width of its column, and says when the text has to shrink too
+// far to be read on a card that size.
+function previewCardBack() {
+    if (!policyData) return;
+    const policies = {};
+    for (let i = 0; i < POLICY_KINDS.length; i++) {
+        policies[POLICY_KINDS[i]] = cardPolicyLines(policyTextNow(POLICY_KINDS[i]));
+    }
+
+    const boxes = document.querySelectorAll('[data-card-preview]');
+    for (let i = 0; i < boxes.length; i++) {
+        const box = boxes[i];
+        const kind = box.dataset.cardPreview;
+        box.innerHTML = customerCardBackHtml(policyData.store, policies, kind);
+        const card = box.querySelector('.cc-card');
+
+        // a page out of sight has no width to measure; it is drawn again when opened
+        if (box.clientWidth === 0) continue;
+        const size = fitCustomerCard(card);
+        const scale = box.clientWidth / card.offsetWidth;
+        card.style.transform = 'scale(' + scale + ')';
+        box.style.height = (card.offsetHeight * scale) + 'px';
+
+        const fit = document.querySelector('[data-card-fit="' + kind + '"]');
+        if (fit && size !== null) {
+            const tooSmall = size < CARD_SMALLEST_READABLE_PT;
+            fit.hidden = false;
+            fit.classList.toggle('is-warn', tooSmall);
+            fit.textContent = tooSmall
+                ? 'The policies print at ' + size + ' pt on the card, too small to read. Shorten them.'
+                : 'The policies print at ' + size + ' pt on the card. The dashed box is the one on this page.';
+        }
     }
 }
 
-function useDefaultCreditTerms() {
-    const form = document.getElementById('terms-form');
-    form.elements.text.value = creditTermsDefault;
-    countCreditTerms();
+window.addEventListener('resize', function () { previewCardBack(); });
+
+function useDefaultPolicy(kind) {
+    const form = document.getElementById('policy-form-' + kind);
+    if (!form || !policyData || !policyData.policies[kind]) return;
+    form.elements.text.value = policyData.policies[kind].defaultText;
+    previewCardBack();
 }
 
-async function saveCreditTermsText(event) {
+async function savePolicyText(event, kind) {
     event.preventDefault();
     const form = event.target;
 
+    const lines = cardPolicyLines(form.elements.text.value);
+    if (lines.length > 20) {
+        notifyWarning('At most 20 lines can be saved. Put each term on its own line.', 'Not saved');
+        return;
+    }
+
     try {
-        const response = await apiSaveCreditTermsText(form.elements.text.value);
+        const response = await apiSavePolicy(kind, form.elements.text.value);
         const result = await response.json();
 
         if (!response.ok) {
@@ -2185,8 +2149,8 @@ async function saveCreditTermsText(event) {
             return;
         }
 
-        notifySuccess(result.message, 'Credit terms saved');
-        await loadCreditTermsText();   // an emptied box comes back as the default wording
+        notifySuccess(result.message, CARD_POLICY_TITLES[kind] + ' saved');
+        await loadPolicies();   // an emptied box comes back as the default wording
     } catch (error) {
         notifyOffline();
     }
@@ -2241,31 +2205,7 @@ async function openCreditAccount(customerId) {
                 ? escapeHtml(String(c.credit_updated_at).slice(0, 16))
                 : '<span class="muted">Never</span>');
 
-        const form = document.getElementById('credit-form');
-        form.elements.creditLimit.value = Number(c.credit_limit).toFixed(2);
-        form.elements.standing.value = c.manual_standing || 'Good';
-
-        if (c.penalty_rate_override === null || c.penalty_rate_override === undefined) {
-            form.elements.penaltyRate.value = '';
-        } else {
-            form.elements.penaltyRate.value = Number(c.penalty_rate_override).toFixed(2);
-        }
-
-        form.elements.notes.value = c.credit_notes || '';
-
-        const hint = document.getElementById('credit-penalty-hint');
-        if (hint) {
-            const shop = penaltyPolicy ? Number(penaltyPolicy.penalty_rate) : null;
-            hint.textContent = '1 to 3; blank means the shop\'s rate' +
-                (Number.isFinite(shop) ? ', ' + penaltyRateWord(shop) : '');
-        }
-
-        previewCreditLimit();
         showCreditTab('account');
-
-        // the two prints, each switched on its own (Access Control)
-        document.getElementById('credit-print-card').hidden = !holdsFeature('customer-card-print');
-        document.getElementById('credit-print-terms').hidden = !holdsFeature('credit-terms-print');
 
         showModal('credit-modal');
 
@@ -2289,179 +2229,7 @@ function showCreditTab(tab) {
         if (button) button.classList.toggle('active', tabs[i] === tab);
     }
 
-    // Save belongs to the Account tab; the history has nothing to save
-    const save = document.querySelector('#credit-foot [form="credit-form"]');
-    if (save) save.hidden = history;
-
     if (history) loadCreditHistory();
-}
-
-// Save Note: the note alone, with the account's saved limit, standing and rate,
-// so a limit typed and not meant to be saved yet is not saved with it
-async function saveCreditNote() {
-    if (!creditCustomer) return;
-    const c = creditCustomer;
-    const note = document.getElementById('credit-notes-input').value.trim();
-    let rate = null;
-    if (c.penalty_rate_override !== null && c.penalty_rate_override !== undefined) rate = Number(c.penalty_rate_override);
-
-    try {
-        const response = await apiSaveCreditLimit(c.customer_id, {
-            creditLimit: Number(c.credit_limit),
-            standing: c.manual_standing || 'Good',
-            penaltyRate: rate,
-            notes: note
-        });
-        const result = await response.json();
-        if (!response.ok) {
-            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Note not saved');
-            return;
-        }
-        c.credit_notes = note;
-        notifySuccess('The note on ' + c.customer_name + '\'s account is saved.', 'Note saved');
-    } catch (error) {
-        notifyOffline();
-    }
-}
-
-// the consequence of the typed figure, in words, before it is saved
-function previewCreditLimit() {
-    if (!creditCustomer) return;
-
-    const form = document.getElementById('credit-form');
-    const preview = document.getElementById('credit-preview');
-    if (!form || !preview) return;
-
-    const limit = Number(form.elements.creditLimit.value) || 0;
-    const standing = form.elements.standing.value;
-    const owed = Number(creditCustomer.current_credit) || 0;
-    const room = limit - owed;
-    const name = creditCustomer.customer_name;
-
-    const days = Number(creditCustomer.oldest_debt_days) || 0;
-    const overLimit = limit > 0 && owed > limit;
-    const nearLimit = limit > 0 && owed >= limit * 0.75;
-
-    let verdict;
-    if (standing === 'Hold') {
-        verdict = name + ' can take no new credit at all until the hold is lifted, ' +
-            'whatever the limit says.';
-    } else if (overLimit) {
-        verdict = name + ' already owes <strong>' + peso(-room) + '</strong> more than this limit, ' +
-            'so the account reads <strong>Hold</strong> and no further credit can be taken until ' +
-            'it is paid down. The existing debt stands.';
-    } else if (days > 90) {
-        verdict = name + '\'s oldest unpaid sale is ' + days + ' days old, so the account reads ' +
-            '<strong>Hold</strong> whatever the limit is set to. Chase the payment first.';
-    } else if (room === 0) {
-        verdict = name + ' is exactly at the limit and can take no more until something is paid.';
-    } else if (standing === 'Watch' || days > 30 || nearLimit) {
-        let why;
-        if (standing === 'Watch') {
-            why = 'you have flagged it.';
-        } else if (days > 30) {
-            why = 'the oldest unpaid sale is ' + days + ' days old.';
-        } else {
-            why = 'they owe ' + Math.round(owed / limit * 100) + '% of this limit.';
-        }
-        verdict = name + ' can take another <strong>' + peso(room) + '</strong> on account today, ' +
-            'and the account reads <strong>Watch</strong>: ' + why;
-    } else {
-        verdict = name + ' can take another <strong>' + peso(room) + '</strong> on account today, ' +
-            'in good standing.';
-    }
-
-    // the account's own late-payment rate, if one is typed
-    const ownRaw = String(form.elements.penaltyRate.value).trim();
-    const ownRate = ownRaw === '' ? null : Number(ownRaw);
-    const shopRate = penaltyPolicy ? Number(penaltyPolicy.penalty_rate) : null;
-    let penaltyWords = '';
-    if (ownRate !== null && (!Number.isFinite(ownRate) || ownRate < 1 || ownRate > 3)) {
-        penaltyWords = ' The late-payment rate must be from 1 to 3 percent a month.';
-    } else if (ownRate !== null && (shopRate === null || ownRate !== shopRate)) {
-        penaltyWords = ' A sale of theirs that falls overdue is charged <strong>' + penaltyRateWord(ownRate) +
-            ' a month</strong>' + (shopRate !== null ? ' instead of the shop\'s ' + penaltyRateWord(shopRate) : '') + '.';
-    }
-
-    preview.innerHTML =
-        '<span class="formula-line">' + peso(limit) + ' limit &minus; ' + peso(owed) +
-        ' owed = <strong>' + (room >= 0 ? peso(room) + ' available' : peso(-room) + ' over') +
-        '</strong></span>' +
-        '<span class="formula-verdict">' + verdict + penaltyWords + '</span>';
-
-    preview.classList.toggle('is-dynamic', standing !== 'Hold' && room > 0 && days <= 90);
-    preview.classList.toggle('is-stop', standing === 'Hold' || overLimit || days > 90);
-}
-
-async function saveCreditLimit(event) {
-    event.preventDefault();
-    if (!creditCustomer) return;
-
-    const form = event.target;
-    const limit = Number(form.elements.creditLimit.value);
-    const standing = form.elements.standing.value;
-    const owed = Number(creditCustomer.current_credit) || 0;
-    const name = creditCustomer.customer_name;
-
-    const ownRaw = String(form.elements.penaltyRate.value).trim();
-    const ownRate = ownRaw === '' ? null : Number(ownRaw);
-    if (ownRate !== null && (!Number.isFinite(ownRate) || ownRate < 1 || ownRate > 3)) {
-        notifyWarning('A late-payment rate is 1 to 3 percent a month. Leave it blank for the shop\'s rate.',
-            'Not saved');
-        form.elements.penaltyRate.focus();
-        return;
-    }
-
-    // two changes worth stopping for: a Hold, and a limit under what is owed
-    if (standing === 'Hold' && creditCustomer.standing !== 'Hold') {
-        const yes = await askDanger(name + ' will not be able to take anything on account.', {
-            title: 'Put this account on hold?',
-            eyebrow: 'Credit Management',
-            confirmLabel: 'Put the account on hold',
-            detail: [
-                'The till will refuse any new credit sale to them, whatever their limit is.',
-                'The ' + peso(owed) + ' already owed is unaffected and still has to be collected.',
-                'Any manager can lift the hold again.'
-            ]
-        });
-        if (!yes) return;
-    } else if (limit < owed) {
-        const yes = await askConfirm(
-            name + ' already owes ' + peso(owed) + ', which is more than this limit.', {
-                title: 'Set the limit below what is owed?',
-                eyebrow: 'Credit Management',
-                confirmLabel: 'Set it anyway',
-                detail: [
-                    'This is how an account is stopped from growing without writing off the debt.',
-                    'They can take nothing further until the balance falls under the new limit.'
-                ]
-            });
-        if (!yes) return;
-    }
-
-    try {
-        const response = await apiSaveCreditLimit(creditCustomer.customer_id, {
-                creditLimit: limit,
-                standing: standing,
-                penaltyRate: ownRate,
-                notes: form.elements.notes.value.trim()
-            });
-        const result = await response.json();
-
-        if (!response.ok) {
-            if (!handleAuthFailure(response, result)) notifyError(result.error);
-            return;
-        }
-
-        notifySuccess(result.message, 'Credit terms saved');
-        closeModal('credit-modal');
-
-        const panel = getDataPanel('mgr-credit');
-        if (panel && panel.state === 'ready') await panel.refresh();
-        loadPenaltyPolicy();   // the own-rate count on the Credit Maintenance screen
-    } catch (error) {
-        notifyOffline();
-    }
 }
 
 // ---------- what they bought, beside what they paid ----------
@@ -2562,7 +2330,7 @@ function openCreditRequest(requestId) {
     document.getElementById('decide-name').textContent = r.customer_name;
     document.getElementById('decide-sub').textContent = decided
         ? r.status + (r.decided_by ? ' by ' + r.decided_by : '')
-        : 'Waiting for a decision';
+        : 'Pending';
     document.getElementById('decide-avatar').textContent = initialsOf(r.customer_name);
 
     document.getElementById('decide-facts').innerHTML =
@@ -2783,7 +2551,8 @@ const RECORD_ARCHIVE_MODULE = {
 };
 
 // the kinds of record the manager edits here (categories and units are the clerk's)
-const RECORD_EDITABLE = ['supplier', 'customer', 'product'];
+// a product is edited by the inventory clerk only; the manager sets its price and archives it
+const RECORD_EDITABLE = ['supplier', 'customer'];
 
 // the kind of record is a screen in the strip
 function showRecordType(type, event) {
@@ -3005,46 +2774,54 @@ async function saveAddRecord(event) {
 }
 
 // ==========================================
-// ARCHIVES
+// ARCHIVES -- customers, products, units, categories, suppliers and users
+// (staff accounts). Sales, deliveries and credit are never archived.
 // ==========================================
+// the kind of data each archived record is, in plain words
+const ARCHIVE_TYPE_NAMES = {
+    Customer: 'Customer', Inventory: 'Product', Unit: 'Unit',
+    Category: 'Category', Supplier: 'Supplier', Staff: 'User'
+};
+
+function archiveTypeName(module) {
+    return ARCHIVE_TYPE_NAMES[module] || module;
+}
+
 function buildArchivePanel() {
     createDataPanel({
         key: 'mgr-archives',
         tableId: 'archives-table',
-        columns: 6,
-        sortKeys: ['module', 'record_name', 'detail', 'handled_by', 'archived_at', 'archived_by'],
+        columns: 5,
+        sortKeys: [function (a) { return archiveTypeName(a.module); }, 'record_name', 'detail', 'archived_at', 'archived_by'],
         pagerId: 'archives-pager',
-        filters: { module: 'all' },
+        filters: { type: 'all' },
         gate: {
             title: 'The archive is not loaded',
-            text: 'Press Load Data for everything archived across all modules.',
+            text: 'Press Load Data for every archived customer, product, unit, category, supplier and user.',
             button: 'Load Data'
         },
         load: function () {
             return apiGetArchives();
         },
         match: function (a, query) {
-            return prefixMatch([a.record_name, a.detail, a.module, a.archived_by, a.handled_by], query);
+            return prefixMatch([a.record_name, a.detail, archiveTypeName(a.module), a.archived_by], query);
         },
         filter: function (a, filters) {
-            return filters.module === 'all' || a.module === filters.module;
+            return filters.type === 'all' || archiveTypeName(a.module) === filters.type;
         },
         onLoaded: function (rows) {
-            const modules = [];
+            const types = [];
             for (let i = 0; i < rows.length; i++) {
-                modules.push(rows[i].module);
+                types.push(archiveTypeName(rows[i].module));
             }
-            fillCountedOptions('archives-module', modules, 'Every module');
+            fillCountedOptions('archives-type', types, 'Every type');
         },
         renderRow: function (a, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                     'onclick="openArchiveEntry(' + index + ')">' +
-                '<td>' + statusBadge(a.module) + '</td>' +
+                '<td>' + statusBadge(archiveTypeName(a.module)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(a.record_name) + '</td>' +
                 '<td>' + escapeHtml(a.detail || '') + '</td>' +
-                '<td>' + (a.handled_by
-                    ? escapeHtml(a.handled_by) + ' <span class="muted">' + escapeHtml(a.handled_label || '') + '</span>'
-                    : '<span class="muted">Not recorded</span>') + '</td>' +
                 '<td class="cell-id">' + escapeHtml(a.archived_at || 'Unknown') + '</td>' +
                 '<td>' + escapeHtml(a.archived_by || 'Not recorded') + '</td></tr>';
         }
@@ -3057,14 +2834,11 @@ function openArchiveEntry(index) {
     const entry = panel ? panel.visible[index] : null;
     if (!entry) return;
 
+    const type = archiveTypeName(entry.module);
     const body = '<div class="detail-grid">' +
-        detailField('Module', statusBadge(entry.module)) +
+        detailField('Type', statusBadge(type)) +
         detailField('Record', escapeHtml(entry.record_name)) +
         detailField('Detail', escapeHtml(entry.detail || 'None recorded')) +
-        (entry.handled_by
-            ? detailField(entry.handled_label || 'Handled By', escapeHtml(entry.handled_by) +
-                (entry.handled_at ? ' <span class="muted">' + escapeHtml(String(entry.handled_at).slice(0, 16)) + '</span>' : ''))
-            : '') +
         detailField('Archived On', escapeHtml(entry.archived_at || 'Not recorded')) +
         detailField('Archived By', escapeHtml(entry.archived_by || 'Not recorded')) +
         '</div>' +
@@ -3073,20 +2847,20 @@ function openArchiveEntry(index) {
             entry.module + '\', ' + entry.record_id + ')">Restore This Record</button>' +
         '</div>';
 
-    openDetailModal(entry.record_name, entry.module + ' · archived',
+    openDetailModal(entry.record_name, type + ' · archived',
         initialsOf(entry.record_name), [{ label: 'Archived Record', body: body }]);
 }
 
 async function restoreArchive(module, recordId) {
     const yes = await askConfirm(
-        'This ' + module.toLowerCase() + ' record goes back into circulation and appears on the ' +
+        'This ' + archiveTypeName(module).toLowerCase() + ' record goes back into circulation and appears on the ' +
         'normal lists again.',
         {
             title: 'Restore this record?',
             eyebrow: 'Archives',
             confirmLabel: 'Restore the record',
             detail: [
-                'It reappears everywhere its module lists records.',
+                'It reappears on every list that shows its type of record.',
                 'Anything that was hidden because it was archived becomes visible again.'
             ]
         });
@@ -3109,11 +2883,6 @@ async function restoreArchive(module, recordId) {
         let keys = ['mgr-archives'];
         if (module === 'Inventory') {
             keys = keys.concat(['mgr-stocks', 'mgr-reorder', 'mgr-stock-moves', 'mgr-records', 'mgr-po']);
-        } else if (module === 'Sales') {
-            keys = keys.concat(['mgr-sales', 'mgr-unpaid', 'mgr-credit', 'mgr-loyal',
-                'mgr-stocks', 'mgr-reorder', 'mgr-stock-moves', 'mgr-deliveries']);
-        } else if (module === 'Delivery') {
-            keys = keys.concat(['mgr-deliveries']);
         } else if (module === 'Staff') {
             keys = keys.concat(['mgr-staff']);
         } else {
@@ -3292,8 +3061,8 @@ async function openSaleDetail(saleId, options) {
     }
 }
 
-// Voiding a sale archives it; the database holds the rules (same day, goods
-// not out for delivery, stock returned).
+// Voiding a sale; the database holds the rules (same day, goods not out for
+// delivery, stock returned).
 async function voidSale(saleId, isCredit) {
     const word = isCredit ? 'credit' : 'sale';
     const yes = await askDanger(
@@ -3312,13 +3081,13 @@ async function voidSale(saleId, isCredit) {
 
     if (!yes) return;
 
-    const result = await apiArchiveSale(saleId);
+    const result = await apiVoidSale(saleId);
     if (!result) return;
 
     closeModal('detail-modal');
     notifySuccess('Sale #' + saleId + ' is voided and its stock is back on the shelf.', 'Sale voided');
 
-    const keys = ['mgr-sales', 'mgr-archives', 'mgr-deliveries'];
+    const keys = ['mgr-sales', 'mgr-deliveries'];
     for (let i = 0; i < keys.length; i++) {
         const panel = getDataPanel(keys[i]);
         if (panel && panel.state === 'ready') await panel.refresh();
@@ -3383,7 +3152,7 @@ function openStockDetail(productId) {
 function openDeliveryDetail(deliveryId) {
     const panel = getDataPanel('mgr-deliveries');
     // the manager reads a delivery; the driver moves it along
-    showDeliveryRecord(panel ? panel.find(deliveryId, 'delivery_id') : null, false, false);
+    showDeliveryRecord(panel ? panel.find(deliveryId, 'delivery_id') : null, false);
 }
 
 async function openRecordDetail(index) {
@@ -3411,15 +3180,17 @@ async function openRecordDetail(index) {
             : '');
     const pages = [{ label: 'Details', body: body }];
 
-    // a category lists the products filed under it, on a page of its own
-    if (type === 'category') {
+    // a category lists the products filed under it, and a unit the products
+    // counted in it, on a page of their own
+    if (type === 'category' || type === 'unit') {
+        const field = type === 'category' ? 'category_name' : 'unit_name';
         let productsBody;
         try {
             const allProducts = await apiGetRecords('product');
             const productRows = [];
             for (let i = 0; i < allProducts.length; i++) {
                 const p = allProducts[i];
-                if (p.category_name !== row.name) continue;
+                if (p[field] !== row.name) continue;
                 productRows.push([
                     escapeHtml(p.name),
                     p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>',
@@ -3432,11 +3203,12 @@ async function openRecordDetail(index) {
             pages.push({ label: 'Products (' + productRows.length + ')', body: productsBody });
         } catch (error) {
             pages.push({ label: 'Products', body:
-                '<p class="detail-note detail-warn">The products in this category could not be loaded.</p>' });
+                '<p class="detail-note detail-warn">The products ' + (type === 'category' ? 'in this category' : 'using this unit') +
+                ' could not be loaded.</p>' });
         }
     }
 
-    // the buttons: edit (suppliers, customers, products), the price (products), archive (all)
+    // the buttons: edit (suppliers, customers), the price (products), archive (all)
     let foot = '';
     if (RECORD_ARCHIVE_MODULE[type]) {
         foot += '<button type="button" class="btn btn-danger" onclick="archiveRecord(' + index + ')">Archive</button>';
@@ -3548,20 +3320,6 @@ async function openEditRecord(index) {
             editFieldHtml('city', 'Town or city', row.address_city, { required: true }) +
             editFieldHtml('province', 'Province', row.address_province, { required: true }) +
             editFieldHtml('landmark', 'Landmark', row.address_landmark, { max: 150 });
-    } else {
-        let lists;
-        try {
-            lists = await Promise.all([apiGetRecords('category'), apiGetRecords('brand'),
-                                       apiGetRecords('unit'), apiGetRecords('supplier')]);
-        } catch (error) {
-            notifyOffline();
-            return;
-        }
-        html = editFieldHtml('name', 'Product name', row.name, { required: true, max: 150 }) +
-            editFieldHtml('categoryId', 'Category', row.category_id, { kind: 'select', choices: recordChoices(lists[0]) }) +
-            editFieldHtml('brandId', 'Brand', row.brand_id, { kind: 'select', choices: recordChoices(lists[1]) }) +
-            editFieldHtml('unitId', 'Unit', row.unit_id, { kind: 'select', choices: recordChoices(lists[2]) }) +
-            editFieldHtml('supplierId', 'Supplier', row.supplier_id, { kind: 'select', choices: recordChoices(lists[3]) });
     }
 
     editRecord = { type: type, row: row };
@@ -3605,10 +3363,6 @@ async function saveEditRecord(event) {
         data = { firstName: value('firstName'), middleName: value('middleName'), lastName: value('lastName'),
                  phone: phoneToStore(form.elements.phone), street: value('street'), barangay: value('barangay'),
                  city: value('city'), province: value('province'), landmark: value('landmark') };
-    } else {
-        if (value('name') === '') { notifyWarning('Product name is required.', 'Fill in the form'); return; }
-        data = { name: value('name'), categoryId: value('categoryId'), brandId: value('brandId'),
-                 unitId: value('unitId'), supplierId: value('supplierId') };
     }
 
     const button = document.getElementById('record-edit-save');
