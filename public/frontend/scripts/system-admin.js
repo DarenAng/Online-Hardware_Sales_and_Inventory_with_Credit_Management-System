@@ -223,7 +223,7 @@ function buildUsersPanel() {
         gate: {
             title: 'The directory is not loaded',
             text: 'Set the filters you want, then press Load Data to read the staff ' +
-                  'directory &mdash; or type a name in the search box to look one person up.',
+                  'directory, or type a name in the search box to look one person up.',
             button: 'Load Data'
         },
 
@@ -288,7 +288,7 @@ async function openUserModal(staffId) {
         detailRow('Account Status', accountCell(selectedUser) +
             (selectedUser.held_until
                 ? ' <span class="muted">until ' + escapeHtml(whenText(selectedUser.held_until)) +
-                  ' \u2014 Lift Hold lets them sign in again now</span>'
+                  '. Lift Hold lets them sign in again now</span>'
                 : '')) +
         detailRow('Password State', selectedUser.must_change_password ? '<span class="badge badge-warning">Temporary</span>' : '<span class="badge badge-neutral">Set by user</span>') +
         detailRow('Hired On', escapeHtml(selectedUser.staff_created_at)) +
@@ -2685,7 +2685,7 @@ async function handleSaveStoreSettings(event) {
     const changes = formChangeLines(form, function (name) {
         return name === 'vatRate' && (registration !== 'VAT' || becomesVat);
     });
-    if (becomesVat) changes.push('VAT rate: \u2014 \u2192 ' + (parseFloat(form.elements.vatRate.value) || 0) + '%');
+    if (becomesVat) changes.push('VAT rate: none \u2192 ' + (parseFloat(form.elements.vatRate.value) || 0) + '%');
 
     const saved = JSON.parse(formBaselines.get(form) || '{}');
     const lineKinds = [['header', 'Header lines'], ['footer', 'Footer lines']];
@@ -2802,7 +2802,7 @@ function renderStorePreview() {
         meta: [
             { key: 'date', label: 'Date', value: now.toLocaleString('en-PH') },
             { key: 'cashier', label: 'Cashier', value: getCurrentUser() ? staffName(getCurrentUser()) : 'Cashier' },
-            { key: 'customer', label: 'Customer', value: 'Walk-in' },
+            { key: 'customer', label: 'Customer', value: '', keepBlank: true },
             { key: 'payment', label: 'Payment', value: 'Bank Transfer' },
             { key: 'reference', label: 'Reference', value: 'REF-12345' }
         ],
@@ -2812,7 +2812,7 @@ function renderStorePreview() {
         totals: [
             { label: 'Subtotal', value: peso(total) },
             { label: 'Total Due', value: peso(total), due: true },
-            { label: 'Tendered', value: peso(total) },
+            { label: 'Received Amount', value: peso(total) },
             { label: 'Change', value: peso(0) }
         ],
         taxHtml: tax,

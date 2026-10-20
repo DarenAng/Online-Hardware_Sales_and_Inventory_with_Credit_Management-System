@@ -317,8 +317,16 @@ input[type="number"].form-control {
     font-variant-numeric: tabular-nums;
 }
 /* the figure lines up on the right, but a hint in words ("Leave blank if not
-   from a sale") reads from the left like every other box, until a number is typed */
-input[type="number"].form-control:placeholder-shown { text-align: left; }
+   from a sale") reads from the left like every other box, until a number is typed.
+   A money box (two decimals, an .amount-field, or a "0.00" hint) keeps its hint on the
+   right, where the amount will be. */
+input[type="number"].form-control:placeholder-shown:not([step="0.01"]):not(.amount-field):not([placeholder="0.00"]) { text-align: left; }
+input[type="number"][step="0.01"],
+input[type="number"].amount-field,
+input[type="number"][placeholder="0.00"] { text-align: right; }
+input[type="number"][step="0.01"]::placeholder,
+input[type="number"].amount-field::placeholder,
+input[type="number"][placeholder="0.00"]::placeholder { text-align: right; }
 
 /* No up / down arrows inside a number box, on any page: they step by 0.01 and
    get in the way of typing an amount. A figure is typed. */
@@ -2925,6 +2933,16 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     background: var(--paper);
 }
 .pay-details[hidden] { display: none; }
+/* what is wrong with a box, under it, and its red edge (payment-details.js pdMark) */
+.pay-details .field-error {
+    display: block;
+    margin-top: 4px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--stop-hi);
+}
+.pay-details .field-error[hidden] { display: none; }
+.pay-details .form-control.is-bad { border-color: var(--stop); box-shadow: 0 0 0 2px var(--stop-dim); }
 .pay-details-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--ink); }
 .pay-details-note { margin: 0 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
 

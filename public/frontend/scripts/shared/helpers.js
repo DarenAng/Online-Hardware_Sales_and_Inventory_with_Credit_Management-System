@@ -272,3 +272,11 @@ document.addEventListener('DOMContentLoaded', limitDateFilters);
 document.addEventListener('focusin', onDateFilterUsed, true);
 document.addEventListener('input', onDateFilterUsed, true);
 document.addEventListener('change', onDateFilterUsed, true);
+
+// The mouse wheel over a number box being typed in would change the amount by
+// a step; the box lets go of the cursor instead, so the page scrolls and the
+// figure stays as typed.
+document.addEventListener('wheel', function (event) {
+    const box = event.target;
+    if (box && box.matches && box.matches('input[type="number"]') && document.activeElement === box) box.blur();
+}, { passive: true });

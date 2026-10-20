@@ -208,8 +208,10 @@ function registerCashierRoutes(app, deps) {
   // account, bank and date, below). A bank transfer needs none typed: its
   // reference is PayMongo's own payment number. The e-wallets print a
   // reference too, taken when the cashier has it.
-  const REFERENCE_REQUIRED = ["Cheque"];
-  const REFERENCE_OPTIONAL = ["GCash", "PayMaya", "PayPal"];
+  // A sale asks for no reference now (a cheque is traced by its account, bank
+  // and date; an e-wallet is paid by QR code). One sent is still kept.
+  const REFERENCE_REQUIRED = [];
+  const REFERENCE_OPTIONAL = ["Cheque", "GCash", "PayMaya", "PayPal"];
 
   // Ring up a sale. The procedure deducts stock, checks the limit and standing,
   // and decides paid, part paid or on account. downPaymentMethod is how the

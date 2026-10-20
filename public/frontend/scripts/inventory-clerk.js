@@ -2041,43 +2041,6 @@ async function loadReturns() {
     if (panel && panel.state !== 'closed') await panel.refresh();
 }
 
-async function resolveReturn(reportId) {
-    const panel = getDataPanel('clerk-returns');
-    const r = panel ? panel.find(reportId) : null;
-
-    let words = 'Report #' + reportId + ' moves out of the open list. The stock it already moved stays where it is.';
-    if (r && r.report_type === 'Missing') {
-        words = 'Report #' + reportId + ' moves out of the open list. Use this once the supplier has made the ' +
-            'missing goods good. Stock does not change here: the goods are counted in when they are received.';
-    }
-
-    const yes = await askConfirm(words,
-        { title: 'Mark this report resolved?', eyebrow: 'Returned Items', confirmLabel: 'Mark resolved' });
-
-    if (!yes) return;
-    await sendReturnVerdict(reportId, null, '');
-}
-
-async function sendReturnVerdict(reportId, verdict, note) {
-    try {
-        const response = await apiResolveReturn(reportId, verdict, note);
-        const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
-        notifySuccess(result.message, verdict ? 'Inspection recorded' : undefined);
-        await loadReturns();
-        // a verdict that put goods back moves stock
-        if (verdict === 'Return to Stock') {
-            const keys = ['clerk-materials', 'clerk-reorder'];
-            for (let i = 0; i < keys.length; i++) {
-                const panel = getDataPanel(keys[i]);
-                if (panel && panel.state === 'ready') await panel.refresh();
-            }
-        }
-    } catch (error) {
-        notifyOffline();
-    }
-}
-
 // ---------- archive ----------
 function buildInventoryArchivePanel() {
     createDataPanel({
@@ -2319,10 +2282,11 @@ const CLERK_RECORD_FIELDS = {
     unit:     [['product_count', 'Products']]
 };
 
-function openClerkRecord(index) {
+async function openClerkRecord(index) {
     const panel = getDataPanel('clerk-records');
     const row = panel ? panel.visible[index] : null;
     if (!row) return;
+    const type = clerkRecordType;
 
     let fields = '';
     const fieldList = CLERK_RECORD_FIELDS[clerkRecordType];
@@ -2343,8 +2307,37 @@ function openClerkRecord(index) {
         fields + '</div>';
 
     // the plural title made singular: "Categories" becomes "Category", "Suppliers" becomes "Supplier"
-    const kind = CLERK_RECORD_TITLES[clerkRecordType].replace(/ies$/, 'y').replace(/s$/, '');
-    openDetailModal(row.name, kind + ' record', initialsOf(row.name), [{ label: 'Details', body: body }]);
+    const kind = CLERK_RECORD_TITLES[type].replace(/ies$/, 'y').replace(/s$/, '');
+    const pages = [{ label: 'Details', body: body }];
+
+    // a supplier lists the products registered to it, a category the products
+    // filed under it and a unit the products counted in it, on a page of their own
+    if (type === 'supplier' || type === 'category' || type === 'unit') {
+        const field = { supplier: 'supplier_name', category: 'category_name', unit: 'unit_name' }[type];
+        try {
+            const allProducts = await apiGetRecords('product');
+            const rows = [];
+            for (let i = 0; i < allProducts.length; i++) {
+                const p = allProducts[i];
+                if (p[field] !== row.name) continue;
+                // a supplier's page names each product's category in place of the supplier
+                const third = type === 'supplier' ? p.category_name : p.supplier_name;
+                rows.push([
+                    escapeHtml(p.name),
+                    p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>',
+                    third ? escapeHtml(third) : '<span class="muted">Not set</span>',
+                    priceOrBadge(p),
+                    escapeHtml(qtyText(p.quantity_in_stock, p.unit_name))
+                ]);
+            }
+            pages.push({ label: 'Products (' + rows.length + ')', body: detailTable(
+                ['Product', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'], rows, [3, 4]) });
+        } catch (error) {
+            pages.push({ label: 'Products', body: '<p class="detail-note detail-warn">The products could not be loaded.</p>' });
+        }
+    }
+
+    openDetailModal(row.name, kind + ' record', initialsOf(row.name), pages, null, { wide: true });
 }
 
 async function archiveMaterial(productId) {
@@ -2541,13 +2534,8 @@ function openReturnDetail(returnId) {
 
     const awaiting = returnAwaiting(r);
 
-    // goods waiting for inspection are added to stock or discarded on Stock
-    // Adjustment (Reference, Returned Items); a report already decided can be
-    // marked resolved here
-    let inspection = '';
-    if (!awaiting && r.status === 'Open') {
-        inspection = '<div class="detail-actions"><button type="button" class="btn btn-success" onclick="closeModal(\'detail-modal\'); resolveReturn(' + r.return_id + ')">Mark Resolved</button></div>';
-    }
+    // read only: goods are added to stock or discarded on Stock Adjustment
+    // (Reference, Returned Items), which closes the report
 
     // what the Inspected field says when nobody has inspected the goods
     let notInspected;
@@ -2565,19 +2553,16 @@ function openReturnDetail(returnId) {
         (missing
             ? detailField('Purchase Order', '#' + r.po_id)
             : detailField('From Sale', r.sale_id ? '#' + r.sale_id : '<span class="muted">Not from a sale</span>')) +
-        detailField('Goods Went', returnDispositionBadge(r)) +
+        detailField('Adjustment', returnDispositionBadge(r)) +
         detailField('Inspected', r.inspected_by
             ? escapeHtml(r.inspected_by) + ' <span class="muted">' + escapeHtml(String(r.inspected_at || '').slice(0, 16)) + '</span>'
             : '<span class="muted">' + notInspected + '</span>') +
-        '</div>' +
-        '<p class="detail-note">' + escapeHtml(r.reason || 'No reason given.') + '</p>' +
-        (r.inspection_note
-            ? '<p class="detail-note"><strong>Inspection:</strong> ' + escapeHtml(r.inspection_note) + '</p>' : '');
+        '</div>';
 
     openDetailModal(r.report_type + ' Report #' + r.return_id,
         r.product_name + ' · ' + (awaiting ? 'Awaiting inspection' : r.status),
         'R' + r.return_id, [
-            { label: 'Report', body: report + inspection },
+            { label: 'Report', body: report },
             { label: 'Details', body: context }
         ]);
 }

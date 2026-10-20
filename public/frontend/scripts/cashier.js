@@ -365,8 +365,8 @@ function renderCatalog(rows, keyword) {
             '<td class="cell-name">' + escapeHtml(p.product_name) +
                 '<span class="on-order-mark" title="On the order"' + markHidden + '>' + markText + '</span></td>' +
             '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
-            '<td>' + escapeHtml(p.brand_name || '—') + '</td>' +
-            '<td class="cell-unit">' + escapeHtml(p.unit_name || '—') + sizesHtml + '</td>' +
+            '<td>' + escapeHtml(p.brand_name || '-') + '</td>' +
+            '<td class="cell-unit">' + escapeHtml(p.unit_name || '-') + sizesHtml + '</td>' +
             '<td class="cell-num catalog-price">' +
                 (noPrice ? '<span class="badge badge-warning">No price yet</span><span class="price-per">ask the manager</span>'
                          : peso(p.price) + perHtml) + '</td>' +
@@ -1602,14 +1602,11 @@ function checkoutLabel(t) {
 // transfer is verified through PayMongo: the customer's bank and account are
 // asked for, and the reference is PayMongo's own payment number, not typed.
 // An e-wallet prints a reference too, taken when the cashier has it. Cash needs none.
-const REFERENCE_REQUIRED = ['Cheque'];
-const REFERENCE_OPTIONAL = ['GCash', 'PayMaya', 'PayPal'];
-
+// the reference asked for on the Credit Settlement card (a sale asks for none)
 const REFERENCE_WORDS = {
-    'Cheque':        { hint: 'required \u2014 the cheque number', placeholder: 'e.g. 001234' },
-    'GCash':         { hint: 'optional \u2014 the GCash reference', placeholder: 'e.g. 1012 345 678901' },
-    'PayMaya':       { hint: 'optional \u2014 the Maya reference', placeholder: 'e.g. 5A3F9C21' },
-    'PayPal':        { hint: 'optional \u2014 the PayPal transaction ID', placeholder: 'e.g. 8TY12345AB678901C' }
+    'Cheque':        { hint: 'required, the cheque number', placeholder: 'e.g. 001234' },
+    'GCash':         { hint: 'optional, the GCash reference', placeholder: 'e.g. 1012 345 678901' },
+    'PayMaya':       { hint: 'optional, the Maya reference', placeholder: 'e.g. 5A3F9C21' }
 };
 
 // what the money taken today arrives by: the sale's own method, or on a
@@ -1645,13 +1642,12 @@ buildPaymentDetailsBox('payment-details-box', 'pay-debt', true);
 function renderSalePaymentExtras(totals) {
     const t = totals || cartTotals();
 
-    // The reference is on screen only while the money taken now has a number to
-    // trace it by (REFERENCE_WORDS): not for cash, not for cash on delivery, and
-    // not for a credit sale with nothing paid now (taken is null then) or a part
-    // payment in cash. When it goes, so does anything typed in it.
+    // A sale asks for no reference: not for an e-wallet, which is paid by QR
+    // code, and not for a cheque, which is traced by its account, bank and date.
+    // (The Credit Settlement card still asks for one: REFERENCE_WORDS.)
     const taken = methodTakenNow(t);
     const field = document.getElementById('sale-reference-field');
-    const words = REFERENCE_WORDS[taken];
+    const words = null;
     if (field) {
         field.hidden = !words;
         const box = document.getElementById('sale-reference');
@@ -1830,8 +1826,7 @@ function showQrCard(session, made) {
     if (isBank) {
         document.getElementById('qr-title').textContent = 'Pay by Bank Transfer · ' + session.bank.bank;
         document.getElementById('qr-ask').textContent =
-            'Ask the customer to scan the code with their phone\'s camera. It opens ' + session.bank.bank +
-            '\'s page, where they log in and approve the transfer.';
+            'Ask the customer to scan the code with their phone\'s camera.';
     } else {
         document.getElementById('qr-title').textContent = 'Pay by QR · ' + (QR_APP_WORDS[session.method] || session.method);
         document.getElementById('qr-ask').textContent =
@@ -1847,11 +1842,9 @@ function showQrCard(session, made) {
     if (made) {
         image.src = made.qrImage;
         image.setAttribute('data-pay-url', made.payUrl || '');
-        // a bank transfer also gets the page as a link to press
-        if (linkRow && link && isBank && made.payUrl) {
-            link.href = made.payUrl;
-            linkRow.hidden = false;
-        }
+        // no link to the bank's page on this computer: the bank's page is good
+        // for one opening, and the customer's phone is the one that needs it
+        if (linkRow) linkRow.hidden = true;
     } else {
         image.removeAttribute('src');
         image.removeAttribute('data-pay-url');
@@ -2146,7 +2139,7 @@ function renderCreditStrip() {
 
     let availableText = peso(available);
     if (c.standing === 'Hold') {
-        availableText = 'Nothing &mdash; on hold';
+        availableText = 'Nothing, on hold';
     }
 
     // a short note: why the credit rating is not Good, or the manager's notes
@@ -2285,10 +2278,11 @@ function closeCheckoutModal() {
     closeModal('checkout-modal');
 }
 
-// the name the confirmation and the messages use for whoever the sale is for
+// the name the confirmation and the messages use for whoever the sale is for;
+// '' when the sale is on no customer record
 function checkoutCustomerName() {
     const id = selectedCustomerId();
-    if (!id) return 'Walk-in';
+    if (!id) return '';
     if (selectedCustomerCredit && selectedCustomerCredit.customer_name) return selectedCustomerCredit.customer_name;
     const found = findCustomer(id);
     if (found) return found.name;
@@ -2301,10 +2295,11 @@ function checkoutCustomerName() {
 // button that was pressed.
 function checkoutQuestion(t, customerName) {
     const methodName = t.method === 'COD' ? 'Cash on Delivery' : t.method;
-    const detail = ['Customer: ' + customerName, 'Amount due: ' + peso(t.due), 'Payment method: ' + methodName];
+    // a sale on no customer record says so, and the question names no one
+    const detail = ['Customer: ' + (customerName || 'No record'), 'Amount due: ' + peso(t.due), 'Payment method: ' + methodName];
 
     let title = 'Complete this sale?';
-    let message = 'Ring up this sale of ' + peso(t.due) + ' for ' + customerName + '?';
+    let message = 'Ring up this sale of ' + peso(t.due) + (customerName ? ' for ' + customerName : '') + '?';
     let confirmLabel = 'Complete Sale';
 
     if (t.method === 'COD') {
@@ -2442,18 +2437,7 @@ async function handleCheckout(event, viaQr) {
         }
     }
 
-    // a cheque is traced by its number; the server refuses one without it too
     const reference = saleReference();
-    if (REFERENCE_REQUIRED.indexOf(taken) !== -1 && reference === '') {
-        let referenceSubject = 'A cheque sale';
-        if (t.onCredit) referenceSubject = 'The part payment is by cheque, so it';
-        notifyWarning(
-            referenceSubject +
-            ' needs its reference: the cheque number. It is how the money is traced if it does not arrive.',
-            'Reference needed');
-        focusBox('sale-reference');
-        return;
-    }
 
     // Asked before anything is sent: the amount due, the method, and the change
     // or the balance that goes on the account. Paying by QR is its own
@@ -2470,8 +2454,6 @@ async function handleCheckout(event, viaQr) {
             question.detail.push('Customer\'s bank: ' + transferDetails.bank);
             question.detail.push('Account name: ' + transferDetails.accountName);
             question.detail.push('Account number: ' + transferDetails.accountNumber);
-            question.message += ' A QR code and a link to the bank\'s page are made next; nothing is recorded ' +
-                'until the customer has approved the transfer in their bank.';
             question.confirmLabel = 'Make the QR code';
         }
         const yes = await askConfirm(question.message, {
@@ -2653,6 +2635,11 @@ function receiptItemCount(items) {
     return Number.isInteger(units) ? String(units) : units.toFixed(2);
 }
 
+// whether a sale names a customer: an account, or a name taken at the till
+function saleHasCustomer(s) {
+    return Boolean(s.customer_id) || String(s.walk_in_name || '').trim() !== '';
+}
+
 async function openReceipt(saleId) {
     let data;
     try { data = await apiGetSale(saleId); }
@@ -2707,7 +2694,7 @@ async function openReceipt(saleId) {
     // everything refunded on the sale, then the part of it that came off what the customer owed
     if (Number(s.returned_total) > 0) totals.push({ label: 'Refunded', value: '-' + peso(s.returned_total) });
     if (Number(s.refunded_amount) > 0) totals.push({ label: 'Taken off the balance', value: '-' + peso(s.refunded_amount) });
-    totals.push({ label: 'Tendered', value: peso(s.amount_paid) });
+    totals.push({ label: 'Received Amount', value: peso(s.amount_paid) });
     totals.push({ label: 'Change', value: peso(s.change_given) });
 
     const paper = document.getElementById('receipt-paper');
@@ -2718,7 +2705,9 @@ async function openReceipt(saleId) {
         meta: [
             { key: 'date', label: 'Date', value: s.sale_date },
             { key: 'cashier', label: 'Cashier', value: s.cashier_name },
-            { key: 'customer', label: 'Customer', value: s.customer_name },
+            // a sale on no customer record leaves the line blank
+            { key: 'customer', label: 'Customer', keepBlank: true,
+              value: saleHasCustomer(s) ? s.customer_name : '' },
             { key: 'payment', label: 'Payment', value: s.payment_method },
             { key: 'reference', label: 'Reference', value: paymentReference(s.payment_method, s.reference_no) }
         ],
@@ -3431,8 +3420,9 @@ async function saveDeliveryForm(event) {
     } else if (phoneProblem) {
         complain('contactPhone', phoneProblem);
     }
-    // a customer's address is complete: house number and street, barangay, town or city, province
-    if (street.length < 2) complain('street', 'Enter the house number and street.');
+    // the barangay, town or city and province are needed; the house number and
+    // street may be left out (not every house has them)
+    if (street !== '' && street.length < 2) complain('street', 'The house number and street is too short; leave it empty if there is none.');
     if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
     if (province.length < 2) complain('province', 'Enter the province.');
@@ -4861,7 +4851,7 @@ function renderCustomerPayments() {
     for (let i = 0; i < rows.length; i++) {
         const p = rows[i];
         // the sale (receipt) the payment was put against
-        let receiptCell = '<span class="muted">&mdash;</span>';
+        let receiptCell = '<span class="muted">-</span>';
         if (p.sale_id) receiptCell = '#' + p.sale_id;
         paymentRows.push([
             escapeHtml(dayOfStamp(p.payment_date)),
@@ -5022,8 +5012,8 @@ async function handleLimitRequest(event) {
 
 // ---------- Add Customer ----------
 // The one place an account is opened (the till no longer opens one from a
-// typed name). First name, last name, phone number and the house number and
-// street, barangay, town or city and province are required; the middle name
+// typed name). First name, last name, phone number, barangay, town or city
+// and province are required; the middle name, the house number and street,
 // and the landmark are optional. The server refuses a name already on the
 // list, any case, and gives the account a credit limit of zero.
 let addCustomerFor = '';   // 'sale': opened from the payment form, the new account goes on the sale; 'delivery': from the delivery form
@@ -5102,12 +5092,10 @@ function setAddCustomerMode(editing, name) {
     const title = document.getElementById('add-customer-title');
     const sub = document.getElementById('add-customer-sub');
     const avatar = document.getElementById('add-customer-avatar');
-    const note = document.getElementById('add-customer-note');
     const save = document.getElementById('add-customer-save');
     if (title) title.textContent = editing ? 'Edit Customer' : 'Add Customer';
     if (sub) sub.textContent = editing ? name : 'Opens an account at the counter';
     if (avatar) avatar.textContent = editing ? initialsOf(name) : '+';
-    if (note) note.hidden = editing;
     if (save) save.textContent = editing ? 'Save Changes' : 'Add Customer';
 }
 
@@ -5211,8 +5199,9 @@ async function handleAddCustomer(event) {
     } else if (phoneProblem) {
         complain('phone', phoneProblem);
     }
-    // a customer's address is complete: house number and street, barangay, town or city, province
-    if (street.length < 2) complain('street', 'Enter the house number and street.');
+    // the barangay, town or city and province are needed; the house number and
+    // street may be left out (not every house has them)
+    if (street !== '' && street.length < 2) complain('street', 'The house number and street is too short; leave it empty if there is none.');
     if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
     if (province.length < 2) complain('province', 'Enter the province.');
