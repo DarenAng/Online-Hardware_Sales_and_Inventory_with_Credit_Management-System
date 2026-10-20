@@ -148,7 +148,7 @@ function renderQrPaymentTiles(state) {
     if (!grid) return;
     const s = state.summary;
     function value(n) {
-        return s ? escapeHtml(String(n)) : '—';
+        return s ? escapeHtml(String(n)) : '0';
     }
 
     function tile(label, figure, note) {
@@ -156,14 +156,14 @@ function renderQrPaymentTiles(state) {
             '<span class="kpi-value">' + figure + '</span><span class="kpi-note">' + note + '</span></div>';
     }
 
-    const rate = s && s.successRate !== null ? s.successRate + '%' : '—';
+    const rate = s && s.successRate !== null ? s.successRate + '%' : 'None yet';
     grid.innerHTML =
         tile('Attempts', value(s && s.attempts), s && s.pending ? s.pending + ' still waiting' : 'QR codes made') +
         tile('Paid', value(s && s.paid), 'Money received') +
         tile('Failed', value(s && s.failed), 'Declined in the app') +
         tile('Expired', value(s && s.expired), 'Not paid in time') +
         tile('Cancelled', value(s && s.cancelled), 'Closed by the cashier') +
-        tile('Success Rate', s ? escapeHtml(rate) : '—', 'Paid, of finished attempts');
+        tile('Success Rate', s ? escapeHtml(rate) : 'None yet', 'Paid, of finished attempts');
 }
 
 // the manager's "Cashier" picker: everyone seen so far, kept across periods

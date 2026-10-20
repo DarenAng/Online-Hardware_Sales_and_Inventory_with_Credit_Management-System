@@ -173,3 +173,20 @@ function apiAddRecord(kind, data) {
     const path = { supplier: '/api/suppliers', category: '/api/categories', unit: '/api/units' }[kind];
     return sendJson(path, 'POST', data);
 }
+
+// POST /api/archives/archive -- any module the manager may archive (Supplier,
+// Customer, Inventory, Category, Unit, Staff); the answer, or null if refused
+function apiArchiveRecord(module, recordId) {
+    return postJson('/api/archives/archive', { module: module, recordId: recordId });
+}
+
+// PUT /api/suppliers/:id, /api/customers/:id, /api/stocks/:id/details -- the
+// manager corrects a record; the answer, or null if refused
+function apiEditRecord(kind, id, data) {
+    const path = {
+        supplier: '/api/suppliers/' + id,
+        customer: '/api/customers/' + id,
+        product: '/api/stocks/' + id + '/details'
+    }[kind];
+    return postJson(path, data, 'PUT');
+}

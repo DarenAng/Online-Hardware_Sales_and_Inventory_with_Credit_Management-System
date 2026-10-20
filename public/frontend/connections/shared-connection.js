@@ -56,6 +56,11 @@ async function getJson(url) {
         handleAuthFailure(response, body);
         const failure = new Error('request failed');
         failure.status = response.status;   // data-panel.js forgets a table that is no longer allowed
+        // the server answered with a reason: a table shows it instead of "did not answer"
+        if (body && body.error) {
+            failure.message = 'The server could not read this (' + response.status + '): ' + body.error;
+            failure.handled = true;
+        }
         throw failure;
     }
     return response.json();
@@ -452,6 +457,11 @@ function apiGetPurchaseOrders() {
 // GET /api/purchase-orders/:id/items
 function apiGetPurchaseOrderItems(poId) {
     return getJson('/api/purchase-orders/' + poId + '/items');
+}
+
+// GET /api/purchase-orders/:id/reports -- goods reported missing from its delivery
+function apiGetPurchaseOrderReports(poId) {
+    return getJson('/api/purchase-orders/' + poId + '/reports');
 }
 
 // GET /api/purchase-orders/:id/document -- the printed order

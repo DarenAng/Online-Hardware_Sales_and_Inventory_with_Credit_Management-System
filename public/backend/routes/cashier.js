@@ -72,17 +72,18 @@ function registerCashierRoutes(app, deps) {
   // THE SALES LIST
   //
   // Two derived filters: PAYMENT GROUP (the four electronic methods answer as
-  // one) and TRANSACTION STATUS, which is not payment_status:
+  // one) and TRANSACTION STATUS, which follows payment_status directly:
   //   Voided           archived; it did not happen
-  //   Pending Delivery goods sent out for delivery and not yet arrived
-  //   Partial Credit   money still owed
-  //   Completed        paid, and collected or delivered
+  //   Paid             nothing is owed on it
+  //   Partially Paid   some money taken, the rest still owed
+  //   Unpaid           nothing taken yet
+  // Where the goods are (a delivery on the road) is the sale's delivery status.
   // ==========================================
   const SALE_STATUS_SQL = "\n  CASE\n" +
     "    WHEN s.is_archived = TRUE THEN 'Voided'\n" +
-    "    WHEN d.delivery_id IS NOT NULL AND d.status <> 'Delivered' THEN 'Pending Delivery'\n" +
-    "    WHEN s.payment_status <> 'Paid' THEN 'Partial Credit'\n" +
-    "    ELSE 'Completed'\n" +
+    "    WHEN s.payment_status = 'Paid' THEN 'Paid'\n" +
+    "    WHEN s.payment_status = 'Partial' THEN 'Partially Paid'\n" +
+    "    ELSE 'Unpaid'\n" +
     "  END";
 
   const PAYMENT_GROUP_SQL = "\n  CASE\n" +

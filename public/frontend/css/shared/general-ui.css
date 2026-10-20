@@ -3254,3 +3254,23 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     }
     .banner .btn { width: 100%; }
 }
+
+/* ==========================================================================
+   SORTING BY A COLUMN HEADER -- data-panel.js marks the headers that sort
+   (th-sortable) and which way the one in use goes (aria-sort)
+   ========================================================================== */
+table th.th-sortable { cursor: pointer; user-select: none; }
+table th.th-sortable:hover,
+table th.th-sortable:focus-visible { background: color-mix(in srgb, var(--chrome) 82%, #ffffff); outline: none; }
+table th.th-sortable::after {
+    content: "\2195";               /* up-down arrow: sortable, not in use */
+    display: inline-block;
+    margin-left: 6px;
+    opacity: 0.45;
+    font-size: 0.85em;
+}
+table th.th-sortable[aria-sort="ascending"]::after  { content: "\25B2"; opacity: 1; }
+table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity: 1; }
+
+/* a toolbar box put away (the From and To beside a Period box until Custom date) */
+.toolbar-field[hidden] { display: none !important; }

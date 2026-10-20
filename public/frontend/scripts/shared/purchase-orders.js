@@ -1139,11 +1139,11 @@ function addPurchaseLine(fromButton) {
             '<p class="pick-verdict po-line-note" id="po-line-note-' + index + '"></p></div>' +
             '<div class="form-group"><label for="po-price-' + index + '" id="po-price-label-' + index + '">Unit price</label>' +
             '<input type="text" class="form-control po-cost" id="po-price-' + index + '" readonly tabindex="-1" ' +
-                   'placeholder="—" title="The price on file for this material. It is not typed on the order.">' +
+                   'title="The price on file for this material. It is not typed on the order.">' +
             '<p class="pick-verdict po-line-amount" id="po-line-amount-' + index + '"></p></div>' +
             '<div class="form-group"><label for="po-line-total-' + index + '">Line total</label>' +
             '<input type="text" class="form-control po-cost po-line-total" id="po-line-total-' + index + '" ' +
-                   'readonly tabindex="-1" placeholder="—"></div>' +
+                   'readonly tabindex="-1"></div>' +
         '</div>';
 
     box.insertBefore(row, box.firstChild);
@@ -1612,7 +1612,11 @@ function buildPurchaseOrderPanel() {
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
             (poSetup.showLines ? '<td class="cell-num">' + po.line_count + '</td>' : '') +
             '<td class="cell-num">' + poValueCell(po) + '</td>' +
-            '<td>' + poStatusBadge(po) + '</td></tr>';
+            '<td>' + poStatusBadge(po) +
+                (Number(po.missing_reports) > 0
+                    ? ' <span class="badge badge-danger" title="The stockroom reported goods missing from this delivery">' +
+                      po.missing_reports + ' missing reported</span>'
+                    : '') + '</td></tr>';
         }
     });
 }
@@ -1790,6 +1794,13 @@ function syncPurchaseTotalsPeriod() {
     const yearField = document.getElementById('po-totals-year-field');
     if (monthField) monthField.hidden = period !== 'month';
     if (yearField) yearField.hidden = period !== 'year';
+
+    // Custom date shows From and To beside the box; any other period hides them
+    const dateFields = ['po-totals-from-field', 'po-totals-to-field'];
+    for (let i = 0; i < dateFields.length; i++) {
+        const field = document.getElementById(dateFields[i]);
+        if (field) field.hidden = period !== 'custom';
+    }
 }
 
 // a period, month or year replaces any dates typed, and the dates replace them
@@ -1806,6 +1817,15 @@ function clearPurchaseTotalsDates(panel) {
 function purchaseTotalsPeriod(value) {
     const panel = getDataPanel(PO_TOTALS_KEY);
     if (!panel) return;
+
+    // Custom date shows the two dates and waits for them
+    if (value === 'custom') {
+        panel.filters.period = 'custom';
+        syncPurchaseTotalsPeriod();
+        const from = document.getElementById('po-totals-from');
+        if (from) from.focus();
+        return;
+    }
     clearPurchaseTotalsDates(panel);
 
     // the month or year starts on the one the box already shows
@@ -1867,7 +1887,7 @@ function renderPurchaseTotalsFigures() {
     }
     const average = orders.length === 0 ? 0 : total / orders.length;
     const shown = function (text) {
-        return ready ? text : '—';
+        return ready ? text : '0';
     };
 
     const f = panel ? panel.filters : {};
@@ -1903,7 +1923,7 @@ function buildPurchaseTotalsPanel() {
         pageSize: 8,            // the manager's Reports tab: eight a page, like the other reports
         pagerId: 'po-totals-pager',
         idField: 'po_id',
-        // period: 'month' (the month box), 'year' (the year box) or 'all'
+        // period: 'month' (the month box), 'year' (the year box), 'all', or 'custom' (From and To)
         filters: { period: 'month', month: poThisMonth(), year: poThisYear(), supplier: 'all', from: '', to: '' },
         inputs: ['po-totals-from', 'po-totals-to', 'po-totals-period', 'po-totals-month', 'po-totals-year', 'po-totals-supplier'],
 
@@ -1988,11 +2008,9 @@ function purchaseTotalsDates() {
     panel.filters.from = from.value;
     panel.filters.to = to.value;
 
-    // dates typed stand in for the period, so it moves to All Time
-    if (from.value || to.value) {
-        panel.filters.period = 'all';
-        syncPurchaseTotalsPeriod();
-    }
+    // the dates are the period: Custom date
+    panel.filters.period = 'custom';
+    syncPurchaseTotalsPeriod();
     panel.page = 1;
     if (panel.state === 'ready') panel.apply();
     else if (panel.state === 'closed' || panel.state === 'error') panel.open();
@@ -2461,6 +2479,12 @@ async function openPurchaseOrderDetail(poId) {
     let items = [];
     try { items = await apiGetPurchaseOrderItems(poId); } catch (error) { items = []; }
 
+    // what the stockroom reported missing from this order's delivery
+    let reports = [];
+    if (Number(po.missing_reports) > 0) {
+        try { reports = await apiGetPurchaseOrderReports(poId); } catch (error) { reports = []; }
+    }
+
     const waiting = po.status === 'For Approval';
 
     // what happens next, in one line over the facts. Once the manager approves
@@ -2614,14 +2638,36 @@ async function openPurchaseOrderDetail(poId) {
                 (poCanRefer(po) ? 'Refer to PO' : 'Count In the Delivery') + '</button>';
     }
 
-    // one wide page, never turned: the facts and the supplier's contact on the
-    // left, every material on the right; a very long order scrolls instead
-    openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(poStage(po)), 'P' + po.po_id, [
+    // one wide page: the facts and the supplier's contact on the left, every
+    // material on the right; a very long order scrolls. Missing-goods reports
+    // filed against the order get a page of their own.
+    const pages = [
         { label: 'Order', body: '<div class="po-detail-layout">' +
             '<div class="po-detail-facts">' + summary + contact + '</div>' +
             '<div class="po-detail-lines"><h4 class="detail-subhead">What is ordered</h4>' + lines + '</div>' +
           '</div>' }
-    ], foot, { wide: 'xl', scroll: true });
+    ];
+    if (reports.length > 0) {
+        const reportRows = [];
+        for (let i = 0; i < reports.length; i++) {
+            const r = reports[i];
+            reportRows.push([
+                escapeHtml(String(r.return_date).slice(0, 16)),
+                escapeHtml(r.product_name),
+                escapeHtml(qtyText(r.quantity, r.unit_name)),
+                escapeHtml(r.reason || ''),
+                escapeHtml(r.reported_by || 'Not recorded'),
+                statusBadge(r.status)
+            ]);
+        }
+        pages.push({ label: 'Missing Reports (' + reports.length + ')',
+            body: '<p class="detail-note detail-warn">The stockroom reported these goods missing from this ' +
+                  'order\'s delivery.</p>' +
+                  detailTable(['Reported', 'Material', 'Qty Missing', 'Reason', 'Reported By', 'Status'],
+                      reportRows, [2]) });
+    }
+    openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(poStage(po)), 'P' + po.po_id,
+        pages, foot, { wide: 'xl', scroll: true });
 }
 
 // The manager's decision. Approving asks once; declining asks for the reason,

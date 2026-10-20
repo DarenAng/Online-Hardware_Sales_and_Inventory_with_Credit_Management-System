@@ -50,8 +50,6 @@
                                onclick="showReport('report-unpaid', event)"><i class="bi bi-wallet2 nav-icon" aria-hidden="true"></i>Receivables</a></li>
                         <li data-feature="reports"><a href="#" data-panel-link="panel-reports" data-panel-view="report-loyal"
                                onclick="showReport('report-loyal', event)"><i class="bi bi-person-check nav-icon" aria-hidden="true"></i>Repeat Customers</a></li>
-                        <li data-feature="reports"><a href="#" data-panel-link="panel-reports" data-panel-view="report-all"
-                               onclick="showReport('report-all', event)"><i class="bi bi-clock-history nav-icon" aria-hidden="true"></i>Activity Log</a></li>
                     </ul>
                 </li>
                 <li data-sidebar-dropdown>
@@ -86,14 +84,15 @@
                 </li>
 
                 <!-- The schedule is drawn by shared/delivery-schedule.js; the manager holds
-                     it by role, so its item starts shown here -->
+                     it by role, so its item starts shown here. Both are to read only: the
+                     driver moves a delivery along, the manager no longer does -->
                 <li data-sidebar-dropdown>
                     <a href="#deliveries" onclick="sidebarHeading(event, 'deliveries-nav', 'deliveries-dropdown', showDeliveries)" class="nav-parent" id="deliveries-nav"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>
-                        Deliveries <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                        Delivery History <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="deliveries-dropdown" class="nav-sub" style="display: none;">
                         <li data-feature="deliveries"><a href="#" data-panel-link="panel-deliveries" onclick="showDeliveries(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>
-                            Deliveries</a></li>
+                            Delivery History</a></li>
                         <li data-feature="delivery-schedule"><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
                             Delivery Schedule</a></li>
                     </ul>
@@ -117,6 +116,8 @@
                     </ul>
                 </li>
                 <li data-feature="archives"><a href="#" data-panel-link="panel-archives" onclick="showArchives(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archives</a></li>
+                <!-- everything staff have filed: its own screen, apart from Reports -->
+                <li data-feature="reports"><a href="#" data-panel-link="panel-activity" onclick="showActivityLog(event)"><i class="bi bi-clock-history nav-icon" aria-hidden="true"></i>Activity Log</a></li>
                 <!-- held by grant only (the administrator switches it on), so it starts hidden -->
                 <li data-feature="account-management" hidden><a href="#" data-panel-link="panel-accounts" onclick="showAccountManagement(event)"><i class="bi bi-person-gear nav-icon" aria-hidden="true"></i>Account Management</a></li>
             </ul>
@@ -137,18 +138,20 @@
 
             <div class="content-area">
                 <!-- NO-PRICE ALERT -- products the clerk added that have no selling price yet; filled by
-                     loadPriceBanner (manager.js), left empty when every product is priced.
+                     loadPriceBanner (manager.js), left empty when every product is priced. It belongs
+                     to the screens it is about: placePriceAlert moves it onto Stocks and Records >
+                     Products, and hides it everywhere else.
                      Switched on and off by itself in Access Control (price-alert) -->
-                <div id="price-alert" class="no-print" data-feature="price-alert">
+                <div id="price-alert" class="no-print" data-feature="price-alert" hidden>
                     <div id="price-banner"></div>
                 </div>
 
                 <!-- ============================================================
                      REPORTS -- the first screen. The tab bar across the top groups the
                      reports: Sales (the summary for a period, and every transaction),
-                     Customers (who owes, who comes back), Activity (everything staff
-                     have filed) and Purchases (the purchase orders of a month). One view
-                     shows at a time; nothing loads until asked.
+                     Customers (who owes, who comes back) and Purchases (the purchase
+                     orders of a month). The Activity Log is a screen of its own. One
+                     view shows at a time; nothing loads until asked.
                      data-feature on a tab hides it for a role (shared/features.js)
                      ============================================================ -->
                 <div id="panel-reports" class="tabbed-panel" data-panel data-view="report-summary">
@@ -180,48 +183,42 @@
                                         onclick="showReport('report-loyal', event)">Repeat Customers</button>
                             </div>
                         </div>
-                        <div class="view-nav-group">
-                            <span class="view-nav-label">Activity</span>
-                            <div class="view-nav-tabs" role="tablist">
-                                <button type="button" class="view-tab" role="tab" data-view-tab="report-all" data-feature="reports"
-                                        onclick="showReport('report-all', event)">Activity Log</button>
-                            </div>
-                        </div>
                     </nav>
 
-                    <!-- SALES SUMMARY: one period drives the figures and both tables -->
+                    <!-- SALES SUMMARY: one period drives the figures and the table -->
                     <section class="panel-view" id="report-summary">
                         <div class="card">
                             <div class="panel-head">
                                 <div>
                                     <h3>Sales Summary</h3>
-                                    <p class="panel-sub" id="income-range-note">Pick a period, then press Load Data.</p>
-                                    <!-- which cashier the figures are for; filled by manager.js renderIncome, and printed -->
-                                    <p class="panel-sub" id="income-cashier-note" hidden></p>
+                                    <p class="panel-sub" id="income-range-note">Pick the dates, then press Load Data.</p>
                                 </div>
                                 <div class="panel-actions no-print">
                                     <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                            data-print-for="mgr-income-methods,mgr-income-products"
+                                            data-print-for="mgr-income-methods"
                                             onclick="exportIncomeSpreadsheet()" disabled>Spreadsheet</button>
                                     <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
-                                            data-print-for="mgr-income-methods,mgr-income-products"
-                                            onclick="printReport('mgr-income-methods,mgr-income-products')"
+                                            data-print-for="mgr-income-methods"
+                                            onclick="printReport('mgr-income-methods')"
                                             disabled>Print / PDF</button>
                                 </div>
                             </div>
 
+                            <!-- THE DATE PICKER: a period applies at once; Custom date shows From and
+                                 To beside it (manager.js) -->
                             <div class="panel-toolbar summary-toolbar no-print">
                                 <div class="toolbar-field">
                                     <label for="income-period">Period</label>
-                                    <!-- filled by manager.js renderIncomeRanges; Custom date opens a popup -->
+                                    <!-- filled by manager.js renderIncomeRanges -->
                                     <select id="income-period" onchange="incomePeriodPicked(this.value)"></select>
                                 </div>
-                                <div class="toolbar-field">
-                                    <label for="income-cashier">Cashier</label>
-                                    <!-- the cashiers are filled in by manager.js once the data has loaded -->
-                                    <select id="income-cashier" onchange="incomeCashierPicked(this.value)">
-                                        <option value="all">All cashiers</option>
-                                    </select>
+                                <div class="toolbar-field toolbar-date" hidden>
+                                    <label for="income-from">From</label>
+                                    <input type="date" id="income-from" onchange="incomeDatesPicked()">
+                                </div>
+                                <div class="toolbar-field toolbar-date" hidden>
+                                    <label for="income-to">To</label>
+                                    <input type="date" id="income-to" onchange="incomeDatesPicked()">
                                 </div>
                                 <div class="toolbar-spacer"></div>
                                 <button type="button" class="btn btn-accent" onclick="loadIncome()">Load Data</button>
@@ -231,22 +228,10 @@
 
                         </div>
 
-                        <!-- the two breakdowns for the same period, one at a time:
-                             the tabs switch between them (showSummaryTab in manager.js).
-                             A printout shows both, one under the other. -->
+                        <!-- the breakdown by payment method for the same period -->
                         <div class="card summary-card">
-                            <div class="summary-tabs no-print" role="tablist">
-                                <button type="button" class="summary-tab active" role="tab" aria-selected="true"
-                                        data-summary-tab="summary-methods"
-                                        onclick="showSummaryTab('summary-methods')">By Payment Method</button>
-                                <button type="button" class="summary-tab" role="tab" aria-selected="false"
-                                        data-summary-tab="summary-products"
-                                        onclick="showSummaryTab('summary-products')">Best Sellers</button>
-                            </div>
-
-                            <div class="summary-pane" id="summary-methods" role="tabpanel">
-                                <!-- the heading is only for the printout; on screen the tab names it -->
-                                <h3 class="summary-pane-title">By Payment Method</h3>
+                            <div class="summary-pane" id="summary-methods">
+                                <h3>By Payment Method</h3>
                                 <div class="table-responsive grid-5">
                                     <table id="income-methods-table">
                                         <thead>
@@ -256,19 +241,6 @@
                                     </table>
                                 </div>
                                 <div class="pager is-single" id="income-methods-pager"></div>
-                            </div>
-
-                            <div class="summary-pane" id="summary-products" role="tabpanel" hidden>
-                                <h3 class="summary-pane-title">Best Sellers</h3>
-                                <div class="table-responsive grid-5">
-                                    <table id="income-products-table">
-                                        <thead>
-                                            <tr><th>Product</th><th>Units Sold</th><th>Revenue</th><th>Share</th></tr>
-                                        </thead>
-                                        <tbody></tbody>
-                                    </table>
-                                </div>
-                                <div class="pager is-single" id="income-products-pager"></div>
                             </div>
                         </div>
                     </section>
@@ -297,8 +269,8 @@
                         <div class="panel-toolbar no-print">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="sales-search"
-                                       placeholder="Search by customer, cashier, or sale number"
-                                       oninput="dataPanelSearchInput('mgr-sales', event)" onkeydown="dataPanelSearchKey('mgr-sales', event)" title="Type one letter or more; it finds words that start with it">
+                                       placeholder="Search Sales"
+                                       oninput="dataPanelSearchInput('mgr-sales', event)" onkeydown="dataPanelSearchKey('mgr-sales', event)" autocomplete="off">
                             </div>
 
                             <div class="toolbar-field">
@@ -317,18 +289,23 @@
                                 <label for="sales-status">Transaction status</label>
                                 <select id="sales-status" data-filter-table="sales-table" data-hides-column="5" onchange="reloadSales()">
                                     <option value="all">Every status</option>
-                                    <option value="Completed">Completed</option>
-                                    <option value="Pending Delivery">Pending Delivery</option>
-                                    <option value="Partial Credit">Partial Credit</option>
+                                    <option value="Paid">Paid</option>
+                                    <option value="Partially Paid">Partially Paid</option>
+                                    <option value="Unpaid">Unpaid</option>
                                     <option value="Voided">Voided</option>
                                 </select>
                             </div>
 
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field">
+                                <label for="sales-period">Period</label>
+                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                                <select id="sales-period" data-period-for="sales" onchange="periodPicked('sales')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="sales-from">From</label>
                                 <input type="date" id="sales-from" onchange="reloadSales()">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="sales-to">To</label>
                                 <input type="date" id="sales-to" onchange="reloadSales()">
                             </div>
@@ -362,19 +339,22 @@
                             </div>
                         </div>
 
-                        <div class="kpi-grid qr-kpis" id="mqr-kpis"></div>
-
                         <div class="panel-toolbar">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="mqr-search"
-                                       placeholder="Search by reference, receipt, cashier, or message"
-                                       oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" title="Type one letter or more; it finds words that start with it">
+                                       placeholder="Search QR Payments"
+                                       oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" autocomplete="off">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field">
+                                <label for="mqr-period">Period</label>
+                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                                <select id="mqr-period" data-period-for="mqr" onchange="periodPicked('mqr')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="mqr-from">From</label>
                                 <input type="date" id="mqr-from" onchange="reloadQrPayments('mqr')">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="mqr-to">To</label>
                                 <input type="date" id="mqr-to" onchange="reloadQrPayments('mqr')">
                             </div>
@@ -416,7 +396,7 @@
                         <div class="panel-head">
                             <div>
                                 <h3>Receivables</h3>
-                                <p class="panel-sub">Every sale with money still owed on it.</p>
+                                <p class="panel-sub">Every sale with money still owed on it. A sale is voided from Sales Transactions.</p>
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -429,8 +409,8 @@
                         <div class="panel-toolbar no-print">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="unpaid-search"
-                                       placeholder="Search by customer or method"
-                                       oninput="dataPanelSearchInput('mgr-unpaid', event)" onkeydown="dataPanelSearchKey('mgr-unpaid', event)" title="Type one letter or more; it finds words that start with it">
+                                       placeholder="Search Receivables"
+                                       oninput="dataPanelSearchInput('mgr-unpaid', event)" onkeydown="dataPanelSearchKey('mgr-unpaid', event)" autocomplete="off">
                             </div>
                             <div class="toolbar-field">
                                 <label for="unpaid-status">Payment status</label>
@@ -443,6 +423,19 @@
                                 <select id="unpaid-method" data-filter-table="unpaid-table" data-hides-column="3" onchange="dataPanelFilter('mgr-unpaid', 'method', this.value)">
                                     <option value="all">Every method</option>
                                 </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="unpaid-period">Period</label>
+                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                                <select id="unpaid-period" data-period-for="unpaid" onchange="periodPicked('unpaid')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
+                                <label for="unpaid-from">From</label>
+                                <input type="date" id="unpaid-from" onchange="dateFilterChanged('mgr-unpaid', 'unpaid')">
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
+                                <label for="unpaid-to">To</label>
+                                <input type="date" id="unpaid-to" onchange="dateFilterChanged('mgr-unpaid', 'unpaid')">
                             </div>
                             <div class="toolbar-field">
                                 <label for="unpaid-age">Age</label>
@@ -486,8 +479,8 @@
                         <div class="panel-toolbar no-print">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="loyal-search"
-                                       placeholder="Search by customer"
-                                       oninput="dataPanelSearchInput('mgr-loyal', event)" onkeydown="dataPanelSearchKey('mgr-loyal', event)" title="Type one letter or more; it finds words that start with it">
+                                       placeholder="Search Customers"
+                                       oninput="dataPanelSearchInput('mgr-loyal', event)" onkeydown="dataPanelSearchKey('mgr-loyal', event)" autocomplete="off">
                             </div>
                             <div class="toolbar-field">
                                 <label for="loyal-purchases">Purchases</label>
@@ -529,53 +522,6 @@
                         <div class="pager is-single" id="loyal-pager"></div>
                     </section>
 
-                    <!-- ACTIVITY LOG: everything staff have filed, newest first, with who filed it -->
-                    <section class="panel-view card" id="report-all" hidden>
-                        <div class="panel-head">
-                            <div>
-                                <h3>Activity Log</h3>
-                                <p class="panel-sub">Sales, payments, stock reports, deliveries, purchase orders and credit decisions, with who filed them.</p>
-                            </div>
-                            <div class="panel-actions no-print">
-                                <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                        data-print-for="mgr-all" onclick="exportPanelSpreadsheet('mgr-all', 'Activity Log')" disabled>Spreadsheet</button>
-                                <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
-                                        data-print-for="mgr-all" onclick="printReport('mgr-all')" disabled>Print / PDF</button>
-                            </div>
-                        </div>
-
-                        <div class="panel-toolbar no-print">
-                            <div class="search-wrap">
-                                <input type="search" class="form-control search-input" id="all-search"
-                                       placeholder="Search by staff, kind of report or details"
-                                       oninput="dataPanelSearchInput('mgr-all', event)" onkeydown="dataPanelSearchKey('mgr-all', event)" title="Type one letter or more; it finds words that start with it">
-                            </div>
-                            <div class="toolbar-field">
-                                <label for="all-kind">Report</label>
-                                <!-- filled from the loaded rows (manager.js) -->
-                                <select id="all-kind" data-filter-table="all-table" data-hides-column="4" onchange="dataPanelFilter('mgr-all', 'kind', this.value)">
-                                    <option value="all">Every report</option>
-                                </select>
-                            </div>
-                            <div class="toolbar-field">
-                                <label for="all-role">Role</label>
-                                <select id="all-role" data-filter-table="all-table" data-hides-column="3" onchange="dataPanelFilter('mgr-all', 'role', this.value)">
-                                    <option value="all">Every role</option>
-                                </select>
-                            </div>
-                            <div class="toolbar-spacer"></div>
-                        </div>
-
-                        <div class="table-responsive grid-8">
-                            <table id="all-table">
-                                <thead>
-                                    <tr><th>When</th><th>Filed By</th><th>Role</th><th>Report</th><th>Details</th></tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                        <div class="pager is-single" id="all-pager"></div>
-                    </section>
 
                     <!-- ============================================================
                          TOTAL PURCHASES: every purchase order in a month, filtered by date,
@@ -604,6 +550,7 @@
                                     <option value="month">Every Month</option>
                                     <option value="year">Every Year</option>
                                     <option value="all">All Time</option>
+                                    <option value="custom">Custom date...</option>
                                 </select>
                             </div>
                             <div class="toolbar-field" id="po-totals-month-field">
@@ -616,11 +563,11 @@
                                 <!-- filled from the loaded orders (renderPurchaseTotalsYears) -->
                                 <select id="po-totals-year" onchange="purchaseTotalsYear(this.value)"></select>
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" id="po-totals-from-field" hidden>
                                 <label for="po-totals-from">From</label>
                                 <input type="date" id="po-totals-from" onchange="purchaseTotalsDates()">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" id="po-totals-to-field" hidden>
                                 <label for="po-totals-to">To</label>
                                 <input type="date" id="po-totals-to" onchange="purchaseTotalsDates()">
                             </div>
@@ -651,8 +598,9 @@
 
                 <!-- ============================================================
                      STOCKS -- every stock report behind one entry: the whole inventory
-                     (a row opens the product, where the price and the reorder point are
-                     changed), the reorder to-do list, and the stock movements staff filed
+                     (a row opens the product, where the reorder point is changed; the
+                     price is set on the product in Records), the reorder to-do list, and
+                     the stock movements staff filed
                      ============================================================ -->
                 <div id="panel-stocks" class="tabbed-panel" data-panel data-view="stock-overview" style="display: none;">
                     <nav class="view-nav no-print" aria-label="Stocks" hidden>
@@ -679,7 +627,7 @@
                         <div class="panel-head">
                             <div>
                                 <h3>Stocks Overview</h3>
-                                <p class="panel-sub">The whole inventory. Open a product to change its price or reorder point.</p>
+                                <p class="panel-sub">The whole inventory. Open a product to change its reorder point; prices are set in Records, Products.</p>
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -692,8 +640,8 @@
                         <div class="panel-toolbar no-print">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="stocks-search"
-                                       placeholder="Search by product, category, or supplier"
-                                       oninput="dataPanelSearchInput('mgr-stocks', event)" onkeydown="dataPanelSearchKey('mgr-stocks', event)" title="Type one letter or more; it finds words that start with it">
+                                       placeholder="Search Products"
+                                       oninput="dataPanelSearchInput('mgr-stocks', event)" onkeydown="dataPanelSearchKey('mgr-stocks', event)" autocomplete="off">
                             </div>
                             <div class="toolbar-field">
                                 <label for="stocks-status">Stock status</label>
@@ -721,16 +669,6 @@
                                     <option value="200+">More than 200</option>
                                 </select>
                             </div>
-                            <div class="toolbar-field">
-                                <label for="stocks-sort">Order</label>
-                                <select id="stocks-sort"
-                                        onchange="dataPanelFilter('mgr-stocks', 'sort', this.value)">
-                                    <option value="name">Product name, A to Z</option>
-                                    <option value="stock-asc">On hand, lowest first</option>
-                                    <option value="stock-desc">On hand, highest first</option>
-                                    <option value="cover">Days of cover, shortest first</option>
-                                </select>
-                            </div>
                             <div class="toolbar-spacer"></div>
                         </div>
 
@@ -738,7 +676,7 @@
                             <table id="stocks-table">
                                 <thead>
                                     <tr><th>Product</th><th>Category</th><th>On Hand</th>
-                                        <th>Unit Price</th><th>Status</th></tr>
+                                        <th>Days of Cover</th><th>Status</th></tr>
                                 </thead>
                                 <tbody></tbody>
                             </table>
@@ -764,8 +702,8 @@
                         <div class="panel-toolbar no-print">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="reorder-search"
-                                       placeholder="Search by product or supplier"
-                                       oninput="dataPanelSearchInput('mgr-reorder', event)" onkeydown="dataPanelSearchKey('mgr-reorder', event)" title="Type one letter or more; it finds words that start with it">
+                                       placeholder="Search Products"
+                                       oninput="dataPanelSearchInput('mgr-reorder', event)" onkeydown="dataPanelSearchKey('mgr-reorder', event)" autocomplete="off">
                             </div>
                             <div class="toolbar-field">
                                 <label for="reorder-status">Stock status</label>
@@ -819,8 +757,8 @@
                         <div class="panel-toolbar no-print">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="stock-moves-search"
-                                       placeholder="Search by product, staff or details"
-                                       oninput="dataPanelSearchInput('mgr-stock-moves', event)" onkeydown="dataPanelSearchKey('mgr-stock-moves', event)" title="Type one letter or more; it finds words that start with it">
+                                       placeholder="Search Stock Movements"
+                                       oninput="dataPanelSearchInput('mgr-stock-moves', event)" onkeydown="dataPanelSearchKey('mgr-stock-moves', event)" autocomplete="off">
                             </div>
                             <div class="toolbar-field">
                                 <label for="stock-moves-kind">Kind</label>
@@ -834,7 +772,21 @@
                                     <option value="PURCHASE_ORDER">Purchase orders raised</option>
                                     <option value="PO_CONFIRMED">Orders confirmed</option>
                                     <option value="PO_DECLINED">Orders declined</option>
+                                    <option value="PO_RECEIVED">Orders received</option>
                                 </select>
+                            </div>
+                            <div class="toolbar-field">
+                                <label for="stock-moves-period">Period</label>
+                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                                <select id="stock-moves-period" data-period-for="stock-moves" onchange="periodPicked('stock-moves')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
+                                <label for="stock-moves-from">From</label>
+                                <input type="date" id="stock-moves-from" onchange="dateFilterChanged('mgr-stock-moves', 'stock-moves')">
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
+                                <label for="stock-moves-to">To</label>
+                                <input type="date" id="stock-moves-to" onchange="dateFilterChanged('mgr-stock-moves', 'stock-moves')">
                             </div>
                             <div class="toolbar-field">
                                 <label for="stock-moves-role">Role</label>
@@ -881,8 +833,8 @@
                     <div class="panel-toolbar no-print">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="po-search"
-                                   placeholder="Search by supplier or order number"
-                                   oninput="dataPanelSearchInput('mgr-po', event)" onkeydown="dataPanelSearchKey('mgr-po', event)" title="Type one letter or more; it finds words that start with it">
+                                   placeholder="Search Purchase Orders"
+                                   oninput="dataPanelSearchInput('mgr-po', event)" onkeydown="dataPanelSearchKey('mgr-po', event)" autocomplete="off">
                         </div>
                         <div class="toolbar-field">
                             <label for="po-status">Status</label>
@@ -939,8 +891,8 @@
                     <div class="panel-toolbar no-print">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="credit-search"
-                                   placeholder="Search by customer or phone"
-                                   oninput="dataPanelSearchInput('mgr-credit', event)" onkeydown="dataPanelSearchKey('mgr-credit', event)" title="Type one letter or more; it finds words that start with it">
+                                   placeholder="Search Customers"
+                                   oninput="dataPanelSearchInput('mgr-credit', event)" onkeydown="dataPanelSearchKey('mgr-credit', event)" autocomplete="off">
                         </div>
 
                         <div class="toolbar-field">
@@ -984,8 +936,8 @@
                     <div class="panel-toolbar no-print">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="requests-search"
-                                   placeholder="Search by customer or who asked"
-                                   oninput="dataPanelSearchInput('mgr-requests', event)" onkeydown="dataPanelSearchKey('mgr-requests', event)" title="Type one letter or more; it finds words that start with it">
+                                   placeholder="Search Requests"
+                                   oninput="dataPanelSearchInput('mgr-requests', event)" onkeydown="dataPanelSearchKey('mgr-requests', event)" autocomplete="off">
                         </div>
                         <div class="toolbar-field">
                             <label for="requests-status">Status</label>
@@ -1086,16 +1038,16 @@
                 </div>
 
                 <!-- ============================================================
-                     DELIVERIES
+                     DELIVERY HISTORY -- to read only
                      ============================================================ -->
                 <div class="card" id="panel-deliveries" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
-                            <h3>Deliveries</h3>
+                            <h3>Delivery History</h3>
                         </div>
                         <div class="panel-actions no-print">
                             <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
-                                    data-print-for="mgr-deliveries" onclick="exportPanelSpreadsheet('mgr-deliveries', 'Deliveries')" disabled>Spreadsheet</button>
+                                    data-print-for="mgr-deliveries" onclick="exportPanelSpreadsheet('mgr-deliveries', 'Delivery History')" disabled>Spreadsheet</button>
                             <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
                                     data-print-for="mgr-deliveries" onclick="printReport('mgr-deliveries')" disabled>Print / PDF</button>
                         </div>
@@ -1104,8 +1056,8 @@
                     <div class="panel-toolbar no-print">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="deliveries-search"
-                                   placeholder="Search by customer, driver, or destination"
-                                   oninput="dataPanelSearchInput('mgr-deliveries', event)" onkeydown="dataPanelSearchKey('mgr-deliveries', event)" title="Type one letter or more; it finds words that start with it">
+                                   placeholder="Search Deliveries"
+                                   oninput="dataPanelSearchInput('mgr-deliveries', event)" onkeydown="dataPanelSearchKey('mgr-deliveries', event)" autocomplete="off">
                         </div>
                         <div class="toolbar-field">
                             <label for="deliveries-driver">Driver</label>
@@ -1154,7 +1106,7 @@
                             <h3 id="records-title">Suppliers</h3>
                         </div>
                         <div class="panel-actions no-print">
-                            <!-- suppliers, categories and units are added by the manager only -->
+                            <!-- suppliers and customers are added here; categories and units by the inventory clerk -->
                             <button type="button" class="btn btn-success" id="records-add-btn" onclick="openAddRecord()">Add Supplier</button>
                         </div>
                     </div>
@@ -1162,13 +1114,8 @@
                     <div class="panel-toolbar no-print">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="records-search"
-                                   placeholder="Search these records"
-                                   oninput="dataPanelSearchInput('mgr-records', event)" onkeydown="dataPanelSearchKey('mgr-records', event)" title="Type one letter or more; it finds words that start with it">
-                        </div>
-                        <div class="toolbar-field">
-                            <label for="records-sort">Sort by</label>
-                            <!-- options follow the kind of record (manager.js fillRecordSort) -->
-                            <select id="records-sort" onchange="dataPanelFilter('mgr-records', 'sort', this.value)"></select>
+                                   placeholder="Search Suppliers"
+                                   oninput="dataPanelSearchInput('mgr-records', event)" onkeydown="dataPanelSearchKey('mgr-records', event)" autocomplete="off">
                         </div>
                         <div class="toolbar-spacer"></div>
                     </div>
@@ -1180,6 +1127,70 @@
                         </table>
                     </div>
                     <div class="pager is-single" id="records-pager"></div>
+                </div>
+
+                <!-- ============================================================
+                     ACTIVITY LOG -- everything staff have filed, newest first, with
+                     who filed it. A screen of its own, apart from Reports.
+                     ============================================================ -->
+                <div class="card" id="panel-activity" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Activity Log</h3>
+                            <p class="panel-sub">Sales, payments, stock reports, deliveries, purchase orders and credit decisions, with who filed them.</p>
+                        </div>
+                        <div class="panel-actions no-print">
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
+                                    data-print-for="mgr-all" onclick="exportPanelSpreadsheet('mgr-all', 'Activity Log')" disabled>Spreadsheet</button>
+                            <button type="button" class="btn btn-sm" data-export data-print-kind="pdf"
+                                    data-print-for="mgr-all" onclick="printReport('mgr-all')" disabled>Print / PDF</button>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar no-print">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="all-search"
+                                   placeholder="Search Activity"
+                                   oninput="dataPanelSearchInput('mgr-all', event)" onkeydown="dataPanelSearchKey('mgr-all', event)" autocomplete="off">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="all-kind">Report</label>
+                            <!-- filled from the loaded rows (manager.js) -->
+                            <select id="all-kind" data-filter-table="all-table" data-hides-column="4" onchange="dataPanelFilter('mgr-all', 'kind', this.value)">
+                                <option value="all">Every report</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="all-period">Period</label>
+                            <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                            <select id="all-period" data-period-for="all" onchange="periodPicked('all')"></select>
+                        </div>
+                        <div class="toolbar-field toolbar-date" hidden>
+                            <label for="all-from">From</label>
+                            <input type="date" id="all-from" onchange="dateFilterChanged('mgr-all', 'all')">
+                        </div>
+                        <div class="toolbar-field toolbar-date" hidden>
+                            <label for="all-to">To</label>
+                            <input type="date" id="all-to" onchange="dateFilterChanged('mgr-all', 'all')">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="all-role">Role</label>
+                            <select id="all-role" data-filter-table="all-table" data-hides-column="3" onchange="dataPanelFilter('mgr-all', 'role', this.value)">
+                                <option value="all">Every role</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-8">
+                        <table id="all-table">
+                            <thead>
+                                <tr><th>When</th><th>Filed By</th><th>Role</th><th>Report</th><th>Details</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="all-pager"></div>
                 </div>
 
                 <!-- ============================================================
@@ -1197,8 +1208,8 @@
                     <div class="panel-toolbar no-print">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="archives-search"
-                                   placeholder="Search archived records"
-                                   oninput="dataPanelSearchInput('mgr-archives', event)" onkeydown="dataPanelSearchKey('mgr-archives', event)" title="Type one letter or more; it finds words that start with it">
+                                   placeholder="Search Archives"
+                                   oninput="dataPanelSearchInput('mgr-archives', event)" onkeydown="dataPanelSearchKey('mgr-archives', event)" autocomplete="off">
                         </div>
                         <div class="toolbar-field">
                             <label for="archives-module">Module</label>
@@ -1213,7 +1224,7 @@
                     <div class="table-responsive grid-10">
                         <table id="archives-table">
                             <thead>
-                                <tr><th>Module</th><th>Record</th><th>Detail</th><th>Archived On</th><th>Archived By</th></tr>
+                                <tr><th>Module</th><th>Record</th><th>Detail</th><th>Handled By</th><th>Archived On</th><th>Archived By</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -1232,7 +1243,6 @@
                     <div class="panel-head">
                         <div>
                             <h3>Account Management</h3>
-                            <p class="panel-sub">Create accounts for cashiers, inventory clerks and drivers, see them all, and lift the sign-in hold of accounts locked out after too many wrong passwords.</p>
                         </div>
                         <div class="panel-actions no-print">
                             <button type="button" class="btn btn-success" onclick="openCreateAccount()">Create Account</button>
@@ -1242,15 +1252,14 @@
                     <div class="panel-head">
                         <div>
                             <h3>Staff Accounts</h3>
-                            <p class="panel-sub">Every cashier, inventory clerk and driver. Open a row to see the account; one on a sign-in hold can be lifted there. The list is as of when it was loaded; press Refresh to update it.</p>
                         </div>
                     </div>
 
                     <div class="panel-toolbar no-print">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="staff-search"
-                                   placeholder="Search staff accounts"
-                                   oninput="dataPanelSearchInput('mgr-staff', event)" onkeydown="dataPanelSearchKey('mgr-staff', event)" title="Type one letter or more; it finds words that start with it">
+                                   placeholder="Search Staff Accounts"
+                                   oninput="dataPanelSearchInput('mgr-staff', event)" onkeydown="dataPanelSearchKey('mgr-staff', event)" autocomplete="off">
                         </div>
                         <div class="toolbar-field">
                             <label for="staff-status">Status</label>
@@ -1339,8 +1348,8 @@
                         <div class="form-group">
                             <label for="policy-mode">How the reorder point is set</label>
                             <select id="policy-mode" name="reorderMode" class="form-control" onchange="previewReorderPoint()">
-                                <option value="Manual">Manual &mdash; use the number below</option>
-                                <option value="Dynamic">Dynamic &mdash; work it out from sales</option>
+                                <option value="Manual">Manual: use the number below</option>
+                                <option value="Dynamic">Dynamic: work it out from sales</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -1379,8 +1388,12 @@
             <div class="modal-tabs">
                 <button type="button" class="modal-tab active" id="credit-tab-account"
                         onclick="showCreditTab('account')">Account</button>
-                <button type="button" class="modal-tab" id="credit-tab-history"
-                        onclick="showCreditTab('history')">Purchases &amp; Payments</button>
+                <button type="button" class="modal-tab" id="credit-tab-purchases"
+                        onclick="showCreditTab('purchases')">Purchases</button>
+                <button type="button" class="modal-tab" id="credit-tab-payments"
+                        onclick="showCreditTab('payments')">Payments</button>
+                <button type="button" class="modal-tab" id="credit-tab-requests"
+                        onclick="showCreditTab('requests')">Extension Requests</button>
             </div>
 
             <div class="modal-body">
@@ -1400,9 +1413,9 @@
                                     <span class="label-hint">the figures decide unless you say otherwise</span></label>
                                 <select id="credit-standing-input" name="standing" class="form-control"
                                         onchange="previewCreditLimit()">
-                                    <option value="Good">None &mdash; let the figures decide</option>
-                                    <option value="Watch">Watch &mdash; flag it whatever the figures say</option>
-                                    <option value="Hold">Hold &mdash; no new credit whatever the figures say</option>
+                                    <option value="Good">None: let the figures decide</option>
+                                    <option value="Watch">Watch: flag it whatever the figures say</option>
+                                    <option value="Hold">Hold: no new credit whatever the figures say</option>
                                 </select>
                             </div>
                         </div>
@@ -1411,13 +1424,15 @@
                                 <label for="credit-penalty-input">Late-payment rate for this account, % a month
                                     <span class="label-hint" id="credit-penalty-hint">1 to 3; blank means the shop's rate</span></label>
                                 <input type="number" id="credit-penalty-input" name="penaltyRate"
-                                       class="form-control" min="1" max="3" step="0.01" placeholder="Shop's rate"
+                                       class="form-control" min="1" max="3" step="0.01"
                                        oninput="previewCreditLimit()">
                             </div>
                             <div class="form-group">
                                 <label for="credit-notes-input">Note <span class="label-hint">why this limit, why this standing</span></label>
-                                <input type="text" id="credit-notes-input" name="notes" class="form-control"
-                                       maxlength="255" placeholder="Cheque bounced in August. No new credit until it clears.">
+                                <div class="note-save-row">
+                                    <input type="text" id="credit-notes-input" name="notes" class="form-control" maxlength="255">
+                                    <button type="button" class="btn btn-sm btn-success" onclick="saveCreditNote()">Save Note</button>
+                                </div>
                             </div>
                         </div>
 
@@ -1425,13 +1440,14 @@
                     </form>
                 </div>
 
+                <!-- the history, one table to a tab (renderCreditHistory) -->
                 <div id="credit-history-tab" style="display: none;">
-                    <div class="history-split" id="credit-history"></div>
+                    <div id="credit-history"></div>
                 </div>
             </div>
 
             <!-- the buttons belong to the Account tab's form; the foot hides them
-                 on the history tab (showCreditTab) -->
+                 on the history tabs (showCreditTab) -->
             <div class="modal-foot" id="credit-foot">
                 <button type="button" class="btn btn-ghost" id="credit-print-card" onclick="printCreditCardOpen('card')">Print Customer Card</button>
                 <button type="button" class="btn btn-ghost" id="credit-print-terms" onclick="printCreditCardOpen('terms')">Print Terms and Conditions</button>
@@ -1441,43 +1457,7 @@
         </div>
     </div>
 
-    <!-- A CUSTOM PERIOD for the Sales Summary: opened by "Custom date" in the Period box -->
-    <div class="modal" id="income-custom-modal" onclick="closeModalOnBackdrop(event, 'income-custom-modal')">
-        <div class="modal-box">
-            <div class="modal-head">
-                <div class="modal-identity">
-                    <div class="avatar">CD</div>
-                    <div>
-                        <h3>Custom date</h3>
-                        <span class="modal-role">Sales Summary</span>
-                    </div>
-                </div>
-                <button type="button" class="modal-close" onclick="cancelCustomIncomeRange()" aria-label="Close">&times;</button>
-            </div>
-
-            <div class="modal-body">
-                <form id="income-custom-form" onsubmit="applyCustomIncomeRange(event)">
-                    <div class="grid-2">
-                        <div class="form-group">
-                            <label for="income-from">From <span class="req">*</span></label>
-                            <input type="date" id="income-from" class="form-control" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="income-to">To <span class="req">*</span></label>
-                            <input type="date" id="income-to" class="form-control" required>
-                        </div>
-                    </div>
-                </form>
-            </div>
-
-            <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="cancelCustomIncomeRange()">Cancel</button>
-                <button type="submit" form="income-custom-form" class="btn btn-accent">Apply</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- ADDING A SUPPLIER, A CATEGORY OR A UNIT -- the manager's alone -->
+    <!-- ADDING A SUPPLIER -- the manager's alone (categories and units are the clerk's) -->
     <div class="modal" id="record-add-modal" onclick="closeModalOnBackdrop(event, 'record-add-modal')">
         <div class="modal-box">
             <div class="modal-head">
@@ -1509,7 +1489,7 @@
                                 <div class="phone-field">
                                     <span class="phone-prefix">+63</span>
                                     <input type="text" id="record-add-number" name="contactNumber" class="form-control"
-                                           inputmode="numeric" autocomplete="tel" maxlength="20" placeholder="9XXXXXXXXX"
+                                           inputmode="numeric" autocomplete="off" maxlength="20"
                                            oninput="onPhoneInput(this)">
                                 </div>
                             </div>
@@ -1533,16 +1513,44 @@
         </div>
     </div>
 
+    <!-- EDITING A RECORD -- a supplier, a customer or a product; the fields are drawn by
+         manager.js openEditRecord for the kind of record. Locked like the other forms that hold typed data. -->
+    <div class="modal" id="record-edit-modal" data-modal-locked data-modal-scroll>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="record-edit-avatar">--</div>
+                    <div>
+                        <h3 id="record-edit-title">Edit Record</h3>
+                        <span class="modal-role">Records</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="closeModal('record-edit-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-body">
+                <form id="record-edit-form" onsubmit="saveEditRecord(event)" novalidate autocomplete="off">
+                    <div class="grid-2" id="record-edit-fields"></div>
+                </form>
+            </div>
+
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('record-edit-modal')">Cancel</button>
+                <button type="submit" form="record-edit-form" class="btn btn-success" id="record-edit-save">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
     <!-- CREATE ACCOUNT -- the manager's version: fill in the form, read the review (the
          details and the first password), then confirm. Locked like the other forms that hold typed data. -->
-    <div class="modal" id="account-modal" data-modal-locked data-modal-scroll>
+    <div class="modal" id="newacct-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box create-box">
             <div class="modal-head">
                 <div class="modal-identity">
                     <div class="avatar">+</div>
                     <div>
                         <h3>Create Account</h3>
-                        <span class="modal-role" id="account-subtitle">Account Management</span>
+                        <span class="modal-role" id="newacct-subtitle">Account Management</span>
                     </div>
                 </div>
                 <button type="button" class="modal-close" onclick="closeAccountModal()" aria-label="Close">&times;</button>
@@ -1550,58 +1558,58 @@
 
             <div class="modal-body">
                 <!-- step 1: the form -->
-                <form id="account-form" onsubmit="reviewNewAccount(event)" novalidate autocomplete="off">
+                <form id="newacct-form" onsubmit="reviewNewAccount(event)" novalidate autocomplete="off">
                     <div class="grid-2">
                         <div class="form-group">
-                            <label for="account-first">First name <span class="req">*</span></label>
-                            <input type="text" id="account-first" name="firstName" class="form-control" maxlength="100" required oninput="onAccountNameInput(this)">
-                            <span class="field-error" id="account-first-error" hidden></span>
+                            <label for="newacct-first">First name <span class="req">*</span></label>
+                            <input type="text" id="newacct-first" name="firstName" class="form-control" maxlength="100" required oninput="onAccountNameInput(this)">
+                            <span class="field-error" id="newacct-first-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="account-middle">Middle name</label>
-                            <input type="text" id="account-middle" name="middleName" class="form-control"
-                                   maxlength="100" placeholder="Dela Cruz" oninput="onAccountNameInput(this)">
-                            <span class="field-error" id="account-middle-error" hidden></span>
+                            <label for="newacct-middle">Middle name</label>
+                            <input type="text" id="newacct-middle" name="middleName" class="form-control"
+                                   maxlength="100" oninput="onAccountNameInput(this)">
+                            <span class="field-error" id="newacct-middle-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="account-last">Last name <span class="req">*</span></label>
-                            <input type="text" id="account-last" name="lastName" class="form-control" maxlength="100" required oninput="onAccountNameInput(this)">
-                            <span class="field-error" id="account-last-error" hidden></span>
+                            <label for="newacct-last">Last name <span class="req">*</span></label>
+                            <input type="text" id="newacct-last" name="lastName" class="form-control" maxlength="100" required oninput="onAccountNameInput(this)">
+                            <span class="field-error" id="newacct-last-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="account-phone">Phone <span class="req">*</span></label>
+                            <label for="newacct-phone">Phone <span class="req">*</span></label>
                             <div class="phone-field">
                                 <span class="phone-prefix">+63</span>
-                                <input type="text" id="account-phone" name="phone" class="form-control"
-                                       inputmode="numeric" autocomplete="tel" required
-                                       maxlength="20" placeholder="9XXXXXXXXX"
+                                <input type="text" id="newacct-phone" name="phone" class="form-control"
+                                       inputmode="numeric" autocomplete="off" required
+                                       maxlength="20"
                                        oninput="setAccountError(this, ''); onPhoneInput(this)" onblur="checkAccountPhoneFree(this)">
                             </div>
-                            <span class="field-error" id="account-phone-error" hidden></span>
+                            <span class="field-error" id="newacct-phone-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="account-role">Role <span class="req">*</span></label>
-                            <select id="account-role" name="roleId" class="form-control" required></select>
+                            <label for="newacct-role">Role <span class="req">*</span></label>
+                            <select id="newacct-role" name="roleId" class="form-control" required></select>
                         </div>
                         <div class="form-group">
-                            <label for="account-email">Email <span class="req">*</span></label>
-                            <input type="email" id="account-email" name="email" class="form-control"
-                                   maxlength="100" autocomplete="off" placeholder="name@example.com" required
+                            <label for="newacct-email">Email <span class="req">*</span></label>
+                            <input type="email" id="newacct-email" name="email" class="form-control"
+                                   maxlength="100" autocomplete="off" required
                                    oninput="onAccountEmailInput(this)" onblur="checkAccountEmailFree(this)">
-                            <span class="field-error" id="account-email-error" hidden></span>
+                            <span class="field-error" id="newacct-email-error" hidden></span>
                         </div>
                     </div>
                 </form>
 
                 <!-- step 2: the review, filled in by showAccountReview -->
-                <div id="account-review" hidden></div>
+                <div id="newacct-review" hidden></div>
             </div>
 
             <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" id="account-cancel" onclick="closeAccountModal()">Cancel</button>
-                <button type="button" class="btn btn-ghost" id="account-back" onclick="backToAccountForm()" hidden>Back</button>
-                <button type="submit" form="account-form" class="btn btn-success" id="account-review-btn">Review</button>
-                <button type="button" class="btn btn-success" id="account-confirm-btn" onclick="confirmNewAccount()" hidden>Confirm</button>
+                <button type="button" class="btn btn-ghost" id="newacct-cancel" onclick="closeAccountModal()">Cancel</button>
+                <button type="button" class="btn btn-ghost" id="newacct-back" onclick="backToAccountForm()" hidden>Back</button>
+                <button type="submit" form="newacct-form" class="btn btn-success" id="newacct-review-btn">Review</button>
+                <button type="button" class="btn btn-success" id="newacct-confirm-btn" onclick="confirmNewAccount()" hidden>Confirm</button>
             </div>
         </div>
     </div>
@@ -1627,8 +1635,7 @@
                 <div class="form-group">
                     <label for="decide-note">Your note
                         <span class="label-hint">required when declining</span></label>
-                    <input type="text" id="decide-note" class="form-control" maxlength="255"
-                           placeholder="Cleared their August balance last week, good for it.">
+                    <input type="text" id="decide-note" class="form-control" maxlength="255">
                 </div>
             </div>
 
@@ -1636,39 +1643,6 @@
                 <button type="button" class="btn btn-ghost" onclick="closeModal('decide-modal')">Cancel</button>
                 <button type="button" class="btn btn-danger" onclick="decideCreditRequest(false)">Decline</button>
                 <button type="button" class="btn btn-success" onclick="decideCreditRequest(true)">Approve</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- WHY IS IT DELAYED OR FAILED -- opened by the Delayed and Failed buttons on a delivery's card. The reason is
-         required and is saved as the delivery's remarks. Locked like the other forms that hold typed data. -->
-    <div class="modal" id="delay-modal" data-modal-locked data-modal-scroll>
-        <div class="modal-box">
-            <div class="modal-head">
-                <div class="modal-identity">
-                    <div class="avatar">DL</div>
-                    <div>
-                        <h3 id="delay-title">Mark Delayed</h3>
-                        <span class="modal-role" id="delay-subtitle">Delivery</span>
-                    </div>
-                </div>
-                <button type="button" class="modal-close" onclick="closeModal('delay-modal')" aria-label="Close">&times;</button>
-            </div>
-
-            <div class="modal-body">
-                <form id="delay-form" onsubmit="handleDelayReason(event)" autocomplete="off">
-                    <div class="form-group">
-                        <label for="delay-reason"><span id="delay-label">Reason for the delay</span>
-                            <span class="label-hint">required</span></label>
-                        <textarea id="delay-reason" class="form-control" rows="4" minlength="5" required
-                                  placeholder="Gate closed, customer not around, rain on the route"></textarea>
-                    </div>
-                </form>
-            </div>
-
-            <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closeModal('delay-modal')">Cancel</button>
-                <button type="submit" class="btn btn-gold" id="delay-save" form="delay-form">Mark Delayed</button>
             </div>
         </div>
     </div>

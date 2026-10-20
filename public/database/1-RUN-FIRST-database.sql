@@ -99,7 +99,10 @@ CREATE TABLE role_feature_permissions (
 -- 2. ENTITIES
 CREATE TABLE categories (
     category_id INT AUTO_INCREMENT PRIMARY KEY,
-    category_name VARCHAR(50) NOT NULL UNIQUE
+    category_name VARCHAR(50) NOT NULL UNIQUE,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    archived_at TIMESTAMP NULL,
+    archived_by_staff_id INT NULL
 );
 
 CREATE TABLE brands (
@@ -109,7 +112,10 @@ CREATE TABLE brands (
 
 CREATE TABLE units (
     unit_id INT AUTO_INCREMENT PRIMARY KEY,
-    unit_name VARCHAR(20) NOT NULL UNIQUE
+    unit_name VARCHAR(20) NOT NULL UNIQUE,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    archived_at TIMESTAMP NULL,
+    archived_by_staff_id INT NULL
 );
 
 CREATE TABLE suppliers (
@@ -118,7 +124,10 @@ CREATE TABLE suppliers (
     contact_person VARCHAR(100),
     contact_number VARCHAR(20),
     email VARCHAR(100),
-    address TEXT
+    address TEXT,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    archived_at TIMESTAMP NULL,
+    archived_by_staff_id INT NULL
 );
 
 -- address is the whole address as one line (what every screen and receipt reads);
@@ -138,6 +147,9 @@ CREATE TABLE customers (
     address_province VARCHAR(100) NULL,
     address_landmark VARCHAR(150) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+    archived_at TIMESTAMP NULL,
+    archived_by_staff_id INT NULL,
     full_name VARCHAR(220) AS (
         TRIM(CONCAT(first_name,
                     IF(middle_name IS NULL OR middle_name = '', '',

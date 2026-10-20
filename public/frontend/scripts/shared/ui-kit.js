@@ -430,3 +430,30 @@ function askDanger(message, options) {
 function askInput(options) {
     return openAsk(Object.assign({ ask: true, mark: '✎', eyebrow: 'Input needed' }, options));
 }
+
+// A safeguard before anything is archived: the card names what goes and what
+// it means, and the word ARCHIVE has to be typed before it goes. Answers true
+// only when it was typed and confirmed.
+async function askArchive(what, options) {
+    const settings = options || {};
+    const typed = await openAsk({
+        ask: true,
+        title: settings.title || 'Archive this record?',
+        eyebrow: settings.eyebrow || 'Archive',
+        mark: '!',
+        message: what + ' will be archived. Type ARCHIVE to confirm.',
+        detail: settings.detail || [
+            'It leaves the lists it shows on and moves to the Archives screen.',
+            'It can be restored from Archives.'
+        ],
+        label: 'Type ARCHIVE',
+        confirmLabel: settings.confirmLabel || 'Archive it',
+        cancelLabel: 'Cancel',
+        tone: 'danger',
+        check: function (value) {
+            return String(value || '').trim().toUpperCase() === 'ARCHIVE'
+                ? null : 'Type the word ARCHIVE to confirm, or press Cancel.';
+        }
+    });
+    return typeof typed === 'string';
+}

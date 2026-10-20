@@ -1290,11 +1290,12 @@ different figures to four different people:
 Collected leads, because this is a shop with credit records and billed income
 that never arrives is not income.
 
-Under the figures and the chart sits one table at a time — Payment Method,
-Best Sellers, or Who Sold It — chosen from the **Income** entry in the menu,
-which folds open to list the three. The entry for the table on the screen is
-the marked one, so the menu and the page can never say two different things,
-and the other two tables are one click away rather than two screens down.
+The **Sales Summary** shows Total Sales and Transactions for the dates picked
+(a Quick range box, or any From and To dates), with the By Payment Method
+table under them. The **Activity Log** is a screen of its own in the menu,
+apart from Reports, with From and To dates like Receivables and Stock
+Movements. Any table sorts by pressing a column header; pressing it again
+turns the order round.
 
 **Records** works the same way: one screen holding one table at a time — five
 kinds of record — chosen from the entry in the menu, which folds open under
@@ -1311,7 +1312,8 @@ report and marks the entry.
 
 ### Two ways off every screen
 
-Every table the manager reads has the same pair of buttons in its corner:
+Every table the manager reads has one **Export** button in its corner, with
+the two ways off the screen in its menu:
 
 | | |
 |---|---|
