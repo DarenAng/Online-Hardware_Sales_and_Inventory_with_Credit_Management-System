@@ -148,9 +148,10 @@ const FEATURES = [
     available: [CLERK], defaults: [CLERK],
     routes: [["GET", /^\/api\/inventory\/adjustments$/]] },
   { key: "reorder-points", name: "Reorder Point", module: "Inventory",
-    description: "Set each material's reorder point: the stock level that puts it on the reorder list.",
+    // read only: the clerk sees each point; the manager sets them (Reorder Alerts)
+    description: "See each material's reorder point: the stock level that puts it on the reorder list.",
     available: [CLERK], defaults: [CLERK],
-    routes: [["PUT", /^\/api\/inventory\/reorder\/\d+$/]] },
+    routes: [] },
   { key: "reorder-alerts", name: "Reorder Alerts", module: "Inventory",
     description: "The materials at or under their reorder point today.",
     available: [MANAGER], defaults: [MANAGER],

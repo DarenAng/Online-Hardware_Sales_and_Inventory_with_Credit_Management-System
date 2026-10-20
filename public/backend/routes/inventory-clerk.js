@@ -707,30 +707,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // REORDER POINT SETTINGS
-  app.put("/api/inventory/reorder/:productId", async function (request, response) {
-    const reorderPoint = request.body.reorderPoint;
-
-    if (reorderPoint === undefined || reorderPoint === null) {
-      return response.status(400).json({ error: "A reorder point is required" });
-    }
-
-    try {
-      const output = await inventoryClerkProcedures.setReorderPoint(
-        [request.params.productId, reorderPoint, getActorId(request)]
-      );
-
-      if (output.status_code !== 200) {
-        return response.status(output.status_code).json({ error: output.message });
-      }
-
-      response.json({ message: output.message });
-    } catch (error) {
-      console.error("Reorder point failed:", error.message);
-      response.status(500).json({ error: "Unable to save the reorder point" });
-    }
-  });
-
   // PURCHASE ORDERS
   app.get("/api/purchase-orders", async function (request, response) {
     try {
@@ -768,6 +744,37 @@ function registerInventoryRoutes(app, deps) {
 
   app.get("/api/purchase-orders/:poId/items", async function (request, response) {
     try {
+      // Receiving corrects an order's lines to what arrived. A received order
+      // is read back as it was ordered (the copy sp_receive_purchase_order
+      // kept), each line carrying what arrived beside it in received_quantity.
+      // The unit cost is the one it was received at; a line where nothing
+      // arrived has none left, so its cost is null. An order received before
+      // the copy was kept falls through to the lines as received.
+      const orderedResult = await db.query(
+        "SELECT o.product_id, o.quantity, " +
+        "(SELECT i.unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
+        " ORDER BY i.po_item_id LIMIT 1) AS unit_cost, " +
+        "NULL AS original_unit_cost, " +
+        "o.quantity * (SELECT i.unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
+        " ORDER BY i.po_item_id LIMIT 1) AS line_cost, " +
+        "COALESCE((SELECT SUM(i.quantity) FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id), 0) " +
+        " AS received_quantity, " +
+        "o.pack_name, o.pack_size, o.pack_count, " +
+        "p.product_name, u.unit_name, c.category_name, b.brand_name, " +
+        "COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock " +
+        "FROM purchase_order_ordered_items o " +
+        "JOIN purchase_orders po ON po.po_id = o.po_id AND po.status = 'Received' " +
+        "JOIN products p ON p.product_id = o.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "LEFT JOIN categories c ON c.category_id = p.category_id " +
+        "LEFT JOIN brands b ON b.brand_id = p.brand_id " +
+        "LEFT JOIN inventory inv ON inv.product_id = o.product_id " +
+        "WHERE o.po_id = ? " +
+        "ORDER BY o.ordered_item_id",
+        [request.params.poId]
+      );
+      if (orderedResult[0].length > 0) return response.json(orderedResult[0]);
+
       const rowsResult = await db.query(
         "SELECT i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
         "i.pack_name, i.pack_size, i.pack_count, " +
@@ -1166,6 +1173,22 @@ function registerInventoryRoutes(app, deps) {
 
       if (output.status_code !== 201) {
         return response.status(output.status_code).json({ error: output.message });
+      }
+
+      // A material typed in as new that turns out to be on file already (the
+      // same name) is used as it is, so it may sit with no supplier or with
+      // another one. Ordering it from this company registers it to this
+      // company, as a brand-new material already is.
+      const orderSupplier = Number(output.supplier_id_out) || Number(supplierId) || null;
+      if (orderSupplier) {
+        for (let i = 0; i < newLines.length; i++) {
+          if (!newLines[i].new_name) continue;
+          await db.query(
+            "UPDATE products SET supplier_id = ? " +
+            "WHERE LOWER(product_name) = LOWER(?) AND (supplier_id IS NULL OR supplier_id <> ?)",
+            [orderSupplier, newLines[i].new_name, orderSupplier]
+          );
+        }
       }
 
       response.json({

@@ -79,8 +79,9 @@ function showPurchaseOrders(event) {
     if (!poSetup.canCreate) { showPurchaseOrderHistory(); return; }
 
     poShowPanel('panel-po', 'New Purchase Order');
-    loadPoSuppliers(false).then(renderSupplierRoster);
-    ensurePoMaterials(false);
+    // the critical list needs the materials, and a click on it the suppliers
+    renderCriticalStocks();
+    Promise.all([loadPoSuppliers(false), ensurePoMaterials(false)]).then(renderCriticalStocks);
     if (poLineCount === 0) addPurchaseLine();
     renderSupplierState();
     renderPoTotals();
@@ -300,7 +301,6 @@ function makeSuggest(id, field) {
             'onclick="makeSuggestPick(\'' + id + '\', \'' + field + '\', this)">' +
             '<span class="suggest-line">' +
                 '<span class="suggest-name">' + escapeHtml(m.value) + '</span>' +
-                '<span class="suggest-figure">' + m.count + ' material' + (m.count === 1 ? '' : 's') + '</span>' +
             '</span>' +
         '</li>';
     }
@@ -995,65 +995,149 @@ function resetPurchaseLines() {
     addPurchaseLine();
 }
 
-// The roster beside the form: every company on file, one click to order
-// from it. Narrowed by the box above it; the chosen one is marked.
-function renderSupplierRoster() {
+// CRITICAL STOCKS beside the form: every material out of stock or low, the
+// emptiest first. Narrowed by the box above it; a material already on the
+// order is marked. One click puts it on the order (addCriticalToOrder).
+function renderCriticalStocks() {
     const list = document.getElementById('po-roster-list');
-    const count = document.getElementById('po-roster-count');
     if (!list) return;
 
     const filter = document.getElementById('po-roster-filter');
     const query = searchText(filter ? filter.value : '');
 
-    if (!poSuppliersLoaded) {
-        list.innerHTML = '<li class="po-roster-empty">The list could not be loaded.</li>';
-        if (count) count.textContent = 'Offline';
+    if (!poMaterialsLoaded) {
+        list.innerHTML = '<li class="po-roster-empty">' +
+            (poMaterialsFailed ? 'The materials could not be loaded.' : 'Loading the materials...') + '</li>';
         return;
     }
 
-    // the suppliers that match the search, sorted A to Z
-    const rows = [];
-    for (let i = 0; i < poSuppliers.length; i++) {
-        if (prefixMatch([poSuppliers[i].name, poSuppliers[i].contact_person], query)) {
-            rows.push(poSuppliers[i]);
-        }
+    const critical = [];
+    for (let i = 0; i < poMaterials.length; i++) {
+        const p = poMaterials[i];
+        if (p.stock_status !== 'Out of Stock' && p.stock_status !== 'Low Stock') continue;
+        if (!prefixMatch([p.product_name, p.supplier_name, p.category_name, p.brand_name], query)) continue;
+        critical.push(p);
     }
-    rows.sort(function (a, b) {
-        // numeric: true sorts "Supplier 2" before "Supplier 10"
-        return String(a.name).localeCompare(String(b.name), undefined, { numeric: true });
+    // out of stock first; inside each, the one furthest under its reorder point
+    const shortBy = function (p) { return (Number(p.reorder_point) || 0) - (Number(p.quantity_in_stock) || 0); };
+    critical.sort(function (a, b) {
+        const aOut = a.stock_status === 'Out of Stock' ? 0 : 1;
+        const bOut = b.stock_status === 'Out of Stock' ? 0 : 1;
+        if (aOut !== bOut) return aOut - bOut;
+        if (shortBy(a) !== shortBy(b)) return shortBy(b) - shortBy(a);
+        return String(a.product_name).localeCompare(String(b.product_name));
     });
 
-    if (count) count.textContent = poSuppliers.length + (poSuppliers.length === 1 ? ' company' : ' companies');
-
-    if (rows.length === 0) {
+    if (critical.length === 0) {
         list.innerHTML = '<li class="po-roster-empty">' +
-            (poSuppliers.length === 0 ? 'No suppliers on file yet.' : 'No company matches that.') + '</li>';
+            (query ? 'No critical material matches that.' : 'No material is low or out of stock.') + '</li>';
         return;
     }
 
-    let rosterHtml = '';
-    for (let i = 0; i < rows.length; i++) {
-        const s = rows[i];
-        const active = poSupplier && poSupplier.id === s.id;
-        rosterHtml += '<li class="po-roster-item' + (active ? ' is-active' : '') + '" role="button" tabindex="0" ' +
-                'onclick="chooseSupplierFromRoster(' + s.id + ')" ' +
-                'onkeydown="if (event.key === \'Enter\' || event.key === \' \') { event.preventDefault(); chooseSupplierFromRoster(' + s.id + '); }">' +
+    const onOrder = poOrderedProductIds();
+    let html = '';
+    for (let i = 0; i < critical.length; i++) {
+        const p = critical[i];
+        const out = p.stock_status === 'Out of Stock';
+        const unit = p.unit_name || '';
+        html += '<li class="po-roster-item' + (onOrder[p.product_id] ? ' is-active' : '') + '" role="button" tabindex="0" ' +
+                'title="' + (onOrder[p.product_id] ? 'On this order' : 'Add it to the order') + '" ' +
+                'onclick="addCriticalToOrder(' + p.product_id + ')" ' +
+                'onkeydown="if (event.key === \'Enter\' || event.key === \' \') { event.preventDefault(); addCriticalToOrder(' + p.product_id + '); }">' +
             '<span class="po-roster-line">' +
-                '<span class="po-roster-name">' + escapeHtml(s.name) + '</span>' +
-                '<span class="po-roster-figure">' + s.product_count + ' material' +
-                    (Number(s.product_count) === 1 ? '' : 's') + '</span>' +
+                '<span class="po-roster-name">' + escapeHtml(p.product_name) + '</span>' +
+                '<span class="badge ' + (out ? 'badge-danger' : 'badge-warning') + '">' +
+                    escapeHtml(qtyText(Number(p.quantity_in_stock) || 0, unit)) + '</span>' +
             '</span>' +
-            '<span class="po-roster-sub">' + escapeHtml(s.contact_person || 'No contact on file') +
-                (s.contact_number ? ' · ' + escapeHtml(s.contact_number) : '') + '</span>' +
+            '<span class="po-roster-sub">' + escapeHtml(p.supplier_name || 'No supplier on file') +
+                ' · reorder at ' + (Number(p.reorder_point) || 0) + '</span>' +
         '</li>';
     }
-    list.innerHTML = rosterHtml;
+    list.innerHTML = html;
 }
 
-function chooseSupplierFromRoster(supplierId) {
-    pickSupplier(supplierId);
-    const first = document.querySelector('.po-line .form-control');
-    if (first) first.focus();
+// product id -> true for every material picked on an order line
+function poOrderedProductIds() {
+    const ids = {};
+    const rows = document.querySelectorAll('.po-line');
+    for (let i = 0; i < rows.length; i++) {
+        const state = matState(rows[i].dataset.picker);
+        if (state.productId) ids[state.productId] = true;
+    }
+    return ids;
+}
+
+// how many to order: the suggested order, or enough to get back over the
+// reorder point; never less than one
+function criticalOrderQuantity(p) {
+    let quantity = Math.ceil(Number(p.suggested_order) || 0);
+    if (!(quantity > 0)) {
+        quantity = Math.ceil((Number(p.reorder_point) || 0) - (Number(p.quantity_in_stock) || 0)) + 1;
+    }
+    return Math.max(1, quantity);
+}
+
+// A critical material on the order: its supplier is picked (the lines only
+// offer one company's materials), then it goes on an empty line, or a new
+// one, at its suggested quantity. Already on the order: that line is shown.
+function addCriticalToOrder(productId) {
+    const p = poFindProduct(poMaterials, productId);
+    if (!p) return;
+
+    if (!p.supplier_id) {
+        notifyWarning(p.product_name + ' has no supplier on file, so it cannot be ordered from here. ' +
+            'Ask the manager to give it one under Records, Products.', 'No supplier');
+        return;
+    }
+
+    // a material from another company: the order changes company (picked lines go, with a warning)
+    if (!poSupplier || poSupplier.id !== p.supplier_id) {
+        let known = false;
+        for (let i = 0; i < poSuppliers.length; i++) {
+            if (poSuppliers[i].id === p.supplier_id) known = true;
+        }
+        if (!known) {
+            notifyWarning(p.product_name + '\'s supplier is not on the supplier list.', 'Supplier not found');
+            return;
+        }
+        pickSupplier(p.supplier_id);
+    }
+
+    // already on a line: show that line
+    const rows = document.querySelectorAll('.po-line');
+    for (let i = 0; i < rows.length; i++) {
+        if (matState(rows[i].dataset.picker).productId === productId) {
+            rows[i].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const qty = rows[i].querySelector('.po-qty');
+            if (qty) qty.focus({ preventScroll: true });
+            return;
+        }
+    }
+
+    // an empty line (nothing picked or typed) is used before a new one is added
+    let row = null;
+    for (let i = 0; i < rows.length && !row; i++) {
+        const state = matState(rows[i].dataset.picker);
+        const box = matBox(rows[i].dataset.picker);
+        if (!state.productId && !state.newName && !(box && box.value.trim())) row = rows[i];
+    }
+    if (!row) {
+        addPurchaseLine();
+        row = document.querySelector('.po-line');      // a new line goes on top
+    }
+    if (!row) return;
+
+    matPick(row.dataset.picker, productId);
+
+    // the line may start on the pack the material is delivered in
+    const index = row.id.replace('po-line-', '');
+    const qty = document.getElementById('po-qty-' + index);
+    const pack = poLineIn(row);
+    if (qty) qty.value = pack ? Math.max(1, Math.ceil(criticalOrderQuantity(p) / pack.size)) : criticalOrderQuantity(p);
+    renderPoTotals();
+
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (qty) qty.focus({ preventScroll: true });
 }
 
 // nothing typed, a known company, or a new one
@@ -1064,7 +1148,7 @@ function renderSupplierState() {
     if (!box) return;
 
     const typed = box.value.trim();
-    renderSupplierRoster();
+    renderCriticalStocks();
 
     if (poSupplier) {
         if (known) {
@@ -1270,6 +1354,9 @@ function removePurchaseLine(index) {
 // typed here; harmless on a page without the form. This also keeps the line
 // count and, on a line ordered in packs, says what the packs come to.
 function renderPoTotals() {
+    // the Critical stocks list marks what is on the order
+    renderCriticalStocks();
+
     let goods = 0;
     let priced = 0;
 
@@ -1452,7 +1539,7 @@ async function handleCreatePurchaseOrder(event) {
 
         poMaterialsLoaded = false;
         poSuppliersLoaded = false;
-        loadPoSuppliers(true).then(renderSupplierRoster);
+        Promise.all([loadPoSuppliers(true), ensurePoMaterials(true)]).then(renderCriticalStocks);
         await refreshPurchaseOrders();
         poAfterChange();
 
@@ -1490,8 +1577,8 @@ function resetPurchaseOrderForm() {
 }
 
 // The history. A row opens the order's card, where the lines are reviewed and
-// the order is approved, declined, sent, printed or referred (an accepted
-// order has its Refer to PO button there, not in the table).
+// the order is approved, declined, emailed or printed. An accepted order's
+// delivery is counted in on Stock Adjustment.
 // The words below are the ones the Status filter offers, and every badge and
 // heading for an order uses the same. They are stages, not the database's
 // status: the database says Pending from the manager's approval until the
@@ -1587,7 +1674,6 @@ function poToSend(po) {
 
 function poRowTitle(po) {
     if (poSetup.canReceive && poToSend(po)) return 'Print this order and send it to the supplier';
-    if (poSetup.canReceive && poCanRefer(po)) return 'Refer the delivery to this order';
     if (poSetup.canDecide && po.status === 'For Approval') return 'Review this order';
     return 'Open this order';
 }
@@ -2219,7 +2305,26 @@ async function printPurchaseOrder(poId) {
         return;
     }
     renderPurchaseOrderDocument();
+    // the QR code is a picture: printing before it has loaded leaves an empty box
+    await poDocumentImagesReady();
     printPurchaseOrderNow();
+}
+
+// Resolves once every picture on the order's document has loaded (or failed),
+// or after two seconds at most, so a slow picture never holds the print back for good.
+function poDocumentImagesReady() {
+    const box = document.getElementById('po-doc');
+    const images = box ? Array.prototype.slice.call(box.querySelectorAll('img')) : [];
+    const waits = images.map(function (image) {
+        if (image.complete && image.naturalWidth > 0) return Promise.resolve();
+        if (typeof image.decode === 'function') return image.decode().catch(function () {});
+        return new Promise(function (resolve) {
+            image.addEventListener('load', resolve, { once: true });
+            image.addEventListener('error', resolve, { once: true });
+        });
+    });
+    const timeout = new Promise(function (resolve) { window.setTimeout(resolve, 2000); });
+    return Promise.race([Promise.all(waits), timeout]);
 }
 
 // only the order's document reaches the paper (the styles are in the Purchase
@@ -2318,14 +2423,6 @@ function renderPurchaseOrderDocument() {
              String(order.supplier_email || '').trim()
                 ? '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + order.po_id + ')">' +
                   'Email to Supplier</button>'
-                : '') +
-            (poSetup.canReceive && poToSend(order)
-                ? '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + order.po_id + ')">' +
-                  'Mark as Sent</button>'
-                : '') +
-            (poSetup.canReceive && poCanRefer(order)
-                ? '<button type="button" class="btn btn-success" ' +
-                  'onclick="openReceiveOrder(' + order.po_id + ')">Refer to PO</button>'
                 : '') +
         '</div>' +
         '<div class="po-doc">' +
@@ -2708,9 +2805,8 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     // order carries a QR code the supplier accepts or declines it with.
     let note = '';
     if (waiting && canDecide) {
-        note = '<p class="detail-note detail-warn po-next">Waiting for your decision. Approved, the clerk prints ' +
-               'it and sends it to the supplier, whose copy carries a QR code to accept or decline it; declined, ' +
-               'it is cancelled and the clerk is told why.</p>';
+        // the manager's own decision needs no note: Approve and Decline are in the foot
+        note = '';
     } else if (waiting && readOnly) {
         note = '<p class="detail-note po-next">Waiting for the manager to approve it.</p>';
     } else if (waiting) {
@@ -2726,25 +2822,21 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         if (po.confirmed_by) {
             byWhom = ' by ' + escapeHtml(po.confirmed_by);
         }
-        let next;
+        let next = null;
+        // an accepted order needs no note: its facts say who accepted it and the
+        // delivery day, and the delivery is counted in on Stock Adjustment
         if (po.supplier_response === 'Accepted') {
-            next = ' ' + escapeHtml(po.supplier_name) + ' accepted it' +
-                   (po.supplier_ship_date ? ' and delivers it on ' + escapeHtml(poShipDay(po.supplier_ship_date)) : '') +
-                   (po.supplier_note ? ' (' + escapeHtml(po.supplier_note) + ')' : '') + '. ' +
-                   (canReceive
-                       ? 'Once the goods are at the store, press Refer to PO to check them against the order ' +
-                         'and count them in.'
-                       : 'The clerk refers it once the goods have been checked against it.');
+            next = null;
         } else if (po.supplier_sent_at) {
             next = ' Sent to the supplier on ' + escapeHtml(poWhen(po.supplier_sent_at)) + ' and waiting for them ' +
-                   'to accept or decline it. It can be referred once the supplier accepts it.';
+                   'to accept or decline it.';
         } else if (canReceive) {
-            next = ' Print it and send it to the supplier, then press Mark as Sent (emailing it marks it sent by ' +
-                   'itself). The printed order carries a QR code for them to accept or decline it.';
+            next = ' Print it or email it to the supplier. The order carries a QR code for them to accept or ' +
+                   'decline it.';
         } else {
-            next = ' The clerk has not sent it to the supplier yet; you are told when the supplier answers.';
+            next = ' Waiting for the supplier to accept or decline it; you are told when they answer.';
         }
-        note = '<p class="detail-note po-next">Approved' + byWhom + '.' + next + '</p>';
+        note = next === null ? '' : '<p class="detail-note po-next">Approved' + byWhom + '.' + next + '</p>';
     } else {
         let why = '';
         if (po.decision_note) {
@@ -2759,10 +2851,21 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         }
     }
 
+    // the order as it was ordered: a received order's items are its lines as
+    // ordered (the server keeps that copy), so these match what was asked for
+    let orderedLines = Number(po.line_count) || 0;
+    let orderedUnits = Number(po.total_units) || 0;
+    if (items.length > 0) {
+        orderedLines = items.length;
+        orderedUnits = 0;
+        for (let i = 0; i < items.length; i++) orderedUnits += Number(items[i].quantity) || 0;
+    }
+
     // the figures: the invoice once received, the priced lines before
     let money;
     if (po.status === 'Received') {
-        money = detailField('Goods', peso(po.goods_cost)) +
+        // the invoice is for what arrived, which may differ from what was ordered
+        money = detailField('Goods Received', peso(po.goods_cost)) +
                 detailField('Invoice Discount', peso(po.discount)) +
                 detailField('Total Cost', '<strong>' + peso(po.total_cost) + '</strong>');
     } else if (Number(po.discount) > 0) {
@@ -2793,8 +2896,13 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         (po.supplier_ship_date
             ? detailField('Delivery Schedule', escapeHtml(poShipDay(po.supplier_ship_date)))
             : '') +
-        detailField('Items', po.line_count + (Number(po.line_count) === 1 ? ' line' : ' lines') +
-            ' <span class="muted">' + po.total_units + (Number(po.total_units) === 1 ? ' unit' : ' units') + '</span>') +
+        (po.status === 'Received'
+            ? detailField('Received', po.received_at
+                ? escapeHtml(poWhen(po.received_at))
+                : '<span class="muted">Not recorded</span>')
+            : '') +
+        detailField('Items', orderedLines + (orderedLines === 1 ? ' line' : ' lines') +
+            ' <span class="muted">' + orderedUnits + (orderedUnits === 1 ? ' unit' : ' units') + '</span>') +
         money +
         '</div>';
 
@@ -2805,6 +2913,8 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     }
     // a price the supplier corrected from the link shows the shop's own struck through
     const unitCostCell = function (it) {
+        // a received line where nothing arrived has no cost left on file
+        if (it.unit_cost === null || it.unit_cost === undefined) return '<span class="muted">&mdash;</span>';
         const original = it.original_unit_cost;
         if (original === null || original === undefined || Number(original) === Number(it.unit_cost)) {
             return peso(it.unit_cost);
@@ -2818,7 +2928,8 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         for (let i = 0; i < items.length; i++) {
             const it = items[i];
             lineRows.push([
-                escapeHtml(it.product_name), escapeHtml(poQuantityText(it)), unitCostCell(it), peso(it.line_cost)
+                escapeHtml(it.product_name), escapeHtml(poQuantityText(it)), unitCostCell(it),
+                it.line_cost === null || it.line_cost === undefined ? '<span class="muted">&mdash;</span>' : peso(it.line_cost)
             ]);
         }
         lines = detailTable(['Material', 'Qty', 'Unit Cost', 'Line Cost'], lineRows, [1, 2, 3]);
@@ -2851,14 +2962,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         foot += '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + po.po_id + ')">' +
                 (po.supplier_sent_at ? 'Email It Again' : 'Email to Supplier') + '</button>';
     }
-    if (canReceive && poToSend(po)) {
-        foot += '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + po.po_id + ')">' +
-                'Mark as Sent</button>';
-    }
-    if (canReceive && poCanRefer(po)) {
-        foot += '<button type="button" class="btn btn-success" onclick="closeModal(\'detail-modal\'); ' +
-                'openReceiveOrder(' + po.po_id + ')">Refer to PO</button>';
-    }
 
     // one wide page: the facts and the supplier's contact on the left, every
     // material on the right; a very long order scrolls. A delivery that came
@@ -2880,17 +2983,16 @@ async function openPurchaseOrderDetail(poId, readOnly) {
 // material with how many were missing or over and why (Under-delivery or
 // Over-delivery), then the clerk's remarks.
 function poDeliveryReportHtml(report) {
-    let rows = '';
+    const rows = [];
     for (let i = 0; i < report.lines.length; i++) {
         const line = report.lines[i];
         const under = line.reason === 'Under-delivery';
-        rows += '<tr>' +
-            '<td>' + escapeHtml(line.product_name) + '</td>' +
-            '<td>' + escapeHtml(qtyText(line.quantity, line.unit_name || '')) +
-                ' <span class="muted">' + (under ? 'missing' : 'over') + '</span></td>' +
-            '<td><span class="badge ' + (under ? 'badge-warning' : 'badge-info') + '">' +
-                escapeHtml(line.reason) + '</span></td>' +
-            '</tr>';
+        rows.push([
+            escapeHtml(line.product_name),
+            escapeHtml(qtyText(line.quantity, line.unit_name || '')) +
+                ' <span class="muted">' + (under ? 'missing' : 'over') + '</span>',
+            '<span class="badge ' + (under ? 'badge-warning' : 'badge-info') + '">' + escapeHtml(line.reason) + '</span>'
+        ]);
     }
 
     return '<div class="po-report">' +
@@ -2900,10 +3002,8 @@ function poDeliveryReportHtml(report) {
                 '<p><span class="po-report-label">Date reported:</span> ' +
                     (report.reported_at ? escapeHtml(poWhen(report.reported_at)) : '<span class="muted">Not recorded</span>') + '</p>' +
             '</div>' +
-            '<table class="po-report-table">' +
-                '<thead><tr><th>Material</th><th>Quantity</th><th>Reason</th></tr></thead>' +
-                '<tbody>' + rows + '</tbody>' +
-            '</table>' +
+            // the same table as every other list on the page
+            detailTable(['Material', 'Quantity', 'Reason'], rows, [1]) +
             '<p class="po-report-remarks"><span class="po-report-label">Remarks:</span> ' +
                 (report.remarks ? escapeHtml(report.remarks) : '<span class="muted">None</span>') + '</p>' +
         '</div>';

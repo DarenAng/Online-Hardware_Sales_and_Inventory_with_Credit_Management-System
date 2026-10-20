@@ -117,7 +117,7 @@ function showCard(options) {
         '<span class="toast-stripe"></span>' +
         '<span class="toast-mark">' + look.mark + '</span>' +
         '<div class="toast-body"><span class="toast-title">' + escapeHtml(options.title || look.title) + '</span>' +
-        (options.message ? '<p class="toast-text">' + escapeHtml(options.message) + '</p>' : '') +
+        (options.message ? '<p class="toast-text">' + escapeHtml(tidyQuantities(options.message)) + '</p>' : '') +
         (meta.length
             ? '<span class="toast-meta">' + metaHtml + '</span>'
             : '') +
@@ -167,6 +167,17 @@ function showCard(options) {
     if (cards.length > 3) cards[0].remove();
 
     return card;
+}
+
+// Quantities come from the database with three decimals ("3.000 set"): a whole
+// number reads without them (3) and a fraction without its trailing zeros
+// (2.5). Only three-decimal figures are touched, so a peso amount (12,500.00)
+// keeps its centavos.
+function tidyQuantities(text) {
+    return String(text).replace(/(\d)\.(\d{3})(?![\d.])/g, function (match, lead, decimals) {
+        const kept = decimals.replace(/0+$/, '');
+        return lead + (kept ? '.' + kept : '');
+    });
 }
 
 function clearCards() {

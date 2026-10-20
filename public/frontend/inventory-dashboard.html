@@ -44,7 +44,6 @@
                             Returned Items</a></li>
                     </ul>
                 </li>
-                <li data-feature="damage-report"><a href="#" data-panel-link="panel-report" onclick="showDamageReport(event)"><i class="bi bi-clipboard-plus nav-icon" aria-hidden="true"></i>Make a Report</a></li>
                 <!-- Records: categories and units are added here; suppliers by the manager -->
                 <li data-sidebar-dropdown data-feature="records">
                     <a href="#records" onclick="sidebarHeading(event, 'records-nav', 'records-dropdown', showClerkRecords)" class="nav-parent" id="records-nav"
@@ -239,7 +238,7 @@
 
                                 <div class="form-footer">
                                     <button type="submit" class="btn btn-success">Apply Adjustment</button>
-                                    <button type="button" class="btn btn-ghost" onclick="showInventoryHome(event)">Cancel</button>
+                                    <button type="button" class="btn btn-ghost" onclick="clearAdjustForm()">Clear</button>
                                 </div>
                             </form>
                         </div>
@@ -262,7 +261,7 @@
                                     <label for="reference-type">Type</label>
                                     <select id="reference-type" onchange="onReferenceType(this.value)">
                                         <option value="all">Every type</option>
-                                        <option value="po">PO</option>
+                                        <option value="po">Purchase Order</option>
                                         <option value="return">Returned Items</option>
                                         <option value="material">Material</option>
                                     </select>
@@ -270,7 +269,7 @@
                             </div>
                             <p class="attention-hint">Accepted purchase orders, open returned items, then every material, most short first. Click one to fill the form.</p>
                             <ul class="attention-list" id="attention-list"></ul>
-                            <div class="attention-more" id="attention-more" hidden></div>
+                            <div class="pager attention-more" id="attention-more" hidden></div>
                         </div>
                     </div>
                 </div>
@@ -454,16 +453,18 @@
                         </div>
                     </form>
 
-                    <aside class="po-roster" aria-label="Suppliers on file">
+                    <!-- CRITICAL STOCKS -- out of stock and low materials; one click puts a
+                         material on the order (shared/purchase-orders.js renderCriticalStocks) -->
+                    <aside class="po-roster" aria-label="Critical stocks">
                         <div class="po-roster-head">
-                            <h4>Suppliers</h4>
+                            <h4>Critical stocks</h4>
                         </div>
                         <input type="search" class="form-control" id="po-roster-filter"
-                               placeholder="Find a company" autocomplete="off"
-                               oninput="renderSupplierRoster()">
+                               placeholder="Find a material or supplier" autocomplete="off"
+                               oninput="renderCriticalStocks()">
                         <ul class="po-roster-list" id="po-roster-list"></ul>
-                        <p class="po-roster-note">Click a company to order from it. A company not
-                            listed here can be typed into the order.</p>
+                        <p class="po-roster-note">Out of stock first, then low. Click a material to add it
+                            to the order with its suggested quantity; its supplier is picked for you.</p>
                     </aside>
                     </div>
                 </div>
@@ -600,81 +601,6 @@
                     <div class="pager is-single" id="returns-pager"></div>
                 </div>
 
-                <!-- MAKE A REPORT -->
-                <div class="card" id="panel-report" data-panel style="display: none;">
-                    <div class="panel-head">
-                        <div>
-                            <h3>Make a Report</h3>
-                        </div>
-                    </div>
-                    <form id="report-form" class="form-sheet" onsubmit="handleFileReport(event)" autocomplete="off">
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label for="report-type">Report type</label>
-                                <select id="report-type" name="reportType" class="form-control" onchange="onReportTypeChange(this.value)" required>
-                                    <option value="Damaged">Damaged item</option>
-                                    <option value="Refunded">Refunded item</option>
-                                    <option value="Return">Plain return</option>
-                                    <option value="Missing">Missing from delivery</option>
-                                </select>
-                            </div>
-                            <div class="form-group" id="report-sale-field">
-                                <label for="report-sale">Sale ID <span class="label-hint">optional, but a Refunded report needs one</span></label>
-                                <input type="number" id="report-sale" name="saleId" class="form-control" min="1" placeholder="Leave blank if not from a sale">
-                            </div>
-                        </div>
-
-                        <!-- MISSING FROM DELIVERY -- pick the purchase order; its items come up as a
-                             checklist, and every ticked one goes into this one report -->
-                        <div class="form-group" id="report-po-field" hidden>
-                            <label for="report-po">Purchase order</label>
-                            <select id="report-po" class="form-control" onchange="onReportPoChange(this.value)">
-                                <option value="">Choose a purchase order</option>
-                            </select>
-                            <p class="pick-verdict" id="report-po-verdict"></p>
-                            <div id="report-po-lines"></div>
-                        </div>
-
-                        <!-- EVERY OTHER TYPE -- typed and picked from the list, like Stock Adjustment;
-                             each material picked is added to the list below, with its own quantity -->
-                        <div class="form-group" id="report-material-field">
-                            <label for="report-material">Add a material</label>
-                            <div class="suggest-wrap">
-                                <input type="text" id="report-material" class="form-control"
-                                       autocomplete="off" placeholder="Type a material, brand, or category"
-                                       role="combobox" aria-expanded="false"
-                                       aria-controls="report-suggest" aria-autocomplete="list"
-                                       oninput="onReportMaterialInput(this.value)"
-                                       onfocus="onReportMaterialInput(this.value)"
-                                       onblur="hideReportSuggestions()"
-                                       onkeydown="onReportMaterialKey(event)">
-                                <button type="button" class="suggest-clear" id="report-material-clear"
-                                        onclick="clearReportMaterial()" aria-label="Clear the material"
-                                        hidden>&times;</button>
-                                <ul class="suggest-list" id="report-suggest" role="listbox" hidden></ul>
-                            </div>
-                            <p class="pick-verdict" id="report-material-verdict"></p>
-                            <div id="report-items" class="report-items" aria-live="polite"></div>
-                        </div>
-
-                        <div class="form-group" id="report-restock-field">
-                            <label for="report-restock">Put back on the shelf</label>
-                            <select id="report-restock" name="restock" class="form-control">
-                                <option value="false">No, keep it off stock</option>
-                                <option value="true">Yes, item is resalable</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="report-reason">Reason</label>
-                            <input type="text" id="report-reason" name="reason" class="form-control" maxlength="255" placeholder="Cracked" required>
-                        </div>
-                        <div class="form-footer">
-                            <button type="submit" class="btn btn-success">File Report</button>
-                            <button type="button" class="btn btn-ghost" onclick="showInventoryHome(event)">Cancel</button>
-                        </div>
-                    </form>
-                </div>
-
                 <!-- ARCHIVE -->
                 <div class="card" id="panel-archive" data-panel style="display: none;">
                     <div class="panel-head">
@@ -720,11 +646,6 @@
                             <input type="search" class="form-control search-input" id="records-search"
                                    placeholder="Search these records"
                                    oninput="dataPanelSearchInput('clerk-records', event)" onkeydown="dataPanelSearchKey('clerk-records', event)" title="Type one letter or more; it finds words that start with it">
-                        </div>
-                        <div class="toolbar-field">
-                            <label for="records-sort">Sort by</label>
-                            <!-- options follow the kind of record (inventory-clerk.js fillClerkRecordSort) -->
-                            <select id="records-sort" onchange="dataPanelFilter('clerk-records', 'sort', this.value)"></select>
                         </div>
                         <div class="toolbar-spacer"></div>
                     </div>

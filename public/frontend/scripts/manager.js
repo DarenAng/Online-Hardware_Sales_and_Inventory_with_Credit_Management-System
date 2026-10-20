@@ -3207,14 +3207,12 @@ function openStockDetail(productId) {
         '<button type="button" class="btn btn-accent" onclick="changeReorderPoint(' + p.product_id + ')">' +
         'Change Reorder Point</button></div>';
 
-    // the price is not set here: it belongs to the product, in Records > Products
     const product = '<div class="detail-grid">' +
         detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
         detailField('Brand', escapeHtml(p.brand_name || 'No brand')) +
         detailField('Product Status', statusBadge(p.status)) +
         detailField('Last Updated', escapeHtml(p.last_updated || 'Never')) +
-        '</div>' +
-        '<p class="detail-note">The selling price is set on the product, in Records, Products.</p>';
+        '</div>';
 
     const supplier = '<div class="detail-grid">' +
         detailField('Supplier', escapeHtml(p.supplier_name || 'No supplier')) +
@@ -3264,10 +3262,11 @@ async function openRecordDetail(index) {
             : '');
     const pages = [{ label: 'Details', body: body }];
 
-    // a category lists the products filed under it, and a unit the products
-    // counted in it, on a page of their own
-    if (type === 'category' || type === 'unit') {
-        const field = type === 'category' ? 'category_name' : 'unit_name';
+    // a category lists the products filed under it, a unit the products
+    // counted in it, and a supplier the products registered to it, on a page
+    // of their own
+    if (type === 'category' || type === 'unit' || type === 'supplier') {
+        const field = { category: 'category_name', unit: 'unit_name', supplier: 'supplier_name' }[type];
         let productsBody;
         try {
             const allProducts = await apiGetRecords('product');
@@ -3275,20 +3274,26 @@ async function openRecordDetail(index) {
             for (let i = 0; i < allProducts.length; i++) {
                 const p = allProducts[i];
                 if (p[field] !== row.name) continue;
+                // a supplier's own page names each product's category in place of the supplier
+                const third = type === 'supplier' ? p.category_name : p.supplier_name;
                 productRows.push([
                     escapeHtml(p.name),
                     p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>',
-                    p.supplier_name ? escapeHtml(p.supplier_name) : '<span class="muted">Not set</span>',
+                    third ? escapeHtml(third) : '<span class="muted">Not set</span>',
                     peso(p.price),
                     escapeHtml(qtyText(p.quantity_in_stock, p.unit_name))
                 ]);
             }
-            productsBody = detailTable(['Product', 'Brand', 'Supplier', 'Price', 'On Hand'], productRows, [3, 4]);
+            productsBody = detailTable(
+                ['Product', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'],
+                productRows, [3, 4]);
             pages.push({ label: 'Products (' + productRows.length + ')', body: productsBody });
         } catch (error) {
+            let where = 'using this unit';
+            if (type === 'category') where = 'in this category';
+            else if (type === 'supplier') where = 'from this supplier';
             pages.push({ label: 'Products', body:
-                '<p class="detail-note detail-warn">The products ' + (type === 'category' ? 'in this category' : 'using this unit') +
-                ' could not be loaded.</p>' });
+                '<p class="detail-note detail-warn">The products ' + where + ' could not be loaded.</p>' });
         }
     }
 

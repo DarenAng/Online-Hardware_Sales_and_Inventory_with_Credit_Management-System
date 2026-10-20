@@ -9,7 +9,6 @@
 //     returned item from Reference, see a preview, save
 //   - adjustment history and reorder points
 //   - returns and damage reports: inspect, return to stock or write off
-//   - Make a Report: several items in one report, or goods missing from a delivery
 //   - the material archive
 //   - popups: one material, one adjustment, one return
 //   - the page start-up code at the very bottom ("INVENTORY PAGE BOOT")
@@ -79,11 +78,6 @@ function showAdjustmentHistory(event) {
 
 function showReorder(event) { showInventoryPanel('panel-reorder', 'Reorder Point Settings', event); }
 function showReturns(event) { showInventoryPanel('panel-returns', 'Returned Items', event); }
-function showDamageReport(event) {
-    showInventoryPanel('panel-report', 'Make a Report', event);
-    renderReportMaterialVerdict();
-    renderReportItems();
-}
 function showInventoryArchive(event) { showInventoryPanel('panel-archive', 'Archive', event); }
 
 // ---------- the material list ----------
@@ -508,8 +502,6 @@ async function loadStockBanner() {
 // The server marks every material Out of Stock, Low Stock or In Stock. It is
 // the same rule that counts the banner above, so the materials are sorted by
 // that mark: the ones that need stock come first.
-const ATTENTION_SHOWN = 20;
-
 function isShort(p) {
     return p.stock_status === 'Out of Stock' || p.stock_status === 'Low Stock';
 }
@@ -590,7 +582,8 @@ let referenceReturns = [];        // open returned items, grouped (see groupOpen
 let referenceProblem = '';
 let referenceSearch = '';
 let referenceType = 'all';
-let referenceMaterialsShown = ATTENTION_SHOWN;
+let referencePage = 1;
+const REFERENCE_PAGE_SIZE = 8;
 
 async function loadReferenceRecords() {
     const problems = [];
@@ -680,18 +673,19 @@ function returnGroupNames(group) {
 
 function onReferenceSearch(value) {
     referenceSearch = searchText(String(value || ''));
-    referenceMaterialsShown = ATTENTION_SHOWN;
+    referencePage = 1;
     renderAttentionList();
 }
 
 function onReferenceType(value) {
     referenceType = value || 'all';
-    referenceMaterialsShown = ATTENTION_SHOWN;
+    referencePage = 1;
     renderAttentionList();
 }
 
-function showMoreReferenceMaterials() {
-    referenceMaterialsShown += 25;
+// Previous and Next under the list, like the pager under every table
+function turnReferencePage(step) {
+    referencePage += step;
     renderAttentionList();
 }
 
@@ -705,7 +699,7 @@ function referenceRowHtml(onclick, label, name, kind, badgeClass, badgeText, not
             '<span class="attention-kind">' + kind + '</span>' +
         '</span>' +
         '<span class="attention-figures">' +
-            '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
+            (badgeText ? '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' : '') +
             (note ? '<span class="attention-reorder">' + note + '</span>' : '') +
         '</span>' +
         '</button></li>';
@@ -717,8 +711,7 @@ function renderAttentionList() {
     if (!list || !more) return;
 
     const query = referenceSearch;
-    let listHtml = '';
-    let count = 0;
+    const rows = [];        // every row that matches, in order; one page of them is drawn
 
     // accepted purchase orders
     if (referenceType === 'all' || referenceType === 'po') {
@@ -727,14 +720,13 @@ function renderAttentionList() {
             if (query && !prefixMatch(['PO', String(po.po_id), 'PO #' + po.po_id, po.supplier_name], query)) continue;
             const picked = adjustSource && adjustSource.kind === 'po' && Number(adjustSource.po.po_id) === Number(po.po_id);
             const lines = Number(po.line_count) || 0;
-            listHtml += referenceRowHtml('adjustFromPo(' + Number(po.po_id) + ')',
+            rows.push(referenceRowHtml('adjustFromPo(' + Number(po.po_id) + ')',
                 'Receive purchase order ' + po.po_id,
                 'PO #' + escapeHtml(String(po.po_id)),
                 escapeHtml(po.supplier_name || 'No supplier'),
-                'badge-info', 'Accepted',
+                '', '',
                 lines ? lines + (lines === 1 ? ' item' : ' items') : 'PO',
-                picked);
-            count++;
+                picked));
         }
     }
 
@@ -746,20 +738,17 @@ function renderAttentionList() {
             const words = [group.type, returnGroupTitle(group), group.filedBy].concat(names);
             if (query && !prefixMatch(words, query)) continue;
             const picked = adjustSource && adjustSource.kind === 'return' && adjustSource.group.key === group.key;
-            listHtml += referenceRowHtml('adjustFromReturn(' + escapeHtml(JSON.stringify(group.key)) + ')',
+            rows.push(referenceRowHtml('adjustFromReturn(' + escapeHtml(JSON.stringify(group.key)) + ')',
                 'Open returned item ' + returnGroupTitle(group),
                 escapeHtml(returnGroupTitle(group)),
                 joinEscaped(names.slice(0, 3), ', ') + (names.length > 3 ? ' and ' + (names.length - 3) + ' more' : ''),
-                'badge-warning', 'Open',
+                '', '',
                 group.items.length + (group.items.length === 1 ? ' item' : ' items'),
-                picked);
-            count++;
+                picked));
         }
     }
 
     // every material, out of stock first, then low, then the rest by name
-    let materialsLeft = 0;
-    let materialCount = 0;
     if (referenceType === 'all' || referenceType === 'material') {
         const materials = [];
         for (let i = 0; i < invProducts.length; i++) {
@@ -775,45 +764,54 @@ function renderAttentionList() {
             return String(a.product_name).localeCompare(String(b.product_name));
         });
 
-        materialCount = materials.length;
-        const shown = materials.slice(0, referenceMaterialsShown);
-        materialsLeft = materials.length - shown.length;
-        for (let i = 0; i < shown.length; i++) {
-            const p = shown[i];
+        for (let i = 0; i < materials.length; i++) {
+            const p = materials[i];
             const unit = p.unit_name ? ' ' + escapeHtml(p.unit_name) : '';
             let badgeClass = 'badge-success';
             if (p.stock_status === 'Out of Stock') badgeClass = 'badge-danger';
             else if (p.stock_status === 'Low Stock') badgeClass = 'badge-warning';
             const picked = !adjustSource && adjustMaterial && adjustMaterial.product_id === p.product_id;
-            listHtml += referenceRowHtml('adjustFromList(' + p.product_id + ')',
+            rows.push(referenceRowHtml('adjustFromList(' + p.product_id + ')',
                 'Adjust ' + p.product_name,
                 escapeHtml(p.product_name),
                 materialKindText(p),
                 badgeClass, (Number(p.quantity_in_stock) || 0) + unit,
                 'Reorder at ' + (Number(p.reorder_point) || 0),
-                picked);
-            count++;
+                picked));
         }
     }
 
     let note = '';
     if (referenceProblem) note = '<li class="attention-empty">' + escapeHtml(referenceProblem) + '</li>';
 
-    if (count === 0) {
+    if (rows.length === 0) {
         let empty = 'Nothing to show.';
         if (query) empty = 'Nothing matches that search.';
         else if (referenceType === 'po') empty = 'No purchase order is waiting for its delivery.';
         else if (referenceType === 'return') empty = 'No returned item is open.';
         else if (referenceType === 'material' && !invLoaded) empty = 'Loading materials...';
         list.innerHTML = note + '<li class="attention-empty">' + escapeHtml(empty) + '</li>';
-    } else {
-        list.innerHTML = note + listHtml;
+        more.hidden = true;
+        more.innerHTML = '';
+        return;
     }
 
-    if (materialsLeft > 0) {
+    // eight rows a page, so the list fits its card without scrolling
+    const pages = Math.max(1, Math.ceil(rows.length / REFERENCE_PAGE_SIZE));
+    referencePage = Math.min(Math.max(1, referencePage), pages);
+    const start = (referencePage - 1) * REFERENCE_PAGE_SIZE;
+    list.innerHTML = note + rows.slice(start, start + REFERENCE_PAGE_SIZE).join('');
+
+    if (pages > 1) {
         more.hidden = false;
-        more.innerHTML = '<button type="button" class="btn btn-ghost btn-sm" onclick="showMoreReferenceMaterials()">' +
-            'Show more materials (' + (materialCount - materialsLeft) + ' of ' + materialCount + ')</button>';
+        more.innerHTML =
+            '<div class="pager-controls">' +
+                '<button type="button" class="btn btn-sm" onclick="turnReferencePage(-1)"' +
+                    (referencePage === 1 ? ' disabled' : '') + '>Previous</button>' +
+                '<span class="pager-page">Page ' + referencePage + ' of ' + pages + '</span>' +
+                '<button type="button" class="btn btn-sm" onclick="turnReferencePage(1)"' +
+                    (referencePage === pages ? ' disabled' : '') + '>Next</button>' +
+            '</div>';
     } else {
         more.hidden = true;
         more.innerHTML = '';
@@ -856,7 +854,7 @@ function focusAdjustForm(fieldId) {
     }
 }
 
-// ---------- the material boxes (Stock Adjustment, Make a Report) ----------
+// ---------- the material box (Stock Adjustment) ----------
 // what a typed query finds, best first: the name starts with it, then a word
 // in the name does, then the brand or category; six at most
 function findMaterials(query) {
@@ -1430,16 +1428,77 @@ function renderAdjustSource() {
             '<span class="adjust-source-eyebrow">' + (adjustSource.kind === 'po' ? 'Purchase order' : 'Returned item') + '</span>' +
             '<span class="adjust-source-title">' + title + '</span>' +
             '<span class="adjust-source-sub">' + sub + '</span>' +
-        '</div>' +
-        '<button type="button" class="btn btn-ghost btn-sm" onclick="clearAdjustSource()">Adjust a material instead</button>';
+        '</div>';
 }
 
-function clearAdjustSource() {
+// Clear: empties the form and stays on the screen, back to a single material
+function clearAdjustForm() {
     const form = document.getElementById('adjust-form');
-    if (form) form.elements.reason.value = '';
+    if (form) {
+        form.elements.quantity.value = '';
+        form.elements.reason.value = '';
+    }
     adjustSourceLoading++;
-    setAdjustSource(null);
+    adjustSource = null;
+
+    const box = adjustMaterialBox();
+    if (box) box.value = '';
+    const clear = document.getElementById('adjust-material-clear');
+    if (clear) clear.hidden = true;
+    hideAdjustSuggestions();
+    setAdjustMaterial(null);
+
+    const type = document.getElementById('adjust-type');
+    if (type) type.value = 'Add';
+    renderAdjustForm();
     renderAttentionList();
+}
+
+// ---------- leaving Stock Adjustment with work on the form ----------
+// A purchase order or returned item picked, or a quantity or remarks typed,
+// is work that leaving the screen would lose, so leaving asks first.
+let adjustLeaveConfirmed = false;
+
+function adjustFormHasWork() {
+    if (!adjustScreenOpen()) return false;
+    if (adjustSource) return true;
+    const form = document.getElementById('adjust-form');
+    if (!form) return false;
+    return form.elements.quantity.value.trim() !== '' || form.elements.reason.value.trim() !== '';
+}
+
+// what counts as going to another screen: the menu (not the caret that only
+// folds a heading), the banner's button, and an alert's Go to
+function leavesAdjustScreen(target) {
+    if (!target || target.closest('#panel-adjust')) return null;
+    const menuLink = target.closest('.sidebar a');
+    // Stock Adjustment's own menu entry stays on this screen
+    if (menuLink && menuLink.dataset.panelLink === 'panel-adjust') return null;
+    if (menuLink && !target.closest('.nav-caret')) return menuLink;
+    const other = target.closest('#stock-banner .btn, [onclick^="goToNotification"]');
+    return other || null;
+}
+
+async function guardAdjustLeave(event) {
+    if (adjustLeaveConfirmed || !adjustFormHasWork()) return;
+    const leaving = leavesAdjustScreen(event.target);
+    if (!leaving) return;
+
+    // hold the click until the clerk says what to do
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const yes = await askConfirm('What is on the Stock Adjustment form has not been applied. Leaving clears it.', {
+        title: 'Leave without applying?',
+        eyebrow: 'Stock Adjustment',
+        confirmLabel: 'Leave and clear',
+        tone: 'danger'
+    });
+    if (!yes) return;
+
+    clearAdjustForm();
+    adjustLeaveConfirmed = true;
+    try { leaving.click(); } finally { adjustLeaveConfirmed = false; }
 }
 
 // The items of the order or return: material, unit and quantity, in a table
@@ -1803,8 +1862,7 @@ async function applyReturnAdjustment() {
 }
 
 // ---------- reorder point settings ----------
-// a material's row is pressed and the new point is asked for in a card; no
-// boxes or buttons sit in the table
+// read only: the manager sets the points
 function buildReorderPanel() {
     createDataPanel({
         key: 'clerk-reorder',
@@ -1834,8 +1892,7 @@ function buildReorderPanel() {
         // the stock level against the point: a bar, the point itself, and what
         // an order would take to get back to comfortable
         renderRow: function (p, index) {
-            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="askReorderPoint(' + p.product_id + ')" title="Set the reorder point">' +
+            return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
             '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
             '<td class="cell-num">' + stockLevelBar(p) + '</td>' +
             '<td class="cell-num">' + p.reorder_point + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
@@ -1880,77 +1937,6 @@ function stockLevelBar(p) {
 async function loadReorderTable() {
     const panel = getDataPanel('clerk-reorder');
     if (panel && panel.state !== 'closed') await panel.refresh();
-}
-
-// the card asks for the new point, reads it back, then saves it
-async function askReorderPoint(productId) {
-    const panel = getDataPanel('clerk-reorder');
-    let p = null;
-    if (panel) {
-        for (let i = 0; i < panel.rows.length; i++) {
-            if (panel.rows[i].product_id === productId) {
-                p = panel.rows[i];
-                break;
-            }
-        }
-    }
-    if (!p) return;
-
-    const current = Number(p.reorder_point) || 0;
-    const unit = p.unit_name ? ' ' + p.unit_name : '';
-
-    // who to order it from, so the card answers "which company?" as well
-    const supplier = p.supplier_name
-        ? ['Supplier: ' + p.supplier_name]
-            .concat(p.contact_person ? ['Contact: ' + p.contact_person] : [])
-            .concat(p.contact_number ? ['Number: ' + p.contact_number] : [])
-            .concat(p.supplier_email ? ['Email: ' + p.supplier_email] : [])
-        : ['Supplier: None on file'];
-    const suggested = suggestedOrderOf(p);
-
-    const asked = await askInput({
-        title: 'Set the reorder point',
-        eyebrow: 'Reorder Point',
-        message: p.product_name + ' is reordered at ' + current + unit + ', with ' + p.quantity_in_stock + unit +
-                 ' on hand. When it falls to the new figure the manager is told to order more.',
-        detail: supplier.concat(['Suggested order: ' + (suggested > 0 ? suggested + unit : 'None')]),
-        label: 'Reorder at' + unit,
-        type: 'number',
-        value: String(current),
-        placeholder: '0',
-        confirmLabel: 'Save the point',
-        check: function (value) {
-            const typed = String(value).trim();
-            // /^\d+$/ matches text made only of digits (a whole number, no sign or decimal point)
-            if (typed === '' || !/^\d+$/.test(typed)) return 'Type a whole number of' + (unit || ' units') + ', like 12.';
-            if (Number(typed) === current) return 'That is the point it already has.';
-            return null;
-        }
-    });
-    if (asked === false || asked === null) return;
-
-    await saveReorderPoint(productId, Number(String(asked).trim()));
-}
-
-async function saveReorderPoint(productId, value) {
-    if (!Number.isInteger(value) || value < 0) {
-        notifyWarning('A reorder point cannot be negative.', 'Not saved');
-        return;
-    }
-
-    try {
-        const response = await apiSaveReorderPoint(productId, value);
-        const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
-
-        notifySuccess(result.message);
-        invLoaded = false;
-        await loadReorderTable();
-        await loadStockBanner();
-        await loadNotifications();
-    } catch (error) {
-        notifyOffline();
-    }
 }
 
 // The clerk raises a purchase order; the manager confirms it; once confirmed,
@@ -2072,48 +2058,6 @@ async function resolveReturn(reportId) {
     await sendReturnVerdict(reportId, null, '');
 }
 
-// The inspection: the clerk has looked at what the counter took back and says
-// whether it can be sold again. Sellable puts it back on the shelf; not
-// sellable writes it off. Either way the report closes.
-async function inspectReturn(reportId, verdict) {
-    const panel = getDataPanel('clerk-returns');
-    const r = panel ? panel.find(reportId) : null;
-    if (!r) return;
-
-    const noteBox = document.getElementById('inspect-note');
-    const note = noteBox ? noteBox.value.trim() : '';
-    const what = r.quantity + ' ' + (r.unit_name || '') + ' ' + r.product_name;
-
-    let yes;
-    if (verdict === 'Return to Stock') {
-        yes = await askConfirm(what.trim() + ' goes back on the shelf and the stock count goes up by ' + r.quantity + '.', {
-                title: 'Can it be sold again?',
-                eyebrow: 'Returned Items',
-                confirmLabel: 'Yes, back on the shelf',
-                detail: [
-                    'The counter and the manager are told.',
-                    'If it turns out to be faulty later, file a damage report.'
-                ]
-            });
-    } else {
-        yes = await askDanger(what.trim() + ' will be written off.', {
-                title: 'Write these goods off?',
-                eyebrow: 'Returned Items',
-                confirmLabel: 'Write it off',
-                detail: [
-                    'It never goes back on the shelf and cannot be sold.',
-                    'The stock count does not change: the sale already took it off.',
-                    'The counter and the manager are told, with your note attached.'
-                ]
-            });
-    }
-
-    if (!yes) return;
-
-    closeModal('detail-modal');
-    await sendReturnVerdict(reportId, verdict, note);
-}
-
 async function sendReturnVerdict(reportId, verdict, note) {
     try {
         const response = await apiResolveReturn(reportId, verdict, note);
@@ -2132,698 +2076,6 @@ async function sendReturnVerdict(reportId, verdict, note) {
     } catch (error) {
         notifyOffline();
     }
-}
-
-// ---------- Make a Report ----------
-// One report can hold several items. Most types list materials (typed and
-// picked, like Stock Adjustment's), each with its own quantity. A "Missing
-// from delivery" report names a purchase order instead: its items come up as
-// a checklist, and every ticked one goes into the report. One press of File
-// Report files them all, or none of them if one is refused.
-let reportItems = [];          // the materials listed so far: { productId, name, unit, onHand, quantity, refund }
-let reportSuggestHighlight = -1;
-let reportPo = null;           // the purchase order chosen for a Missing report: { po, items }
-let reportPoTicks = {};        // product id -> quantity, to tick when the checklist is drawn
-
-function reportMaterialBox() { return document.getElementById('report-material'); }
-function reportTypeNow() {
-    const box = document.getElementById('report-type');
-    return box ? box.value : 'Damaged';
-}
-
-async function onReportMaterialInput(value) {
-    const text = String(value || '').trim();
-    const clear = document.getElementById('report-material-clear');
-    if (clear) clear.hidden = text === '';
-
-    if (!invLoaded && text !== '') await ensureInventoryLoaded(false);
-
-    renderReportSuggestions(text);
-    renderReportMaterialVerdict();
-}
-
-function renderReportSuggestions(text) {
-    const list = document.getElementById('report-suggest');
-    const box = reportMaterialBox();
-    if (!list) return;
-
-    const query = String(text || '').trim().toLowerCase();
-    reportSuggestHighlight = -1;
-
-    let found = [];
-    if (query !== '' && invProducts.length > 0) found = findMaterials(query);
-
-    list.innerHTML = materialSuggestHtml(found, 'report-suggest-', 'pickReportMaterial');
-    list.hidden = found.length === 0;
-    if (box) box.setAttribute('aria-expanded', found.length > 0 ? 'true' : 'false');
-}
-
-function hideReportSuggestions() {
-    const list = document.getElementById('report-suggest');
-    const box = reportMaterialBox();
-    if (list) { list.hidden = true; list.innerHTML = ''; }
-    if (box) box.setAttribute('aria-expanded', 'false');
-    reportSuggestHighlight = -1;
-}
-
-function onReportMaterialKey(event) {
-    const list = document.getElementById('report-suggest');
-    if (!list || list.hidden) {
-        if (event.key === 'Enter') event.preventDefault();
-        return;
-    }
-
-    const items = list.querySelectorAll('.suggest-item');
-    if (items.length === 0) return;
-
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        const step = event.key === 'ArrowDown' ? 1 : -1;
-        reportSuggestHighlight = (reportSuggestHighlight + step + items.length) % items.length;
-        for (let i = 0; i < items.length; i++) {
-            items[i].classList.toggle('is-active', i === reportSuggestHighlight);
-        }
-        return;
-    }
-
-    if (event.key === 'Enter') {
-        event.preventDefault();
-        const pick = items[reportSuggestHighlight >= 0 ? reportSuggestHighlight : 0];
-        if (pick) pick.click();
-        return;
-    }
-
-    if (event.key === 'Escape') hideReportSuggestions();
-}
-
-// a picked material goes onto the list; the box empties, ready for the next one
-function pickReportMaterial(productId) {
-    const found = findProductById(productId);
-    if (!found) return;
-
-    addReportItem(found);
-    clearReportMaterial();
-}
-
-function clearReportMaterial(keepFocus) {
-    const box = reportMaterialBox();
-    if (box) box.value = '';
-
-    const clear = document.getElementById('report-material-clear');
-    if (clear) clear.hidden = true;
-
-    hideReportSuggestions();
-    renderReportMaterialVerdict();
-    if (box && keepFocus !== false) box.focus();
-}
-
-function renderReportMaterialVerdict() {
-    const box = document.getElementById('report-material-verdict');
-    if (!box) return;
-
-    const typed = reportMaterialBox() ? reportMaterialBox().value.trim() : '';
-    const list = document.getElementById('report-suggest');
-    const listOpen = list && !list.hidden;
-
-    box.className = 'pick-verdict';
-    box.textContent = '';
-    if (typed === '' || listOpen) return;
-
-    box.className = 'pick-verdict is-stop';
-    box.textContent = 'Nothing matches "' + typed + '". Try a name, brand, or category.';
-}
-
-// ---------- the materials listed in this report ----------
-function addReportItem(product) {
-    let alreadyListed = false;
-    for (let i = 0; i < reportItems.length; i++) {
-        if (reportItems[i].productId === product.product_id) alreadyListed = true;
-    }
-    if (alreadyListed) {
-        notifyWarning(product.product_name + ' is already in this report. Change its quantity in the list.', 'Already listed');
-        return;
-    }
-
-    reportItems.push({
-        productId: product.product_id,
-        name: product.product_name,
-        unit: product.unit_name || '',
-        onHand: Number(product.quantity_in_stock),
-        quantity: '1',
-        refund: ''
-    });
-    renderReportItems();
-}
-
-function removeReportItem(index) {
-    reportItems.splice(index, 1);
-    renderReportItems();
-}
-
-// typing in a box only remembers the figure; the list is not drawn again, so the cursor stays
-function setReportItemField(index, field, value) {
-    if (reportItems[index]) reportItems[index][field] = value;
-}
-
-function renderReportItems() {
-    const box = document.getElementById('report-items');
-    if (!box) return;
-
-    if (reportItems.length === 0) {
-        box.innerHTML = '<p class="report-items-empty">No materials in this report yet. Type one above to add it.</p>';
-        return;
-    }
-
-    // a refund amount goes with each item of a refund or a plain return
-    const type = reportTypeNow();
-    const withRefund = type === 'Refunded' || type === 'Return';
-
-    let lines = '';
-    for (let index = 0; index < reportItems.length; index++) {
-        const item = reportItems[index];
-        lines +=
-            '<div class="report-line' + (withRefund ? ' has-refund' : '') + '">' +
-                '<div>' +
-                    '<div class="recv-name">' + escapeHtml(item.name) + '</div>' +
-                    '<div class="recv-meta">' + item.onHand + ' ' + escapeHtml(item.unit) + ' on hand</div>' +
-                '</div>' +
-                '<div>' +
-                    '<label class="recv-meta" for="report-qty-' + index + '">Quantity' +
-                        (item.unit ? ' (' + escapeHtml(item.unit) + ')' : '') + '</label>' +
-                    '<input type="number" class="form-control recv-qty" id="report-qty-' + index + '" ' +
-                           'min="0.001" step="0.001" value="' + escapeHtml(item.quantity) + '" ' +
-                           'oninput="setReportItemField(' + index + ', \'quantity\', this.value)">' +
-                '</div>' +
-                (withRefund
-                    ? '<div>' +
-                          '<label class="recv-meta" for="report-refund-' + index + '">Refund amount</label>' +
-                          '<input type="number" class="form-control recv-qty" id="report-refund-' + index + '" ' +
-                                 'min="0" step="0.01" placeholder="0.00" value="' + escapeHtml(item.refund) + '" ' +
-                                 'oninput="setReportItemField(' + index + ', \'refund\', this.value)">' +
-                      '</div>'
-                    : '') +
-                '<button type="button" class="btn btn-sm btn-danger" ' +
-                        'onclick="removeReportItem(' + index + ')">Remove</button>' +
-            '</div>';
-    }
-
-    box.innerHTML = '<div class="report-items-head">Items in this report ' +
-        '<span class="chip-count">' + reportItems.length + '</span></div>' +
-        lines;
-}
-
-// ---------- the purchase orders a delivery can be checked against ----------
-// Approved orders still waiting for their delivery. Receiving an order
-// corrects its lines to what arrived, so a received order has nothing left to
-// check a delivery against.
-let poChoices = [];
-
-async function loadPoChoices() {
-    const rows = await apiGetPurchaseOrders();
-    poChoices = [];
-    for (let i = 0; i < rows.length; i++) {
-        if (rows[i].status === 'Pending') poChoices.push(rows[i]);
-    }
-    return poChoices;
-}
-
-// The approved order with this id from poChoices, or undefined when there is none.
-function findPoChoice(poId) {
-    for (let i = 0; i < poChoices.length; i++) {
-        if (poChoices[i].po_id === poId) return poChoices[i];
-    }
-    return undefined;
-}
-
-// the <option> rows of a purchase order box; the order with this id is selected
-function poChoiceOptions(selectedId) {
-    let options = '';
-    for (let i = 0; i < poChoices.length; i++) {
-        const po = poChoices[i];
-        options += '<option value="' + po.po_id + '"' + (po.po_id === selectedId ? ' selected' : '') + '>' +
-            escapeHtml('PO #' + po.po_id + ' · ' + po.supplier_name + ' · ' +
-                       poWhen(po.order_date).slice(0, 10) + ' · ' + poStatusWord(poStage(po))) +
-            '</option>';
-    }
-    return options;
-}
-
-// ---------- Missing from delivery: the purchase order and its checklist ----------
-function setReportPoVerdict(text, isStop) {
-    const box = document.getElementById('report-po-verdict');
-    if (!box) return;
-    box.className = isStop ? 'pick-verdict is-stop' : 'pick-verdict';
-    box.textContent = text;
-}
-
-async function loadReportPoChoices() {
-    const select = document.getElementById('report-po');
-    if (!select) return;
-
-    try {
-        await loadPoChoices();
-    } catch (error) {
-        setReportPoVerdict('The purchase orders could not be loaded. Try again.', true);
-        return;
-    }
-
-    select.innerHTML = '<option value="">Choose a purchase order</option>' +
-        poChoiceOptions(reportPo ? reportPo.po.po_id : null);
-    setReportPoVerdict(poChoices.length === 0
-        ? 'There is no approved purchase order waiting for its delivery.' : '', false);
-}
-
-async function onReportPoChange(value) {
-    reportPo = null;
-    reportPoTicks = {};
-    renderReportPoLines();
-
-    const poId = parseInt(value, 10);
-    if (!poId) return;
-
-    try {
-        const items = await apiGetPurchaseOrderItems(poId);
-        // another order may have been chosen while this one was loading
-        const select = document.getElementById('report-po');
-        if (select && parseInt(select.value, 10) !== poId) return;
-
-        reportPo = { po: findPoChoice(poId), items: items };
-        renderReportPoLines();
-    } catch (error) {
-        setReportPoVerdict('That purchase order could not be opened. Try again.', true);
-    }
-}
-
-// The order's items as a checklist: tick the ones that did not arrive, and
-// say how many.
-function renderReportPoLines() {
-    const box = document.getElementById('report-po-lines');
-    if (!box) return;
-
-    if (!reportPo) {
-        box.innerHTML = '';
-        return;
-    }
-    if (reportPo.items.length === 0) {
-        box.innerHTML = '<p class="report-items-empty">This order has no items.</p>';
-        return;
-    }
-
-    setReportPoVerdict('Tick every item that did not arrive and say how many.', false);
-
-    let bodyRows = '';
-    for (let index = 0; index < reportPo.items.length; index++) {
-        const item = reportPo.items[index];
-        const ticked = reportPoTicks[item.product_id] !== undefined;
-        const howMany = ticked ? reportPoTicks[item.product_id] : item.quantity;
-        bodyRows += '<tr>' +
-                '<td class="report-tick"><input type="checkbox" id="report-po-tick-' + index + '"' +
-                    (ticked ? ' checked' : '') + ' onchange="tickReportPo(' + index + ', this.checked)" ' +
-                    'aria-label="Missing: ' + escapeHtml(item.product_name) + '"></td>' +
-                '<td>' + escapeHtml(item.product_name) + '</td>' +
-                '<td class="cell-num">' + escapeHtml(poQuantityText(item)) + '</td>' +
-                '<td class="cell-num"><input type="number" class="form-control recv-qty" ' +
-                    'id="report-po-qty-' + index + '" min="0.001" step="0.001" value="' + howMany + '"' +
-                    (ticked ? '' : ' disabled') + ' aria-label="How many missing: ' + escapeHtml(item.product_name) + '"> ' +
-                    '<span class="muted">' + escapeHtml(item.unit_name || '') + '</span></td>' +
-                '</tr>';
-    }
-
-    box.innerHTML = '<div class="table-responsive"><table class="mini-table report-po-table">' +
-        '<thead><tr>' +
-            '<th class="report-tick"><input type="checkbox" id="report-po-all" ' +
-                'onchange="tickAllReportPo(this.checked)" aria-label="Tick every item"></th>' +
-            '<th>Material</th><th class="col-num">Ordered</th><th class="col-num">Missing</th>' +
-        '</tr></thead><tbody>' +
-        bodyRows +
-        '</tbody></table></div>';
-}
-
-function tickReportPo(index, on) {
-    const box = document.getElementById('report-po-qty-' + index);
-    if (box) box.disabled = !on;
-    if (on && reportPo) reportPoTicks[reportPo.items[index].product_id] = box ? box.value : 1;
-    else if (reportPo) delete reportPoTicks[reportPo.items[index].product_id];
-}
-
-function tickAllReportPo(on) {
-    if (!reportPo) return;
-    for (let index = 0; index < reportPo.items.length; index++) {
-        const tick = document.getElementById('report-po-tick-' + index);
-        if (tick) tick.checked = on;
-        tickReportPo(index, on);
-    }
-}
-
-// ---------- the report type decides which parts of the form show ----------
-function showReportSections(type) {
-    const missing = type === 'Missing';
-
-    document.getElementById('report-po-field').hidden = !missing;
-    document.getElementById('report-material-field').hidden = missing;
-    document.getElementById('report-sale-field').hidden = missing;
-    document.getElementById('report-restock-field').hidden = missing;
-
-    const form = document.getElementById('report-form');
-    if (form) {
-        form.elements.restock.value = type === 'Damaged' ? 'false' : 'true';
-        form.elements.reason.placeholder = missing ? 'Short delivery' : 'Cracked';
-    }
-
-    // the refund box shows on a refund or a plain return
-    renderReportItems();
-}
-
-function onReportTypeChange(type) {
-    showReportSections(type);
-    if (type === 'Missing') loadReportPoChoices();
-}
-
-// ---------- File Report ----------
-async function handleFileReport(event) {
-    event.preventDefault();
-    const form = event.target;
-    const type = form.elements.reportType.value;
-    const reason = form.elements.reason.value.trim();
-
-    const data = {
-        reportType: type,
-        reason: reason,
-        items: []
-    };
-
-    if (type === 'Missing') {
-        if (!reportPo) {
-            notifyWarning('Choose the purchase order the goods were missing from.', 'No purchase order');
-            return;
-        }
-        data.poId = reportPo.po.po_id;
-
-        for (let index = 0; index < reportPo.items.length; index++) {
-            const item = reportPo.items[index];
-            const tick = document.getElementById('report-po-tick-' + index);
-            const howMany = document.getElementById('report-po-qty-' + index);
-            if (tick && tick.checked) {
-                data.items.push({ productId: item.product_id, quantity: readQuantity(howMany ? howMany.value : '') });
-            }
-        }
-        if (data.items.length === 0) {
-            notifyWarning('Tick at least one item that did not arrive.', 'Nothing to report');
-            return;
-        }
-    } else {
-        data.saleId = form.elements.saleId.value ? parseInt(form.elements.saleId.value, 10) : null;
-        data.restock = form.elements.restock.value === 'true';
-
-        if (reportItems.length === 0) {
-            notifyWarning('Type a material\'s name and choose it from the list to add it to the report.', 'No material chosen');
-            renderReportMaterialVerdict();
-            return;
-        }
-        // a refund amount goes only with a refund or a plain return; a value typed
-        // while one of those was chosen is not sent for a damage report
-        const withRefund = type === 'Refunded' || type === 'Return';
-        for (let i = 0; i < reportItems.length; i++) {
-            const item = reportItems[i];
-            data.items.push({
-                productId: item.productId,
-                quantity: readQuantity(item.quantity),
-                refundAmount: withRefund ? (parseFloat(item.refund) || 0) : 0
-            });
-        }
-    }
-
-    if (reason === '') { notifyWarning('Say why this is being recorded.', 'A reason is required'); return; }
-    let badQuantity = false;
-    for (let i = 0; i < data.items.length; i++) {
-        if (!data.items[i].quantity || data.items[i].quantity <= 0) badQuantity = true;
-    }
-    if (badQuantity) {
-        notifyWarning('Every item needs a quantity greater than zero.', 'Nothing was filed');
-        return;
-    }
-
-    // a double press must not file the report twice
-    const button = form.querySelector('[type="submit"]');
-    if (button) button.disabled = true;
-
-    try {
-        const response = await apiFileReportItems(data);
-        const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
-
-        notifySuccess(result.message + ' The manager has been notified.', 'Report filed');
-        form.reset();
-        reportItems = [];
-        reportPo = null;
-        reportPoTicks = {};
-        clearReportMaterial(false);
-        onReportTypeChange(form.elements.reportType.value);
-        renderReportPoLines();
-        // the stock figures have moved; the next search reads them afresh
-        invLoaded = false;
-
-        // The live channel skips this screen's own writes, so the lists that
-        // show the new report (Returned Items) and the stock it moved read again here.
-        const keys = ['clerk-returns', 'clerk-materials', 'clerk-reorder'];
-        for (let i = 0; i < keys.length; i++) {
-            const panel = getDataPanel(keys[i]);
-            if (panel && panel.state === 'ready') await panel.refresh();
-        }
-
-        await loadStockBanner();
-        await loadNotifications();
-    } catch (error) {
-        notifyOffline();
-    } finally {
-        if (button) button.disabled = false;
-    }
-}
-
-// ---------- the purchase order Reference card (opened from Adjustment History) ----------
-// A received purchase order, each line with what was ordered beside what
-// arrived, so the clerk can see the right goods came in. Read only.
-// choices: the received orders, newest first; data: the open order's reference;
-// search: what is typed in the box above the list
-let poReference = { poId: null, choices: [], data: null, search: '' };
-
-// the card's one page; the card is still the open one while detailPages holds it
-let poReferencePageObject = null;
-
-// poId: optional; the order to open on (an Adjustment History entry names one).
-// Without it the card opens on the newest received order.
-async function openPoReference(poId) {
-    poReference = { poId: poId || null, choices: [], data: null, search: '' };
-    poReferencePageObject = { label: 'Reference', body: '<p class="detail-note">Loading the purchase orders...</p>' };
-    openDetailModal('Purchase Order Reference', 'What was ordered beside what arrived', 'PO',
-        [poReferencePageObject],
-        '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Close</button>',
-        { wide: true, scroll: true });
-
-    try {
-        const rows = await apiGetPurchaseOrders();
-        for (let i = 0; i < rows.length; i++) {
-            if (rows[i].status === 'Received') poReference.choices.push(rows[i]);
-        }
-    } catch (error) {
-        redrawPoReference('<p class="detail-note detail-warn">The purchase orders could not be loaded. Close this and try again.</p>');
-        return;
-    }
-
-    if (!poReference.poId) poReference.poId = lastReceivedPoId(poReference.choices);
-    await onPoReferencePick(poReference.poId);
-}
-
-// the order counted in most lately; an order received before the day was kept
-// has none, and comes after every one that has it
-function lastReceivedPoId(orders) {
-    let latest = null;
-    for (let i = 0; i < orders.length; i++) {
-        const when = String(orders[i].received_at || '');
-        if (latest === null || when > String(latest.received_at || '')) latest = orders[i];
-    }
-    return latest ? latest.po_id : null;
-}
-
-// true while this card is the one open: it may have been closed, or another
-// card opened, while an order was loading
-function poReferenceIsOpen() {
-    const modal = document.getElementById('detail-modal');
-    return Boolean(modal && modal.classList.contains('open') &&
-                   poReferencePageObject && detailPages[0] === poReferencePageObject);
-}
-
-// draws the card's page again without opening it again
-function redrawPoReference(body) {
-    if (!poReferenceIsOpen()) return;
-    poReferencePageObject.body = body;
-    renderDetailPage();
-    filterPoReference(poReference.search);   // a search typed before an order was picked still applies
-
-    // the list scrolls on its own; keep the open order in view
-    const picked = document.querySelector('.po-ref-list .is-picked');
-    if (picked) picked.scrollIntoView({ block: 'nearest' });
-}
-
-async function onPoReferencePick(value) {
-    const poId = parseInt(value, 10);
-    poReference.poId = poId || null;
-    poReference.data = null;
-
-    if (poId) {
-        redrawPoReference(poReferencePage('<p class="detail-note">Opening the order...</p>'));
-        try {
-            const data = await apiGetPurchaseOrderReference(poId);
-            // the card may have been closed, or another order chosen, while this one was loading
-            if (!poReferenceIsOpen() || poReference.poId !== poId) return;
-            poReference.data = data;
-        } catch (error) {
-            redrawPoReference(poReferencePage('<p class="detail-note detail-warn">That purchase order could not be opened. Try again.</p>'));
-            return;
-        }
-    }
-    redrawPoReference(poReferencePage());
-}
-
-// Two columns: every received order on the left, the open one marked; the
-// open order on the right. Clicking an order on the left opens it.
-// message: optional, shown on the right instead of the order (loading, failed)
-function poReferencePage(message) {
-    if (poReference.choices.length === 0) {
-        return '<p class="detail-note">No purchase order has been received yet. ' +
-            'Press Receive on a purchase order when its delivery is counted in.</p>';
-    }
-
-    let list = '';
-    for (let i = 0; i < poReference.choices.length; i++) {
-        const po = poReference.choices[i];
-        const picked = po.po_id === poReference.poId;
-        // an order received before the day was kept has no date; its order date is shown
-        const when = po.received_at
-            ? 'Received ' + poWhen(po.received_at).slice(0, 10)
-            : 'Ordered ' + poWhen(po.order_date).slice(0, 10);
-        // what the search box matches: the number and the supplier
-        const words = ('PO #' + po.po_id + ' ' + po.po_id + ' ' + po.supplier_name).toLowerCase();
-        list += '<button type="button" class="po-ref-item' + (picked ? ' is-picked' : '') + '" ' +
-                'data-search="' + escapeHtml(words) + '" ' +
-                'onclick="onPoReferencePick(' + po.po_id + ')">' +
-            '<span class="po-ref-no">PO #' + po.po_id + '</span>' +
-            '<span class="po-ref-supplier">' + escapeHtml(po.supplier_name) + '</span>' +
-            '<span class="po-ref-when">' + escapeHtml(when) + '</span>' +
-            '</button>';
-    }
-
-    let main = message || '';
-    if (!main && poReference.data) main = poReferenceDetails(poReference.data);
-    if (!main) main = '<p class="detail-note">Pick an order on the left to see it.</p>';
-
-    return '<div class="po-ref">' +
-            '<div class="po-ref-side">' +
-                '<p class="po-ref-head">Received orders (' + poReference.choices.length + ')</p>' +
-                '<input type="search" class="form-control po-ref-search" id="po-ref-search" ' +
-                    'placeholder="Search PO number or supplier" autocomplete="off" ' +
-                    'value="' + escapeHtml(poReference.search) + '" oninput="filterPoReference(this.value)">' +
-                '<div class="po-ref-list">' + list +
-                    '<p class="po-ref-none" id="po-ref-none" hidden>No order matches that search.</p>' +
-                '</div>' +
-            '</div>' +
-            '<div class="po-ref-main">' + main + '</div>' +
-        '</div>';
-}
-
-// hides the orders the search does not match; the list is not drawn again,
-// so the box keeps its cursor while typing
-function filterPoReference(text) {
-    poReference.search = text;
-    const wanted = String(text || '').trim().toLowerCase();
-    const items = document.querySelectorAll('.po-ref-list .po-ref-item');
-    let shown = 0;
-    for (let i = 0; i < items.length; i++) {
-        const match = wanted === '' || items[i].getAttribute('data-search').indexOf(wanted) !== -1;
-        items[i].hidden = !match;
-        if (match) shown++;
-    }
-    const none = document.getElementById('po-ref-none');
-    if (none) none.hidden = shown > 0;
-}
-
-// one fact beside another: "Ordered" over its date and who raised it
-function poReferenceFact(label, when, who) {
-    return '<div class="po-ref-fact">' +
-            '<span class="po-ref-fact-label">' + label + '</span>' +
-            '<span class="po-ref-fact-value">' + when + '</span>' +
-            (who ? '<span class="po-ref-fact-who">by ' + escapeHtml(who) + '</span>' : '') +
-        '</div>';
-}
-
-// the order's name, when it was ordered and received, a one-line verdict, then
-// each material with what was ordered and what arrived
-function poReferenceDetails(data) {
-    const order = data.order;
-
-    let rows = '';
-    let differs = 0;
-    for (let i = 0; i < data.lines.length; i++) {
-        const line = data.lines[i];
-        const check = poReferenceCheck(line, data.kept);
-        if (check.differs) differs++;
-
-        const ordered = line.ordered
-            ? escapeHtml(poQuantityText(line.ordered))
-            : '<span class="muted">' + (data.kept ? 'Not ordered' : 'Not recorded') + '</span>';
-        const received = line.received
-            ? escapeHtml(poQuantityText(line.received))
-            : escapeHtml(qtyText(0, line.unit_name || ''));
-
-        rows += '<tr' + (check.differs ? ' class="po-ref-differs"' : '') + '>' +
-            '<td>' + escapeHtml(line.product_name) + '</td>' +
-            '<td class="cell-num">' + ordered + '</td>' +
-            '<td class="cell-num">' + received + '</td>' +
-            '<td><span class="badge ' + check.badge + '">' + escapeHtml(check.text) + '</span></td>' +
-            '</tr>';
-    }
-
-    // the verdict comes first, so the answer is read before the details
-    let verdict;
-    if (!data.kept) {
-        verdict = '<p class="po-ref-verdict is-old"><i class="bi bi-info-circle" aria-hidden="true"></i>' +
-            'Received before the system kept what was ordered, so only what arrived is shown.</p>';
-    } else if (differs === 0) {
-        verdict = '<p class="po-ref-verdict is-complete"><i class="bi bi-check-circle" aria-hidden="true"></i>' +
-            'Complete: all ' + data.lines.length + (data.lines.length === 1 ? ' item' : ' items') +
-            ' arrived as ordered.</p>';
-    } else {
-        verdict = '<p class="po-ref-verdict is-short"><i class="bi bi-exclamation-triangle" aria-hidden="true"></i>' +
-            differs + ' of ' + data.lines.length + ' items ' + (differs === 1 ? 'differs' : 'differ') +
-            ' from the order. They are shaded below.</p>';
-    }
-
-    return '<h4 class="po-ref-title">PO #' + order.po_id + ' · ' + escapeHtml(order.supplier_name) + '</h4>' +
-        '<div class="po-ref-facts">' +
-            poReferenceFact('Ordered', escapeHtml(poWhen(order.order_date)), order.raised_by) +
-            poReferenceFact('Received', order.received_at
-                ? escapeHtml(poWhen(order.received_at))
-                : '<span class="muted">Not recorded</span>', order.received_by) +
-        '</div>' +
-        verdict +
-        '<div class="table-responsive"><table class="mini-table po-ref-table">' +
-            '<thead><tr><th>Material</th><th class="col-num">Ordered</th><th class="col-num">Received</th><th>Check</th></tr></thead>' +
-            '<tbody>' + rows + '</tbody></table></div>';
-}
-
-// What one line came to, in the material's own unit: as ordered, short,
-// more than ordered, not ordered at all, or did not arrive.
-// badge: the colour of its label (green as ordered, amber short, red missing)
-function poReferenceCheck(line, kept) {
-    const unit = line.unit_name || '';
-    if (!kept) return { text: 'Arrived', badge: 'badge-neutral', differs: false };
-    if (!line.ordered) return { text: 'Not on the order', badge: 'badge-info', differs: true };
-    if (!line.received) return { text: 'Did not arrive', badge: 'badge-danger', differs: true };
-
-    const difference = Number(line.received.quantity) - Number(line.ordered.quantity);
-    if (difference < 0) return { text: 'Short by ' + qtyText(-difference, unit), badge: 'badge-warning', differs: true };
-    if (difference > 0) return { text: qtyText(difference, unit) + ' more than ordered', badge: 'badge-info', differs: true };
-    return { text: 'As ordered', badge: 'badge-success', differs: false };
 }
 
 // ---------- archive ----------
@@ -2918,7 +2170,6 @@ function showClerkRecordType(type, event) {
 
     writeClerkRecordHeaders();
     syncClerkRecordAddButton();
-    if (changed) fillClerkRecordSort();
 
     const panel = getDataPanel('clerk-records');
     if (!panel || !changed) return;
@@ -2948,47 +2199,10 @@ function writeClerkRecordHeaders() {
     }
 }
 
-// Products sort by All (name), Category or Brand; the others by name
-function fillClerkRecordSort() {
-    const select = document.getElementById('records-sort');
-    if (!select) return;
-
-    let options;
-    if (clerkRecordType === 'product') {
-        options = [['name-asc', 'All'], ['category_name-asc', 'Category'], ['brand_name-asc', 'Brand']];
-    } else {
-        options = [['name-asc', 'Name, A to Z'], ['name-desc', 'Name, Z to A']];
-    }
-
-    let optionsHtml = '';
-    for (let i = 0; i < options.length; i++) {
-        optionsHtml += '<option value="' + options[i][0] + '">' + escapeHtml(options[i][1]) + '</option>';
-    }
-    select.innerHTML = optionsHtml;
-    select.value = 'name-asc';
-    // set without loading: a closed table stays closed
-    const panel = getDataPanel('clerk-records');
-    if (panel) panel.setFilter('sort', 'name-asc');
-}
-
-function sortClerkRecordRows(rows, order) {
-    const value = String(order || 'name-asc');
-    const descending = value.endsWith('-desc');
-    // the sort order without its "-asc" or "-desc" ending
-    const key = value.replace(/-(asc|desc)$/, '');
-
+// every kind of record reads A to Z by name
+function sortClerkRecordRows(rows) {
     return rows.sort(function (a, b) {
-        const byName = String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
-        let result = byName;
-        if (key === 'category_name' || key === 'brand_name') {
-            // A to Z by category or brand, the ones not set last, then by name
-            const first = String(a[key] || '');
-            const second = String(b[key] || '');
-            if (first === '' && second !== '') result = 1;
-            else if (second === '' && first !== '') result = -1;
-            else result = first.localeCompare(second) || byName;
-        }
-        return descending ? -result : result;
+        return String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
     });
 }
 
@@ -3004,7 +2218,7 @@ function buildClerkRecordsPanel() {
             text: 'Press Load Data to see these records.',
             button: 'Load Data'
         },
-        filters: { sort: 'name-asc' },
+        filters: {},
         load: function () {
             return apiGetRecords(clerkRecordType);
         },
@@ -3015,7 +2229,7 @@ function buildClerkRecordsPanel() {
             return prefixMatch(values, query);
         },
         sort: function (rows, filters) {
-            return sortClerkRecordRows(rows, filters.sort);
+            return sortClerkRecordRows(rows);
         },
 
         // a row opens a card with the whole record
@@ -3294,23 +2508,18 @@ function openAdjustmentDetail(adjustmentId) {
               escapeHtml(a.unit_name) + ', and says so.</p>'
             : '');
 
+    // who and when, then the reason under the figures: one page, no tabs
     const why = '<div class="detail-grid">' +
         detailField('Adjusted By', escapeHtml(a.adjusted_by)) +
         detailField('When', escapeHtml(a.created_at)) +
-        '</div><p class="detail-note">' + escapeHtml(a.reason) + '</p>';
-
-    // stock that came in on a purchase order opens that order's Reference card,
-    // when Purchase Order Reference is switched on in Access Control
-    const fromOrder = /^Received on purchase order #(\d+)/.exec(a.reason || '');
-    const footActions = fromOrder && holdsFeature('po-reference')
-        ? '<button type="button" class="btn btn-ghost" onclick="openPoReference(' + Number(fromOrder[1]) + ')">Reference</button>'
-        : '';
+        '</div>' +
+        '<h4 class="detail-subhead">Reason</h4>' +
+        '<p class="detail-note">' + escapeHtml(a.reason || 'No reason given.') + '</p>';
 
     openDetailModal('Adjustment #' + a.adjustment_id, a.product_name + ' · ' + a.adjustment_type,
         'A' + a.adjustment_id, [
-            { label: 'Change', body: change },
-            { label: 'Reason', body: why }
-        ], footActions);
+            { label: 'Change', body: change + why }
+        ], '');
 }
 
 function openReturnDetail(returnId) {
@@ -3328,32 +2537,16 @@ function openReturnDetail(returnId) {
         // goods that never arrived have no sale and no refund
         (missing ? detailField('Purchase Order', '#' + r.po_id) : detailField('Refund Amount', peso(r.refund_amount))) +
         detailField('Status', statusBadge(r.status)) +
-        '</div>' +
-        (missing && r.status === 'Open'
-            ? '<p class="detail-note">These goods were ordered but never arrived. Mark the report resolved once the supplier has made it good.</p>'
-            : '');
+        '</div>';
 
     const awaiting = returnAwaiting(r);
 
-    // the inspection sits on the first tab, where a pressed row lands
-    let inspection;
-    if (awaiting) {
-        inspection = '<p class="detail-note">The counter took this back and refunded it. Look at the goods: can they be sold again?</p>' +
-              '<div class="form-group">' +
-                  '<label for="inspect-note">What you found <span class="label-hint">optional</span></label>' +
-                  '<input type="text" id="inspect-note" class="form-control" maxlength="255" ' +
-                         'placeholder="Box unopened, seals intact." onclick="event.stopPropagation()">' +
-              '</div>' +
-              '<div class="detail-actions">' +
-                  '<button type="button" class="btn btn-success" onclick="inspectReturn(' + r.return_id + ', \'Return to Stock\')">' +
-                      'Sellable &mdash; back on the shelf</button>' +
-                  '<button type="button" class="btn btn-danger" onclick="inspectReturn(' + r.return_id + ', \'Write-Off\')">' +
-                      'Not sellable &mdash; write it off</button>' +
-              '</div>';
-    } else if (r.status === 'Open') {
+    // goods waiting for inspection are added to stock or discarded on Stock
+    // Adjustment (Reference, Returned Items); a report already decided can be
+    // marked resolved here
+    let inspection = '';
+    if (!awaiting && r.status === 'Open') {
         inspection = '<div class="detail-actions"><button type="button" class="btn btn-success" onclick="closeModal(\'detail-modal\'); resolveReturn(' + r.return_id + ')">Mark Resolved</button></div>';
-    } else {
-        inspection = '';
     }
 
     // what the Inspected field says when nobody has inspected the goods
@@ -3404,7 +2597,6 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         buildClerkRecordsPanel();
         writeClerkRecordHeaders();
         syncClerkRecordAddButton();
-        fillClerkRecordSort();
 
         // the schedule follows what the administrator switched on for this role
         configureDeliverySchedule({
@@ -3442,6 +2634,17 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         fillMaterialFilters();
         unfoldSidebarAtOpenScreen();
         loadNotifications();
+    });
+
+    // going to another screen with work on the Stock Adjustment form asks first;
+    // capture, so the menu's own handler waits for the answer
+    document.addEventListener('click', guardAdjustLeave, true);
+
+    // so does closing or reloading the page
+    window.addEventListener('beforeunload', function (event) {
+        if (!adjustFormHasWork()) return;
+        event.preventDefault();
+        event.returnValue = '';
     });
 
     // a click anywhere else closes whichever suggestion list is open

@@ -227,19 +227,17 @@ function buildMessage(from, fromName, to, subject, body, html, images, attachmen
   if (!html) {
     layer = [textHeaders, base64Lines(body)];
   } else {
-    // the text and the html are two versions of the same message (alternative)
-    const alternative = "alt-" + randomPart;
-    layer = [["Content-Type: multipart/alternative; boundary=\"" + alternative + "\""],
-      "--" + alternative + "\r\n" + mimePart(textHeaders, base64Lines(body)) +
-      "--" + alternative + "\r\n" +
-      mimePart(["Content-Type: text/html; charset=UTF-8", "Content-Transfer-Encoding: base64"], base64Lines(html)) +
-      "--" + alternative + "--"];
+    const htmlPart = [["Content-Type: text/html; charset=UTF-8", "Content-Transfer-Encoding: base64"],
+      base64Lines(html)];
 
-    // the pictures belong to the html (related)
+    // the pictures belong to the html alone (related), the way mail readers
+    // expect it: the Gmail app shows a broken picture when they wrap the
+    // plain text too
+    let htmlLayer = htmlPart;
     const pictures = images || [];
     if (pictures.length > 0) {
       const related = "rel-" + randomPart;
-      let content = "--" + related + "\r\n" + mimePart(layer[0], layer[1]);
+      let content = "--" + related + "\r\n" + mimePart(htmlPart[0], htmlPart[1]);
       for (let imageIndex = 0; imageIndex < pictures.length; imageIndex++) {
         const image = pictures[imageIndex];
         content += "--" + related + "\r\n" + mimePart([
@@ -249,8 +247,16 @@ function buildMessage(from, fromName, to, subject, body, html, images, attachmen
           "Content-Disposition: inline; filename=\"" + image.filename + "\""
         ], base64Lines(image.content));
       }
-      layer = [["Content-Type: multipart/related; boundary=\"" + related + "\""], content + "--" + related + "--"];
+      htmlLayer = [["Content-Type: multipart/related; type=\"text/html\"; boundary=\"" + related + "\""],
+        content + "--" + related + "--"];
     }
+
+    // the text and the html are two versions of the same message (alternative)
+    const alternative = "alt-" + randomPart;
+    layer = [["Content-Type: multipart/alternative; boundary=\"" + alternative + "\""],
+      "--" + alternative + "\r\n" + mimePart(textHeaders, base64Lines(body)) +
+      "--" + alternative + "\r\n" + mimePart(htmlLayer[0], htmlLayer[1]) +
+      "--" + alternative + "--"];
   }
 
   // the files ride alongside the message (mixed)

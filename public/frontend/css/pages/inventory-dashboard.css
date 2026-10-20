@@ -392,7 +392,8 @@ td.cell-num .stock-level { margin-left: auto; }
 .attention-reorder { font-size: 12.5px; color: var(--steel-soft); }
 
 .attention-empty { padding: 14px 0; color: var(--steel); border-top: 1px solid var(--line); }
-.attention-more { margin-top: 12px; }
+.attention-more { margin-top: 0; }
+.attention-more[hidden] { display: none; }
 
 /* the row whose order, return or material is on the form */
 .attention-row.is-picked { background: var(--signal-dim); box-shadow: inset 3px 0 0 var(--signal); }
@@ -400,7 +401,7 @@ td.cell-num .stock-level { margin-left: auto; }
 /* REFERENCE -- the search and the Type filter sit above the list; the list
    holds every material, so it scrolls on its own instead of stretching the page */
 .reference-toolbar { margin-bottom: 10px; }
-#panel-adjust .attention-list { max-height: 560px; overflow-y: auto; }
+
 
 /* ==========================================================================
    AN ORDER OR A RETURN ON THE ADJUSTMENT FORM
