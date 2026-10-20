@@ -451,7 +451,7 @@
                                        min="0" step="0.01" value="0" placeholder="0.00" oninput="renderCart()">
                             </div>
                             <div class="form-group">
-                                <label for="pay-down-method">Payment method</label>
+                                <label for="pay-down-method">Method</label>
                                 <select id="pay-down-method" name="downPaymentMethod" class="form-control" onchange="renderCart()">
                                     <option value="Cash">Cash</option>
                                     <option value="GCash">GCash</option>
@@ -648,7 +648,7 @@
                     <h4 class="detail-subhead">Where it goes</h4>
                     <p class="label-hint" id="dl-saved-address" hidden></p>
                     <div class="form-group">
-                        <label for="dl-street">House number and street <span class="label-hint">optional</span></label>
+                        <label for="dl-street">House number and street</label>
                         <input type="text" id="dl-street" name="street" class="form-control"
                                maxlength="150" placeholder="Lot 5 Block 2, Rizal Street">
                         <span class="field-error" id="dl-street-error" hidden></span>
@@ -675,7 +675,7 @@
                             <span class="field-error" id="dl-province-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="dl-landmark">Landmark <span class="label-hint">optional</span></label>
+                            <label for="dl-landmark">Landmark</label>
                             <input type="text" id="dl-landmark" name="landmark" class="form-control"
                                    maxlength="150" placeholder="Beside the blue gate, across the chapel">
                             <span class="field-error" id="dl-landmark-error" hidden></span>
@@ -685,10 +685,8 @@
                     <h4 class="detail-subhead">When and who</h4>
                     <div class="grid-2">
                         <div class="form-group">
-                            <label for="dl-scheduled">Preferred delivery date <span class="label-hint">optional</span></label>
-                            <input type="datetime-local" id="dl-scheduled" name="scheduledDate" class="form-control">
-                            <span class="label-hint">Date and time. Leave it empty if the slot is not
-                                agreed yet.</span>
+                            <label for="dl-scheduled">Preferred delivery date <span class="req-mark" aria-hidden="true">*</span></label>
+                            <input type="datetime-local" id="dl-scheduled" name="scheduledDate" class="form-control" required>
                             <span class="field-error" id="dl-scheduled-error" hidden></span>
                         </div>
                         <div class="form-group">
@@ -712,7 +710,7 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="dl-remarks">Remarks <span class="label-hint">optional</span></label>
+                        <label for="dl-remarks">Remarks</label>
                         <input type="text" id="dl-remarks" name="remarks" class="form-control" maxlength="255"
                                placeholder="Call before arriving, leave with the guard">
                         <span class="field-error" id="dl-remarks-error" hidden></span>
