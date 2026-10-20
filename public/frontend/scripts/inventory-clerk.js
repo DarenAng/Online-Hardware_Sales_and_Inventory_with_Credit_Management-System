@@ -1862,8 +1862,7 @@ async function applyReturnAdjustment() {
 }
 
 // ---------- reorder point settings ----------
-// a material's row is pressed and the new point is asked for in a card; no
-// boxes or buttons sit in the table
+// read only: the manager sets the points
 function buildReorderPanel() {
     createDataPanel({
         key: 'clerk-reorder',
@@ -1893,8 +1892,7 @@ function buildReorderPanel() {
         // the stock level against the point: a bar, the point itself, and what
         // an order would take to get back to comfortable
         renderRow: function (p, index) {
-            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="askReorderPoint(' + p.product_id + ')" title="Set the reorder point">' +
+            return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
             '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
             '<td class="cell-num">' + stockLevelBar(p) + '</td>' +
             '<td class="cell-num">' + p.reorder_point + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
@@ -1939,77 +1937,6 @@ function stockLevelBar(p) {
 async function loadReorderTable() {
     const panel = getDataPanel('clerk-reorder');
     if (panel && panel.state !== 'closed') await panel.refresh();
-}
-
-// the card asks for the new point, reads it back, then saves it
-async function askReorderPoint(productId) {
-    const panel = getDataPanel('clerk-reorder');
-    let p = null;
-    if (panel) {
-        for (let i = 0; i < panel.rows.length; i++) {
-            if (panel.rows[i].product_id === productId) {
-                p = panel.rows[i];
-                break;
-            }
-        }
-    }
-    if (!p) return;
-
-    const current = Number(p.reorder_point) || 0;
-    const unit = p.unit_name ? ' ' + p.unit_name : '';
-
-    // who to order it from, so the card answers "which company?" as well
-    const supplier = p.supplier_name
-        ? ['Supplier: ' + p.supplier_name]
-            .concat(p.contact_person ? ['Contact: ' + p.contact_person] : [])
-            .concat(p.contact_number ? ['Number: ' + p.contact_number] : [])
-            .concat(p.supplier_email ? ['Email: ' + p.supplier_email] : [])
-        : ['Supplier: None on file'];
-    const suggested = suggestedOrderOf(p);
-
-    const asked = await askInput({
-        title: 'Set the reorder point',
-        eyebrow: 'Reorder Point',
-        message: p.product_name + ' is reordered at ' + current + unit + ', with ' + p.quantity_in_stock + unit +
-                 ' on hand. When it falls to the new figure the manager is told to order more.',
-        detail: supplier.concat(['Suggested order: ' + (suggested > 0 ? suggested + unit : 'None')]),
-        label: 'Reorder at' + unit,
-        type: 'number',
-        value: String(current),
-        placeholder: '0',
-        confirmLabel: 'Save the point',
-        check: function (value) {
-            const typed = String(value).trim();
-            // /^\d+$/ matches text made only of digits (a whole number, no sign or decimal point)
-            if (typed === '' || !/^\d+$/.test(typed)) return 'Type a whole number of' + (unit || ' units') + ', like 12.';
-            if (Number(typed) === current) return 'That is the point it already has.';
-            return null;
-        }
-    });
-    if (asked === false || asked === null) return;
-
-    await saveReorderPoint(productId, Number(String(asked).trim()));
-}
-
-async function saveReorderPoint(productId, value) {
-    if (!Number.isInteger(value) || value < 0) {
-        notifyWarning('A reorder point cannot be negative.', 'Not saved');
-        return;
-    }
-
-    try {
-        const response = await apiSaveReorderPoint(productId, value);
-        const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
-
-        notifySuccess(result.message);
-        invLoaded = false;
-        await loadReorderTable();
-        await loadStockBanner();
-        await loadNotifications();
-    } catch (error) {
-        notifyOffline();
-    }
 }
 
 // The clerk raises a purchase order; the manager confirms it; once confirmed,

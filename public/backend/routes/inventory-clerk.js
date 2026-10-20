@@ -707,30 +707,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // REORDER POINT SETTINGS
-  app.put("/api/inventory/reorder/:productId", async function (request, response) {
-    const reorderPoint = request.body.reorderPoint;
-
-    if (reorderPoint === undefined || reorderPoint === null) {
-      return response.status(400).json({ error: "A reorder point is required" });
-    }
-
-    try {
-      const output = await inventoryClerkProcedures.setReorderPoint(
-        [request.params.productId, reorderPoint, getActorId(request)]
-      );
-
-      if (output.status_code !== 200) {
-        return response.status(output.status_code).json({ error: output.message });
-      }
-
-      response.json({ message: output.message });
-    } catch (error) {
-      console.error("Reorder point failed:", error.message);
-      response.status(500).json({ error: "Unable to save the reorder point" });
-    }
-  });
-
   // PURCHASE ORDERS
   app.get("/api/purchase-orders", async function (request, response) {
     try {

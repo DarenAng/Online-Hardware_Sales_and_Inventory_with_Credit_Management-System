@@ -159,7 +159,6 @@ const ACCESS_RULES = [
   ["PUT",   /^\/api\/inventory\/products\/\d+\/pack$/,        [CLERK]],
   ["GET",   /^\/api\/inventory\/adjustments$/,         [CLERK]],
   ["POST",  /^\/api\/inventory\/adjust$/,              [CLERK]],
-  ["PUT",   /^\/api\/inventory\/reorder\/\d+$/,        [CLERK]],
 
   // suppliers are the manager's to add; categories and units the inventory clerk's alone
   ["POST",  /^\/api\/suppliers$/,                     [MANAGER]],

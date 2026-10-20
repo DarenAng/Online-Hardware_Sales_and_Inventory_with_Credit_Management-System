@@ -31,11 +31,6 @@ function apiAdjustStock(data) {
     return sendJson('/api/inventory/adjust', 'POST', data);
 }
 
-// PUT /api/inventory/reorder/:id -- the reorder point of one material
-function apiSaveReorderPoint(productId, reorderPoint) {
-    return sendJson('/api/inventory/reorder/' + productId, 'PUT', { reorderPoint: reorderPoint });
-}
-
 // GET /api/purchase-orders/:id/reference -- a received order: what was ordered beside what arrived
 function apiGetPurchaseOrderReference(poId) {
     return getJson('/api/purchase-orders/' + poId + '/reference');
