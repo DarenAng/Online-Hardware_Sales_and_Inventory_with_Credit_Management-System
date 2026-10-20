@@ -453,10 +453,6 @@ function apiGetPurchaseOrderItems(poId) {
     return getJson('/api/purchase-orders/' + poId + '/items');
 }
 
-// GET /api/purchase-orders/:id/reports -- goods reported missing from its delivery
-function apiGetPurchaseOrderReports(poId) {
-    return getJson('/api/purchase-orders/' + poId + '/reports');
-}
 
 // GET /api/purchase-orders/:id/document -- the printed order
 function apiGetPurchaseOrderDocument(poId) {
@@ -486,10 +482,18 @@ function apiMarkPurchaseOrderSent(poId) {
     return sendJson('/api/purchase-orders/' + poId + '/mark-sent', 'POST', {});
 }
 
-// POST /api/purchase-orders/:id/receive -- the clerk counts the delivery in
-function apiReceivePurchaseOrder(poId, received, discount) {
+// POST /api/purchase-orders/:id/receive -- the clerk counts the delivery in;
+// remarks (optional) go on the order's delivery Report
+function apiReceivePurchaseOrder(poId, received, discount, remarks) {
     return sendJson('/api/purchase-orders/' + poId + '/receive', 'POST', {
         received: received,
-        discount: discount
+        discount: discount,
+        remarks: remarks || null
     });
+}
+
+// GET /api/purchase-orders/:id/reports -- the delivery Report: what came in
+// under or over the order
+function apiGetPurchaseOrderReport(poId) {
+    return getJson('/api/purchase-orders/' + poId + '/reports');
 }

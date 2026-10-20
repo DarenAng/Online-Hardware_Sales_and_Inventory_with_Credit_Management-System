@@ -4,15 +4,14 @@
 //
 // What is in this file, from top to bottom:
 //   - switching screens (showInventoryPanel and the show... functions)
-//   - the material list and the low-stock banner
-//   - stock adjustment: pick a material and a unit, see a preview, save
+//   - the material list (with its filters) and the low-stock banner
+//   - stock adjustment: pick a material, an accepted purchase order or an open
+//     returned item from Reference, see a preview, save
 //   - adjustment history and reorder points
 //   - returns and damage reports: inspect, return to stock or write off
 //   - Make a Report: several items in one report, or goods missing from a delivery
-//     (checked against its purchase order, here and from Stock Adjustment)
 //   - the material archive
-//   - popups: one material (with its selling sizes and delivery pack),
-//     one adjustment, one return
+//   - popups: one material, one adjustment, one return
 //   - the page start-up code at the very bottom ("INVENTORY PAGE BOOT")
 // (Purchase orders are in shared/purchase-orders.js.)
 // ============================================================
@@ -22,10 +21,6 @@ let invLoaded = false;
 // what is chosen on the adjustment form; typed text that matches nothing is not a choice
 let adjustMaterial = null;
 let adjustSuggestHighlight = -1;
-
-let invUnits = [];
-let invUnitsLoaded = false;
-let unitSuggestHighlight = -1;
 
 function invBody() { return document.querySelector('#inv-table tbody'); }
 
@@ -70,17 +65,12 @@ function showInventoryHome(event) {
 function showAdjust(event) {
     showInventoryPanel('panel-adjust', 'Stock Adjustment', event);
 
-    // Reference is its own switch in Access Control
-    const referenceButton = document.getElementById('adjust-reference');
-    if (referenceButton) referenceButton.hidden = !holdsFeature('po-reference');
-
-    // the "Needs attention" list is drawn from the same material list, so it waits for it
+    // the Reference list holds the materials too, so it waits for them
     if (invLoaded) renderAttentionList();
-    else attentionMessage('Loading materials...');
+    else attentionMessage('Loading...');
     ensureInventoryLoaded(true).then(afterMaterialsLoaded);
-    loadUnits(false);
-    renderAdjustMaterialVerdict();
-    renderAdjustPreview();
+    loadReferenceRecords().then(renderAttentionList);
+    renderAdjustForm();
 }
 
 function showAdjustmentHistory(event) {
@@ -118,11 +108,11 @@ function buildMaterialsPanel() {
         columns: 6,
         pagerId: 'inv-pager',
         idField: 'product_id',
-        filters: { status: 'all' },
+        filters: { status: 'all', supplier: 'all', material: 'all', category: 'all' },
 
         gate: {
             title: 'No materials loaded',
-            text: 'Search above for one material, pick a stock status, or press Load Data ' +
+            text: 'Search above for one material, pick a filter, or press Load Data ' +
                   'for the whole list. Archived materials never appear here.',
             button: 'Load Data'
         },
@@ -133,8 +123,10 @@ function buildMaterialsPanel() {
             return invProducts;
         },
 
-        // this load replaces invProducts, so the Stock Adjustment list is redrawn from it
+        // this load replaces invProducts, so the Stock Adjustment list and the
+        // Material filter are redrawn from it
         onLoaded: function () {
+            fillMaterialNameFilter();
             if (adjustScreenOpen()) afterMaterialsLoaded(true);
         },
 
@@ -145,7 +137,11 @@ function buildMaterialsPanel() {
         },
 
         filter: function (p, filters) {
-            return filters.status === 'all' || p.stock_status === filters.status;
+            if (filters.status !== 'all' && p.stock_status !== filters.status) return false;
+            if (filters.supplier !== 'all' && String(p.supplier_name || '') !== filters.supplier) return false;
+            if (filters.material !== 'all' && String(p.product_id) !== filters.material) return false;
+            if (filters.category !== 'all' && String(p.category_name || '') !== filters.category) return false;
+            return true;
         },
 
         // a product with no price yet (just added, waiting for the manager) is
@@ -171,6 +167,52 @@ function buildMaterialsPanel() {
             '<td>' + statusBadge(p.stock_status) + '</td></tr>';
         }
     });
+}
+
+// ---------- the Material List filters ----------
+// Supplier and Category come from Records; Material from the material list.
+// Each keeps what is picked when its choices are filled again.
+function setFilterOptions(selectId, firstLabel, choices) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    const before = select.value;
+    let html = '<option value="all">' + escapeHtml(firstLabel) + '</option>';
+    let kept = false;
+    for (let i = 0; i < choices.length; i++) {
+        const value = String(choices[i].value);
+        if (value === before) kept = true;
+        html += '<option value="' + escapeHtml(value) + '">' + escapeHtml(choices[i].label) + '</option>';
+    }
+    select.innerHTML = html;
+    select.value = kept ? before : 'all';
+}
+
+async function fillMaterialFilters() {
+    try {
+        const lists = await Promise.all([apiGetRecords('supplier'), apiGetRecords('category')]);
+        const named = function (rows) {
+            const choices = [];
+            for (let i = 0; i < rows.length; i++) choices.push({ value: rows[i].name, label: rows[i].name });
+            choices.sort(function (a, b) { return a.label.localeCompare(b.label); });
+            return choices;
+        };
+        setFilterOptions('inv-supplier', 'Every supplier', named(lists[0]));
+        setFilterOptions('inv-category', 'Every category', named(lists[1]));
+    } catch (error) {
+        // not fatal: the list still searches by supplier and category
+    }
+
+    if (await ensureInventoryLoaded(false)) fillMaterialNameFilter();
+}
+
+function fillMaterialNameFilter() {
+    const choices = [];
+    for (let i = 0; i < invProducts.length; i++) {
+        choices.push({ value: invProducts[i].product_id, label: invProducts[i].product_name });
+    }
+    choices.sort(function (a, b) { return String(a.label).localeCompare(String(b.label)); });
+    setFilterOptions('inv-material', 'Every material', choices);
 }
 
 // The material in invProducts with this id, or undefined when there is none.
@@ -272,7 +314,7 @@ async function openAddProduct() {
             '<div class="form-group">' +
                 '<label for="new-product-name">Product name</label>' +
                 '<input type="text" class="form-control" id="new-product-name" name="productName" ' +
-                    'maxlength="' + PRODUCT_NAME_MAX + '" placeholder="Claw Hammer 16 oz">' +
+                    'maxlength="' + PRODUCT_NAME_MAX + '" placeholder="Input product">' +
             '</div>' +
             '<div class="grid-2">' +
                 '<div class="form-group">' +
@@ -420,14 +462,18 @@ async function showNewProductRow(name) {
     const panel = getDataPanel('clerk-materials');
     if (!panel) return;
 
-    // the search text and the stock filter must not hide it
+    // the search text and the filters must not hide it
     const search = document.getElementById('inv-search');
     if (search) search.value = name;
-    const status = document.getElementById('inv-status');
-    if (status) status.value = 'all';
-    panel.filters.status = 'all';
+    const filterBoxes = { status: 'inv-status', supplier: 'inv-supplier', material: 'inv-material', category: 'inv-category' };
+    for (const filterName in filterBoxes) {
+        const select = document.getElementById(filterBoxes[filterName]);
+        if (select) select.value = 'all';
+        panel.filters[filterName] = 'all';
+    }
     panel.query = searchText(name);
     await panel.open();
+    fillMaterialFilters();         // the new product's supplier, category and name
 }
 
 // ---------- the low stock banner ----------
@@ -458,11 +504,11 @@ async function loadStockBanner() {
     }
 }
 
-// ---------- the "Needs attention" list (Stock Adjustment) ----------
+// ---------- the Reference list (Stock Adjustment) ----------
 // The server marks every material Out of Stock, Low Stock or In Stock. It is
-// the same rule that counts the banner above, so the list follows that mark
-// and the two always agree.
-const ATTENTION_SHOWN = 10;
+// the same rule that counts the banner above, so the materials are sorted by
+// that mark: the ones that need stock come first.
+const ATTENTION_SHOWN = 20;
 
 function isShort(p) {
     return p.stock_status === 'Out of Stock' || p.stock_status === 'Low Stock';
@@ -519,18 +565,150 @@ function refreshPickedMaterial() {
 
     adjustMaterial = fresh;
     renderAdjustMaterialStrip();
-    renderAdjustUnitVerdict();
     renderAdjustPreview();
 }
 
 // Somebody else moved stock (a sale, a return, another clerk): while this screen is
-// open, read the materials again so the list, the strip and the banner stay true.
+// open, read the materials, orders and returns again so the list, the strip and
+// the banner stay true.
 async function refreshAdjustScreen() {
     if (!adjustScreenOpen()) return;
 
     const loaded = await ensureInventoryLoaded(true);
+    await loadReferenceRecords();
     if (loaded) afterMaterialsLoaded(true);
+    else renderAttentionList();
     loadStockBanner();
+}
+
+// ---------- the Reference list's purchase orders and returned items ----------
+// Accepted purchase orders (the supplier said yes; the goods are on their way)
+// and returned items still Open. A failed load leaves that part of the list
+// empty and says so; the materials still show.
+let referencePos = [];
+let referenceReturns = [];        // open returned items, grouped (see groupOpenReturns)
+let referenceProblem = '';
+let referenceSearch = '';
+let referenceType = 'all';
+let referenceMaterialsShown = ATTENTION_SHOWN;
+
+async function loadReferenceRecords() {
+    const problems = [];
+
+    if (holdsFeature('purchase-orders')) {
+        try {
+            const orders = await apiGetPurchaseOrders();
+            const accepted = [];
+            for (let i = 0; i < orders.length; i++) {
+                if (poStage(orders[i]) === 'Accepted') accepted.push(orders[i]);
+            }
+            referencePos = accepted;
+        } catch (error) {
+            problems.push('purchase orders');
+        }
+    } else {
+        referencePos = [];
+    }
+
+    if (holdsFeature('returns')) {
+        try {
+            referenceReturns = groupOpenReturns(await apiGetReturns());
+        } catch (error) {
+            problems.push('returned items');
+        }
+    } else {
+        referenceReturns = [];
+    }
+
+    referenceProblem = problems.length ? 'The ' + problems.join(' and ') + ' could not be loaded.' : '';
+    dropStaleAdjustSource();
+}
+
+// Open returned items filed together are one return: the same sale, the same
+// purchase order, or one report filed at the same moment by the same person.
+function returnGroupKey(r) {
+    if (r.sale_id) return r.report_type + '|sale|' + r.sale_id;
+    if (r.po_id) return r.report_type + '|po|' + r.po_id;
+    return r.report_type + '|at|' + String(r.return_date).slice(0, 19) + '|' + r.reported_by;
+}
+
+function groupOpenReturns(rows) {
+    const groups = [];
+    const byKey = {};
+    for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        if (r.status !== 'Open') continue;
+        const key = returnGroupKey(r);
+        if (!byKey[key]) {
+            byKey[key] = { key: key, type: r.report_type, saleId: r.sale_id, poId: r.po_id,
+                           filedOn: r.return_date, filedBy: r.reported_by, items: [] };
+            groups.push(byKey[key]);
+        }
+        byKey[key].items.push(r);
+    }
+    return groups;
+}
+
+function findReturnGroup(key) {
+    for (let i = 0; i < referenceReturns.length; i++) {
+        if (referenceReturns[i].key === key) return referenceReturns[i];
+    }
+    return undefined;
+}
+
+function findReferencePo(poId) {
+    for (let i = 0; i < referencePos.length; i++) {
+        if (Number(referencePos[i].po_id) === Number(poId)) return referencePos[i];
+    }
+    return undefined;
+}
+
+// "Refunded · Sale #45", "Missing · PO #12", or "Damaged · Report #31"
+function returnGroupTitle(group) {
+    let from;
+    if (group.saleId) from = 'Sale #' + group.saleId;
+    else if (group.poId) from = 'PO #' + group.poId;
+    else from = 'Report #' + group.items[0].return_id;
+    return group.type + ' · ' + from;
+}
+
+function returnGroupNames(group) {
+    const names = [];
+    for (let i = 0; i < group.items.length; i++) names.push(group.items[i].product_name);
+    return names;
+}
+
+function onReferenceSearch(value) {
+    referenceSearch = searchText(String(value || ''));
+    referenceMaterialsShown = ATTENTION_SHOWN;
+    renderAttentionList();
+}
+
+function onReferenceType(value) {
+    referenceType = value || 'all';
+    referenceMaterialsShown = ATTENTION_SHOWN;
+    renderAttentionList();
+}
+
+function showMoreReferenceMaterials() {
+    referenceMaterialsShown += 25;
+    renderAttentionList();
+}
+
+// one clickable row of the Reference list
+function referenceRowHtml(onclick, label, name, kind, badgeClass, badgeText, note, picked) {
+    return '<li>' +
+        '<button type="button" class="attention-row' + (picked ? ' is-picked' : '') + '" ' +
+            'aria-label="' + escapeHtml(label) + '" onclick="' + onclick + '">' +
+        '<span class="attention-who">' +
+            '<span class="attention-name">' + name + '</span>' +
+            '<span class="attention-kind">' + kind + '</span>' +
+        '</span>' +
+        '<span class="attention-figures">' +
+            '<span class="badge ' + badgeClass + '">' + badgeText + '</span>' +
+            (note ? '<span class="attention-reorder">' + note + '</span>' : '') +
+        '</span>' +
+        '</button></li>';
 }
 
 function renderAttentionList() {
@@ -538,71 +716,133 @@ function renderAttentionList() {
     const more = document.getElementById('attention-more');
     if (!list || !more) return;
 
-    const short = [];
-    for (let i = 0; i < invProducts.length; i++) {
-        if (isShort(invProducts[i])) short.push(invProducts[i]);
-    }
-    short.sort(compareShort);
-
-    if (short.length === 0) {
-        attentionMessage('Everything is above its reorder point.');
-        return;
-    }
-
+    const query = referenceSearch;
     let listHtml = '';
-    const shown = short.slice(0, ATTENTION_SHOWN);
-    for (let i = 0; i < shown.length; i++) {
-        const p = shown[i];
-        const out = p.stock_status === 'Out of Stock';
-        const unit = p.unit_name ? ' ' + escapeHtml(p.unit_name) : '';
+    let count = 0;
 
-        // the whole row is the button (like a clickable table row); it is a
-        // real <button> so the keyboard can reach it too
-        listHtml += '<li>' +
-            '<button type="button" class="attention-row" ' +
-                'aria-label="Adjust ' + escapeHtml(p.product_name) + '" ' +
-                'onclick="adjustFromList(' + p.product_id + ')">' +
-            '<span class="attention-who">' +
-                '<span class="attention-name">' + escapeHtml(p.product_name) + '</span>' +
-                '<span class="attention-kind">' + materialKindText(p) + '</span>' +
-            '</span>' +
-            '<span class="attention-figures">' +
-                '<span class="badge ' + (out ? 'badge-danger' : 'badge-warning') + '" ' +
-                    'title="' + (out ? 'Out of stock' : 'Low stock') + '">' +
-                    (Number(p.quantity_in_stock) || 0) + unit + '</span>' +
-                '<span class="attention-reorder">Reorder at ' + (Number(p.reorder_point) || 0) + '</span>' +
-            '</span>' +
-            '</button></li>';
+    // accepted purchase orders
+    if (referenceType === 'all' || referenceType === 'po') {
+        for (let i = 0; i < referencePos.length; i++) {
+            const po = referencePos[i];
+            if (query && !prefixMatch(['PO', String(po.po_id), 'PO #' + po.po_id, po.supplier_name], query)) continue;
+            const picked = adjustSource && adjustSource.kind === 'po' && Number(adjustSource.po.po_id) === Number(po.po_id);
+            const lines = Number(po.line_count) || 0;
+            listHtml += referenceRowHtml('adjustFromPo(' + Number(po.po_id) + ')',
+                'Receive purchase order ' + po.po_id,
+                'PO #' + escapeHtml(String(po.po_id)),
+                escapeHtml(po.supplier_name || 'No supplier'),
+                'badge-info', 'Accepted',
+                lines ? lines + (lines === 1 ? ' item' : ' items') : 'PO',
+                picked);
+            count++;
+        }
     }
-    list.innerHTML = listHtml;
 
-    // more than fit here: the Reorder Point screen has them all
-    if (short.length > ATTENTION_SHOWN) {
+    // open returned items
+    if (referenceType === 'all' || referenceType === 'return') {
+        for (let i = 0; i < referenceReturns.length; i++) {
+            const group = referenceReturns[i];
+            const names = returnGroupNames(group);
+            const words = [group.type, returnGroupTitle(group), group.filedBy].concat(names);
+            if (query && !prefixMatch(words, query)) continue;
+            const picked = adjustSource && adjustSource.kind === 'return' && adjustSource.group.key === group.key;
+            listHtml += referenceRowHtml('adjustFromReturn(' + escapeHtml(JSON.stringify(group.key)) + ')',
+                'Open returned item ' + returnGroupTitle(group),
+                escapeHtml(returnGroupTitle(group)),
+                joinEscaped(names.slice(0, 3), ', ') + (names.length > 3 ? ' and ' + (names.length - 3) + ' more' : ''),
+                'badge-warning', 'Open',
+                group.items.length + (group.items.length === 1 ? ' item' : ' items'),
+                picked);
+            count++;
+        }
+    }
+
+    // every material, out of stock first, then low, then the rest by name
+    let materialsLeft = 0;
+    let materialCount = 0;
+    if (referenceType === 'all' || referenceType === 'material') {
+        const materials = [];
+        for (let i = 0; i < invProducts.length; i++) {
+            const p = invProducts[i];
+            if (query && !prefixMatch([p.product_name, p.brand_name, p.category_name, p.supplier_name], query)) continue;
+            materials.push(p);
+        }
+        materials.sort(function (a, b) {
+            const aShort = isShort(a);
+            const bShort = isShort(b);
+            if (aShort && bShort) return compareShort(a, b);
+            if (aShort !== bShort) return aShort ? -1 : 1;
+            return String(a.product_name).localeCompare(String(b.product_name));
+        });
+
+        materialCount = materials.length;
+        const shown = materials.slice(0, referenceMaterialsShown);
+        materialsLeft = materials.length - shown.length;
+        for (let i = 0; i < shown.length; i++) {
+            const p = shown[i];
+            const unit = p.unit_name ? ' ' + escapeHtml(p.unit_name) : '';
+            let badgeClass = 'badge-success';
+            if (p.stock_status === 'Out of Stock') badgeClass = 'badge-danger';
+            else if (p.stock_status === 'Low Stock') badgeClass = 'badge-warning';
+            const picked = !adjustSource && adjustMaterial && adjustMaterial.product_id === p.product_id;
+            listHtml += referenceRowHtml('adjustFromList(' + p.product_id + ')',
+                'Adjust ' + p.product_name,
+                escapeHtml(p.product_name),
+                materialKindText(p),
+                badgeClass, (Number(p.quantity_in_stock) || 0) + unit,
+                'Reorder at ' + (Number(p.reorder_point) || 0),
+                picked);
+            count++;
+        }
+    }
+
+    let note = '';
+    if (referenceProblem) note = '<li class="attention-empty">' + escapeHtml(referenceProblem) + '</li>';
+
+    if (count === 0) {
+        let empty = 'Nothing to show.';
+        if (query) empty = 'Nothing matches that search.';
+        else if (referenceType === 'po') empty = 'No purchase order is waiting for its delivery.';
+        else if (referenceType === 'return') empty = 'No returned item is open.';
+        else if (referenceType === 'material' && !invLoaded) empty = 'Loading materials...';
+        list.innerHTML = note + '<li class="attention-empty">' + escapeHtml(empty) + '</li>';
+    } else {
+        list.innerHTML = note + listHtml;
+    }
+
+    if (materialsLeft > 0) {
         more.hidden = false;
-        more.innerHTML = '<button type="button" class="btn btn-ghost btn-sm" onclick="showReorder(event)">' +
-            'See all ' + short.length + ' in Reorder Point</button>';
+        more.innerHTML = '<button type="button" class="btn btn-ghost btn-sm" onclick="showMoreReferenceMaterials()">' +
+            'Show more materials (' + (materialCount - materialsLeft) + ' of ' + materialCount + ')</button>';
     } else {
         more.hidden = true;
         more.innerHTML = '';
     }
 }
 
-// "Adjust" on a row: the same pick as choosing it from the suggestion list, for adding stock
+// A material from the list: back to a single material, the same pick as
+// choosing it from the suggestion list, for adding stock
 function adjustFromList(productId) {
     const form = document.getElementById('adjust-form');
 
     // a quantity and reason typed for another material do not belong to this one
-    if (form && adjustMaterial && adjustMaterial.product_id !== productId) {
+    if (form && (adjustSource || (adjustMaterial && adjustMaterial.product_id !== productId))) {
         form.elements.quantity.value = '';
         form.elements.reason.value = '';
     }
 
+    setAdjustSource(null);
     const type = document.getElementById('adjust-type');
     if (type) type.value = 'Add';
 
     pickAdjustMaterial(productId);       // this also redraws the strip and the preview
+    renderAttentionList();
+    focusAdjustForm('adjust-qty');
+}
 
-    const qty = document.getElementById('adjust-qty');
+// brings the form into view and puts the cursor in one of its boxes
+function focusAdjustForm(fieldId) {
+    const qty = document.getElementById(fieldId);
     const card = document.querySelector('#panel-adjust .pair-form');
 
     if (card && qty && window.matchMedia('(max-width: 1279px)').matches) {
@@ -809,13 +1049,12 @@ function setAdjustMaterial(product) {
     const idBox = adjustProductIdBox();
     if (idBox) idBox.value = product ? String(product.product_id) : '';
 
-    // the material's own unit is filled in but stays editable
+    // the material's own unit; it is not typed
     const unitBox = adjustUnitBox();
     if (unitBox) unitBox.value = product ? (product.unit_name || '') : '';
 
     renderAdjustMaterialStrip();
     renderAdjustMaterialVerdict();
-    renderAdjustUnitVerdict();
     renderAdjustPreview();
 }
 
@@ -868,191 +1107,6 @@ function renderAdjustMaterialVerdict(insist) {
     }
 }
 
-// ---------- the unit ----------
-async function loadUnits(force) {
-    if (invUnitsLoaded && !force) return true;
-
-    try {
-        invUnits = await apiGetRecords('unit');
-        invUnitsLoaded = true;
-        return true;
-    } catch (error) {
-        // not fatal: a blank unit keeps whatever the material already uses
-        invUnitsLoaded = false;
-        return false;
-    }
-}
-
-async function onAdjustUnitInput(value) {
-    if (!invUnitsLoaded) await loadUnits(false);
-    renderUnitSuggestions(String(value || ''));
-    renderAdjustUnitVerdict();
-    renderAdjustPreview();
-}
-
-function renderUnitSuggestions(text) {
-    const list = document.getElementById('unit-suggest');
-    const box = adjustUnitBox();
-    if (!list) return;
-
-    const query = String(text || '').trim().toLowerCase();
-    unitSuggestHighlight = -1;
-
-    const hide = function () {
-        list.hidden = true;
-        list.innerHTML = '';
-        if (box) box.setAttribute('aria-expanded', 'false');
-    };
-
-    if (invUnits.length === 0) { hide(); return; }
-
-    // an empty box offers the whole short list
-    const typed = searchText(query);
-    let matches;
-    if (typed === '') {
-        matches = invUnits.slice(0, 8);
-    } else {
-        matches = [];
-        for (let i = 0; i < invUnits.length; i++) {
-            if (startsAWord(invUnits[i].name, typed)) matches.push(invUnits[i]);
-        }
-        matches = matches.slice(0, 8);
-    }
-
-    if (matches.length === 1 && String(matches[0].name).toLowerCase() === query) { hide(); return; }
-    if (matches.length === 0) { hide(); return; }
-
-    let unitHtml = '';
-    for (let i = 0; i < matches.length; i++) {
-        const u = matches[i];
-        const used = Number(u.product_count) || 0;
-        unitHtml += '<li class="suggest-item" role="option" id="unit-suggest-' + i + '" ' +
-            'onmousedown="event.preventDefault()" ' +
-            'onclick="pickAdjustUnit(' + JSON.stringify(String(u.name)).replace(/"/g, '&quot;') + ')">' +
-            '<span class="suggest-line">' +
-                '<span class="suggest-name">' + escapeHtml(u.name) + '</span>' +
-                '<span class="suggest-figure">' + used + '</span>' +
-            '</span></li>';
-    }
-    list.innerHTML = unitHtml;
-
-    list.hidden = false;
-    if (box) box.setAttribute('aria-expanded', 'true');
-}
-
-function hideUnitSuggestions() {
-    const list = document.getElementById('unit-suggest');
-    const box = adjustUnitBox();
-    if (list) { list.hidden = true; list.innerHTML = ''; }
-    if (box) box.setAttribute('aria-expanded', 'false');
-    unitSuggestHighlight = -1;
-}
-
-function onAdjustUnitKey(event) {
-    const list = document.getElementById('unit-suggest');
-    if (!list || list.hidden) {
-        if (event.key === 'Enter') event.preventDefault();
-        return;
-    }
-
-    const items = list.querySelectorAll('.suggest-item');
-    if (items.length === 0) return;
-
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        const step = event.key === 'ArrowDown' ? 1 : -1;
-        unitSuggestHighlight = (unitSuggestHighlight + step + items.length) % items.length;
-        for (let i = 0; i < items.length; i++) {
-            items[i].classList.toggle('is-active', i === unitSuggestHighlight);
-        }
-        return;
-    }
-
-    if (event.key === 'Enter') {
-        event.preventDefault();
-        const pick = items[unitSuggestHighlight >= 0 ? unitSuggestHighlight : 0];
-        if (pick) pick.click();
-        return;
-    }
-
-    if (event.key === 'Escape') hideUnitSuggestions();
-}
-
-function pickAdjustUnit(name) {
-    const box = adjustUnitBox();
-    if (box) box.value = name;
-    hideUnitSuggestions();
-    renderAdjustUnitVerdict();
-    renderAdjustPreview();
-}
-
-// Why a different unit cannot be filed, in the words of sp_adjust_stock; ''
-// when it can. Only called when the typed unit differs from the current one.
-function adjustUnitProblem() {
-    const form = document.getElementById('adjust-form');
-    const type = form ? form.elements.adjustmentType.value : '';
-    const sizes = adjustMaterial && Array.isArray(adjustMaterial.selling_units) ? adjustMaterial.selling_units : [];
-
-    if (type !== 'Recount') {
-        return 'A different unit can only be set on a Recount. Leave Counted in empty, or choose Recount.';
-    }
-    if (sizes.length > 0) {
-        return 'This material has selling sizes set up, so its unit cannot change. Fix the selling sizes first.';
-    }
-    return '';
-}
-
-// says what the typed unit is about to do before the button is pressed
-function renderAdjustUnitVerdict() {
-    const box = document.getElementById('adjust-unit-verdict');
-    if (!box) return;
-
-    const typed = adjustUnitBox() ? adjustUnitBox().value.trim() : '';
-
-    if (typed === '') {
-        box.className = 'unit-verdict';
-
-        // with no material yet the placeholder already says what goes here
-        box.textContent = adjustMaterial
-            ? 'Left empty, this stays counted in ' + (adjustMaterial.unit_name || 'whatever it uses now') + '.'
-            : '';
-
-        return;
-    }
-
-    let known = false;
-    for (let i = 0; i < invUnits.length; i++) {
-        if (String(invUnits[i].name).toLowerCase() === typed.toLowerCase()) known = true;
-    }
-    const current = adjustMaterial ? String(adjustMaterial.unit_name || '') : '';
-    const changing = adjustMaterial && current.toLowerCase() !== typed.toLowerCase();
-
-    // the same rule as sp_adjust_stock: a different unit is only for a Recount,
-    // and not for a material that already has a unit and also sells in other sizes
-    const unitProblem = changing && current !== '' ? adjustUnitProblem() : '';
-    if (unitProblem) {
-        box.className = 'unit-verdict is-stop';
-        box.textContent = unitProblem;
-        return;
-    }
-
-    if (!known) {
-        box.className = 'unit-verdict is-new';
-        box.textContent = '"' + typed + '" is not on the list yet. Filing this adds it.';
-        return;
-    }
-
-    if (changing) {
-        box.className = 'unit-verdict is-new';
-        box.textContent = adjustMaterial.product_name + ' is counted in ' +
-            (current || 'nothing yet') + '. Filing this changes it to ' + typed + '.';
-        return;
-    }
-
-    box.className = 'unit-verdict';
-    box.textContent = '';
-}
-
 // A quantity as typed, whole or fractional: 2.5 kilogram is 2.5, not 2. Three
 // decimals is the width of the column it lands in; NaN when nothing readable.
 function readQuantity(value) {
@@ -1063,12 +1117,8 @@ function readQuantity(value) {
 }
 
 // Add and Remove move the shelf, so a quantity of nothing is not an adjustment
-// (fractions are fine); a recount may find the shelf empty, so it may be 0.
-// Returns the words to show, or '' when the quantity is fine.
+// (fractions are fine). Returns the words to show, or '' when the quantity is fine.
 function adjustQuantityProblem(type, quantity) {
-    if (type === 'Recount') {
-        return quantity < 0 ? 'A recount cannot be below zero.' : '';
-    }
     return quantity <= 0 ? 'Add and Remove need a quantity greater than zero.' : '';
 }
 
@@ -1079,6 +1129,12 @@ function renderAdjustPreview() {
     const box = document.getElementById('adjust-preview');
     const form = document.getElementById('adjust-form');
     if (!box || !form) return;
+
+    // an order or a return shows its figures line by line in its own table
+    if (adjustSource) {
+        renderSourcePreview(box);
+        return;
+    }
 
     const quantity = readQuantity(form.elements.quantity.value);
 
@@ -1099,12 +1155,9 @@ function renderAdjustPreview() {
     }
 
     const before = Number(adjustMaterial.quantity_in_stock) || 0;
-    const unit = (adjustUnitBox() && adjustUnitBox().value.trim()) || adjustMaterial.unit_name || '';
+    const unit = adjustMaterial.unit_name || '';
 
-    let after = before;
-    if (type === 'Add') after = before + quantity;
-    else if (type === 'Remove') after = before - quantity;
-    else after = quantity;
+    let after = type === 'Remove' ? before - quantity : before + quantity;
     after = Math.round(after * 1000) / 1000;      // 2.3 + 0.1 reads 2.4, not 2.4000000000000004
 
     if (after < 0) {
@@ -1203,6 +1256,9 @@ async function handleAdjustStock(event) {
     event.preventDefault();
     const form = event.target;
 
+    if (adjustSource && adjustSource.kind === 'po') { await applyPoAdjustment(); return; }
+    if (adjustSource && adjustSource.kind === 'return') { await applyReturnAdjustment(); return; }
+
     // the check is on what was chosen, not what is typed
     if (!adjustMaterial || !form.elements.productId.value) {
         notifyWarning('Type a few letters of the material and choose it from the list. ' +
@@ -1213,13 +1269,12 @@ async function handleAdjustStock(event) {
         return;
     }
 
-    const unit = form.elements.unitName ? form.elements.unitName.value.trim() : '';
-
     const data = {
         productId: parseInt(form.elements.productId.value, 10),
-        adjustmentType: form.elements.adjustmentType.value,
+        adjustmentType: form.elements.adjustmentType.value === 'Remove' ? 'Remove' : 'Add',
         quantity: readQuantity(form.elements.quantity.value),
-        unitName: unit,
+        // the material's own unit: an adjustment never changes it
+        unitName: adjustMaterial.unit_name || '',
         reason: form.elements.reason.value.trim()
     };
 
@@ -1233,34 +1288,18 @@ async function handleAdjustStock(event) {
         return;
     }
 
-    if (data.reason === '') { notifyWarning('Say why this is being recorded.', 'A reason is required'); return; }
+    if (data.reason === '') {
+        notifyWarning('Add remarks saying why this is being recorded.', 'Remarks are required');
+        const reason = document.getElementById('adjust-reason');
+        if (reason) reason.focus();
+        return;
+    }
 
-    // changing the unit re-reads every figure on the shelf, so it is read back first
-    const current = String(adjustMaterial.unit_name || '');
-    if (unit !== '' && current !== '' && unit.toLowerCase() !== current.toLowerCase()) {
-        // the server refuses these too; saying it here saves a round trip
-        const unitProblem = adjustUnitProblem();
-        if (unitProblem) {
-            notifyWarning(unitProblem, 'Unit not changed');
-            return;
-        }
-
-        const yes = await askConfirm(
-            adjustMaterial.product_name + ' is counted in ' + current + ' and you are filing this in ' + unit + '.',
-            {
-                title: 'Change what this is counted in?',
-                eyebrow: 'Stock Adjustment',
-                confirmLabel: 'Count it in ' + unit,
-                tone: 'danger',
-                detail: [
-                    'The ' + adjustMaterial.quantity_in_stock + ' ' + current + ' on the shelf is replaced by the ' +
-                        'count you typed, in ' + unit + '. Nothing is converted.',
-                    'Every screen that shows this material will say ' + unit + '.',
-                    'Entries already in the log keep saying ' + current + ', because that is what they counted.'
-                ]
-            });
-
-        if (!yes) return;
+    // what the preview already says in red (a Remove below zero) is not sent
+    if (data.adjustmentType === 'Remove' && data.quantity > (Number(adjustMaterial.quantity_in_stock) || 0)) {
+        notifyWarning('Only ' + adjustMaterial.quantity_in_stock + ' ' + (adjustMaterial.unit_name || '') +
+            ' on hand.', 'Quantity not allowed');
+        return;
     }
 
     try {
@@ -1275,21 +1314,492 @@ async function handleAdjustStock(event) {
 
         // form.reset() would clear the material too; only the stale stock figure must go
         invLoaded = false;
-        invUnitsLoaded = false;
-        afterMaterialsLoaded(await ensureInventoryLoaded(true));    // a restocked material drops off the list
-        await loadUnits(true);
+        afterMaterialsLoaded(await ensureInventoryLoaded(true));
 
         const again = findProductById(data.productId);
         setAdjustMaterial(again || null);
         if (!again) clearAdjustMaterial();
 
-        await loadAdjustments();
-
-        await loadStockBanner();
-        await loadNotifications();
+        await afterStockMoved();
     } catch (error) {
         notifyOffline();
     }
+}
+
+// every screen that shows stock reads it again
+async function afterStockMoved() {
+    await loadAdjustments();
+    const keys = ['clerk-materials', 'clerk-reorder', 'clerk-returns'];
+    for (let i = 0; i < keys.length; i++) {
+        const panel = getDataPanel(keys[i]);
+        if (panel && panel.state === 'ready') await panel.refresh();
+    }
+    if (typeof refreshPurchaseOrders === 'function') {
+        try { await refreshPurchaseOrders(); } catch (error) { /* the list reads again when opened */ }
+    }
+    await loadStockBanner();
+    await loadNotifications();
+}
+
+// ---------- Stock Adjustment from a purchase order or a returned item ----------
+// adjustSource: null for a single material; { kind: 'po', po, items } for an
+// accepted purchase order; { kind: 'return', group } for an open return.
+let adjustSource = null;
+let adjustSourceLoading = 0;      // which pick is loading, so a slower earlier one is dropped
+
+function setAdjustSource(source) {
+    adjustSource = source || null;
+    renderAdjustForm();
+}
+
+// shows the fields the pick needs: a material has the material box and its
+// figures; an order or a return shows its items in a table instead
+function renderAdjustForm() {
+    const kind = adjustSource ? adjustSource.kind : 'material';
+    const show = function (id, on) {
+        const element = document.getElementById(id);
+        if (element) element.hidden = !on;
+    };
+
+    show('adjust-material-field', kind === 'material');
+    show('adjust-unit-field', kind === 'material');
+    show('adjust-qty-field', kind === 'material');
+    // an order is always added to stock, so it has no type to choose
+    show('adjust-type-field', kind !== 'po');
+
+    renderAdjustTypeOptions(kind);
+    renderAdjustSource();
+    renderAdjustLines();
+    renderAdjustMaterialVerdict();
+    renderAdjustPreview();
+
+    const button = document.querySelector('#adjust-form button[type="submit"]');
+    if (button) {
+        let label = 'Apply Adjustment';
+        if (kind === 'po') label = 'Receive into Stock';
+        button.textContent = label;
+    }
+}
+
+// a material: Add or Remove; a returned item: Add to stock or Discard Item
+function renderAdjustTypeOptions(kind) {
+    const select = document.getElementById('adjust-type');
+    if (!select) return;
+
+    const before = select.value;
+    let options;
+    if (kind === 'return') {
+        options = [['Add', 'Add to stock'], ['Discard', 'Discard Item']];
+    } else {
+        options = [['Add', 'Add to stock'], ['Remove', 'Remove from stock']];
+    }
+
+    let html = '';
+    let kept = false;
+    for (let i = 0; i < options.length; i++) {
+        if (options[i][0] === before) kept = true;
+        html += '<option value="' + options[i][0] + '">' + options[i][1] + '</option>';
+    }
+    select.innerHTML = html;
+    select.value = kept ? before : 'Add';
+}
+
+// the strip on top of the form: which order or return is being worked, and a way out
+function renderAdjustSource() {
+    const box = document.getElementById('adjust-source');
+    if (!box) return;
+
+    if (!adjustSource) { box.hidden = true; box.innerHTML = ''; return; }
+
+    let title;
+    let sub;
+    if (adjustSource.kind === 'po') {
+        const po = adjustSource.po;
+        title = 'PO #' + escapeHtml(String(po.po_id)) + ' · ' + escapeHtml(po.supplier_name || '');
+        sub = 'Accepted by the supplier. What arrived goes onto the shelf and the order is marked Received.';
+    } else {
+        const group = adjustSource.group;
+        title = escapeHtml(returnGroupTitle(group));
+        sub = 'Filed ' + escapeHtml(String(group.filedOn || '').slice(0, 10)) +
+            (group.filedBy ? ' by ' + escapeHtml(group.filedBy) : '') + '. Add it back to stock, or discard it.';
+    }
+
+    box.hidden = false;
+    box.innerHTML =
+        '<div class="adjust-source-text">' +
+            '<span class="adjust-source-eyebrow">' + (adjustSource.kind === 'po' ? 'Purchase order' : 'Returned item') + '</span>' +
+            '<span class="adjust-source-title">' + title + '</span>' +
+            '<span class="adjust-source-sub">' + sub + '</span>' +
+        '</div>' +
+        '<button type="button" class="btn btn-ghost btn-sm" onclick="clearAdjustSource()">Adjust a material instead</button>';
+}
+
+function clearAdjustSource() {
+    const form = document.getElementById('adjust-form');
+    if (form) form.elements.reason.value = '';
+    adjustSourceLoading++;
+    setAdjustSource(null);
+    renderAttentionList();
+}
+
+// The items of the order or return: material, unit and quantity, in a table
+// that scrolls on its own once it is longer than a few rows. An order's
+// quantities are filled in from the order and can be changed to what arrived;
+// a return's are what was filed.
+function renderAdjustLines() {
+    const box = document.getElementById('adjust-lines');
+    if (!box) return;
+
+    if (!adjustSource) { box.hidden = true; box.innerHTML = ''; return; }
+
+    if (adjustSource.loading) {
+        box.hidden = false;
+        box.innerHTML = '<p class="detail-note">Opening the order...</p>';
+        return;
+    }
+
+    let rows = '';
+    let count = 0;
+    if (adjustSource.kind === 'po') {
+        const items = adjustSource.items;
+        count = items.length;
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            rows += '<tr>' +
+                '<td class="cell-name">' + escapeHtml(item.product_name) +
+                    '<span class="cell-sub">Ordered ' + escapeHtml(poQuantityText(item)) + '</span>' +
+                    '<span class="adjust-line-note" id="adjust-line-note-' + i + '"></span></td>' +
+                '<td>' + escapeHtml(item.unit_name || '') + '</td>' +
+                '<td class="cell-num"><input type="number" class="form-control adjust-line-qty" ' +
+                    'id="adjust-line-qty-' + i + '" min="0" step="1" value="' + Number(item.quantity) + '" ' +
+                    'oninput="renderAdjustPreview()" aria-label="Quantity arrived: ' + escapeHtml(item.product_name) + '"></td>' +
+                '</tr>';
+        }
+    } else {
+        const items = adjustSource.group.items;
+        count = items.length;
+        for (let i = 0; i < items.length; i++) {
+            const r = items[i];
+            rows += '<tr>' +
+                '<td class="cell-name">' + escapeHtml(r.product_name) +
+                    '<span class="cell-sub">Report #' + r.return_id + ' · ' + returnLineWent(r) + '</span></td>' +
+                '<td>' + escapeHtml(r.unit_name || '') + '</td>' +
+                '<td class="cell-num">' + Number(r.quantity) + '</td>' +
+                '</tr>';
+        }
+    }
+
+    if (count === 0) {
+        box.hidden = false;
+        box.innerHTML = '<p class="detail-empty">There are no items on it.</p>';
+        return;
+    }
+
+    box.hidden = false;
+    box.innerHTML =
+        '<p class="adjust-lines-head">' + count + (count === 1 ? ' item' : ' items') + '</p>' +
+        '<div class="adjust-lines-scroll">' +
+            '<table class="mini-table adjust-lines-table">' +
+                '<thead><tr><th>Material</th><th>Unit</th><th class="col-num">Quantity</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody>' +
+            '</table>' +
+        '</div>';
+}
+
+// where a returned item's goods stand now, for its line in the table
+function returnLineWent(r) {
+    if (r.report_type === 'Missing') return 'never arrived';
+    if (!r.disposition) return 'awaiting inspection';
+    return r.disposition === 'Return to Stock' ? 'already back on the shelf' : 'already written off';
+}
+
+// What one returned item does to the shelf for the choice made. The goods end
+// where the choice says: back on the shelf (Add) or not (Discard).
+//   change: what this form moves itself with an adjustment (+ or -), 0 for none
+//   verdict: sent to the inspection when the goods still wait for one
+function returnLinePlan(r, choice) {
+    const quantity = Number(r.quantity) || 0;
+    const add = choice === 'Add';
+
+    // a refund the counter took back: the inspection itself moves the stock
+    if (r.report_type !== 'Missing' && !r.disposition) {
+        return { verdict: add ? 'Return to Stock' : 'Write-Off', change: 0 };
+    }
+    // goods a delivery never brought: Add means they have come in since
+    if (r.report_type === 'Missing') return { verdict: null, change: add ? quantity : 0 };
+    // decided when it was filed: only a change of mind moves anything
+    if (r.disposition === 'Return to Stock') return { verdict: null, change: add ? 0 : -quantity };
+    return { verdict: null, change: add ? quantity : 0 };
+}
+
+function renderSourcePreview(box) {
+    box.className = 'adjust-preview';
+    box.textContent = '';
+    if (!adjustSource || adjustSource.loading) return;
+
+    if (adjustSource.kind === 'po') {
+        const lines = poAdjustLines();
+        let total = 0;
+        let blank = false;
+        let off = 0;
+        for (let i = 0; i < lines.length; i++) {
+            const state = poLineState(lines[i]);
+            const note = document.getElementById('adjust-line-note-' + i);
+            if (note) {
+                note.className = 'adjust-line-note' + (state.kind ? ' is-' + state.kind : '');
+                note.textContent = state.text;
+            }
+            if (state.kind === 'bad') blank = true;
+            else if (lines[i].quantity > 0) total++;
+            if (state.kind === 'under' || state.kind === 'over') off++;
+        }
+        if (blank) {
+            box.className = 'adjust-preview is-stop';
+            box.textContent = 'Every line needs a whole number of 0 or more. Type 0 for what did not arrive.';
+            return;
+        }
+        box.className = 'adjust-preview is-good';
+        box.innerHTML = '<span class="preview-name">PO #' + escapeHtml(String(adjustSource.po.po_id)) + '</span>' +
+            '<span class="preview-figures">' + total + ' of ' + lines.length +
+                (lines.length === 1 ? ' item' : ' items') + ' will be added to stock</span>' +
+            (off > 0 ? '<span class="preview-note">' + off + (off === 1 ? ' item differs' : ' items differ') +
+                ' from the order, so a Report is added to the order.</span>' : '');
+        return;
+    }
+
+    const select = document.getElementById('adjust-type');
+    const choice = select ? select.value : 'Add';
+    const items = adjustSource.group.items;
+    box.className = 'adjust-preview ' + (choice === 'Add' ? 'is-good' : 'is-down');
+    box.innerHTML = '<span class="preview-name">' + escapeHtml(returnGroupTitle(adjustSource.group)) + '</span>' +
+        '<span class="preview-figures">' + (choice === 'Add'
+            ? 'Back on the shelf: ' + items.length + (items.length === 1 ? ' item' : ' items')
+            : 'Discarded: ' + items.length + (items.length === 1 ? ' item' : ' items')) + '</span>' +
+        '<span class="preview-note">The report' + (items.length === 1 ? ' is' : 's are') + ' then closed.</span>';
+}
+
+// One order line against what was ordered: kind is '' (as ordered), 'under',
+// 'over' or 'bad' (not a whole number of 0 or more); text says so for the line.
+function poLineState(line) {
+    const quantity = line.quantity;
+    if (!Number.isInteger(quantity) || quantity < 0) return { kind: 'bad', text: 'Type a whole number, 0 or more.' };
+    const difference = quantity - Number(line.item.quantity);
+    const unit = line.item.unit_name || '';
+    if (difference < 0) return { kind: 'under', text: 'Under-delivery: ' + qtyText(-difference, unit) + ' missing' };
+    if (difference > 0) return { kind: 'over', text: 'Over-delivery: ' + qtyText(difference, unit) + ' over' };
+    return { kind: '', text: '' };
+}
+
+// what each line of the order says arrived, in the material's own unit
+function poAdjustLines() {
+    const lines = [];
+    if (!adjustSource || adjustSource.kind !== 'po') return lines;
+    for (let i = 0; i < adjustSource.items.length; i++) {
+        const field = document.getElementById('adjust-line-qty-' + i);
+        lines.push({ item: adjustSource.items[i], quantity: readQuantity(field ? field.value : adjustSource.items[i].quantity) });
+    }
+    return lines;
+}
+
+// An accepted purchase order from Reference: its items fill the form
+async function adjustFromPo(poId) {
+    const po = findReferencePo(poId);
+    if (!po) return;
+
+    const ticket = ++adjustSourceLoading;
+    setAdjustMaterial(null);
+    const box = adjustMaterialBox();
+    if (box) box.value = '';
+    setAdjustSource({ kind: 'po', po: po, items: [], loading: true });
+    renderAttentionList();
+
+    try {
+        const items = await apiGetPurchaseOrderItems(poId);
+        if (ticket !== adjustSourceLoading) return;       // another pick came after this one
+        setAdjustSource({ kind: 'po', po: po, items: items });
+        focusAdjustForm('adjust-line-qty-0');
+    } catch (error) {
+        if (ticket !== adjustSourceLoading) return;
+        setAdjustSource(null);
+        notifyError('That purchase order could not be opened. Try again.', 'Not opened');
+    }
+}
+
+// An open returned item from Reference: its items fill the form
+function adjustFromReturn(key) {
+    const group = findReturnGroup(key);
+    if (!group) return;
+
+    adjustSourceLoading++;
+    setAdjustMaterial(null);
+    const box = adjustMaterialBox();
+    if (box) box.value = '';
+    const form = document.getElementById('adjust-form');
+    if (form) form.elements.reason.value = '';
+    const type = document.getElementById('adjust-type');
+    if (type) type.value = 'Add';
+
+    setAdjustSource({ kind: 'return', group: group });
+    renderAttentionList();
+    focusAdjustForm('adjust-type');
+}
+
+// after the lists are read again: an order received or a return closed by
+// someone else is no longer on the form
+function dropStaleAdjustSource() {
+    if (!adjustSource || adjustSource.loading) return;
+
+    if (adjustSource.kind === 'po' && !findReferencePo(adjustSource.po.po_id)) {
+        notifyWarning('PO #' + adjustSource.po.po_id + ' is no longer waiting for its delivery.', 'Order closed');
+        setAdjustSource(null);
+    } else if (adjustSource.kind === 'return') {
+        const fresh = findReturnGroup(adjustSource.group.key);
+        if (!fresh) {
+            notifyWarning(returnGroupTitle(adjustSource.group) + ' is no longer open.', 'Return closed');
+            setAdjustSource(null);
+        } else {
+            adjustSource.group = fresh;
+            renderAdjustLines();
+            renderAdjustPreview();
+        }
+    }
+}
+
+// Receiving the order: the quantities on the form go onto the shelf, at the
+// cost on the order, and the order is marked Received
+async function applyPoAdjustment() {
+    if (!adjustSource || adjustSource.loading) return;
+    const po = adjustSource.po;
+    const lines = poAdjustLines();
+
+    if (lines.length === 0) { notifyWarning('This order has no items to add.', 'Nothing to add'); return; }
+
+    const received = [];
+    const differs = [];
+    for (let i = 0; i < lines.length; i++) {
+        const quantity = lines[i].quantity;
+        const state = poLineState(lines[i]);
+        if (state.kind === 'bad') {
+            notifyWarning('Type how many of ' + lines[i].item.product_name + ' arrived, as a whole number, or 0.',
+                'Quantity needed');
+            const field = document.getElementById('adjust-line-qty-' + i);
+            if (field) field.focus();
+            return;
+        }
+        if (state.kind) differs.push(lines[i].item.product_name + ': ' + state.text);
+        received.push({
+            productId: lines[i].item.product_id,
+            quantity: quantity,
+            unitCost: Number(lines[i].item.unit_cost) || 0
+        });
+    }
+
+    const form = document.getElementById('adjust-form');
+    const remarks = form ? form.elements.reason.value.trim() : '';
+
+    const yes = await askConfirm(
+        'The quantities on the form go onto the shelf, and purchase order #' + po.po_id + ' is marked Received.' +
+        (differs.length > 0 ? ' The delivery differs from the order, so a Report is added to the order.' : ''),
+        { title: 'Add this delivery to stock?', eyebrow: 'Stock Adjustment', confirmLabel: 'Add to stock',
+          detail: differs.length > 0 ? differs : undefined });
+    if (!yes) return;
+
+    try {
+        const response = await apiReceivePurchaseOrder(po.po_id, received, Number(po.discount) || 0, remarks);
+        const result = await response.json();
+        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
+
+        notifySuccess(result.message + (differs.length > 0 ? ' A Report was added to the order.' : ''),
+            'Delivery added to stock');
+        if (form) form.elements.reason.value = '';
+        if (typeof poMaterialsLoaded !== 'undefined') poMaterialsLoaded = false;
+        setAdjustSource(null);
+
+        invLoaded = false;
+        await ensureInventoryLoaded(true);
+        await loadReferenceRecords();
+        afterMaterialsLoaded(invLoaded);
+        await afterStockMoved();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// Closing a return: each item goes back on the shelf or is discarded, then
+// its report is closed. Items are sent one at a time; one that is refused
+// stops the rest and says which.
+async function applyReturnAdjustment() {
+    if (!adjustSource) return;
+    const group = adjustSource.group;
+    const form = document.getElementById('adjust-form');
+    const choice = form && form.elements.adjustmentType.value === 'Discard' ? 'Discard' : 'Add';
+    const note = form ? form.elements.reason.value.trim() : '';
+    const count = group.items.length;
+
+    const yes = choice === 'Add'
+        ? await askConfirm(count + (count === 1 ? ' item goes' : ' items go') + ' back on the shelf and ' +
+            (count === 1 ? 'its report is' : 'their reports are') + ' closed.',
+            { title: 'Add to stock?', eyebrow: 'Stock Adjustment', confirmLabel: 'Add to stock' })
+        : await askDanger(count + (count === 1 ? ' item is' : ' items are') + ' discarded and ' +
+            (count === 1 ? 'its report is' : 'their reports are') + ' closed.',
+            { title: 'Discard these items?', eyebrow: 'Stock Adjustment', confirmLabel: 'Discard',
+              detail: ['They never go back on the shelf and cannot be sold.'] });
+    if (!yes) return;
+
+    let done = 0;
+    try {
+        for (let i = 0; i < group.items.length; i++) {
+            const r = group.items[i];
+            const plan = returnLinePlan(r, choice);
+
+            if (plan.change !== 0) {
+                const moved = await apiAdjustStock({
+                    productId: r.product_id,
+                    adjustmentType: plan.change > 0 ? 'Add' : 'Remove',
+                    quantity: Math.abs(plan.change),
+                    unitName: r.unit_name || '',
+                    reason: (choice === 'Add' ? 'Added to stock' : 'Discarded') + ' from ' + r.report_type +
+                        ' report #' + r.return_id + (note ? ' - ' + note : '')
+                });
+                const movedResult = await moved.json();
+                if (!moved.ok) {
+                    if (!handleAuthFailure(moved, movedResult)) {
+                        notifyError(r.product_name + ': ' + movedResult.error, 'Stopped at report #' + r.return_id);
+                    }
+                    break;
+                }
+            }
+
+            const response = await apiResolveReturn(r.return_id, plan.verdict, note);
+            const result = await response.json();
+            if (!response.ok) {
+                if (!handleAuthFailure(response, result)) {
+                    notifyError(r.product_name + ': ' + result.error, 'Stopped at report #' + r.return_id);
+                }
+                break;
+            }
+            done++;
+        }
+    } catch (error) {
+        notifyOffline();
+    }
+
+    if (done > 0) {
+        notifySuccess(done + ' of ' + count + (count === 1 ? ' item' : ' items') +
+            (choice === 'Add' ? ' added to stock.' : ' discarded.'), 'Return closed');
+    }
+    // all closed: back to a single material, before the lists are read again
+    // (a source missing from them would be reported as closed by someone else)
+    if (done === count) {
+        if (form) form.elements.reason.value = '';
+        setAdjustSource(null);
+    }
+
+    invLoaded = false;
+    await ensureInventoryLoaded(true);
+    await loadReferenceRecords();
+    afterMaterialsLoaded(invLoaded);
+    await afterStockMoved();
 }
 
 // ---------- reorder point settings ----------
@@ -1989,29 +2499,6 @@ function onReportTypeChange(type) {
     if (type === 'Missing') loadReportPoChoices();
 }
 
-// From the delivery check on Stock Adjustment: Make a Report opens on
-// Missing from delivery, the order chosen and the short items ticked.
-async function startMissingReport(po, items, shortLines) {
-    const form = document.getElementById('report-form');
-    if (!form) return;
-
-    form.elements.reportType.value = 'Missing';
-    showReportSections('Missing');
-
-    reportPo = { po: po, items: items };
-    reportPoTicks = {};
-    for (let i = 0; i < shortLines.length; i++) {
-        reportPoTicks[shortLines[i].item.product_id] = shortLines[i].shortBase;
-    }
-
-    await loadReportPoChoices();
-    renderReportPoLines();
-
-    if (form.elements.reason.value.trim() === '') {
-        form.elements.reason.value = 'Short delivery';
-    }
-}
-
 // ---------- File Report ----------
 async function handleFileReport(event) {
     event.preventDefault();
@@ -2113,207 +2600,7 @@ async function handleFileReport(event) {
     }
 }
 
-// ---------- Stock Adjustment: check a delivery against its purchase order ----------
-// Read only: nothing here moves stock. Stock comes in when the delivery is
-// received on its purchase order. What is short can be reported from here.
-let poCheck = { poId: null, po: null, items: [] };
-
-async function openPoCheck() {
-    poCheck = { poId: null, po: null, items: [] };
-    showPoCheckCard('<p class="detail-note">Loading the purchase orders...</p>');
-
-    try {
-        await loadPoChoices();
-    } catch (error) {
-        redrawPoCheck('<p class="detail-note detail-warn">The purchase orders could not be loaded. Close this and try again.</p>');
-        return;
-    }
-    redrawPoCheck(poCheckPage());
-}
-
-// the card's one page; the card is still the open one while detailPages holds it
-let poCheckPageObject = null;
-
-function showPoCheckCard(body) {
-    poCheckPageObject = { label: 'Check', body: body };
-
-    // Make a Report is left out when the administrator has switched that screen off
-    const reportButton = holdsFeature('damage-report')
-        ? '<button type="button" class="btn btn-success" id="po-check-report" onclick="reportShortFromCheck()" disabled>Make a Report</button>'
-        : '';
-
-    openDetailModal('Check a Purchase Order', 'Compare a delivery with its order', 'PO',
-        [poCheckPageObject],
-        reportButton +
-        '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Close</button>',
-        { wide: true, scroll: true });
-}
-
-// true while this card is the one open: it may have been closed, or another
-// card opened, while a purchase order was loading
-function poCheckIsOpen() {
-    const modal = document.getElementById('detail-modal');
-    return Boolean(modal && modal.classList.contains('open') &&
-                   poCheckPageObject && detailPages[0] === poCheckPageObject);
-}
-
-// draws the card's page again without opening it again
-function redrawPoCheck(body) {
-    if (!poCheckIsOpen()) return;
-    poCheckPageObject.body = body;
-    renderDetailPage();
-    updatePoCheckSummary();
-}
-
-function poCheckPage() {
-    let html = '<p class="detail-note">This only compares the delivery with the order. It does not change ' +
-        'the stock. When the delivery is counted in, press Receive on the purchase order.</p>' +
-        '<div class="form-group">' +
-            '<label for="check-po">Purchase order</label>' +
-            '<select id="check-po" class="form-control" onchange="onPoCheckPick(this.value)">' +
-                '<option value="">Choose a purchase order</option>' + poChoiceOptions(poCheck.poId) +
-            '</select>' +
-        '</div>';
-
-    if (poChoices.length === 0) {
-        html += '<p class="detail-note">There is no approved purchase order waiting for its delivery.</p>';
-    }
-    if (poCheck.po) html += poCheckLines();
-    return html;
-}
-
-async function onPoCheckPick(value) {
-    const poId = parseInt(value, 10);
-    poCheck = { poId: poId || null, po: null, items: [] };
-
-    if (poId) {
-        poCheck.po = findPoChoice(poId) || null;
-        try {
-            const items = await apiGetPurchaseOrderItems(poId);
-            // the card may have been closed, or another order chosen, while this one was loading
-            if (!poCheckIsOpen() || poCheck.poId !== poId) return;
-            poCheck.items = items;
-        } catch (error) {
-            redrawPoCheck(poCheckPage() + '<p class="detail-note detail-warn">That purchase order could not be opened. Try again.</p>');
-            return;
-        }
-    }
-    redrawPoCheck(poCheckPage());
-}
-
-// the order's items: what was ordered, a box for what arrived, and the check
-function poCheckLines() {
-    if (poCheck.items.length === 0) return '<p class="detail-empty">This order has no items.</p>';
-
-    const rows = [];
-    for (let index = 0; index < poCheck.items.length; index++) {
-        const item = poCheck.items[index];
-        const pack = recvPackOf(item);
-        const unit = pack ? pack.name : (item.unit_name || '');
-        rows.push([
-            escapeHtml(item.product_name),
-            escapeHtml(poQuantityText(item)),
-            '<input type="number" class="form-control recv-qty" id="check-arrived-' + index + '" ' +
-                   'min="0" step="1" value="' + recvOrderedCount(item) + '" ' +
-                   'oninput="updatePoCheckLine(' + index + ')" ' +
-                   'aria-label="Arrived: ' + escapeHtml(item.product_name) + '"> ' +
-                   '<span class="muted">' + escapeHtml(unit) + '</span>',
-            '<span class="recv-verdict is-exact" id="check-result-' + index + '">As ordered</span>'
-        ]);
-    }
-
-    return detailTable(['Material', 'Ordered', 'Arrived', 'Check'], rows, [1, 2]) +
-        '<p class="check-summary" id="check-summary" aria-live="polite"></p>';
-}
-
-// What one line came to: how many arrived against how many were ordered.
-// "short" is in the line's own count (packs for a line ordered in packs);
-// "shortBase" is the same in the material's unit, which is what a report holds.
-function poCheckLineState(index) {
-    const item = poCheck.items[index];
-    const field = document.getElementById('check-arrived-' + index);
-    const ordered = recvOrderedCount(item);
-    const pack = recvPackOf(item);
-
-    const typed = field ? field.value.trim() : '';
-    const arrived = typed === '' ? ordered : Math.max(0, Number(typed) || 0);
-    const short = typed === '' ? 0 : Math.max(0, ordered - arrived);
-
-    return {
-        item: item,
-        ordered: ordered,
-        arrived: arrived,
-        blank: typed === '',
-        short: short,
-        shortBase: pack ? Math.round(short * pack.size * 1000) / 1000 : short
-    };
-}
-
-function updatePoCheckLine(index) {
-    const result = document.getElementById('check-result-' + index);
-    if (result) {
-        const state = poCheckLineState(index);
-        const pack = recvPackOf(state.item);
-        const unit = pack ? pack.name : (state.item.unit_name || '');
-
-        if (state.blank) {
-            result.className = 'recv-verdict is-exact';
-            result.textContent = 'Type how many arrived.';
-        } else if (state.short > 0) {
-            result.className = 'recv-verdict is-short';
-            result.textContent = 'Short by ' + qtyText(state.short, unit) +
-                (pack ? ' (' + qtyText(state.shortBase, state.item.unit_name || '') + ')' : '');
-        } else if (state.arrived > state.ordered) {
-            result.className = 'recv-verdict is-over';
-            result.textContent = qtyText(state.arrived - state.ordered, unit) + ' more than ordered';
-        } else {
-            result.className = 'recv-verdict is-exact';
-            result.textContent = 'As ordered';
-        }
-    }
-    updatePoCheckSummary();
-}
-
-// "Complete" or "N items short"; Make a Report works only when something is short
-function updatePoCheckSummary() {
-    const summary = document.getElementById('check-summary');
-    const button = document.getElementById('po-check-report');
-
-    let shortCount = 0;
-    for (let index = 0; index < poCheck.items.length; index++) {
-        if (poCheckLineState(index).short > 0) shortCount++;
-    }
-
-    if (summary) {
-        if (shortCount === 0) {
-            summary.className = 'check-summary is-complete';
-            summary.textContent = 'Complete: every item arrived as ordered.';
-        } else {
-            summary.className = 'check-summary is-short';
-            summary.textContent = shortCount + (shortCount === 1 ? ' item short.' : ' items short.');
-        }
-    }
-    if (button) button.disabled = shortCount === 0;
-}
-
-// Make a Report: closes the card and opens the report with what is short
-function reportShortFromCheck() {
-    const shortLines = [];
-    for (let index = 0; index < poCheck.items.length; index++) {
-        const state = poCheckLineState(index);
-        if (state.short > 0) shortLines.push(state);
-    }
-    if (shortLines.length === 0 || !poCheck.po) return;
-
-    const po = poCheck.po;
-    const items = poCheck.items;
-
-    closeModal('detail-modal');
-    showDamageReport();
-    startMissingReport(po, items, shortLines);
-}
-
-// ---------- Stock Adjustment: the Reference card ----------
+// ---------- the purchase order Reference card (opened from Adjustment History) ----------
 // A received purchase order, each line with what was ordered beside what
 // arrived, so the clerk can see the right goods came in. Read only.
 // choices: the received orders, newest first; data: the open order's reference;
@@ -2976,252 +3263,8 @@ function openMaterialDetail(productId) {
         (p.supplier_name ? p.supplier_name : 'No supplier') + ' · ' + (p.category_name || 'Uncategorised'),
         initialsOf(p.product_name), [
             { label: 'Stock', body: stock },
-            { label: 'Overview', body: overview },
-            { label: 'Selling Units', body: sellingUnitsPage(p) },
-            { label: 'Delivered In', body: deliveryPackPage(p) }
+            { label: 'Overview', body: overview }
         ]);
-}
-
-// ---------- the pack a material is delivered in ----------
-// Nails are kept by the kilogram but arrive by the box, twenty kilogram to
-// the box. The clerk sets that here; the order form and the receiving sheet
-// then count in boxes and the shelf still moves in kilograms. It is not a
-// selling size: the shop's own box of nails is on the Selling Units page.
-function deliveryPackPage(p) {
-    const own = p.unit_name || 'unit';
-    const has = p.pack_name && Number(p.pack_size) > 0;
-
-    let now;
-    if (has) {
-        now = '<p class="detail-note">Delivered by the <strong>' + escapeHtml(p.pack_name) + '</strong> of ' +
-              escapeHtml(qtyText(p.pack_size, own)) + '. A purchase order for it is written in ' +
-              escapeHtml(p.pack_name) + 'es and the delivery is counted in the same way; ' +
-              escapeHtml(qtyText(p.pack_size, own)) + ' goes on the shelf for each one.</p>';
-    } else {
-        now = '<p class="detail-empty">Delivered by the ' + escapeHtml(own) + ': an order for it is written in ' +
-              escapeHtml(own) + '. If the supplier sends it in a bigger pack, say so below.</p>';
-    }
-
-    return now +
-        '<form class="unit-size-form" onsubmit="saveDeliveryPack(event, ' + p.product_id + ')" autocomplete="off">' +
-            '<div class="unit-size-fields">' +
-                '<div class="form-group">' +
-                    '<label for="pack-name-' + p.product_id + '">Pack</label>' +
-                    '<input type="text" class="form-control" id="pack-name-' + p.product_id + '" name="packName" ' +
-                        'list="unit-size-names" maxlength="20" placeholder="box, sack, drum" ' +
-                        'value="' + escapeHtml(p.pack_name || '') + '">' +
-                '</div>' +
-                '<div class="form-group">' +
-                    '<label for="pack-size-' + p.product_id + '">Holds</label>' +
-                    '<div class="unit-size-per">' +
-                        '<input type="number" class="form-control" id="pack-size-' + p.product_id + '" name="packSize" ' +
-                            'min="0.001" step="0.001" placeholder="20" value="' + (has ? Number(p.pack_size) : '') + '">' +
-                        '<span class="unit-size-own">' + escapeHtml(own) + '</span>' +
-                    '</div>' +
-                '</div>' +
-            '</div>' +
-            '<div class="detail-actions">' +
-                '<button type="submit" class="btn btn-accent">' + (has ? 'Change the pack' : 'Set the pack') + '</button>' +
-                (has ? '<button type="button" class="btn btn-ghost" onclick="clearDeliveryPack(' + p.product_id + ')">' +
-                       'Delivered by the ' + escapeHtml(own) + ' again</button>' : '') +
-            '</div>' +
-        '</form>';
-}
-
-async function saveDeliveryPack(event, productId) {
-    event.preventDefault();
-    const form = event.target;
-    const packName = form.elements.packName.value.trim();
-    const packSize = Number(form.elements.packSize.value);
-
-    if (packName === '') { notifyWarning('Name the pack: box, sack, drum.', 'No pack named'); form.elements.packName.focus(); return; }
-    if (!Number.isFinite(packSize) || packSize <= 0) {
-        notifyWarning('Say how much one ' + packName + ' holds, like 20.', 'No size given');
-        form.elements.packSize.focus();
-        return;
-    }
-    await putDeliveryPack(productId, packName, packSize);
-}
-
-async function clearDeliveryPack(productId) {
-    await putDeliveryPack(productId, '', null);
-}
-
-async function putDeliveryPack(productId, packName, packSize) {
-    try {
-        const response = await apiSaveDeliveryPack(productId, packName, packSize);
-        const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
-
-        notifySuccess(result.message, 'Delivery pack saved');
-
-        const p = findProductById(productId);
-        if (p) {
-            p.pack_name = result.packName;
-            p.pack_size = result.packSize;
-            const page = findDetailPage('Delivered In');
-            if (page) {
-                page.body = deliveryPackPage(p);
-                if (detailPages[detailIndex] === page) renderDetailPage();
-            }
-        }
-        if (typeof poMaterialsLoaded !== 'undefined') poMaterialsLoaded = false;   // the order form reads it afresh
-    } catch (error) {
-        notifyOffline();
-    }
-}
-
-// ---------- the sizes a material also sells in ----------
-// Stock stays in the material's own unit; a size here says one "sack" is 25
-// of it, at its own price (or the unit price times 25 when none is typed).
-// The till offers the sizes beside the unit. Sales already written keep
-// their own copy, so removing a size changes nothing sold.
-function sellingUnitsPage(p) {
-    // (the table rows for the sizes are built by sizeRows, just below this function)
-    const own = p.unit_name || 'unit';
-    const sizes = Array.isArray(p.selling_units) ? p.selling_units : [];
-
-    // the size names offered while typing a new size
-    const sizeNames = ['box', 'pack', 'sack', 'bag', 'bundle', 'roll', 'set', 'dozen', 'pallet', 'length', 'sheet', 'gallon'];
-    let sizeNameOptions = '';
-    for (let i = 0; i < sizeNames.length; i++) {
-        sizeNameOptions += '<option value="' + sizeNames[i] + '">';
-    }
-
-    let list;
-    if (sizes.length === 0) {
-        list = '<p class="detail-empty">Sold only by the ' + escapeHtml(own) + '. Add a bigger size below if it ' +
-              'also goes out by the box, pack or sack.</p>';
-    } else {
-        list = '<div class="table-responsive"><table class="mini-table unit-sizes-table"><thead><tr>' +
-              '<th>Size</th><th class="col-num">Holds</th><th class="col-num">Price</th></tr></thead><tbody>' +
-              sizeRows(p, sizes, own) + '</tbody></table></div>';
-    }
-
-    return '<p class="detail-note">Kept by the <strong>' + escapeHtml(own) + '</strong> at ' + peso(p.price) +
-        ' each. A size sells a fixed number of them at once, and stock still comes off by the ' +
-        escapeHtml(own) + '.</p>' +
-        list +
-        '<form class="unit-size-form" onsubmit="addSellingUnit(event, ' + p.product_id + ')" autocomplete="off">' +
-            '<div class="unit-size-fields">' +
-                '<div class="form-group">' +
-                    '<label for="size-name-' + p.product_id + '">Size</label>' +
-                    '<input type="text" class="form-control" id="size-name-' + p.product_id + '" name="unitName" ' +
-                        'list="unit-size-names" maxlength="20" placeholder="box, pack, sack" required>' +
-                '</div>' +
-                '<div class="form-group">' +
-                    '<label for="size-per-' + p.product_id + '">Holds</label>' +
-                    '<div class="unit-size-per">' +
-                        '<input type="number" class="form-control" id="size-per-' + p.product_id + '" name="unitsPer" ' +
-                            'min="0.001" step="0.001" placeholder="25" required>' +
-                        '<span class="unit-size-own">' + escapeHtml(own) + '</span>' +
-                    '</div>' +
-                '</div>' +
-                '<div class="form-group">' +
-                    '<label for="size-price-' + p.product_id + '">Price <span class="label-hint">optional</span></label>' +
-                    '<input type="number" class="form-control" id="size-price-' + p.product_id + '" name="price" ' +
-                        'min="0" step="0.01" placeholder="' + escapeHtml(own) + ' price x holds">' +
-                '</div>' +
-            '</div>' +
-            '<datalist id="unit-size-names">' + sizeNameOptions + '</datalist>' +
-            '<div class="detail-actions"><button type="submit" class="btn btn-accent">Add this size</button></div>' +
-        '</form>';
-}
-
-// the table rows of the sizes a material sells in; a row removes its size
-function sizeRows(p, sizes, own) {
-    let rows = '';
-    for (let i = 0; i < sizes.length; i++) {
-        const u = sizes[i];
-        const each = u.price === null || u.price === undefined
-            ? Math.round(Number(p.price) * Number(u.units_per) * 100) / 100 : Number(u.price);
-        rows += '<tr class="row-clickable" title="Press to stop selling by this size" ' +
-            'onclick="removeSellingUnit(' + p.product_id + ', ' + Number(u.product_unit_id) + ')">' +
-            '<td><strong>' + escapeHtml(u.unit_name) + '</strong></td>' +
-            '<td class="cell-num">' + escapeHtml(qtyText(u.units_per, own)) + '</td>' +
-            '<td class="cell-num">' + peso(each) +
-                (u.price === null || u.price === undefined
-                    ? ' <span class="muted" title="The unit price times what it holds">worked out</span>' : '') + '</td>' +
-        '</tr>';
-    }
-    return rows;
-}
-
-// The page of the open card with this label, or undefined when it has none.
-function findDetailPage(label) {
-    for (let i = 0; i < detailPages.length; i++) {
-        if (detailPages[i].label === label) return detailPages[i];
-    }
-    return undefined;
-}
-
-// the card is redrawn on its Selling Units page once the list comes back
-function refreshSellingUnitsPage(productId, units) {
-    const p = findProductById(productId);
-    if (!p) return;
-    p.selling_units = units;
-
-    const page = findDetailPage('Selling Units');
-    if (page) {
-        page.body = sellingUnitsPage(p);
-        if (detailPages[detailIndex] === page) renderDetailPage();
-    }
-}
-
-async function addSellingUnit(event, productId) {
-    event.preventDefault();
-    const form = event.target;
-
-    const unitName = form.elements.unitName.value.trim();
-    const unitsPer = Number(form.elements.unitsPer.value);
-    const price = form.elements.price.value.trim();
-
-    if (unitName === '') { notifyWarning('Name the size: box, pack, sack.', 'No size named'); form.elements.unitName.focus(); return; }
-    if (!(unitsPer > 0)) { notifyWarning('Say how many it holds.', 'Nothing to hold'); form.elements.unitsPer.focus(); return; }
-
-    try {
-        const response = await apiAddSellingUnit(productId, unitName, unitsPer, price);
-        const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error, 'Size not added'); return; }
-
-        notifySuccess(result.message, 'Size added');
-        refreshSellingUnitsPage(productId, result.units || []);
-    } catch (error) {
-        notifyOffline();
-    }
-}
-
-async function removeSellingUnit(productId, unitId) {
-    const p = findProductById(productId);
-    let unit;
-    if (p && Array.isArray(p.selling_units)) {
-        unit = undefined;
-        for (let i = 0; i < p.selling_units.length; i++) {
-            if (Number(p.selling_units[i].product_unit_id) === unitId) {
-                unit = p.selling_units[i];
-                break;
-            }
-        }
-    } else {
-        unit = null;
-    }
-
-    const yes = await askConfirm(
-        'The till stops offering it. Sales already written in it are not changed.',
-        { title: 'Stop selling by the ' + (unit ? unit.unit_name : 'size') + '?', eyebrow: 'Inventory',
-          confirmLabel: 'Remove the size', tone: 'danger' });
-    if (!yes) return;
-
-    try {
-        const response = await apiRemoveSellingUnit(productId, unitId);
-        const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error, 'Size not removed'); return; }
-
-        notifySuccess(result.message, 'Size removed');
-        refreshSellingUnitsPage(productId, result.units || []);
-    } catch (error) {
-        notifyOffline();
-    }
 }
 
 // the panel holds the rows, so the panel is what it asks
@@ -3236,7 +3279,7 @@ function openAdjustmentDetail(adjustmentId) {
         detailField('Adjustment ID', '#' + a.adjustment_id) +
         detailField('Material', escapeHtml(a.product_name)) +
         detailField('Type', statusBadge(a.adjustment_type)) +
-        detailField('Counted In', a.unit_name
+        detailField('Unit', a.unit_name
             ? escapeHtml(a.unit_name)
             : '<span class="muted">Not recorded</span>') +
         detailField('Before', a.quantity_before + unit) +
@@ -3396,6 +3439,7 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         onLiveChange(['inventory', 'sales', 'returns'], refreshAdjustScreen);
 
         showInventoryHome();
+        fillMaterialFilters();
         unfoldSidebarAtOpenScreen();
         loadNotifications();
     });
@@ -3404,6 +3448,5 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
     document.addEventListener('click', function (event) {
         if (event.target.closest('.suggest-wrap')) return;
         hideAdjustSuggestions();
-        hideUnitSuggestions();
     });
 }

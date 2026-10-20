@@ -280,6 +280,8 @@ CREATE TABLE purchase_orders (
     decision_note VARCHAR(255) NULL,
     -- when the delivery was counted in (sp_receive_purchase_order)
     received_at TIMESTAMP NULL,
+    -- the clerk's remarks on the delivery, shown on the order's Report
+    delivery_remarks VARCHAR(255) NULL,
     -- the supplier prices the order: unit costs go on the lines and any
     -- discount goes here when the delivery is counted in, not when it is raised
     discount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
