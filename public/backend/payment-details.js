@@ -49,16 +49,16 @@ function isRealDay(text) {
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
-// A cheque is stale six months after its date, and a date more than a year
-// ahead is a typing mistake.
+// A cheque cannot be dated before today, and a date more than a year ahead is
+// a typing mistake.
 function chequeDateProblem(text) {
   if (text === "") return "Enter the date written on the cheque.";
   if (!isRealDay(text)) return "The cheque date is not a real date. Use the date picker, or write it as 2026-10-20.";
 
   const now = new Date();
-  const earliest = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate());
+  const earliest = now;
   const latest = new Date(now.getFullYear() + 1, now.getMonth(), now.getDate());
-  if (text < dayText(earliest)) return "That cheque is dated more than six months ago, so the bank will not take it (stale cheque).";
+  if (text < dayText(earliest)) return "A cheque cannot be dated before today. Pick today or a later date.";
   if (text > dayText(latest)) return "That cheque is dated more than a year ahead. Check the date written on it.";
   return null;
 }

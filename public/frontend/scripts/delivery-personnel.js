@@ -254,10 +254,11 @@ async function openDriverPayment(deliveryId, remarks) {
     showModal('pay-modal');
 }
 
-// A cheque and a bank transfer cannot be traced without their number, so the
-// reference is required for those two; for the rest it is optional.
+// A bank transfer cannot be traced without its number, so the reference is
+// required for it; for the rest it is optional. A cheque is traced by its account,
+// bank and date (as at the counter), so it is not asked for a reference at all.
 function payNeedsReference(method) {
-    return method === 'Cheque' || method === 'Bank Transfer';
+    return method === 'Bank Transfer';
 }
 
 // A cheque is collected with the same details the counter takes: the account name and
@@ -275,6 +276,12 @@ function onDriverPayMethodChange() {
     const needed = payNeedsReference(method);
     form.elements.referenceNo.required = needed;
     hint.textContent = needed ? 'required' : 'optional';
+
+    // no cheque number: the box is hidden for a cheque, and anything typed goes with it
+    const isCheque = method === 'Cheque';
+    const refGroup = form.elements.referenceNo.closest('.form-group');
+    if (refGroup) refGroup.style.display = isCheque ? 'none' : '';
+    if (isCheque) form.elements.referenceNo.value = '';
     showPaymentDetails('door', method);
 }
 
@@ -345,8 +352,7 @@ async function handleDriverPayment(event) {
     }
 
     if (payNeedsReference(method) && form.elements.referenceNo.value.trim() === '') {
-        notifyWarning('Write the ' + (method === 'Cheque' ? 'cheque number' : 'transfer reference') +
-            ' in the Reference box.', 'The reference is required');
+        notifyWarning('Write the transfer reference in the Reference box.', 'The reference is required');
         form.elements.referenceNo.focus();
         return;
     }

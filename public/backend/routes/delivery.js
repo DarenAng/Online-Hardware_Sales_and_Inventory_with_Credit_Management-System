@@ -191,7 +191,7 @@ function registerDeliveryRoutes(app, deps) {
   // at the door is only taken on the driver's word: the customer's bank, account name
   // and account number, and the bank's reference. It is not verified through PayMongo.
   const PAYMENT_METHODS = ["Cash", "GCash", "PayMaya", "Cheque", "Bank Transfer"];
-  const REFERENCE_NEEDED = ["Cheque", "Bank Transfer"];
+  const REFERENCE_NEEDED = ["Bank Transfer"];
 
   // "\u20B1" is the peso sign, written as an escape to keep this file plain ASCII
   function pesoText(value) {
@@ -218,12 +218,8 @@ function registerDeliveryRoutes(app, deps) {
       return response.status(400).json({ error: "Pick how the customer paid: " + PAYMENT_METHODS.join(", ") + "." });
     }
     if (REFERENCE_NEEDED.includes(paymentMethod) && referenceNo === "") {
-      let whichNumber = "transfer reference";
-      if (paymentMethod === "Cheque") {
-        whichNumber = "cheque number";
-      }
       return response.status(400).json({
-        error: "A " + paymentMethod.toLowerCase() + " payment needs its reference: the " + whichNumber +
+        error: "A " + paymentMethod.toLowerCase() + " payment needs its reference: the transfer reference" +
                ". It is how the money is traced if it does not arrive."
       });
     }

@@ -2440,8 +2440,7 @@ async function handleCheckout(event, viaQr) {
     if (!viaQr || (t.onCredit && t.amountOnAccount > 0) || transferDetails) {
         const question = checkoutQuestion(t, checkoutCustomerName());
         if (chequeDetails) {
-            question.detail.push('Cheque no.: ' + reference);
-            question.detail.push('Cheque: ' + chequeDetails.bank + ', ' + chequeDetails.branch + ' \u00b7 dated ' + chequeDetails.chequeDate);
+            question.detail.push('Cheque: ' + chequeDetails.bank + ' \u00b7 dated ' + chequeDetails.chequeDate);
             question.detail.push('Account: ' + chequeDetails.accountName + ', ' + chequeDetails.accountNumber);
         }
         if (transferDetails) {
@@ -4316,7 +4315,7 @@ async function handleTakePayment(event, viaQr) {
     ];
     if (!viaQr && reference !== '') details.push('Reference: ' + reference);
     if (chequeDetails) {
-        details.push('Cheque: ' + chequeDetails.bank + ', ' + chequeDetails.branch + ' \u00b7 dated ' + chequeDetails.chequeDate);
+        details.push('Cheque: ' + chequeDetails.bank + ' \u00b7 dated ' + chequeDetails.chequeDate);
         details.push('Account: ' + chequeDetails.accountName + ', ' + chequeDetails.accountNumber);
     }
     if (transferDetails) {
