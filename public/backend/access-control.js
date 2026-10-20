@@ -218,8 +218,9 @@ const ACCESS_RULES = [
   // the printed credit terms and customer card; the manager writes the wording
   ["GET",   /^\/api\/credit\/terms\/\d+$/,              [MANAGER, CASHIER]],
   ["GET",   /^\/api\/credit\/card\/\d+$/,               [MANAGER, CASHIER]],
-  ["GET",   /^\/api\/credit\/terms-text$/,              [MANAGER]],
-  ["PUT",   /^\/api\/credit\/terms-text$/,              [MANAGER]],
+  // Policy Maintenance: the credit policy, the customer data terms and the refund policy
+  ["GET",   /^\/api\/policies$/,                         [MANAGER]],
+  ["PUT",   /^\/api\/policies\/(credit|data-terms|refund)$/, [MANAGER]],
   ["GET",   /^\/api\/credit\/requests$/,               [MANAGER, CASHIER]],
   ["POST",  /^\/api\/credit\/requests$/,               [MANAGER, CASHIER]],
   ["POST",  /^\/api\/credit\/requests\/\d+\/decide$/,  [MANAGER]],

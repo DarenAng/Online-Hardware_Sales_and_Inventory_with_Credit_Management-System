@@ -198,14 +198,24 @@ function showSalesTransactions(event) {
     showReport(wanted, event);
 }
 
-// Credit Maintenance: the shop's late-payment rate and the wording of the credit terms.
-// Both are read again each time the screen is opened.
+// Policy Maintenance. Credit Maintenance: the shop's late-payment rate and the
+// credit policy. Customer Data Terms and Refund Policy: their wording. Each page
+// shows the back of the customer card beside it. Read again each time a page opens.
 async function showCreditMaintenance(event) {
     showManagerPanel('panel-credit-maintenance', 'Credit Maintenance', event);
     const rateRead = await loadPenaltyPolicy();
     fillPenaltyForm(rateRead);
-    // the terms are asked for only by a manager who holds that part of the screen
-    if (holdsFeature('credit-terms-text')) await loadCreditTermsText();
+    await loadPolicies();
+}
+
+async function showDataTerms(event) {
+    showManagerPanel('panel-data-terms', 'Customer Data Terms', event);
+    await loadPolicies();
+}
+
+async function showRefundPolicy(event) {
+    showManagerPanel('panel-refund-policy', 'Refund Policy', event);
+    await loadPolicies();
 }
 
 // Account Management: the staff list is not read here; Load Data on the screen reads it
@@ -1967,46 +1977,7 @@ async function loadPenaltyPolicy() {
     } catch (error) {
         return false;   // the screen keeps whatever it last showed
     }
-    renderPenaltyPolicy();
     return true;
-}
-
-function renderPenaltyPolicy() {
-    const rate = document.getElementById('penalty-policy-rate');
-    const words = document.getElementById('penalty-policy-words');
-    if (!rate || !words || !penaltyPolicy) return;
-
-    const pct = Number(penaltyPolicy.penalty_rate) || 0;
-    const own = Number(penaltyPolicy.own_rate_accounts) || 0;
-    const charged = Number(penaltyPolicy.penalised_sales) || 0;
-    const owed = Number(penaltyPolicy.penalties_owed) || 0;
-
-    rate.textContent = penaltyRateWord(pct) + ' a month';
-
-    words.innerHTML =
-        'late-payment penalty on the goods still unpaid, for every month a credit sale is past its 30-day due date. ' +
-        (charged > 0
-            ? '<span class="muted">' + peso(owed) + ' in penalties is owed on ' + charged +
-              (charged === 1 ? ' sale' : ' sales') + '.</span> '
-            : '') +
-        (own > 0
-            ? '<span class="muted">' + own + (own === 1 ? ' account has' : ' accounts have') +
-              ' a rate of ' + (own === 1 ? 'its' : 'their') + ' own.</span>'
-            : '');
-
-    const facts = document.getElementById('penalty-facts');
-    if (facts) {
-        facts.innerHTML =
-            detailField('Rate Now', penaltyRateWord(pct) + ' a month' + (pct === 3 ? ' <span class="muted">the default</span>' : '')) +
-            detailField('Last Changed', penaltyPolicy.updated_at
-                ? escapeHtml(String(penaltyPolicy.updated_at).slice(0, 16)) +
-                  (penaltyPolicy.updated_by ? ' <span class="muted">by ' + escapeHtml(penaltyPolicy.updated_by) + '</span>' : '')
-                : '<span class="muted">Never</span>') +
-            detailField('Charged So Far', charged > 0
-                ? peso(owed) + ' <span class="muted">on ' + charged + (charged === 1 ? ' open sale' : ' open sales') + '</span>'
-                : '<span class="muted">Nothing outstanding</span>') +
-            detailField('Own-Rate Accounts', String(own));
-    }
 }
 
 // Puts the saved rate in the box, with its worked example. When the rate could not be
@@ -2024,9 +1995,6 @@ function fillPenaltyForm(rateRead) {
 
     if (!rateRead) {
         form.elements.penaltyRate.value = '';
-        document.getElementById('penalty-policy-rate').textContent = 'Rate not read';
-        document.getElementById('penalty-policy-words').textContent = '';
-        document.getElementById('penalty-facts').innerHTML = '';
         document.getElementById('penalty-preview').hidden = true;
         return;
     }
@@ -2088,62 +2056,92 @@ async function savePenaltyPolicy(event) {
     }
 }
 
-// ---------- the wording of the credit terms ----------
-// The terms printed with every credit account. One term to a line. The
-// figures on that page come from the account, not from this text.
-let creditTermsDefault = '';
+// ---------- the policies and the back of the customer card ----------
+// Three texts, one line to a term: the credit policy, the customer data terms
+// and the refund policy. All three print on the back of the customer card;
+// the credit policy also prints on the credit terms page.
+const POLICY_KINDS = ['credit', 'data-terms', 'refund'];
+let policyData = null;      // what /api/policies answered: { policies, store }
 
-// reads the saved wording into the box on the Credit Maintenance screen
-async function loadCreditTermsText() {
-    let answer;
+async function loadPolicies() {
     try {
-        answer = await apiGetCreditTermsText();
+        policyData = await apiGetPolicies();
     } catch (error) {
-        explainReadFailure(error, 'The credit terms could not be read.', 'Nothing to show');
+        explainReadFailure(error, 'The policies could not be read.', 'Nothing to show');
         return;
     }
-
-    creditTermsDefault = answer.defaultText;
-    const form = document.getElementById('terms-form');
-    form.elements.text.value = answer.text;
-    document.getElementById('terms-sub').textContent =
-        answer.isDefault ? 'Printed with every credit account. The default wording is in use.'
-                         : 'Printed with every credit account. Your own wording is in use.';
-    countCreditTerms();
-}
-
-// how many terms the box holds, as it is typed
-function countCreditTerms() {
-    const form = document.getElementById('terms-form');
-    const note = document.getElementById('terms-count');
-    if (!form || !note) return;
-
-    let count = 0;
-    const lines = form.elements.text.value.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim() !== '') count++;
+    for (let i = 0; i < POLICY_KINDS.length; i++) {
+        const form = document.getElementById('policy-form-' + POLICY_KINDS[i]);
+        const policy = policyData.policies[POLICY_KINDS[i]];
+        if (form && policy) form.elements.text.value = policy.text;
     }
-    if (count === 0) {
-        note.textContent = 'Nothing typed: saving puts the default wording back.';
-    } else if (count > 20) {
-        note.textContent = count + ' terms. At most 20 can be saved.';
-    } else {
-        note.textContent = count + (count === 1 ? ' term' : ' terms') + '. Each prints with its own number.';
+    previewCardBack();
+}
+
+// the text of a policy as it stands: what is typed in its box, else what was read
+function policyTextNow(kind) {
+    const form = document.getElementById('policy-form-' + kind);
+    if (form) return form.elements.text.value;
+    return policyData && policyData.policies[kind] ? policyData.policies[kind].text : '';
+}
+
+// Draws the back of the card beside each policy page, with what is typed now,
+// scaled to the width of its column, and says when the text has to shrink too
+// far to be read on a card that size.
+function previewCardBack() {
+    if (!policyData) return;
+    const policies = {};
+    for (let i = 0; i < POLICY_KINDS.length; i++) {
+        policies[POLICY_KINDS[i]] = cardPolicyLines(policyTextNow(POLICY_KINDS[i]));
+    }
+
+    const boxes = document.querySelectorAll('[data-card-preview]');
+    for (let i = 0; i < boxes.length; i++) {
+        const box = boxes[i];
+        const kind = box.dataset.cardPreview;
+        box.innerHTML = customerCardBackHtml(policyData.store, policies, kind);
+        const card = box.querySelector('.cc-card');
+
+        // a page out of sight has no width to measure; it is drawn again when opened
+        if (box.clientWidth === 0) continue;
+        const size = fitCustomerCard(card);
+        const scale = box.clientWidth / card.offsetWidth;
+        card.style.transform = 'scale(' + scale + ')';
+        box.style.height = (card.offsetHeight * scale) + 'px';
+
+        const fit = document.querySelector('[data-card-fit="' + kind + '"]');
+        if (fit && size !== null) {
+            const tooSmall = size < CARD_SMALLEST_READABLE_PT;
+            fit.hidden = false;
+            fit.classList.toggle('is-warn', tooSmall);
+            fit.textContent = tooSmall
+                ? 'The policies print at ' + size + ' pt on the card, too small to read. Shorten them.'
+                : 'The policies print at ' + size + ' pt on the card. The dashed box is the one on this page.';
+        }
     }
 }
 
-function useDefaultCreditTerms() {
-    const form = document.getElementById('terms-form');
-    form.elements.text.value = creditTermsDefault;
-    countCreditTerms();
+window.addEventListener('resize', function () { previewCardBack(); });
+
+function useDefaultPolicy(kind) {
+    const form = document.getElementById('policy-form-' + kind);
+    if (!form || !policyData || !policyData.policies[kind]) return;
+    form.elements.text.value = policyData.policies[kind].defaultText;
+    previewCardBack();
 }
 
-async function saveCreditTermsText(event) {
+async function savePolicyText(event, kind) {
     event.preventDefault();
     const form = event.target;
 
+    const lines = cardPolicyLines(form.elements.text.value);
+    if (lines.length > 20) {
+        notifyWarning('At most 20 lines can be saved. Put each term on its own line.', 'Not saved');
+        return;
+    }
+
     try {
-        const response = await apiSaveCreditTermsText(form.elements.text.value);
+        const response = await apiSavePolicy(kind, form.elements.text.value);
         const result = await response.json();
 
         if (!response.ok) {
@@ -2151,8 +2149,8 @@ async function saveCreditTermsText(event) {
             return;
         }
 
-        notifySuccess(result.message, 'Credit terms saved');
-        await loadCreditTermsText();   // an emptied box comes back as the default wording
+        notifySuccess(result.message, CARD_POLICY_TITLES[kind] + ' saved');
+        await loadPolicies();   // an emptied box comes back as the default wording
     } catch (error) {
         notifyOffline();
     }
@@ -2332,7 +2330,7 @@ function openCreditRequest(requestId) {
     document.getElementById('decide-name').textContent = r.customer_name;
     document.getElementById('decide-sub').textContent = decided
         ? r.status + (r.decided_by ? ' by ' + r.decided_by : '')
-        : 'Waiting for a decision';
+        : 'Pending';
     document.getElementById('decide-avatar').textContent = initialsOf(r.customer_name);
 
     document.getElementById('decide-facts').innerHTML =

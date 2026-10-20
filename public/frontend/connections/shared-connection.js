@@ -391,14 +391,14 @@ function apiGetCustomerCard(customerId) {
     return getJson('/api/credit/card/' + customerId);
 }
 
-// GET /api/credit/terms-text -- the wording of the terms { text, isDefault, defaultText } (manager)
-function apiGetCreditTermsText() {
-    return getJson('/api/credit/terms-text');
+// GET /api/policies -- every policy's wording { policies: { credit, 'data-terms', refund }, store } (manager)
+function apiGetPolicies() {
+    return getJson('/api/policies');
 }
 
-// PUT /api/credit/terms-text -- save the wording; empty text puts the default back (manager)
-function apiSaveCreditTermsText(text) {
-    return sendJson('/api/credit/terms-text', 'PUT', { text: text });
+// PUT /api/policies/:kind -- save one policy's wording; empty text puts its default back (manager)
+function apiSavePolicy(kind, text) {
+    return sendJson('/api/policies/' + kind, 'PUT', { text: text });
 }
 
 // GET /api/customers/:id/history

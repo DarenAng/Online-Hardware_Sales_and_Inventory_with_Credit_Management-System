@@ -2550,6 +2550,101 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 }
 
 /* ==========================================================================
+   THE PHYSICAL CUSTOMER CARD (shared/credit-terms.js) -- ID-1 size, 85.6 x 54 mm,
+   drawn in mm so the print is true size. The same card is the preview on the
+   Policy Maintenance pages (scaled up there) and is measured out of sight
+   (.cc-measure) before printing, to fit the back's text to the card.
+   ========================================================================== */
+.cc-card {
+    --cc-ink: #14181d;
+    --cc-band: #1b1f24;
+    --cc-accent: #d0400f;
+    position: relative;
+    box-sizing: border-box;
+    width: 85.6mm; height: 54mm;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+    background: #fff;
+    color: var(--cc-ink);
+    border-radius: 3mm;
+    font-family: Arial, Helvetica, sans-serif;
+    line-height: 1.25;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+}
+.cc-card * { box-sizing: border-box; }
+
+/* the front: a dark band with the store, the cardholder below */
+.cc-front-band {
+    display: flex; align-items: center; gap: 2.4mm;
+    padding: 3mm 3.6mm;
+    background: var(--cc-band); color: #fff;
+    border-bottom: 1mm solid var(--cc-accent);
+}
+.cc-logo {
+    flex: none; width: 9mm; height: 9mm; border-radius: 1.6mm;
+    display: grid; place-items: center;
+    background: var(--cc-accent); color: #fff;
+    font-size: 11pt; font-weight: 700;
+}
+.cc-front-store { display: flex; flex-direction: column; min-width: 0; }
+.cc-front-store strong { font-size: 10pt; letter-spacing: 0.01em; }
+.cc-front-store span { font-size: 5.5pt; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-front-main { flex: 1; display: flex; flex-direction: column; padding: 2.6mm 3.6mm 0; min-height: 0; }
+.cc-front-kind { font-size: 5.5pt; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--cc-accent); }
+.cc-front-name { margin-top: 0.6mm; font-size: 11pt; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-front-facts { display: flex; gap: 4mm; margin-top: 2.4mm; }
+.cc-front-facts div { display: flex; flex-direction: column; min-width: 0; }
+.cc-front-facts span { font-size: 5pt; text-transform: uppercase; letter-spacing: 0.06em; color: #5b636d; }
+.cc-front-facts strong { font-size: 7pt; white-space: nowrap; }
+.cc-front-foot { padding: 1.4mm 3.6mm; font-size: 5pt; color: #5b636d; border-top: 0.2mm solid #d9dde2; }
+
+/* the back: the three policies in two columns, the signature at the foot */
+.cc-back-head {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 2mm;
+    padding: 1.3mm 2.6mm;
+    background: var(--cc-band); color: #fff;
+    border-bottom: 0.6mm solid var(--cc-accent);
+    font-size: 6pt; font-weight: 700;
+}
+.cc-back-head span:last-child { font-size: 5pt; font-weight: 400; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85; }
+.cc-back-body {
+    flex: 1; min-height: 0; overflow: hidden;
+    padding: 1.2mm 2.6mm 0;
+    column-count: 2; column-gap: 2mm;
+    font-size: 6.5pt; line-height: 1.17;
+}
+.cc-policy { margin-bottom: 0.5em; }
+.cc-policy h4 {
+    margin: 0 0 0.3em; break-after: avoid;
+    font-size: 1.1em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--cc-accent);
+}
+.cc-policy ol { margin: 0; padding-left: 1.1em; }
+.cc-policy li { margin: 0 0 0.1em; }
+.cc-empty { margin: 0; font-style: italic; color: #5b636d; }
+.cc-back-foot { padding: 0.6mm 2.6mm 1.4mm; }
+.cc-sign { display: flex; align-items: flex-end; gap: 1.6mm; font-size: 5pt; color: #5b636d; }
+.cc-sign-line { flex: 1; height: 3.4mm; border-bottom: 0.25mm solid var(--cc-ink); }
+.cc-return { margin-top: 0.8mm; font-size: 4.5pt; color: #5b636d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* measured on screen, out of sight, before it goes to the paper */
+.cc-measure { position: fixed; left: -10000px; top: 0; visibility: hidden; }
+
+/* the preview: the card scaled to the width of its column (manager.js previewCardBack) */
+.card-preview { position: relative; width: 100%; }
+.card-preview .cc-card { transform-origin: top left; box-shadow: 0 0 0 1px var(--line); }
+.card-preview .cc-policy.is-editing { outline: 0.3mm dashed var(--cc-accent); outline-offset: 0.4mm; }
+
+@media print {
+    /* the printed sheet: the front and the back side by side, sharing the fold,
+       with a dotted line to cut along */
+    .cc-instructions { margin: 0 0 8mm; font-size: 11px; text-align: center; }
+    .cc-pair { display: flex; justify-content: center; }
+    .cc-pair .cc-card { border-radius: 0; outline: 0.3mm dashed #000; }
+    .cc-pair .cc-front { border-right: 0.2mm dotted #999; }
+}
+
+/* ==========================================================================
    CREDIT -- purchase history and payment history side by side
    ========================================================================== */
 .history-head {

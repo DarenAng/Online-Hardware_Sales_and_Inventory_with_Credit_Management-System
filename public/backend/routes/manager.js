@@ -22,6 +22,8 @@ const buildFullAddress = helpers.buildFullAddress;
 const addressPartsFrom = helpers.addressPartsFrom;
 const addressPartsProblem = helpers.addressPartsProblem;
 const DEFAULT_CREDIT_TERMS = require("../store-settings").DEFAULT_CREDIT_TERMS;
+const DEFAULT_DATA_TERMS = require("../store-settings").DEFAULT_DATA_TERMS;
+const DEFAULT_REFUND_POLICY = require("../store-settings").DEFAULT_REFUND_POLICY;
 const receiptLayoutFrom = require("../store-settings").receiptLayoutFrom;
 
 function registerManagerRoutes(app, deps) {
@@ -1198,12 +1200,39 @@ function registerManagerRoutes(app, deps) {
   // ==========================================
   const CREDIT_DUE_DAYS = 30;
 
-  // The terms text in force: the manager's own wording, else the default.
+  // The three policies the manager maintains (Policy Maintenance), each one
+  // line to a term: where it is kept, its default wording and what the audit
+  // trail calls a change to it.
+  const POLICIES = {
+    credit: { column: "credit_terms", fallback: DEFAULT_CREDIT_TERMS, name: "Credit policy",
+              action: "UPDATE_CREDIT_TERMS" },
+    "data-terms": { column: "data_terms", fallback: DEFAULT_DATA_TERMS, name: "Customer data terms",
+                    action: "UPDATE_DATA_TERMS" },
+    refund: { column: "refund_policy", fallback: DEFAULT_REFUND_POLICY, name: "Refund policy",
+              action: "UPDATE_REFUND_POLICY" }
+  };
+
+  // Every policy's text in force: the manager's own wording, else the default.
+  // A database from before a column was added reads as the default.
+  async function policyTexts() {
+    const rowsResult = await db.query("SELECT * FROM store_settings WHERE setting_id = 1");
+    const row = rowsResult[0][0] || {};
+    const texts = {};
+    for (const kind in POLICIES) {
+      const policy = POLICIES[kind];
+      const saved = row[policy.column];
+      if (saved && String(saved).trim() !== "") {
+        texts[kind] = { text: String(saved), isDefault: false, defaultText: policy.fallback };
+      } else {
+        texts[kind] = { text: policy.fallback, isDefault: true, defaultText: policy.fallback };
+      }
+    }
+    return texts;
+  }
+
+  // The credit terms text in force (the credit policy)
   async function creditTermsText() {
-    const rowsResult = await db.query("SELECT credit_terms FROM store_settings WHERE setting_id = 1");
-    const saved = rowsResult[0][0] ? rowsResult[0][0].credit_terms : null;
-    if (saved && String(saved).trim() !== "") return { text: String(saved), isDefault: false };
-    return { text: DEFAULT_CREDIT_TERMS, isDefault: true };
+    return (await policyTexts()).credit;
   }
 
   // every filled-in line of a text, in order
@@ -1233,7 +1262,8 @@ function registerManagerRoutes(app, deps) {
     const staffResult = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [actorId]);
     const staff = staffResult[0][0];
 
-    const terms = await creditTermsText();
+    const policies = await policyTexts();
+    const terms = policies.credit;
     const ownRate = customer.penalty_rate_override !== null && customer.penalty_rate_override !== undefined;
 
     return {
@@ -1264,6 +1294,11 @@ function registerManagerRoutes(app, deps) {
         penalty_rate_is_own: ownRate,
         lines: linesOf(terms.text)
       },
+      // the back of the customer card
+      policies: {
+        data_terms: linesOf(policies["data-terms"].text),
+        refund_policy: linesOf(policies.refund.text)
+      },
       prepared_by: staff ? staff.full_name : null,
       printed_at: new Date().toISOString()
     };
@@ -1291,27 +1326,42 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // The manager reads and writes the wording. An empty text puts the default back.
-  app.get("/api/credit/terms-text", requireRole(MANAGER), async function (request, response) {
+  // Policy Maintenance: the manager reads every policy's wording (with the
+  // store's name and contact lines, for the preview of the card's back) and
+  // writes one at a time. An empty text puts that policy's default back.
+  app.get("/api/policies", requireRole(MANAGER), async function (request, response) {
     try {
-      const terms = await creditTermsText();
-      response.json({ text: terms.text, isDefault: terms.isDefault, defaultText: DEFAULT_CREDIT_TERMS });
+      const texts = await policyTexts();
+      const storeResult = await db.query(
+        "SELECT store_name, address, receipt_layout FROM store_settings WHERE setting_id = 1");
+      const store = storeResult[0][0] || {};
+      response.json({
+        policies: texts,
+        store: {
+          name: store.store_name || "Lucelyn Hardware",
+          address: store.address || "",
+          contact_lines: receiptLayoutFrom(store.receipt_layout).headerLines
+        }
+      });
     } catch (error) {
-      console.error("Credit terms text failed:", error.message);
-      response.status(500).json({ error: "Unable to read the credit terms" });
+      console.error("Policies read failed:", error.message);
+      response.status(500).json({ error: "Unable to read the policies" });
     }
   });
 
-  app.put("/api/credit/terms-text", requireRole(MANAGER), async function (request, response) {
+  app.put("/api/policies/:kind", requireRole(MANAGER), async function (request, response) {
+    const policy = POLICIES[request.params.kind];
+    if (!policy) return response.status(404).json({ error: "There is no such policy." });
+
     const typed = typeof (request.body || {}).text === "string" ? request.body.text : "";
     const lines = linesOf(typed);
 
     if (lines.length > 20) {
-      return response.status(400).json({ error: "At most 20 terms. Put each term on its own line." });
+      return response.status(400).json({ error: "At most 20 lines. Put each term on its own line." });
     }
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].length > 600) {
-        return response.status(400).json({ error: "Term " + (i + 1) + " is longer than 600 characters. Split it into two." });
+        return response.status(400).json({ error: "Line " + (i + 1) + " is longer than 600 characters. Split it into two." });
       }
     }
 
@@ -1325,23 +1375,23 @@ function registerManagerRoutes(app, deps) {
       // they were (updated_at = updated_at stops its automatic refresh)
       const rowResult = await db.query("SELECT setting_id FROM store_settings WHERE setting_id = 1");
       if (rowResult[0].length === 0) {
-        return response.status(409).json({ error: "The store settings are not set up yet, so there is nowhere to keep the terms. The administrator fills them in first." });
+        return response.status(409).json({ error: "The store settings are not set up yet, so there is nowhere to keep the policy. The administrator fills them in first." });
       }
       await db.query(
-        "UPDATE store_settings SET credit_terms = ?, updated_at = updated_at WHERE setting_id = 1",
+        "UPDATE store_settings SET " + policy.column + " = ?, updated_at = updated_at WHERE setting_id = 1",
         [saved]
       );
-      await writeAuditLog(request, "UPDATE_CREDIT_TERMS",
-        saved === null ? "Credit terms and conditions set back to the default wording"
-                       : "Credit terms and conditions rewritten (" + lines.length + " terms)");
+      await writeAuditLog(request, policy.action,
+        saved === null ? policy.name + " set back to the default wording"
+                       : policy.name + " rewritten (" + lines.length + " lines)");
 
       response.json({
-        message: saved === null ? "The default wording is back." : "The credit terms are saved. They print on the next page.",
+        message: saved === null ? "The default wording is back." : policy.name + " saved.",
         isDefault: saved === null
       });
     } catch (error) {
-      console.error("Credit terms save failed:", error.message);
-      response.status(500).json({ error: "Unable to save the credit terms" });
+      console.error("Policy save failed:", error.message);
+      response.status(500).json({ error: "Unable to save the policy" });
     }
   });
 

@@ -1529,19 +1529,36 @@ reprinted later, the income figures and the standing rules. The sale itself,
 `final_amount`, is untouched, so the sales figures are still the sales.
 
 **The rate is the manager's.** It is set on the manager's **Credit Maintenance**
-screen (under Customers Record), which says the shop's rate in force and what
-is owed in penalties, and sets another, anywhere from 1 to 3, with a worked
-example before it is saved. The same page holds the wording of the credit
-terms and conditions printed with every credit account, one term to a line,
-with *Use the default wording* to put the standard text back. The screen is
-its own switch in Access Control (`credit-maintenance`, held by managers by
-default, so an existing database needs no migration); the wording half also
-needs `credit-terms-text`. A change applies from the next month charged and never rewrites a
-month already charged. An account can also be given **a rate of its own** on
-its credit terms, beside the limit and the standing override — a loyal
-customer at 1 percent while the shop stays at 3 — and blank there means the
-shop's rate. The cashier reads the rate and sees the penalties but cannot set
+screen, anywhere from 1 to 3, with a worked example before it is saved. A
+change applies from the next month charged and never rewrites a month already
+charged. The cashier reads the rate and sees the penalties but cannot set
 either; the server refuses the route to anyone but a manager.
+
+### Policy Maintenance and the customer card
+
+**Policy Maintenance** in the manager's menu holds three pages:
+
+- **Credit Maintenance**: the late-payment rate and the **Credit Policy**,
+  printed on the credit terms page and on the back of the customer card.
+- **Customer Data Terms**: how the store collects, keeps and uses a
+  customer's personal data (Data Privacy Act of 2012).
+- **Refund Policy**: the store's refund rules.
+
+Each policy is one term to a line (up to 20), with *Use the default wording*
+to put the standard text back; an emptied box saved does the same. They are
+kept in `store_settings.credit_terms`, `data_terms` and `refund_policy` (the
+last two are added on the next `npm start`) and read and saved through
+`GET /api/policies` and `PUT /api/policies/:kind`. Each page is its own switch
+in Access Control (`credit-maintenance` with `credit-terms-text`, `data-terms`,
+`refund-policy`), held by managers by default.
+
+Beside each page is a live preview of **the back of the customer card** with
+all three policies on it. The text shrinks to fit the card, and the preview
+warns when it gets too small to read (under 4.5 pt), so the policies can be
+shortened. **Print Customer Card** prints the physical card at true size
+(85.6 x 54 mm, a bank card's size): the front (the store, the customer, their
+number, contact and credit limit) and the back side by side, to cut out, fold
+and laminate, followed by the credit terms page.
 
 ## Returns: what happened, and where the goods went
 

@@ -685,6 +685,27 @@ async function migrateCreditTerms() {
   console.log("Added store_settings.credit_terms for the printed credit terms and conditions.");
 }
 
+// The other two policies on the back of the customer card: how the store
+// handles a customer's data, and its refund policy. NULL means the default text.
+async function migratePolicyTexts() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.length === 0) return;                         // no store_settings table yet
+
+  if (names.indexOf("data_terms") === -1) {
+    await db.query("ALTER TABLE store_settings ADD COLUMN data_terms TEXT NULL");
+    console.log("Added store_settings.data_terms for the customer data terms and conditions.");
+  }
+  if (names.indexOf("refund_policy") === -1) {
+    await db.query("ALTER TABLE store_settings ADD COLUMN refund_policy TEXT NULL");
+    console.log("Added store_settings.refund_policy for the refund policy.");
+  }
+}
+
 // A product added by the inventory clerk tells the manager, so the alert has a
 // kind of its own: 'New Product'. The kind is a word in notifications.notif_type,
 // so the column is widened (every kind it already has is kept).
@@ -1581,6 +1602,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateBankDetails();
   await migrateReceiptLayout();
   await migrateCreditTerms();
+  await migratePolicyTexts();
   await migrateNewProductAlert();
   await migrateRemoveDeliveryAreas();
   await migratePasswordResets();

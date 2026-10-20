@@ -19,7 +19,9 @@ const DEFAULT_STORE_SETTINGS = {
   bank_account_name: null,
   bank_account_number: null,
   receipt_layout: null,
-  credit_terms: null
+  credit_terms: null,
+  data_terms: null,
+  refund_policy: null
 };
 
 // The plain terms printed with a customer's credit account, one term to a
@@ -27,13 +29,31 @@ const DEFAULT_STORE_SETTINGS = {
 // hold no figures: the credit limit, the due date and the late-payment rate are
 // printed above them from the account itself, so they cannot go out of date.
 const DEFAULT_CREDIT_TERMS = [
-  "The customer agrees to pay every credit purchase in full by its due date, as shown above and on the receipt.",
-  "A purchase that is not paid by its due date is charged the late-payment penalty shown above, for every month or part of a month it stays unpaid.",
-  "The store may put the customer's credit on hold, lower the credit limit or stop further credit purchases when payments are late or the credit limit is exceeded.",
-  "Returns and refunds are accepted only for goods in their original condition, with the receipt, and only as the store allows. A refund on a credit purchase first reduces the balance still owed.",
-  "The customer keeps every receipt and payment slip as proof of purchase and of payment.",
+  "Every credit purchase is paid in full by its due date, shown on the receipt.",
+  "A purchase paid late is charged the late-payment penalty for every month or part of a month it stays unpaid.",
+  "The store may hold, lower or stop the customer's credit when payments are late or the limit is exceeded.",
+  "The customer keeps every receipt and payment slip as proof of purchase and payment.",
   "The customer tells the store of any change of address or contact number.",
-  "By signing below, the customer confirms the details above are correct and that the terms have been read and accepted."
+  "By signing, the customer confirms these details and accepts these terms."
+].join("\n");
+
+// The terms on how the store handles a customer's personal data, one term to a
+// line, until the manager writes their own (store_settings.data_terms). Printed
+// on the back of the customer card.
+const DEFAULT_DATA_TERMS = [
+  "The store collects the customer's name, address, contact number and purchase records only to sell, deliver, give credit and collect payment.",
+  "This information is seen only by authorized staff and is not sold or shared, except with a courier or where the law requires.",
+  "The customer may ask to see, correct or update it at any time.",
+  "Handled under the Data Privacy Act of 2012 (RA 10173)."
+].join("\n");
+
+// The store's refund policy, one rule to a line, until the manager writes their
+// own (store_settings.refund_policy). Printed on the back of the customer card.
+const DEFAULT_REFUND_POLICY = [
+  "Returns within 3 days of purchase, with the receipt.",
+  "Goods must be unused, undamaged and in their original packaging.",
+  "Goods cut to size, mixed or specially ordered cannot be returned.",
+  "A refund on a credit purchase first reduces the balance owed."
 ].join("\n");
 
 // What the receipt looks like until the administrator changes it in Receipt
@@ -125,6 +145,8 @@ function receiptLayoutFrom(raw) {
 module.exports = {
   DEFAULT_STORE_SETTINGS: DEFAULT_STORE_SETTINGS,
   DEFAULT_CREDIT_TERMS: DEFAULT_CREDIT_TERMS,
+  DEFAULT_DATA_TERMS: DEFAULT_DATA_TERMS,
+  DEFAULT_REFUND_POLICY: DEFAULT_REFUND_POLICY,
   DEFAULT_RECEIPT_LAYOUT: DEFAULT_RECEIPT_LAYOUT,
   receiptLayoutFrom: receiptLayoutFrom
 };

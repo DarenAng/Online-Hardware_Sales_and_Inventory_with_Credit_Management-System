@@ -78,8 +78,6 @@
                         <li data-feature="credit"><a href="#" data-panel-link="panel-credit" onclick="showCredit(event)"><i class="bi bi-credit-card nav-icon" aria-hidden="true"></i>Customer Credit</a></li>
                         <li data-feature="credit-requests"><a href="#" data-panel-link="panel-credit-requests" onclick="showCreditRequests(event)"><i class="bi bi-calendar-plus nav-icon" aria-hidden="true"></i>
                             Extension Requests</a></li>
-                        <li data-feature="credit-maintenance"><a href="#" data-panel-link="panel-credit-maintenance" onclick="showCreditMaintenance(event)"><i class="bi bi-sliders nav-icon" aria-hidden="true"></i>
-                            Credit Maintenance</a></li>
                     </ul>
                 </li>
 
@@ -113,6 +111,21 @@
                                onclick="showRecordType('category', event)"><i class="bi bi-grid nav-icon" aria-hidden="true"></i>Categories</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="unit"
                                onclick="showRecordType('unit', event)"><i class="bi bi-rulers nav-icon" aria-hidden="true"></i>Units</a></li>
+                    </ul>
+                </li>
+                <!-- the policies printed for customers: credit, their data, refunds;
+                     each page previews the back of the customer card -->
+                <li data-sidebar-dropdown>
+                    <a href="#policy" onclick="sidebarHeading(event, 'policy-nav', 'policy-dropdown', showCreditMaintenance)" class="nav-parent" id="policy-nav"><i class="bi bi-journal-text nav-icon" aria-hidden="true"></i>
+                        Policy Maintenance <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
+                    </a>
+                    <ul id="policy-dropdown" class="nav-sub" style="display: none;">
+                        <li data-feature="credit-maintenance"><a href="#" data-panel-link="panel-credit-maintenance" onclick="showCreditMaintenance(event)"><i class="bi bi-sliders nav-icon" aria-hidden="true"></i>
+                            Credit Maintenance</a></li>
+                        <li data-feature="data-terms"><a href="#" data-panel-link="panel-data-terms" onclick="showDataTerms(event)"><i class="bi bi-shield-lock nav-icon" aria-hidden="true"></i>
+                            Customer Data Terms</a></li>
+                        <li data-feature="refund-policy"><a href="#" data-panel-link="panel-refund-policy" onclick="showRefundPolicy(event)"><i class="bi bi-arrow-counterclockwise nav-icon" aria-hidden="true"></i>
+                            Refund Policy</a></li>
                     </ul>
                 </li>
                 <li data-feature="archives"><a href="#" data-panel-link="panel-archives" onclick="showArchives(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archives</a></li>
@@ -882,7 +895,7 @@
                         <div class="toolbar-field">
                             <label for="requests-status">Status</label>
                             <select id="requests-status" data-filter-table="requests-table" data-hides-column="7" onchange="reloadCreditRequests()">
-                                <option value="Pending">Waiting for a decision</option>
+                                <option value="Pending">Pending</option>
                                 <option value="all">Every request</option>
                                 <option value="Approved">Approved</option>
                                 <option value="Declined">Declined</option>
@@ -904,76 +917,128 @@
                 </div>
 
                 <!-- ============================================================
-                     CREDIT MAINTENANCE -- the shop's late-payment rate and the wording of the
-                     credit terms, on one page (loadPenaltyPolicy and loadCreditTermsText fill it)
+                     POLICY MAINTENANCE -- three pages, each with the back of the customer
+                     card beside it: Credit Maintenance (the late-payment rate and the
+                     credit policy), Customer Data Terms and Refund Policy
                      ============================================================ -->
                 <div id="panel-credit-maintenance" data-panel style="display: none;">
-                    <div class="card">
-                        <div class="panel-head">
-                            <div>
-                                <h3>Late-Payment Penalty</h3>
-                                <p class="panel-sub">The shop's rate for every credit account</p>
+                    <div class="policy-layout">
+                    <div class="policy-main">
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Late-Payment Penalty</h3>
+                                    <p class="panel-sub">The shop's rate for every credit account</p>
+                                </div>
                             </div>
+
+                            <form id="penalty-form" onsubmit="savePenaltyPolicy(event)">
+                                <p class="detail-note detail-warn" id="penalty-read-note" hidden>The rate could not be read.
+                                    Reload the page to try again.</p>
+                                <div class="form-group">
+                                    <label for="penalty-rate-input">Penalty rate, percent a month</label>
+                                    <input type="number" id="penalty-rate-input" name="penaltyRate" class="form-control"
+                                           min="1" max="3" step="0.01" required oninput="previewPenaltyPolicy()">
+                                </div>
+
+                                <p class="formula-preview" id="penalty-preview"></p>
+
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-success" id="penalty-save-btn">Save the Rate</button>
+                                </div>
+                            </form>
                         </div>
 
-                        <div class="policy-text">
-                            <span class="policy-rate" id="penalty-policy-rate">3% a month</span>
-                            <span class="policy-words" id="penalty-policy-words">late-payment penalty on the goods still unpaid,
-                                for every month a credit sale is past its 30-day due date.</span>
+                        <div class="card" data-feature="credit-terms-text">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Credit Policy</h3>
+                                </div>
+                            </div>
+                            <form id="policy-form-credit" class="policy-form" onsubmit="savePolicyText(event, 'credit')">
+                                <textarea name="text" class="form-control policy-textarea" rows="14" maxlength="12000"
+                                          aria-label="Credit Policy" oninput="previewCardBack()"></textarea>
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-success">Save</button>
+                                    <button type="button" class="btn btn-ghost" onclick="useDefaultPolicy('credit')">Use the default wording</button>
+                                </div>
+                            </form>
                         </div>
-
-                        <div class="detail-grid" id="penalty-facts"></div>
-
-                        <form id="penalty-form" class="form-sheet" onsubmit="savePenaltyPolicy(event)">
-                            <p class="detail-note detail-warn" id="penalty-read-note" hidden>The rate could not be read.
-                                Reload the page to try again.</p>
-                            <div class="form-group">
-                                <label for="penalty-rate-input">Penalty rate, percent a month
-                                    <span class="label-hint">from 1 to 3, of the goods still unpaid; the default is 3</span></label>
-                                <input type="number" id="penalty-rate-input" name="penaltyRate" class="form-control"
-                                       min="1" max="3" step="0.01" required oninput="previewPenaltyPolicy()">
-                            </div>
-
-                            <p class="formula-preview" id="penalty-preview"></p>
-
-                            <p class="detail-note">A sale is charged the day after its due date and again every thirty
-                                days it stays unpaid, at the rate in force that day; a part of a month counts as a month.
-                                Changing the rate here does not touch a month already charged. An account given its
-                                own rate on its credit terms keeps that rate instead of this one.</p>
-
-                            <div class="form-footer">
-                                <button type="submit" class="btn btn-success" id="penalty-save-btn">Save the Rate</button>
-                            </div>
-                        </form>
                     </div>
-
-                    <!-- THE WORDING OF THE CREDIT TERMS AND CONDITIONS -- printed with every credit account.
-                         One term to a line; the figures (limit, days to pay, late-payment rate) are not typed here,
-                         they are printed from the account. Emptied and saved, the default wording comes back. -->
-                    <div class="card" data-feature="credit-terms-text">
+                    <!-- the back of the customer card as it prints, with what is typed here -->
+                    <div class="card policy-preview-card">
                         <div class="panel-head">
                             <div>
-                                <h3>Credit Terms and Conditions</h3>
-                                <p class="panel-sub" id="terms-sub">Printed with every credit account</p>
+                                <h3>Customer Card, Back</h3>
                             </div>
                         </div>
+                        <div class="card-preview" data-card-preview="credit"></div>
+                        <p class="card-preview-fit" data-card-fit="credit" hidden></p>
+                    </div>
+                    </div>
+                </div>
 
-                        <form id="terms-form" class="form-sheet" onsubmit="saveCreditTermsText(event)">
-                            <div class="form-group">
-                                <label for="terms-text">The terms <span class="label-hint">one to a line, up to 20</span></label>
-                                <textarea id="terms-text" name="text" class="form-control" rows="12" maxlength="12000"
-                                          oninput="countCreditTerms()"></textarea>
-                                <span class="label-hint" id="terms-count"></span>
+                <div id="panel-data-terms" data-panel style="display: none;">
+                    <div class="policy-layout">
+                    <div class="policy-main">
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Customer Data Terms</h3>
+                                </div>
                             </div>
-                            <p class="detail-note">The page also prints the store's details, the customer, the credit limit,
-                                the days to pay and the late-payment rate from the account itself, then these terms, then
-                                the signature lines. Do not type those figures here: they would go out of date.</p>
+                            <form id="policy-form-data-terms" class="policy-form" onsubmit="savePolicyText(event, 'data-terms')">
+                                <textarea name="text" class="form-control policy-textarea" rows="14" maxlength="12000"
+                                          aria-label="Customer Data Terms" oninput="previewCardBack()"></textarea>
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-success">Save</button>
+                                    <button type="button" class="btn btn-ghost" onclick="useDefaultPolicy('data-terms')">Use the default wording</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <!-- the back of the customer card as it prints, with what is typed here -->
+                    <div class="card policy-preview-card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Customer Card, Back</h3>
+                            </div>
+                        </div>
+                        <div class="card-preview" data-card-preview="data-terms"></div>
+                        <p class="card-preview-fit" data-card-fit="data-terms" hidden></p>
+                    </div>
+                    </div>
+                </div>
 
-                            <div class="form-footer">
-                                <button type="submit" class="btn btn-success">Save the Terms</button>
-                                <button type="button" class="btn btn-ghost" onclick="useDefaultCreditTerms()">Use the default wording</button>
+                <div id="panel-refund-policy" data-panel style="display: none;">
+                    <div class="policy-layout">
+                    <div class="policy-main">
+                        <div class="card">
+                            <div class="panel-head">
+                                <div>
+                                    <h3>Refund Policy</h3>
+                                </div>
                             </div>
-                        </form>
+                            <form id="policy-form-refund" class="policy-form" onsubmit="savePolicyText(event, 'refund')">
+                                <textarea name="text" class="form-control policy-textarea" rows="14" maxlength="12000"
+                                          aria-label="Refund Policy" oninput="previewCardBack()"></textarea>
+                                <div class="form-footer">
+                                    <button type="submit" class="btn btn-success">Save</button>
+                                    <button type="button" class="btn btn-ghost" onclick="useDefaultPolicy('refund')">Use the default wording</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <!-- the back of the customer card as it prints, with what is typed here -->
+                    <div class="card policy-preview-card">
+                        <div class="panel-head">
+                            <div>
+                                <h3>Customer Card, Back</h3>
+                            </div>
+                        </div>
+                        <div class="card-preview" data-card-preview="refund"></div>
+                        <p class="card-preview-fit" data-card-fit="refund" hidden></p>
+                    </div>
                     </div>
                 </div>
 
@@ -1459,7 +1524,7 @@
                     <div class="avatar" id="decide-avatar">--</div>
                     <div>
                         <h3 id="decide-name">Extension request</h3>
-                        <span class="modal-role" id="decide-sub">Waiting for a decision</span>
+                        <span class="modal-role" id="decide-sub">Pending</span>
                     </div>
                 </div>
                 <button type="button" class="modal-close" onclick="closeModal('decide-modal')" aria-label="Close">&times;</button>
