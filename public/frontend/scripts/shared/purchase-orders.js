@@ -2072,12 +2072,9 @@ function renderPurchaseTotalsFigures() {
     const ready = panel && panel.state === 'ready';
     const orders = ready ? panel.visible : [];
     let total = 0;
-    let units = 0;
     for (let i = 0; i < orders.length; i++) {
         total = total + poOrderValue(orders[i]);
-        units = units + (Number(orders[i].total_units) || 0);
     }
-    const average = orders.length === 0 ? 0 : total / orders.length;
     const shown = function (text) {
         return ready ? text : '0';
     };
@@ -2089,9 +2086,7 @@ function renderPurchaseTotalsFigures() {
 
     const kpis = [
         ['Total Purchases', shown(peso(total)), covers],
-        ['Orders', shown(orders.length.toLocaleString('en-PH')), orders.length === 1 ? 'purchase order' : 'purchase orders'],
-        ['Units Ordered', shown(units.toLocaleString('en-PH')), 'across every line'],
-        ['Average Order', shown(peso(average)), 'per purchase order']
+        ['Orders', shown(orders.length.toLocaleString('en-PH')), orders.length === 1 ? 'purchase order' : 'purchase orders']
     ];
 
     let cards = '';
@@ -2163,7 +2158,7 @@ function buildPurchaseTotalsPanel() {
 
         renderRow: function (po, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'title="Open this order" onclick="openPurchaseOrderDetail(' + po.po_id + ')">' +
+                'title="Open this order" onclick="openPurchaseOrderDetail(' + po.po_id + ', true)">' +
             '<td class="cell-id">#' + po.po_id + '</td>' +
             '<td class="cell-name">' + escapeHtml(po.supplier_name) + '</td>' +
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
@@ -2234,12 +2229,32 @@ async function printPurchaseOrder(poId) {
 // only the order's document reaches the paper (the styles are in the Purchase
 // orders section at the end of css/shared/responsive.css, with css/pages/manager.css
 // and css/pages/inventory-dashboard.css)
+// A4 with no page margin: the browser then prints none of its own header and
+// footer (the date, the page's title, the address and the page number). The
+// document keeps its own margin inside (css/shared/responsive.css).
+const PO_PRINT_PAGE_STYLE_ID = 'po-print-page-style';
+
 function printPurchaseOrderNow() {
     // a credit page still on the paper is put back first (only the pages that have one)
     if (typeof finishCreditPrint === 'function') finishCreditPrint();
     document.body.classList.add('printing-po');
+
+    const style = document.createElement('style');
+    style.id = PO_PRINT_PAGE_STYLE_ID;
+    style.textContent = '@media print { @page { size: A4; margin: 0; } }';
+    document.head.appendChild(style);
+
+    // "Save as PDF" names the file after the page's title: the order's number
+    const title = document.title;
+    if (poDocument && poDocument.order) document.title = 'Purchase Order #' + poDocument.order.po_id;
+
+    let finished = false;
     const done = function () {
+        if (finished) return;
+        finished = true;
         document.body.classList.remove('printing-po');
+        style.remove();
+        document.title = title;
         window.removeEventListener('afterprint', done);
     };
     window.addEventListener('afterprint', done);
@@ -2672,9 +2687,14 @@ async function submitReceiveOrder() {
 // ==========================================
 // ONE ORDER, IN A POPUP
 // ==========================================
-async function openPurchaseOrderDetail(poId) {
+async function openPurchaseOrderDetail(poId, readOnly) {
     const po = findPurchaseOrder(poId);
     if (!po) return;
+
+    // opened from a report (Total Purchases), the order is only read: no
+    // approving, declining, sending or referring from there
+    const canDecide = poSetup.canDecide && !readOnly;
+    const canReceive = poSetup.canReceive && !readOnly;
 
     let items = [];
     try { items = await apiGetPurchaseOrderItems(poId); } catch (error) { items = []; }
@@ -2691,10 +2711,12 @@ async function openPurchaseOrderDetail(poId) {
     // an order, the clerk prints it and sends it to the supplier; the printed
     // order carries a QR code the supplier accepts or declines it with.
     let note = '';
-    if (waiting && poSetup.canDecide) {
+    if (waiting && canDecide) {
         note = '<p class="detail-note detail-warn po-next">Waiting for your decision. Approved, the clerk prints ' +
                'it and sends it to the supplier, whose copy carries a QR code to accept or decline it; declined, ' +
                'it is cancelled and the clerk is told why.</p>';
+    } else if (waiting && readOnly) {
+        note = '<p class="detail-note po-next">Waiting for the manager to approve it.</p>';
     } else if (waiting) {
         note = '<p class="detail-note po-next">Waiting for the manager to approve it. Once approved, print it ' +
                'and send it to the supplier.</p>';
@@ -2711,16 +2733,16 @@ async function openPurchaseOrderDetail(poId) {
         let next;
         if (po.supplier_response === 'Accepted') {
             next = ' ' + escapeHtml(po.supplier_name) + ' accepted it' +
-                   (po.supplier_ship_date ? ' and ships it ' + escapeHtml(poShipDay(po.supplier_ship_date)) : '') +
+                   (po.supplier_ship_date ? ' and delivers it on ' + escapeHtml(poShipDay(po.supplier_ship_date)) : '') +
                    (po.supplier_note ? ' (' + escapeHtml(po.supplier_note) + ')' : '') + '. ' +
-                   (poSetup.canReceive
+                   (canReceive
                        ? 'Once the goods are at the store, press Refer to PO to check them against the order ' +
                          'and count them in.'
                        : 'The clerk refers it once the goods have been checked against it.');
         } else if (po.supplier_sent_at) {
             next = ' Sent to the supplier on ' + escapeHtml(poWhen(po.supplier_sent_at)) + ' and waiting for them ' +
                    'to accept or decline it. It can be referred once the supplier accepts it.';
-        } else if (poSetup.canReceive) {
+        } else if (canReceive) {
             next = ' Print it and send it to the supplier, then press Mark as Sent (emailing it marks it sent by ' +
                    'itself). The printed order carries a QR code for them to accept or decline it.';
         } else {
@@ -2773,8 +2795,7 @@ async function openPurchaseOrderDetail(poId) {
                 escapeHtml(poWhen(po.supplier_responded_at)))
             : '') +
         (po.supplier_ship_date
-            ? detailField('Ships', escapeHtml(poShipDay(po.supplier_ship_date)) +
-                ' <span class="muted">as the supplier said</span>')
+            ? detailField('Delivery Schedule', escapeHtml(poShipDay(po.supplier_ship_date)))
             : '') +
         detailField('Items', po.line_count + (Number(po.line_count) === 1 ? ' line' : ' lines') +
             ' <span class="muted">' + po.total_units + (Number(po.total_units) === 1 ? ' unit' : ' units') + '</span>') +
@@ -2824,21 +2845,21 @@ async function openPurchaseOrderDetail(poId) {
     // the supplier's QR code; the clerk prints it, or emails it with the same link.
     let foot = '<button type="button" class="btn btn-ghost" onclick="printPurchaseOrder(' + po.po_id + ')">' +
                (po.status === 'Pending' ? 'Print Purchase Order' : 'Print PDF') + '</button>';
-    if (poSetup.canDecide && waiting) {
+    if (canDecide && waiting) {
         foot += '<button type="button" class="btn btn-danger" onclick="decidePurchaseOrder(' + po.po_id + ', false)">' +
                 'Decline</button>' +
                 '<button type="button" class="btn btn-success" onclick="decidePurchaseOrder(' + po.po_id + ', true)">' +
                 'Approve Order</button>';
     }
-    if (poSetup.canReceive && po.status === 'Pending' && !po.supplier_response && po.supplier_email) {
+    if (canReceive && po.status === 'Pending' && !po.supplier_response && po.supplier_email) {
         foot += '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + po.po_id + ')">' +
                 (po.supplier_sent_at ? 'Email It Again' : 'Email to Supplier') + '</button>';
     }
-    if (poSetup.canReceive && poToSend(po)) {
+    if (canReceive && poToSend(po)) {
         foot += '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + po.po_id + ')">' +
                 'Mark as Sent</button>';
     }
-    if (poSetup.canReceive && poCanRefer(po)) {
+    if (canReceive && poCanRefer(po)) {
         foot += '<button type="button" class="btn btn-success" onclick="closeModal(\'detail-modal\'); ' +
                 'openReceiveOrder(' + po.po_id + ')">Refer to PO</button>';
     }
@@ -2849,7 +2870,7 @@ async function openPurchaseOrderDetail(poId) {
     const pages = [
         { label: 'Order', body: '<div class="po-detail-layout">' +
             '<div class="po-detail-facts">' + summary + contact + '</div>' +
-            '<div class="po-detail-lines"><h4 class="detail-subhead">What is ordered</h4>' + lines + '</div>' +
+            '<div class="po-detail-lines"><h4 class="detail-subhead">Ordered Items</h4>' + lines + '</div>' +
           '</div>' }
     ];
     if (reports.length > 0) {
@@ -3021,11 +3042,10 @@ function poWhen(value) {
     return String(value || '').replace('T', ' ').slice(0, 16);
 }
 
-// the day the supplier ships it: "Mon, Oct 12"
+// the delivery schedule the supplier gave, in the same form as every other
+// date on the order: "2026-10-28" (it is a day, with no time)
 function poShipDay(value) {
-    const day = new Date(String(value).slice(0, 10) + 'T00:00:00');
-    if (Number.isNaN(day.getTime())) return String(value || '');
-    return day.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
+    return String(value || '').replace('T', ' ').slice(0, 10);
 }
 
 // A click closes every list but the one clicked into: two open at once is two

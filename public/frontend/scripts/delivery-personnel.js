@@ -782,7 +782,8 @@ function buildReportPanels() {
                 '<td class="cell-id">' + (p.delivery_id ? '#' + p.delivery_id : '<span class="muted">None</span>') + '</td>' +
                 '<td class="cell-name">' + escapeHtml(p.customer_name) + '</td>' +
                 '<td>' + escapeHtml(p.payment_method) + '</td>' +
-                '<td>' + (p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>') + '</td>' +
+                '<td>' + (paymentReference(p.payment_method, p.reference_no)
+                    ? escapeHtml(paymentReference(p.payment_method, p.reference_no)) : '<span class="muted">None</span>') + '</td>' +
                 '<td class="cell-num">' + peso(p.amount) + '</td></tr>';
         }
     });

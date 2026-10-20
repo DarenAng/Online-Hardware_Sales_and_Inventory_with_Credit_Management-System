@@ -365,12 +365,6 @@ function apiGetSale(saleId) {
     return getJson('/api/sales/' + saleId);
 }
 
-// GET /api/qr-payments -- every GCash/Maya QR attempt (a cashier gets their own),
-// query like '?status=paid&from=2026-10-01'; the answer is { rows, summary, badge }
-function apiGetQrPayments(query) {
-    return getJson('/api/qr-payments' + (query || ''));
-}
-
 // GET /api/credit/customers
 function apiGetCreditCustomers() {
     return getJson('/api/credit/customers');

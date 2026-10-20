@@ -97,11 +97,6 @@ function apiRestoreArchive(module, recordId) {
     return sendJson('/api/archives/restore', 'POST', { module: module, recordId: recordId });
 }
 
-// POST /api/sales/:id/void -- gives back the answer, or null if refused
-function apiVoidSale(saleId) {
-    return postJson('/api/sales/' + saleId + '/void', {});
-}
-
 // ---------- account management (creating accounts, sign-in holds) ----------
 
 // GET /api/roles -- gives back the Response; for a manager only the roles a

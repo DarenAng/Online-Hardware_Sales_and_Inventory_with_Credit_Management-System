@@ -321,7 +321,7 @@ function paymentDetailItems(data) {
             for (let p = 0; p < payments.length; p++) {
                 if (payments[p].payment_id !== detail.payment_id) continue;
                 label = detail.method + ' details \u00b7 payment of ' + peso(payments[p].amount);
-                if (payments[p].reference_no && payments[p].reference_no !== 'Down payment at counter') {
+                if (payments[p].reference_no && payments[p].reference_no !== DOWN_PAYMENT_NOTE) {
                     reference = payments[p].reference_no;
                 }
             }

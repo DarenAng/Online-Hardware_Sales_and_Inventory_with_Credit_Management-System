@@ -2720,7 +2720,7 @@ async function openReceipt(saleId) {
             { key: 'cashier', label: 'Cashier', value: s.cashier_name },
             { key: 'customer', label: 'Customer', value: s.customer_name },
             { key: 'payment', label: 'Payment', value: s.payment_method },
-            { key: 'reference', label: 'Reference', value: s.reference_no }
+            { key: 'reference', label: 'Reference', value: paymentReference(s.payment_method, s.reference_no) }
         ],
         itemsHtml: itemsHtml,
         itemCount: receiptItemCount(data.items),
@@ -2783,7 +2783,7 @@ async function showPaymentReceipt(info) {
             { key: 'customer', label: 'Customer', value: info.customerName },
             { label: 'Applied to', value: saleNumber },
             { key: 'payment', label: 'Method', value: info.method },
-            { key: 'reference', label: 'Reference', value: info.reference }
+            { key: 'reference', label: 'Reference', value: paymentReference(info.method, info.reference) }
         ],
         totals: [
             { label: 'Balance Before', value: peso(info.balanceBefore) },
@@ -3431,8 +3431,8 @@ async function saveDeliveryForm(event) {
     } else if (phoneProblem) {
         complain('contactPhone', phoneProblem);
     }
-    // the house number and street is optional, but one letter is not an address
-    if (street !== '' && street.length < 2) complain('street', 'Enter the house number and street, or leave it empty.');
+    // a customer's address is complete: house number and street, barangay, town or city, province
+    if (street.length < 2) complain('street', 'Enter the house number and street.');
     if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
     if (province.length < 2) complain('province', 'Enter the province.');
@@ -5022,8 +5022,8 @@ async function handleLimitRequest(event) {
 
 // ---------- Add Customer ----------
 // The one place an account is opened (the till no longer opens one from a
-// typed name). First name, last name, phone number and the barangay, town or
-// city and province are required; the middle name, the house number and street
+// typed name). First name, last name, phone number and the house number and
+// street, barangay, town or city and province are required; the middle name
 // and the landmark are optional. The server refuses a name already on the
 // list, any case, and gives the account a credit limit of zero.
 let addCustomerFor = '';   // 'sale': opened from the payment form, the new account goes on the sale; 'delivery': from the delivery form
@@ -5160,8 +5160,8 @@ async function handleAddCustomer(event) {
     } else if (phoneProblem) {
         complain('phone', phoneProblem);
     }
-    // the house number and street is optional, but one letter is not an address
-    if (street !== '' && street.length < 2) complain('street', 'Enter the house number and street, or leave it empty.');
+    // a customer's address is complete: house number and street, barangay, town or city, province
+    if (street.length < 2) complain('street', 'Enter the house number and street.');
     if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
     if (province.length < 2) complain('province', 'Enter the province.');

@@ -732,6 +732,13 @@
     body.printing-po #panel-po-doc { display: block !important; }
     body.printing-po .main-content,
     body.printing-po .content-area { margin: 0 !important; padding: 0 !important; }
+    /* the page has no margin (so the browser adds no header or footer of its
+       own); the document keeps an even A4 margin inside instead */
+    body.printing-po { background: #fff !important; }
+    body.printing-po .po-doc { padding: 14mm 16mm; box-shadow: none; }
+    body.printing-po .po-doc tbody tr,
+    body.printing-po .po-doc-signs,
+    body.printing-po .po-doc-answer { break-inside: avoid; page-break-inside: avoid; }
 }
 
 @media print {

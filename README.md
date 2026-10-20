@@ -858,10 +858,10 @@ sale's reference. A code lasts 10 minutes. A failed or expired code offers
 **New QR** or **Choose another method**, and nothing is recorded for it.
 
 Every attempt is a row in `qr_payments` with how it ended (paid, failed,
-expired, cancelled), and **QR Payments** lists the successful (paid) ones only,
-with no status filter: the manager sees everyone's. A paid code whose sale could not be
-saved (an item ran out) stays paid and says *paid but sale not saved – refund
-needed*.
+expired, cancelled). There is no separate QR Payments screen: a paid code is
+listed in its sale's **Payments** tab beside the other payments (date, amount,
+wallet, reference, who took it), once even when it was also recorded as a
+payment on the account.
 
 `PAYMENT_PROVIDER` in `.env` decides who takes the money:
 
@@ -911,8 +911,9 @@ create screen says so in plain words and asks for a different one.
 **Add Customer** (in Customers Record, and from the register when a typed name
 is not on record) asks for a **first name** and **last name**, an optional
 **middle name**, a **phone number** (required, +63 9XXXXXXXXX) and the address in
-the same parts the **Make a Delivery** card uses: house number and street
-(optional), barangay, town or city, province, and an optional landmark. The
+the same parts the **Make a Delivery** card uses: house number and street,
+barangay, town or city and province (all four required for a customer; a
+delivery address may leave out the street), and an optional landmark. The
 server joins the parts into one line, with "Brgy." put in front of a barangay
 written without the word, and keeps that line in `customers.address`, so every
 screen, receipt and report that reads `address` is unchanged. The parts are kept
@@ -1337,8 +1338,8 @@ rule about ordering. It says nothing about how much is actually on the shelf,
 which is the question a manager walking the stockroom is asking. So the stock
 report also filters by quantity — nothing on hand, below the reorder point,
 within a quarter above it, or a band of round numbers — and sorts by what is
-on hand, by how far under the reorder point a product has fallen, by stock
-value, or by days of cover.
+on hand, by how far under the reorder point a product has fallen, or by stock
+value.
 
 ### The price is the manager's
 
@@ -1412,9 +1413,8 @@ stock is at or below it, the product shows on **Reorder Alerts**, with a
 suggested order that brings it back to twice the reorder point. The manager
 changes it from the product's card in Stocks; the clerk from the Material List.
 
-How fast a product sells (its average daily sales over the last ninety days of
-trading, and the days of cover that gives) is shown on the product's card to
-help pick the figure, but nothing is calculated for it. An older database whose products were
+What a product sold over the last ninety days is shown on the product's card
+to help pick the figure, but nothing is calculated for it. An older database whose products were
 set to a calculated (Dynamic) reorder point is switched to the typed figure on
 the next `npm start`.
 
@@ -1626,8 +1626,13 @@ The rules live on the server: `sp_archive_record` and the archive routes hold
 the manual ones and `sp_sweep_archives` the automatic one. A request that
 breaks one is refused with the reason, whichever screen sends it.
 
-**Voiding a sale puts the stock back.** A manager voids a sale from its card
-in Sales Transactions (`POST /api/sales/:id/void`), **on the day it was made
+**Reports only read.** A record opened from a report (Sales Transactions,
+Receivables, Total Purchases) cannot be changed there: no Void on a sale, no
+Approve or Decline on a purchase order (that is done from Purchase Orders).
+The Void button is therefore not on any screen at present.
+
+**Voiding a sale puts the stock back.** The server's void route
+(`POST /api/sales/:id/void`) accepts a sale **on the day it was made
 only**, and only while its goods are not out for delivery. Every line on it
 goes back on the shelf with an entry in the stock log saying which sale was
 voided, and a delivery created for it and not yet on the road is cancelled

@@ -42,7 +42,7 @@
                         <li data-feature="income"><a href="#" data-panel-link="panel-reports" data-panel-view="report-summary"
                                onclick="showReport('report-summary', event)"><i class="bi bi-graph-up nav-icon" aria-hidden="true"></i>Sales Summary</a></li>
                         <!-- QR Payments is the second tab of Sales Transactions -->
-                        <li data-feature="sales, qr-payments"><a href="#" data-panel-link="panel-reports" data-panel-view="report-sales"
+                        <li data-feature="sales"><a href="#" data-panel-link="panel-reports" data-panel-view="report-sales"
                                onclick="showSalesTransactions(event)"><i class="bi bi-receipt-cutoff nav-icon" aria-hidden="true"></i>Sales Transactions</a></li>
                         <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-reports" data-panel-view="report-purchases"
                                onclick="showReport('report-purchases', event)"><i class="bi bi-bag nav-icon" aria-hidden="true"></i>Total Purchases</a></li>
@@ -176,8 +176,6 @@
                                         onclick="showReport('report-summary', event)">Sales Summary</button>
                                 <button type="button" class="view-tab" role="tab" data-view-tab="report-sales" data-feature="sales"
                                         onclick="showReport('report-sales', event)">Sales Transactions</button>
-                                <button type="button" class="view-tab" role="tab" data-view-tab="report-qr" data-feature="qr-payments"
-                                        onclick="showReport('report-qr', event)">QR Payments</button>
                             </div>
                         </div>
                         <div class="view-nav-group">
@@ -258,18 +256,11 @@
                         </div>
                     </section>
 
-                    <!-- SALES TRANSACTIONS -- with QR Payments as its second tab -->
+                    <!-- SALES TRANSACTIONS -->
                     <section class="panel-view card" id="report-sales" hidden>
                         <div class="panel-head">
                             <div>
-                                <div class="tab-header report-tabs" role="tablist">
-                                    <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-feature="sales"
-                                            onclick="showReport('report-sales', event)">Sales Transactions</button>
-                                    <button type="button" class="tab-btn" role="tab" aria-selected="false" data-feature="qr-payments"
-                                            onclick="showReport('report-qr', event)">QR Payments</button>
-                                </div>
-                                <!-- the tabs are not printed, so this names the printout -->
-                                <h3 class="report-print-title">Sales Transactions</h3>
+                                <h3>Sales Transactions</h3>
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -337,67 +328,12 @@
                         <div class="pager is-single" id="sales-pager"></div>
                     </section>
 
-                    <!-- QR PAYMENTS -- the second tab of Sales Transactions: every GCash and
-                         Maya payment tried by QR code and how it ended (shared/qr-payments.js).
-                         Everyone's here; the server decides whose rows come back. -->
-                    <section class="panel-view card" id="report-qr" data-view-of="report-sales" hidden>
-                        <div class="panel-head">
-                            <div>
-                                <div class="tab-header report-tabs" role="tablist">
-                                    <button type="button" class="tab-btn" role="tab" aria-selected="false" data-feature="sales"
-                                            onclick="showReport('report-sales', event)">Sales Transactions</button>
-                                    <button type="button" class="tab-btn active" role="tab" aria-selected="true" data-feature="qr-payments"
-                                            onclick="showReport('report-qr', event)">QR Payments</button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="panel-toolbar">
-                            <div class="search-wrap">
-                                <input type="search" class="form-control search-input" id="mqr-search"
-                                       placeholder="Search QR Payments"
-                                       oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" autocomplete="off">
-                            </div>
-                            <div class="toolbar-field">
-                                <label for="mqr-period">Period</label>
-                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
-                                <select id="mqr-period" data-period-for="mqr" onchange="periodPicked('mqr')"></select>
-                            </div>
-                            <div class="toolbar-field toolbar-date" hidden>
-                                <label for="mqr-from">From</label>
-                                <input type="date" id="mqr-from" onchange="reloadQrPayments('mqr')">
-                            </div>
-                            <div class="toolbar-field toolbar-date" hidden>
-                                <label for="mqr-to">To</label>
-                                <input type="date" id="mqr-to" onchange="reloadQrPayments('mqr')">
-                            </div>
-                            <div class="toolbar-field">
-                                <label for="mqr-staff">Cashier</label>
-                                <select id="mqr-staff" onchange="reloadQrPayments('mqr')">
-                                    <option value="all">Everyone</option>
-                                </select>
-                            </div>
-                            <div class="toolbar-spacer"></div>
-                        </div>
-
-                        <div class="table-responsive grid-10">
-                            <table id="mqr-table">
-                                <thead>
-                                    <tr><th>Time</th><th>Amount</th><th>Wallet</th><th>Status</th><th>Reference</th>
-                                        <th>Sale</th><th>Cashier</th><th>Message</th></tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
-                        </div>
-                        <div class="pager is-single" id="mqr-pager"></div>
-                    </section>
-
                     <!-- RECEIVABLES -->
                     <section class="panel-view card" id="report-unpaid" hidden>
                         <div class="panel-head">
                             <div>
                                 <h3>Receivables</h3>
-                                <p class="panel-sub">Every sale with money still owed on it. A sale is voided from Sales Transactions.</p>
+                                <p class="panel-sub">Every sale with money still owed on it.</p>
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -415,14 +351,24 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="unpaid-status">Payment status</label>
-                                <select id="unpaid-status" data-filter-table="unpaid-table" data-hides-column="4" onchange="dataPanelFilter('mgr-unpaid', 'status', this.value)">
+                                <select id="unpaid-status" data-filter-table="unpaid-table" data-hides-column="4" onchange="unpaidStatusPicked(this.value)">
                                     <option value="all">Every status</option>
                                 </select>
                             </div>
-                            <div class="toolbar-field">
+                            <!-- every way a sale can be paid; offered with Every status or Partial
+                                 only: an Unpaid sale has had nothing paid on it (unpaidStatusPicked) -->
+                            <div class="toolbar-field" id="unpaid-method-field">
                                 <label for="unpaid-method">Payment method</label>
                                 <select id="unpaid-method" data-filter-table="unpaid-table" data-hides-column="3" onchange="dataPanelFilter('mgr-unpaid', 'method', this.value)">
                                     <option value="all">Every method</option>
+                                    <option value="Cash">Cash</option>
+                                    <option value="GCash">GCash</option>
+                                    <option value="PayMaya">PayMaya</option>
+                                    <option value="PayPal">PayPal</option>
+                                    <option value="Cheque">Cheque</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                    <option value="COD">Cash on Delivery</option>
+                                    <option value="Credit">Credit</option>
                                 </select>
                             </div>
                             <div class="toolbar-field">
@@ -629,7 +575,7 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="stocks-status">Stock status</label>
-                                <select id="stocks-status" data-filter-table="stocks-table" data-hides-column="5"
+                                <select id="stocks-status" data-filter-table="stocks-table" data-hides-column="4"
                                         onchange="dataPanelFilter('mgr-stocks', 'status', this.value)">
                                     <option value="all">Every status</option>
                                     <option value="In Stock">In stock</option>
@@ -645,8 +591,7 @@
                         <div class="table-responsive grid-10">
                             <table id="stocks-table">
                                 <thead>
-                                    <tr><th>Product</th><th>Category</th><th>On Hand</th>
-                                        <th>Days of Cover</th><th>Status</th></tr>
+                                    <tr><th>Product</th><th>Category</th><th>On Hand</th><th>Status</th></tr>
                                 </thead>
                                 <tbody></tbody>
                             </table>
@@ -1078,7 +1023,7 @@
                             <select id="deliveries-state" data-filter-table="deliveries-table" data-hides-column="7"
                                     onchange="dataPanelFilter('mgr-deliveries', 'state', this.value)">
                                 <option value="all">Every state</option>
-                                <option value="Pending Cash Collection">Pending cash collection</option>
+                                <option value="Pending Payment">Pending payment</option>
                                 <option value="Completed">Completed</option>
                                 <option value="Out for Delivery">Out for delivery</option>
                                 <option value="In Transit">In transit</option>
@@ -1570,7 +1515,6 @@
     <script src="scripts/shared/deliveries.js"></script>
     <script src="scripts/shared/delivery-schedule.js"></script>
     <script src="scripts/shared/purchase-orders.js"></script>
-    <script src="scripts/shared/qr-payments.js"></script>
     <script src="scripts/shared/credit-terms.js"></script>
     <script src="scripts/shared/payment-details.js"></script>
     <script src="connections/manager-connection.js"></script>

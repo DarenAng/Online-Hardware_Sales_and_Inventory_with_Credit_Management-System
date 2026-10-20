@@ -839,10 +839,14 @@ function registerCashierRoutes(app, deps) {
       );
       const delivery = deliveryResult[0];
 
-      // the GCash, Maya or bank-transfer codes paid towards this sale, with PayMongo's reference
+      // the GCash, Maya or bank-transfer codes paid towards this sale, with PayMongo's
+      // reference and who took them (only paid ones: the rest are not payments)
       const qrPaidResult = await db.query(
-        "SELECT qr_payment_id, status, amount, wallet, bank_name, purpose, provider, mode, provider_payment_id, paid_at\n" +
-          "         FROM qr_payments WHERE sale_id = ? ORDER BY qr_payment_id",
+        "SELECT q.qr_payment_id, q.status, q.amount, q.wallet, q.bank_name, q.purpose, q.provider, q.mode,\n" +
+          "              q.provider_payment_id, q.paid_at, q.created_at, st.full_name AS received_by\n" +
+          "         FROM qr_payments q\n" +
+          "         LEFT JOIN staff st ON st.staff_id = q.created_by_staff_id\n" +
+          "        WHERE q.sale_id = ? AND q.status = 'paid' ORDER BY q.qr_payment_id",
         [request.params.saleId]
       );
       const qrPaid = qrPaidResult[0];

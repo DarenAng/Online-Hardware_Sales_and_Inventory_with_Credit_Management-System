@@ -25,7 +25,6 @@ let incomeData = null;
 // the view showing on each tabbed screen; opening the screen again goes back to it
 let reportView = 'report-summary';
 let stockView = 'stock-overview';
-let salesTab = 'report-sales';   // Sales Transactions or its QR Payments tab, whichever was last open
 
 // eight rows keeps a report card above the fold on a 1366x768 laptop, so the
 // Reports screen never scrolls; the pager turns the rest
@@ -164,7 +163,6 @@ function showReports(event) { showReport(reportView, event); }
 function showReport(reportId, event) {
     const shown = showPanelView('panel-reports', reportId, 'Reports', event);
     if (shown) reportView = shown;
-    if (shown === 'report-sales' || shown === 'report-qr') salesTab = shown;
 }
 
 // Stocks: the whole inventory, the reorder alerts and the stock movements
@@ -187,16 +185,8 @@ function showPurchasing(event)    { showPurchaseOrderHistory(event); }
 function showArchives(event)      { showManagerPanel('panel-archives', 'Archives', event); }
 // everything staff have filed: a screen of its own, apart from Reports
 function showActivityLog(event)   { showManagerPanel('panel-activity', 'Activity Log', event); }
-// Sales Transactions and QR Payments are two tabs of one report. The menu entry
-// opens the one last looked at, or QR Payments when Sales is switched off.
-function showSalesTransactions(event) {
-    const panel = document.getElementById('panel-reports');
-    let wanted = salesTab;
-    if (panel && !viewOffered(panel, wanted)) {
-        wanted = wanted === 'report-qr' ? 'report-sales' : 'report-qr';
-    }
-    showReport(wanted, event);
-}
+// Sales Transactions
+function showSalesTransactions(event) { showReport('report-sales', event); }
 
 // Policy Maintenance. Credit Maintenance: the shop's late-payment rate and the
 // credit policy. Customer Data Terms and Refund Policy: their wording. Each page
@@ -327,7 +317,6 @@ const PERIOD_CHOICES = [
 // what each report does once its dates have changed
 const PERIOD_APPLY = {
     sales: function () { reloadSales(); },
-    mqr: function () { reloadQrPayments('mqr'); },
     unpaid: function () { dateFilterChanged('mgr-unpaid', 'unpaid'); },
     'stock-moves': function () { dateFilterChanged('mgr-stock-moves', 'stock-moves'); },
     all: function () { dateFilterChanged('mgr-all', 'all'); }
@@ -801,7 +790,7 @@ let printRestore = null;
 
 // The Deliveries printout holds only the rows the filters leave; the Totals
 // table counts those rows in each of these fulfilment states, in this order.
-const PRINT_DELIVERY_STATES = ['Pending Cash Collection', 'Completed', 'Out for Delivery',
+const PRINT_DELIVERY_STATES = ['Pending Payment', 'Completed', 'Out for Delivery',
                                'In Transit', 'Pending', 'Delayed', 'Failed'];
 
 function printTotalRows(container, panel) {
@@ -1134,19 +1123,19 @@ function buildReportPanels() {
                 (filters.method === 'all' || row.payment_method === filters.method) &&
                 dateInRange(row.sale_date, filters.from, filters.to);
         },
+        // the methods are a fixed list (every way a sale can be paid); the
+        // statuses are the ones the loaded sales have
         onLoaded: function (rows) {
             const statuses = [];
-            const methods = [];
             for (let i = 0; i < rows.length; i++) {
                 statuses.push(rows[i].payment_status);
-                methods.push(rows[i].payment_method);
             }
             fillFilterOptions('unpaid-status', statuses, 'Every status');
-            fillFilterOptions('unpaid-method', methods, 'Every method');
+            showUnpaidMethodField(document.getElementById('unpaid-status').value);
         },
         renderRow: function (u, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                    'onclick="openSaleDetail(' + u.sale_id + ', { fromReceivables: true })">' +
+                    'onclick="openSaleDetail(' + u.sale_id + ')">' +
                 '<td class="cell-id">#' + u.sale_id + '</td>' +
                 '<td class="cell-name">' + escapeHtml(u.customer_name) + '</td>' +
                 '<td>' + escapeHtml(u.payment_method) + '</td>' +
@@ -1241,6 +1230,27 @@ function repeatCustomerMatches(row, filters) {
 
 // A dropdown filled from the loaded rows: one option per value they hold,
 // sorted, keeping the one already picked when it is still there.
+// Receivables: the payment method is asked only with Every status or Partial.
+// An Unpaid sale has had nothing paid on it, so the method box goes, and its
+// choice goes back to Every method.
+function showUnpaidMethodField(status) {
+    const offered = status === 'all' || status === 'Partial';
+    const field = document.getElementById('unpaid-method-field');
+    if (field) field.hidden = !offered;
+    return offered;
+}
+
+function unpaidStatusPicked(status) {
+    const method = document.getElementById('unpaid-method');
+    const offered = showUnpaidMethodField(status);
+    if (!offered && method && method.value !== 'all') {
+        method.value = 'all';
+        dataPanelFilter('mgr-unpaid', 'method', 'all');
+        syncFilteredColumns('unpaid-table');
+    }
+    dataPanelFilter('mgr-unpaid', 'status', status);
+}
+
 function fillFilterOptions(id, values, allLabel) {
     const select = document.getElementById(id);
     if (!select) return;
@@ -1464,12 +1474,11 @@ function buildStockPanels() {
     createDataPanel({
         key: 'mgr-stocks',
         tableId: 'stocks-table',
-        columns: 5,
+        columns: 4,
         pagerId: 'stocks-pager',
         idField: 'product_id',
         filters: { status: 'all' },
-        sortKeys: ['product_name', 'category_name', function (p) { return Number(p.quantity_in_stock); },
-                   function (p) { return p.days_of_cover === null ? '' : Number(p.days_of_cover); }, 'stock_status'],
+        sortKeys: ['product_name', 'category_name', function (p) { return Number(p.quantity_in_stock); }, 'stock_status'],
         gate: {
             title: 'The stock report is not loaded',
             text: 'Search for a product, pick a status or a quantity, or press Load Data for the whole inventory.',
@@ -1490,9 +1499,6 @@ function buildStockPanels() {
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
                 '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
-                '<td class="cell-num">' + (p.days_of_cover === null || p.days_of_cover === undefined
-                    ? '<span class="muted">no sales</span>'
-                    : Number(p.days_of_cover).toFixed(0) + ' days') + '</td>' +
                 '<td>' + statusBadge(p.stock_status) + '</td></tr>';
         }
     });
@@ -2440,7 +2446,7 @@ async function decideCreditRequest(approve) {
 // ==========================================
 const FULFILMENT_TONE = {
     'Completed': 'badge-success',
-    'Pending Cash Collection': 'badge-warning',
+    'Pending Payment': 'badge-warning',
     'Out for Delivery': 'badge-warning',
     'In Transit': 'badge-warning',
     'Pending': 'badge-warning',
@@ -2902,10 +2908,19 @@ async function restoreArchive(module, recordId) {
 // ==========================================
 // POPUP BUILDERS, ONE PER MODULE
 // ==========================================
-// options.fromReceivables: opened from Receivables, which shows the sale but
-// does not void it (that is done from Sales Transactions)
-async function openSaleDetail(saleId, options) {
-    const settings = options || {};
+// how a QR payment reads in a sale's Payments: "GCash", "Maya", or
+// "Bank Transfer · BPI" when the customer paid through their bank
+const SALE_QR_WALLETS = { GCash: 'GCash', PayMaya: 'Maya', 'Bank Transfer': 'Bank Transfer' };
+
+function saleQrWallet(q) {
+    const way = SALE_QR_WALLETS[q.wallet] || q.wallet || 'QR';
+    if (q.wallet === 'Bank Transfer' && q.bank_name) return way + ' \u00b7 ' + q.bank_name;
+    return way;
+}
+
+// A sale opened from a report (Sales Transactions, Receivables) is only read:
+// reports do not change data, so there is no Void button.
+async function openSaleDetail(saleId) {
     try {
         const data = await apiGetSale(saleId);
         const s = data.sale;
@@ -2918,7 +2933,8 @@ async function openSaleDetail(saleId, options) {
             detailField('Cashier', escapeHtml(s.cashier_name)) +
             detailField('Payment Method', escapeHtml(s.payment_method)) +
             detailField('Payment Status', statusBadge(s.payment_status)) +
-            detailField('Reference No', s.reference_no ? escapeHtml(s.reference_no) : '<span class="muted">None</span>') +
+            detailField('Reference No', paymentReference(s.payment_method, s.reference_no)
+                ? escapeHtml(paymentReference(s.payment_method, s.reference_no)) : '<span class="muted">None</span>') +
             '</div>';
 
         const balance = saleAmountDue(s) - Number(s.amount_paid);
@@ -2961,50 +2977,45 @@ async function openSaleDetail(saleId, options) {
         }
         const items = detailTable(['Product', 'Qty', 'Unit Price', 'Subtotal'], itemRows, [1, 2, 3]);
 
-        const paymentRows = [];
+        // Every payment on the sale in one list: the payments taken against it,
+        // and the GCash, Maya or bank-transfer codes paid by QR. A QR payment that
+        // was also recorded as a payment (same reference) is listed once.
+        const paidList = [];
+        const references = {};
         for (let i = 0; i < data.payments.length; i++) {
             const p = data.payments[i];
+            if (p.reference_no) references[p.reference_no] = true;
+            paidList.push({ when: String(p.payment_date || ''), amount: p.amount, method: p.payment_method,
+                            reference: paymentReference(p.payment_method, p.reference_no), by: p.received_by });
+        }
+        const qrPaid = data.qrPayments || [];
+        for (let i = 0; i < qrPaid.length; i++) {
+            const q = qrPaid[i];
+            if (q.status !== 'paid' || (q.provider_payment_id && references[q.provider_payment_id])) continue;
+            paidList.push({ when: String(q.paid_at || q.created_at || ''), amount: q.amount,
+                            method: saleQrWallet(q), reference: q.provider_payment_id, by: q.received_by });
+        }
+        paidList.sort(function (a, b) { return a.when.localeCompare(b.when); });
+
+        const paymentRows = [];
+        for (let i = 0; i < paidList.length; i++) {
+            const p = paidList[i];
             paymentRows.push([
-                escapeHtml(String(p.payment_date).slice(0, 16)),
+                escapeHtml(p.when.replace('T', ' ').slice(0, 16)),
                 peso(p.amount),
-                escapeHtml(p.payment_method),
-                p.reference_no ? escapeHtml(p.reference_no) : '<span class="muted">None</span>',
-                escapeHtml(p.received_by || 'Unknown')
+                escapeHtml(p.method || ''),
+                p.reference ? escapeHtml(p.reference) : '<span class="muted">None</span>',
+                escapeHtml(p.by || 'Unknown')
             ]);
         }
         const payments = detailTable(['Date', 'Amount', 'Method', 'Reference', 'Received By'],
             paymentRows, [1]);
 
-        // a sale can be voided on the day it was made; the machine's own calendar, not UTC
-        const now = new Date();
-        const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') +
-            '-' + String(now.getDate()).padStart(2, '0');
-        const saleDay = String(s.sale_date).slice(0, 10);
-        // a credit sale reads "Void this credit"; any other "Void this sale"
-        const isCredit = s.payment_method === 'Credit';
-        let voidBlock;
-        if (s.is_archived) {
-            voidBlock = '<p class="detail-note detail-warn">This sale was voided' +
-                  (s.archived_at ? ' on ' + escapeHtml(String(s.archived_at).slice(0, 16)) : '') +
-                  '. It counts for nothing, and its stock went back on the shelf.</p>';
-        } else if (settings.fromReceivables) {
-            voidBlock = '<p class="detail-note">To void this ' + (isCredit ? 'credit' : 'sale') +
-                  ', open it from Sales Transactions.</p>';
-        } else if (saleDay === today) {
-            voidBlock = '<div class="detail-actions">' +
-                  '<button type="button" class="btn btn-danger" onclick="voidSale(' + s.sale_id + ', ' + isCredit + ')">' +
-                  (isCredit ? 'Void this credit' : 'Void this sale') + '</button>' +
-                  '</div>';
-        } else {
-            voidBlock = '<p class="detail-note">A sale can only be voided on the day it was made. ' +
-                  'Correct this one with a return or a refund.</p>';
-        }
-
         const pages = [
-            { label: 'Summary', body: summary + voidBlock },
+            { label: 'Summary', body: summary },
             { label: 'Totals', body: totals },
             { label: 'Items (' + data.items.length + ')', body: items },
-            { label: 'Payments (' + data.payments.length + ')', body: payments }
+            { label: 'Payments (' + paidList.length + ')', body: payments }
         ];
 
         // a cheque's or a bank transfer's bank and account
@@ -3018,13 +3029,6 @@ async function openSaleDetail(saleId, options) {
             pages.push({ label: 'Payment Details', body: detailsBody });
         }
 
-        // paid by QR code: each code's status and PayMongo's reference
-        const qrPaid = data.qrPayments || [];
-        if (qrPaid.length > 0) {
-            pages.push({ label: 'QR Payment' + (qrPaid.length === 1 ? '' : 's (' + qrPaid.length + ')'),
-                         body: qrPaymentsOfSaleHtml(qrPaid) });
-        }
-
         if (data.delivery) {
             const d = data.delivery;
             const owed = saleAmountDue(s) - Number(s.amount_paid);
@@ -3032,7 +3036,7 @@ async function openSaleDetail(saleId, options) {
             if (d.status !== 'Delivered') {
                 state = d.status;
             } else if (owed > 0) {
-                state = 'Pending Cash Collection';
+                state = 'Pending Payment';
             } else {
                 state = 'Completed';
             }
@@ -3061,39 +3065,6 @@ async function openSaleDetail(saleId, options) {
     }
 }
 
-// Voiding a sale; the database holds the rules (same day, goods not out for
-// delivery, stock returned).
-async function voidSale(saleId, isCredit) {
-    const word = isCredit ? 'credit' : 'sale';
-    const yes = await askDanger(
-        'Sale #' + saleId + ' is struck off as if it had not happened.',
-        {
-            title: 'Void this ' + word + '?',
-            eyebrow: 'Sales Transactions',
-            confirmLabel: 'Void the ' + word,
-            detail: [
-                'It reads Voided everywhere and counts for nothing.',
-                'Every item on it goes back on the shelf, with a line in the stock log.',
-                'A delivery created for it and not yet on the road is cancelled with it.',
-                'Money already taken is not refunded by this; hand it back at the counter.'
-            ]
-        });
-
-    if (!yes) return;
-
-    const result = await apiVoidSale(saleId);
-    if (!result) return;
-
-    closeModal('detail-modal');
-    notifySuccess('Sale #' + saleId + ' is voided and its stock is back on the shelf.', 'Sale voided');
-
-    const keys = ['mgr-sales', 'mgr-deliveries'];
-    for (let i = 0; i < keys.length; i++) {
-        const panel = getDataPanel(keys[i]);
-        if (panel && panel.state === 'ready') await panel.refresh();
-    }
-}
-
 function openStockDetail(productId) {
     const p = findCachedStock(productId);
     if (!p) return;
@@ -3107,17 +3078,12 @@ function openStockDetail(productId) {
         detailField('Suggested Order', p.suggested_order + ' ' + escapeHtml(p.unit_name || '')) +
         '</div>';
 
-    // the reorder point is typed; how fast it sells is shown beside it
-    const daily = Number(p.avg_daily_sales) || 0;
+    // the reorder point is typed; what sold recently is shown beside it
     const reorder = '<div class="detail-grid">' +
         detailField('Reorder Point', p.reorder_point + ' ' + escapeHtml(p.unit_name || '')) +
         detailField('On Hand', p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '')) +
         detailField('Sold Recently', p.units_sold_window + ' ' + escapeHtml(p.unit_name || '') +
             ' over ' + p.window_days + ' days') +
-        detailField('Average Daily Sales', daily.toFixed(3)) +
-        detailField('Days of Cover', p.days_of_cover === null
-            ? '<span class="muted">Nothing sold in the window</span>'
-            : Number(p.days_of_cover).toFixed(1) + ' days') +
         '</div>' +
         '<div class="detail-actions">' +
         '<button type="button" class="btn btn-accent" onclick="changeReorderPoint(' + p.product_id + ')">' +
@@ -3315,7 +3281,7 @@ async function openEditRecord(index) {
             editFieldHtml('middleName', 'Middle name', row.middle_name) +
             editFieldHtml('lastName', 'Last name', row.last_name, { required: true }) +
             editFieldHtml('phone', 'Phone', '', { kind: 'phone', required: true }) +
-            editFieldHtml('street', 'House and street', row.address_street, { max: 150 }) +
+            editFieldHtml('street', 'House and street', row.address_street, { required: true, max: 150 }) +
             editFieldHtml('barangay', 'Barangay', row.address_barangay, { required: true }) +
             editFieldHtml('city', 'Town or city', row.address_city, { required: true }) +
             editFieldHtml('province', 'Province', row.address_province, { required: true }) +
@@ -3360,6 +3326,10 @@ async function saveEditRecord(event) {
         }
         const problem = phoneComplaint(form.elements.phone);
         if (problem) { notifyWarning(problem, 'Check the phone number'); return; }
+        if (value('street').length < 2 || value('barangay') === '' || value('city').length < 2 || value('province').length < 2) {
+            notifyWarning('Fill in the house number and street, barangay, town or city and province.', 'Fill in the form');
+            return;
+        }
         data = { firstName: value('firstName'), middleName: value('middleName'), lastName: value('lastName'),
                  phone: phoneToStore(form.elements.phone), street: value('street'), barangay: value('barangay'),
                  city: value('city'), province: value('province'), landmark: value('landmark') };
@@ -4014,7 +3984,6 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
         buildIncomePanels();
         buildReportPanels();
         buildSalesPanel();
-        buildQrPaymentsPanel({ key: 'mqr', prefix: 'mqr', openSale: openSaleDetail, byStaff: true });
         buildStockPanels();
         buildStockMovesPanel();
         buildDeliveryPanel();

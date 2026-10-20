@@ -1624,9 +1624,10 @@ function registerManagerRoutes(app, deps) {
     }
     const phoneText = cleanPhone(phone) || "";
 
-    // the address in parts: the house and street and the landmark may be left out
+    // the address in parts: house number and street, barangay, town or city and
+    // province are required; only the landmark may be left out
     const parts = addressPartsFrom(request.body);
-    const addressProblem = addressPartsProblem(parts, "customer's address");
+    const addressProblem = addressPartsProblem(parts, "customer's address", true);
     if (addressProblem) {
       return response.status(400).json({ error: addressProblem });
     }
@@ -1685,9 +1686,7 @@ function registerManagerRoutes(app, deps) {
   // STOCKS, AND THE REORDER POINT
   //
   // The reorder point is the figure the shop types for each product; nothing
-  // works it out. Average daily sales (over a window of real trading, 90 days,
-  // divided by the days the shop has recorded sales) is still shown, with the
-  // days of cover it gives.
+  // works it out. What sold over the last 90 days is shown beside it.
   // ==========================================
   const SALES_WINDOW_DAYS = 90;
 
@@ -1733,7 +1732,6 @@ function registerManagerRoutes(app, deps) {
         "(COALESCE(i.quantity_in_stock, 0) * p.price) AS stock_value, " +
         "w.days AS window_days, " +
         "COALESCE(rc.units, 0) AS units_sold_window, " +
-        "ROUND(COALESCE(rc.units, 0) / w.days, 3) AS avg_daily_sales, " +
         "p.reorder_point AS effective_rop, " +
         "CASE " +
         "WHEN COALESCE(i.quantity_in_stock, 0) = 0 THEN 'Out of Stock' " +
@@ -1743,13 +1741,7 @@ function registerManagerRoutes(app, deps) {
         "END AS stock_status, " +
         "-- order back up to twice the reorder point, so the next order is\n" +
         "-- not due the week after this one arrives\n" +
-        "GREATEST(p.reorder_point * 2 - COALESCE(i.quantity_in_stock, 0), 0) AS suggested_order, " +
-        "-- roughly how long what is on the shelf will last at the\n" +
-        "-- current rate. NULL when nothing is moving, because \"forever\"\n" +
-        "-- is not a number worth printing.\n" +
-        "CASE WHEN COALESCE(rc.units, 0) = 0 THEN NULL " +
-        "ELSE ROUND(COALESCE(i.quantity_in_stock, 0) / (rc.units / w.days), 1) " +
-        "END AS days_of_cover " +
+        "GREATEST(p.reorder_point * 2 - COALESCE(i.quantity_in_stock, 0), 0) AS suggested_order " +
         "FROM products p " +
         "CROSS JOIN window_days w " +
         "LEFT JOIN recent rc ON rc.product_id = p.product_id " +
@@ -1933,7 +1925,7 @@ function registerManagerRoutes(app, deps) {
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
     const parts = addressPartsFrom(body);
-    const addressProblem = addressPartsProblem(parts, "customer's address");
+    const addressProblem = addressPartsProblem(parts, "customer's address", true);
     if (addressProblem) return response.status(400).json({ error: addressProblem });
     const addressLine = buildFullAddress(parts).slice(0, 500);
 
