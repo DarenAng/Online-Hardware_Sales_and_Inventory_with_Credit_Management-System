@@ -547,10 +547,17 @@
                                 <label for="po-totals-month">Month</label>
                                 <!-- type to search, then pick: every month from January 2025 to December
                                      of this year (renderPurchaseTotalsMonths) -->
-                                <input type="text" id="po-totals-month" class="form-control month-search" list="po-totals-month-list"
-                                       autocomplete="off" placeholder="Search a month"
-                                       onchange="purchaseTotalsMonthTyped(this)" onfocus="this.select()">
-                                <datalist id="po-totals-month-list"></datalist>
+                                <div class="suggest-wrap month-wrap">
+                                    <input type="text" id="po-totals-month" class="form-control month-search"
+                                           role="combobox" aria-autocomplete="list" aria-controls="po-totals-month-list"
+                                           aria-expanded="false" autocomplete="off" placeholder="Search a month"
+                                           onfocus="poMonthFocus(this)" onclick="poMonthClick(this)" oninput="poMonthSuggest(false)"
+                                           onkeydown="poMonthKey(event)" onblur="poMonthBlur()">
+                                    <button type="button" class="suggest-clear" id="po-totals-month-clear" tabindex="-1"
+                                            aria-label="Clear the month" onmousedown="event.preventDefault()"
+                                            onclick="poMonthClear()" hidden>&times;</button>
+                                    <ul class="suggest-list month-list" id="po-totals-month-list" role="listbox" hidden></ul>
+                                </div>
                             </div>
                             <div class="toolbar-field" id="po-totals-year-field" hidden>
                                 <label for="po-totals-year">Year</label>

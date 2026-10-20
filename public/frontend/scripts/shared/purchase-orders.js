@@ -1757,36 +1757,198 @@ function purchaseOrderRowsLoaded() {
 }
 
 // The Month box is a search box: every month from January 2025 to December of
-// this year is on its list, January first. It shows the month in use.
+// this year is on its list, January first. It shows the month in use; clicking
+// it opens the list, and typing narrows it (poMonthSuggest).
+let poMonthChoices = [];      // ['2025-01', ...] as the list offers them
+let poMonthActive = -1;       // the suggestion the arrow keys are on, or -1
+
 function renderPurchaseTotalsMonths(rows) {
+    const box = document.getElementById('po-totals-month');
+    if (!box) return;
+
+    poMonthChoices = poTotalsMonths(rows);
+    const panel = getDataPanel(PO_TOTALS_KEY);
+    const current = panel ? panel.filters.month : poThisMonth();
+    if (document.activeElement !== box) {
+        box.value = poMonthLabel(poMonthChoices.indexOf(current) !== -1 ? current : poThisMonth());
+    }
+    poMonthSyncClear();
+}
+
+// the month in use, written out: what the box goes back to
+function poMonthInUse() {
+    const panel = getDataPanel(PO_TOTALS_KEY);
+    return panel ? panel.filters.month : poThisMonth();
+}
+
+// The months that fit what is typed, as the Material box does it: every word
+// typed must be the start of a word of the month. "a" finds April and August
+// (not January or May, where the a is inside the word); "aug 2026", "2025" and
+// "oct 25" work too. Nothing typed, or the month already in the box, offers
+// every month.
+function poMonthMatches(text) {
+    const typed = String(text || '').trim().toLowerCase();
+    const months = poMonthChoices.length ? poMonthChoices : poTotalsMonths([]);
+    if (typed === '' || typed === poMonthLabel(poMonthInUse()).toLowerCase()) return months;
+
+    const words = typed.split(/\s+/);
+    const found = [];
+    for (let i = 0; i < months.length; i++) {
+        const parts = poMonthLabel(months[i]).toLowerCase().split(' ');   // ['august', '2026']
+        let fits = true;
+        for (let w = 0; w < words.length && fits; w++) {
+            const word = words[w];
+            const startsName = parts[0].startsWith(word);
+            // a year matches typed whole ("2026") or short ("26")
+            const startsYear = /^\d+$/.test(word) && (parts[1].startsWith(word) || parts[1].slice(2).startsWith(word));
+            if (!startsName && !startsYear) fits = false;
+        }
+        if (fits) found.push(months[i]);
+    }
+    return found;
+}
+
+// the line under a month in the list: its quarter and its days
+function poMonthNote(month) {
+    const parts = String(month).split('-');
+    const year = Number(parts[0]);
+    const index = Number(parts[1]);
+    const days = new Date(year, index, 0).getDate();
+    return 'Quarter ' + Math.ceil(index / 3) + ' \u00B7 ' + days + ' days';
+}
+
+// the × shows while the box holds text
+function poMonthSyncClear() {
+    const box = document.getElementById('po-totals-month');
+    const clear = document.getElementById('po-totals-month-clear');
+    if (box && clear) clear.hidden = box.value === '';
+}
+
+// the × empties the box and opens every month
+function poMonthClear() {
+    const box = document.getElementById('po-totals-month');
+    if (!box) return;
+    box.value = '';
+    box.focus();
+    poMonthSuggest(false);
+}
+
+function poMonthFocus(box) {
+    box.select();
+    poMonthSuggest(true);
+}
+
+// a click on the box while it already has focus (after a pick) opens the list again
+function poMonthClick(box) {
+    const list = document.getElementById('po-totals-month-list');
+    if (list && list.hidden) poMonthFocus(box);
+}
+
+// draws the list under the box; openAll scrolls it to the month in use
+function poMonthSuggest(openAll) {
     const box = document.getElementById('po-totals-month');
     const list = document.getElementById('po-totals-month-list');
     if (!box || !list) return;
 
-    const months = poTotalsMonths(rows);
-    let options = '';
-    for (let i = 0; i < months.length; i++) {
-        options += '<option value="' + escapeHtml(poMonthLabel(months[i])) + '"></option>';
+    const matches = poMonthMatches(box.value);
+    poMonthActive = -1;
+    if (matches.length === 0) {
+        list.innerHTML = '<li class="suggest-item is-empty"><span class="suggest-name">No month matches</span></li>';
+    } else {
+        const current = poMonthInUse();
+        const thisMonth = poThisMonth();
+        let html = '';
+        for (let i = 0; i < matches.length; i++) {
+            let figure = '';
+            if (matches[i] === current) figure = 'In use';
+            else if (matches[i] === thisMonth) figure = 'This month';
+            html += '<li class="suggest-item' + (matches[i] === current ? ' is-current' : '') + '" role="option" ' +
+                'id="po-month-option-' + i + '" data-month="' + matches[i] + '" aria-selected="false" ' +
+                // mousedown, so the pick lands before the box loses focus and closes the list
+                'onmousedown="event.preventDefault(); poMonthPick(\'' + matches[i] + '\')">' +
+                '<span class="suggest-line">' +
+                    '<span class="suggest-name">' + escapeHtml(poMonthLabel(matches[i])) + '</span>' +
+                    (figure ? '<span class="suggest-figure">' + figure + '</span>' : '') +
+                '</span>' +
+                '<span class="suggest-note">' + escapeHtml(poMonthNote(matches[i])) + '</span></li>';
+        }
+        list.innerHTML = html;
     }
-    list.innerHTML = options;
+    list.hidden = false;
+    box.setAttribute('aria-expanded', 'true');
+    poMonthSyncClear();
 
-    const panel = getDataPanel(PO_TOTALS_KEY);
-    const current = panel ? panel.filters.month : poThisMonth();
-    box.value = poMonthLabel(months.indexOf(current) !== -1 ? current : poThisMonth());
+    if (openAll) {
+        const current = list.querySelector('.is-current');
+        if (current) list.scrollTop = current.offsetTop - list.clientHeight / 2 + current.offsetHeight / 2;
+    } else {
+        list.scrollTop = 0;
+    }
 }
 
-// a month typed or picked in the Month box; anything not on the list goes back
-// to the month in use
-function purchaseTotalsMonthTyped(box) {
-    const month = poMonthFromLabel(box.value);
-    const panel = getDataPanel(PO_TOTALS_KEY);
-    if (!month) {
-        notifyWarning('Pick a month from the list, like ' + poMonthLabel(poThisMonth()) + '.', 'No such month');
-        box.value = poMonthLabel(panel ? panel.filters.month : poThisMonth());
-        return;
+function poMonthHide() {
+    const box = document.getElementById('po-totals-month');
+    const list = document.getElementById('po-totals-month-list');
+    if (list) list.hidden = true;
+    poMonthSyncClear();
+    if (box) {
+        box.setAttribute('aria-expanded', 'false');
+        box.removeAttribute('aria-activedescendant');
     }
-    box.value = poMonthLabel(month);
-    purchaseTotalsMonth(month);
+    poMonthActive = -1;
+}
+
+// a month picked from the list (or typed and Enter): the table follows it
+function poMonthPick(month) {
+    const box = document.getElementById('po-totals-month');
+    if (box) box.value = poMonthLabel(month);
+    poMonthHide();
+    if (month !== poMonthInUse()) purchaseTotalsMonth(month);
+}
+
+// the arrow keys move along the list, Enter picks, Escape puts the box back
+function poMonthKey(event) {
+    const list = document.getElementById('po-totals-month-list');
+    const box = event.target;
+    if (!list) return;
+    const items = list.querySelectorAll('.suggest-item[data-month]');
+
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (list.hidden) { poMonthSuggest(true); return; }
+        if (items.length === 0) return;
+        poMonthActive += event.key === 'ArrowDown' ? 1 : -1;
+        if (poMonthActive < 0) poMonthActive = items.length - 1;
+        if (poMonthActive >= items.length) poMonthActive = 0;
+        for (let i = 0; i < items.length; i++) {
+            items[i].classList.toggle('is-active', i === poMonthActive);
+            items[i].setAttribute('aria-selected', i === poMonthActive ? 'true' : 'false');
+        }
+        items[poMonthActive].scrollIntoView({ block: 'nearest' });
+        box.setAttribute('aria-activedescendant', items[poMonthActive].id);
+    } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (poMonthActive >= 0 && items[poMonthActive]) {
+            poMonthPick(items[poMonthActive].dataset.month);
+        } else if (items.length === 1 || poMonthFromLabel(box.value)) {
+            poMonthPick(poMonthFromLabel(box.value) || items[0].dataset.month);
+        } else if (items.length === 0) {
+            notifyWarning('Pick a month from the list, like ' + poMonthLabel(poThisMonth()) + '.', 'No such month');
+        }
+    } else if (event.key === 'Escape') {
+        box.value = poMonthLabel(poMonthInUse());
+        poMonthHide();
+    }
+}
+
+// leaving the box: a whole month typed is used, anything else goes back
+function poMonthBlur() {
+    const box = document.getElementById('po-totals-month');
+    if (!box) return;
+    const month = poMonthFromLabel(box.value);
+    poMonthHide();
+    if (month) poMonthPick(month);
+    else box.value = poMonthLabel(poMonthInUse());
 }
 
 // every year from 2025 to this one, the oldest first

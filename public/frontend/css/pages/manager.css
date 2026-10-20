@@ -384,5 +384,12 @@
 .panel-toolbar:has(.toolbar-date:not([hidden])) .search-wrap { flex: 1 1 150px; min-width: 140px; }
 .panel-toolbar:has(.toolbar-date:not([hidden])) .toolbar-date input { width: 150px; }
 
-/* Total Purchases: the Month box is typed in, with the months as its list */
+/* Total Purchases: the Month box is typed in, with the months listed under it
+   (purchase-orders.js poMonthSuggest) */
 .toolbar-field .month-search { min-width: 190px; }
+.month-wrap .form-control { padding-right: 34px; }
+.month-wrap .suggest-clear[hidden] { display: none; }
+.month-list { min-width: 260px; max-height: 300px; }
+.month-list .suggest-item.is-current .suggest-name { color: var(--go); }
+.month-list .suggest-item.is-empty { cursor: default; }
+.month-list .suggest-item.is-empty .suggest-name { font-weight: 400; color: var(--steel-soft); }
