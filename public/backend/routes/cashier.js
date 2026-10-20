@@ -506,6 +506,9 @@ function registerCashierRoutes(app, deps) {
     const phoneProblem = phoneComplaint(contactPhone);
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
+    if (!String(scheduledDate || "").trim()) {
+      return response.status(400).json({ error: "Pick the date and time of the delivery." });
+    }
     const scheduled = toMysqlDateTime(scheduledDate);
 
     // a schedule typed but not understood must not become "unscheduled" silently

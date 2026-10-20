@@ -518,14 +518,6 @@ async function openDriverRefund(deliveryId) {
     document.getElementById('refund-subtitle').textContent = 'Delivery #' + deliveryId + ' · ' + d.customer_name;
     document.getElementById('refund-reason').value = '';
 
-    let moneyNote = 'The order is already paid, so the refund is cash handed back to the customer.';
-    if (refundBalance > 0) {
-        moneyNote = 'The order still owes ' + peso(refundBalance) + ', so the refund comes off what the customer ' +
-            'owes. If it is more than that, hand the rest back in cash.';
-    }
-    document.getElementById('refund-explain').textContent =
-        'Tick each item the customer turned away and say how many. ' + moneyNote +
-        ' The goods go to the inventory clerk for inspection.';
 
     let linesHtml = '';
     for (let i = 0; i < refundLines.length; i++) {
@@ -536,7 +528,7 @@ async function openDriverRefund(deliveryId) {
             '<span class="refund-sold muted">bought ' + escapeHtml(qtyText(line.sold, line.unit)) +
                 ' at ' + peso(line.price) + ', up to ' + line.left + ' can go back</span>' +
             '<input type="number" class="form-control refund-qty" id="refund-qty-' + i + '" ' +
-                'min="0" max="' + line.left + '" step="any" value="' + Math.min(1, line.left) + '" ' +
+                'min="0" max="' + line.left + '" step="any" value="' + line.left + '" ' +
                 'oninput="onRefundLineChange()" aria-label="Quantity of ' + escapeHtml(line.name) + '">' +
             '<span class="refund-amount" id="refund-amount-' + i + '"></span>' +
         '</div>';

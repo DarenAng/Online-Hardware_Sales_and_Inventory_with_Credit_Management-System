@@ -1581,7 +1581,9 @@ function renderCartFigures() {
     const qrButton = document.getElementById('qr-pay-btn');
     if (qrButton) {
         qrButton.hidden = QR_METHODS.indexOf(taken) === -1;
-        qrButton.disabled = cart.length === 0;
+        // GCash or PayMaya paid in full: the amount entered has to cover the bill
+        const short = !t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due;
+        qrButton.disabled = cart.length === 0 || short;
         qrButton.textContent = taken === 'Bank Transfer' ? 'Pay by Bank Transfer' : 'Pay by QR';
     }
 
@@ -1595,7 +1597,7 @@ function checkoutLabel(t) {
     if (t.method === 'COD') return 'Place COD Order';
     if (t.onCredit) {
         if (cart.length > 0 && t.amountOnAccount <= 0) return 'Complete Sale';
-        if (t.down > 0) return 'Take Part Payment & Charge the Rest';
+        // a part paid now still reads Charge to Account: the rest goes on the account
         return 'Charge to Account';
     }
     return 'Complete Sale';
@@ -2024,7 +2026,7 @@ async function handleCheckout(event, viaQr) {
         return;
     }
 
-    if (!t.onAccount && !viaQr && t.tendered < t.due) {
+    if (!t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due) {
         notifyWarning('The amount entered is less than the amount due.', 'Sale not completed');
         return;
     }
@@ -2592,14 +2594,8 @@ function fillDeliveryFromCustomer(account) {
     // an old one-line address is only shown; the boxes are for the cashier to fill in
     const note = document.getElementById('dl-saved-address');
     if (note) {
-        if (saved.oldLine !== '') {
-            note.textContent = 'This customer was saved with one address line: ' + saved.oldLine +
-                '. Fill in the boxes below from it.';
-            note.hidden = false;
-        } else {
-            note.textContent = '';
-            note.hidden = true;
-        }
+        note.textContent = '';
+        note.hidden = true;
     }
 }
 
@@ -2623,7 +2619,7 @@ function renderDeliveryCustomerVerdict() {
 
     if (id) {
         box.className = 'customer-verdict is-good';
-        box.textContent = 'A customer on record. Their number and address are filled in below.';
+        box.textContent = '';
     } else if (typed === '') {
         box.className = 'customer-verdict';
         box.textContent = "Type the customer's name and pick them from the list.";
@@ -3114,8 +3110,10 @@ async function saveDeliveryForm(event) {
     if (landmark.length > 150) complain('landmark', 'The landmark is at most 150 characters.');
     if (fields.remarks.value.trim().length > 255) complain('remarks', 'The remarks are at most 255 characters.');
 
-    // a slot in the past is almost always a typing slip in the year or month
-    if (scheduledDate && new Date(scheduledDate).getTime() < Date.now() - 60000) {
+    // the date and time are required; a slot in the past is almost always a typing slip
+    if (!scheduledDate) {
+        complain('scheduledDate', 'Pick the date and time of the delivery.');
+    } else if (new Date(scheduledDate).getTime() < Date.now() - 60000) {
         complain('scheduledDate', 'That date has already passed. Check the date and time.');
     }
 

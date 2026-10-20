@@ -224,8 +224,11 @@ function showDeliveryRecord(d, canUpdate) {
                 footActions += '<button type="button" class="btn btn-success" ' +
                     'onclick="proceedToPayment(' + d.delivery_id + ')">Proceed Payment</button>';
             } else if (s === 'Delivered' && isDriver) {
+                // fully paid: there is nothing to collect, the delivery is only closed
+                const fullyPaid = Number(d.balance_due) <= 0;
                 footActions += '<button type="button" class="btn btn-success" ' +
-                    'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'Delivered\')">Proceed Payment</button>';
+                    'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'Delivered\')">' +
+                    (fullyPaid ? 'Complete Delivery' : 'Proceed Payment') + '</button>';
             } else {
                 footActions += '<button type="button" class="btn ' + (DELIVERY_STATUS_BUTTON[s] || 'btn-accent') + '" ' +
                     'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'' + s + '\')">' + s + '</button>';
@@ -283,16 +286,9 @@ async function fillDeliveryItems(deliveryId, page, pages) {
     let body;
     try {
         const items = await apiGetDeliveryItems(deliveryId);
-        // count the pieces: a measured item (like 2.5 kg of nails) counts as 1 piece
-        let pieces = 0;
         const rows = [];
         for (let i = 0; i < items.length; i++) {
             const it = items[i];
-            if (isMeasuredUnit(it.unit_name)) {
-                pieces = pieces + 1;
-            } else {
-                pieces = pieces + (Number(it.quantity) || 0);
-            }
 
             // a size also shows what it came to on the shelf: 2 sack (50 kg)
             let quantity = escapeHtml(qtyText(it.quantity, it.unit_name));
@@ -310,11 +306,6 @@ async function fillDeliveryItems(deliveryId, page, pages) {
 
         body = detailTable(['Product', 'Qty', 'Unit Price', 'Subtotal'], rows, [1, 2, 3]);
         page.label = 'Items (' + items.length + ')';
-        if (items.length > 0) {
-            body += '<p class="detail-note">' + items.length + (items.length === 1 ? ' line, ' : ' lines, ') +
-                (Number.isInteger(pieces) ? pieces : pieces.toFixed(2)) + (pieces === 1 ? ' item' : ' items') +
-                ' to deliver.</p>';
-        }
     } catch (error) {
         body = '<p class="detail-empty">The items could not be loaded.</p>';
     }

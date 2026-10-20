@@ -275,6 +275,28 @@ function markPanelStale(panel, scope) {
 
     mount.appendChild(note);
     mount.classList.remove('is-single');
+    watchStalePanels();
+}
+
+// A table marked stale (a popup was open, or the cashier was typing in its
+// filters) reads itself again as soon as that is over, so nobody has to press
+// Refresh. Checked once a second while any table waits.
+let staleWatch = null;
+
+function watchStalePanels() {
+    if (staleWatch) return;
+    staleWatch = setInterval(function () {
+        let waiting = 0;
+        for (const key in dataPanels) {
+            const panel = dataPanels[key];
+            const mount = panel.pager ? panel.pager() : null;
+            if (!mount || !mount.querySelector('.stale-note')) continue;
+            if (panel.state !== 'ready') continue;
+            waiting += 1;
+            if (safeToRefresh(panel)) refreshQuietly(panel);
+        }
+        if (waiting === 0) { clearInterval(staleWatch); staleWatch = null; }
+    }, 1000);
 }
 
 async function refreshStalePanel(key) {
