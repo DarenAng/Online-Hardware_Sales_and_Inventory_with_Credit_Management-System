@@ -22,19 +22,19 @@
 /* ==========================================================================
    COUNTERS AND FILTERS
    ========================================================================== */
-/* the policy strip above the credit records: the rate in force, and the way to change it */
-.policy-strip {
-    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+/* Credit Maintenance: the rate in force, as a line above the form that changes it */
+.policy-text {
+    display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
     margin-bottom: 14px; padding: 10px 14px;
     background: var(--paper);
     border: 1px solid var(--line);
     border-left: var(--rule) solid var(--signal);
     border-radius: var(--radius);
+    font-size: 14px; color: var(--steel); line-height: 1.5;
 }
-.policy-text { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; font-size: 14px; color: var(--steel); line-height: 1.5; }
 .policy-rate { font-size: 22px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
 .policy-words .muted { display: inline; }
-.policy-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+#penalty-facts { margin-bottom: 18px; }
 
 /* ==========================================================================
    TABS
@@ -184,10 +184,6 @@
     /* the totals sit two to a row, so four of them take two rows, not four;
        the cards and the figures are a little smaller to fit half the width */
     .kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
-
-    .policy-strip { flex-direction: column; align-items: flex-start; }
-    .policy-strip .btn { align-self: stretch; }
-    .policy-buttons { flex-direction: column; align-self: stretch; }
 }
 
 /* ==========================================================================
@@ -283,9 +279,8 @@
 }
 
 /* ==========================================================================
-   DELIVERY TRACKING -- the stage counts above the table are legend and summary
+   DELIVERY TRACKING
    ========================================================================== */
-#panel-deliveries .track-legend { margin-bottom: 16px; }
 /* the balance still owed is the figure this screen is read for */
 #deliveries-table .cell-due { font-weight: 600; }
 
@@ -330,8 +325,7 @@
     .summary-pane-title { display: block; font-size: 14px; margin: 16px 0 6px; }
 
     /* the status cards come off the printout; their figures are in the Totals table */
-    body.is-printing .kpi-grid,
-    body.is-printing .track-legend { display: none !important; }
+    body.is-printing .kpi-grid { display: none !important; }
 
     body.is-printing .print-totals {
         display: block;

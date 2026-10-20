@@ -59,7 +59,7 @@ const FEATURES = [
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
     routes: [["GET", /^\/api\/credit\/customers$/], ["GET", /^\/api\/credit\/customers\/\d+$/],
              ["PUT", /^\/api\/credit\/customers\/\d+\/limit$/], ["GET", /^\/api\/customers\/\d+\/history$/],
-             ["GET", /^\/api\/credit\/policy$/], ["PUT", /^\/api\/credit\/policy$/],
+             ["GET", /^\/api\/credit\/policy$/],
              ["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests$/],
              ["POST", /^\/api\/customers$/]] },
   { key: "debt-payments", name: "Credit Settlement", module: "Credit",
@@ -78,9 +78,16 @@ const FEATURES = [
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
     routes: [["GET", /^\/api\/credit\/card\/\d+$/]] },
   { key: "credit-terms-text", name: "Credit Terms Wording", module: "Credit",
-    description: "Write the terms and conditions that are printed with every credit account (the wording only; the figures come from the account).",
+    description: "Write the terms and conditions that are printed with every credit account (the wording only; the figures come from the account). It is a part of the Credit Maintenance screen, so that screen is needed as well.",
     available: [MANAGER], defaults: [MANAGER],
     routes: [["GET", /^\/api\/credit\/terms-text$/], ["PUT", /^\/api\/credit\/terms-text$/]] },
+  // the manager's maintenance page for credit: the shop's late-payment rate (changing it is
+  // this screen's alone; reading it is also part of Customer Credit) and, when Credit Terms
+  // Wording is held too, the wording of the terms
+  { key: "credit-maintenance", name: "Credit Maintenance", module: "Credit",
+    description: "Set the late-payment rate the shop charges every credit account, 1 to 3 percent a month, and write the credit terms and conditions, on one page.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/credit\/policy$/], ["PUT", /^\/api\/credit\/policy$/]] },
   { key: "credit-requests", name: "Extension Requests", module: "Credit",
     description: "The queue of credit-limit requests waiting for a decision.",
     available: [MANAGER], defaults: [MANAGER],

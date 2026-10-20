@@ -1,4 +1,4 @@
-// delivery-schedule.js -- open deliveries grouped by the day they are due
+// delivery-schedule.js -- open deliveries in a table, soonest due first
 // Loaded by: the four staff dashboards
 //
 // Drawn by script because the administrator can hand this screen to any role
@@ -116,15 +116,15 @@ function showDeliverySchedule(event) {
     }
 }
 
-// Grouped by scheduled date against the browser's today. A delivery with no
-// date is listed last under its own heading.
-const SCHEDULE_GROUPS = [
-    { key: 'overdue',  label: 'Overdue',     tone: 'is-overdue',  note: 'Due before today and not yet delivered.' },
-    { key: 'today',    label: 'Today',       tone: 'is-today',    note: 'Due today.' },
-    { key: 'tomorrow', label: 'Tomorrow',    tone: '',            note: 'Due tomorrow.' },
-    { key: 'later',    label: 'Later',       tone: '',            note: 'Due after tomorrow.' },
-    { key: 'unset',    label: 'No date yet', tone: '',            note: 'No day set to go out on yet.' }
-];
+// Each delivery is placed by its scheduled date against the browser's today and
+// shows it in the When column. A delivery with no date is listed last.
+const SCHEDULE_GROUPS = {
+    overdue:  { label: 'Overdue',     badge: 'badge-danger' },
+    today:    { label: 'Today',       badge: 'badge-warning' },
+    tomorrow: { label: 'Tomorrow',    badge: 'badge-info' },
+    later:    { label: 'Later',       badge: 'badge-neutral' },
+    unset:    { label: 'No date yet', badge: 'badge-neutral' }
+};
 
 function scheduleDayOf(stamp) {
     if (!stamp) return null;
@@ -262,10 +262,6 @@ function renderDeliverySchedule() {
     const body = document.getElementById('schedule-body');
     if (!body || scheduleRows === null) return;
 
-    // a filter on status or driver means every row says the same there, so it is not drawn
-    body.classList.toggle('hide-status', scheduleValue('schedule-status') !== 'all');
-    body.classList.toggle('hide-driver', scheduleValue('schedule-driver') !== 'all');
-
     // the deliveries that fit the search and filters, soonest first
     const rows = [];
     for (let i = 0; i < scheduleRows.length; i++) {
@@ -275,18 +271,7 @@ function renderDeliverySchedule() {
         return String(a.scheduled_date || '9999').localeCompare(String(b.scheduled_date || '9999'));
     });
 
-    // put each delivery under its heading (Overdue, Today, ...)
-    const grouped = {};
-    for (let i = 0; i < SCHEDULE_GROUPS.length; i++) {
-        grouped[SCHEDULE_GROUPS[i].key] = [];
-    }
-    for (let i = 0; i < rows.length; i++) {
-        grouped[scheduleGroupOf(rows[i])].push(rows[i]);
-    }
-
-    const total = rows.length;
-
-    if (total === 0) {
+    if (rows.length === 0) {
         body.innerHTML = scheduleRows.length > 0
             ? '<div class="empty-state"><h4>No delivery matches</h4>' +
               '<p>Nothing on the schedule fits the search and filters above.</p></div>'
@@ -301,41 +286,37 @@ function renderDeliverySchedule() {
     const canUpdate = typeof hasRole === 'function' && hasRole('Manager', 'Delivery Personnel');
     const canArchive = typeof hasRole === 'function' && hasRole('Manager');
 
-    let html = '';
-    for (let g = 0; g < SCHEDULE_GROUPS.length; g++) {
-        const group = SCHEDULE_GROUPS[g];
-        const list = grouped[group.key];
-        if (list.length === 0) continue;
+    // a filter on due day, driver or status means every row says the same there,
+    // so that column is not drawn (tables.js hides the columns listed here)
+    const hidden = [];
+    if (scheduleValue('schedule-due') !== 'all') hidden.push(2);
+    if (scheduleValue('schedule-driver') !== 'all') hidden.push(5);
+    if (scheduleValue('schedule-status') !== 'all') hidden.push(6);
 
-        // one line for each delivery under this heading
-        let listHtml = '';
-        for (let i = 0; i < list.length; i++) {
-            const d = list[i];
-            listHtml += '<li class="schedule-row' + (canOpen ? ' row-clickable' : '') + '"' +
-                (canOpen ? ' onclick="openScheduledDelivery(' + Number(d.delivery_id) + ')"' : '') + '>' +
-                '<span class="schedule-when">' +
-                    '<span class="schedule-day">' + escapeHtml(scheduleDateOf(d.scheduled_date) || '—') + '</span>' +
-                    '<span class="schedule-time">' + escapeHtml(scheduleTimeOf(d.scheduled_date)) + '</span>' +
-                '</span>' +
-                '<span class="schedule-who">' +
-                    '<strong>' + escapeHtml(d.customer_name || 'Walk-in') + '</strong>' +
-                    '<span class="schedule-where">' + escapeHtml(d.delivery_address || '') + '</span>' +
-                '</span>' +
-                '<span class="schedule-driver">' + escapeHtml(d.driver_name || 'Unassigned') + '</span>' +
-                '<span class="schedule-status">' + statusBadge(d.status) + '</span>' +
-                '</li>';
-        }
+    // one row for each delivery
+    let rowsHtml = '';
+    for (let i = 0; i < rows.length; i++) {
+        const d = rows[i];
+        const group = SCHEDULE_GROUPS[scheduleGroupOf(d)];
+        const day = scheduleDateOf(d.scheduled_date);
+        const due = day ? (day + ' ' + scheduleTimeOf(d.scheduled_date)).trim() : '—';
 
-        html += '<section class="schedule-group ' + group.tone + '">' +
-            '<header class="schedule-group-head">' +
-                '<h4>' + group.label + ' <span class="schedule-group-count">' + list.length + '</span></h4>' +
-                '<span class="schedule-group-note">' + group.note + '</span>' +
-            '</header>' +
-            '<ol class="schedule-list">' + listHtml +
-            '</ol>' +
-        '</section>';
+        rowsHtml += '<tr class="' + (canOpen ? 'row-clickable ' : '') + 'row-reveal" ' +
+            'style="animation-delay:' + (i % 10) * 28 + 'ms"' +
+            (canOpen ? ' onclick="openScheduledDelivery(' + Number(d.delivery_id) + ')"' : '') + '>' +
+            '<td class="cell-id">' + escapeHtml(due) + '</td>' +
+            '<td><span class="badge ' + group.badge + '">' + group.label + '</span></td>' +
+            '<td class="cell-name">' + escapeHtml(d.customer_name || 'Walk-in') + '</td>' +
+            '<td>' + escapeHtml(d.delivery_address || '') + '</td>' +
+            '<td>' + escapeHtml(d.driver_name || 'Unassigned') + '</td>' +
+            '<td>' + statusBadge(d.status) + '</td></tr>';
     }
-    body.innerHTML = html;
+
+    body.innerHTML = '<div class="table-responsive">' +
+        '<table id="schedule-table" data-hidden-columns="' + hidden.join(',') + '">' +
+        '<thead><tr><th>Due</th><th>When</th><th>Customer</th><th>Destination</th>' +
+        '<th>Driver</th><th>Status</th></tr></thead>' +
+        '<tbody>' + rowsHtml + '</tbody></table></div>';
 
     body.dataset.canUpdate = canUpdate ? '1' : '';
     body.dataset.canArchive = canArchive ? '1' : '';

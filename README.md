@@ -1184,7 +1184,8 @@ administrator can:
   cashiers, say, or Adjustment History off the clerks.
 - **switch a screen on** for a role whose page can draw it but does not hold
   it by role. Today that is the **Delivery Schedule** — the deliveries still
-  to go out, under Overdue, Today, Tomorrow and Later — which the manager
+  to go out, in a table with a When badge (Overdue, Today, Tomorrow, Later,
+  No date yet), soonest first — which the manager
   holds by role and any of the other three can be given.
 
 A screen a role's dashboard cannot draw is not on that role's line at all:
@@ -1517,10 +1518,15 @@ card, the cashier's balances-due sheet and the payment it takes, the receipt
 reprinted later, the income figures and the standing rules. The sale itself,
 `final_amount`, is untouched, so the sales figures are still the sales.
 
-**The rate is the manager's.** The strip above the manager's credit records says
-the shop's rate in force and what is owed in penalties; *Change the rate*
-sets another, anywhere from 1 to 3, with a worked example before it is
-saved. A change applies from the next month charged and never rewrites a
+**The rate is the manager's.** It is set on the manager's **Credit Maintenance**
+screen (under Customers Record), which says the shop's rate in force and what
+is owed in penalties, and sets another, anywhere from 1 to 3, with a worked
+example before it is saved. The same page holds the wording of the credit
+terms and conditions printed with every credit account, one term to a line,
+with *Use the default wording* to put the standard text back. The screen is
+its own switch in Access Control (`credit-maintenance`, held by managers by
+default, so an existing database needs no migration); the wording half also
+needs `credit-terms-text`. A change applies from the next month charged and never rewrites a
 month already charged. An account can also be given **a rate of its own** on
 its credit terms, beside the limit and the standing override — a loyal
 customer at 1 percent while the shop stays at 3 — and blank there means the

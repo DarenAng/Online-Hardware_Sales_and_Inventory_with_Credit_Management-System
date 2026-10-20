@@ -2435,16 +2435,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     margin: 0 0 14px;
 }
 
-/* a stage count that is also a filter */
-button.track-chip { cursor: pointer; font-family: var(--font-ui); }
-button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
-.track-chip-alert {
-    border-color: rgba(245, 179, 1, 0.55);
-    background: var(--signal-dim);
-    color: var(--signal-ink);
-    font-weight: 600;
-}
-
 /* ==========================================================================
    ON PAPER -- the browser's print dialogue; controls come off, the open
    panel stays, and tables get their full height
@@ -2644,77 +2634,6 @@ button.track-chip:hover { border-color: var(--steel-soft); color: var(--ink); }
     background: rgba(240, 78, 35, 0.20);
 }
 .sidebar-nav li[data-sidebar-dropdown]:has(> .nav-sub a.active) > .nav-parent::before { transform: scaleY(1); }
-
-/* ==========================================================================
-   THE DELIVERY SCHEDULE -- drawn by shared/delivery-schedule.js; overdue
-   carries the crimson rule, today the amber
-   ========================================================================== */
-.schedule-group { margin-bottom: 22px; }
-.schedule-group:last-child { margin-bottom: 0; }
-.schedule-group-head {
-    display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px;
-    padding-bottom: 8px; margin-bottom: 8px;
-    border-bottom: 1px solid var(--line);
-}
-.schedule-group-head h4 {
-    display: flex; align-items: center; gap: 8px;
-    margin: 0;
-    font-size: 16px; font-weight: 600; letter-spacing: -0.01em;
-}
-.schedule-group-count {
-    min-width: 22px; padding: 1px 7px;
-    border-radius: 999px;
-    background: var(--paper-2); color: var(--steel);
-    font-family: var(--font-figure);
-    font-size: 13px; font-weight: 600;
-    text-align: center;
-}
-.schedule-group.is-overdue .schedule-group-count { background: var(--stop); color: #fff; }
-.schedule-group.is-today .schedule-group-count { background: var(--signal); color: #5a4200; }
-.schedule-group-note { font-size: 13.5px; color: var(--steel-soft); }
-
-.schedule-list { list-style: none; margin: 0; padding: 0; }
-.schedule-row {
-    display: grid;
-    grid-template-columns: 118px minmax(0, 1fr) 150px auto;
-    align-items: center; gap: 14px;
-    padding: 10px 12px;
-    border: 1px solid var(--line);
-    border-left: var(--rule) solid var(--line);
-    border-radius: var(--radius);
-    background: var(--surface);
-    margin-bottom: 6px;
-}
-.schedule-group.is-overdue .schedule-row { border-left-color: var(--stop); }
-.schedule-group.is-today .schedule-row { border-left-color: var(--signal); }
-.schedule-row.row-clickable { cursor: pointer; }
-.schedule-row.row-clickable:hover { background: var(--paper); }
-.schedule-when { display: flex; flex-direction: column; min-width: 0; }
-.schedule-day { font-size: 14.5px; font-weight: 600; }
-.schedule-time {
-    font-family: var(--font-figure);
-    font-size: 13px; color: var(--steel);
-}
-.schedule-who { display: flex; flex-direction: column; min-width: 0; }
-.schedule-who strong { font-size: 15px; font-weight: 600; }
-.schedule-where {
-    font-size: 13.5px; color: var(--steel);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.schedule-driver { font-size: 14px; color: var(--steel); }
-.schedule-status { justify-self: end; }
-/* filtered to one status or one driver: every row would say the same, so it goes */
-#schedule-body.hide-status .schedule-status,
-#schedule-body.hide-driver .schedule-driver { display: none; }
-
-@media (max-width: 760px) {
-    .schedule-row { grid-template-columns: 1fr auto; }
-    .schedule-when { grid-column: 1; }
-    .schedule-status { grid-column: 2; grid-row: 1; }
-    .schedule-who { grid-column: 1 / -1; }
-    .schedule-driver { grid-column: 1 / -1; }
-    .schedule-where { white-space: normal; }
-}
 
 /* ==========================================================================
    LIVE SYNC -- a stale table says so in its own footer (see live-sync.js)

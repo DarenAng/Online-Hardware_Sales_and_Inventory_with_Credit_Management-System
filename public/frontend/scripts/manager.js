@@ -197,6 +197,16 @@ function showSalesTransactions(event) {
     showReport(wanted, event);
 }
 
+// Credit Maintenance: the shop's late-payment rate and the wording of the credit terms.
+// Both are read again each time the screen is opened.
+async function showCreditMaintenance(event) {
+    showManagerPanel('panel-credit-maintenance', 'Credit Maintenance', event);
+    const rateRead = await loadPenaltyPolicy();
+    fillPenaltyForm(rateRead);
+    // the terms are asked for only by a manager who holds that part of the screen
+    if (holdsFeature('credit-terms-text')) await loadCreditTermsText();
+}
+
 // Account Management: the staff list is not read here; Load Data on the screen reads it
 function showAccountManagement(event) {
     showManagerPanel('panel-accounts', 'Account Management', event);
@@ -642,21 +652,14 @@ async function exportPanelSpreadsheet(keys, title) {
 // the browser's own print dialogue; the named tables are unpaged while it is open
 let printRestore = null;
 
-// The status cards over a table (the figure cards and the count chips) stay
-// off the printout. Their figures are read back here as label/value rows, to
-// go in a Totals table at the bottom of the report instead.
+// The status cards over a table stay off the printout. Their figures are read
+// back here as label/value rows, to go in a Totals table at the bottom of the
+// report instead.
 
-// The count chips count every row loaded, but the printout holds only the rows
-// the filters leave. For these panels the chip counts are taken again from the
-// printed (visible) rows: each says which chip a row belongs to.
-const PRINT_CHIP_STATE = {
-    'mgr-deliveries': function (d) {
-        return d.fulfilment_state;
-    },
-    'mgr-po': function (po) {
-        return poStage(po);
-    }
-};
+// The Deliveries printout holds only the rows the filters leave; the Totals
+// table counts those rows in each of these fulfilment states, in this order.
+const PRINT_DELIVERY_STATES = ['Pending Cash Collection', 'Completed', 'Out for Delivery',
+                               'In Transit', 'Pending', 'Delayed', 'Failed'];
 
 function printTotalRows(container, panel) {
     const rows = [];
@@ -670,34 +673,21 @@ function printTotalRows(container, panel) {
         }
     }
 
-    // a chip reads "3 Completed": the number is in .track-count, the words are the rest
-    let chipTotal = 0;
-    const chips = container.querySelectorAll('.track-chip');
-    const stateOf = panel ? PRINT_CHIP_STATE[panel.key] : null;
-    let chipRows = 0;
-    for (let c = 0; c < chips.length; c++) {
-        const chip = chips[c];
-        const countBox = chip.querySelector('.track-count');
-        let count = countBox ? Number(countBox.textContent) : 0;
-
-        // count the printed rows instead of the chip's own number
-        if (stateOf && panel.state === 'ready') {
-            count = 0;
+    // the Deliveries printout counts the printed rows in each fulfilment state
+    if (panel && panel.key === 'mgr-deliveries' && panel.state === 'ready') {
+        let total = 0;
+        for (let s = 0; s < PRINT_DELIVERY_STATES.length; s++) {
+            let count = 0;
             for (let i = 0; i < panel.visible.length; i++) {
-                if (stateOf(panel.visible[i]) === chip.dataset.state) count++;
+                if (panel.visible[i].fulfilment_state === PRINT_DELIVERY_STATES[s]) count++;
             }
+            if (count === 0) continue;   // nothing of this kind is printed
+            total += count;
+            rows.push([PRINT_DELIVERY_STATES[s], String(count)]);
         }
-        if (count === 0) continue;   // nothing of this kind is printed
-        chipTotal += count;
-        chipRows += 1;
-
-        const copy = chip.cloneNode(true);
-        const copyCount = copy.querySelector('.track-count');
-        if (copyCount) copyCount.remove();
-        rows.push([copy.textContent.trim(), String(count)]);
-    }
-    if (chipRows > 0) {
-        rows.push(['Total', String(chipTotal)]);
+        if (total > 0) {
+            rows.push(['Total', String(total)]);
+        }
     }
 
     return rows;
@@ -1368,16 +1358,6 @@ function sortStockRows(rows, order) {
         if (order === 'stock-desc') {
             return num(b.quantity_in_stock) - num(a.quantity_in_stock) || byName(a, b);
         }
-        if (order === 'gap') {
-            return (num(a.quantity_in_stock) - num(a.effective_rop)) -
-                   (num(b.quantity_in_stock) - num(b.effective_rop)) || byName(a, b);
-        }
-        if (order === 'value-desc') {
-            return num(b.stock_value) - num(a.stock_value) || byName(a, b);
-        }
-        if (order === 'value-asc') {
-            return num(a.stock_value) - num(b.stock_value) || byName(a, b);
-        }
         if (order === 'cover') {
             return (coverOf(a) - coverOf(b)) || byName(a, b);
         }
@@ -1434,7 +1414,7 @@ function buildStockPanels() {
     createDataPanel({
         key: 'mgr-stocks',
         tableId: 'stocks-table',
-        columns: 7,
+        columns: 5,
         pagerId: 'stocks-pager',
         idField: 'product_id',
         filters: { status: 'all', level: 'all', sort: 'name' },
@@ -1463,9 +1443,7 @@ function buildStockPanels() {
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
                 '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
-                '<td class="cell-num">' + p.effective_rop + ' ' + modeBadge(p) + '</td>' +
                 '<td class="cell-num">' + priceOrBadge(p) + '</td>' +
-                '<td class="cell-num">' + peso(p.stock_value) + '</td>' +
                 '<td>' + statusBadge(p.stock_status) + '</td></tr>';
         }
     });
@@ -1982,15 +1960,17 @@ function buildCreditPanels() {
 // ---------- the late-payment policy ----------
 // 1 to 3 percent a month of the goods still unpaid, for every month a credit
 // sale is past its 30-day due date; the default is 3. The manager may set
-// another rate for the shop here; an account can be given its own rate on
-// its credit terms.
+// another rate for the shop on the Credit Maintenance screen; an account can
+// be given its own rate on its credit terms.
+// answers true when the rate was read, false when it could not be
 async function loadPenaltyPolicy() {
     try {
         penaltyPolicy = await apiGetPenaltyPolicy();
     } catch (error) {
-        return;   // the strip keeps whatever it last showed
+        return false;   // the screen keeps whatever it last showed
     }
     renderPenaltyPolicy();
+    return true;
 }
 
 function renderPenaltyPolicy() {
@@ -2015,33 +1995,48 @@ function renderPenaltyPolicy() {
             ? '<span class="muted">' + own + (own === 1 ? ' account has' : ' accounts have') +
               ' a rate of ' + (own === 1 ? 'its' : 'their') + ' own.</span>'
             : '');
+
+    const facts = document.getElementById('penalty-facts');
+    if (facts) {
+        facts.innerHTML =
+            detailField('Rate Now', penaltyRateWord(pct) + ' a month' + (pct === 3 ? ' <span class="muted">the default</span>' : '')) +
+            detailField('Last Changed', penaltyPolicy.updated_at
+                ? escapeHtml(String(penaltyPolicy.updated_at).slice(0, 16)) +
+                  (penaltyPolicy.updated_by ? ' <span class="muted">by ' + escapeHtml(penaltyPolicy.updated_by) + '</span>' : '')
+                : '<span class="muted">Never</span>') +
+            detailField('Charged So Far', charged > 0
+                ? peso(owed) + ' <span class="muted">on ' + charged + (charged === 1 ? ' open sale' : ' open sales') + '</span>'
+                : '<span class="muted">Nothing outstanding</span>') +
+            detailField('Own-Rate Accounts', String(own));
+    }
 }
 
-function openPenaltyPolicy() {
+// Puts the saved rate in the box, with its worked example. When the rate could not be
+// read (rateRead is false) the box stays empty and Save is off: saving a guessed 3 would
+// replace the real rate.
+function fillPenaltyForm(rateRead) {
     const form = document.getElementById('penalty-form');
     if (!form) return;
 
-    const pct = penaltyPolicy ? Number(penaltyPolicy.penalty_rate) : 3;
-    form.elements.penaltyRate.value = Number.isFinite(pct) ? pct.toFixed(2) : '3.00';
+    const note = document.getElementById('penalty-read-note');
+    const saveButton = document.getElementById('penalty-save-btn');
+    if (note) note.hidden = rateRead;
+    if (saveButton) saveButton.disabled = !rateRead;
+    form.elements.penaltyRate.disabled = !rateRead;
 
-    document.getElementById('penalty-facts').innerHTML =
-        detailField('Rate Now', penaltyRateWord(pct) + ' a month' + (pct === 3 ? ' <span class="muted">the default</span>' : '')) +
-        detailField('Last Changed', penaltyPolicy && penaltyPolicy.updated_at
-            ? escapeHtml(String(penaltyPolicy.updated_at).slice(0, 16)) +
-              (penaltyPolicy.updated_by ? ' <span class="muted">by ' + escapeHtml(penaltyPolicy.updated_by) + '</span>' : '')
-            : '<span class="muted">Never</span>') +
-        detailField('Charged So Far', penaltyPolicy && Number(penaltyPolicy.penalised_sales) > 0
-            ? peso(penaltyPolicy.penalties_owed) + ' <span class="muted">on ' + penaltyPolicy.penalised_sales +
-              (Number(penaltyPolicy.penalised_sales) === 1 ? ' open sale' : ' open sales') + '</span>'
-            : '<span class="muted">Nothing outstanding</span>') +
-        detailField('Own-Rate Accounts', String((penaltyPolicy && penaltyPolicy.own_rate_accounts) || 0));
+    if (!rateRead) {
+        form.elements.penaltyRate.value = '';
+        document.getElementById('penalty-policy-rate').textContent = 'Rate not read';
+        document.getElementById('penalty-policy-words').textContent = '';
+        document.getElementById('penalty-facts').innerHTML = '';
+        document.getElementById('penalty-preview').hidden = true;
+        return;
+    }
 
+    const pct = Number(penaltyPolicy.penalty_rate);
+    form.elements.penaltyRate.value = Number.isFinite(pct) ? pct.toFixed(2) : '';
+    document.getElementById('penalty-preview').hidden = false;
     previewPenaltyPolicy();
-    showModal('penalty-modal');
-    setTimeout(function () {
-        form.elements.penaltyRate.focus();
-        form.elements.penaltyRate.select();
-    }, 60);
 }
 
 // the rate as a worked example, so 3 reads as pesos a month before it is saved
@@ -2088,8 +2083,8 @@ async function savePenaltyPolicy(event) {
         }
 
         notifySuccess(result.message, 'Late-payment rate saved');
-        closeModal('penalty-modal');
-        await loadPenaltyPolicy();
+        const rateRead = await loadPenaltyPolicy();
+        fillPenaltyForm(rateRead);
     } catch (error) {
         notifyOffline();
     }
@@ -2129,7 +2124,8 @@ function printCreditCardOpen(kind) {
 // figures on that page come from the account, not from this text.
 let creditTermsDefault = '';
 
-async function openCreditTermsText() {
+// reads the saved wording into the box on the Credit Maintenance screen
+async function loadCreditTermsText() {
     let answer;
     try {
         answer = await apiGetCreditTermsText();
@@ -2142,11 +2138,9 @@ async function openCreditTermsText() {
     const form = document.getElementById('terms-form');
     form.elements.text.value = answer.text;
     document.getElementById('terms-sub').textContent =
-        answer.isDefault ? 'The default wording is in use' : 'Your own wording is in use';
+        answer.isDefault ? 'Printed with every credit account. The default wording is in use.'
+                         : 'Printed with every credit account. Your own wording is in use.';
     countCreditTerms();
-
-    showModal('terms-modal');
-    setTimeout(function () { form.elements.text.focus(); }, 60);
 }
 
 // how many terms the box holds, as it is typed
@@ -2189,7 +2183,7 @@ async function saveCreditTermsText(event) {
         }
 
         notifySuccess(result.message, 'Credit terms saved');
-        closeModal('terms-modal');
+        await loadCreditTermsText();   // an emptied box comes back as the default wording
     } catch (error) {
         notifyOffline();
     }
@@ -2426,7 +2420,7 @@ async function saveCreditLimit(event) {
 
         const panel = getDataPanel('mgr-credit');
         if (panel && panel.state === 'ready') await panel.refresh();
-        loadPenaltyPolicy();   // the own-rate count on the strip
+        loadPenaltyPolicy();   // the own-rate count on the Credit Maintenance screen
     } catch (error) {
         notifyOffline();
     }
@@ -2682,7 +2676,6 @@ function buildDeliveryPanel() {
                 (filters.driver === 'all' || d.driver_name === filters.driver);
         },
         onLoaded: function (rows) {
-            renderTrackLegend(rows);
             renderDriverOptions(rows);
         },
         renderRow: function (d, index) {
@@ -2700,32 +2693,6 @@ function buildDeliveryPanel() {
                 '<td><span class="badge ' + tone + '">' + escapeHtml(d.fulfilment_state) + '</span></td></tr>';
         }
     });
-}
-
-// stage counts above the table; cash collection leads
-function renderTrackLegend(rows) {
-    const legend = document.getElementById('track-legend');
-    if (!legend) return;
-
-    const states = ['Pending Cash Collection', 'Completed', 'Out for Delivery',
-                    'In Transit', 'Pending', 'Delayed', 'Failed'];
-
-    let html = '';
-    for (let s = 0; s < states.length; s++) {
-        const state = states[s];
-
-        let count = 0;
-        for (let i = 0; i < rows.length; i++) {
-            if (rows[i].fulfilment_state === state) count++;
-        }
-        if (count === 0) continue;
-
-        const alert = state === 'Pending Cash Collection' ? ' track-chip-alert' : '';
-        html += '<button type="button" class="track-chip' + alert + '" data-state="' + state + '" ' +
-            'onclick="filterDeliveriesBy(\'' + state + '\')">' +
-            '<span class="track-count">' + count + '</span>' + escapeHtml(state) + '</button>';
-    }
-    legend.innerHTML = html;
 }
 
 // The Driver box: "All drivers", "Unassigned", then each driver found in the
@@ -2760,12 +2727,6 @@ function renderDriverOptions(rows) {
     }
     select.innerHTML = html;
     select.value = chosen;
-}
-
-function filterDeliveriesBy(state) {
-    const select = document.getElementById('deliveries-state');
-    if (select) select.value = state;
-    dataPanelFilter('mgr-deliveries', 'state', state);
 }
 
 // ==========================================
