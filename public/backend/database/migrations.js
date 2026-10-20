@@ -1538,6 +1538,18 @@ async function migrateRecordArchives() {
   }
 }
 
+// The reorder point the system worked out (Dynamic) is gone: every product
+// reorders at the figure typed for it. A product still marked Dynamic is
+// marked Manual, keeping the reorder point stored on it.
+async function migrateManualReorderPoints() {
+  const result = await db.query("UPDATE products SET reorder_mode = 'Manual' WHERE reorder_mode = 'Dynamic'");
+  const changed = result[0] && result[0].affectedRows ? result[0].affectedRows : 0;
+  if (changed > 0) {
+    console.log("Set " + changed + " product(s) from a calculated to a typed reorder point " +
+      "(the calculated reorder point is no longer used).");
+  }
+}
+
 async function migrateDatabase(runSqlScript) {
   // first: sign-in reads user_sessions on every request
   await migrateServerTables();
@@ -1579,6 +1591,7 @@ async function migrateDatabase(runSqlScript) {
   await migratePaymentDetails();
   await migrateCheckConstraints();
   await migrateRecordArchives();
+  await migrateManualReorderPoints();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();
   await warnIfAdminPasswordIsDefault();

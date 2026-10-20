@@ -21,7 +21,6 @@
 let recordType = 'supplier';
 let incomeRange = { name: 'monthly', from: null, to: null };
 let incomeData = null;
-let policyProduct = null;
 
 // the view showing on each tabbed screen; opening the screen again goes back to it
 let reportView = 'report-summary';
@@ -1154,7 +1153,7 @@ function buildReportPanels() {
         pageSize: REPORT_ROWS_PER_PAGE,
         pagerId: 'loyal-pager',
         idField: 'customer_id',
-        filters: { purchases: 'all', balance: 'all', last: 'all' },
+        filters: { balance: 'all' },
         sortKeys: ['customer_name', 'purchase_count', function (row) { return Number(row.total_spent); },
                    function (row) { return Number(row.balance_due); }, 'last_purchase'],
         gate: {
@@ -1222,26 +1221,11 @@ function dateFilterChanged(key, prefix) {
     }
 }
 
-// Repeat Customers: how many purchases, whether they owe, and how long ago
-// they last bought
+// Repeat Customers: with a balance, or without one
 function repeatCustomerMatches(row, filters) {
-    const count = Number(row.purchase_count) || 0;
-    if (filters.purchases === '2-4' && (count < 2 || count > 4)) return false;
-    if (filters.purchases === '5-9' && (count < 5 || count > 9)) return false;
-    if (filters.purchases === '10+' && count < 10) return false;
-
     const owes = (Number(row.balance_due) || 0) > 0;
     if (filters.balance === 'owing' && !owes) return false;
     if (filters.balance === 'clear' && owes) return false;
-
-    if (filters.last !== 'all') {
-        const last = new Date(String(row.last_purchase || '').slice(0, 10) + 'T00:00:00');
-        if (isNaN(last.getTime())) return filters.last === 'older';
-        const days = Math.floor((Date.now() - last.getTime()) / 86400000);
-        if (filters.last === '30' && days > 30) return false;
-        if (filters.last === '90' && days > 90) return false;
-        if (filters.last === 'older' && days <= 90) return false;
-    }
     return true;
 }
 
@@ -1425,33 +1409,6 @@ async function stockRows() {
     return stocksCache;
 }
 
-function modeBadge(row) {
-    if (row.reorder_mode === 'Dynamic') {
-        return '<span class="badge badge-success">Dynamic</span>';
-    } else {
-        return '<span class="badge badge-neutral">Manual</span>';
-    }
-}
-
-// Quantity gets a filter of its own; stock status only says whether a product
-// is under its reorder point. The bands are round numbers on purpose.
-function stockLevelMatches(p, level) {
-    const onHand = Number(p.quantity_in_stock) || 0;
-    const rop = Number(p.effective_rop) || 0;
-
-    switch (level) {
-        case 'all':       return true;
-        case 'none':      return onHand <= 0;
-        case 'under-rop': return onHand < rop;
-        case 'near-rop':  return onHand >= rop && onHand <= rop * 1.25;
-        case '1-10':      return onHand >= 1 && onHand <= 10;
-        case '11-50':     return onHand >= 11 && onHand <= 50;
-        case '51-200':    return onHand >= 51 && onHand <= 200;
-        case '200+':      return onHand > 200;
-        default:          return true;
-    }
-}
-
 function buildStockPanels() {
     createDataPanel({
         key: 'mgr-reorder',
@@ -1459,7 +1416,7 @@ function buildStockPanels() {
         columns: 8,
         pagerId: 'reorder-pager',
         idField: 'product_id',
-        filters: { mode: 'all', status: 'all' },
+        filters: { status: 'all' },
         sortKeys: ['product_name', function (p) { return Number(p.quantity_in_stock); },
                    function (p) { return Number(p.effective_rop); }, function (p) { return Number(p.avg_daily_sales); },
                    function (p) { return p.days_of_cover === null ? '' : Number(p.days_of_cover); },
@@ -1481,15 +1438,14 @@ function buildStockPanels() {
             return prefixMatch([p.product_name, p.supplier_name], query);
         },
         filter: function (p, filters) {
-            return (filters.mode === 'all' || p.reorder_mode === filters.mode) &&
-                (filters.status === 'all' || p.stock_status === filters.status);
+            return filters.status === 'all' || p.stock_status === filters.status;
         },
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                     'onclick="openStockDetail(' + p.product_id + ')">' +
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + '</td>' +
-                '<td class="cell-num">' + p.effective_rop + ' ' + modeBadge(p) + '</td>' +
+                '<td class="cell-num">' + p.effective_rop + '</td>' +
                 '<td class="cell-num">' + Number(p.avg_daily_sales).toFixed(2) + '</td>' +
                 '<td class="cell-num">' + (p.days_of_cover === null
                     ? '<span class="muted">no sales</span>'
@@ -1506,7 +1462,7 @@ function buildStockPanels() {
         columns: 5,
         pagerId: 'stocks-pager',
         idField: 'product_id',
-        filters: { status: 'all', level: 'all' },
+        filters: { status: 'all' },
         sortKeys: ['product_name', 'category_name', function (p) { return Number(p.quantity_in_stock); },
                    function (p) { return p.days_of_cover === null ? '' : Number(p.days_of_cover); }, 'stock_status'],
         gate: {
@@ -1521,8 +1477,7 @@ function buildStockPanels() {
             return prefixMatch([p.product_name, p.category_name, p.supplier_name], query);
         },
         filter: function (p, filters) {
-            return (filters.status === 'all' || p.stock_status === filters.status) &&
-                stockLevelMatches(p, filters.level);
+            return filters.status === 'all' || p.stock_status === filters.status;
         },
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -1548,7 +1503,7 @@ function buildStockMovesPanel() {
         tableId: 'stock-moves-table',
         columns: 5,
         pagerId: 'stock-moves-pager',
-        filters: { kind: 'all', role: 'all', from: '', to: '' },
+        filters: { kind: 'all', from: '', to: '' },
         sortKeys: ['happened_at', function (row) { return activityKind(row.kind); }, 'details', 'staff_name', 'role_name'],
         gate: {
             title: 'Not loaded',
@@ -1568,15 +1523,7 @@ function buildStockMovesPanel() {
         },
         filter: function (row, filters) {
             return (filters.kind === 'all' || row.kind === filters.kind) &&
-                (filters.role === 'all' || row.role_name === filters.role) &&
                 dateInRange(row.happened_at, filters.from, filters.to);
-        },
-        onLoaded: function (rows) {
-            const roles = [];
-            for (let i = 0; i < rows.length; i++) {
-                roles.push(rows[i].role_name);
-            }
-            fillFilterOptions('stock-moves-role', roles, 'Every role');
         },
         renderRow: function (row, index) {
             return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
@@ -1794,113 +1741,40 @@ async function changePrice(product) {
 }
 
 // ==========================================
-// THE REORDER POLICY
+// THE REORDER POINT -- one figure, typed for each product
 // ==========================================
-function openReorderPolicy(productId) {
+async function changeReorderPoint(productId) {
     const product = findCachedStock(productId);
     if (!product) return;
+    const unit = product.unit_name || 'units';
 
-    policyProduct = product;
-    closeModal('detail-modal');
-
-    document.getElementById('policy-product').textContent = product.product_name;
-    document.getElementById('policy-sub').textContent =
-        (product.category_name || 'Uncategorised') + ' · ' + (product.supplier_name || 'No supplier');
-    document.getElementById('policy-avatar').textContent = initialsOf(product.product_name);
-
-    document.getElementById('policy-facts').innerHTML =
-        detailField('Sold Recently', product.units_sold_window + ' ' + escapeHtml(product.unit_name || '') +
-            ' over ' + product.window_days + ' days') +
-        detailField('Average Daily Sales', Number(product.avg_daily_sales).toFixed(3) + ' ' +
-            escapeHtml(product.unit_name || '')) +
-        detailField('On Hand Now', product.quantity_in_stock + ' ' + escapeHtml(product.unit_name || '')) +
-        detailField('Reorder Point In Use', String(product.effective_rop));
-
-    const form = document.getElementById('policy-form');
-    form.elements.leadTimeDays.value = product.lead_time_days;
-    form.elements.safetyStock.value = product.safety_stock;
-    form.elements.reorderMode.value = product.reorder_mode;
-    form.elements.reorderPoint.value = product.reorder_point;
-
-    previewReorderPoint();
-    showModal('policy-modal');
-}
-
-// the arithmetic, shown as it is typed
-function previewReorderPoint() {
-    if (!policyProduct) return;
-
-    const form = document.getElementById('policy-form');
-    const preview = document.getElementById('policy-preview');
-    if (!form || !preview) return;
-
-    const lead = Number(form.elements.leadTimeDays.value) || 0;
-    const safety = Number(form.elements.safetyStock.value) || 0;
-    const manual = Number(form.elements.reorderPoint.value) || 0;
-    const daily = Number(policyProduct.avg_daily_sales) || 0;
-
-    const calculated = Math.ceil(daily * lead) + safety;
-    const dynamic = form.elements.reorderMode.value === 'Dynamic';
-    const unit = policyProduct.unit_name || 'units';
-
-    preview.innerHTML =
-        '<span class="formula-line">(' + daily.toFixed(3) + ' a day &times; ' + lead + ' days) + ' +
-        safety + ' safety = <strong>' + calculated + ' ' + escapeHtml(unit) + '</strong></span>' +
-        '<span class="formula-verdict">' +
-        (dynamic
-            ? 'This product will reorder at <strong>' + calculated + '</strong>, recalculated as sales change.'
-            : 'This product will reorder at <strong>' + manual + '</strong>, the manual figure. ' +
-              'The calculated one is shown above for comparison.') +
-        '</span>';
-
-    preview.classList.toggle('is-dynamic', dynamic);
-}
-
-async function saveReorderPolicy(event) {
-    event.preventDefault();
-    if (!policyProduct) return;
-
-    const form = event.target;
-    const body = {
-        leadTimeDays: parseInt(form.elements.leadTimeDays.value, 10),
-        safetyStock: parseInt(form.elements.safetyStock.value, 10),
-        reorderMode: form.elements.reorderMode.value,
-        reorderPoint: parseInt(form.elements.reorderPoint.value, 10)
-    };
-
-    if (body.reorderMode === 'Dynamic' && policyProduct.reorder_mode !== 'Dynamic') {
-        const calculated = Math.ceil((Number(policyProduct.avg_daily_sales) || 0) * body.leadTimeDays) +
-            body.safetyStock;
-
-        const yes = await askConfirm(
-            policyProduct.product_name + ' will reorder at ' + calculated + ' instead of ' +
-            policyProduct.reorder_point + '.',
-            {
-                title: 'Let the system set this reorder point?',
-                eyebrow: 'Reorder Policy',
-                confirmLabel: 'Use the formula',
-                detail: [
-                    'The figure moves on its own as the product sells faster or slower.',
-                    'A product that stops selling will fall to its safety stock alone.',
-                    'You can switch it back to Manual at any time.'
-                ]
-            });
-
-        if (!yes) return;
-    }
+    const typed = await askInput({
+        title: 'Change the reorder point',
+        eyebrow: 'Reorder Alerts',
+        message: product.product_name + ' reorders at ' + product.reorder_point + ' ' + unit +
+            '. It shows on Reorder Alerts once the stock is at or below this figure.',
+        label: 'Reorder point (' + unit + ')',
+        type: 'number',
+        value: String(product.reorder_point),
+        confirmLabel: 'Save',
+        check: function (value) {
+            const text = String(value).trim();
+            if (!/^\d+$/.test(text)) return 'Type a whole number, zero or more.';
+            if (Number(text) === Number(product.reorder_point)) return 'That is the reorder point it already has.';
+            return null;
+        }
+    });
+    if (typed === false || typed === null || typed === undefined) return;
 
     try {
-        const response = await apiSaveReorderPolicy(policyProduct.product_id, body);
+        const response = await apiSaveReorderPolicy(productId, { reorderPoint: parseInt(typed, 10) });
         const result = await response.json();
-
         if (!response.ok) {
             if (!handleAuthFailure(response, result)) notifyError(result.error);
             return;
         }
-
-        notifySuccess(result.message, 'Reorder policy saved');
-        closeModal('policy-modal');
-
+        notifySuccess(result.message, 'Reorder point saved');
+        closeModal('detail-modal');
         stocksCache = null;
         await refreshStockPanels();
     } catch (error) {
@@ -3459,31 +3333,26 @@ function openStockDetail(productId) {
         detailField('Product ID', '#' + p.product_id) +
         detailField('Product', escapeHtml(p.product_name)) +
         detailField('On Hand', p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '')) +
-        detailField('Reorder Point', p.effective_rop + ' ' + modeBadge(p)) +
+        detailField('Reorder Point', String(p.reorder_point)) +
         detailField('Stock Status', statusBadge(p.stock_status)) +
         detailField('Suggested Order', p.suggested_order + ' ' + escapeHtml(p.unit_name || '')) +
         '</div>';
 
-    // the formula written out for this product
+    // the reorder point is typed; how fast it sells is shown beside it
     const daily = Number(p.avg_daily_sales) || 0;
     const reorder = '<div class="detail-grid">' +
+        detailField('Reorder Point', p.reorder_point + ' ' + escapeHtml(p.unit_name || '')) +
+        detailField('On Hand', p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '')) +
         detailField('Sold Recently', p.units_sold_window + ' ' + escapeHtml(p.unit_name || '') +
             ' over ' + p.window_days + ' days') +
         detailField('Average Daily Sales', daily.toFixed(3)) +
-        detailField('Lead Time', p.lead_time_days + ' days') +
-        detailField('Safety Stock', String(p.safety_stock)) +
-        detailField('Calculated Point', String(p.calculated_rop)) +
-        detailField('Manual Point', String(p.reorder_point)) +
-        detailField('In Use', p.effective_rop + ' ' + modeBadge(p)) +
         detailField('Days of Cover', p.days_of_cover === null
             ? '<span class="muted">Nothing sold in the window</span>'
             : Number(p.days_of_cover).toFixed(1) + ' days') +
         '</div>' +
-        '<p class="detail-note">(' + daily.toFixed(3) + ' a day &times; ' + p.lead_time_days +
-        ' days) + ' + p.safety_stock + ' safety = ' + p.calculated_rop + '</p>' +
         '<div class="detail-actions">' +
-        '<button type="button" class="btn btn-accent" onclick="openReorderPolicy(' + p.product_id + ')">' +
-        'Change Reorder Policy</button></div>';
+        '<button type="button" class="btn btn-accent" onclick="changeReorderPoint(' + p.product_id + ')">' +
+        'Change Reorder Point</button></div>';
 
     // the price is not set here: it belongs to the product, in Records > Products
     const product = '<div class="detail-grid">' +
