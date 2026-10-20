@@ -1566,7 +1566,7 @@ function renderCartFigures() {
     renderSalePaymentExtras(t);
 
     // GCash, PayMaya and a bank transfer are only ever taken through PayMongo
-    // (Pay by QR, Pay by Bank Transfer), so Complete Sale is not offered for them.
+    // (Pay by QR), so Complete Sale is not offered for them.
     const taken = methodTakenNow(t);
     const button = document.getElementById('checkout-btn');
     if (button) {
@@ -1584,7 +1584,7 @@ function renderCartFigures() {
         // GCash or PayMaya paid in full: the amount entered has to cover the bill
         const short = !t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due;
         qrButton.disabled = cart.length === 0 || short;
-        qrButton.textContent = taken === 'Bank Transfer' ? 'Pay by Bank Transfer' : 'Pay by QR';
+        qrButton.textContent = 'Pay by QR';
     }
 
     // a code on screen is for the old total; it is cancelled, not paid wrong
@@ -4061,11 +4061,10 @@ function renderPaymentVerdict() {
 
     // GCash, PayMaya and a bank transfer are only taken through PayMongo (the QR
     // code), so Confirm Payment is not offered for them.
-    const isTransfer = fields.paymentMethod.value === 'Bank Transfer';
     const qrButton = document.getElementById('payment-qr-btn');
     if (qrButton) {
         qrButton.hidden = QR_METHODS.indexOf(fields.paymentMethod.value) === -1;
-        qrButton.textContent = isTransfer ? 'Pay by Bank Transfer' : 'Pay by QR';
+        qrButton.textContent = 'Pay by QR';
     }
     const saveButton = document.getElementById('payment-save-btn');
     if (saveButton) saveButton.hidden = QR_METHODS.indexOf(fields.paymentMethod.value) !== -1;

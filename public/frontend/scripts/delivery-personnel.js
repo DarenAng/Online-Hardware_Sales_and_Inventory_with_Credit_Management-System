@@ -238,13 +238,13 @@ async function openDriverPayment(deliveryId, remarks) {
     paymentDeliveryId = deliveryId;
     paymentRemarks = remarks || null;
 
-    document.getElementById('pay-subtitle').textContent = 'Delivery #' + deliveryId + ' · ' + d.customer_name;
-    document.getElementById('pay-balance').textContent = peso(d.balance_due);
+    document.getElementById('pay-subtitle').textContent = 'Delivery #' + deliveryId;
+    // the customer is the delivery's own, filled in and not changed here
+    document.getElementById('pay-customer').value = d.customer_name || '';
 
-    // the amount starts as the whole balance; the driver can lower it but not go over it
+    // the amount starts empty, as at the counter: Short by reads the whole balance
     const form = document.getElementById('pay-form');
-    form.elements.amount.max = Number(d.balance_due).toFixed(2);
-    form.elements.amount.value = Number(d.balance_due).toFixed(2);
+    form.elements.amount.value = '';
     form.elements.paymentMethod.value = 'Cash';
     clearPaymentDetails('door');
     onDriverPayMethodChange();
@@ -267,39 +267,67 @@ function onDriverPayMethodChange() {
     const method = form.elements.paymentMethod.value;
     showPaymentDetails('door', method);
 
-    // Pay by QR (or Pay by Bank Transfer) is the only way to take these
+    // Pay by QR is the only way to take GCash, PayMaya and a bank transfer;
+    // Complete Sale takes cash and a cheque
     const byQr = QR_METHODS.indexOf(method) !== -1;
     const qrButton = document.getElementById('pay-qr-btn');
-    if (qrButton) {
-        qrButton.hidden = !byQr;
-        qrButton.textContent = method === 'Bank Transfer' ? 'Pay by Bank Transfer' : 'Pay by QR';
-    }
+    if (qrButton) qrButton.hidden = !byQr;
     const saveButton = document.getElementById('pay-save-btn');
     if (saveButton) saveButton.hidden = byQr;
+
+    // a bank transfer is for the whole balance, so there is no amount to type
+    const amountField = document.getElementById('pay-amount-field');
+    if (amountField) amountField.hidden = method === 'Bank Transfer';
+
+    onDriverPayAmountChange();
 }
 
-// says what is left after the amount typed, before the button is pressed
-function onDriverPayAmountChange() {
+// What the driver's form comes to: the balance, what is taken against it, the
+// change handed back (cash only) and what is still owed afterwards.
+function driverPayFigures() {
     const form = document.getElementById('pay-form');
-    const note = document.getElementById('pay-left');
     const d = findDriverDelivery(paymentDeliveryId);
-    if (!form || !note || !d) return;
+    const due = d ? Number(d.balance_due) : 0;
+    const method = form ? form.elements.paymentMethod.value : 'Cash';
 
-    const amount = parseFloat(form.elements.amount.value) || 0;
-    const left = Math.round((Number(d.balance_due) - amount) * 100) / 100;
+    // a bank transfer is for the whole balance
+    const entered = method === 'Bank Transfer' ? due : (parseFloat(form.elements.amount.value) || 0);
+    const over = Math.round((entered - due) * 100) / 100;
+    // cash handed over beyond the balance comes back as change; nothing else can go over
+    const taken = Math.round(Math.min(entered, due) * 100) / 100;
+
+    return {
+        method: method,
+        due: due,
+        entered: entered,
+        taken: taken,
+        change: method === 'Cash' && over > 0 ? over : 0,
+        tooMuch: method !== 'Cash' && over > 0 ? over : 0,
+        left: Math.round((due - taken) * 100) / 100
+    };
+}
+
+// the amount due, and what becomes of it, as the counter's Payment window shows it
+function onDriverPayAmountChange() {
+    const totals = document.getElementById('pay-totals');
+    if (!totals || !findDriverDelivery(paymentDeliveryId)) return;
+
+    const f = driverPayFigures();
+    let html = '<div class="total-row total-due"><span>Amount Due</span><span>' + peso(f.due) + '</span></div>';
+
+    if (f.method === 'Bank Transfer') {
+        html += '<div class="total-row total-note"><span>Paid by bank transfer</span><span>' + peso(f.due) + '</span></div>';
+    } else if (f.tooMuch > 0) {
+        html += '<div class="total-row total-short"><span>More than the balance by</span><span>' + peso(f.tooMuch) + '</span></div>';
+    } else if (f.left > 0) {
+        html += '<div class="total-row total-short"><span>Short by</span><span>' + peso(f.left) + '</span></div>';
+    } else {
+        html += '<div class="total-row total-change"><span>Change</span><span>' + peso(f.change) + '</span></div>';
+    }
+    totals.innerHTML = html;
 
     // a QR code on screen is for the old amount; it is cancelled, not paid wrong
-    qrAmountChanged('credit_payment', amount);
-
-    if (amount <= 0) {
-        note.textContent = '';
-    } else if (left < 0) {
-        note.textContent = 'That is ' + peso(-left) + ' more than the balance. Lower the amount.';
-    } else if (left === 0) {
-        note.textContent = 'This pays the sale in full.';
-    } else {
-        note.textContent = peso(left) + ' will still be owed.';
-    }
+    qrAmountChanged('credit_payment', f.taken);
 }
 
 // Cancel and the x: back to the delivery's card
@@ -315,20 +343,22 @@ async function handleDriverPayment(event, viaQr) {
     if (event && typeof event.preventDefault === 'function') event.preventDefault();
     const form = document.getElementById('pay-form');
 
-    const amount = parseFloat(form.elements.amount.value);
-    if (!amount || amount <= 0) {
-        notifyWarning('A payment has to be greater than zero.', 'Nothing recorded');
+    // what is taken against the balance; cash over the balance is change handed back
+    const d = findDriverDelivery(paymentDeliveryId);
+    const figures = driverPayFigures();
+    const amount = figures.taken;
+    const stillOwed = figures.left;
+
+    if (!(amount > 0)) {
+        notifyWarning('Enter the amount the customer handed over.', 'Nothing recorded');
+        const box = document.getElementById('pay-amount');
+        if (box) box.focus();
         return;
     }
 
-    // how much was owed before this payment, to say what is left afterwards
-    const d = findDriverDelivery(paymentDeliveryId);
-    const owedBefore = d ? Number(d.balance_due) : 0;
-    const stillOwed = Math.round((owedBefore - amount) * 100) / 100;
-
-    // the server refuses these too; saying it here saves the trip
-    if (stillOwed < 0) {
-        notifyWarning('The sale only owes ' + peso(owedBefore) + '. Lower the amount received.', 'More than is owed');
+    // only cash can go over the balance (the rest is change); the server refuses it too
+    if (figures.tooMuch > 0) {
+        notifyWarning('The sale only owes ' + peso(figures.due) + '. Lower the amount entered.', 'More than is owed');
         return;
     }
 
@@ -427,6 +457,7 @@ async function handleDriverPayment(event, viaQr) {
                 statusResult.error, 'Payment recorded');
         } else {
             let message = peso(amount) + ' received by ' + form.elements.paymentMethod.value + '. The delivery is marked Delivered.';
+            if (figures.change > 0) message += ' Change: ' + peso(figures.change) + '.';
             if (stillOwed > 0) message += ' ' + peso(stillOwed) + ' is still owed.';
             else message += ' The sale is paid in full.';
             notifySuccess(message, 'Delivery #' + paymentDeliveryId + ' delivered');

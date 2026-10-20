@@ -54,7 +54,7 @@ const QR_METHODS = ["GCash", "PayMaya", "Bank Transfer"];
 
 // said when a bank transfer is sent without a PayMongo payment behind it
 const TRANSFER_BY_QR_ONLY =
-  "A bank transfer is taken through PayMongo: use Pay by Bank Transfer, and the customer approves " +
+  "A bank transfer is taken through PayMongo: use Pay by QR, and the customer approves " +
   "it in their bank. Nothing was recorded.";
 
 function registerCashierRoutes(app, deps) {
