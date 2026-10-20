@@ -11,6 +11,11 @@ function apiSaveSale(sale) {
     return sendJson('/api/sales', 'POST', sale);
 }
 
+// PUT /api/customers/:id -- correct a customer's name, phone and address
+function apiEditCustomer(customerId, customer) {
+    return sendJson('/api/customers/' + customerId, 'PUT', customer);
+}
+
 // POST /api/customers -- open a customer account at the counter
 function apiCreateCustomer(customer) {
     return sendJson('/api/customers', 'POST', customer);

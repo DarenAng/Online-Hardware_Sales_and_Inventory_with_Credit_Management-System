@@ -920,6 +920,11 @@ screen, receipt and report that reads `address` is unchanged. The parts are kept
 in their own columns too. Two customers may share a first and last name if the
 middle name differs; the same full name is refused as already on record.
 
+**Only the cashier edits a customer.** The customer's card at the counter has
+**Edit Customer**, which opens the same form filled with what is on record
+(`PUT /api/customers/:id`, the cashier's alone). The manager reads customers
+in Records and Customer Credit but cannot change their details.
+
 A customer's name is spelled the way a staff name is: the whole middle name is
 stored, and only its first letter is shown (`Maria R. Santos`). That happens once,
 in the generated `customers.full_name` column, which the credit view, the sales

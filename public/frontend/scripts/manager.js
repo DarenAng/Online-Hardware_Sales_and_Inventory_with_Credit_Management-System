@@ -2557,8 +2557,9 @@ const RECORD_ARCHIVE_MODULE = {
 };
 
 // the kinds of record the manager edits here (categories and units are the clerk's)
-// a product is edited by the inventory clerk only; the manager sets its price and archives it
-const RECORD_EDITABLE = ['supplier', 'customer'];
+// a product is edited by the inventory clerk only (the manager sets its price
+// and archives it), and a customer by the cashier only (the manager reads it)
+const RECORD_EDITABLE = ['supplier'];
 
 // the kind of record is a screen in the strip
 function showRecordType(type, event) {
@@ -3209,7 +3210,7 @@ async function openRecordDetail(index) {
         }
     }
 
-    // the buttons: edit (suppliers, customers), the price (products), archive (all)
+    // the buttons: edit (suppliers), the price (products), archive (all)
     let foot = '';
     if (RECORD_ARCHIVE_MODULE[type]) {
         foot += '<button type="button" class="btn btn-danger" onclick="archiveRecord(' + index + ')">Archive</button>';
@@ -3261,7 +3262,7 @@ async function archiveRecord(index) {
     if (module === 'Inventory') loadPriceBanner();
 }
 
-// ---------- editing a supplier, a customer or a product ----------
+// ---------- editing a supplier ----------
 let editRecord = null;   // { type, row }
 
 // one box: [field name, label, value, options]; options.kind is 'text',
@@ -3311,16 +3312,6 @@ async function openEditRecord(index) {
             editFieldHtml('contactNumber', 'Contact number', '', { kind: 'phone' }) +
             editFieldHtml('email', 'Email', row.email, { kind: 'email' }) +
             editFieldHtml('address', 'Address', row.address, { max: 255 });
-    } else if (type === 'customer') {
-        html = editFieldHtml('firstName', 'First name', row.first_name, { required: true }) +
-            editFieldHtml('middleName', 'Middle name', row.middle_name) +
-            editFieldHtml('lastName', 'Last name', row.last_name, { required: true }) +
-            editFieldHtml('phone', 'Phone', '', { kind: 'phone', required: true }) +
-            editFieldHtml('street', 'House and street', row.address_street, { required: true, max: 150 }) +
-            editFieldHtml('barangay', 'Barangay', row.address_barangay, { required: true }) +
-            editFieldHtml('city', 'Town or city', row.address_city, { required: true }) +
-            editFieldHtml('province', 'Province', row.address_province, { required: true }) +
-            editFieldHtml('landmark', 'Landmark', row.address_landmark, { max: 150 });
     }
 
     editRecord = { type: type, row: row };
@@ -3331,7 +3322,6 @@ async function openEditRecord(index) {
     // the phone boxes take the stored number through their own filler
     const form = document.getElementById('record-edit-form');
     if (type === 'supplier') phoneFill(form.elements.contactNumber, row.contact_number || '');
-    if (type === 'customer') phoneFill(form.elements.phone, row.phone || '');
 
     closeModal('detail-modal');
     showModal('record-edit-modal');
@@ -3354,20 +3344,6 @@ async function saveEditRecord(event) {
         data = { name: value('name'), contactPerson: value('contactPerson'),
                  contactNumber: phoneToStore(form.elements.contactNumber),
                  email: value('email'), address: value('address') };
-    } else if (type === 'customer') {
-        if (value('firstName') === '' || value('lastName') === '') {
-            notifyWarning('First and last name are required.', 'Fill in the form');
-            return;
-        }
-        const problem = phoneComplaint(form.elements.phone);
-        if (problem) { notifyWarning(problem, 'Check the phone number'); return; }
-        if (value('street').length < 2 || value('barangay') === '' || value('city').length < 2 || value('province').length < 2) {
-            notifyWarning('Fill in the house number and street, barangay, town or city and province.', 'Fill in the form');
-            return;
-        }
-        data = { firstName: value('firstName'), middleName: value('middleName'), lastName: value('lastName'),
-                 phone: phoneToStore(form.elements.phone), street: value('street'), barangay: value('barangay'),
-                 city: value('city'), province: value('province'), landmark: value('landmark') };
     }
 
     const button = document.getElementById('record-edit-save');
