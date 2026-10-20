@@ -2285,10 +2285,11 @@ function closeCheckoutModal() {
     closeModal('checkout-modal');
 }
 
-// the name the confirmation and the messages use for whoever the sale is for
+// the name the confirmation and the messages use for whoever the sale is for;
+// '' when the sale is on no customer record
 function checkoutCustomerName() {
     const id = selectedCustomerId();
-    if (!id) return 'Walk-in';
+    if (!id) return '';
     if (selectedCustomerCredit && selectedCustomerCredit.customer_name) return selectedCustomerCredit.customer_name;
     const found = findCustomer(id);
     if (found) return found.name;
@@ -2301,10 +2302,11 @@ function checkoutCustomerName() {
 // button that was pressed.
 function checkoutQuestion(t, customerName) {
     const methodName = t.method === 'COD' ? 'Cash on Delivery' : t.method;
-    const detail = ['Customer: ' + customerName, 'Amount due: ' + peso(t.due), 'Payment method: ' + methodName];
+    // a sale on no customer record says so, and the question names no one
+    const detail = ['Customer: ' + (customerName || 'No record'), 'Amount due: ' + peso(t.due), 'Payment method: ' + methodName];
 
     let title = 'Complete this sale?';
-    let message = 'Ring up this sale of ' + peso(t.due) + ' for ' + customerName + '?';
+    let message = 'Ring up this sale of ' + peso(t.due) + (customerName ? ' for ' + customerName : '') + '?';
     let confirmLabel = 'Complete Sale';
 
     if (t.method === 'COD') {
@@ -2653,6 +2655,11 @@ function receiptItemCount(items) {
     return Number.isInteger(units) ? String(units) : units.toFixed(2);
 }
 
+// whether a sale names a customer: an account, or a name taken at the till
+function saleHasCustomer(s) {
+    return Boolean(s.customer_id) || String(s.walk_in_name || '').trim() !== '';
+}
+
 async function openReceipt(saleId) {
     let data;
     try { data = await apiGetSale(saleId); }
@@ -2718,7 +2725,9 @@ async function openReceipt(saleId) {
         meta: [
             { key: 'date', label: 'Date', value: s.sale_date },
             { key: 'cashier', label: 'Cashier', value: s.cashier_name },
-            { key: 'customer', label: 'Customer', value: s.customer_name },
+            // a sale on no customer record leaves the line blank
+            { key: 'customer', label: 'Customer', keepBlank: true,
+              value: saleHasCustomer(s) ? s.customer_name : '' },
             { key: 'payment', label: 'Payment', value: s.payment_method },
             { key: 'reference', label: 'Reference', value: paymentReference(s.payment_method, s.reference_no) }
         ],

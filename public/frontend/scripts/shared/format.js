@@ -487,12 +487,14 @@ function receiptHtml(shop, parts) {
     const layout = receiptLayoutOf(store);
     const metaSwitch = { cashier: 'cashier', customer: 'customer', payment: 'payment', reference: 'reference' };
 
-    // the details rows that have a value and are switched on
+    // the details rows that have a value (or are kept blank, like the Customer
+    // of a sale on no record) and are switched on
     const allMeta = parts.meta || [];
     const meta = [];
     for (let i = 0; i < allMeta.length; i++) {
         const row = allMeta[i];
-        if (row.value !== null && row.value !== undefined && row.value !== '' &&
+        const hasValue = row.value !== null && row.value !== undefined && row.value !== '';
+        if ((hasValue || row.keepBlank) &&
             (!metaSwitch[row.key] || receiptShows(layout, metaSwitch[row.key]))) {
             meta.push(row);
         }

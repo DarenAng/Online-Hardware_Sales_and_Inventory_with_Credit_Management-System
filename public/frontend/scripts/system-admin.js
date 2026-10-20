@@ -2802,7 +2802,7 @@ function renderStorePreview() {
         meta: [
             { key: 'date', label: 'Date', value: now.toLocaleString('en-PH') },
             { key: 'cashier', label: 'Cashier', value: getCurrentUser() ? staffName(getCurrentUser()) : 'Cashier' },
-            { key: 'customer', label: 'Customer', value: 'Walk-in' },
+            { key: 'customer', label: 'Customer', value: '', keepBlank: true },
             { key: 'payment', label: 'Payment', value: 'Bank Transfer' },
             { key: 'reference', label: 'Reference', value: 'REF-12345' }
         ],
