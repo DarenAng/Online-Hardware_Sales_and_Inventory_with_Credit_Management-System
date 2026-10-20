@@ -2800,57 +2800,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
 
     const waiting = po.status === 'For Approval';
 
-    // what happens next, in one line over the facts. Once the manager approves
-    // an order, the clerk prints it and sends it to the supplier; the printed
-    // order carries a QR code the supplier accepts or declines it with.
-    let note = '';
-    if (waiting && canDecide) {
-        // the manager's own decision needs no note: Approve and Decline are in the foot
-        note = '';
-    } else if (waiting && readOnly) {
-        note = '<p class="detail-note po-next">Waiting for the manager to approve it.</p>';
-    } else if (waiting) {
-        note = '<p class="detail-note po-next">Waiting for the manager to approve it. Once approved, print it ' +
-               'and send it to the supplier.</p>';
-    } else if (po.status === 'Pending' && po.supplier_response === 'Declined') {
-        // the supplier said no from the link on the order: the delivery is not coming
-        note = '<p class="detail-note detail-warn po-next">' + escapeHtml(po.supplier_name) +
-               ' cannot fill this order' + (po.supplier_note ? ': ' + escapeHtml(po.supplier_note) : '.') +
-               ' Order the materials from another supplier.</p>';
-    } else if (po.status === 'Pending') {
-        let byWhom = '';
-        if (po.confirmed_by) {
-            byWhom = ' by ' + escapeHtml(po.confirmed_by);
-        }
-        let next = null;
-        // an accepted order needs no note: its facts say who accepted it and the
-        // delivery day, and the delivery is counted in on Stock Adjustment
-        if (po.supplier_response === 'Accepted') {
-            next = null;
-        } else if (po.supplier_sent_at) {
-            next = ' Sent to the supplier on ' + escapeHtml(poWhen(po.supplier_sent_at)) + ' and waiting for them ' +
-                   'to accept or decline it.';
-        } else if (canReceive) {
-            next = ' Print it or email it to the supplier. The order carries a QR code for them to accept or ' +
-                   'decline it.';
-        } else {
-            next = ' Waiting for the supplier to accept or decline it; you are told when they answer.';
-        }
-        note = next === null ? '' : '<p class="detail-note po-next">Approved' + byWhom + '.' + next + '</p>';
-    } else {
-        let why = '';
-        if (po.decision_note) {
-            why = ': ' + escapeHtml(po.decision_note);
-        }
-        if (po.status === 'Cancelled') {
-            note = '<p class="detail-note detail-warn po-next">Declined by the manager' +
-                   (po.decision_note ? '. Remarks: ' + escapeHtml(po.decision_note) : '') + '.</p>';
-        } else {
-            note = '<p class="detail-note po-next">This order was ' + escapeHtml(String(po.status).toLowerCase()) +
-                   why + '.</p>';
-        }
-    }
-
     // the order as it was ordered: a received order's items are its lines as
     // ordered (the server keeps that copy), so these match what was asked for
     let orderedLines = Number(po.line_count) || 0;
@@ -2878,7 +2827,9 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 ' <span class="muted">before any invoice discount</span>');
     }
 
-    const summary = note +
+    // no note on what happens next: the Status and the dates say where the
+    // order stands. A decline keeps its reason, as a field.
+    const summary =
         '<div class="detail-grid">' +
         detailField('Supplier', escapeHtml(po.supplier_name)) +
         detailField('Status', poStatusBadge(po)) +
@@ -2895,6 +2846,12 @@ async function openPurchaseOrderDetail(poId, readOnly) {
             : '') +
         (po.supplier_ship_date
             ? detailField('Delivery Schedule', escapeHtml(poShipDay(po.supplier_ship_date)))
+            : '') +
+        (po.status === 'Cancelled' && po.decision_note
+            ? detailField('Manager\'s Remarks', escapeHtml(po.decision_note))
+            : '') +
+        (po.supplier_response === 'Declined' && po.supplier_note
+            ? detailField('Supplier\'s Reason', escapeHtml(po.supplier_note))
             : '') +
         (po.status === 'Received'
             ? detailField('Received', po.received_at
