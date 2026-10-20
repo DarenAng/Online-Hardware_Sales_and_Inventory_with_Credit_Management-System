@@ -170,12 +170,11 @@ function apiArchiveRecord(module, recordId) {
     return postJson('/api/archives/archive', { module: module, recordId: recordId });
 }
 
-// PUT /api/suppliers/:id, /api/customers/:id -- the manager corrects a
-// record; the answer, or null if refused (a product is the clerk's to edit)
+// PUT /api/suppliers/:id -- the manager corrects a supplier; the answer, or
+// null if refused (a product is the clerk's to edit, a customer the cashier's)
 function apiEditRecord(kind, id, data) {
     const path = {
-        supplier: '/api/suppliers/' + id,
-        customer: '/api/customers/' + id
+        supplier: '/api/suppliers/' + id
     }[kind];
     return postJson(path, data, 'PUT');
 }

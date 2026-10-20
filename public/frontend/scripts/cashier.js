@@ -5095,8 +5095,26 @@ function prefillAddCustomerName(typed) {
     form.elements.lastName.value = words.join(' ');
 }
 
+// the same card adds a customer or edits one (editCustomerId set)
+let editCustomerId = null;
+
+function setAddCustomerMode(editing, name) {
+    const title = document.getElementById('add-customer-title');
+    const sub = document.getElementById('add-customer-sub');
+    const avatar = document.getElementById('add-customer-avatar');
+    const note = document.getElementById('add-customer-note');
+    const save = document.getElementById('add-customer-save');
+    if (title) title.textContent = editing ? 'Edit Customer' : 'Add Customer';
+    if (sub) sub.textContent = editing ? name : 'Opens an account at the counter';
+    if (avatar) avatar.textContent = editing ? initialsOf(name) : '+';
+    if (note) note.hidden = editing;
+    if (save) save.textContent = editing ? 'Save Changes' : 'Add Customer';
+}
+
 function openAddCustomer() {
     addCustomerFor = '';
+    editCustomerId = null;
+    setAddCustomerMode(false);
 
     const form = document.getElementById('add-customer-form');
     if (!form) return;
@@ -5120,7 +5138,40 @@ function openAddCustomer() {
 
 function cancelAddCustomer() {
     addCustomerFor = '';
+    editCustomerId = null;
     closeModal('add-customer-modal');
+}
+
+// Edit Customer, from the customer's card: the same form, filled with what is
+// on record (the name, phone and address parts are read from the records list)
+async function editOpenCustomer() {
+    if (!openCustomerId) return;
+    let row = null;
+    try {
+        const rows = await apiGetRecords('customer');
+        for (let i = 0; i < rows.length; i++) {
+            if (Number(rows[i].id) === Number(openCustomerId)) { row = rows[i]; break; }
+        }
+    } catch (error) {
+        notifyOffline();
+        return;
+    }
+    if (!row) { notifyError('That customer could not be read.', 'Nothing to edit'); return; }
+
+    openAddCustomer();
+    editCustomerId = Number(openCustomerId);
+    setAddCustomerMode(true, row.name);
+
+    const form = document.getElementById('add-customer-form');
+    form.elements.firstName.value = row.first_name || '';
+    form.elements.middleName.value = row.middle_name || '';
+    form.elements.lastName.value = row.last_name || '';
+    phoneFill(form.elements.phone, row.phone || '');
+    form.elements.street.value = row.address_street || '';
+    form.elements.barangay.value = row.address_barangay || '';
+    form.elements.city.value = row.address_city || '';
+    form.elements.province.value = row.address_province || '';
+    form.elements.landmark.value = row.address_landmark || '';
 }
 
 async function handleAddCustomer(event) {
@@ -5170,13 +5221,45 @@ async function handleAddCustomer(event) {
         firstBad.focus();
         if (verdict) {
             verdict.className = 'delivery-verdict is-stop';
-            verdict.textContent = 'Fill in the boxes marked in red, then add the customer.';
+            verdict.textContent = editCustomerId
+                ? 'Fill in the boxes marked in red, then save the changes.'
+                : 'Fill in the boxes marked in red, then add the customer.';
         }
         return;
     }
 
     const save = document.getElementById('add-customer-save');
     if (save) save.disabled = true;
+
+    // editing a customer already on record
+    if (editCustomerId) {
+        const customerId = editCustomerId;
+        try {
+            const response = await apiEditCustomer(customerId, {
+                firstName: firstName, middleName: middleName, lastName: lastName, phone: phone,
+                street: street, barangay: barangay, city: city, province: province, landmark: landmark });
+            const result = await response.json();
+            if (!response.ok) {
+                if (save) save.disabled = false;
+                if (!handleAuthFailure(response, result) && verdict) {
+                    verdict.className = 'delivery-verdict is-stop';
+                    verdict.textContent = result.error || 'The changes were not saved.';
+                }
+                return;
+            }
+            editCustomerId = null;
+            closeModal('add-customer-modal');
+            notifySuccess(result.message, 'Customer saved');
+            customerDirectoryLoaded = false;
+            const panel = getDataPanel('cash-credit');
+            if (panel && panel.state === 'ready') await panel.refresh();
+            await openCustomerCredit(customerId);
+        } catch (error) {
+            if (save) save.disabled = false;
+            notifyOffline();
+        }
+        return;
+    }
 
     try {
         const response = await apiCreateCustomer({

@@ -51,13 +51,13 @@ const FEATURES = [
 
   // --- credit ---
   { key: "credit", name: "Customer Credit", module: "Credit",
-    description: "Every credit account and its credit rating; the cashier's copy adds customers and files extension requests, the manager's decides limits.",
+    description: "Every credit account and its credit rating; the cashier's copy adds and edits customers and files extension requests, the manager's reads them and decides limits.",
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
     routes: [["GET", /^\/api\/credit\/customers$/], ["GET", /^\/api\/credit\/customers\/\d+$/],
              ["PUT", /^\/api\/credit\/customers\/\d+\/limit$/], ["GET", /^\/api\/customers\/\d+\/history$/],
              ["GET", /^\/api\/credit\/policy$/],
              ["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests$/],
-             ["POST", /^\/api\/customers$/]] },
+             ["POST", /^\/api\/customers$/], ["PUT", /^\/api\/customers\/\d+$/]] },
   { key: "debt-payments", name: "Credit Settlement", module: "Credit",
     description: "Credit Settlement: take a payment against what a customer still owes, sale by sale, from the customer's card, with a receipt for each payment.",
     available: [CASHIER], defaults: [CASHIER],
@@ -218,10 +218,10 @@ const FEATURES = [
 
   // --- records ---
   { key: "records", name: "Records", module: "Records",
-    description: "Suppliers, customers, products, categories and units. The manager edits suppliers and customers, prices products and archives records (only the clerk edits a product); the clerk alone adds categories and units.",
+    description: "Suppliers, customers, products, categories and units. The manager edits suppliers, reads customers (only the cashier edits a customer), prices products and archives records (only the clerk edits a product); the clerk alone adds categories and units.",
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
     routes: [["POST", /^\/api\/categories$/], ["POST", /^\/api\/units$/],
-             ["PUT", /^\/api\/suppliers\/\d+$/], ["PUT", /^\/api\/customers\/\d+$/],
+             ["PUT", /^\/api\/suppliers\/\d+$/],
              ["PUT", /^\/api\/stocks\/\d+\/price$/]] },
   { key: "archives", name: "Archives", module: "Records",
     description: "What has been put away, and restoring it.",

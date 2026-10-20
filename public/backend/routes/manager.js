@@ -1913,7 +1913,9 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  app.put("/api/customers/:customerId", requireRole(MANAGER), async function (request, response) {
+  // A customer's name, phone and address are corrected by the cashier, who
+  // deals with the customer at the counter; the manager only reads them.
+  app.put("/api/customers/:customerId", requireRole(CASHIER), async function (request, response) {
     const body = request.body || {};
     const first = tidy(body.firstName).slice(0, 100);
     const middle = tidy(body.middleName).slice(0, 100);

@@ -734,10 +734,10 @@
         <div class="modal-box">
             <div class="modal-head">
                 <div class="modal-identity">
-                    <div class="avatar">+</div>
+                    <div class="avatar" id="add-customer-avatar">+</div>
                     <div>
-                        <h3>Add Customer</h3>
-                        <span class="modal-role">Opens an account at the counter</span>
+                        <h3 id="add-customer-title">Add Customer</h3>
+                        <span class="modal-role" id="add-customer-sub">Opens an account at the counter</span>
                     </div>
                 </div>
                 <button type="button" class="modal-close" onclick="cancelAddCustomer()" aria-label="Cancel">&times;</button>
@@ -814,7 +814,7 @@
                         </div>
                     </div>
 
-                    <p class="add-customer-note">The account opens with a credit limit of zero. Only a manager
+                    <p class="add-customer-note" id="add-customer-note">The account opens with a credit limit of zero. Only a manager
                         raises it; the cashier can ask for a higher one from the customer's card.</p>
                     <p class="delivery-verdict" id="add-customer-verdict"></p>
                 </form>
@@ -1012,6 +1012,7 @@
                 <button type="button" class="btn btn-ghost" id="customer-print-card" onclick="printOpenCustomer('card')" hidden>Print Customer Card</button>
                 <button type="button" class="btn btn-ghost" id="customer-print-terms" onclick="printOpenCustomer('terms')" hidden>Print Terms and Conditions</button>
                 <button type="button" class="btn btn-accent" id="customer-pay-btn" onclick="payFromCustomerCard()" hidden>Credit Settlement</button>
+                <button type="button" class="btn btn-ghost" id="customer-edit-btn" onclick="editOpenCustomer()">Edit Customer</button>
                 <button type="button" class="btn btn-gold" onclick="askForExtension()">Ask for a Higher Limit</button>
             </div>
         </div>

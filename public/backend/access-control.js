@@ -165,7 +165,7 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/suppliers$/,                     [MANAGER]],
   // the manager corrects a supplier, a customer or a product's details from Records
   ["PUT",   /^\/api\/suppliers\/\d+$/,                 [MANAGER]],
-  ["PUT",   /^\/api\/customers\/\d+$/,                 [MANAGER]],
+  ["PUT",   /^\/api\/customers\/\d+$/,                 [CASHIER]],
   ["POST",  /^\/api\/categories$/,                    [CLERK]],
   ["POST",  /^\/api\/units$/,                         [CLERK]],
   ["PUT",   /^\/api\/units\/\d+$/,                     [CLERK]],
