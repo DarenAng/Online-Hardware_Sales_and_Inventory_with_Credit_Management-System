@@ -286,7 +286,7 @@ function renderDeliverySchedule() {
         const d = rows[i];
         const group = SCHEDULE_GROUPS[scheduleGroupOf(d)];
         const day = scheduleDateOf(d.scheduled_date);
-        const due = day ? (day + ' ' + scheduleTimeOf(d.scheduled_date)).trim() : '—';
+        const due = day ? (day + ' ' + scheduleTimeOf(d.scheduled_date)).trim() : 'Not set';
 
         rowsHtml += '<tr class="' + (canOpen ? 'row-clickable ' : '') + 'row-reveal" ' +
             'style="animation-delay:' + (i % 10) * 28 + 'ms"' +

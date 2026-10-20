@@ -7,7 +7,7 @@
 //     views inside Reports and Stocks, each opened from its own menu entry
 //     (showPanelView)
 //   - the Sales Summary: the period, the figures, the two tables
-//   - saving tables as Excel workbooks, and printing them
+//   - saving tables as spreadsheets, and printing them (one Export menu each)
 //   - reports, stocks, stock movements, the selling price and the reorder policy
 //   - credit: customer limits and extension requests
 //   - deliveries, records (suppliers, customers, products...), archives
@@ -53,6 +53,7 @@ function showManagerPanel(panelId, title, event) {
     const heading = document.getElementById('manager-page-title');
     if (heading) heading.textContent = title;
 
+    placePriceAlert();
     leaveScreenFurniture();
 }
 
@@ -180,12 +181,14 @@ function showIncome(event)        { showReport('report-summary', event); }
 function showSales(event)         { showReport('report-sales', event); }
 function showReorderAlerts(event) { showStockView('stock-reorder', event); }
 function showStockReport(event)   { showStockView('stock-overview', event); }
-function showDeliveries(event)    { showManagerPanel('panel-deliveries', 'Deliveries', event); }
+function showDeliveries(event)    { showManagerPanel('panel-deliveries', 'Delivery History', event); }
 function showCredit(event)         { showManagerPanel('panel-credit', 'Customer Credit', event); }
 function showCreditRequests(event) { showManagerPanel('panel-credit-requests', 'Extension Requests', event); }
 function showRecords(event)       { showRecordType(recordType, event); }
 function showPurchasing(event)    { showPurchaseOrderHistory(event); }
 function showArchives(event)      { showManagerPanel('panel-archives', 'Archives', event); }
+// everything staff have filed: a screen of its own, apart from Reports
+function showActivityLog(event)   { showManagerPanel('panel-activity', 'Activity Log', event); }
 // Sales Transactions and QR Payments are two tabs of one report. The menu entry
 // opens the one last looked at, or QR Payments when Sales is switched off.
 function showSalesTransactions(event) {
@@ -212,22 +215,24 @@ function showAccountManagement(event) {
     showManagerPanel('panel-accounts', 'Account Management', event);
 }
 
-// Sales Summary. Named periods count back from today rather than snapping
-// to a calendar month; Custom date opens a popup for two dates.
+// Sales Summary. The date picker is a Quick range box and two dates, From and
+// To. A quick range counts back from today and fills both dates; a date typed
+// or picked in either box makes the range a custom one.
 const INCOME_RANGES = [
-    ['daily', 'Today'],
-    ['weekly', 'Last 7 days'],
-    ['monthly', 'Last 30 days'],
-    ['quarterly', 'Last 90 days'],
-    ['six-month', 'Last 6 months'],
-    ['annual', 'Last 12 months']
+    ['daily', 'Today', 0],
+    ['weekly', 'Last 7 days', 6],
+    ['monthly', 'Last 30 days', 29],
+    ['quarterly', 'Last 90 days', 89],
+    ['six-month', 'Last 6 months', 182],
+    ['annual', 'Last 12 months', 364]
 ];
 
 // The calendar day this browser is having, as the date inputs write it.
 // toISOString() answers in UTC, which is yesterday for the first eight hours
 // of every day here.
-function localIsoDay() {
+function localIsoDay(daysBack) {
     const now = new Date();
+    now.setDate(now.getDate() - (daysBack || 0));
     return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
@@ -240,8 +245,7 @@ function limitDatesToToday(ids) {
     }
 }
 
-// The Period box: the named periods, then Custom date. Once a custom range
-// is in use its own option says which dates it covers.
+// The Quick range box: the named ranges, then Custom (the dates typed below)
 function renderIncomeRanges() {
     const select = document.getElementById('income-period');
     if (!select) return;
@@ -250,13 +254,30 @@ function renderIncomeRanges() {
     for (let i = 0; i < INCOME_RANGES.length; i++) {
         html += '<option value="' + INCOME_RANGES[i][0] + '">' + escapeHtml(INCOME_RANGES[i][1]) + '</option>';
     }
-    const customLabel = incomeRange.name === 'custom'
-        ? 'Custom: ' + incomeRange.from + ' to ' + incomeRange.to
-        : 'Custom date...';
-    html += '<option value="custom">' + escapeHtml(customLabel) + '</option>';
+    html += '<option value="custom">Custom dates</option>';
 
     select.innerHTML = html;
     select.value = incomeRange.name;
+    fillIncomeDates();
+}
+
+// the two date boxes show the range in use
+function fillIncomeDates() {
+    const from = document.getElementById('income-from');
+    const to = document.getElementById('income-to');
+    if (!from || !to) return;
+
+    if (incomeRange.name === 'custom') {
+        from.value = incomeRange.from;
+        to.value = incomeRange.to;
+        return;
+    }
+    for (let i = 0; i < INCOME_RANGES.length; i++) {
+        if (INCOME_RANGES[i][0] === incomeRange.name) {
+            from.value = localIsoDay(INCOME_RANGES[i][2]);
+            to.value = localIsoDay();
+        }
+    }
 }
 
 async function pickIncomeRange(name) {
@@ -265,44 +286,21 @@ async function pickIncomeRange(name) {
     await incomeRangeChanged();
 }
 
-// the Period box changed: a named period applies at once, Custom date asks first
+// the Quick range box changed: a named range applies at once; Custom waits for the dates
 function incomePeriodPicked(value) {
     if (value === 'custom') {
-        openCustomIncomeRange();
+        const from = document.getElementById('income-from');
+        if (from) from.focus();
         return;
     }
     pickIncomeRange(value);
 }
 
-function openCustomIncomeRange() {
+// a date typed or picked: once both are there and in order, the range is custom
+async function incomeDatesPicked() {
     const from = document.getElementById('income-from');
     const to = document.getElementById('income-to');
-    limitDatesToToday(['income-from', 'income-to']);
-    if (from) from.value = incomeRange.name === 'custom' ? incomeRange.from : '';
-    if (to) to.value = incomeRange.name === 'custom' ? incomeRange.to : localIsoDay();
-    showModal('income-custom-modal');
-    if (from) {
-        setTimeout(function () {
-            from.focus();
-        }, 60);
-    }
-}
-
-// closing the popup without applying leaves the period as it was
-function cancelCustomIncomeRange() {
-    closeModal('income-custom-modal');
-    renderIncomeRanges();
-}
-
-async function applyCustomIncomeRange(event) {
-    if (event) event.preventDefault();
-    const from = document.getElementById('income-from');
-    const to = document.getElementById('income-to');
-
-    if (!from || !to || !from.value || !to.value) {
-        notifyWarning('Pick both a start date and an end date.', 'Two dates needed');
-        return;
-    }
+    if (!from || !to || !from.value || !to.value) return;
 
     if (from.value > to.value) {
         notifyWarning('The start date is after the end date. Swap them and try again.',
@@ -319,8 +317,8 @@ async function applyCustomIncomeRange(event) {
     }
 
     incomeRange = { name: 'custom', from: from.value, to: to.value };
-    closeModal('income-custom-modal');
-    renderIncomeRanges();
+    const select = document.getElementById('income-period');
+    if (select) select.value = 'custom';
     await incomeRangeChanged();
 }
 
@@ -404,8 +402,8 @@ async function refreshIncome(all) {
     }
 }
 
-// Before Load Data the four cards are already there with a dash, so the
-// tables under them do not jump when the figures arrive.
+// Before Load Data the two cards are already there, so the table under them
+// does not jump when the figures arrive.
 function renderIncome() {
     const data = incomeData;
     const totals = data ? data.totals : null;
@@ -414,7 +412,9 @@ function renderIncome() {
         incomeSummaryShown = true;
         const note = document.getElementById('income-range-note');
         if (note) {
-            note.textContent = data.range.label + ' — ' + data.range.from + ' to ' + data.range.to;
+            // a custom range is already named by its dates
+            const dates = data.range.from + ' to ' + data.range.to;
+            note.textContent = data.range.label === dates ? dates : data.range.label + ': ' + dates;
         }
 
         // who the figures are for; this line is on the printout too
@@ -429,12 +429,10 @@ function renderIncome() {
         }
     }
 
-    const dash = '—';
+    const notLoaded = 'Not loaded';
     const kpis = [
-        ['Total Sales', totals ? peso(totals.billed) : dash, 'total of every sale, paid or not', ''],
-        ['Transactions', totals ? Number(totals.saleCount).toLocaleString('en-PH') : dash, 'sales rung up', ''],
-        ['Units Sold', totals ? Number(totals.unitsSold).toLocaleString('en-PH') : dash, 'items across the counter', ''],
-        ['Average Sale', totals ? peso(totals.averageSale) : dash, 'per transaction', '']
+        ['Total Sales', totals ? peso(totals.billed) : notLoaded, 'total of every sale, paid or not', ''],
+        ['Transactions', totals ? Number(totals.saleCount).toLocaleString('en-PH') : notLoaded, 'sales rung up', '']
     ];
 
     const grid = document.getElementById('income-kpis');
@@ -451,10 +449,10 @@ function renderIncome() {
     }
 }
 
-// Every table can leave the page as an Excel workbook of every filtered row,
-// or through the browser's print dialogue with the table unpaged. Both
-// buttons are dead until the table holds rows and follow it via
-// 'datapanel:change'. The server lays the workbook out (spreadsheet.js), so
+// Every table can leave the page as a spreadsheet of every filtered row, or
+// through the browser's print dialogue with the table unpaged. Both sit in one
+// Export menu (buildExportMenus); each is dead until the table holds rows and
+// follows it via 'datapanel:change'. The server lays the workbook out (spreadsheet.js), so
 // every column is as wide as what it holds.
 function canExportReports() {
     const user = getCurrentUser();
@@ -467,6 +465,65 @@ function applyExportPermissions() {
     const buttons = document.querySelectorAll('[data-export]');
     for (let i = 0; i < buttons.length; i++) {
         buttons[i].remove();
+    }
+}
+
+// Spreadsheet and Print / PDF go behind one Export button with a menu under it.
+// The two buttons keep their own handlers and data-print-for; they only move.
+function buildExportMenus() {
+    const boxes = document.querySelectorAll('.panel-actions');
+    for (let b = 0; b < boxes.length; b++) {
+        const box = boxes[b];
+        const buttons = box.querySelectorAll(':scope > [data-export]');
+        if (buttons.length === 0) continue;
+
+        const menu = document.createElement('div');
+        menu.className = 'export-menu';
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'btn btn-sm export-toggle';
+        toggle.setAttribute('aria-haspopup', 'true');
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.innerHTML = 'Export<span class="export-caret" aria-hidden="true">&#9660;</span>';
+        toggle.disabled = true;
+        toggle.addEventListener('click', function (event) {
+            event.stopPropagation();
+            const list = menu.querySelector('.export-menu-list');
+            const open = list.hidden;
+            closeExportMenus();
+            list.hidden = !open;
+            toggle.setAttribute('aria-expanded', String(open));
+        });
+
+        const list = document.createElement('div');
+        list.className = 'export-menu-list';
+        list.setAttribute('role', 'menu');
+        list.hidden = true;
+        for (let i = 0; i < buttons.length; i++) {
+            buttons[i].setAttribute('role', 'menuitem');
+            buttons[i].addEventListener('click', closeExportMenus);
+            list.appendChild(buttons[i]);
+        }
+
+        menu.appendChild(toggle);
+        menu.appendChild(list);
+        box.insertBefore(menu, box.firstChild);
+    }
+
+    document.addEventListener('click', function (event) {
+        if (!event.target.closest('.export-menu')) closeExportMenus();
+    });
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') closeExportMenus();
+    });
+}
+
+function closeExportMenus() {
+    const lists = document.querySelectorAll('.export-menu-list');
+    for (let i = 0; i < lists.length; i++) {
+        lists[i].hidden = true;
+        const toggle = lists[i].parentElement.querySelector('.export-toggle');
+        if (toggle) toggle.setAttribute('aria-expanded', 'false');
     }
 }
 
@@ -508,6 +565,19 @@ function syncExportButtons() {
             button.title = 'Load data first';
         }
     }
+
+    // an Export button is live while anything in its menu is
+    const menus = document.querySelectorAll('.export-menu');
+    for (let m = 0; m < menus.length; m++) {
+        const toggle = menus[m].querySelector('.export-toggle');
+        const items = menus[m].querySelectorAll('.export-menu-list .btn');
+        let any = false;
+        for (let i = 0; i < items.length; i++) {
+            if (!items[i].disabled) any = true;
+        }
+        toggle.disabled = !any;
+        toggle.title = any ? 'Save as a spreadsheet, or print or save as PDF' : 'Load data first';
+    }
 }
 
 // the income breakdown as one file, for the period on the screen
@@ -525,7 +595,7 @@ function exportIncomeSpreadsheet() {
 
     apiDownloadIncomeBreakdown(incomeQuery());
 
-    notifyInfo('The Excel file is being saved to your downloads folder.', 'Exporting the Sales Summary');
+    notifyInfo('The spreadsheet is being saved to your downloads folder.', 'Exporting the Sales Summary');
 }
 
 // ---------- a spreadsheet of what the table shows ----------
@@ -815,31 +885,10 @@ function printReport(keys) {
     }, 1500);
 }
 
-// The Sales Summary's two tables, both read from the one period. They share
-// one card and the tabs above them show one at a time.
-const INCOME_PANEL_KEYS = ['mgr-income-methods', 'mgr-income-products'];
+// The Sales Summary's table, read from the one period
+const INCOME_PANEL_KEYS = ['mgr-income-methods'];
 
-// A Sales Summary tab: show its table, hide the other, underline the tab.
-function showSummaryTab(paneId) {
-    const panes = document.querySelectorAll('.summary-pane');
-    for (let i = 0; i < panes.length; i++) {
-        panes[i].hidden = panes[i].id !== paneId;
-    }
-
-    const tabs = document.querySelectorAll('.summary-tab');
-    for (let i = 0; i < tabs.length; i++) {
-        const tab = tabs[i];
-        const isOpen = tab.getAttribute('data-summary-tab') === paneId;
-        tab.classList.toggle('active', isOpen);
-        tab.setAttribute('aria-selected', isOpen ? 'true' : 'false');
-    }
-
-    // a table that was hidden had no size to measure; measure it now it shows
-    const table = document.querySelector('#' + paneId + ' table');
-    if (table) holdTableHeight(table);
-}
-
-// The one Load Data above fills the figures and both tables for the period.
+// The one Load Data above fills the figures and the table for the period.
 async function incomeRows(field) {
     if (!incomeData || incomeStale) await fetchIncome();
     return incomeData[field];
@@ -847,7 +896,7 @@ async function incomeRows(field) {
 
 const INCOME_GATE = {
     title: 'Not loaded',
-    text: 'Pick a period above and press Load Data.',
+    text: 'Pick the dates above and press Load Data.',
     button: false
 };
 
@@ -855,7 +904,7 @@ function buildIncomePanels() {
     renderIncome();
 
     // A payment taken at the counter or by a driver at the door changes what was
-    // collected. The two tables below read again through the usual live path
+    // collected. The table below reads again through the usual live path
     // (PANEL_SCOPES in shared/live-sync.js: quietly when nobody is reading or
     // typing, otherwise a Refresh note); this only says the held figures are old.
     if (typeof onLiveChange === 'function') {
@@ -870,12 +919,13 @@ function buildIncomePanels() {
         tableId: 'income-methods-table',
         columns: 5,
         pageSize: 5,
+        sortKeys: ['payment_method', 'sale_count', 'billed', 'collected', 'outstanding'],
         pagerId: 'income-methods-pager',
         gate: INCOME_GATE,
         load: function () {
             return incomeRows('methods');
         },
-        // the four figures above follow the table when it is read again
+        // the two figures above follow the table when it is read again
         onLoaded: function () {
             if (incomeSummaryShown) renderIncome();
         },
@@ -886,34 +936,6 @@ function buildIncomePanels() {
                 '<td class="cell-num">' + peso(m.collected) + '</td>' +
                 '<td class="cell-num' + (Number(m.outstanding) > 0 ? ' cell-due' : '') + '">' +
                     peso(m.outstanding) + '</td></tr>';
-        }
-    });
-
-    createDataPanel({
-        key: 'mgr-income-products',
-        remember: false,
-        tableId: 'income-products-table',
-        columns: 4,
-        pageSize: 5,
-        pagerId: 'income-products-pager',
-        gate: INCOME_GATE,
-        load: function () {
-            return incomeRows('products');
-        },
-        renderRow: function (p) {
-            let total;
-            if (incomeData) {
-                total = sumOf(incomeData.products, 'revenue');
-            } else {
-                total = 0;
-            }
-
-            const share = total === 0 ? 0 : (Number(p.revenue) / total) * 100;
-
-            return '<tr><td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
-                '<td class="cell-num">' + p.units_sold + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
-                '<td class="cell-num">' + peso(p.revenue) + '</td>' +
-                '<td class="cell-num">' + share.toFixed(1) + '%</td></tr>';
         }
     });
 
@@ -976,7 +998,8 @@ function buildReportPanels() {
                   'reports, stock adjustments, deliveries, purchase orders and credit decisions.',
             button: 'Load Data'
         },
-        filters: { kind: 'all', role: 'all' },
+        filters: { kind: 'all', role: 'all', from: '', to: '' },
+        sortKeys: ['happened_at', 'staff_name', 'role_name', function (row) { return activityKind(row.kind); }, 'details'],
         load: function () {
             return apiGetActivityReport();
         },
@@ -987,7 +1010,8 @@ function buildReportPanels() {
         },
         filter: function (row, filters) {
             return (filters.kind === 'all' || activityKind(row.kind) === filters.kind) &&
-                (filters.role === 'all' || row.role_name === filters.role);
+                (filters.role === 'all' || row.role_name === filters.role) &&
+                dateInRange(row.happened_at, filters.from, filters.to);
         },
         onLoaded: function (rows) {
             const kinds = [];
@@ -1016,7 +1040,8 @@ function buildReportPanels() {
         pageSize: REPORT_ROWS_PER_PAGE,
         pagerId: 'unpaid-pager',
         idField: 'sale_id',
-        filters: { status: 'all', method: 'all', age: 'all' },
+        filters: { status: 'all', method: 'all', age: 'all', from: '', to: '' },
+        sortKeys: ['sale_id', 'customer_name', 'payment_method', 'payment_status', function (row) { return Number(row.balance_due); }, 'sale_date'],
         gate: {
             title: 'Not loaded',
             text: 'Press Load Data for every sale with money still owed on it.',
@@ -1034,7 +1059,8 @@ function buildReportPanels() {
         filter: function (row, filters) {
             return (filters.status === 'all' || row.payment_status === filters.status) &&
                 (filters.method === 'all' || row.payment_method === filters.method) &&
-                receivableAgeMatches(row, filters.age);
+                receivableAgeMatches(row, filters.age) &&
+                dateInRange(row.sale_date, filters.from, filters.to);
         },
         onLoaded: function (rows) {
             const statuses = [];
@@ -1048,7 +1074,7 @@ function buildReportPanels() {
         },
         renderRow: function (u, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                    'onclick="openSaleDetail(' + u.sale_id + ')">' +
+                    'onclick="openSaleDetail(' + u.sale_id + ', { fromReceivables: true })">' +
                 '<td class="cell-id">#' + u.sale_id + '</td>' +
                 '<td class="cell-name">' + escapeHtml(u.customer_name) + '</td>' +
                 '<td>' + escapeHtml(u.payment_method) + '</td>' +
@@ -1066,6 +1092,8 @@ function buildReportPanels() {
         pagerId: 'loyal-pager',
         idField: 'customer_id',
         filters: { purchases: 'all', balance: 'all', last: 'all' },
+        sortKeys: ['customer_name', 'purchase_count', function (row) { return Number(row.total_spent); },
+                   function (row) { return Number(row.balance_due); }, 'last_purchase'],
         gate: {
             title: 'Not loaded',
             text: 'Press Load Data for customers who have bought more than once.',
@@ -1093,6 +1121,42 @@ function buildReportPanels() {
         }
     });
 
+}
+
+// ---------- From and To on a report ----------
+// The day part of a stamp ("2026-09-04 16:45:00" -> "2026-09-04") falls inside
+// the two dates; an empty date leaves that end open.
+function dateInRange(stamp, from, to) {
+    const day = String(stamp || '').slice(0, 10);
+    if (from && day < from) return false;
+    if (to && day > to) return false;
+    return true;
+}
+
+// A From or To box changed on a report: the table keeps only those days.
+// prefix names the boxes (prefix-from, prefix-to).
+function dateFilterChanged(key, prefix) {
+    const fromBox = document.getElementById(prefix + '-from');
+    const toBox = document.getElementById(prefix + '-to');
+    const from = fromBox ? fromBox.value : '';
+    const to = toBox ? toBox.value : '';
+
+    if (from && to && from > to) {
+        notifyWarning('The start date is after the end date. Swap them and try again.',
+            'That range runs backwards');
+        return;
+    }
+
+    const panel = getDataPanel(key);
+    if (!panel) return;
+    panel.filters.from = from;
+    panel.filters.to = to;
+    if (panel.state === 'ready') {
+        panel.page = 1;
+        panel.apply();
+    } else {
+        panel.open();
+    }
 }
 
 // Repeat Customers: how many purchases, whether they owe, and how long ago
@@ -1269,6 +1333,8 @@ function buildSalesPanel() {
         idField: 'sale_id',
         // the boxes that load() reads, put back with the table after a reload
         inputs: ['sales-method', 'sales-status', 'sales-from', 'sales-to'],
+        sortKeys: ['sale_id', 'sale_date', 'customer_name', 'payment_group', 'transaction_status',
+                   function (row) { return Number(row.final_amount); }],
         gate: {
             title: 'No sales loaded',
             text: 'Pick a payment method, a status or a date range above, then press Load Data.',
@@ -1336,38 +1402,6 @@ function stockLevelMatches(p, level) {
     }
 }
 
-// a product nobody sells has no days of cover, so it sorts last
-function sortStockRows(rows, order) {
-    function num(value) {
-        return Number(value) || 0;
-    }
-
-    function byName(a, b) {
-        return String(a.product_name).localeCompare(String(b.product_name));
-    }
-
-    // days of cover; a product with no figure counts as endless cover
-    function coverOf(row) {
-        if (row.days_of_cover === null || row.days_of_cover === undefined) return Infinity;
-        return num(row.days_of_cover);
-    }
-
-    function compare(a, b) {
-        if (order === 'stock-asc') {
-            return num(a.quantity_in_stock) - num(b.quantity_in_stock) || byName(a, b);
-        }
-        if (order === 'stock-desc') {
-            return num(b.quantity_in_stock) - num(a.quantity_in_stock) || byName(a, b);
-        }
-        if (order === 'cover') {
-            return (coverOf(a) - coverOf(b)) || byName(a, b);
-        }
-        return byName(a, b);   // 'name', or anything not listed
-    }
-
-    return rows.sort(compare);
-}
-
 function buildStockPanels() {
     createDataPanel({
         key: 'mgr-reorder',
@@ -1376,6 +1410,10 @@ function buildStockPanels() {
         pagerId: 'reorder-pager',
         idField: 'product_id',
         filters: { mode: 'all', status: 'all' },
+        sortKeys: ['product_name', function (p) { return Number(p.quantity_in_stock); },
+                   function (p) { return Number(p.effective_rop); }, function (p) { return Number(p.avg_daily_sales); },
+                   function (p) { return p.days_of_cover === null ? '' : Number(p.days_of_cover); },
+                   function (p) { return Number(p.suggested_order); }, 'supplier_name', 'stock_status'],
         gate: {
             title: 'Reorder alerts not loaded',
             text: 'Press Load Data for every product at or below its reorder point.',
@@ -1418,7 +1456,9 @@ function buildStockPanels() {
         columns: 5,
         pagerId: 'stocks-pager',
         idField: 'product_id',
-        filters: { status: 'all', level: 'all', sort: 'name' },
+        filters: { status: 'all', level: 'all' },
+        sortKeys: ['product_name', 'category_name', function (p) { return Number(p.quantity_in_stock); },
+                   function (p) { return p.days_of_cover === null ? '' : Number(p.days_of_cover); }, 'stock_status'],
         gate: {
             title: 'The stock report is not loaded',
             text: 'Search for a product, pick a status or a quantity, or press Load Data for the whole inventory.',
@@ -1434,17 +1474,15 @@ function buildStockPanels() {
             return (filters.status === 'all' || p.stock_status === filters.status) &&
                 stockLevelMatches(p, filters.level);
         },
-        // a product with no price yet is always on the top row, whatever the order, the filter or the page
-        sort: function (rows, filters) {
-            return unpricedFirst(sortStockRows(rows, filters.sort));
-        },
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                     'onclick="openStockDetail(' + p.product_id + ')">' +
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
                 '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
-                '<td class="cell-num">' + priceOrBadge(p) + '</td>' +
+                '<td class="cell-num">' + (p.days_of_cover === null || p.days_of_cover === undefined
+                    ? '<span class="muted">no sales</span>'
+                    : Number(p.days_of_cover).toFixed(0) + ' days') + '</td>' +
                 '<td>' + statusBadge(p.stock_status) + '</td></tr>';
         }
     });
@@ -1460,7 +1498,8 @@ function buildStockMovesPanel() {
         tableId: 'stock-moves-table',
         columns: 5,
         pagerId: 'stock-moves-pager',
-        filters: { kind: 'all', role: 'all' },
+        filters: { kind: 'all', role: 'all', from: '', to: '' },
+        sortKeys: ['happened_at', function (row) { return activityKind(row.kind); }, 'details', 'staff_name', 'role_name'],
         gate: {
             title: 'Not loaded',
             text: 'Press Load Data for the damage and return reports, stock adjustments and purchase orders staff have filed.',
@@ -1479,7 +1518,8 @@ function buildStockMovesPanel() {
         },
         filter: function (row, filters) {
             return (filters.kind === 'all' || row.kind === filters.kind) &&
-                (filters.role === 'all' || row.role_name === filters.role);
+                (filters.role === 'all' || row.role_name === filters.role) &&
+                dateInRange(row.happened_at, filters.from, filters.to);
         },
         onLoaded: function (rows) {
             const roles = [];
@@ -1512,10 +1552,12 @@ function findCachedStock(productId) {
 }
 
 // ==========================================
-// THE NO-PRICE ALERT -- "3 products have no price set", across the manager's screens
+// THE NO-PRICE ALERT -- "3 products have no price set", on the screens it is about
 // ==========================================
 // A product the clerk adds has price 0. The strip says how many, and its button
-// opens the Stocks Overview with those products on the top rows. It reads the
+// opens Records > Products with those products on the top rows. It shows on the
+// Stocks screens and on Records > Products only (placePriceAlert), not across
+// every screen. It reads the
 // count again whenever the inventory moves (the live channel), after a price is
 // saved here, and when the screens the administrator switched on are applied.
 async function loadPriceBanner() {
@@ -1543,8 +1585,8 @@ async function loadPriceBanner() {
 
     const words = count === 1 ? '1 product has no price set' : count + ' products have no price set';
     let button = '';
-    // the Stocks Overview is where the price is set
-    if (holdsFeature('stock-reports')) {
+    // Records > Products is where the price is set
+    if (holdsFeature('records')) {
         button = '<button type="button" class="btn btn-sm" onclick="openUnpricedProducts()">Set prices</button>';
     }
     box.innerHTML = '<div class="banner banner-warn">' +
@@ -1553,37 +1595,67 @@ async function loadPriceBanner() {
         ' a price.</span>' + button + '</div>';
 }
 
-// The Stocks Overview, read afresh, with nothing in the search or the filters that could hide a
-// product without a price; those products come first on their own (see the table's sort).
+// Records > Products, read afresh with nothing in the search; products without a
+// price come first on their own (see the records table's sort).
 function openUnpricedProducts() {
-    showStockReport();
+    showRecordType('product');
 
-    const panel = getDataPanel('mgr-stocks');
+    const panel = getDataPanel('mgr-records');
     if (!panel) return;
 
-    const boxes = ['stocks-search', 'stocks-status', 'stocks-level'];
-    for (let i = 0; i < boxes.length; i++) {
-        const box = document.getElementById(boxes[i]);
-        if (box) box.value = boxes[i] === 'stocks-search' ? '' : 'all';
-    }
-    panel.filters.status = 'all';
-    panel.filters.level = 'all';
+    const box = document.getElementById('records-search');
+    if (box) box.value = '';
     panel.query = '';
+    panel.resetHeaderSort();
     panel.open();
 }
 
-// reloads the two stock tables that are showing, after a save
+// The strip belongs to the screens about stock and products: it moves to the top
+// of the Stocks screen or of Records when Products is showing, and hides elsewhere.
+function placePriceAlert() {
+    const alert = document.getElementById('price-alert');
+    if (!alert) return;
+
+    let home = null;
+    const stocks = document.getElementById('panel-stocks');
+    const records = document.getElementById('panel-records');
+    if (stocks && stocks.style.display !== 'none') home = stocks;
+    else if (records && records.style.display !== 'none' && recordType === 'product') home = records;
+
+    // switched off for the role stays hidden (features.js would otherwise show it again)
+    const switchedOff = heldFeatureKeys !== null && !holdsFeature('price-alert');
+    if (!home || switchedOff) {
+        alert.hidden = true;
+        return;
+    }
+    if (alert.parentElement !== home) home.insertBefore(alert, home.firstChild);
+    alert.hidden = false;
+}
+
+// reloads the stock tables and the product records that are showing, after a save
 async function refreshStockPanels() {
-    const keys = ['mgr-reorder', 'mgr-stocks'];
+    const keys = ['mgr-reorder', 'mgr-stocks', 'mgr-records'];
     for (let i = 0; i < keys.length; i++) {
         const panel = getDataPanel(keys[i]);
         if (panel && panel.state === 'ready') await panel.refresh();
     }
 }
 
-async function changePrice(productId) {
-    const product = findCachedStock(productId);
+// The price is set on the product, in Records > Products. index is the row
+// in that table; the row carries id, name, price, unit_name and quantity_in_stock.
+async function changeProductPrice(index) {
+    const panel = getDataPanel('mgr-records');
+    const row = panel ? panel.visible[index] : null;
+    if (!row) return;
+    await changePrice({
+        product_id: row.id, product_name: row.name, price: row.price,
+        unit_name: row.unit_name, quantity_in_stock: row.quantity_in_stock
+    });
+}
+
+async function changePrice(product) {
     if (!product) return;
+    const productId = product.product_id;
 
     const current = Number(product.price) || 0;
     const unit = product.unit_name ? ' per ' + product.unit_name : '';
@@ -1598,7 +1670,7 @@ async function changePrice(productId) {
 
     const asked = await askInput({
         title: noPrice ? 'Set the price' : 'Change the price',
-        eyebrow: 'Stocks Overview',
+        eyebrow: 'Products',
         message: askMessage,
         label: 'New price' + unit,
         type: 'number',
@@ -1638,7 +1710,7 @@ async function changePrice(productId) {
             : product.product_name + ': ' + peso(current) + ' to ' + peso(next) + unit + change + '.',
         {
             title: noPrice ? 'Set the price?' : (up ? 'Raise the price?' : 'Lower the price?'),
-            eyebrow: 'Stocks Overview',
+            eyebrow: 'Products',
             confirmLabel: 'Set the price',
             // a big jump is more often a slipped decimal than a decision
             tone: share !== null && share >= 0.5 ? 'danger' : undefined,
@@ -1850,6 +1922,9 @@ function buildCreditPanels() {
         key: 'mgr-credit',
         tableId: 'credit-table',
         columns: 6,
+        sortKeys: ['customer_name', function (r) { return Number(r.credit_limit); }, function (r) { return Number(r.current_credit); },
+                   function (r) { return Number(r.available_credit); }, function (r) { return Number(r.open_sales); },
+                   function (r) { return r.oldest_debt_days === null ? '' : Number(r.oldest_debt_days); }],
         pagerId: 'credit-pager',
         idField: 'customer_id',
         filters: { owing: 'all' },
@@ -1905,6 +1980,9 @@ function buildCreditPanels() {
         key: 'mgr-requests',
         tableId: 'requests-table',
         columns: 7,
+        sortKeys: ['created_at', 'customer_name', function (r) { return Number(r.current_credit); },
+                   function (r) { return Number(r.previous_limit); }, function (r) { return Number(r.requested_limit); },
+                   'requested_by', 'status'],
         pagerId: 'requests-pager',
         idField: 'request_id',
 
@@ -2273,18 +2351,53 @@ async function openCreditAccount(customerId) {
     }
 }
 
+// 'account', or one table of the history: 'purchases', 'payments' or 'requests'
+let creditTab = 'account';
+
 function showCreditTab(tab) {
-    const history = tab === 'history';
+    creditTab = tab;
+    const history = tab !== 'account';
     document.getElementById('credit-account-tab').style.display = history ? 'none' : 'block';
     document.getElementById('credit-history-tab').style.display = history ? 'block' : 'none';
-    document.getElementById('credit-tab-account').classList.toggle('active', !history);
-    document.getElementById('credit-tab-history').classList.toggle('active', history);
+    const tabs = ['account', 'purchases', 'payments', 'requests'];
+    for (let i = 0; i < tabs.length; i++) {
+        const button = document.getElementById('credit-tab-' + tabs[i]);
+        if (button) button.classList.toggle('active', tabs[i] === tab);
+    }
 
     // Save belongs to the Account tab; the history has nothing to save
     const save = document.querySelector('#credit-foot [form="credit-form"]');
     if (save) save.hidden = history;
 
     if (history) loadCreditHistory();
+}
+
+// Save Note: the note alone, with the account's saved limit, standing and rate,
+// so a limit typed and not meant to be saved yet is not saved with it
+async function saveCreditNote() {
+    if (!creditCustomer) return;
+    const c = creditCustomer;
+    const note = document.getElementById('credit-notes-input').value.trim();
+    let rate = null;
+    if (c.penalty_rate_override !== null && c.penalty_rate_override !== undefined) rate = Number(c.penalty_rate_override);
+
+    try {
+        const response = await apiSaveCreditLimit(c.customer_id, {
+            creditLimit: Number(c.credit_limit),
+            standing: c.manual_standing || 'Good',
+            penaltyRate: rate,
+            notes: note
+        });
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Note not saved');
+            return;
+        }
+        c.credit_notes = note;
+        notifySuccess('The note on ' + c.customer_name + '\'s account is saved.', 'Note saved');
+    } catch (error) {
+        notifyOffline();
+    }
 }
 
 // the consequence of the typed figure, in words, before it is saved
@@ -2446,8 +2559,8 @@ async function loadCreditHistory() {
     }
 }
 
-// purchases beside payments, so both get read before extending anything;
-// each is paged with Previous and Next rather than scrolled
+// one table to a tab (Purchases, Payments, Extension Requests), each paged with
+// Previous and Next rather than scrolled
 function renderCreditHistory(data) {
     const box = document.getElementById('credit-history');
     if (!box) return;
@@ -2484,43 +2597,33 @@ function renderCreditHistory(data) {
     const payments = pagedTable('mgr-payments', ['Date', 'Amount', 'Method', 'Receipt'],
         paymentRows, [1], { empty: 'No payments recorded.' });
 
-    let requests;
-    if (data.requests.length === 0) {
-        requests = '';
-    } else {
-        const requestRows = [];
-        for (let i = 0; i < data.requests.length; i++) {
-            const r = data.requests[i];
-            requestRows.push([
-                escapeHtml(String(r.created_at).slice(0, 10)),
-                peso(r.previous_limit),
-                peso(r.requested_limit),
-                escapeHtml(r.status) + (r.decided_by ? ' <span class="muted">' +
-                    escapeHtml(r.decided_by) + '</span>' : '')
-            ]);
-        }
-        requests = '<div class="history-column history-full">' +
-              '<h4 class="history-head">Extension Requests</h4>' +
-              pagedTable('mgr-requests', ['Date Requested', 'From', 'To', 'Outcome'],
-                requestRows, [1, 2], { empty: 'No requests yet.' }) + '</div>';
+    const requestRows = [];
+    for (let i = 0; i < data.requests.length; i++) {
+        const r = data.requests[i];
+        requestRows.push([
+            escapeHtml(String(r.created_at).slice(0, 10)),
+            peso(r.previous_limit),
+            peso(r.requested_limit),
+            escapeHtml(r.status) + (r.decided_by ? ' <span class="muted">' +
+                escapeHtml(r.decided_by) + '</span>' : '')
+        ]);
     }
+    const requests = pagedTable('mgr-credit-requests', ['Date Requested', 'From', 'To', 'Outcome'],
+        requestRows, [1, 2], { empty: 'No requests yet.' });
 
-    box.innerHTML =
-        '<div class="history-column">' +
-            '<h4 class="history-head">Purchase History' +
-            '<span class="history-total">' + peso(data.credit.total_purchase) + '</span></h4>' +
-            purchases +
-        '</div>' +
-        '<div class="history-column">' +
-            '<h4 class="history-head">Credit Payments' +
+    if (creditTab === 'purchases') {
+        box.innerHTML = '<h4 class="history-head">Purchase History' +
+            '<span class="history-total">' + peso(data.credit.total_purchase) + '</span></h4>' + purchases;
+    } else if (creditTab === 'payments') {
+        box.innerHTML = '<h4 class="history-head">Credit Payments' +
             '<span class="history-total">' +
                 (Number(data.credit.current_credit) > 0
                     ? '<span class="cell-due">' + peso(data.credit.current_credit) + ' balance</span>'
                     : 'No balance') +
-            '</span></h4>' +
-            payments +
-        '</div>' +
-        requests;
+            '</span></h4>' + payments;
+    } else {
+        box.innerHTML = '<h4 class="history-head">Extension Requests</h4>' + requests;
+    }
 }
 
 // ---------- deciding an extension ----------
@@ -2661,8 +2764,10 @@ function buildDeliveryPanel() {
         pagerId: 'deliveries-pager',
         idField: 'delivery_id',
         filters: { state: 'all', driver: 'all' },
+        sortKeys: ['delivery_id', 'customer_name', 'delivery_address', 'driver_name', 'scheduled_date',
+                   function (d) { return Number(d.balance_due); }, 'fulfilment_state'],
         gate: {
-            title: 'Deliveries not loaded',
+            title: 'Delivery history not loaded',
             text: 'Press Load Data for every delivery on record, or filter by fulfilment first.',
             button: 'Load Data'
         },
@@ -2747,6 +2852,15 @@ const RECORD_TITLES = {
     category: 'Categories', unit: 'Units'
 };
 
+// the module name the archive routes know each kind of record by
+const RECORD_ARCHIVE_MODULE = {
+    supplier: 'Supplier', customer: 'Customer', product: 'Inventory',
+    category: 'Category', unit: 'Unit'
+};
+
+// the kinds of record the manager edits here (categories and units are the clerk's)
+const RECORD_EDITABLE = ['supplier', 'customer', 'product'];
+
 // the kind of record is a screen in the strip
 function showRecordType(type, event) {
     if (!RECORD_COLUMNS[type]) type = 'supplier';
@@ -2765,10 +2879,15 @@ function showRecordType(type, event) {
 
     writeRecordHeaders();
     syncRecordAddButton();
-    if (changed) fillRecordSort();
+
+    // the search box names what it searches
+    const search = document.getElementById('records-search');
+    if (search) search.placeholder = 'Search ' + RECORD_TITLES[type];
+    placePriceAlert();
 
     const panel = getDataPanel('mgr-records');
     if (!panel || !changed) return;
+    panel.resetHeaderSort();
 
     // a table already open loads the new kind at once; a closed one stays closed
     if (panel.state === 'ready') panel.open();
@@ -2787,7 +2906,18 @@ function writeRecordHeaders() {
     table.querySelector('thead tr').innerHTML = headers;
 
     const panel = getDataPanel('mgr-records');
-    if (panel) panel.config.columns = columns.length;
+    if (panel) {
+        panel.config.columns = columns.length;
+        const keys = [];
+        for (let i = 0; i < columns.length; i++) {
+            const field = columns[i][0];
+            keys.push(RECORD_NUMERIC.indexOf(field) !== -1
+                ? function (row) { return Number(row[field]); }
+                : field);
+        }
+        panel.config.sortKeys = keys;
+        panel.resetHeaderSort();
+    }
 }
 
 function buildRecordsPanel() {
@@ -2802,7 +2932,7 @@ function buildRecordsPanel() {
             text: 'Pick a kind of record above, then press Load Data.',
             button: 'Load Data'
         },
-        filters: { sort: 'name-asc' },
+        sortKeys: [],      // filled for the kind of record (writeRecordHeaders)
         load: function () {
             return apiGetRecords(recordType);
         },
@@ -2814,11 +2944,10 @@ function buildRecordsPanel() {
             }
             return prefixMatch(values, query);
         },
-        sort: function (rows, filters) {
-            const sorted = sortRecordRows(rows, filters.sort);
-            // a product with no price yet is always on the top row
-            if (recordType === 'product') return unpricedFirst(sorted);
-            return sorted;
+        sort: function (rows) {
+            // a product with no price yet is always on the top row, whatever the header sort
+            if (recordType === 'product') return unpricedFirst(rows);
+            return rows;
         },
         renderRow: function (row, index) {
             const columns = RECORD_COLUMNS[recordType];
@@ -2858,74 +2987,14 @@ function buildRecordsPanel() {
     });
 }
 
-// The Sort box follows the kind of record: by name either way, then by each
-// figure the table shows (most first).
-function fillRecordSort() {
-    const select = document.getElementById('records-sort');
-    if (!select) return;
-
-    let options;
-    if (recordType === 'product') {
-        // products group by category or brand; All keeps them by name
-        options = [['name-asc', 'All'], ['category_name-asc', 'Category'], ['brand_name-asc', 'Brand']];
-    } else {
-        options = [['name-asc', 'Name, A to Z'], ['name-desc', 'Name, Z to A']];
-        const columns = RECORD_COLUMNS[recordType];
-        for (let i = 1; i < columns.length; i++) {
-            const column = columns[i];
-            if (RECORD_NUMERIC.indexOf(column[0]) !== -1) {
-                options.push([column[0] + '-desc', column[1] + ', highest first']);
-                options.push([column[0] + '-asc', column[1] + ', lowest first']);
-            }
-        }
-    }
-
-    let html = '';
-    for (let i = 0; i < options.length; i++) {
-        html += '<option value="' + options[i][0] + '">' + escapeHtml(options[i][1]) + '</option>';
-    }
-    select.innerHTML = html;
-    select.value = 'name-asc';
-    // set without loading: a closed table stays closed
-    const panel = getDataPanel('mgr-records');
-    if (panel) panel.setFilter('sort', 'name-asc');
-}
-
 // the columns that hold a figure, and so can be sorted by size
 const RECORD_NUMERIC = ['product_count', 'purchase_count', 'credit_limit', 'current_credit',
                         'price', 'quantity_in_stock', 'total_stock'];
 
-function sortRecordRows(rows, order) {
-    const value = String(order || 'name-asc');
-    const descending = value.endsWith('-desc');
-    // takes "-asc" or "-desc" off the end, leaving the column name
-    const key = value.replace(/-(asc|desc)$/, '');
-
-    return rows.sort(function (a, b) {
-        let result;
-        if (key === 'name') {
-            result = String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
-        } else if (key === 'category_name' || key === 'brand_name') {
-            // A to Z by category or brand, the ones not set last, then by name
-            const first = String(a[key] || '');
-            const second = String(b[key] || '');
-            if (first === '' && second !== '') result = 1;
-            else if (second === '' && first !== '') result = -1;
-            else result = first.localeCompare(second) ||
-                          String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
-        } else {
-            result = (Number(a[key]) || 0) - (Number(b[key]) || 0) ||
-                     String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
-        }
-        return descending ? -result : result;
-    });
-}
-
-// ---------- adding a supplier, a category or a unit (the manager's alone) ----------
+// ---------- adding a supplier (the manager's alone) ----------
+// Categories and units are added by the inventory clerk, from the clerk's Records.
 const RECORD_ADDABLE = {
-    supplier: { title: 'Add Supplier', label: 'Company name', max: 100 },
-    category: { title: 'Add Category', label: 'Category name', max: 50 },
-    unit:     { title: 'Add Unit', label: 'Unit name', max: 20 }
+    supplier: { title: 'Add Supplier', label: 'Company name', max: 100 }
 };
 
 // the Add button names the kind on screen, and goes for the kinds kept elsewhere
@@ -3018,7 +3087,8 @@ function buildArchivePanel() {
     createDataPanel({
         key: 'mgr-archives',
         tableId: 'archives-table',
-        columns: 5,
+        columns: 6,
+        sortKeys: ['module', 'record_name', 'detail', 'handled_by', 'archived_at', 'archived_by'],
         pagerId: 'archives-pager',
         filters: { module: 'all' },
         gate: {
@@ -3030,7 +3100,7 @@ function buildArchivePanel() {
             return apiGetArchives();
         },
         match: function (a, query) {
-            return prefixMatch([a.record_name, a.detail, a.module], query);
+            return prefixMatch([a.record_name, a.detail, a.module, a.archived_by, a.handled_by], query);
         },
         filter: function (a, filters) {
             return filters.module === 'all' || a.module === filters.module;
@@ -3048,6 +3118,9 @@ function buildArchivePanel() {
                 '<td>' + statusBadge(a.module) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(a.record_name) + '</td>' +
                 '<td>' + escapeHtml(a.detail || '') + '</td>' +
+                '<td>' + (a.handled_by
+                    ? escapeHtml(a.handled_by) + ' <span class="muted">' + escapeHtml(a.handled_label || '') + '</span>'
+                    : '<span class="muted">Not recorded</span>') + '</td>' +
                 '<td class="cell-id">' + escapeHtml(a.archived_at || 'Unknown') + '</td>' +
                 '<td>' + escapeHtml(a.archived_by || 'Not recorded') + '</td></tr>';
         }
@@ -3064,6 +3137,10 @@ function openArchiveEntry(index) {
         detailField('Module', statusBadge(entry.module)) +
         detailField('Record', escapeHtml(entry.record_name)) +
         detailField('Detail', escapeHtml(entry.detail || 'None recorded')) +
+        (entry.handled_by
+            ? detailField(entry.handled_label || 'Handled By', escapeHtml(entry.handled_by) +
+                (entry.handled_at ? ' <span class="muted">' + escapeHtml(String(entry.handled_at).slice(0, 16)) + '</span>' : ''))
+            : '') +
         detailField('Archived On', escapeHtml(entry.archived_at || 'Not recorded')) +
         detailField('Archived By', escapeHtml(entry.archived_by || 'Not recorded')) +
         '</div>' +
@@ -3113,6 +3190,10 @@ async function restoreArchive(module, recordId) {
                 'mgr-stocks', 'mgr-reorder', 'mgr-stock-moves', 'mgr-deliveries']);
         } else if (module === 'Delivery') {
             keys = keys.concat(['mgr-deliveries']);
+        } else if (module === 'Staff') {
+            keys = keys.concat(['mgr-staff']);
+        } else {
+            keys = keys.concat(['mgr-records', 'mgr-credit']);
         }
         for (let i = 0; i < keys.length; i++) {
             const panel = getDataPanel(keys[i]);
@@ -3128,7 +3209,10 @@ async function restoreArchive(module, recordId) {
 // ==========================================
 // POPUP BUILDERS, ONE PER MODULE
 // ==========================================
-async function openSaleDetail(saleId) {
+// options.fromReceivables: opened from Receivables, which shows the sale but
+// does not void it (that is done from Sales Transactions)
+async function openSaleDetail(saleId, options) {
+    const settings = options || {};
     try {
         const data = await apiGetSale(saleId);
         const s = data.sale;
@@ -3203,14 +3287,20 @@ async function openSaleDetail(saleId) {
         const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') +
             '-' + String(now.getDate()).padStart(2, '0');
         const saleDay = String(s.sale_date).slice(0, 10);
+        // a credit sale reads "Void this credit"; any other "Void this sale"
+        const isCredit = s.payment_method === 'Credit';
         let voidBlock;
         if (s.is_archived) {
             voidBlock = '<p class="detail-note detail-warn">This sale was voided' +
                   (s.archived_at ? ' on ' + escapeHtml(String(s.archived_at).slice(0, 16)) : '') +
                   '. It counts for nothing, and its stock went back on the shelf.</p>';
+        } else if (settings.fromReceivables) {
+            voidBlock = '<p class="detail-note">To void this ' + (isCredit ? 'credit' : 'sale') +
+                  ', open it from Sales Transactions.</p>';
         } else if (saleDay === today) {
             voidBlock = '<div class="detail-actions">' +
-                  '<button type="button" class="btn btn-danger" onclick="voidSale(' + s.sale_id + ')">Void this sale</button>' +
+                  '<button type="button" class="btn btn-danger" onclick="voidSale(' + s.sale_id + ', ' + isCredit + ')">' +
+                  (isCredit ? 'Void this credit' : 'Void this sale') + '</button>' +
                   '</div>';
         } else {
             voidBlock = '<p class="detail-note">A sale can only be voided on the day it was made. ' +
@@ -3280,13 +3370,14 @@ async function openSaleDetail(saleId) {
 
 // Voiding a sale archives it; the database holds the rules (same day, goods
 // not out for delivery, stock returned).
-async function voidSale(saleId) {
+async function voidSale(saleId, isCredit) {
+    const word = isCredit ? 'credit' : 'sale';
     const yes = await askDanger(
         'Sale #' + saleId + ' is struck off as if it had not happened.',
         {
-            title: 'Void this sale?',
-            eyebrow: 'Sales',
-            confirmLabel: 'Void the sale',
+            title: 'Void this ' + word + '?',
+            eyebrow: 'Sales Transactions',
+            confirmLabel: 'Void the ' + word,
             detail: [
                 'It reads Voided everywhere and counts for nothing.',
                 'Every item on it goes back on the shelf, with a line in the stock log.',
@@ -3304,37 +3395,6 @@ async function voidSale(saleId) {
     notifySuccess('Sale #' + saleId + ' is voided and its stock is back on the shelf.', 'Sale voided');
 
     const keys = ['mgr-sales', 'mgr-archives', 'mgr-deliveries'];
-    for (let i = 0; i < keys.length; i++) {
-        const panel = getDataPanel(keys[i]);
-        if (panel && panel.state === 'ready') await panel.refresh();
-    }
-}
-
-// A closed delivery can be put away before the ninety-day sweep; the
-// database refuses a live one.
-async function archiveDelivery(deliveryId) {
-    const yes = await askConfirm(
-        'Delivery #' + deliveryId + ' leaves the tracking list and goes to the Archives screen.',
-        {
-            title: 'Archive this delivery?',
-            eyebrow: 'Deliveries',
-            confirmLabel: 'Archive it',
-            detail: [
-                'It can be restored from Archives.',
-                'The sale it belongs to is not touched.',
-                'The sweep would archive it on its own ninety days after it closed.'
-            ]
-        });
-
-    if (!yes) return;
-
-    const result = await apiArchiveDelivery(deliveryId);
-    if (!result) return;
-
-    closeModal('detail-modal');
-    notifySuccess('Delivery #' + deliveryId + ' is archived.', 'Delivery archived');
-
-    const keys = ['mgr-deliveries', 'mgr-archives'];
     for (let i = 0; i < keys.length; i++) {
         const panel = getDataPanel(keys[i]);
         if (panel && panel.state === 'ready') await panel.refresh();
@@ -3375,24 +3435,14 @@ function openStockDetail(productId) {
         '<button type="button" class="btn btn-accent" onclick="openReorderPolicy(' + p.product_id + ')">' +
         'Change Reorder Policy</button></div>';
 
-    const noPrice = isUnpriced(p);
-    const pricing = '<div class="detail-grid">' +
-        detailField('Unit Price', priceOrBadge(p) +
-            (p.unit_name ? ' <span class="muted">per ' + escapeHtml(p.unit_name) + '</span>' : '')) +
-        detailField('Stock Value', peso(p.stock_value)) +
+    // the price is not set here: it belongs to the product, in Records > Products
+    const product = '<div class="detail-grid">' +
         detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
         detailField('Brand', escapeHtml(p.brand_name || 'No brand')) +
         detailField('Product Status', statusBadge(p.status)) +
         detailField('Last Updated', escapeHtml(p.last_updated || 'Never')) +
         '</div>' +
-        (noPrice
-            ? '<p class="detail-note detail-warn">This product has no price yet, so the till cannot sell it. ' +
-              'The price reaches the till from the next sale on.</p>'
-            : '<p class="detail-note">A new price reaches the till from the next sale on. Sales already ' +
-              'rung up keep the price they were sold at.</p>') +
-        '<div class="detail-actions">' +
-        '<button type="button" class="btn btn-accent" onclick="changePrice(' + p.product_id + ')">' +
-        (noPrice ? 'Set Price' : 'Change Price') + '</button></div>';
+        '<p class="detail-note">The selling price is set on the product, in Records, Products.</p>';
 
     const supplier = '<div class="detail-grid">' +
         detailField('Supplier', escapeHtml(p.supplier_name || 'No supplier')) +
@@ -3403,11 +3453,9 @@ function openStockDetail(productId) {
     const pages = [
         { label: 'Stock', body: stock },
         { label: 'Reorder Point', body: reorder },
-        { label: 'Pricing', body: pricing },
+        { label: 'Product', body: product },
         { label: 'Supplier', body: supplier }
     ];
-    // a product with no price opens on the page where it is set
-    if (noPrice) pages.unshift(pages.splice(2, 1)[0]);
 
     openDetailModal(p.product_name, (p.category_name || 'Uncategorised') + ' · ' + p.stock_status,
         initialsOf(p.product_name), pages);
@@ -3415,7 +3463,8 @@ function openStockDetail(productId) {
 
 function openDeliveryDetail(deliveryId) {
     const panel = getDataPanel('mgr-deliveries');
-    showDeliveryRecord(panel ? panel.find(deliveryId, 'delivery_id') : null, true, true);
+    // the manager reads a delivery; the driver moves it along
+    showDeliveryRecord(panel ? panel.find(deliveryId, 'delivery_id') : null, false, false);
 }
 
 async function openRecordDetail(index) {
@@ -3426,26 +3475,32 @@ async function openRecordDetail(index) {
     const type = recordType;
     let fields = '';
     for (const key in row) {
-        if (key !== 'id' && key !== 'name') {
-            fields += detailField(prettyLabel(key), fieldValue(key, row[key]));
-        }
+        // the ids behind the names are for the edit form, not for reading
+        if (key === 'id' || key === 'name' || /_id$/.test(key)) continue;
+        fields += detailField(prettyLabel(key), fieldValue(key, row[key]));
     }
-    let body = '<div class="detail-grid detail-grid-3">' +
+    const body = '<div class="detail-grid detail-grid-3">' +
         detailField('Record ID', '#' + row.id) +
         detailField('Name', escapeHtml(row.name)) +
         fields +
-        '</div>';
+        '</div>' +
+        (type === 'product'
+            ? (isUnpriced(row)
+                ? '<p class="detail-note detail-warn">This product has no price yet, so the till cannot sell it.</p>'
+                : '<p class="detail-note">A new price reaches the till from the next sale on. Sales already ' +
+                  'rung up keep the price they were sold at.</p>')
+            : '');
+    const pages = [{ label: 'Details', body: body }];
 
-    // a category lists the products filed under it (names are unique)
+    // a category lists the products filed under it, on a page of its own
     if (type === 'category') {
+        let productsBody;
         try {
             const allProducts = await apiGetRecords('product');
-            const products = [];
             const productRows = [];
             for (let i = 0; i < allProducts.length; i++) {
                 const p = allProducts[i];
                 if (p.category_name !== row.name) continue;
-                products.push(p);
                 productRows.push([
                     escapeHtml(p.name),
                     p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>',
@@ -3454,15 +3509,203 @@ async function openRecordDetail(index) {
                     escapeHtml(qtyText(p.quantity_in_stock, p.unit_name))
                 ]);
             }
-            body += '<h4 class="detail-subhead">Products in this category (' + products.length + ')</h4>' +
-                detailTable(['Product', 'Brand', 'Supplier', 'Price', 'On Hand'], productRows, [3, 4]);
+            productsBody = detailTable(['Product', 'Brand', 'Supplier', 'Price', 'On Hand'], productRows, [3, 4]);
+            pages.push({ label: 'Products (' + productRows.length + ')', body: productsBody });
         } catch (error) {
-            body += '<p class="detail-note detail-warn">The products in this category could not be loaded.</p>';
+            pages.push({ label: 'Products', body:
+                '<p class="detail-note detail-warn">The products in this category could not be loaded.</p>' });
         }
     }
 
+    // the buttons: edit (suppliers, customers, products), the price (products), archive (all)
+    let foot = '';
+    if (RECORD_ARCHIVE_MODULE[type]) {
+        foot += '<button type="button" class="btn btn-danger" onclick="archiveRecord(' + index + ')">Archive</button>';
+    }
+    if (type === 'product') {
+        foot += '<button type="button" class="btn btn-accent" onclick="changeProductPrice(' + index + ')">' +
+            (isUnpriced(row) ? 'Set Price' : 'Change Price') + '</button>';
+    }
+    if (RECORD_EDITABLE.indexOf(type) !== -1) {
+        foot += '<button type="button" class="btn btn-success" onclick="openEditRecord(' + index + ')">Edit</button>';
+    }
+
     openDetailModal(row.name, prettyLabel(type) + ' record', initialsOf(row.name),
-        [{ label: 'Details', body: body }], null, { wide: true });
+        pages, foot || null, { wide: true });
+}
+
+// ---------- archiving a record ----------
+async function archiveRecord(index) {
+    const panel = getDataPanel('mgr-records');
+    const row = panel ? panel.visible[index] : null;
+    const module = RECORD_ARCHIVE_MODULE[recordType];
+    if (!row || !module) return;
+
+    const kind = prettyLabel(recordType).toLowerCase();
+    const yes = await askArchive(row.name + ' (' + kind + ')', {
+        title: 'Archive this ' + kind + '?',
+        eyebrow: 'Records',
+        detail: [
+            'It leaves the ' + RECORD_TITLES[recordType] + ' list and moves to the Archives screen.',
+            'It can be restored from Archives.',
+            'The archive log keeps who archived it and when.'
+        ]
+    });
+    if (!yes) return;
+
+    const result = await apiArchiveRecord(module, row.id);
+    if (!result) return;   // refused: the reason is on the screen
+
+    closeModal('detail-modal');
+    notifySuccess(row.name + ' is archived. It can be restored from Archives.', 'Record archived');
+
+    const keys = ['mgr-records', 'mgr-archives'];
+    if (module === 'Inventory') keys.push('mgr-stocks', 'mgr-reorder');
+    if (module === 'Customer') keys.push('mgr-credit', 'mgr-loyal');
+    for (let i = 0; i < keys.length; i++) {
+        const other = getDataPanel(keys[i]);
+        if (other && other.state === 'ready') await other.refresh();
+    }
+    if (module === 'Inventory') loadPriceBanner();
+}
+
+// ---------- editing a supplier, a customer or a product ----------
+let editRecord = null;   // { type, row }
+
+// one box: [field name, label, value, options]; options.kind is 'text',
+// 'phone', 'email' or 'select' (with options.choices [[id, name], ...])
+function editFieldHtml(name, label, value, options) {
+    const settings = options || {};
+    const id = 'edit-' + name;
+    const required = settings.required ? ' <span class="req">*</span>' : '';
+    let box;
+    if (settings.kind === 'select') {
+        let html = '<option value="">None</option>';
+        const choices = settings.choices || [];
+        for (let i = 0; i < choices.length; i++) {
+            const picked = String(choices[i][0]) === String(value) ? ' selected' : '';
+            html += '<option value="' + escapeHtml(choices[i][0]) + '"' + picked + '>' + escapeHtml(choices[i][1]) + '</option>';
+        }
+        box = '<select id="' + id + '" name="' + name + '" class="form-control">' + html + '</select>';
+    } else if (settings.kind === 'phone') {
+        box = '<div class="phone-field"><span class="phone-prefix">+63</span>' +
+            '<input type="text" id="' + id + '" name="' + name + '" class="form-control" inputmode="numeric" ' +
+            'autocomplete="off" maxlength="20" oninput="onPhoneInput(this)"></div>';
+    } else {
+        box = '<input type="' + (settings.kind === 'email' ? 'email' : 'text') + '" id="' + id + '" name="' + name + '" ' +
+            'class="form-control" autocomplete="off" maxlength="' + (settings.max || 100) + '" value="' +
+            escapeHtml(value === null || value === undefined ? '' : value) + '">';
+    }
+    return '<div class="form-group"><label for="' + id + '">' + escapeHtml(label) + required + '</label>' + box + '</div>';
+}
+
+// [[id, name], ...] from a records list
+function recordChoices(rows) {
+    const choices = [];
+    for (let i = 0; i < rows.length; i++) choices.push([rows[i].id, rows[i].name]);
+    return choices;
+}
+
+async function openEditRecord(index) {
+    const panel = getDataPanel('mgr-records');
+    const row = panel ? panel.visible[index] : null;
+    const type = recordType;
+    if (!row || RECORD_EDITABLE.indexOf(type) === -1) return;
+
+    let html = '';
+    if (type === 'supplier') {
+        html = editFieldHtml('name', 'Company name', row.name, { required: true, max: 100 }) +
+            editFieldHtml('contactPerson', 'Contact person', row.contact_person) +
+            editFieldHtml('contactNumber', 'Contact number', '', { kind: 'phone' }) +
+            editFieldHtml('email', 'Email', row.email, { kind: 'email' }) +
+            editFieldHtml('address', 'Address', row.address, { max: 255 });
+    } else if (type === 'customer') {
+        html = editFieldHtml('firstName', 'First name', row.first_name, { required: true }) +
+            editFieldHtml('middleName', 'Middle name', row.middle_name) +
+            editFieldHtml('lastName', 'Last name', row.last_name, { required: true }) +
+            editFieldHtml('phone', 'Phone', '', { kind: 'phone', required: true }) +
+            editFieldHtml('street', 'House and street', row.address_street, { max: 150 }) +
+            editFieldHtml('barangay', 'Barangay', row.address_barangay, { required: true }) +
+            editFieldHtml('city', 'Town or city', row.address_city, { required: true }) +
+            editFieldHtml('province', 'Province', row.address_province, { required: true }) +
+            editFieldHtml('landmark', 'Landmark', row.address_landmark, { max: 150 });
+    } else {
+        let lists;
+        try {
+            lists = await Promise.all([apiGetRecords('category'), apiGetRecords('brand'),
+                                       apiGetRecords('unit'), apiGetRecords('supplier')]);
+        } catch (error) {
+            notifyOffline();
+            return;
+        }
+        html = editFieldHtml('name', 'Product name', row.name, { required: true, max: 150 }) +
+            editFieldHtml('categoryId', 'Category', row.category_id, { kind: 'select', choices: recordChoices(lists[0]) }) +
+            editFieldHtml('brandId', 'Brand', row.brand_id, { kind: 'select', choices: recordChoices(lists[1]) }) +
+            editFieldHtml('unitId', 'Unit', row.unit_id, { kind: 'select', choices: recordChoices(lists[2]) }) +
+            editFieldHtml('supplierId', 'Supplier', row.supplier_id, { kind: 'select', choices: recordChoices(lists[3]) });
+    }
+
+    editRecord = { type: type, row: row };
+    document.getElementById('record-edit-fields').innerHTML = html;
+    document.getElementById('record-edit-title').textContent = 'Edit ' + prettyLabel(type);
+    document.getElementById('record-edit-avatar').textContent = initialsOf(row.name);
+
+    // the phone boxes take the stored number through their own filler
+    const form = document.getElementById('record-edit-form');
+    if (type === 'supplier') phoneFill(form.elements.contactNumber, row.contact_number || '');
+    if (type === 'customer') phoneFill(form.elements.phone, row.phone || '');
+
+    closeModal('detail-modal');
+    showModal('record-edit-modal');
+}
+
+async function saveEditRecord(event) {
+    event.preventDefault();
+    if (!editRecord) return;
+    const form = event.target;
+    const type = editRecord.type;
+    const value = function (name) { return String(form.elements[name].value || '').trim(); };
+
+    let data;
+    if (type === 'supplier') {
+        if (value('name') === '') { notifyWarning('Company name is required.', 'Fill in the form'); return; }
+        if (value('contactNumber') !== '') {
+            const problem = phoneComplaint(form.elements.contactNumber);
+            if (problem) { notifyWarning(problem, 'Check the phone number'); return; }
+        }
+        data = { name: value('name'), contactPerson: value('contactPerson'),
+                 contactNumber: phoneToStore(form.elements.contactNumber),
+                 email: value('email'), address: value('address') };
+    } else if (type === 'customer') {
+        if (value('firstName') === '' || value('lastName') === '') {
+            notifyWarning('First and last name are required.', 'Fill in the form');
+            return;
+        }
+        const problem = phoneComplaint(form.elements.phone);
+        if (problem) { notifyWarning(problem, 'Check the phone number'); return; }
+        data = { firstName: value('firstName'), middleName: value('middleName'), lastName: value('lastName'),
+                 phone: phoneToStore(form.elements.phone), street: value('street'), barangay: value('barangay'),
+                 city: value('city'), province: value('province'), landmark: value('landmark') };
+    } else {
+        if (value('name') === '') { notifyWarning('Product name is required.', 'Fill in the form'); return; }
+        data = { name: value('name'), categoryId: value('categoryId'), brandId: value('brandId'),
+                 unitId: value('unitId'), supplierId: value('supplierId') };
+    }
+
+    const button = document.getElementById('record-edit-save');
+    button.disabled = true;
+    try {
+        const result = await apiEditRecord(type, editRecord.row.id, data);
+        if (!result) return;   // refused: the reason is on the screen
+        notifySuccess(result.message, 'Saved');
+        closeModal('record-edit-modal');
+        editRecord = null;
+        await refreshStockPanels();
+    } catch (error) {
+        notifyOffline();
+    } finally {
+        button.disabled = false;
+    }
 }
 
 // reached from the Repeat Customers report, which only knows a customer id
@@ -3887,6 +4130,7 @@ function buildStaffAccountsPanel() {
         key: 'mgr-staff',
         tableId: 'staff-table',
         columns: 6,
+        sortKeys: ['full_name', 'role_name', 'email', 'phone', function (row) { return staffAccountState(row); }, 'last_login'],
         pagerId: 'staff-pager',
         idField: 'staff_id',
         filters: { status: 'all' },
@@ -3990,18 +4234,51 @@ function openStaffAccount(staffId) {
     body += '</div>';
 
     let foot = '';
+    if (account.is_active) {
+        foot += '<button type="button" class="btn btn-danger" onclick="archiveStaffAccount(' + account.staff_id + ')">' +
+            'Archive Account</button>';
+    }
     if (onHold) {
         body += '<p class="detail-note">Lifting the hold lets them sign in again straight away with the ' +
             'password they already have. Their password is not changed, they get a full set of tries ' +
             'again, and the change is written to the audit trail in your name.</p>';
 
-        foot = '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
+        foot += '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
             '<button type="button" class="btn btn-accent" id="lift-hold-button" ' +
             'onclick="liftHeldAccount(' + account.staff_id + ')">Lift hold</button>';
     }
 
     openDetailModal(account.full_name, account.role_name,
-        initialsOf(account.full_name), [{ label: 'Account', body: body }], foot);
+        initialsOf(account.full_name), [{ label: 'Account', body: body }], foot || null);
+}
+
+// A cashier, clerk or driver account goes to Archives: they can no longer sign
+// in, and any screen they have open is signed out. Restored from Archives.
+async function archiveStaffAccount(staffId) {
+    const panel = getDataPanel('mgr-staff');
+    const account = panel ? panel.find(staffId) : null;
+    if (!account) return;
+
+    const yes = await askArchive(account.full_name + ' (' + account.role_name + ')', {
+        title: 'Archive this account?',
+        eyebrow: 'Account Management',
+        confirmLabel: 'Archive the account',
+        detail: [
+            'They can no longer sign in, and any screen they have open is signed out.',
+            'Their sales, reports and history stay on record.',
+            'The account can be restored from Archives.'
+        ]
+    });
+    if (!yes) return;
+
+    const result = await apiArchiveRecord('Staff', staffId);
+    if (!result) return;
+
+    closeModal('detail-modal');
+    notifySuccess(account.full_name + '\'s account is archived.', 'Account archived');
+    await panel.refresh();
+    const archives = getDataPanel('mgr-archives');
+    if (archives && archives.state === 'ready') await archives.refresh();
 }
 
 async function liftHeldAccount(staffId) {
@@ -4028,6 +4305,32 @@ async function liftHeldAccount(staffId) {
         if (button) button.disabled = false;
         notifyOffline();
     }
+}
+
+// ==========================================
+// NO AUTOFILL -- the browser's own suggestions do not drop into the boxes
+// ==========================================
+// Every box on the page, and every one a popup draws later, has autocomplete
+// off. Password boxes keep theirs, so a password manager still works.
+function stopAutofill(root) {
+    const boxes = root.querySelectorAll ? root.querySelectorAll('input:not([type="password"]), textarea, form') : [];
+    for (let i = 0; i < boxes.length; i++) {
+        boxes[i].setAttribute('autocomplete', 'off');
+    }
+}
+
+if (typeof MutationObserver === 'function') {
+    new MutationObserver(function (changes) {
+        for (let i = 0; i < changes.length; i++) {
+            const added = changes[i].addedNodes;
+            for (let j = 0; j < added.length; j++) {
+                const node = added[j];
+                if (node.nodeType !== 1) continue;
+                if (node.matches('input:not([type="password"]), textarea, form')) node.setAttribute('autocomplete', 'off');
+                stopAutofill(node);
+            }
+        }
+    }).observe(document.documentElement, { childList: true, subtree: true });
 }
 
 // ==========================================
@@ -4062,6 +4365,7 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
             onApply: function () {
                 syncViewNavs();
                 loadPriceBanner();
+                placePriceAlert();
             }
         });
 
@@ -4074,9 +4378,9 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
             key: 'mgr-reorder', searchId: 'reorder-search'
         };
         const returnsAlert = {
-            label: 'Activity Log', panelId: 'panel-reports',
+            label: 'Activity Log', panelId: 'panel-activity',
             open: function () {
-                showReport('report-all');
+                showActivityLog();
             },
             key: 'mgr-all'
         };
@@ -4099,16 +4403,16 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
                 },
                 key: 'mgr-stock-moves'
             },
-            // a product the clerk added: the Stocks Overview, read afresh with the search and filters cleared
+            // a product the clerk added: Records > Products, read afresh with the search cleared
             // (openUnpricedProducts), where products with no price are on the top rows
             'New Product':      {
-                label: 'Stocks Overview', panelId: 'panel-stocks',
+                label: 'Products', panelId: 'panel-records',
                 open: function () {
                     openUnpricedProducts();
                 }
             },
             'Delivery':         {
-                label: 'Deliveries', panelId: 'panel-deliveries',
+                label: 'Delivery History', panelId: 'panel-deliveries',
                 open: function () {
                     showDeliveries();
                 },
@@ -4132,10 +4436,12 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
 
         writeRecordHeaders();
         syncRecordAddButton();
-        fillRecordSort();
-        limitDatesToToday(['income-from', 'income-to', 'sales-from', 'sales-to']);
+        limitDatesToToday(['income-from', 'income-to', 'sales-from', 'sales-to', 'all-from', 'all-to',
+                           'unpaid-from', 'unpaid-to', 'stock-moves-from', 'stock-moves-to']);
         renderIncomeRanges();
         applyExportPermissions();
+        buildExportMenus();
+        stopAutofill(document);
 
         document.addEventListener('datapanel:change', syncExportButtons);
         syncExportButtons();

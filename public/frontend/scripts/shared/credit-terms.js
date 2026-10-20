@@ -26,9 +26,9 @@ function printDate(stamp) {
 
 // "2026-10-01 10:00:00" -> "1 October 2026", or a dash when there is none
 function printDay(stamp) {
-    if (!stamp) return '&mdash;';
+    if (!stamp) return 'Not set';
     const when = new Date(String(stamp).replace(' ', 'T'));
-    if (isNaN(when.getTime())) return '&mdash;';
+    if (isNaN(when.getTime())) return 'Not set';
     return escapeHtml(when.toLocaleDateString('en-PH', { day: 'numeric', month: 'long', year: 'numeric' }));
 }
 
@@ -81,8 +81,8 @@ function creditTermsPage(data) {
         '<h3>The customer</h3>' +
         '<table class="cp-facts">' +
             creditPrintRow('Name', escapeHtml(c.name)) +
-            creditPrintRow('Address', c.address ? escapeHtml(c.address) : '&mdash;') +
-            creditPrintRow('Contact number', c.phone ? escapeHtml(c.phone) : '&mdash;') +
+            creditPrintRow('Address', c.address ? escapeHtml(c.address) : 'Not set') +
+            creditPrintRow('Contact number', c.phone ? escapeHtml(c.phone) : 'Not set') +
         '</table>' +
 
         '<h3>The credit account</h3>' +
@@ -125,8 +125,8 @@ function customerCardPage(data) {
         '<h3>The customer</h3>' +
         '<table class="cp-facts">' +
             creditPrintRow('Name', escapeHtml(c.name)) +
-            creditPrintRow('Address', c.address ? escapeHtml(c.address) : '&mdash;') +
-            creditPrintRow('Contact number', c.phone ? escapeHtml(c.phone) : '&mdash;') +
+            creditPrintRow('Address', c.address ? escapeHtml(c.address) : 'Not set') +
+            creditPrintRow('Contact number', c.phone ? escapeHtml(c.phone) : 'Not set') +
         '</table>' +
 
         '<h3>The credit account today</h3>' +

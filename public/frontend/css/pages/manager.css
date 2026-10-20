@@ -341,3 +341,40 @@
        (printReport marks it) */
     body.is-printing .panel-view:not(.is-print-target) { display: none !important; }
 }
+
+/* ==========================================================================
+   EXPORT -- Spreadsheet and Print / PDF behind one button (manager.js
+   buildExportMenus); the menu opens under it
+   ========================================================================== */
+.export-menu { position: relative; display: inline-block; }
+.export-menu-list {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 40;
+    min-width: 170px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--lift-high);
+}
+.export-menu-list[hidden] { display: none; }
+.export-menu-list .btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+}
+.export-menu-list .btn:hover:not(:disabled) { background: var(--paper-2); }
+.export-menu .export-caret { margin-left: 6px; font-size: 0.75em; }
+
+/* a hint beside a field's name sits at the right end of the label row */
+.form-group label .label-hint,
+.form-group > .label-hint { float: right; margin-left: 8px; text-align: right; }
+.form-group > .label-hint { float: none; display: block; }
+
+/* the Note on a credit account saves on its own */
+.note-save-row { display: flex; gap: 8px; align-items: stretch; }
+.note-save-row .form-control { flex: 1; }

@@ -13,7 +13,10 @@
 //       load: async function () { return [...]; },  // returns every row, once
 //       match: function (row, query) { return true; },   // optional free-text search
 //       filter: function (row, filters) { return true; },// optional dropdown filters
-//       sort: function (rows, filters) { return rows; }, // optional
+//       sort: function (rows, filters) { return rows; }, // optional; runs after a header sort
+//       sortKeys: ['name', 'qty', null],  // optional; one per column: a row field or
+//                                         // function (row) {...}; null = not sortable.
+//                                         // Pressing a header sorts by it, again reverses it.
 //       renderRow: function (row, index) { return '<tr>...</tr>'; },
 //       gate: { title, text, button },  // what the closed state says
 //       empty: { title, text },        // optional; a loaded table with no rows
@@ -47,7 +50,8 @@ function createDataPanel(config) {
         visible: [],          // what survives the search and the filters
         page: 1,
         query: '',
-        filters: Object.assign({}, config.filters || {})
+        filters: Object.assign({}, config.filters || {}),
+        headerSort: null      // { column, descending } once a header is pressed
     };
 
     // copy the functions below (body, open, render, ...) onto this panel,
@@ -57,7 +61,77 @@ function createDataPanel(config) {
     dataPanels[config.key] = panel;
 
     panel.renderClosed();
+    if (config.sortKeys) wireHeaderSort(panel);
     return panel;
+}
+
+// ---------- sorting by pressing a column header ----------
+// One listener on the table head, so headers drawn again later (Records
+// changes its columns) still sort.
+function wireHeaderSort(panel) {
+    const table = document.getElementById(panel.config.tableId);
+    const head = table ? table.querySelector('thead') : null;
+    if (!head || head.dataset.sortWired) return;
+    head.dataset.sortWired = '1';
+
+    head.addEventListener('click', function (event) {
+        const th = event.target.closest('th');
+        if (!th || !head.contains(th)) return;
+        const column = Array.prototype.indexOf.call(th.parentElement.children, th);
+        panel.sortByColumn(column);
+    });
+    head.addEventListener('keydown', function (event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const th = event.target.closest('th');
+        if (!th) return;
+        event.preventDefault();
+        th.click();
+    });
+    markSortableHeaders(panel);
+}
+
+// marks the headers that sort, and which one is in use and which way
+function markSortableHeaders(panel) {
+    const keys = panel.config.sortKeys;
+    const table = document.getElementById(panel.config.tableId);
+    if (!keys || !table) return;
+
+    const heads = table.querySelectorAll('thead th');
+    for (let i = 0; i < heads.length; i++) {
+        const th = heads[i];
+        const sortable = Boolean(keys[i]);
+        th.classList.toggle('th-sortable', sortable);
+        if (!sortable) {
+            th.removeAttribute('aria-sort');
+            th.removeAttribute('tabindex');
+            continue;
+        }
+        th.tabIndex = 0;
+        th.title = 'Sort by ' + th.textContent.trim();
+        let state = 'none';
+        if (panel.headerSort && panel.headerSort.column === i) {
+            state = panel.headerSort.descending ? 'descending' : 'ascending';
+        }
+        th.setAttribute('aria-sort', state);
+    }
+}
+
+// the value a row is sorted by in one column
+function headerSortValue(key, row) {
+    if (typeof key === 'function') return key(row);
+    return row[key];
+}
+
+// numbers by size, words A to Z (with numbers inside them in order); empty last
+function compareSortValues(a, b) {
+    const aEmpty = a === null || a === undefined || a === '';
+    const bEmpty = b === null || b === undefined || b === '';
+    if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : (aEmpty ? 1 : -1);
+
+    const aNumber = typeof a === 'number' || (typeof a === 'string' && /^-?\d+(\.\d+)?$/.test(a.trim()));
+    const bNumber = typeof b === 'number' || (typeof b === 'string' && /^-?\d+(\.\d+)?$/.test(b.trim()));
+    if (aNumber && bNumber) return Number(a) - Number(b);
+    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 }
 
 function getDataPanel(key) {
@@ -408,6 +482,27 @@ const dataPanelMethods = {
             if (query === '' || !match || match(row, query)) this.visible.push(row);
         }
 
+        // a pressed header sorts first; the empty ones stay last either way
+        if (this.headerSort && this.config.sortKeys) {
+            const key = this.config.sortKeys[this.headerSort.column];
+            const descending = this.headerSort.descending;
+            if (key) {
+                const indexed = [];
+                for (let i = 0; i < this.visible.length; i++) {
+                    indexed.push({ row: this.visible[i], value: headerSortValue(key, this.visible[i]), at: i });
+                }
+                indexed.sort(function (x, y) {
+                    const xEmpty = x.value === null || x.value === undefined || x.value === '';
+                    const yEmpty = y.value === null || y.value === undefined || y.value === '';
+                    if (xEmpty !== yEmpty) return xEmpty ? 1 : -1;
+                    const result = compareSortValues(x.value, y.value);
+                    return (descending ? -result : result) || x.at - y.at;
+                });
+                this.visible = [];
+                for (let i = 0; i < indexed.length; i++) this.visible.push(indexed[i].row);
+            }
+        }
+
         // sort is applied to the filtered copy; loaded rows keep server order
         if (typeof this.config.sort === 'function') {
             const sorted = this.config.sort(this.visible.slice(), this.filters);
@@ -418,6 +513,28 @@ const dataPanelMethods = {
         if (this.page > pages) this.page = pages;
 
         this.render();
+    },
+
+    // a header was pressed: sort by it, or turn the order round when it already sorts
+    sortByColumn: function (column) {
+        const keys = this.config.sortKeys;
+        if (!keys || !keys[column]) return;
+        if (this.headerSort && this.headerSort.column === column) {
+            this.headerSort.descending = !this.headerSort.descending;
+        } else {
+            this.headerSort = { column: column, descending: false };
+        }
+        markSortableHeaders(this);
+        if (this.state === 'ready') {
+            this.page = 1;
+            this.apply();
+        }
+    },
+
+    // the columns changed (Records): forget the sort and mark the new headers
+    resetHeaderSort: function () {
+        this.headerSort = null;
+        markSortableHeaders(this);
     },
 
     // ---------- drawing ----------

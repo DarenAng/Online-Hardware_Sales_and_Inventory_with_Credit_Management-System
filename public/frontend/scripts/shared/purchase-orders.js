@@ -1139,11 +1139,11 @@ function addPurchaseLine(fromButton) {
             '<p class="pick-verdict po-line-note" id="po-line-note-' + index + '"></p></div>' +
             '<div class="form-group"><label for="po-price-' + index + '" id="po-price-label-' + index + '">Unit price</label>' +
             '<input type="text" class="form-control po-cost" id="po-price-' + index + '" readonly tabindex="-1" ' +
-                   'placeholder="—" title="The price on file for this material. It is not typed on the order.">' +
+                   'title="The price on file for this material. It is not typed on the order.">' +
             '<p class="pick-verdict po-line-amount" id="po-line-amount-' + index + '"></p></div>' +
             '<div class="form-group"><label for="po-line-total-' + index + '">Line total</label>' +
             '<input type="text" class="form-control po-cost po-line-total" id="po-line-total-' + index + '" ' +
-                   'readonly tabindex="-1" placeholder="—"></div>' +
+                   'readonly tabindex="-1"></div>' +
         '</div>';
 
     box.insertBefore(row, box.firstChild);
@@ -1871,7 +1871,7 @@ function renderPurchaseTotalsFigures() {
     }
     const average = orders.length === 0 ? 0 : total / orders.length;
     const shown = function (text) {
-        return ready ? text : '—';
+        return ready ? text : '0';
     };
 
     const f = panel ? panel.filters : {};
