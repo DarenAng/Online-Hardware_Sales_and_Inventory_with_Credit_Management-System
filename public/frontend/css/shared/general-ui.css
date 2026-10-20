@@ -3550,3 +3550,17 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
     .adjust-source { flex-direction: column; }
     .adjust-line-qty { width: 80px; }
 }
+
+/* ---------- a cashier's request to void a sale, on the sale's record ---------- */
+.void-request-box {
+    margin: 0 0 14px;
+    padding: 10px 13px;
+    border-radius: var(--radius);
+    border-left: var(--rule) solid var(--steel-soft);
+    background: var(--paper);
+}
+.void-request-box.is-waiting { border-left-color: var(--stop); background: var(--stop-dim); }
+.void-request-box p { margin: 0; }
+.void-request-title { font-weight: 600; color: var(--ink); }
+.void-request-reason { margin-top: 2px; color: var(--ink); overflow-wrap: anywhere; }
+.void-request-hint { margin-top: 4px; font-size: 13px; color: var(--steel); }

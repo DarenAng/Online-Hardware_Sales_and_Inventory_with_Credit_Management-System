@@ -26,7 +26,8 @@ const NOTIF_TONE = {
     'Delivery':         'warning',
     'Credit Request':   'info',
     'Late Penalty':     'danger',
-    'New Product':      'warning'
+    'New Product':      'warning',
+    'Void Request':     'danger'
 };
 
 // heading shown over the subject line when an alert is opened
@@ -40,7 +41,8 @@ const NOTIF_ABOUT = {
     'Delivery':         ['Delivery',          'A delivery was created and needs a driver.'],
     'Credit Request':   ['Credit request',    'A cashier asked for a higher credit limit for a customer, and a manager has to decide it.'],
     'Late Penalty':     ['Late payment',      'A credit sale is another month past its due date still unpaid, and the month\'s late-payment penalty was added to it.'],
-    'New Product':      ['New product',       'The inventory clerk added a product. It has no price yet, so the till cannot sell it until you set one.']
+    'New Product':      ['New product',       'The inventory clerk added a product. It has no price yet, so the till cannot sell it until you set one.'],
+    'Void Request':     ['Void request',      'A cashier asked for a sale of today to be voided, or a manager decided such a request.']
 };
 
 // ---------- Go to: the screen an alert is about ----------

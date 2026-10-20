@@ -352,7 +352,7 @@ CREATE TABLE stock_adjustments (
 CREATE TABLE notifications (
     notification_id INT AUTO_INCREMENT PRIMARY KEY,
     target_role_id INT NULL,
-    notif_type ENUM('Low Stock', 'Out of Stock', 'Damage Report', 'Refund Report', 'Purchase Order', 'Stock Adjustment', 'Delivery', 'Credit Request', 'Late Penalty', 'New Product') NOT NULL,
+    notif_type ENUM('Low Stock', 'Out of Stock', 'Damage Report', 'Refund Report', 'Purchase Order', 'Stock Adjustment', 'Delivery', 'Credit Request', 'Late Penalty', 'New Product', 'Void Request') NOT NULL,
     title VARCHAR(150) NOT NULL,
     message TEXT,
     product_id INT NULL,
@@ -453,6 +453,26 @@ CREATE TABLE sales (
     -- a negative discount would raise the bill, a negative payment would lower what was paid
     CONSTRAINT chk_sales_discount_not_negative CHECK (discount >= 0),
     CONSTRAINT chk_sales_amount_paid_not_negative CHECK (amount_paid >= 0)
+);
+
+-- A cashier asks for a sale of the same day to be voided; a manager approves
+-- (the sale is voided through sp_archive_record) or declines it, with a note.
+-- One request waits per sale at a time (the server checks it).
+CREATE TABLE void_requests (
+    request_id INT AUTO_INCREMENT PRIMARY KEY,
+    sale_id INT NOT NULL,
+    reason VARCHAR(255) NOT NULL,
+    status ENUM('Pending', 'Approved', 'Declined') NOT NULL DEFAULT 'Pending',
+    requested_by_staff_id INT NULL,
+    requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    decided_by_staff_id INT NULL,
+    decided_at TIMESTAMP NULL,
+    decision_note VARCHAR(255) NULL,
+    INDEX idx_void_requests_sale (sale_id, status),
+    INDEX idx_void_requests_status (status),
+    FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (requested_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
+    FOREIGN KEY (decided_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 CREATE TABLE sale_items (

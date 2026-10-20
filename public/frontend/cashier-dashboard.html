@@ -200,8 +200,6 @@
                         <div class="toolbar-spacer"></div>
                     </div>
 
-                    <div class="track-legend" id="cdel-legend"></div>
-
                     <div class="table-responsive grid-8">
                         <table id="cdel-table">
                             <thead>
@@ -1039,6 +1037,9 @@
 
             <div class="modal-foot no-print">
                 <button type="button" class="btn btn-ghost" id="receipt-terms-btn" onclick="printReceiptCreditTerms()" hidden>Print Terms and Conditions</button>
+                <!-- opened from Sales Report: a sale of today can be asked to be voided (a manager decides) -->
+                <button type="button" class="btn btn-danger" id="receipt-void-btn" data-icon="slash-circle"
+                        onclick="requestVoidSale()" hidden>Request Void</button>
                 <button type="button" class="btn btn-accent" id="receipt-print-btn" onclick="printReceipt()">Print Invoice</button>
             </div>
         </div>

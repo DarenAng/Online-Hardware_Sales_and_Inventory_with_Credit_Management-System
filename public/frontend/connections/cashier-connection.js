@@ -48,6 +48,11 @@ function apiGetOpenSales() {
     return getJson('/api/credit/open-sales');
 }
 
+// POST /api/sales/:id/void-request -- ask a manager to void a sale of today: { reason }
+function apiRequestVoid(saleId, reason) {
+    return sendJson('/api/sales/' + encodeURIComponent(saleId) + '/void-request', 'POST', { reason: reason });
+}
+
 // POST /api/returns/batch -- a refund of several items of one sale, in one report:
 // { reportType: 'Refunded', saleId, reason, items: [{ productId, quantity, refundAmount }] }.
 // All or nothing; the answer has offBalance (how much came off what the customer owes).

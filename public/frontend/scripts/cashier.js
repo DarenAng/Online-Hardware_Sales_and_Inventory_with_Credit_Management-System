@@ -2265,7 +2265,8 @@ function saleHasCustomer(s) {
     return Boolean(s.customer_id) || String(s.walk_in_name || '').trim() !== '';
 }
 
-async function openReceipt(saleId) {
+// fromReport: opened from Sales Report, where a sale of today can be asked to be voided
+async function openReceipt(saleId, fromReport) {
     let data;
     try { data = await apiGetSale(saleId); }
     catch (error) {
@@ -2352,7 +2353,59 @@ async function openReceipt(saleId) {
         termsButton.hidden = !(s.payment_method === 'Credit' && s.customer_id && holdsFeature('credit-terms-print'));
     }
 
+    renderVoidButton(fromReport ? data : null);
     showModal('receipt-modal');
+}
+
+// Request Void on the invoice: only from Sales Report, only for a sale of today
+// not yet voided; while a request waits for the manager it reads Void Requested.
+function renderVoidButton(data) {
+    const button = document.getElementById('receipt-void-btn');
+    if (!button) return;
+    const s = data ? data.sale : null;
+    if (!s || Number(s.is_archived) || Number(s.is_today) !== 1) {
+        button.hidden = true;
+        button.removeAttribute('data-sale-id');
+        return;
+    }
+    const waiting = Boolean(data.voidRequest && data.voidRequest.status === 'Pending');
+    button.hidden = false;
+    button.disabled = waiting;
+    button.textContent = waiting ? 'Void Requested' : 'Request Void';
+    button.title = waiting ? 'Waiting for a manager to approve or decline it' : 'Ask a manager to void this sale';
+    button.setAttribute('data-sale-id', String(s.sale_id));
+}
+
+async function requestVoidSale() {
+    const button = document.getElementById('receipt-void-btn');
+    const saleId = button ? Number(button.getAttribute('data-sale-id')) : 0;
+    if (!saleId) return;
+    const receiptNo = 'OR-' + String(saleId).padStart(6, '0');
+
+    const typed = await askInput({
+        title: 'Request a void?', eyebrow: 'Sales Report',
+        message: receiptNo + ' is sent to a manager. Once they approve, the sale is voided and its goods go back on the shelf.',
+        label: 'Reason', placeholder: 'Wrong items rung up', confirmLabel: 'Send Request', cancelLabel: 'Go back',
+        check: function (value) {
+            return String(value || '').trim() === '' ? 'Type why the sale should be voided.' : null;
+        }
+    });
+    if (typeof typed !== 'string') return;
+
+    try {
+        const response = await apiRequestVoid(saleId, typed.trim());
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Request not sent');
+            return;
+        }
+        notifySuccess(result.message + ' You are told here when they decide.', 'Void requested');
+        if (button) { button.disabled = true; button.textContent = 'Void Requested'; }
+        const panel = getDataPanel('cash-sales');
+        if (panel && panel.state === 'ready') await panel.refresh();
+    } catch (error) {
+        notifyOffline();
+    }
 }
 
 // The receipt of one Credit Settlement payment, on the invoice's own paper and head
@@ -2414,10 +2467,11 @@ async function showPaymentReceipt(info) {
         footerLines: ['Thank you for your payment']
     });
 
-    // it is not a credit sale's invoice: no terms page to offer
+    // it is not a credit sale's invoice: no terms page to offer, nor a void
     lastReceipt = null;
     const termsButton = document.getElementById('receipt-terms-btn');
     if (termsButton) termsButton.hidden = true;
+    renderVoidButton(null);
 
     showModal('receipt-modal');
 }
@@ -3253,10 +3307,6 @@ function buildDeliveryPanel() {
             return filters.status === 'all' || row.status === filters.status;
         },
 
-        onLoaded: function (rows) {
-            renderDeliveryLegend(rows);
-        },
-
         renderRow: function (row, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
                 'onclick="openCashierDeliveryDetail(' + row.delivery_id + ')">' +
@@ -3289,24 +3339,6 @@ function scheduleText(stamp) {
     return day + ' ' + time;
 }
 
-function renderDeliveryLegend(rows) {
-    const legend = document.getElementById('cdel-legend');
-    if (!legend) return;
-
-    if (!rows || rows.length === 0) { legend.innerHTML = ''; return; }
-
-    const stages = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed'];
-    let chips = '';
-    for (let s = 0; s < stages.length; s++) {
-        let count = 0;
-        for (let i = 0; i < rows.length; i++) {
-            if (rows[i].status === stages[s]) count++;
-        }
-        chips += '<span class="track-chip"><span class="track-count">' + count + '</span>' + stages[s] + '</span>';
-    }
-    legend.innerHTML = chips;
-}
-
 function clearDeliveryPanel() {
     const panel = getDataPanel('cash-deliveries');
     if (panel) panel.reset();
@@ -3316,9 +3348,6 @@ function clearDeliveryPanel() {
 
     const status = document.getElementById('cdel-status');
     if (status) status.value = 'all';
-
-    const legend = document.getElementById('cdel-legend');
-    if (legend) legend.innerHTML = '';
 }
 
 function openCashierDeliveryDetail(deliveryId) {
@@ -3854,12 +3883,13 @@ function buildSalesPanel() {
 
         renderRow: function (row, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
-                'onclick="openReceipt(' + row.sale_id + ')">' +
+                'onclick="openReceipt(' + row.sale_id + ', true)">' +
                 '<td class="cell-id">OR-' + String(row.sale_id).padStart(6, '0') + '</td>' +
                 '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 10)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
                 '<td>' + escapeHtml(row.payment_method) + '</td>' +
-                '<td>' + statusBadge(row.payment_status) + '</td>' +
+                '<td>' + statusBadge(row.payment_status) +
+                    (row.void_request_id ? ' <span class="badge badge-danger">Void requested</span>' : '') + '</td>' +
                 '<td class="cell-num">' + peso(row.final_amount) + '</td></tr>';
         }
     });
@@ -5206,7 +5236,10 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
             'Refund Report':  { label: 'Refunds', panelId: 'panel-refund',
                                 open: function () { showRefunds(); } },
             'Credit Request': creditAlert,
-            'Late Penalty':   creditAlert
+            'Late Penalty':   creditAlert,
+            // a manager approved or declined a request to void a sale
+            'Void Request':   { label: 'Sales Report', panelId: 'panel-salesreport',
+                                open: function () { showSalesReport(); }, key: 'cash-sales' }
         });
 
         renderCatalogEmpty();

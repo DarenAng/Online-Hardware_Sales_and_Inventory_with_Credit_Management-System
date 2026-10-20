@@ -1597,6 +1597,48 @@ async function migrateRecordArchives() {
 // The reorder point the system worked out (Dynamic) is gone: every product
 // reorders at the figure typed for it. A product still marked Dynamic is
 // marked Manual, keeping the reorder point stored on it.
+// A cashier asks a manager to void a sale of the same day (routes/void-requests.js):
+// the requests get their table, and the alerts about them a kind of their own.
+async function migrateVoidRequests() {
+  const typeResult = await db.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'notif_type'",
+    [DB_NAME]
+  );
+  const found = typeResult[0];
+  if (found.length > 0 && String(found[0].COLUMN_TYPE).indexOf("Void Request") === -1) {
+    const wider = String(found[0].COLUMN_TYPE).replace(/\)$/, ",'Void Request')");
+    await db.query("ALTER TABLE notifications MODIFY COLUMN notif_type " + wider + " NOT NULL");
+    console.log("Added the Void Request kind of alert (notifications.notif_type).");
+  }
+
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'void_requests'",
+    [DB_NAME]
+  );
+  if (tablesResult[0].length > 0) return;
+
+  await db.query(
+    "CREATE TABLE void_requests (\n" +
+      "       request_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+      "       sale_id INT NOT NULL,\n" +
+      "       reason VARCHAR(255) NOT NULL,\n" +
+      "       status ENUM('Pending','Approved','Declined') NOT NULL DEFAULT 'Pending',\n" +
+      "       requested_by_staff_id INT NULL,\n" +
+      "       requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n" +
+      "       decided_by_staff_id INT NULL,\n" +
+      "       decided_at TIMESTAMP NULL,\n" +
+      "       decision_note VARCHAR(255) NULL,\n" +
+      "       INDEX idx_void_requests_sale (sale_id, status),\n" +
+      "       INDEX idx_void_requests_status (status),\n" +
+      "       FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE CASCADE ON UPDATE CASCADE,\n" +
+      "       FOREIGN KEY (requested_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,\n" +
+      "       FOREIGN KEY (decided_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE\n" +
+      "     )");
+  console.log("Added the void_requests table: a cashier's request to void a sale, for a manager to decide.");
+}
+
 async function migrateManualReorderPoints() {
   const result = await db.query("UPDATE products SET reorder_mode = 'Manual' WHERE reorder_mode = 'Dynamic'");
   const changed = result[0] && result[0].affectedRows ? result[0].affectedRows : 0;
@@ -1651,6 +1693,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateCheckConstraints();
   await migrateRecordArchives();
   await migrateManualReorderPoints();
+  await migrateVoidRequests();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();
   await warnIfAdminPasswordIsDefault();
