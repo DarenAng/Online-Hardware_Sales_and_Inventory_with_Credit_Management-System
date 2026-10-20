@@ -300,7 +300,6 @@ function makeSuggest(id, field) {
             'onclick="makeSuggestPick(\'' + id + '\', \'' + field + '\', this)">' +
             '<span class="suggest-line">' +
                 '<span class="suggest-name">' + escapeHtml(m.value) + '</span>' +
-                '<span class="suggest-figure">' + m.count + ' material' + (m.count === 1 ? '' : 's') + '</span>' +
             '</span>' +
         '</li>';
     }
@@ -2708,9 +2707,8 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     // order carries a QR code the supplier accepts or declines it with.
     let note = '';
     if (waiting && canDecide) {
-        note = '<p class="detail-note detail-warn po-next">Waiting for your decision. Approved, the clerk prints ' +
-               'it and sends it to the supplier, whose copy carries a QR code to accept or decline it; declined, ' +
-               'it is cancelled and the clerk is told why.</p>';
+        // the manager's own decision needs no note: Approve and Decline are in the foot
+        note = '';
     } else if (waiting && readOnly) {
         note = '<p class="detail-note po-next">Waiting for the manager to approve it.</p>';
     } else if (waiting) {

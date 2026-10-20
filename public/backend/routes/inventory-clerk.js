@@ -1199,6 +1199,22 @@ function registerInventoryRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
+      // A material typed in as new that turns out to be on file already (the
+      // same name) is used as it is, so it may sit with no supplier or with
+      // another one. Ordering it from this company registers it to this
+      // company, as a brand-new material already is.
+      const orderSupplier = Number(output.supplier_id_out) || Number(supplierId) || null;
+      if (orderSupplier) {
+        for (let i = 0; i < newLines.length; i++) {
+          if (!newLines[i].new_name) continue;
+          await db.query(
+            "UPDATE products SET supplier_id = ? " +
+            "WHERE LOWER(product_name) = LOWER(?) AND (supplier_id IS NULL OR supplier_id <> ?)",
+            [orderSupplier, newLines[i].new_name, orderSupplier]
+          );
+        }
+      }
+
       response.json({
         message: output.message,
         poId: output.po_id,
