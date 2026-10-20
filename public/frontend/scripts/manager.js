@@ -1104,7 +1104,7 @@ function buildReportPanels() {
         pageSize: REPORT_ROWS_PER_PAGE,
         pagerId: 'unpaid-pager',
         idField: 'sale_id',
-        filters: { status: 'all', method: 'all', age: 'all', from: '', to: '' },
+        filters: { status: 'all', method: 'all', from: '', to: '' },
         sortKeys: ['sale_id', 'customer_name', 'payment_method', 'payment_status', function (row) { return Number(row.balance_due); }, 'sale_date'],
         gate: {
             title: 'Not loaded',
@@ -1123,7 +1123,6 @@ function buildReportPanels() {
         filter: function (row, filters) {
             return (filters.status === 'all' || row.payment_status === filters.status) &&
                 (filters.method === 'all' || row.payment_method === filters.method) &&
-                receivableAgeMatches(row, filters.age) &&
                 dateInRange(row.sale_date, filters.from, filters.to);
         },
         onLoaded: function (rows) {
@@ -1243,19 +1242,6 @@ function repeatCustomerMatches(row, filters) {
         if (filters.last === '90' && days > 90) return false;
         if (filters.last === 'older' && days <= 90) return false;
     }
-    return true;
-}
-
-// how old a receivable is, in whole days since the sale
-function receivableAgeMatches(row, age) {
-    if (!age || age === 'all') return true;
-    const sold = new Date(String(row.sale_date || '').slice(0, 10) + 'T00:00:00');
-    if (isNaN(sold.getTime())) return true;
-    const days = Math.floor((Date.now() - sold.getTime()) / 86400000);
-    if (age === '0-30') return days <= 30;
-    if (age === '31-60') return days > 30 && days <= 60;
-    if (age === '61-90') return days > 60 && days <= 90;
-    if (age === '90+') return days > 90;
     return true;
 }
 
