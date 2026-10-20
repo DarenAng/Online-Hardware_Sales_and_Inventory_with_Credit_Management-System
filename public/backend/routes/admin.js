@@ -331,11 +331,18 @@ function registerAdminRoutes(app, deps) {
     const status = String(request.query.status || "all").toLowerCase();
     const search = String(request.query.search || "").trim();
 
+    // status=archived is the Archived Accounts screen; every other status is the
+    // Staff Directory, which never lists an archived account
     const where = [];
     const params = [];
 
-    if (status === "active") where.push("s.is_active = TRUE");
-    else if (status === "inactive") where.push("s.is_active = FALSE");
+    if (status === "archived") {
+      where.push("s.archived_at IS NOT NULL");
+    } else {
+      where.push("s.archived_at IS NULL");
+      if (status === "active") where.push("s.is_active = TRUE");
+      else if (status === "inactive") where.push("s.is_active = FALSE");
+    }
 
     // a word starts with the text, not contains; see wordStartSearch
     if (search !== "") {
@@ -921,7 +928,7 @@ function registerAdminRoutes(app, deps) {
     const by = settings.by || "the administrator";
 
     const rowsResult = await db.query(
-      "SELECT s.full_name, u.email, r.role_name " +
+      "SELECT s.full_name, s.is_active, u.email, r.role_name " +
       "FROM staff s JOIN roles r ON r.role_id = s.role_id " +
       "LEFT JOIN users u ON u.staff_id = s.staff_id " +
       "WHERE s.staff_id = ?",
@@ -929,6 +936,11 @@ function registerAdminRoutes(app, deps) {
     const rows = rowsResult[0];
 
     if (rows.length === 0) return { status: 404, body: { error: "Staff record not found" } };
+
+    // a deactivated account cannot sign in, so it is given no new password
+    if (!rows[0].is_active) {
+      return { status: 409, body: { error: "This account is deactivated. Activate it before resetting its password." } };
+    }
 
     // checked here, against the row about to be reset, and never taken from the screen
     if (settings.roles && settings.roles.indexOf(rows[0].role_name) === -1) {
@@ -2204,6 +2216,11 @@ function registerAdminRoutes(app, deps) {
         console.error("Archive sweep failed inside the database (" + output.err_no + "): " + output.err_text);
         return;
       }
+      // staff accounts deactivated for 30 days are archived by the same run;
+      // the directory and the archive are read again (once a day, so cheap)
+      publishChange("staff", "sweep", null);
+      publishChange("archives", "sweep", null);
+
       if (deliveries > 0 || materials > 0) {
         console.log("Archive sweep: put away " + deliveries + " closed " +
           (deliveries === 1 ? "delivery" : "deliveries") + " and " + materials + " idle " +
@@ -2271,6 +2288,7 @@ function registerAdminRoutes(app, deps) {
           name: feature.name,
           module: feature.module,
           description: feature.description,
+          hosts: feature.available,
           roles: cells
         });
       }
@@ -2319,11 +2337,6 @@ function registerAdminRoutes(app, deps) {
 
       if (role.role_name === ADMIN) {
         return response.status(403).json({ error: "The System Administrator holds every screen by role. Nothing here is granted or taken away." });
-      }
-      if (!feature.available.includes(role.role_name)) {
-        return response.status(400).json({
-          error: "The " + role.role_name + " dashboard has no " + feature.name + " screen to show, so it cannot be granted there."
-        });
       }
 
       const before = await roleFeature(role.role_name, feature.key);

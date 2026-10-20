@@ -1440,7 +1440,11 @@ async function routinesAreOld() {
     ["sp_receive_purchase_order", "purchase_order_ordered_items"],
     ["sp_receive_purchase_order", "received_at = NOW()"],
     ["sp_create_customer", "p_address_barangay"],
-    ["sp_sweep_archives", "deliveries are never archived"]
+    ["sp_sweep_archives", "deliveries are never archived"],
+    ["sp_sweep_archives", "deactivated for 30 days"],
+    ["sp_archive_record", "Only a deactivated account can be archived"],
+    ["sp_restore_archive", "deactivated_at = NULL"],
+    ["sp_set_staff_status", "deactivated_at"]
   ];
 
   const routinesResult = await db.query(
@@ -1450,7 +1454,7 @@ async function routinesAreOld() {
       "                            'sp_create_sale_transaction', 'sp_resolve_return_report', 'sp_archive_record',\n" +
       "                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',\n" +
       "                            'sp_adjust_stock', 'sp_receive_purchase_order', 'sp_create_customer',\n" +
-      "                            'sp_create_qr_payment', 'sp_sweep_archives')",
+      "                            'sp_create_qr_payment', 'sp_sweep_archives', 'sp_set_staff_status')",
     [DB_NAME]
   );
   const routines = routinesResult[0];
@@ -1639,6 +1643,32 @@ async function migrateVoidRequests() {
   console.log("Added the void_requests table: a cashier's request to void a sale, for a manager to decide.");
 }
 
+// Deactivating an account no longer archives it: it stays in the Staff
+// Directory as Deactivated, and is archived by hand or by the daily sweep
+// once it has been deactivated for 30 days. staff.deactivated_at says when.
+// Before this, every deactivation stamped archived_at, so on the first run an
+// account deactivated less than 30 days ago comes back to the directory as
+// Deactivated; one deactivated longer ago stays archived.
+async function migrateStaffDeactivatedAt() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'staff' AND COLUMN_NAME = 'deactivated_at'",
+    [DB_NAME]
+  );
+  if (columnsResult[0].length > 0) return;
+
+  await db.query("ALTER TABLE staff ADD COLUMN deactivated_at TIMESTAMP NULL AFTER is_active");
+  await db.query(
+    "UPDATE staff SET deactivated_at = COALESCE(archived_at, NOW()) WHERE is_active = FALSE");
+  const back = await db.query(
+    "UPDATE staff SET archived_at = NULL, archived_by_staff_id = NULL\n" +
+      "     WHERE is_active = FALSE AND archived_at IS NOT NULL\n" +
+      "       AND archived_at > DATE_SUB(NOW(), INTERVAL 30 DAY)");
+  const moved = back[0] && back[0].affectedRows ? back[0].affectedRows : 0;
+  console.log("Added staff.deactivated_at: a deactivated account is archived after 30 days" +
+    (moved > 0 ? " (" + moved + " recently deactivated account(s) are back in the Staff Directory)." : "."));
+}
+
 async function migrateManualReorderPoints() {
   const result = await db.query("UPDATE products SET reorder_mode = 'Manual' WHERE reorder_mode = 'Dynamic'");
   const changed = result[0] && result[0].affectedRows ? result[0].affectedRows : 0;
@@ -1694,6 +1724,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateRecordArchives();
   await migrateManualReorderPoints();
   await migrateVoidRequests();
+  await migrateStaffDeactivatedAt();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();
   await warnIfAdminPasswordIsDefault();

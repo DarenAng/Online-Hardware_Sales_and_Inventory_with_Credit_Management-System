@@ -1566,7 +1566,7 @@ function renderCartFigures() {
     renderSalePaymentExtras(t);
 
     // GCash, PayMaya and a bank transfer are only ever taken through PayMongo
-    // (Pay by QR, Pay by Bank Transfer), so Complete Sale is not offered for them.
+    // (Pay by QR), so Complete Sale is not offered for them.
     const taken = methodTakenNow(t);
     const button = document.getElementById('checkout-btn');
     if (button) {
@@ -1584,7 +1584,7 @@ function renderCartFigures() {
         // GCash or PayMaya paid in full: the amount entered has to cover the bill
         const short = !t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due;
         qrButton.disabled = cart.length === 0 || short;
-        qrButton.textContent = taken === 'Bank Transfer' ? 'Pay by Bank Transfer' : 'Pay by QR';
+        qrButton.textContent = 'Pay by QR';
     }
 
     // a code on screen is for the old total; it is cancelled, not paid wrong
@@ -1939,7 +1939,7 @@ function checkoutQuestion(t, customerName) {
         if (t.amountOnAccount > 0) {
             if (t.down > 0) {
                 title = 'Take part payment and put the rest on account?';
-                confirmLabel = 'Take ' + peso(t.down) + ' and put the rest on account';
+                confirmLabel = 'Confirm';
             } else {
                 title = 'Put this sale on account?';
                 confirmLabel = 'Put it on their account';
@@ -2345,15 +2345,8 @@ async function openReceipt(saleId, fromReport) {
         taxHtml: receiptTaxBlock(s),
         paid: s.payment_status === 'Paid',
         balanceText: s.payment_status.toUpperCase() + ' BALANCE ' + peso(saleAmountDue(s) - Number(s.amount_paid)),
-        detailsHtml: paymentDetailsReceiptHtml(paymentDetailItems(data), true),
-        bankHtml: receiptBankBlock(shop, s, receiptNo)
+        detailsHtml: paymentDetailsReceiptHtml(paymentDetailItems(data), true)
     });
-
-    // a credit sale's invoice offers the terms page, when the role may print it
-    const termsButton = document.getElementById('receipt-terms-btn');
-    if (termsButton) {
-        termsButton.hidden = !(s.payment_method === 'Credit' && s.customer_id && holdsFeature('credit-terms-print'));
-    }
 
     renderVoidButton(fromReport ? data : null);
     showModal('receipt-modal');
@@ -2387,7 +2380,7 @@ async function requestVoidSale() {
     const typed = await askInput({
         title: 'Request a void?', eyebrow: 'Sales Report',
         message: receiptNo + ' is sent to a manager. Once they approve, the sale is voided and its goods go back on the shelf.',
-        label: 'Reason', placeholder: 'Wrong items rung up', confirmLabel: 'Send Request', cancelLabel: 'Go back',
+        label: 'Reason', confirmLabel: 'Send Request', cancelLabel: 'Go back',
         check: function (value) {
             return String(value || '').trim() === '' ? 'Type why the sale should be voided.' : null;
         }
@@ -2469,44 +2462,11 @@ async function showPaymentReceipt(info) {
         footerLines: ['Thank you for your payment']
     });
 
-    // it is not a credit sale's invoice: no terms page to offer, nor a void
+    // it is not a sale's invoice: no void to offer
     lastReceipt = null;
-    const termsButton = document.getElementById('receipt-terms-btn');
-    if (termsButton) termsButton.hidden = true;
     renderVoidButton(null);
 
     showModal('receipt-modal');
-}
-
-// The shop's account on the invoice, as the way to pay when the sale leaves a
-// balance, with the invoice number to quote so the money can be matched to this
-// sale when it lands. (A transfer taken at the counter shows the customer's own
-// bank and account instead: paymentDetailsReceiptHtml.)
-function receiptBankBlock(shop, sale, receiptNo) {
-    if (!shop || !shop.bank_account_number) return '';
-
-    const balance = saleAmountDue(sale) - Number(sale.amount_paid);
-    const owing = sale.payment_status !== 'Paid' && balance > 0.004;
-
-    if (!owing) return '';
-
-    const quoteHtml = '<p class="rc-bank-note">Quote <strong>' + escapeHtml(receiptNo) + '</strong> as the transfer ' +
-        'reference, so the payment is matched to this invoice.</p>';
-
-    return '<div class="rc-rule"></div>' +
-        '<div class="rc-bank">' +
-            '<p class="rc-bank-head">Pay the balance by bank transfer</p>' +
-            '<div><span>Bank</span><span>' + escapeHtml(shop.bank_name) + '</span></div>' +
-            '<div><span>Account name</span><span>' + escapeHtml(shop.bank_account_name) + '</span></div>' +
-            '<div><span>Account no.</span><span>' + escapeHtml(shop.bank_account_number) + '</span></div>' +
-            quoteHtml +
-        '</div>';
-}
-
-// the Credit Terms and Conditions page for the customer of the invoice on screen
-function printReceiptCreditTerms() {
-    if (!lastReceipt || !lastReceipt.sale.customer_id) return;
-    printCreditTerms(lastReceipt.sale.customer_id);
 }
 
 function printReceipt() {
@@ -4075,11 +4035,10 @@ function renderPaymentVerdict() {
 
     // GCash, PayMaya and a bank transfer are only taken through PayMongo (the QR
     // code), so Confirm Payment is not offered for them.
-    const isTransfer = fields.paymentMethod.value === 'Bank Transfer';
     const qrButton = document.getElementById('payment-qr-btn');
     if (qrButton) {
         qrButton.hidden = QR_METHODS.indexOf(fields.paymentMethod.value) === -1;
-        qrButton.textContent = isTransfer ? 'Pay by Bank Transfer' : 'Pay by QR';
+        qrButton.textContent = 'Pay by QR';
     }
     const saveButton = document.getElementById('payment-save-btn');
     if (saveButton) saveButton.hidden = QR_METHODS.indexOf(fields.paymentMethod.value) !== -1;

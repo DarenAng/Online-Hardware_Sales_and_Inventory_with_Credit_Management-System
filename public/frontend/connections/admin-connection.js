@@ -13,7 +13,7 @@ function apiGetRoles() {
     return fetch('/api/roles', { headers: apiHeaders() });
 }
 
-// GET /api/users -- query is '' or like '?status=inactive'
+// GET /api/users -- query is '', '?status=active', '?status=inactive' or '?status=archived'
 function apiGetStaff(query) {
     return getJson('/api/users' + query);
 }
@@ -26,6 +26,11 @@ function apiUpdateStaff(staffId, data) {
 // PATCH /api/users/:id/status -- activate (true) or deactivate (false)
 function apiSetStaffActive(staffId, isActive) {
     return sendJson('/api/users/' + staffId + '/status', 'PATCH', { isActive: isActive });
+}
+
+// POST /api/archives/archive -- put a deactivated staff account in the archive
+function apiArchiveStaff(staffId) {
+    return sendJson('/api/archives/archive', 'POST', { module: 'Staff', recordId: staffId });
 }
 
 // POST /api/users/:id/reset-password

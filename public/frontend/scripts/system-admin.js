@@ -84,7 +84,7 @@ function showMaintenance(event) {
 }
 function showStoreSettings(event) { showPanel('panel-store', event); loadStoreSettingsForm(); }
 
-// read on opening; not re-read while switches wait for Grant Access, or are being saved
+// read on opening; not re-read while switches wait for Confirm Configuration, or are being saved
 function showAccessControl(event) {
     showPanel('panel-features', event);
     if (!featureSaving && featureMatrixChanges().length === 0) loadFeatureMatrix();
@@ -141,12 +141,12 @@ async function loadRoles() {
     }
 }
 
-// Active/Inactive is a decision about the account. Whether somebody is at a
+// Active/Deactivated is a decision about the account. Whether somebody is at a
 // screen right now is not the directory's business; Last Login is on the card.
 let selectedUser = null;
 
 function accountCell(user) {
-    if (!user.is_active) return '<span class="badge badge-danger">Inactive</span>';
+    if (!user.is_active) return '<span class="badge badge-danger">Deactivated</span>';
     // held after too many wrong passwords; a password reset releases it
     if (user.held_until) return '<span class="badge badge-warning" title="Held until ' + escapeHtml(whenText(user.held_until)) + ' after too many wrong passwords">Held</span>';
     return '<span class="badge badge-success">Active</span>';
@@ -316,7 +316,10 @@ async function openUserModal(staffId) {
 
     const hasLogin = Boolean(selectedUser.user_id);
     document.getElementById('modal-login-btn').style.display = hasLogin ? 'none' : 'inline-block';
-    document.getElementById('modal-reset-btn').style.display = hasLogin ? 'inline-block' : 'none';
+    // a deactivated account cannot sign in, so its password is not reset
+    document.getElementById('modal-reset-btn').style.display = hasLogin && selectedUser.is_active ? 'inline-block' : 'none';
+    // only a deactivated account can be archived
+    document.getElementById('modal-archive-btn').style.display = selectedUser.is_active ? 'none' : 'inline-block';
     // Lift Hold only while the account is held after too many wrong passwords
     document.getElementById('modal-hold-btn').style.display =
         hasLogin && selectedUser.held_until ? 'inline-block' : 'none';
@@ -326,7 +329,7 @@ async function openUserModal(staffId) {
     const own = isOwnAccount(selectedUser);
     document.getElementById('modal-own-note').style.display = own ? 'block' : 'none';
     document.getElementById('modal-edit-tab').style.display = own ? 'none' : '';
-    const buttonIds = ['modal-login-btn', 'modal-hold-btn', 'modal-reset-btn', 'modal-status-btn'];
+    const buttonIds = ['modal-login-btn', 'modal-hold-btn', 'modal-reset-btn', 'modal-status-btn', 'modal-archive-btn'];
     for (let i = 0; i < buttonIds.length; i++) {
         const button = document.getElementById(buttonIds[i]);
         button.disabled = own;
@@ -489,7 +492,8 @@ async function toggleUserStatus() {
                 confirmLabel: 'Deactivate the account',
                 detail: [
                     'Any session they have open is ended immediately.',
-                    'They cannot sign in again until an administrator restores the account.',
+                    'They cannot sign in again until an administrator activates the account.',
+                    'It stays in the Staff Directory as Deactivated, and is archived after 30 days.',
                     'Their sales, records and history are kept and are not deleted.'
                 ]
             });
@@ -502,6 +506,41 @@ async function toggleUserStatus() {
         doneMessage = 'The account is active again.';
     }
     await sendUserRequest(apiSetStaffActive(selectedUser.staff_id, makeActive), doneMessage);
+}
+
+// Archive Account: only on a deactivated account. It leaves the Staff
+// Directory for Archived Accounts, where it can be restored.
+async function archiveUserAccount() {
+    if (!selectedUser) return;
+
+    if (isOwnAccount(selectedUser)) {
+        notifyWarning('You cannot archive your own account. Another administrator can.', 'Not allowed');
+        return;
+    }
+    if (selectedUser.is_active) {
+        notifyWarning('Only a deactivated account can be archived. Deactivate it first.', 'Account is active');
+        return;
+    }
+
+    const name = staffName(selectedUser);
+    const yes = await askArchive(name + ' (' + selectedUser.role_name + ')', {
+        title: 'Archive this account?',
+        eyebrow: 'Accounts Management',
+        confirmLabel: 'Archive the account',
+        detail: [
+            'It leaves the Staff Directory and is listed under Archived Accounts.',
+            'Their sales, records and history stay on record.',
+            'The account can be restored from Archived Accounts.'
+        ]
+    });
+    if (!yes) return;
+
+    const result = await sendUserRequest(apiArchiveStaff(selectedUser.staff_id));
+    if (!result) return;
+
+    notifySuccess(name + '\'s account is archived.', 'Account archived');
+    const archive = getDataPanel('admin-archive');
+    if (archive && archive.state === 'ready') await archive.refresh();
 }
 
 // Lift Hold: the account was held after too many wrong passwords. This lets
@@ -541,11 +580,15 @@ async function resetUserPassword() {
         return;
     }
 
+    if (!selectedUser.is_active) {
+        notifyWarning('This account is deactivated. Activate it before resetting its password.', 'Account deactivated');
+        return;
+    }
+
     // nobody types the new password: the server makes it and sends it
     const name = staffName(selectedUser);
     const yes = await askDanger(
-        'A new password is made for ' + name + ' and sent to ' + selectedUser.email + '. ' +
-        'The one they have now stops working the moment you confirm.',
+        'A new password is made for ' + name + ' and sent to ' + selectedUser.email + '.',
         {
             title: 'Reset this password?',
             eyebrow: 'Accounts Management',
@@ -553,8 +596,7 @@ async function resetUserPassword() {
             cancelLabel: 'Cancel',
             detail: [
                 'Every screen they are signed in on is signed out.',
-                'They sign in with the new password and are asked to choose their own.',
-                'If the mail cannot go, the password is shown to you once, to hand over.'
+                'They sign in with the new password and are asked to choose their own.'
             ]
         });
 
@@ -1181,12 +1223,12 @@ function buildArchivePanel() {
 
         gate: {
             title: 'The archive is not loaded',
-            text: 'Press Load Data to read the deactivated staff accounts, or type a name.',
+            text: 'Press Load Data to read the archived staff accounts, or type a name.',
             button: 'Load Data'
         },
 
         load: function () {
-            return apiGetStaff('?status=inactive');
+            return apiGetStaff('?status=archived');
         },
 
         match: function (user, query) {
@@ -1298,13 +1340,14 @@ async function restoreSelectedAccount() {
     }
 }
 
-// Access control: a role is picked on the left and its screens are a list of
-// switches on the right. Every role's list is drawn and all but the picked one
-// hidden, so a change made under one role survives looking at another.
-// Nothing is saved until Grant Access reads the changes back.
+// Access control: a role is picked from the dropdown beside the search and its
+// screens are a list of switches below. Every screen in the system is listed for
+// every role. Every role's list is drawn and all but the picked one hidden, so a
+// change made under one role survives looking at another. Nothing is saved until
+// Confirm Configuration reads the changes back.
 let featureMatrix = null;       // what /api/features last answered
 let featureRoleId = null;       // the role whose list is showing
-let featureSaving = false;      // true while Grant Access is saving
+let featureSaving = false;      // true while Confirm Configuration is saving
 
 function featureCellState(cell) {
     if (!cell.available) return 'unavailable';
@@ -1341,12 +1384,11 @@ async function loadFeatureMatrix() {
     renderFeatureMatrix();
 }
 
-// The roles down the left-hand column, one button each; the first is picked
-// until somebody chooses. Each carries a mark once something on it has been
-// changed and not yet granted.
+// The roles in the dropdown; the first is picked until somebody chooses.
+// A role with changes not yet confirmed says so in its name.
 function renderFeatureRoleList(roles) {
-    const list = document.getElementById('features-role');
-    if (!list) return;
+    const select = document.getElementById('features-role');
+    if (!select) return;
 
     let found = false;
     for (let i = 0; i < roles.length; i++) {
@@ -1358,17 +1400,11 @@ function renderFeatureRoleList(roles) {
 
     let html = '';
     for (let i = 0; i < roles.length; i++) {
-        const role = roles[i];
-        const picked = role.role_id === featureRoleId;
-        html += '<button type="button" class="role-pick' + (picked ? ' active' : '') + '"' +
-                ' role="tab" aria-selected="' + (picked ? 'true' : 'false') + '"' +
-                ' data-role="' + escapeHtml(String(role.role_id)) + '"' +
-                ' onclick="selectFeatureRole(' + Number(role.role_id) + ')">' +
-                '<span class="role-pick-name">' + escapeHtml(role.role_name) + '</span>' +
-                '<span class="role-pick-mark" title="Changed, not yet granted" hidden>&bull;</span>' +
-            '</button>';
+        html += '<option value="' + escapeHtml(String(roles[i].role_id)) + '"' +
+            ' data-name="' + escapeHtml(roles[i].role_name) + '">' + escapeHtml(roles[i].role_name) + '</option>';
     }
-    list.innerHTML = html;
+    select.innerHTML = html;
+    if (featureRoleId !== null) select.value = String(featureRoleId);
 }
 
 function selectFeatureRole(value) {
@@ -1383,11 +1419,9 @@ function showFeatureRole() {
         strips[i].hidden = Number(strips[i].dataset.role) !== featureRoleId;
     }
 
-    const buttons = document.querySelectorAll('#features-role .role-pick');
-    for (let i = 0; i < buttons.length; i++) {
-        const picked = Number(buttons[i].dataset.role) === featureRoleId;
-        buttons[i].classList.toggle('active', picked);
-        buttons[i].setAttribute('aria-selected', picked ? 'true' : 'false');
+    const select = document.getElementById('features-role');
+    if (select && featureRoleId !== null && select.value !== String(featureRoleId)) {
+        select.value = String(featureRoleId);
     }
 
     syncFeatureRoleNote();
@@ -1414,16 +1448,17 @@ function syncFeatureRoleNote() {
             if (before[boxes[b].dataset.feature + '|' + boxes[b].dataset.role] !== boxes[b].checked) unsaved = true;
         }
 
-        const pick = document.querySelector('#features-role .role-pick[data-role="' + strip.dataset.role + '"]');
-        if (pick) {
-            const mark = pick.querySelector('.role-pick-mark');
-            if (mark) mark.hidden = !unsaved;
+        const option = document.querySelector('#features-role option[value="' + strip.dataset.role + '"]');
+        if (option) {
+            const text = option.dataset.name + (unsaved ? ' (changed)' : '');
+            if (option.textContent !== text) option.textContent = text;
         }
     }
 }
 
-// one row: the screen and what it does, the state it is in, then the checkbox;
-// every row shares the same three columns, so the checkboxes line up
+// one row: the screen and what it does, the state it is in, the checkbox, then
+// "Default" when the role has it by default; every row shares the same four
+// columns, so the checkboxes line up
 function featureRowHtml(feature, role) {
     const cell = feature.roles[role.role_name];
     const state = featureCellState(cell);
@@ -1449,6 +1484,9 @@ function featureRowHtml(feature, role) {
                 (cell.held ? ' checked' : '') +
                 ' aria-label="' + escapeHtml(feature.name + ' for ' + role.role_name) + '"' +
                 ' onchange="onFeatureBoxChange(this)">' +
+            '<span class="feature-default' + (cell.byDefault ? '' : ' is-empty') + '"' +
+                (cell.byDefault ? ' title="' + escapeHtml(role.role_name) + ' accounts have this screen by default"' : ' aria-hidden="true"') + '>' +
+                'Default</span>' +
         '</label>';
 }
 
@@ -1467,7 +1505,7 @@ function renderFeatureMatrix() {
         if (!modules.includes(features[i].module)) modules.push(features[i].module);
     }
 
-    // one list per role: the screens its dashboard can draw, grouped under the module name
+    // one list per role: every screen in the system, grouped under the module name
     let html = '';
     for (let r = 0; r < roles.length; r++) {
         const role = roles[r];
@@ -1477,7 +1515,7 @@ function renderFeatureMatrix() {
             for (let f = 0; f < features.length; f++) {
                 const feature = features[f];
                 const cell = feature.roles[role.role_name];
-                if (feature.module === modules[m] && cell && cell.available) {
+                if (feature.module === modules[m] && cell) {
                     rows += featureRowHtml(feature, role);
                 }
             }
@@ -1592,58 +1630,121 @@ function syncFeatureSaveButton() {
     const changes = featureMatrixChanges();
     button.disabled = changes.length === 0 || featureSaving;
     button.title = changes.length === 0 ? 'Nothing has changed yet' : '';
+
+    const discard = document.getElementById('features-discard-btn');
+    if (discard) discard.disabled = changes.length === 0 || featureSaving;
+
+    const note = document.getElementById('features-change-note');
+    if (note) {
+        note.textContent = changes.length === 0
+            ? 'No changes yet'
+            : changes.length + (changes.length === 1 ? ' change' : ' changes') + ' not confirmed yet';
+        note.classList.toggle('has-changes', changes.length > 0);
+    }
 }
 
-// Grant Access: read back first; crimson when anything is being taken away.
+// Discard Changes: every switch back to how it was saved
+function discardFeatureChanges() {
+    if (featureSaving) return;
+    renderFeatureMatrix();
+}
+
+// Leaving Access Control (another screen in the menu) with changes not yet
+// confirmed asks first: keep editing, or discard them and go.
+function featureScreenOpen() {
+    const panel = document.getElementById('panel-features');
+    return Boolean(panel) && panel.style.display !== 'none';
+}
+
+document.addEventListener('click', async function (event) {
+    const link = event.target.closest ? event.target.closest('.sidebar-nav a, .sidebar-brand') : null;
+    if (!link || link.dataset.leaveChecked === '1') return;
+    if (!featureScreenOpen() || featureSaving || featureMatrixChanges().length === 0) return;
+    if (link.dataset.panelLink === 'panel-features') return;
+    // the caret only folds a heading; it does not leave the screen
+    if (event.target.closest('.nav-caret')) return;
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
+    const count = featureMatrixChanges().length;
+    const leave = await askConfirm(
+        'You have ' + count + (count === 1 ? ' change' : ' changes') + ' to Access Control that ' +
+        (count === 1 ? 'is' : 'are') + ' not confirmed yet.',
+        {
+            title: 'Discard your changes?',
+            eyebrow: 'Access Control',
+            mark: '!',
+            confirmLabel: 'Discard Changes',
+            cancelLabel: 'Keep Editing',
+            tone: 'danger'
+        });
+    if (!leave) return;
+
+    discardFeatureChanges();
+    link.dataset.leaveChecked = '1';
+    try {
+        link.click();
+    } finally {
+        delete link.dataset.leaveChecked;
+    }
+}, true);
+
+// closing the tab or reloading with changes waiting: the browser asks too
+window.addEventListener('beforeunload', function (event) {
+    if (featureScreenOpen() && !featureSaving && featureMatrixChanges().length > 0) {
+        event.preventDefault();
+        event.returnValue = '';
+    }
+});
+
+// Confirm Configuration: read back first, role by role, every screen changed.
 async function saveFeatureMatrix() {
     const changes = featureMatrixChanges();
     if (changes.length === 0) {
-        notifyInfo('Nothing on this screen has been changed, so there is nothing to grant.', 'No changes');
+        notifyInfo('Nothing on this screen has been changed, so there is nothing to confirm.', 'No changes');
         return;
     }
 
-    // one line per change, e.g. "Cashier: Income switched on"
-    let takesAway = false;
-    const lines = [];
+    // Role: Manager / Access: Account Management - turned off, ...
+    const byRole = [];
     for (let i = 0; i < changes.length; i++) {
-        const change = changes[i];
-        let what;
-        if (change.granted && change.byDefault) {
-            what = ' switched back on';
-        } else if (change.granted) {
-            what = ' switched on';
-        } else if (change.byDefault) {
-            what = ' switched off';
-            takesAway = true;
-        } else {
-            what = ' taken back off';
-            takesAway = true;
+        let group = null;
+        for (let g = 0; g < byRole.length; g++) {
+            if (byRole[g].roleName === changes[i].roleName) group = byRole[g];
         }
-        lines.push(change.roleName + ': ' + change.name + what);
+        if (!group) {
+            group = { roleName: changes[i].roleName, lines: [] };
+            byRole.push(group);
+        }
+        group.lines.push(changes[i]);
     }
 
-    let detail = lines;
-    if (takesAway) {
-        detail = lines.concat(['Somebody may be on one of these screens now. Their page goes back to its first screen and says why.']);
+    let html = '<div class="ask-config">';
+    for (let g = 0; g < byRole.length; g++) {
+        html += '<div class="ask-config-role">' +
+            '<span class="ask-config-line">Role: <strong>' + escapeHtml(byRole[g].roleName) + '</strong></span>' +
+            '<span class="ask-config-line">Access:</span><ul>';
+        for (let l = 0; l < byRole[g].lines.length; l++) {
+            const change = byRole[g].lines[l];
+            html += '<li>' + escapeHtml(change.name) + ' - ' +
+                (change.granted ? '<span class="is-on">turned on</span>' : '<span class="is-off">turned off</span>') + '</li>';
+        }
+        html += '</ul></div>';
     }
-    const options = {
-        title: takesAway ? 'Switch screens off for a role?' : 'Grant these screens?',
+    html += '</div>';
+
+    const yes = await askConfirm('', {
+        title: 'Confirm access control configuration',
         eyebrow: 'Access Control',
-        confirmLabel: 'Grant Access',
-        detail: detail
-    };
-    const message = 'Every signed-in screen of these roles follows at once. Each line is written to the audit trail in your name.';
-
-    let yes;
-    if (takesAway) {
-        yes = await askDanger(message, options);
-    } else {
-        yes = await askConfirm(message, options);
-    }
+        messageHtml: html,
+        confirmLabel: 'Confirm Configuration',
+        cancelLabel: 'Cancel'
+    });
     if (!yes) return;
 
     const button = document.getElementById('features-save-btn');
-    if (button) { button.disabled = true; button.textContent = 'Granting...'; }
+    if (button) { button.disabled = true; button.textContent = 'Saving...'; }
     featureSaving = true;
 
     let saved = 0;
@@ -1669,7 +1770,7 @@ async function saveFeatureMatrix() {
     }
 
     featureSaving = false;
-    if (button) { button.textContent = 'Grant Access'; }
+    if (button) { button.textContent = 'Confirm Configuration'; }
 
     if (saved > 0) {
         let text = saved + ' ' + (saved === 1 ? 'change' : 'changes') + ' to the screens by role ';
@@ -1678,7 +1779,7 @@ async function saveFeatureMatrix() {
         } else {
             text += 'saved and written to the audit trail.';
         }
-        notifySuccess(text, stopped ? 'Partly saved' : 'Access granted');
+        notifySuccess(text, stopped ? 'Partly saved' : 'Configuration saved');
     }
 
     await loadFeatureMatrix();
@@ -1745,6 +1846,127 @@ function keepSavedLogRole() {
     select.value = role;
 }
 
+// ---------- the Period box on the audit trail ----------
+// All time, a named period, or Custom date (which shows From and To). A named
+// period fills the two date boxes itself, so the query and the export read it.
+const LOG_PERIODS = [
+    ['all', 'All time', null],
+    ['today', 'Today', 0],
+    ['7d', 'Last 7 days', 6],
+    ['30d', 'Last 30 days', 29],
+    ['90d', 'Last 90 days', 89],
+    ['6m', 'Last 6 months', 182],
+    ['12m', 'Last 12 months', 364]
+];
+
+function isoDayBefore(days) {
+    const day = new Date();
+    day.setDate(day.getDate() - days);
+    return day.getFullYear() + '-' + String(day.getMonth() + 1).padStart(2, '0') + '-' +
+        String(day.getDate()).padStart(2, '0');
+}
+
+function logPeriodDates(value) {
+    for (let i = 0; i < LOG_PERIODS.length; i++) {
+        if (LOG_PERIODS[i][0] !== value) continue;
+        if (LOG_PERIODS[i][2] === null) return { from: '', to: '' };
+        return { from: isoDayBefore(LOG_PERIODS[i][2]), to: isoDayBefore(0) };
+    }
+    return null;
+}
+
+function showLogDates(show) {
+    const ids = ['logs-from', 'logs-to'];
+    for (let i = 0; i < ids.length; i++) {
+        const box = document.getElementById(ids[i]);
+        const field = box ? box.closest('.toolbar-field') : null;
+        if (field) field.hidden = !show;
+    }
+}
+
+function buildLogPeriodBox() {
+    const select = document.getElementById('logs-period');
+    if (!select) return;
+    let html = '';
+    for (let i = 0; i < LOG_PERIODS.length; i++) {
+        html += '<option value="' + LOG_PERIODS[i][0] + '">' + escapeHtml(LOG_PERIODS[i][1]) + '</option>';
+    }
+    html += '<option value="custom">Custom date...</option>';
+    select.innerHTML = html;
+    select.value = 'all';
+    syncLogPeriodBox();
+}
+
+// Custom date shows the dates and waits for both; any other period applies at once
+function logPeriodPicked() {
+    const select = document.getElementById('logs-period');
+    if (!select) return;
+    if (select.value === 'custom') {
+        showLogDates(true);
+        const from = document.getElementById('logs-from');
+        if (from) from.focus();
+        return;
+    }
+    showLogDates(false);
+    const dates = logPeriodDates(select.value);
+    document.getElementById('logs-from').value = dates.from;
+    document.getElementById('logs-to').value = dates.to;
+    refreshAuditLogs();
+}
+
+// a custom range is read once both dates are in, and the right way round
+function logDatesPicked() {
+    const from = document.getElementById('logs-from').value;
+    const to = document.getElementById('logs-to').value;
+    if (!from || !to) return;
+    if (from > to) {
+        notifyWarning('The start date is after the end date. Swap them and try again.', 'That range runs backwards');
+        return;
+    }
+    refreshAuditLogs();
+}
+
+// a table put back after a reload brings its dates back: the Period box follows them
+function syncLogPeriodBox() {
+    const select = document.getElementById('logs-period');
+    const from = document.getElementById('logs-from');
+    const to = document.getElementById('logs-to');
+    if (!select || !from || !to) return;
+    if (select.value !== 'custom') {
+        const dates = logPeriodDates(select.value);
+        if (!dates || dates.from !== from.value || dates.to !== to.value) select.value = 'custom';
+    }
+    showLogDates(select.value === 'custom');
+}
+
+// Export opens Excel and PDF under it; a click anywhere else closes it
+function toggleLogExportMenu(event) {
+    if (event) event.stopPropagation();
+    const menu = document.getElementById('logs-export-menu');
+    if (!menu) return;
+    const list = menu.querySelector('.export-menu-list');
+    const toggle = menu.querySelector('.export-toggle');
+    list.hidden = !list.hidden;
+    toggle.setAttribute('aria-expanded', String(!list.hidden));
+}
+
+function closeLogExportMenu() {
+    const menu = document.getElementById('logs-export-menu');
+    if (!menu) return;
+    menu.querySelector('.export-menu-list').hidden = true;
+    menu.querySelector('.export-toggle').setAttribute('aria-expanded', 'false');
+}
+
+document.addEventListener('click', function (event) {
+    if (!event.target.closest || !event.target.closest('.export-menu-list .btn')) {
+        if (event.target.closest && event.target.closest('#logs-export-menu')) return;
+    }
+    closeLogExportMenu();
+});
+document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') closeLogExportMenu();
+});
+
 // the role box and the two date boxes narrow the query itself
 async function refreshAuditLogs() {
     syncLogColumns();
@@ -1756,7 +1978,7 @@ async function refreshAuditLogs() {
 function buildLogsPanel() {
     createDataPanel({
         key: 'admin-logs',
-        inputs: ['logs-role', 'logs-from', 'logs-to'],
+        inputs: ['logs-role', 'logs-period', 'logs-from', 'logs-to'],
         tableId: 'logs-table',
         columns: 6,
         pagerId: 'logs-pager',
@@ -1764,7 +1986,7 @@ function buildLogsPanel() {
 
         gate: {
             title: 'The audit trail is not loaded',
-            text: 'Pick a date range or a role, then press Load Data. ' +
+            text: 'Pick a period or a role, then press Load Data. ' +
                   'Nothing is read from the trail until you ask for it.',
             button: 'Load Data'
         },
@@ -2785,15 +3007,6 @@ function renderStorePreview() {
               '<div><span>Exempt Sales</span><span>' + peso(0) + '</span></div></div>';
     }
 
-    let bank = '';
-    if (shop.bank_account_number) {
-        bank = '<div class="rc-rule"></div><div class="rc-bank">' +
-            '<p class="rc-bank-head">Paid by bank transfer</p>' +
-            '<div><span>Bank</span><span>' + escapeHtml(shop.bank_name) + '</span></div>' +
-            '<div><span>Account name</span><span>' + escapeHtml(shop.bank_account_name) + '</span></div>' +
-            '<div><span>Account no.</span><span>' + escapeHtml(shop.bank_account_number) + '</span></div></div>';
-    }
-
     const now = new Date();
     applyReceiptPaper(box, shop);
     box.innerHTML = receiptHtml(shop, {
@@ -2816,8 +3029,7 @@ function renderStorePreview() {
             { label: 'Change', value: peso(0) }
         ],
         taxHtml: tax,
-        paid: true,
-        bankHtml: bank
+        paid: true
     });
 }
 
@@ -2911,8 +3123,7 @@ function previewPartsFor(box, form, name) {
         case 'show_tax':          return { parts: firstFound(all('.rc-tax'), all('.rc-totals')) };
         case 'bankName':
         case 'bankAccountName':
-        case 'bankAccountNumber':
-        case 'show_bank':         return { parts: firstFound(all('.rc-bank'), all('.rc-foot')) };
+        case 'bankAccountNumber': return { parts: all('.rc-foot') };
         case 'title':             return { parts: firstFound(all('.rc-line'), all('.rc-no')) };
         case 'show_item_count':   return { parts: all('.rc-due') };
         case 'invoiceNote':
@@ -3009,8 +3220,14 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
     document.addEventListener('DOMContentLoaded', async function () {
         buildUsersPanel();
         buildArchivePanel();
+        buildLogPeriodBox();
         buildLogsPanel();
         keepSavedLogRole();
+
+        // the audit trail put back after a reload: its Period box follows the dates it came back with
+        document.addEventListener('datapanel:change', function (event) {
+            if (!event.detail || event.detail.key === 'admin-logs') syncLogPeriodBox();
+        });
         buildBackupPanel();
 
         // a switch thrown by another administrator reaches this screen, unless this one has changes of its own

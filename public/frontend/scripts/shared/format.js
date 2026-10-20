@@ -481,7 +481,7 @@ function receiptHeadHtml(shop, taxRegistration, receiptNo, title) {
 //   { registration, receiptNo, title (optional, instead of the shop's invoice title),
 //     meta: [{ key: 'date'|'cashier'|'customer'|'payment'|'reference', label, value }],
 //     itemsHtml (left out when there are no items, as on a payment receipt), itemCount,
-//     totals: [{ label, value, due }], taxHtml, paid: true/false, balanceText, bankHtml }
+//     totals: [{ label, value, due }], taxHtml, paid: true/false, balanceText }
 function receiptHtml(shop, parts) {
     const store = shop || {};
     const layout = receiptLayoutOf(store);
@@ -539,8 +539,6 @@ function receiptHtml(shop, parts) {
 
     // the bank and account of a cheque or a bank transfer taken (payment-details.js)
     if (parts.detailsHtml) html += parts.detailsHtml;
-
-    if (parts.bankHtml && receiptShows(layout, 'bank')) html += parts.bankHtml;
 
     // The invoice note is the shop's note for a sales invoice; a receipt of another kind
     // (a Credit Settlement payment) leaves it out with parts.noInvoiceNote, and

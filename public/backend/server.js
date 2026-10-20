@@ -337,12 +337,33 @@ app.use(async function (request, response, next) {
 
   if (changePassword) return next();
 
-  if (!PAGE_ROLES[page].includes(session.roleName)) {
+  if (!PAGE_ROLES[page].includes(session.roleName) && !(await mayVisitPage(session.roleName, page))) {
     return response.redirect(ROLE_PAGES[session.roleName] || "/Login.html");
   }
 
   next();
 });
+
+// Another role's dashboard is served to a staff member holding a screen that
+// page draws (granted under Access Control); the page then shows only those
+// screens (shared/features.js). The administrator's page is never visited.
+async function mayVisitPage(roleName, page) {
+  if (roleName === ADMIN || PAGE_ROLES[page].includes(ADMIN)) return false;
+  try {
+    const list = await featuresOf(roleName);
+    for (let i = 0; i < list.length; i++) {
+      const feature = list[i];
+      if (!feature.held) continue;
+      const hosts = feature.hosts || [];
+      for (let h = 0; h < hosts.length; h++) {
+        if (PAGE_ROLES[page].includes(hosts[h])) return true;
+      }
+    }
+  } catch (error) {
+    console.error("Checking a visited page failed:", error.message);
+  }
+  return false;
+}
 
 // the folders a browser may read from (everything else stays private)
 const PUBLIC_DIR = path.join(__dirname, "..");                // public/

@@ -195,63 +195,17 @@
 #modal-status-btn { min-width: 168px; }
 
 /* ==========================================================================
-   ACCESS CONTROL -- the roles down the left as buttons, the picked role's
-   screens as a list of switches on the right. Each row reads left to
-   right: the screen and what it does, the state it is in (grey, amber or
-   crimson), then the switch on the right-hand edge. Grant Access saves.
+   ACCESS CONTROL -- the role is picked in the toolbar, its screens are a list
+   of switches below. Each row reads left to right: the screen and what it
+   does, the state it is in (amber or crimson when it differs from the role's
+   default), the switch, then a Default mark when the role has it by default.
+   The save bar stays at the foot of the screen while the list scrolls.
    ========================================================================== */
-.access-layout {
-    display: grid;
-    grid-template-columns: 236px minmax(0, 1fr);
-    gap: 22px;
-    align-items: start;
-}
 .access-screens { min-width: 0; }
-
-.access-roles {
-    position: sticky;
-    top: 74px;
-    padding-right: 22px;
-    border-right: 1px solid var(--line);
-}
-.role-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
-.role-pick {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-areas: "name mark";
-    align-items: center;
-    column-gap: 8px;
-    text-align: left;
-    padding: 10px 12px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-left: var(--rule) solid var(--line);
-    border-radius: 0 var(--radius) var(--radius) 0;
-    cursor: pointer;
-    font: inherit;
-    transition: border-color 0.12s, background 0.12s;
-}
-.role-pick:hover { border-color: var(--steel-soft); }
-.role-pick:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
-.role-pick.active {
-    background: var(--go-dim);
-    border-color: var(--go);
-    border-left-color: var(--go);
-}
-.role-pick-name { grid-area: name; font-size: 15px; font-weight: 600; color: var(--ink); }
-.role-pick.active .role-pick-name { color: var(--go-hi); }
-/* the dot on a role whose switches were changed and not yet granted */
-.role-pick-mark {
-    grid-area: mark;
-    font-size: 23.5px; line-height: 1;
-    color: var(--signal);
-}
-.role-pick-mark[hidden] { display: none; }
 .feature-strip[hidden] { display: none; }
 
-/* the screens this role's dashboard can draw: a group per module, each
-   screen a row of the same three columns -- name, state, checkbox -- so
-   every checkbox sits on one vertical line */
+/* a group per module, each screen a row of the same four columns -- name,
+   state, checkbox, default mark -- so every checkbox sits on one line */
 .feature-line { display: flex; flex-direction: column; gap: 18px; }
 .feature-group {
     display: flex; flex-direction: column;
@@ -270,7 +224,7 @@
 
 .feature-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 118px 40px;
+    grid-template-columns: minmax(0, 1fr) 118px 40px 64px;
     align-items: center;
     column-gap: 14px;
     margin: 0;
@@ -286,14 +240,30 @@
 .feature-row-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .feature-row-name { font-size: 14.5px; font-weight: 600; color: var(--ink); }
 .feature-desc { display: block; font-size: 13px; color: var(--steel); }
-.feature-row .feature-state { justify-self: end; }
+.feature-row .feature-row-text { grid-column: 1; }
+.feature-row .feature-state { grid-column: 2; justify-self: end; }
+.feature-row .feature-default { grid-column: 4; }
 .feature-row .feature-box {
+    grid-column: 3;
     justify-self: center;
     width: 20px; height: 20px;
     margin: 0;
     accent-color: var(--go);
     cursor: pointer;
 }
+
+/* "Default": the role has this screen when nobody has changed anything */
+.feature-default {
+    justify-self: start;
+    padding: 1px 7px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 11.5px; font-weight: 600;
+    color: var(--steel);
+    background: var(--paper);
+    white-space: nowrap;
+}
+.feature-default.is-empty { visibility: hidden; }
 
 .feature-state {
     display: inline-block;
@@ -310,24 +280,37 @@
 .feature-state.is-revoked { background: var(--stop-dim); color: var(--stop); }
 .feature-state[hidden], .feature-row[hidden], .feature-group[hidden] { display: none; }
 
+/* the save bar: what is waiting, Discard and Confirm Configuration */
+.access-savebar {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin: 18px -22px -20px;
+    padding: 12px 22px;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    border-radius: 0 0 var(--radius) var(--radius);
+    box-shadow: 0 -6px 14px rgba(0, 0, 0, 0.06);
+}
+.access-savebar-note { margin-right: auto; font-size: 13.5px; color: var(--steel); }
+.access-savebar-note.has-changes { color: var(--signal-ink); font-weight: 600; }
+
+/* the confirmation card: the role, then the screens changed for it */
+.ask-config { display: flex; flex-direction: column; gap: 12px; text-align: left; }
+.ask-config-role { display: flex; flex-direction: column; gap: 4px; }
+.ask-config-line { color: var(--ink); }
+.ask-config-line strong { font-weight: 700; }
+.ask-config ul { margin: 0; padding-left: 18px; }
+.ask-config li { color: var(--ink); }
+.ask-config .is-off { color: var(--stop); font-weight: 600; }
+.ask-config .is-on { color: var(--ok-ink); font-weight: 600; }
+
 #panel-features .panel-toolbar { margin-bottom: 16px; }
 #features-no-match[hidden] { display: none; }
-
-/* the roles go above the screens once there is no room beside them, as a
-   row of buttons rather than a column */
-@media (max-width: 900px) {
-    .access-layout { grid-template-columns: 1fr; }
-    .access-roles {
-        position: static;
-        padding-right: 0;
-        border-right: none;
-        padding-bottom: 14px;
-        border-bottom: 1px solid var(--line);
-    }
-    .role-list { flex-direction: row; flex-wrap: wrap; }
-    .role-pick { flex: 1 1 160px; border-radius: var(--radius); border-left-width: 1px; }
-    .role-pick.active { border-left-color: var(--go); }
-}
 
 /* on a phone the state word drops under the name so the row fits */
 @media (max-width: 640px) {
@@ -336,7 +319,10 @@
     .feature-row .feature-row-text { grid-column: 1; grid-row: 1; }
     .feature-row .feature-state { grid-column: 1; grid-row: 2; justify-self: start; }
     .feature-row .feature-box { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
-    .role-pick { flex-basis: 100%; }
+    .feature-row .feature-default { grid-column: 1; grid-row: 3; }
+    .feature-row .feature-default.is-empty { display: none; }
+    .access-savebar { margin: 18px -12px -14px; padding: 10px 12px; flex-wrap: wrap; }
+    .access-savebar-note { flex-basis: 100%; }
 }
 
 /* ==========================================================================
@@ -518,3 +504,33 @@
 }
 .store-verdict:empty { display: none; }
 .store-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
+
+/* ==========================================================================
+   EXPORT -- Excel and PDF behind one button on the audit trail; the menu
+   opens under it (system-admin.js toggleLogExportMenu)
+   ========================================================================== */
+.export-menu { position: relative; display: inline-block; }
+.export-menu-list {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    z-index: 40;
+    min-width: 150px;
+    padding: 4px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--lift-high);
+}
+.export-menu-list[hidden] { display: none; }
+.export-menu-list .btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: var(--ink);
+}
+.export-menu-list .btn:hover:not(:disabled),
+.export-menu-list .btn:focus-visible { background: var(--paper-2); color: var(--ink); }
+.export-menu .export-caret { margin-left: 6px; font-size: 0.75em; }

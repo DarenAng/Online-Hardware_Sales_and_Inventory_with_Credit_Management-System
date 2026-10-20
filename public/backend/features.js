@@ -247,10 +247,10 @@ const FEATURE_ROLES = [MANAGER, CLERK, CASHIER, DRIVER];   // the matrix's colum
 // (the administrator may do both for any role)
 const ROLES_MANAGED_BY_MANAGER = [CASHIER, CLERK, DRIVER];
 
-// "available" is the list of dashboards that have a menu entry for the screen.
-// Access Control only offers a switch where flipping it shows or hides
-// something: a screen granted to a role whose page cannot draw it would save
-// and then appear nowhere.
+// "available" is the list of dashboards whose page draws the screen (its
+// host pages). Any screen can be granted to any role: a role granted a screen
+// its own dashboard does not draw opens it on a host page, which then shows
+// only the screens that role holds (shared/features.js, "visiting").
 
 // finds a screen by its key, e.g. findFeature("pos"); null when there is none
 function findFeature(key) {
@@ -340,9 +340,6 @@ async function featuresOf(roleName) {
   const result = [];
   for (let featureIndex = 0; featureIndex < FEATURES.length; featureIndex++) {
     const feature = FEATURES[featureIndex];
-    if (!feature.available.includes(roleName) && roleName !== ADMIN) {
-      continue;   // this role can never have this screen
-    }
 
     // does the role have this screen when nobody has changed anything?
     const byDefault = roleName === ADMIN || feature.defaults.includes(roleName);
@@ -357,6 +354,7 @@ async function featuresOf(roleName) {
       key: feature.key,
       name: feature.name,
       module: feature.module,
+      hosts: feature.available,   // the roles whose dashboard page draws this screen
       held: byDefault,
       byDefault: byDefault,
       overridden: false,

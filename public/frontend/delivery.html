@@ -89,13 +89,18 @@
                                     <option value="Delayed">Delayed</option>
                                 </select>
                             </div>
+                            <div class="toolbar-field">
+                                <label for="dpend-period">Period</label>
+                                <!-- filled by delivery-personnel.js buildDriverPeriodBoxes; Custom date shows From and To -->
+                                <select id="dpend-period" data-driver-period="dpend" onchange="driverPeriodPicked('dpend')"></select>
+                            </div>
                             <!-- the scheduled day can be ahead of today, so these two boxes are not held to today -->
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="dpend-from">From</label>
                                 <input type="date" id="dpend-from" data-any-date title="Scheduled from"
                                        onchange="dataPanelFilter('driver-pending', 'from', this.value)">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="dpend-to">To</label>
                                 <input type="date" id="dpend-to" data-any-date title="Scheduled to"
                                        onchange="dataPanelFilter('driver-pending', 'to', this.value)">
@@ -133,17 +138,23 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="dhand-balance">Balance</label>
-                                <select id="dhand-balance" onchange="dataPanelFilter('driver-report', 'balance', this.value)">
+                                <select id="dhand-balance" data-filter-table="drep-table" data-hides-column="6"
+                                        data-keeps-column-for="owing" onchange="dataPanelFilter('driver-report', 'balance', this.value)">
                                     <option value="all">All</option>
-                                    <option value="paid">Paid in full</option>
+                                    <option value="paid">Fully paid</option>
                                     <option value="owing">With balance</option>
                                 </select>
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field">
+                                <label for="dhand-period">Period</label>
+                                <!-- filled by delivery-personnel.js buildDriverPeriodBoxes; Custom date shows From and To -->
+                                <select id="dhand-period" data-driver-period="dhand" onchange="driverPeriodPicked('dhand')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="dhand-from">From</label>
                                 <input type="date" id="dhand-from" onchange="reportDatesPicked('driver-report', 'dhand-from', 'dhand-to')">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="dhand-to">To</label>
                                 <input type="date" id="dhand-to" onchange="reportDatesPicked('driver-report', 'dhand-from', 'dhand-to')">
                             </div>
@@ -180,7 +191,8 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="dpay-method">Method</label>
-                                <select id="dpay-method" onchange="dataPanelFilter('driver-report-pay', 'method', this.value)">
+                                <select id="dpay-method" data-filter-table="drep-pay-table" data-hides-column="4"
+                                        data-also-hides="Cash:5" onchange="dataPanelFilter('driver-report-pay', 'method', this.value)">
                                     <option value="all">All</option>
                                     <option value="Cash">Cash</option>
                                     <option value="GCash">GCash</option>
@@ -189,11 +201,16 @@
                                     <option value="Bank Transfer">Bank Transfer</option>
                                 </select>
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field">
+                                <label for="dpay-period">Period</label>
+                                <!-- filled by delivery-personnel.js buildDriverPeriodBoxes; Custom date shows From and To -->
+                                <select id="dpay-period" data-driver-period="dpay" onchange="driverPeriodPicked('dpay')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="dpay-from">From</label>
                                 <input type="date" id="dpay-from" onchange="reportDatesPicked('driver-report-pay', 'dpay-from', 'dpay-to')">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="dpay-to">To</label>
                                 <input type="date" id="dpay-to" onchange="reportDatesPicked('driver-report-pay', 'dpay-from', 'dpay-to')">
                             </div>
@@ -275,7 +292,8 @@
         </div>
     </div>
 
-    <!-- RECEIVE PAYMENT -- opened by Proceed Payment on a delivery's card. Recording the
+    <!-- PAYMENT -- opened by Proceed Payment on a delivery's card, laid out like the
+         counter's Payment window. The customer is the delivery's own. Recording the
          payment also marks the delivery Delivered. Locked and scrolling like the refund form. -->
     <div class="modal" id="pay-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
@@ -283,21 +301,21 @@
                 <div class="modal-identity">
                     <div class="avatar">PY</div>
                     <div>
-                        <h3>Receive Payment</h3>
+                        <h3>Payment</h3>
                         <span class="modal-role" id="pay-subtitle">At the door</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="cancelDriverPayment()" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="cancelDriverPayment()" aria-label="Back to the delivery">&times;</button>
             </div>
 
             <div class="modal-body">
+                <!-- the amount due, and what happens to it: short by, change, paid by transfer -->
+                <div class="pay-totals" id="pay-totals"></div>
+
                 <form id="pay-form" class="pay-form" onsubmit="handleDriverPayment(event)" autocomplete="off">
-                    <p class="pay-owed">Balance due <strong id="pay-balance"></strong></p>
                     <div class="form-group">
-                        <label for="pay-amount">Amount received</label>
-                        <input type="number" id="pay-amount" name="amount" class="form-control" min="0" step="0.01" required
-                               oninput="onDriverPayAmountChange()">
-                        <span class="label-hint" id="pay-left"></span>
+                        <label for="pay-customer">Customer</label>
+                        <input type="text" id="pay-customer" class="form-control" readonly>
                     </div>
                     <div class="form-group">
                         <label for="pay-method">Payment method</label>
@@ -309,6 +327,12 @@
                             <option value="Bank Transfer">Bank Transfer</option>
                         </select>
                     </div>
+                    <!-- a bank transfer is for the whole balance, so no amount is typed for it -->
+                    <div class="form-group" id="pay-amount-field">
+                        <label for="pay-amount">Amount entered</label>
+                        <input type="number" id="pay-amount" name="amount" class="form-control" min="0" step="0.01"
+                               placeholder="0.00" oninput="onDriverPayAmountChange()">
+                    </div>
                     <!-- the bank and account of a cheque or a transfer (payment-details.js) -->
                     <div id="pay-details-box"></div>
                 </form>
@@ -317,10 +341,10 @@
             <div class="modal-foot">
                 <button type="button" class="btn btn-ghost" onclick="cancelDriverPayment()">Cancel</button>
                 <!-- GCash, PayMaya or a bank transfer: the customer scans a QR code (qr-pay.js),
-                     the only way to take those, so Record Payment is hidden for them -->
-                <button type="button" class="btn" id="pay-qr-btn" data-icon="qr-code"
+                     the only way to take those, so Complete Sale is hidden for them -->
+                <button type="button" class="btn btn-accent" id="pay-qr-btn" data-icon="qr-code"
                         onclick="handleDriverPayment(event, true)" hidden>Pay by QR</button>
-                <button type="submit" class="btn btn-success" id="pay-save-btn" form="pay-form">Record Payment</button>
+                <button type="submit" class="btn btn-accent" id="pay-save-btn" form="pay-form">Complete Sale</button>
             </div>
         </div>
     </div>
@@ -345,8 +369,7 @@
                     <div class="form-group">
                         <label for="delay-reason"><span id="delay-label">Reason for the delay</span>
                             <span class="label-hint">required</span></label>
-                        <textarea id="delay-reason" class="form-control" rows="4" minlength="5" required
-                                  placeholder="Gate closed, customer not around, rain on the route"></textarea>
+                        <textarea id="delay-reason" class="form-control" rows="4" minlength="5" required></textarea>
                     </div>
                 </form>
             </div>

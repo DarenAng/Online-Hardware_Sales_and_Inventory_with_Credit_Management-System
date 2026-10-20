@@ -522,6 +522,10 @@ const dataPanelMethods = {
                 const first = (this.config.filters || {})[name];
                 this.filters[name] = first === undefined ? 'all' : first;
             }
+            // a dropdown that hides its own column: the column follows the value put back
+            if (select.dataset && select.dataset.filterTable && typeof syncFilteredColumns === 'function') {
+                syncFilteredColumns(select.dataset.filterTable);
+            }
         }
 
         const inputs = saved.inputs || {};

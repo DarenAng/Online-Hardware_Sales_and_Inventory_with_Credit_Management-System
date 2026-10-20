@@ -214,21 +214,20 @@ function showDeliveryRecord(d, canUpdate) {
 
         for (let i = 0; i < next.length; i++) {
             const s = next[i];
-            // The driver collects what is owed on their own delivery before it is closed,
-            // so Delivered becomes Proceed Payment. With nothing owed, Proceed Payment
-            // closes the delivery as delivered.
-            // (the Collect Payment at the Door screen, switched on and off for the role)
+            // The driver collects what is owed on their own delivery before it is closed:
+            // while something is owed, Delivered reads Proceed Payment and opens the
+            // Payment card, and recording the payment marks the delivery Delivered.
+            // With nothing to collect it reads Mark As Delivered and only asks first.
+            // (the Collect Payment at the Door screen, switched on and off for the role;
+            // a sale on account is paid at the counter, not at the door)
             const mine = typeof isMine === 'function' && isMine(d);
             const collectOn = typeof holdsFeature !== 'function' || holdsFeature('delivery-collect');
             if (s === 'Delivered' && isDriver && mine && collectOn && d.payment_method !== 'Credit' && Number(d.balance_due) > 0) {
                 footActions += '<button type="button" class="btn btn-success" ' +
                     'onclick="proceedToPayment(' + d.delivery_id + ')">Proceed Payment</button>';
             } else if (s === 'Delivered' && isDriver) {
-                // fully paid: there is nothing to collect, the delivery is only closed
-                const fullyPaid = Number(d.balance_due) <= 0;
                 footActions += '<button type="button" class="btn btn-success" ' +
-                    'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'Delivered\')">' +
-                    (fullyPaid ? 'Complete Delivery' : 'Proceed Payment') + '</button>';
+                    'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'Delivered\')">Mark As Delivered</button>';
             } else {
                 footActions += '<button type="button" class="btn ' + (DELIVERY_STATUS_BUTTON[s] || 'btn-accent') + '" ' +
                     'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'' + s + '\')">' + s + '</button>';
@@ -364,7 +363,7 @@ function openDelayReason(deliveryId, status) {
 
     document.getElementById('delay-subtitle').textContent = 'Delivery #' + deliveryId;
     document.getElementById('delay-title').textContent = failed ? 'Mark Failed' : 'Mark Delayed';
-    document.getElementById('delay-label').textContent = failed ? 'Why it failed' : 'Reason for the delay';
+    document.getElementById('delay-label').textContent = failed ? 'Reason' : 'Reason for the delay';
     document.getElementById('delay-reason').value = '';
 
     const button = document.getElementById('delay-save');
@@ -398,7 +397,7 @@ async function handleDelayReason(event) {
     if (button) button.disabled = false;
 }
 
-// Proceed Payment, in the driver's card: the card closes and the Receive
+// Proceed Payment, in the driver's card: the card closes and the
 // Payment card (delivery-personnel.js) opens for the same delivery.
 function proceedToPayment(deliveryId) {
     closeModal('detail-modal');

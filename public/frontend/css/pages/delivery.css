@@ -21,27 +21,46 @@
 #dpend-table .owner-tag { margin-left: 4px; vertical-align: middle; }
 
 /* ==========================================================================
-   RECEIVE PAYMENT -- the card opened by Proceed Payment (#pay-modal in delivery.html)
-   One column; the balance is read out first and the amount is set as a figure
+   PAYMENT -- the card opened by Proceed Payment (#pay-modal in delivery.html)
+   Laid out like the counter's Payment window: the amount due first, then what
+   becomes of it (short is red, change is green, a transfer is amber)
    ========================================================================== */
-#pay-form .pay-owed {
+#pay-modal .pay-totals {
     margin: 0 0 16px;
-    color: var(--steel);
+    padding: 10px 0 12px;
+    border-bottom: 1px solid var(--line);
 }
-#pay-form .pay-owed strong {
-    margin-left: 6px;
+#pay-modal .total-row {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 3px 0;
+    font-size: 14.5px; color: var(--steel);
+}
+#pay-modal .total-row span:last-child {
     font-family: var(--font-figure);
-    font-size: 19.5px;
     font-variant-numeric: tabular-nums;
-    color: var(--stop);
+    color: var(--ink);
 }
-#pay-form input[name="amount"] {
-    font-family: var(--font-figure);
-    font-size: 19.5px;
+#pay-modal .total-due {
+    font-size: 18px;
     font-weight: 600;
+    color: var(--ink);
+    padding: 8px 0 4px;
+    margin-top: 4px;
+    border-top: 1px solid var(--line);
+    align-items: baseline;
+}
+#pay-modal .total-due span:last-child {
+    font-family: var(--font-ui);
+    font-size: 25.5px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+}
+#pay-modal .total-change span:last-child { color: var(--ok-ink);     font-weight: 600; }
+#pay-modal .total-short  span:last-child { color: var(--stop);       font-weight: 600; }
+#pay-modal .total-note   span:last-child { color: var(--signal-ink); font-weight: 600; }
+#pay-form input[name="amount"] {
     text-align: right;
     font-variant-numeric: tabular-nums;
-    min-height: 48px;
 }
 
 /* ==========================================================================
@@ -82,7 +101,6 @@
    ========================================================================== */
 @media (max-width: 640px) {
     /* big boxes for a thumb */
-    #pay-form input[name="amount"] { font-size: 21.5px; min-height: 52px; }
     #pay-form .form-control { min-height: 48px; font-size: 16px; }
 
     /* A delivery's status buttons: big targets, two to a row (a lone one takes the

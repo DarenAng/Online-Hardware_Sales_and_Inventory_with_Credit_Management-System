@@ -161,6 +161,8 @@ function watchTablesForAlignment() {
 // say the same thing there, so the column is not drawn. Used on every page.
 // A dropdown can name values that keep its column drawn, because the column
 // holds more than the filtered word: data-keeps-column-for="Delayed".
+// A value can hide more columns too, those that say nothing for it:
+// data-also-hides="Cash:5" (more as "Cash:5|Cheque:3,4").
 // ==========================================
 function syncFilteredColumns(tableId) {
     const table = document.getElementById(tableId);
@@ -173,6 +175,13 @@ function syncFilteredColumns(tableId) {
         const keeps = String(select.dataset.keepsColumnFor || '').split('|');
         if (select.value !== 'all' && keeps.indexOf(select.value) === -1) {
             hidden.push(Number(select.dataset.hidesColumn));
+        }
+        const also = String(select.dataset.alsoHides || '').split('|');
+        for (let a = 0; a < also.length; a++) {
+            const parts = also[a].split(':');
+            if (parts.length !== 2 || parts[0] !== select.value) continue;
+            const columns = parts[1].split(',');
+            for (let c = 0; c < columns.length; c++) hidden.push(Number(columns[c]));
         }
     }
     setHiddenColumns(table, hidden);

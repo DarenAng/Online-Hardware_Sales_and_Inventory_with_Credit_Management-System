@@ -32,7 +32,7 @@
                         Accounts Management <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="accounts-dropdown" class="nav-sub" style="display: none;">
-                        <li><a href="#" data-panel-link="panel-accounts" onclick="showAllUsers(event)"><i class="bi bi-person-lines-fill nav-icon" aria-hidden="true"></i>List Users</a></li>
+                        <li><a href="#" data-panel-link="panel-accounts" onclick="showAllUsers(event)"><i class="bi bi-person-lines-fill nav-icon" aria-hidden="true"></i>Staff Directory</a></li>
                         <li><a href="#" data-panel-link="panel-archive" onclick="showArchiveModule(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
                     </ul>
                 </li>
@@ -59,7 +59,7 @@
 
             <div class="content-area">
 
-                <!-- LIST USERS -->
+                <!-- STAFF DIRECTORY -- every account that is not archived -->
                 <div class="card" id="panel-accounts" data-panel>
                     <div class="panel-head">
                         <div>
@@ -82,7 +82,7 @@
                             <select id="accounts-status" onchange="reloadUsers()">
                                 <option value="all">All</option>
                                 <option value="active">Active only</option>
-                                <option value="inactive">Inactive only</option>
+                                <option value="inactive">Deactivated only</option>
                             </select>
                         </div>
 
@@ -148,17 +148,15 @@
                     <div class="pager is-single" id="archive-pager"></div>
                 </div>
 
-                <!-- ACCESS CONTROL -- the roles down the left, the picked role's screens
-                     on the right. Every role's switches are kept in the page so a change
-                     made under one role survives looking at another before Grant Access. -->
+                <!-- ACCESS CONTROL -- pick a role, then switch its screens on and off. Every
+                     screen in the system can be given to every role; one its own dashboard
+                     does not draw opens on the dashboard that does (shared/features.js).
+                     Every role's switches are kept in the page, so a change made under one
+                     role survives looking at another before Confirm Configuration. -->
                 <div class="card" id="panel-features" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
                             <h3>Access Control</h3>
-                        </div>
-                        <div class="panel-actions">
-                            <button type="button" class="btn btn-success" id="features-save-btn"
-                                    onclick="saveFeatureMatrix()" disabled title="Nothing has changed yet">Grant Access</button>
                         </div>
                     </div>
 
@@ -168,23 +166,28 @@
                                    placeholder="Search screens by name or module"
                                    oninput="filterFeatureScreens(this.value)">
                         </div>
+                        <div class="toolbar-field">
+                            <label for="features-role">Role</label>
+                            <!-- filled by system-admin.js renderFeatureRoleList -->
+                            <select id="features-role" onchange="selectFeatureRole(this.value)"></select>
+                        </div>
                     </div>
 
                     <!-- drawn by system-admin.js renderFeatureMatrix -->
-                    <div class="access-layout">
-                        <aside class="access-roles" aria-label="Roles">
-                            <span class="eyebrow">Roles</span>
-                            <div class="role-list" id="features-role" role="tablist" aria-label="Pick a role">
-                                <p class="muted">Loading the roles</p>
-                            </div>
-                        </aside>
-
-                        <div class="access-screens">
-                            <div id="features-matrix" class="feature-strips" aria-live="polite">
-                                <p class="table-empty">Loading the screens</p>
-                            </div>
-                            <p class="table-empty" id="features-no-match" hidden>No screen matches that search.</p>
+                    <div class="access-screens">
+                        <div id="features-matrix" class="feature-strips" aria-live="polite">
+                            <p class="table-empty">Loading the screens</p>
                         </div>
+                        <p class="table-empty" id="features-no-match" hidden>No screen matches that search.</p>
+                    </div>
+
+                    <!-- stays at the foot of the screen while the list scrolls -->
+                    <div class="access-savebar">
+                        <span class="access-savebar-note" id="features-change-note">No changes yet</span>
+                        <button type="button" class="btn btn-ghost" id="features-discard-btn"
+                                onclick="discardFeatureChanges()" disabled>Discard Changes</button>
+                        <button type="button" class="btn btn-success" id="features-save-btn"
+                                onclick="saveFeatureMatrix()" disabled title="Nothing has changed yet">Confirm Configuration</button>
                     </div>
                 </div>
 
@@ -195,8 +198,15 @@
                             <h3>Audit Trail</h3>
                         </div>
                         <div class="panel-actions">
-                            <button type="button" class="btn" onclick="exportAuditLogs('xlsx')">Export Excel</button>
-                            <button type="button" class="btn" onclick="exportAuditLogs('pdf')">Export PDF</button>
+                            <!-- one Export button; Excel and PDF open under it -->
+                            <div class="export-menu" id="logs-export-menu">
+                                <button type="button" class="btn export-toggle" aria-haspopup="true" aria-expanded="false"
+                                        onclick="toggleLogExportMenu(event)">Export<span class="export-caret" aria-hidden="true">&#9660;</span></button>
+                                <div class="export-menu-list" role="menu" hidden>
+                                    <button type="button" class="btn" role="menuitem" onclick="exportAuditLogs('xlsx')">Excel</button>
+                                    <button type="button" class="btn" role="menuitem" onclick="exportAuditLogs('pdf')">PDF</button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -214,14 +224,20 @@
                             </select>
                         </div>
 
-                        <div class="toolbar-field toolbar-date">
-                            <label for="logs-from">From</label>
-                            <input type="date" id="logs-from" onchange="refreshAuditLogs()">
+                        <div class="toolbar-field">
+                            <label for="logs-period">Period</label>
+                            <!-- filled by system-admin.js buildLogPeriodBox; Custom date shows From and To -->
+                            <select id="logs-period" onchange="logPeriodPicked()"></select>
                         </div>
 
-                        <div class="toolbar-field toolbar-date">
+                        <div class="toolbar-field toolbar-date" hidden>
+                            <label for="logs-from">From</label>
+                            <input type="date" id="logs-from" onchange="logDatesPicked()">
+                        </div>
+
+                        <div class="toolbar-field toolbar-date" hidden>
                             <label for="logs-to">To</label>
-                            <input type="date" id="logs-to" onchange="refreshAuditLogs()">
+                            <input type="date" id="logs-to" onchange="logDatesPicked()">
                         </div>
 
                         <div class="toolbar-spacer"></div>
@@ -377,25 +393,27 @@
                                 </div>
                             </fieldset>
 
-                            <!-- the account the till shows whenever Bank Transfer is chosen -->
-                            <fieldset class="store-section store-bank" id="store-bank">
+                            <!-- The bank account the till and the invoice show for a bank transfer. Taken
+                                 off this screen: the boxes stay (out of sight, not required) so a save
+                                 keeps whatever details are already stored. -->
+                            <fieldset class="store-section store-bank" id="store-bank" style="display: none;">
                                 <legend class="form-legend">Bank transfer details</legend>
                                 <div class="grid-2">
                                     <div class="form-group">
-                                        <label for="store-bank-name">Bank <span class="req">*</span></label>
+                                        <label for="store-bank-name">Bank</label>
                                         <input type="text" id="store-bank-name" name="bankName" class="form-control"
-                                               maxlength="100" autocomplete="off" placeholder="BDO Unibank" required oninput="onBankInput()">
+                                               maxlength="100" autocomplete="off" placeholder="BDO Unibank" oninput="onBankInput()">
                                     </div>
                                     <div class="form-group">
-                                        <label for="store-bank-account-name">Account name <span class="req">*</span></label>
+                                        <label for="store-bank-account-name">Account name</label>
                                         <input type="text" id="store-bank-account-name" name="bankAccountName" class="form-control"
-                                               maxlength="150" autocomplete="off" placeholder="Lucelyn Hardware" required oninput="onBankInput()">
+                                               maxlength="150" autocomplete="off" placeholder="Lucelyn Hardware" oninput="onBankInput()">
                                     </div>
                                 </div>
                                 <div class="form-group">
-                                    <label for="store-bank-account-number">Account number <span class="req">*</span></label>
+                                    <label for="store-bank-account-number">Account number</label>
                                     <input type="text" id="store-bank-account-number" name="bankAccountNumber" class="form-control"
-                                           maxlength="30" inputmode="numeric" autocomplete="off" placeholder="0012 3456 7890" required oninput="onBankNumberInput(this)">
+                                           maxlength="30" inputmode="numeric" autocomplete="off" placeholder="0012 3456 7890" oninput="onBankNumberInput(this)">
                                 </div>
                                 <p class="store-bank-note" id="store-bank-note"></p>
                             </fieldset>
@@ -434,7 +452,6 @@
                                     <label><input type="checkbox" name="show_reference"> Reference number</label>
                                     <label><input type="checkbox" name="show_item_count"> Item count</label>
                                     <label><input type="checkbox" name="show_tax"> Tax breakdown</label>
-                                    <label><input type="checkbox" name="show_bank"> Bank details</label>
                                     <label><input type="checkbox" name="show_note"> Invoice footnote</label>
                                 </div>
                             </fieldset>
@@ -633,6 +650,8 @@
                 <button type="button" class="btn btn-gold" id="modal-hold-btn" onclick="liftUserHold()" style="display: none;">Lift Hold</button>
                 <button type="button" class="btn btn-ghost" id="modal-reset-btn" onclick="resetUserPassword()">Reset Password</button>
                 <button type="button" class="btn btn-danger" id="modal-status-btn" onclick="toggleUserStatus()">Deactivate Account</button>
+                <!-- only a deactivated account can be archived; one left deactivated 30 days is archived by itself -->
+                <button type="button" class="btn btn-ghost" id="modal-archive-btn" onclick="archiveUserAccount()" style="display: none;">Archive Account</button>
             </div>
         </div>
     </div>

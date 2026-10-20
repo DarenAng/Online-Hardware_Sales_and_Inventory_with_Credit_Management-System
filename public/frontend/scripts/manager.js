@@ -4026,7 +4026,7 @@ function staffStatusBadge(account) {
     let text = 'Active';
     if (state === 'inactive') {
         tone = 'badge-danger';
-        text = 'Inactive';
+        text = 'Deactivated';
     } else if (state === 'nologin') {
         tone = 'badge-neutral';
         text = 'No login';
@@ -4061,8 +4061,9 @@ function openStaffAccount(staffId) {
         detailField('Last Sign-in', account.last_login ? escapeHtml(whenText(account.last_login)) : '<span class="muted">Never</span>');
     body += '</div>';
 
+    // only a deactivated account can be archived (one left deactivated 30 days is archived by itself)
     let foot = '';
-    if (account.is_active) {
+    if (!account.is_active) {
         foot += '<button type="button" class="btn btn-danger" onclick="archiveStaffAccount(' + account.staff_id + ')">' +
             'Archive Account</button>';
     }
@@ -4080,19 +4081,23 @@ function openStaffAccount(staffId) {
         initialsOf(account.full_name), [{ label: 'Account', body: body }], foot || null);
 }
 
-// A cashier, clerk or driver account goes to Archives: they can no longer sign
-// in, and any screen they have open is signed out. Restored from Archives.
+// A deactivated cashier, clerk or driver account goes to Archives and leaves
+// this list. Restored from Archives.
 async function archiveStaffAccount(staffId) {
     const panel = getDataPanel('mgr-staff');
     const account = panel ? panel.find(staffId) : null;
     if (!account) return;
+    if (account.is_active) {
+        notifyWarning('Only a deactivated account can be archived.', 'Account is active');
+        return;
+    }
 
     const yes = await askArchive(account.full_name + ' (' + account.role_name + ')', {
         title: 'Archive this account?',
         eyebrow: 'Account Management',
         confirmLabel: 'Archive the account',
         detail: [
-            'They can no longer sign in, and any screen they have open is signed out.',
+            'It leaves Staff Accounts and is listed under Archives.',
             'Their sales, reports and history stay on record.',
             'The account can be restored from Archives.'
         ]

@@ -220,7 +220,8 @@ function openAsk(options) {
     document.getElementById('ask-title').textContent = options.title || 'Please confirm';
     document.getElementById('ask-eyebrow').textContent = options.eyebrow || 'Confirmation';
     document.getElementById('ask-mark').textContent = options.mark || '?';
-    document.getElementById('ask-text').innerHTML = escapeHtml(options.message || '');
+    // messageHtml is markup the caller built with escapeHtml (the Access Control read-back)
+    document.getElementById('ask-text').innerHTML = options.messageHtml || escapeHtml(options.message || '');
     document.getElementById('ask-cancel').textContent = options.cancelLabel || 'Cancel';
 
     const okButton = document.getElementById('ask-ok');
@@ -414,6 +415,7 @@ function askConfirm(message, options) {
         eyebrow: settings.eyebrow || 'Confirmation',
         mark: settings.mark || '?',
         message: message,
+        messageHtml: settings.messageHtml,
         detail: settings.detail,
         confirmLabel: settings.confirmLabel || 'Yes, continue',
         cancelLabel: settings.cancelLabel || 'Cancel',

@@ -220,7 +220,7 @@ function registerDeliveryRoutes(app, deps) {
     }
     const qrPaymentId = request.body.qrPaymentId;
     if (paymentMethod === "Bank Transfer" && !qrPaymentId) {
-      return response.status(400).json({ error: "A bank transfer is taken only by its QR code. Press Pay by Bank Transfer." });
+      return response.status(400).json({ error: "A bank transfer is taken only by its QR code. Press Pay by QR." });
     }
     if (qrPaymentId && !QR_METHODS.includes(paymentMethod)) {
       return response.status(400).json({ error: "A QR payment can only pay for money taken by GCash, PayMaya or bank transfer." });

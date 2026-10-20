@@ -3564,3 +3564,17 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
 .void-request-title { font-weight: 600; color: var(--ink); }
 .void-request-reason { margin-top: 2px; color: var(--ink); overflow-wrap: anywhere; }
 .void-request-hint { margin-top: 4px; font-size: 13px; color: var(--steel); }
+
+/* ==========================================================================
+   SCREENS FROM ANOTHER DASHBOARD (shared/features.js)
+   A dashboard opened for a screen granted from it keeps its menu out of sight
+   until the granted screens are known, so its own screens never flash past.
+   ========================================================================== */
+html.is-visiting:not(.visit-ready) .sidebar-nav { visibility: hidden; }
+.sidebar-nav .nav-host {
+    margin-left: auto;
+    padding-left: 8px;
+    font-size: 11px;
+    font-weight: 500;
+    opacity: 0.6;
+}
