@@ -2977,23 +2977,58 @@ async function openSaleDetail(saleId) {
         }
         const items = detailTable(['Product', 'Qty', 'Unit Price', 'Subtotal'], itemRows, [1, 2, 3]);
 
-        // Every payment on the sale in one list: the payments taken against it,
-        // and the GCash, Maya or bank-transfer codes paid by QR. A QR payment that
-        // was also recorded as a payment (same reference) is listed once.
+        // Every sale is paid somehow, so every sale lists its payments:
+        //  - the payments recorded against it (a credit sale's down payment and
+        //    every payment after, one row each);
+        //  - the GCash, Maya or bank-transfer codes paid by QR, once each (a QR
+        //    payment already on the list by its reference is not repeated; one
+        //    that paid a down payment gives that row its reference);
+        //  - what the till took when the sale was rung up and paid there (a cash
+        //    sale, a cheque), which is kept on the sale itself: whatever was kept
+        //    (handed over less the change) that the rows above do not account for.
         const paidList = [];
         const references = {};
+        let listed = 0;
         for (let i = 0; i < data.payments.length; i++) {
             const p = data.payments[i];
             if (p.reference_no) references[p.reference_no] = true;
+            listed += Number(p.amount) || 0;
             paidList.push({ when: String(p.payment_date || ''), amount: p.amount, method: p.payment_method,
-                            reference: paymentReference(p.payment_method, p.reference_no), by: p.received_by });
+                            reference: paymentReference(p.payment_method, p.reference_no), by: p.received_by,
+                            downPayment: p.reference_no === DOWN_PAYMENT_NOTE });
         }
+
+        const kept = Math.max((Number(s.amount_paid) || 0) - (Number(s.change_given) || 0), 0);
+        let unlisted = kept - listed;
+
         const qrPaid = data.qrPayments || [];
         for (let i = 0; i < qrPaid.length; i++) {
             const q = qrPaid[i];
             if (q.status !== 'paid' || (q.provider_payment_id && references[q.provider_payment_id])) continue;
-            paidList.push({ when: String(q.paid_at || q.created_at || ''), amount: q.amount,
+            const amount = Number(q.amount) || 0;
+            // a QR payment that was the down payment: that row carries its reference
+            let downRow = null;
+            for (let r = 0; r < paidList.length; r++) {
+                if (paidList[r].downPayment && !paidList[r].reference &&
+                    Math.abs(Number(paidList[r].amount) - amount) < 0.005) {
+                    downRow = paidList[r];
+                    break;
+                }
+            }
+            if (downRow) {
+                downRow.reference = q.provider_payment_id || '';
+                continue;
+            }
+            paidList.push({ when: String(q.paid_at || q.created_at || ''), amount: amount,
                             method: saleQrWallet(q), reference: q.provider_payment_id, by: q.received_by });
+            unlisted -= amount;
+        }
+
+        // paid at the till when it was rung up, and not on the list yet
+        if (unlisted > 0.005 && s.payment_method !== 'Credit') {
+            paidList.push({ when: String(s.sale_date || ''), amount: unlisted, method: s.payment_method,
+                            reference: paymentReference(s.payment_method, s.reference_no),
+                            by: s.cashier_name });
         }
         paidList.sort(function (a, b) { return a.when.localeCompare(b.when); });
 
