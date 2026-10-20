@@ -141,6 +141,18 @@ function toCentavos(pesos) {
 // the type PayMongo names each wallet by
 const WALLET_TYPES = { GCash: "gcash", PayMaya: "paymaya" };
 
+// In test mode PayMongo only simulates its own test banks: a real bank code
+// ("bpi") gets a page that fails at the account list with "Access token is
+// invalid or expired". So with an sk_test_ key BPI goes as test_bank_one and
+// UnionBank as test_bank_two; the page then offers test accounts ******0001 to
+// 0004 and asks for an OTP (123456 pays). A live key sends the real codes.
+const TEST_BANK_CODES = { bpi: "test_bank_one", ubp: "test_bank_two" };
+
+function bankCodeFor(code) {
+  if (mode === "test" && TEST_BANK_CODES[code]) return TEST_BANK_CODES[code];
+  return code;
+}
+
 async function attach(intentId, methodId, returnUrl) {
   return call("POST", "/payment_intents/" + intentId + "/attach", {
     payment_method: methodId,
@@ -163,7 +175,7 @@ async function createPayment(options) {
     if (!bank) throw new PayMongoError("Pick the customer's bank.", 400);
     type = bank.type;
     allowed = [type];
-    methodAttributes = { type: type, details: { bank_code: bank.code } };
+    methodAttributes = { type: type, details: { bank_code: bankCodeFor(bank.code) } };
   }
   if (!type) throw new PayMongoError("Only GCash, Maya and bank transfers can be paid by QR code.", 400);
 
