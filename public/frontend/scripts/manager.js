@@ -1135,7 +1135,7 @@ function buildReportPanels() {
         },
         renderRow: function (u, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                    'onclick="openSaleDetail(' + u.sale_id + ', { fromReceivables: true })">' +
+                    'onclick="openSaleDetail(' + u.sale_id + ')">' +
                 '<td class="cell-id">#' + u.sale_id + '</td>' +
                 '<td class="cell-name">' + escapeHtml(u.customer_name) + '</td>' +
                 '<td>' + escapeHtml(u.payment_method) + '</td>' +
@@ -2897,10 +2897,9 @@ function saleQrWallet(q) {
     return way;
 }
 
-// options.fromReceivables: opened from Receivables, which shows the sale but
-// does not void it (that is done from Sales Transactions)
-async function openSaleDetail(saleId, options) {
-    const settings = options || {};
+// A sale opened from a report (Sales Transactions, Receivables) is only read:
+// reports do not change data, so there is no Void button.
+async function openSaleDetail(saleId) {
     try {
         const data = await apiGetSale(saleId);
         const s = data.sale;
@@ -2991,24 +2990,8 @@ async function openSaleDetail(saleId, options) {
         const payments = detailTable(['Date', 'Amount', 'Method', 'Reference', 'Received By'],
             paymentRows, [1]);
 
-        // a sale can be voided on the day it was made; the machine's own calendar, not UTC
-        const now = new Date();
-        const today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') +
-            '-' + String(now.getDate()).padStart(2, '0');
-        const saleDay = String(s.sale_date).slice(0, 10);
-        // a credit sale reads "Void this credit"; any other "Void this sale"
-        const isCredit = s.payment_method === 'Credit';
-        // the Void button, on the day the sale was made only; no notes
-        let voidBlock = '';
-        if (!s.is_archived && !settings.fromReceivables && saleDay === today) {
-            voidBlock = '<div class="detail-actions">' +
-                  '<button type="button" class="btn btn-danger" onclick="voidSale(' + s.sale_id + ', ' + isCredit + ')">' +
-                  (isCredit ? 'Void this credit' : 'Void this sale') + '</button>' +
-                  '</div>';
-        }
-
         const pages = [
-            { label: 'Summary', body: summary + voidBlock },
+            { label: 'Summary', body: summary },
             { label: 'Totals', body: totals },
             { label: 'Items (' + data.items.length + ')', body: items },
             { label: 'Payments (' + paidList.length + ')', body: payments }
@@ -3058,39 +3041,6 @@ async function openSaleDetail(saleId, options) {
             'S' + s.sale_id, pages);
     } catch (error) {
         notifyError('That sale could not be opened.', 'Nothing to show');
-    }
-}
-
-// Voiding a sale; the database holds the rules (same day, goods not out for
-// delivery, stock returned).
-async function voidSale(saleId, isCredit) {
-    const word = isCredit ? 'credit' : 'sale';
-    const yes = await askDanger(
-        'Sale #' + saleId + ' is struck off as if it had not happened.',
-        {
-            title: 'Void this ' + word + '?',
-            eyebrow: 'Sales Transactions',
-            confirmLabel: 'Void the ' + word,
-            detail: [
-                'It reads Voided everywhere and counts for nothing.',
-                'Every item on it goes back on the shelf, with a line in the stock log.',
-                'A delivery created for it and not yet on the road is cancelled with it.',
-                'Money already taken is not refunded by this; hand it back at the counter.'
-            ]
-        });
-
-    if (!yes) return;
-
-    const result = await apiVoidSale(saleId);
-    if (!result) return;
-
-    closeModal('detail-modal');
-    notifySuccess('Sale #' + saleId + ' is voided and its stock is back on the shelf.', 'Sale voided');
-
-    const keys = ['mgr-sales', 'mgr-deliveries'];
-    for (let i = 0; i < keys.length; i++) {
-        const panel = getDataPanel(keys[i]);
-        if (panel && panel.state === 'ready') await panel.refresh();
     }
 }
 

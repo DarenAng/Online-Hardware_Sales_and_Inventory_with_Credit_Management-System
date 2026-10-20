@@ -1626,8 +1626,13 @@ The rules live on the server: `sp_archive_record` and the archive routes hold
 the manual ones and `sp_sweep_archives` the automatic one. A request that
 breaks one is refused with the reason, whichever screen sends it.
 
-**Voiding a sale puts the stock back.** A manager voids a sale from its card
-in Sales Transactions (`POST /api/sales/:id/void`), **on the day it was made
+**Reports only read.** A record opened from a report (Sales Transactions,
+Receivables, Total Purchases) cannot be changed there: no Void on a sale, no
+Approve or Decline on a purchase order (that is done from Purchase Orders).
+The Void button is therefore not on any screen at present.
+
+**Voiding a sale puts the stock back.** The server's void route
+(`POST /api/sales/:id/void`) accepts a sale **on the day it was made
 only**, and only while its goods are not out for delivery. Every line on it
 goes back on the shelf with an entry in the stock log saying which sale was
 voided, and a delivery created for it and not yet on the road is cancelled
