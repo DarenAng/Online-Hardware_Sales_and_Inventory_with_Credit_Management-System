@@ -246,7 +246,6 @@ async function openDriverPayment(deliveryId, remarks) {
     form.elements.amount.max = Number(d.balance_due).toFixed(2);
     form.elements.amount.value = Number(d.balance_due).toFixed(2);
     form.elements.paymentMethod.value = 'Cash';
-    form.elements.referenceNo.value = '';
     clearPaymentDetails('door');
     onDriverPayMethodChange();
     onDriverPayAmountChange();
@@ -254,28 +253,29 @@ async function openDriverPayment(deliveryId, remarks) {
     showModal('pay-modal');
 }
 
-// A cheque and a bank transfer cannot be traced without their number, so the
-// reference is required for those two; for the rest it is optional.
-function payNeedsReference(method) {
-    return method === 'Cheque' || method === 'Bank Transfer';
-}
-
 // A cheque is collected with the same details the counter takes: the account name and
-// number printed on it, the bank, its branch and the date. A bank transfer is written
-// down as the customer shows it (bank, account name, account number and the bank's
-// reference); the driver has no QR screen, so it is not checked with PayMongo.
-buildPaymentDetailsBox('pay-details-box', 'door', false);
+// number printed on it, the bank and the date. GCash, PayMaya and a bank transfer are
+// paid by a QR code the customer scans (qr-pay.js), as at the counter; for a transfer
+// the customer's bank is picked from the ones PayMongo can take a transfer from.
+// No reference is typed: a cheque is traced by its details, the rest by the QR payment.
+buildPaymentDetailsBox('pay-details-box', 'door', true);
 
 function onDriverPayMethodChange() {
     const form = document.getElementById('pay-form');
-    const hint = document.getElementById('pay-ref-hint');
-    if (!form || !hint) return;
+    if (!form) return;
 
     const method = form.elements.paymentMethod.value;
-    const needed = payNeedsReference(method);
-    form.elements.referenceNo.required = needed;
-    hint.textContent = needed ? 'required' : 'optional';
     showPaymentDetails('door', method);
+
+    // Pay by QR (or Pay by Bank Transfer) is the only way to take these
+    const byQr = QR_METHODS.indexOf(method) !== -1;
+    const qrButton = document.getElementById('pay-qr-btn');
+    if (qrButton) {
+        qrButton.hidden = !byQr;
+        qrButton.textContent = method === 'Bank Transfer' ? 'Pay by Bank Transfer' : 'Pay by QR';
+    }
+    const saveButton = document.getElementById('pay-save-btn');
+    if (saveButton) saveButton.hidden = byQr;
 }
 
 // says what is left after the amount typed, before the button is pressed
@@ -287,6 +287,9 @@ function onDriverPayAmountChange() {
 
     const amount = parseFloat(form.elements.amount.value) || 0;
     const left = Math.round((Number(d.balance_due) - amount) * 100) / 100;
+
+    // a QR code on screen is for the old amount; it is cancelled, not paid wrong
+    qrAmountChanged('credit_payment', amount);
 
     if (amount <= 0) {
         note.textContent = '';
@@ -307,9 +310,10 @@ function cancelDriverPayment() {
     openDriverDetail(deliveryId);
 }
 
-async function handleDriverPayment(event) {
-    event.preventDefault();
-    const form = event.target;
+// viaQr: pressed as Pay by QR; the money is taken by the QR code
+async function handleDriverPayment(event, viaQr) {
+    if (event && typeof event.preventDefault === 'function') event.preventDefault();
+    const form = document.getElementById('pay-form');
 
     const amount = parseFloat(form.elements.amount.value);
     if (!amount || amount <= 0) {
@@ -328,8 +332,12 @@ async function handleDriverPayment(event) {
         return;
     }
 
-    // the bank and account behind a cheque or a bank transfer
+    // GCash, PayMaya and a bank transfer are only taken by QR code, whichever way
+    // the form was sent (Enter too)
     const method = form.elements.paymentMethod.value;
+    viaQr = QR_METHODS.indexOf(method) !== -1;
+
+    // the bank and account behind a cheque or a bank transfer
     let details = null;
     if (method === 'Cheque' || method === 'Bank Transfer') {
         let read;
@@ -344,11 +352,16 @@ async function handleDriverPayment(event) {
         details = read.details;
     }
 
-    if (payNeedsReference(method) && form.elements.referenceNo.value.trim() === '') {
-        notifyWarning('Write the ' + (method === 'Cheque' ? 'cheque number' : 'transfer reference') +
-            ' in the Reference box.', 'The reference is required');
-        form.elements.referenceNo.focus();
-        return;
+    // PayMongo refuses a transfer below the bank's smallest
+    if (method === 'Bank Transfer') {
+        const bank = paymongoBank(details.bankCode);
+        if (bank && amount < bank.minimum) {
+            notifyWarning(bank.name + ' takes transfers of ' + peso(bank.minimum) + ' or more. This one is ' +
+                peso(amount) + '.', 'Too small for ' + bank.name);
+            const box = document.getElementById('door-transfer-bank');
+            if (box) box.focus();
+            return;
+        }
     }
 
     // A part payment still closes the delivery, so it is asked about before anything is sent
@@ -360,22 +373,45 @@ async function handleDriverPayment(event) {
         if (!yes) return;
     }
 
-    // The button is off while this sends, so a double tap cannot record the payment twice.
-    const button = document.querySelector('#pay-modal button[type="submit"]');
-    if (button && button.disabled) return;   // already sending
+    // The buttons are off while this sends, so a double tap cannot record the payment twice.
+    const button = document.getElementById('pay-save-btn');
+    const qrButton = document.getElementById('pay-qr-btn');
+    if ((button && button.disabled) || (qrButton && qrButton.disabled)) return;   // already sending
     if (button) button.disabled = true;
+    if (qrButton) qrButton.disabled = true;
+
+    // by QR code: the customer pays the code before anything is recorded
+    let qr = null;
+    if (viaQr) {
+        const saleNumber = d && d.sale_id ? 'OR-' + String(d.sale_id).padStart(6, '0') : 'the sale';
+        qr = await collectQrPayment(amount, 'Payment on ' + saleNumber + ' \u00b7 Delivery #' + paymentDeliveryId,
+            method, 'credit_payment', d ? d.sale_id : null, method === 'Bank Transfer' ? details : null);
+        if (!qr) {
+            if (button) button.disabled = false;
+            if (qrButton) qrButton.disabled = false;
+            return;
+        }
+    }
 
     let paymentRecorded = false;
     try {
         const response = await apiCollectPayment(paymentDeliveryId, {
                 amount: amount,
-                paymentMethod: form.elements.paymentMethod.value,
-                referenceNo: form.elements.referenceNo.value.trim() || null,
+                paymentMethod: method,
+                qrPaymentId: qr ? qr.id : null,
                 paymentDetails: details
             });
         const result = await response.json();
 
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) {
+                let errorText = result.error + '';
+                if (qr) errorText += keepUnusedQr(qr, result);
+                notifyError(errorText);
+            }
+            return;
+        }
+        if (qr) qrPaidUnused = null;
         paymentRecorded = true;
 
         // the money is in, so the delivery is closed out as Delivered
@@ -404,10 +440,12 @@ async function handleDriverPayment(event) {
                 'Delivered. Open the delivery and mark it Delivered.', 'Payment recorded');
             await refreshDeliveryLists();
         } else {
+            if (qr) qrPaidUnused = qr;
             notifyOffline();
         }
     } finally {
         if (button) button.disabled = false;
+        if (qrButton) qrButton.disabled = false;
     }
 }
 
@@ -480,14 +518,6 @@ async function openDriverRefund(deliveryId) {
     document.getElementById('refund-subtitle').textContent = 'Delivery #' + deliveryId + ' · ' + d.customer_name;
     document.getElementById('refund-reason').value = '';
 
-    let moneyNote = 'The order is already paid, so the refund is cash handed back to the customer.';
-    if (refundBalance > 0) {
-        moneyNote = 'The order still owes ' + peso(refundBalance) + ', so the refund comes off what the customer ' +
-            'owes. If it is more than that, hand the rest back in cash.';
-    }
-    document.getElementById('refund-explain').textContent =
-        'Tick each item the customer turned away and say how many. ' + moneyNote +
-        ' The goods go to the inventory clerk for inspection.';
 
     let linesHtml = '';
     for (let i = 0; i < refundLines.length; i++) {
@@ -498,7 +528,7 @@ async function openDriverRefund(deliveryId) {
             '<span class="refund-sold muted">bought ' + escapeHtml(qtyText(line.sold, line.unit)) +
                 ' at ' + peso(line.price) + ', up to ' + line.left + ' can go back</span>' +
             '<input type="number" class="form-control refund-qty" id="refund-qty-' + i + '" ' +
-                'min="0" max="' + line.left + '" step="any" value="' + Math.min(1, line.left) + '" ' +
+                'min="0" max="' + line.left + '" step="any" value="' + line.left + '" ' +
                 'oninput="onRefundLineChange()" aria-label="Quantity of ' + escapeHtml(line.name) + '">' +
             '<span class="refund-amount" id="refund-amount-' + i + '"></span>' +
         '</div>';

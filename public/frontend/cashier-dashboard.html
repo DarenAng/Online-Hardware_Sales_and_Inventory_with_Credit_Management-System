@@ -200,8 +200,6 @@
                         <div class="toolbar-spacer"></div>
                     </div>
 
-                    <div class="track-legend" id="cdel-legend"></div>
-
                     <div class="table-responsive grid-8">
                         <table id="cdel-table">
                             <thead>
@@ -224,6 +222,15 @@
                                 </div>
                             </div>
                             <form id="refund-form" class="form-sheet" onsubmit="handleIssueRefund(event)" autocomplete="off">
+                                <!-- the sale picked from Sales in the Past 3 Days (renderRefundSource) -->
+                                <div class="adjust-source" id="refund-source" hidden></div>
+                                <!-- a sale of several items: each with how many came back, like the
+                                     clerk's Stock Adjustment for a purchase order (renderRefundLines) -->
+                                <div class="adjust-lines" id="refund-lines" hidden></div>
+
+                                <!-- ONE ITEM -- typed by hand, or filled in from a sale of one item.
+                                     Hidden while a sale of several items is on the form. -->
+                                <div id="refund-single">
                                 <!-- WHAT CAME BACK -- unlike the customer box, a name matching nothing is
                                      not accepted: no strip under the box means nothing is chosen -->
                                 <div class="form-group">
@@ -264,7 +271,9 @@
                                 <div class="form-group">
                                     <label for="refund-sale">Sale ID <span class="label-hint">required. If the sale still owes money, the refund comes off what is owed</span></label>
                                     <input type="number" id="refund-sale" name="saleId" class="form-control"
-                                           min="1" placeholder="Receipt number" style="max-width: 220px;" required>
+                                           min="1" placeholder="Receipt number" style="max-width: 220px;" required
+                                           oninput="onRefundSaleInput()">
+                                </div>
                                 </div>
 
                                 <div class="form-group">
@@ -272,9 +281,11 @@
                                     <input type="text" name="reason" id="return-reason" class="form-control"
                                            maxlength="255" placeholder="Wrong item" required>
                                 </div>
+                                <!-- what a sale of several items will refund, as it is typed -->
+                                <div class="adjust-preview" id="refund-preview"></div>
                                 <div class="form-footer">
                                     <button type="submit" class="btn btn-success">Issue Refund</button>
-                                    <button type="button" class="btn btn-ghost" onclick="showCashierHome(event)">Cancel</button>
+                                    <button type="button" class="btn btn-ghost" onclick="cancelRefundForm(event)">Cancel</button>
                                 </div>
                             </form>
                         </div>
@@ -330,7 +341,6 @@
                                 <option value="Cash">Cash</option>
                                 <option value="Online Payment">Online Payment</option>
                                 <option value="Cheque">Cheque</option>
-                                <option value="COD">Cash on Delivery</option>
                                 <option value="Credit">Credit</option>
                             </select>
                         </div>
@@ -395,7 +405,7 @@
                          from the list; a name nobody has gets an Add Customer button, which
                          opens the Customers Record form and puts the new account on the sale. -->
                     <div class="form-group">
-                        <label for="customer-name">Customer <span class="label-hint">empty is a walk-in</span></label>
+                        <label for="customer-name">Customer</label>
                         <div class="suggest-wrap">
                             <input type="text" id="customer-name" name="customerName"
                                    class="form-control" autocomplete="off"
@@ -424,7 +434,6 @@
                                 <option value="PayMaya">PayMaya</option>
                                 <option value="Cheque">Cheque</option>
                                 <option value="Bank Transfer">Bank Transfer</option>
-                                <option value="COD">Cash on Delivery</option>
                                 <option value="Credit">Credit</option>
                             </select>
                     </div>
@@ -442,7 +451,7 @@
                                        min="0" step="0.01" value="0" placeholder="0.00" oninput="renderCart()">
                             </div>
                             <div class="form-group">
-                                <label for="pay-down-method">Payment method</label>
+                                <label for="pay-down-method">Method</label>
                                 <select id="pay-down-method" name="downPaymentMethod" class="form-control" onchange="renderCart()">
                                     <option value="Cash">Cash</option>
                                     <option value="GCash">GCash</option>
@@ -486,9 +495,8 @@
                 <button type="button" class="btn btn-ghost" onclick="closeCheckoutModal()">Back to the Order</button>
                 <button type="button" class="btn btn-ghost" id="make-delivery-btn"
                         onclick="openDeliveryForm()">Make a Delivery</button>
-                <!-- GCash, PayMaya or Bank Transfer: the customer scans a QR code instead of
-                     the cashier typing a reference (shown by renderCartFigures; for a bank
-                     transfer it is the only way to finish, and Complete Sale is hidden) -->
+                <!-- GCash, PayMaya or Bank Transfer: the customer scans a QR code, the only
+                     way to finish for those, so Complete Sale is hidden (renderCartFigures) -->
                 <button type="button" class="btn" id="qr-pay-btn" data-icon="qr-code"
                         onclick="payByQr()" hidden>Pay by QR</button>
                 <button type="submit" form="checkout-form" class="btn btn-success" id="checkout-btn">Complete Sale</button>
@@ -521,7 +529,8 @@
                            placeholder="Type a name or phone, or pick from the list"
                            oninput="renderCreditPayList()">
                 </div>
-                <div id="credit-pay-list" class="credit-pay-list"></div>
+                <!-- data-no-icon: each row is a customer name, so "Mark Aguilar" must not get the "Mark ..." icon -->
+                <div id="credit-pay-list" class="credit-pay-list" data-no-icon></div>
             </div>
 
             <div class="modal-foot">
@@ -548,7 +557,6 @@
             </div>
 
             <div class="modal-body">
-                <p class="limit-intro" id="limit-intro"></p>
                 <form id="limit-form" onsubmit="handleLimitRequest(event)" autocomplete="off" novalidate>
                     <div class="form-group">
                         <label for="limit-new">New limit</label>
@@ -556,7 +564,7 @@
                                min="0" step="0.01" placeholder="0.00" oninput="renderLimitVerdict()">
                     </div>
                     <div class="form-group">
-                        <label for="limit-reason">Reason <span class="label-hint">required</span></label>
+                        <label for="limit-reason">Reason</label>
                         <input type="text" id="limit-reason" name="reason" class="form-control" maxlength="255"
                                oninput="renderLimitVerdict()" placeholder="Contractor">
                     </div>
@@ -640,7 +648,7 @@
                     <h4 class="detail-subhead">Where it goes</h4>
                     <p class="label-hint" id="dl-saved-address" hidden></p>
                     <div class="form-group">
-                        <label for="dl-street">House number and street <span class="label-hint">optional</span></label>
+                        <label for="dl-street">House number and street</label>
                         <input type="text" id="dl-street" name="street" class="form-control"
                                maxlength="150" placeholder="Lot 5 Block 2, Rizal Street">
                         <span class="field-error" id="dl-street-error" hidden></span>
@@ -667,7 +675,7 @@
                             <span class="field-error" id="dl-province-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="dl-landmark">Landmark <span class="label-hint">optional</span></label>
+                            <label for="dl-landmark">Landmark</label>
                             <input type="text" id="dl-landmark" name="landmark" class="form-control"
                                    maxlength="150" placeholder="Beside the blue gate, across the chapel">
                             <span class="field-error" id="dl-landmark-error" hidden></span>
@@ -677,10 +685,8 @@
                     <h4 class="detail-subhead">When and who</h4>
                     <div class="grid-2">
                         <div class="form-group">
-                            <label for="dl-scheduled">Preferred delivery date <span class="label-hint">optional</span></label>
-                            <input type="datetime-local" id="dl-scheduled" name="scheduledDate" class="form-control">
-                            <span class="label-hint">Date and time. Leave it empty if the slot is not
-                                agreed yet.</span>
+                            <label for="dl-scheduled">Preferred delivery date <span class="req-mark" aria-hidden="true">*</span></label>
+                            <input type="datetime-local" id="dl-scheduled" name="scheduledDate" class="form-control" required>
                             <span class="field-error" id="dl-scheduled-error" hidden></span>
                         </div>
                         <div class="form-group">
@@ -704,7 +710,7 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="dl-remarks">Remarks <span class="label-hint">optional</span></label>
+                        <label for="dl-remarks">Remarks</label>
                         <input type="text" id="dl-remarks" name="remarks" class="form-control" maxlength="255"
                                placeholder="Call before arriving, leave with the guard">
                         <span class="field-error" id="dl-remarks-error" hidden></span>
@@ -867,7 +873,7 @@
                         <span class="modal-role" id="payment-sub">Against a sale</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closePaymentForm()" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="closePaymentForm(true)" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-body">
@@ -900,23 +906,15 @@
                     </div>
                     <!-- the cheque's or the transfer's bank and account (payment-details.js) -->
                     <div id="payment-details-box" style="margin-top: 14px;"></div>
-                    <!-- asked for only when the method has a number to trace it by
-                         (renderPaymentVerdict); cash needs none, and the box is left blank with
-                         its room kept so the card does not change size -->
-                    <div class="form-group is-blank" id="payment-ref-field" style="margin-top: 14px;">
-                        <label for="pay-debt-ref">Reference <span class="label-hint" id="payment-ref-hint">optional</span></label>
-                        <input type="text" id="pay-debt-ref" name="referenceNo" class="form-control" maxlength="60"
-                               placeholder="e.g. cheque 001234">
-                    </div>
                     <p class="credit-verdict" id="payment-verdict"></p>
                 </form>
             </div>
 
             <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closePaymentForm()">Cancel</button>
+                <button type="button" class="btn btn-ghost" onclick="closePaymentForm(true)">Cancel</button>
                 <button type="button" class="btn" id="payment-qr-btn" data-icon="qr-code"
                         onclick="handleTakePayment(event, true)" hidden>Pay by QR</button>
-                <button type="button" class="btn btn-success" id="payment-save-btn" onclick="handleTakePayment(event)">Record the Payment</button>
+                <button type="button" class="btn btn-success" id="payment-save-btn" data-icon="cash" onclick="handleTakePayment(event)">Confirm Payment</button>
             </div>
         </div>
     </div>
@@ -1006,7 +1004,6 @@
 
             <div class="modal-foot">
                 <button type="button" class="btn btn-ghost" id="customer-print-card" onclick="printOpenCustomer('card')" hidden>Print Customer Card</button>
-                <button type="button" class="btn btn-ghost" id="customer-print-terms" onclick="printOpenCustomer('terms')" hidden>Print Terms and Conditions</button>
                 <button type="button" class="btn btn-accent" id="customer-pay-btn" onclick="payFromCustomerCard()" hidden>Credit Settlement</button>
                 <button type="button" class="btn btn-ghost" id="customer-edit-btn" onclick="editOpenCustomer()">Edit Customer</button>
                 <button type="button" class="btn btn-gold" onclick="askForExtension()">Ask for a Higher Limit</button>
@@ -1037,53 +1034,10 @@
 
             <div class="modal-foot no-print">
                 <button type="button" class="btn btn-ghost" id="receipt-terms-btn" onclick="printReceiptCreditTerms()" hidden>Print Terms and Conditions</button>
+                <!-- opened from Sales Report: a sale of today can be asked to be voided (a manager decides) -->
+                <button type="button" class="btn btn-danger" id="receipt-void-btn" data-icon="slash-circle"
+                        onclick="requestVoidSale()" hidden>Request Void</button>
                 <button type="button" class="btn btn-accent" id="receipt-print-btn" onclick="printReceipt()">Print Invoice</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- ============================================================
-         PAY BY QR -- the code the customer scans for a GCash or Maya
-         payment, for a sale or for a payment on a balance. Opened by
-         collectQrPayment() in scripts/cashier.js. The code holds the address
-         of the page the customer pays on (kept on the image as data-pay-url).
-         Locked: it closes only through its own buttons, so the checking
-         always stops. data-modal-scroll: the card stays 440 wide on one page, so
-         the code is never moved off the screen onto a second page (modals.js).
-         ============================================================ -->
-    <div class="modal" id="qr-modal" data-modal-locked data-modal-scroll>
-        <div class="modal-box qr-box">
-            <div class="modal-head">
-                <div class="modal-identity">
-                    <div class="avatar"><i class="bi bi-qr-code" aria-hidden="true"></i></div>
-                    <div>
-                        <h3 id="qr-title">Pay by QR</h3>
-                        <span class="modal-role" id="qr-sub"></span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="modal-body">
-                <p class="qr-amount" id="qr-amount"></p>
-                <!-- above the code, so it is never pushed onto a second page on a short screen -->
-                <p class="qr-status" id="qr-status" role="status" aria-live="polite"></p>
-                <p class="qr-clock" id="qr-clock">The code expires in <strong id="qr-countdown">10:00</strong></p>
-                <div class="qr-frame">
-                    <img id="qr-image" alt="QR code for the customer to scan" width="240" height="240">
-                </div>
-                <p class="qr-ask" id="qr-ask">Ask the customer to scan the code with their phone's camera.</p>
-                <!-- a bank transfer only: the same page the code opens, for testing in PayMongo test mode or a customer who is
-                     at this computer rather than scanning -->
-                <p class="qr-link" id="qr-link-row" hidden>
-                    <a id="qr-link" href="#" target="_blank" rel="noopener">Open the bank's page on this computer</a>
-                </p>
-            </div>
-
-            <div class="modal-foot qr-foot">
-                <button type="button" class="btn btn-ghost" id="qr-cancel-btn" onclick="cancelQrPayment()">Cancel</button>
-                <!-- after a failed or expired code -->
-                <button type="button" class="btn btn-ghost" id="qr-other-btn" onclick="chooseAnotherMethod()" hidden>Choose another method</button>
-                <button type="button" class="btn btn-success" id="qr-new-btn" onclick="newQrCode()" hidden>New QR</button>
             </div>
         </div>
     </div>
@@ -1110,6 +1064,7 @@
     <script src="scripts/shared/delivery-schedule.js"></script>
     <script src="scripts/shared/credit-terms.js"></script>
     <script src="scripts/shared/payment-details.js"></script>
+    <script src="scripts/shared/qr-pay.js"></script>
     <script src="connections/cashier-connection.js"></script>
     <script src="scripts/cashier.js"></script>
 </body>

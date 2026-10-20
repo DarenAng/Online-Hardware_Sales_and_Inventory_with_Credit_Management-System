@@ -752,7 +752,11 @@ function suggestRefundAmount() {
     }
 
     const quantity = Number(form.elements.quantity.value) || 0;
-    const suggested = Math.round(Number(refundProduct.price) * Math.max(quantity, 0) * 100) / 100;
+    // from a sale on the form: what the customer paid for it; otherwise today's price
+    const saleLine = refundSaleLine(refundProduct.product_id);
+    const suggested = saleLine
+        ? refundLineAmount(saleLine, Math.max(quantity, 0))
+        : Math.round(Number(refundProduct.price) * Math.max(quantity, 0) * 100) / 100;
 
     const current = parseFloat(field.value);
     const untouched = !field.value || current === 0 || current === refundAmountSuggested;
@@ -762,16 +766,18 @@ function suggestRefundAmount() {
         refundAmountSuggested = suggested;
         if (note) {
             note.className = 'amount-source';
-            note.textContent = quantity + ' at ' + peso(refundProduct.price) + '. Change it if the '
-                + 'customer paid a different price.';
+            note.textContent = saleLine
+                ? 'What the customer paid for ' + quantity + ' on sale #' + refundSale.saleId + '.'
+                : quantity + ' at ' + peso(refundProduct.price) + '. Change it if the customer paid a different price.';
         }
         return;
     }
 
     if (note) {
         note.className = 'amount-source is-edited';
-        note.textContent = 'Your figure. ' + quantity + ' at today\'s price would be '
-            + peso(suggested) + '.';
+        note.textContent = saleLine
+            ? 'Your figure. The customer paid ' + peso(suggested) + ' for ' + quantity + '.'
+            : 'Your figure. ' + quantity + ' at today\'s price would be ' + peso(suggested) + '.';
     }
 }
 
@@ -1080,7 +1086,7 @@ function renderCustomerVerdict() {
 
     if (typed === '') {
         box.className = 'customer-verdict';
-        box.textContent = 'Walk-in. To put the sale on a customer, type their name and pick them from the list.';
+        box.textContent = '';
         return;
     }
 
@@ -1559,13 +1565,13 @@ function renderCartFigures() {
     renderCreditVerdict(t);
     renderSalePaymentExtras(t);
 
-    // A bank transfer is only ever taken through PayMongo (Pay by Bank Transfer),
-    // so Complete Sale is not offered for it.
+    // GCash, PayMaya and a bank transfer are only ever taken through PayMongo
+    // (Pay by QR, Pay by Bank Transfer), so Complete Sale is not offered for them.
     const taken = methodTakenNow(t);
     const button = document.getElementById('checkout-btn');
     if (button) {
         button.disabled = cart.length === 0 || (!t.onAccount && t.tendered < t.due);
-        button.hidden = taken === 'Bank Transfer';
+        button.hidden = QR_METHODS.indexOf(taken) !== -1;
         button.textContent = checkoutLabel(t);
     }
 
@@ -1575,7 +1581,9 @@ function renderCartFigures() {
     const qrButton = document.getElementById('qr-pay-btn');
     if (qrButton) {
         qrButton.hidden = QR_METHODS.indexOf(taken) === -1;
-        qrButton.disabled = cart.length === 0;
+        // GCash or PayMaya paid in full: the amount entered has to cover the bill
+        const short = !t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due;
+        qrButton.disabled = cart.length === 0 || short;
         qrButton.textContent = taken === 'Bank Transfer' ? 'Pay by Bank Transfer' : 'Pay by QR';
     }
 
@@ -1589,7 +1597,7 @@ function checkoutLabel(t) {
     if (t.method === 'COD') return 'Place COD Order';
     if (t.onCredit) {
         if (cart.length > 0 && t.amountOnAccount <= 0) return 'Complete Sale';
-        if (t.down > 0) return 'Take Part Payment & Charge the Rest';
+        // a part paid now still reads Charge to Account: the rest goes on the account
         return 'Charge to Account';
     }
     return 'Complete Sale';
@@ -1602,12 +1610,6 @@ function checkoutLabel(t) {
 // transfer is verified through PayMongo: the customer's bank and account are
 // asked for, and the reference is PayMongo's own payment number, not typed.
 // An e-wallet prints a reference too, taken when the cashier has it. Cash needs none.
-// the reference asked for on the Credit Settlement card (a sale asks for none)
-const REFERENCE_WORDS = {
-    'Cheque':        { hint: 'required, the cheque number', placeholder: 'e.g. 001234' },
-    'GCash':         { hint: 'optional, the GCash reference', placeholder: 'e.g. 1012 345 678901' },
-    'PayMaya':       { hint: 'optional, the Maya reference', placeholder: 'e.g. 5A3F9C21' }
-};
 
 // what the money taken today arrives by: the sale's own method, or on a
 // Credit sale the part payment's; nothing is taken on COD, nor on credit
@@ -1644,7 +1646,7 @@ function renderSalePaymentExtras(totals) {
 
     // A sale asks for no reference: not for an e-wallet, which is paid by QR
     // code, and not for a cheque, which is traced by its account, bank and date.
-    // (The Credit Settlement card still asks for one: REFERENCE_WORDS.)
+    // (The Credit Settlement card asks for none either.)
     const taken = methodTakenNow(t);
     const field = document.getElementById('sale-reference-field');
     const words = null;
@@ -1667,33 +1669,6 @@ function renderSalePaymentExtras(totals) {
     let detailsFor = taken;
     if (t.onCredit) detailsFor = downPaymentMethod();
     showPaymentDetails('sale', detailsFor);
-}
-
-// ---------- paying GCash, PayMaya or a bank transfer by QR code ----------
-// The customer scans a code instead of the cashier typing a reference. The
-// code is made on the server (routes/qr-payments.js) through PayMongo or
-// its offline simulation, and holds the address of the page the customer pays
-// on (for a bank transfer, their bank's own online-banking page, with the bank
-// and account the cashier typed kept on the QR payment). The server is asked every three seconds, and at once when the live
-// channel says a QR payment changed, whether it has been paid; only then is
-// the sale or the payment sent, carrying the QR payment's id, and the server
-// checks it again before recording anything.
-const QR_METHODS = ['GCash', 'PayMaya', 'Bank Transfer'];
-const QR_CHECK_MS = 3000;
-
-// the code on screen, or null; one at a time
-let qrSession = null;
-
-// A QR payment the customer made that no sale took (the server refused the
-// sale after the money was in: an item ran out). The next QR payment for the
-// same amount uses it rather than charging the customer twice.
-let qrPaidUnused = null;
-
-const QR_APP_WORDS = { 'GCash': 'GCash', 'PayMaya': 'Maya', 'Bank Transfer': 'Bank Transfer' };
-
-// a change to any QR payment: the code on screen is asked about straight away
-if (typeof onLiveChange === 'function') {
-    onLiveChange(['qr-payments'], function () { if (qrSession && !qrSession.over) checkQr(qrSession); });
 }
 
 // The inventory moved (somebody added a product, the manager set a price): when the
@@ -1726,354 +1701,6 @@ function payByQr() {
     const form = document.getElementById('checkout-form');
     if (!form) return;
     return handleCheckout({ preventDefault: function () {}, target: form }, true);
-}
-
-// Shows a code for amount and waits. purpose is 'sale' or 'credit_payment'
-// (then saleId is the sale being paid). bank is { bankCode, bank, accountName,
-// accountNumber } for a Bank Transfer (readTransferDetails), otherwise null.
-// Resolves to { id, reference, amount } once paid, or null when the cashier
-// cancelled or chose another method (the reason already said on screen).
-async function collectQrPayment(amount, what, method, purpose, saleId, bank) {
-    amount = Math.round(amount * 100) / 100;
-
-    if (qrPaidUnused) {
-        // a transfer is only reused for the same bank and account; the details copied
-        // when the money is recorded are the ones on that payment
-        let sameAccount = true;
-        if (method === 'Bank Transfer') {
-            sameAccount = Boolean(qrPaidUnused.bank && bank &&
-                qrPaidUnused.bank.bankCode === bank.bankCode &&
-                qrPaidUnused.bank.accountNumber === bank.accountNumber);
-        }
-        if (Math.abs(qrPaidUnused.amount - amount) < 0.005 && qrPaidUnused.wallet === method && sameAccount) {
-            notifyInfo('The customer already paid ' + peso(amount) + ' by QR (' + qrPaidUnused.reference +
-                '), so that payment is used. No new code is needed.', 'Using the earlier QR payment');
-            return qrPaidUnused;
-        }
-        notifyWarning('A QR payment of ' + peso(qrPaidUnused.amount) + ' (' + qrPaidUnused.reference +
-            ') was taken but never recorded. The manager\'s QR Payments list shows it as needing a refund.',
-            'An earlier QR payment is unused');
-    }
-
-    return new Promise(function (resolve) {
-        const session = {
-            amount: amount, what: what, method: method, bank: bank || null,
-            purpose: purpose || 'sale', saleId: saleId || null,
-            id: null, resolve: resolve, ticker: null, poller: null, inflight: null,
-            endsAt: 0, closing: false, over: false, done: false
-        };
-        qrSession = session;
-        startQrCode(session);
-    });
-}
-
-// Makes a code for the session (again, after New QR) and puts it on screen.
-async function startQrCode(session) {
-    session.id = null;
-    session.over = false;
-    session.closing = false;
-    showQrCard(session, null);
-    setQrStatus('Making the QR code...', '');
-    if (!isModalOpen('qr-modal')) showModal('qr-modal');
-
-    let made;
-    try {
-        const request = {
-            amount: session.amount, wallet: session.method,
-            purpose: session.purpose, saleId: session.saleId
-        };
-        if (session.bank) {
-            request.bankCode = session.bank.bankCode;
-            request.accountName = session.bank.accountName;
-            request.accountNumber = session.bank.accountNumber;
-        }
-        const response = await apiCreateQrPayment(request);
-        made = await response.json();
-        if (!response.ok) {
-            if (!handleAuthFailure(response, made)) {
-                endQr(session, null);
-                notifyError(made.error, 'No QR code');
-            }
-            return;
-        }
-    } catch (error) {
-        endQr(session, null);
-        notifyOffline();
-        return;
-    }
-    if (session.done) return;
-
-    session.id = made.id;
-    session.endsAt = Date.now() + (Number(made.secondsLeft) || 600) * 1000;
-    showQrCard(session, made);
-    setQrStatus('Waiting for the customer to pay...', '');
-
-    tickQr();
-    session.ticker = setInterval(tickQr, 1000);
-    session.poller = setInterval(function () { if (qrSession === session) checkQr(session); }, QR_CHECK_MS);
-}
-
-function isModalOpen(id) {
-    const modal = document.getElementById(id);
-    return Boolean(modal && modal.classList.contains('open'));
-}
-
-// the card's words, the code and the buttons; made is null while the code is
-// being made. The page address the code holds is kept on the image
-// (data-pay-url) for the tests, and is not shown.
-function showQrCard(session, made) {
-    const isBank = session.method === 'Bank Transfer' && session.bank;
-    if (isBank) {
-        document.getElementById('qr-title').textContent = 'Pay by Bank Transfer · ' + session.bank.bank;
-        document.getElementById('qr-ask').textContent =
-            'Ask the customer to scan the code with their phone\'s camera.';
-    } else {
-        document.getElementById('qr-title').textContent = 'Pay by QR · ' + (QR_APP_WORDS[session.method] || session.method);
-        document.getElementById('qr-ask').textContent =
-            'Ask the customer to scan the code with their phone\'s camera and pay with ' +
-            (QR_APP_WORDS[session.method] || session.method) + '.';
-    }
-    document.getElementById('qr-sub').textContent = session.what;
-    document.getElementById('qr-amount').textContent = peso(session.amount);
-
-    const image = document.getElementById('qr-image');
-    const linkRow = document.getElementById('qr-link-row');
-    const link = document.getElementById('qr-link');
-    if (made) {
-        image.src = made.qrImage;
-        image.setAttribute('data-pay-url', made.payUrl || '');
-        // no link to the bank's page on this computer: the bank's page is good
-        // for one opening, and the customer's phone is the one that needs it
-        if (linkRow) linkRow.hidden = true;
-    } else {
-        image.removeAttribute('src');
-        image.removeAttribute('data-pay-url');
-        if (linkRow) linkRow.hidden = true;
-        if (link) link.removeAttribute('href');
-    }
-
-    document.getElementById('qr-clock').hidden = !made;
-    document.querySelector('#qr-modal .qr-box').classList.remove('is-over');
-    setQrButtons('waiting');
-}
-
-function setQrStatus(text, tone) {
-    const box = document.getElementById('qr-status');
-    if (!box) return;
-    box.textContent = text;
-    box.className = 'qr-status' + (tone ? ' ' + tone : '');
-}
-
-// waiting: Cancel. over (failed or ran out): Choose another method, New QR.
-// busy: nothing can be pressed.
-function setQrButtons(state) {
-    function show(id, visible, enabled) {
-        const button = document.getElementById(id);
-        if (!button) return;
-        button.hidden = !visible;
-        button.disabled = !enabled;
-    }
-    show('qr-cancel-btn', state !== 'over', state === 'waiting');
-    show('qr-other-btn', state === 'over', true);
-    show('qr-new-btn', state === 'over', true);
-}
-
-function stopQrTimers(session) {
-    clearInterval(session.ticker);
-    clearInterval(session.poller);
-    session.ticker = null;
-    session.poller = null;
-}
-
-// The card closes and the checking stops, whatever closed it; whoever is
-// waiting on collectQrPayment hears the outcome.
-function endQr(session, result) {
-    if (session.done) return;
-    session.done = true;
-    stopQrTimers(session);
-    if (qrSession === session) qrSession = null;
-    closeModal('qr-modal');
-    const image = document.getElementById('qr-image');
-    image.removeAttribute('src');
-    image.removeAttribute('data-pay-url');
-    const linkRow = document.getElementById('qr-link-row');
-    if (linkRow) linkRow.hidden = true;
-    session.resolve(result);
-}
-
-// Failed or ran out: the card stays, says why, and offers a new code or
-// another way to pay. Nothing was recorded.
-function qrOver(session, text) {
-    stopQrTimers(session);
-    session.over = true;
-    document.querySelector('#qr-modal .qr-box').classList.add('is-over');
-    document.getElementById('qr-clock').hidden = true;
-    const linkRow = document.getElementById('qr-link-row');
-    if (linkRow) linkRow.hidden = true;
-    setQrStatus(text + ' Nothing was recorded.', 'is-stop');
-    setQrButtons('over');
-}
-
-// paid: said on the card, which closes, and the sale or the payment goes on
-function qrPaid(session, state) {
-    stopQrTimers(session);
-    session.over = true;
-    setQrButtons('busy');
-    setQrStatus('Payment received', 'is-good');
-    // long enough to read before the card closes
-    setTimeout(function () {
-        endQr(session, {
-            id: session.id, reference: state.reference, amount: session.amount, wallet: session.method,
-            bank: session.bank
-        });
-    }, 700);
-}
-
-// One question to the server, acted on: paid, failed, ran out, or still
-// waiting. A question already on its way is shared rather than sent twice.
-// Gives back the status, or 'offline'.
-function checkQr(session) {
-    if (!session.id || session.done) return Promise.resolve('done');
-    if (session.inflight) return session.inflight;
-
-    session.inflight = apiGetQrPayment(session.id)
-        .then(function (state) {
-            if (session.done || session.over) return state.status;
-
-            if (state.status === 'paid') {
-                qrPaid(session, state);
-            } else if (state.status === 'failed') {
-                qrOver(session, 'The payment failed' + (state.errorMessage ? ': ' + state.errorMessage : '.'));
-            } else if (state.status === 'expired') {
-                qrOver(session, 'The QR code expired before it was paid.');
-            } else if (state.status === 'cancelled') {
-                endQr(session, null);
-            } else {
-                // the server's clock decides; the countdown follows it
-                session.endsAt = Date.now() + (Number(state.secondsLeft) || 0) * 1000;
-                if (!session.closing) {
-                    if (state.checkError) {
-                        setQrStatus('The payment provider cannot be reached just now. Still trying...', 'is-stop');
-                    } else {
-                        setQrStatus('Waiting for the customer to pay...', '');
-                    }
-                }
-            }
-            return state.status;
-        })
-        .catch(function () {
-            if (!session.done && !session.closing && !session.over) {
-                setQrStatus('The server cannot be reached just now. Still trying...', 'is-stop');
-            }
-            return 'offline';
-        })
-        .finally(function () { session.inflight = null; });
-    return session.inflight;
-}
-
-// The countdown is only the screen's: the server decides when the code has
-// run out, so at zero it is asked at once.
-function tickQr() {
-    const session = qrSession;
-    if (!session || session.closing || session.over) return;
-
-    const left = Math.max(0, Math.ceil((session.endsAt - Date.now()) / 1000));
-    const clock = document.getElementById('qr-countdown');
-    if (clock) {
-        clock.textContent = Math.floor(left / 60) + ':' + String(left % 60).padStart(2, '0');
-        clock.parentElement.classList.toggle('is-ending', left <= 60);
-    }
-    if (left === 0) checkQr(session);
-}
-
-// Cancel asks the server to close the code, which looks once more first: a
-// payment that already went through is recorded rather than abandoned.
-async function cancelQrPayment(reason) {
-    const session = qrSession;
-    if (!session || session.closing || session.done) return;
-    session.closing = true;
-    stopQrTimers(session);
-    setQrButtons('busy');
-    setQrStatus('Making sure nothing was paid...', '');
-
-    if (!session.id) { endQr(session, null); return; }
-    if (session.inflight) await session.inflight;
-    if (session.done) return;
-
-    let ended = null;
-    try {
-        const response = await apiCancelQrPayment(session.id);
-        ended = await response.json();
-        if (!response.ok) {
-            handleAuthFailure(response, ended);
-            ended = null;
-        }
-    } catch (error) {
-        ended = null;
-    }
-
-    if (ended && ended.status === 'paid') {
-        notifyInfo('The customer had already paid, so the payment is being recorded.', 'Already paid');
-        session.closing = false;
-        qrPaid(session, ended);
-        return;
-    }
-    if (!ended) {
-        // the server did not answer; the code is left to run out on its own
-        notifyWarning('The server could not be reached to cancel the QR code. It closes by itself when ' +
-            'its time runs out; ask the customer whether it went through before taking the money another way.', 'Not cancelled');
-    } else {
-        notifyInfo(reason || 'The QR payment was cancelled, so nothing was recorded.', 'QR payment cancelled');
-    }
-    endQr(session, null);
-}
-
-// after a failed or expired code
-function newQrCode() {
-    const session = qrSession;
-    if (!session || !session.over) return;
-    startQrCode(session);
-}
-
-function chooseAnotherMethod() {
-    const session = qrSession;
-    if (!session) return;
-    endQr(session, null);
-    notifyInfo('Pick another payment method, or press Pay by QR to try again.', 'Nothing was recorded');
-}
-
-// The code is for one amount. If what is owed changes while it is on screen
-// (the order or the payment typed), it is cancelled rather than paid wrong.
-function qrAmountChanged(purpose, amountNow) {
-    const session = qrSession;
-    if (!session || session.purpose !== purpose || session.done || session.over || session.closing) return;
-    if (Math.abs(Math.round(amountNow * 100) / 100 - session.amount) < 0.005) return;
-    cancelQrPayment('The amount changed while the QR code was open, so the code was cancelled. ' +
-        'Press Pay by QR again for the new amount.');
-}
-
-// Leaving the page with a code on screen: the browser asks first, and if the
-// cashier goes anyway the checking stops with the page.
-window.addEventListener('beforeunload', function (event) {
-    if (!qrSession) return;
-    event.preventDefault();
-    event.returnValue = '';
-});
-window.addEventListener('pagehide', function () {
-    if (qrSession) stopQrTimers(qrSession);
-});
-
-// After the customer has paid, a refusal from the server leaves the money in
-// and nothing recorded. Unless the refusal was about the payment itself, it is
-// kept for the next try and the cashier is told so.
-function keepUnusedQr(qr, result) {
-    const code = result && result.code;
-    if (code === 'QR_USED' || code === 'QR_AMOUNT' || code === 'QR_NOT_PAID' ||
-        code === 'QR_UNKNOWN' || code === 'QR_WALLET') return '';
-    qrPaidUnused = qr;
-    return ' The customer\'s QR payment of ' + peso(qr.amount) + ' (' + qr.reference + ') is kept: ' +
-        'put things right and press Pay by QR again, and it is used without a new code. ' +
-        'Until then the manager\'s QR Payments list shows it as needing a refund.';
 }
 
 function onPaymentMethodChange(method) {
@@ -2352,8 +1979,9 @@ async function handleCheckout(event, viaQr) {
     const t = cartTotals();
     const typedName = typedCustomerName();
 
-    // a bank transfer is only taken through PayMongo, whichever way the sale was sent (Enter too)
-    if (methodTakenNow(t) === 'Bank Transfer') viaQr = true;
+    // GCash, PayMaya and a bank transfer are only taken through PayMongo, whichever
+    // way the sale was sent (Enter too)
+    if (QR_METHODS.indexOf(methodTakenNow(t)) !== -1) viaQr = true;
 
     // Walk-in is allowed (nothing typed). A name has to be a customer picked
     // from the list; the till does not open an account from a typed name.
@@ -2398,7 +2026,7 @@ async function handleCheckout(event, viaQr) {
         return;
     }
 
-    if (!t.onAccount && !viaQr && t.tendered < t.due) {
+    if (!t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due) {
         notifyWarning('The amount entered is less than the amount due.', 'Sale not completed');
         return;
     }
@@ -2446,8 +2074,7 @@ async function handleCheckout(event, viaQr) {
     if (!viaQr || (t.onCredit && t.amountOnAccount > 0) || transferDetails) {
         const question = checkoutQuestion(t, checkoutCustomerName());
         if (chequeDetails) {
-            question.detail.push('Cheque no.: ' + reference);
-            question.detail.push('Cheque: ' + chequeDetails.bank + ', ' + chequeDetails.branch + ' \u00b7 dated ' + chequeDetails.chequeDate);
+            question.detail.push('Cheque: ' + chequeDetails.bank + ' \u00b7 dated ' + chequeDetails.chequeDate);
             question.detail.push('Account: ' + chequeDetails.accountName + ', ' + chequeDetails.accountNumber);
         }
         if (transferDetails) {
@@ -2640,7 +2267,8 @@ function saleHasCustomer(s) {
     return Boolean(s.customer_id) || String(s.walk_in_name || '').trim() !== '';
 }
 
-async function openReceipt(saleId) {
+// fromReport: opened from Sales Report, where a sale of today can be asked to be voided
+async function openReceipt(saleId, fromReport) {
     let data;
     try { data = await apiGetSale(saleId); }
     catch (error) {
@@ -2727,7 +2355,59 @@ async function openReceipt(saleId) {
         termsButton.hidden = !(s.payment_method === 'Credit' && s.customer_id && holdsFeature('credit-terms-print'));
     }
 
+    renderVoidButton(fromReport ? data : null);
     showModal('receipt-modal');
+}
+
+// Request Void on the invoice: only from Sales Report, only for a sale of today
+// not yet voided; while a request waits for the manager it reads Void Requested.
+function renderVoidButton(data) {
+    const button = document.getElementById('receipt-void-btn');
+    if (!button) return;
+    const s = data ? data.sale : null;
+    if (!s || Number(s.is_archived) || Number(s.is_today) !== 1) {
+        button.hidden = true;
+        button.removeAttribute('data-sale-id');
+        return;
+    }
+    const waiting = Boolean(data.voidRequest && data.voidRequest.status === 'Pending');
+    button.hidden = false;
+    button.disabled = waiting;
+    button.textContent = waiting ? 'Void Requested' : 'Request Void';
+    button.title = waiting ? 'Waiting for a manager to approve or decline it' : 'Ask a manager to void this sale';
+    button.setAttribute('data-sale-id', String(s.sale_id));
+}
+
+async function requestVoidSale() {
+    const button = document.getElementById('receipt-void-btn');
+    const saleId = button ? Number(button.getAttribute('data-sale-id')) : 0;
+    if (!saleId) return;
+    const receiptNo = 'OR-' + String(saleId).padStart(6, '0');
+
+    const typed = await askInput({
+        title: 'Request a void?', eyebrow: 'Sales Report',
+        message: receiptNo + ' is sent to a manager. Once they approve, the sale is voided and its goods go back on the shelf.',
+        label: 'Reason', placeholder: 'Wrong items rung up', confirmLabel: 'Send Request', cancelLabel: 'Go back',
+        check: function (value) {
+            return String(value || '').trim() === '' ? 'Type why the sale should be voided.' : null;
+        }
+    });
+    if (typeof typed !== 'string') return;
+
+    try {
+        const response = await apiRequestVoid(saleId, typed.trim());
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Request not sent');
+            return;
+        }
+        notifySuccess(result.message + ' You are told here when they decide.', 'Void requested');
+        if (button) { button.disabled = true; button.textContent = 'Void Requested'; }
+        const panel = getDataPanel('cash-sales');
+        if (panel && panel.state === 'ready') await panel.refresh();
+    } catch (error) {
+        notifyOffline();
+    }
 }
 
 // The receipt of one Credit Settlement payment, on the invoice's own paper and head
@@ -2789,10 +2469,11 @@ async function showPaymentReceipt(info) {
         footerLines: ['Thank you for your payment']
     });
 
-    // it is not a credit sale's invoice: no terms page to offer
+    // it is not a credit sale's invoice: no terms page to offer, nor a void
     lastReceipt = null;
     const termsButton = document.getElementById('receipt-terms-btn');
     if (termsButton) termsButton.hidden = true;
+    renderVoidButton(null);
 
     showModal('receipt-modal');
 }
@@ -2913,14 +2594,8 @@ function fillDeliveryFromCustomer(account) {
     // an old one-line address is only shown; the boxes are for the cashier to fill in
     const note = document.getElementById('dl-saved-address');
     if (note) {
-        if (saved.oldLine !== '') {
-            note.textContent = 'This customer was saved with one address line: ' + saved.oldLine +
-                '. Fill in the boxes below from it.';
-            note.hidden = false;
-        } else {
-            note.textContent = '';
-            note.hidden = true;
-        }
+        note.textContent = '';
+        note.hidden = true;
     }
 }
 
@@ -2944,7 +2619,7 @@ function renderDeliveryCustomerVerdict() {
 
     if (id) {
         box.className = 'customer-verdict is-good';
-        box.textContent = 'A customer on record. Their number and address are filled in below.';
+        box.textContent = '';
     } else if (typed === '') {
         box.className = 'customer-verdict';
         box.textContent = "Type the customer's name and pick them from the list.";
@@ -3435,8 +3110,10 @@ async function saveDeliveryForm(event) {
     if (landmark.length > 150) complain('landmark', 'The landmark is at most 150 characters.');
     if (fields.remarks.value.trim().length > 255) complain('remarks', 'The remarks are at most 255 characters.');
 
-    // a slot in the past is almost always a typing slip in the year or month
-    if (scheduledDate && new Date(scheduledDate).getTime() < Date.now() - 60000) {
+    // the date and time are required; a slot in the past is almost always a typing slip
+    if (!scheduledDate) {
+        complain('scheduledDate', 'Pick the date and time of the delivery.');
+    } else if (new Date(scheduledDate).getTime() < Date.now() - 60000) {
         complain('scheduledDate', 'That date has already passed. Check the date and time.');
     }
 
@@ -3628,10 +3305,6 @@ function buildDeliveryPanel() {
             return filters.status === 'all' || row.status === filters.status;
         },
 
-        onLoaded: function (rows) {
-            renderDeliveryLegend(rows);
-        },
-
         renderRow: function (row, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
                 'onclick="openCashierDeliveryDetail(' + row.delivery_id + ')">' +
@@ -3664,24 +3337,6 @@ function scheduleText(stamp) {
     return day + ' ' + time;
 }
 
-function renderDeliveryLegend(rows) {
-    const legend = document.getElementById('cdel-legend');
-    if (!legend) return;
-
-    if (!rows || rows.length === 0) { legend.innerHTML = ''; return; }
-
-    const stages = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed'];
-    let chips = '';
-    for (let s = 0; s < stages.length; s++) {
-        let count = 0;
-        for (let i = 0; i < rows.length; i++) {
-            if (rows[i].status === stages[s]) count++;
-        }
-        chips += '<span class="track-chip"><span class="track-count">' + count + '</span>' + stages[s] + '</span>';
-    }
-    legend.innerHTML = chips;
-}
-
 function clearDeliveryPanel() {
     const panel = getDataPanel('cash-deliveries');
     if (panel) panel.reset();
@@ -3691,9 +3346,6 @@ function clearDeliveryPanel() {
 
     const status = document.getElementById('cdel-status');
     if (status) status.value = 'all';
-
-    const legend = document.getElementById('cdel-legend');
-    if (legend) legend.innerHTML = '';
 }
 
 function openCashierDeliveryDetail(deliveryId) {
@@ -3709,6 +3361,12 @@ async function handleIssueRefund(event) {
     const form = event.target;
 
     const reason = form.elements.reason.value.trim();
+
+    // a sale of several items: every line with a quantity, in one report
+    if (isRefundMulti()) {
+        await issueRefundForLines(form, reason);
+        return;
+    }
 
     // the check is on what was chosen, not what is typed
     if (!refundProduct || !form.elements.productId.value) {
@@ -3765,8 +3423,71 @@ async function handleIssueRefund(event) {
 
         form.reset();
         // form.reset() knows nothing about the hidden id, the strip or the suggested figure
-        clearRefundProduct();
-        refundAmountSuggested = null;
+        clearRefundSale();
+        catalogLoaded = false;
+        await loadRecentSales();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// Issue Refund for a sale of several items: the lines with a quantity go in one
+// report (POST /api/returns/batch); if the server refuses one, nothing is filed.
+async function issueRefundForLines(form, reason) {
+    const lines = refundTableLines();
+    const items = [];
+    let total = 0;
+    for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        if (l.problem) {
+            notifyWarning(l.line.name + ': ' + l.problem, 'Check the quantities');
+            const box = document.getElementById('refund-line-qty-' + i);
+            if (box) box.focus();
+            return;
+        }
+        if (l.quantity > 0) {
+            if (!(l.amount > 0)) {
+                notifyWarning(l.line.name + ': that is too few to refund any money. Type a larger quantity, or 0.',
+                    'Check the quantities');
+                return;
+            }
+            items.push({ productId: l.line.productId, quantity: l.quantity, refundAmount: l.amount });
+            total += l.amount;
+        }
+    }
+    if (items.length === 0) {
+        notifyWarning('Type how many of each item came back. Leave 0 for what did not.', 'Nothing to refund');
+        const first = document.getElementById('refund-line-qty-0');
+        if (first) first.focus();
+        return;
+    }
+    if (reason === '') {
+        notifyWarning('Type the reason for the refund.', 'A reason is required');
+        const field = document.getElementById('return-reason');
+        if (field) field.focus();
+        return;
+    }
+
+    const saleId = refundSale.saleId;
+    try {
+        const response = await apiFileRefundBatch({
+            reportType: 'Refunded', saleId: saleId, reason: reason, items: items
+        });
+        const result = await response.json();
+        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error, 'Refund not issued'); return; }
+
+        total = Math.round(total * 100) / 100;
+        const offBalance = Number(result.offBalance) || 0;
+        const cashBack = Math.round((total - offBalance) * 100) / 100;
+        let balanceNote = '';
+        if (offBalance > 0) balanceNote = ' ' + peso(offBalance) + ' came off what the customer owes on sale #' + saleId + '.';
+        if (cashBack > 0) balanceNote += ' Hand back ' + peso(cashBack) + ' in cash.';
+        notifySuccess(items.length + (items.length === 1 ? ' item' : ' items') + ' refunded on sale #' + saleId +
+            '. The goods are set aside for the stockroom; the clerk has been asked to inspect them.' + balanceNote,
+            'Refund issued');
+
+        form.elements.reason.value = '';
+        clearRefundSale();
         catalogLoaded = false;
         await loadRecentSales();
     } catch (error) {
@@ -3818,8 +3539,10 @@ function buildRecentSalesPanel() {
             if (Number(row.returned_total) > 0) {
                 refundedNote = '<span class="cell-sub">refunded ' + peso(row.returned_total) + '</span>';
             }
-            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
-                'onclick="openRecentSale(' + row.sale_id + ')">' +
+            const picked = refundSale && refundSale.saleId === row.sale_id ? ' is-picked' : '';
+            return '<tr class="row-clickable row-reveal' + picked + '" data-sale-id="' + row.sale_id + '" ' +
+                'style="animation-delay:' + (index % 8) * 28 + 'ms" title="Refund from this sale" ' +
+                'onclick="fillRefundFromSale(' + row.sale_id + ')">' +
                 '<td class="cell-id">#' + row.sale_id + '</td>' +
                 '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 16)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
@@ -3839,142 +3562,286 @@ async function loadRecentSales() {
     else await panel.open();
 }
 
-// the receipt open in the popup: its lines, and the line the cashier pressed
-let recentSale = null;
+// ---------- a sale picked from Sales in the Past 3 Days ----------
+// Pressing a sale fills Issue a Refund in from it. A sale of one item fills
+// the Product, Quantity, Refund amount and Sale ID boxes. A sale of several
+// items puts them on the form as a table, like the clerk's Stock Adjustment for
+// a purchase order: each line with how many came back (0 for none), and the
+// refund for those pieces at what the customer paid for them.
+//
+// refundSale: { saleId, customerName, saleDate, method, lines: [...] } or null.
+// Each line is one product (two lines of the same product on the receipt are
+// added together, as the server counts them):
+//   { productId, name, baseUnit, sold, left, paidPerUnit }
+// counted in the product's own unit (what left the shelf), as a refund is.
+let refundSale = null;
 
-async function openRecentSale(saleId) {
+// money down to the centavo, never up: the server refuses a refund over what was paid
+function floorCentavo(value) {
+    return Math.floor(Number(value) * 100 + 1e-6) / 100;
+}
+
+function refundLinesFromSale(sale, items) {
+    // the lines add up to total_amount; the customer paid final_amount, after the discount
+    let afterDiscount = 1;
+    if (Number(sale.total_amount) > 0) afterDiscount = Number(sale.final_amount) / Number(sale.total_amount);
+
+    const lines = [];
+    for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        let line = null;
+        for (let k = 0; k < lines.length; k++) {
+            if (lines[k].productId === it.product_id) line = lines[k];
+        }
+        if (!line) {
+            line = { productId: it.product_id, name: it.product_name, baseUnit: it.base_unit || '',
+                     sold: 0, worth: 0, refunded: Number(it.refunded_quantity) || 0 };
+            lines.push(line);
+        }
+        line.sold += Number(it.base_quantity) || 0;
+        line.worth += Number(it.subtotal) || 0;
+    }
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        line.left = Math.max(0, Math.round((line.sold - line.refunded) * 1000) / 1000);
+        line.paidPerUnit = line.sold > 0 ? line.worth * afterDiscount / line.sold : 0;
+    }
+    return lines;
+}
+
+// the refund for this many pieces of the line, at what the customer paid
+function refundLineAmount(line, quantity) {
+    return floorCentavo(line.paidPerUnit * quantity);
+}
+
+// the line of the sale on the form for this product, or null
+function refundSaleLine(productId) {
+    if (!refundSale) return null;
+    for (let i = 0; i < refundSale.lines.length; i++) {
+        if (refundSale.lines[i].productId === productId) return refundSale.lines[i];
+    }
+    return null;
+}
+
+function isRefundMulti() {
+    return Boolean(refundSale && refundSale.lines.length > 1);
+}
+
+async function fillRefundFromSale(saleId) {
+    const form = document.getElementById('refund-form');
+    if (!form) return;
+
     let data;
     try { data = await apiGetSale(saleId); }
     catch (error) {
-        notifyWarning('The receipt could not be opened. Check the connection and try again.', 'Receipt unavailable');
+        notifyWarning('The sale could not be read. Check the connection and try again.', 'Sale unavailable');
         return;
     }
 
     const s = data.sale;
-    recentSale = { saleId: s.sale_id, items: data.items, picked: -1 };
+    refundSale = {
+        saleId: s.sale_id,
+        customerName: s.customer_name,
+        saleDate: String(s.sale_date).slice(0, 16),
+        method: s.payment_method,
+        lines: refundLinesFromSale(s, data.items || [])
+    };
+    form.elements.saleId.value = s.sale_id;
 
-    // everything refunded on the sale, as the list row says; s.refunded_amount is only the part that came off the balance
-    let refundedText = '<span class="muted">Nothing yet</span>';
-    if (Number(s.returned_total) > 0) refundedText = peso(s.returned_total);
-
-    const facts = '<div class="detail-grid">' +
-        detailField('Date', escapeHtml(String(s.sale_date).slice(0, 16))) +
-        detailField('Customer', escapeHtml(s.customer_name)) +
-        detailField('Rung Up By', escapeHtml(s.cashier_name)) +
-        detailField('Total', peso(s.final_amount)) +
-        detailField('Payment', escapeHtml(s.payment_method) + ' ' + statusBadge(s.payment_status)) +
-        detailField('Refunded Already', refundedText) +
-        '</div>';
-
-    const body = facts +
-        paymentDetailsCardHtml(data) +
-        '<h4 class="detail-subhead">Items</h4>' +
-        '<p class="detail-note" id="recent-sale-pick">Press an item to fill the Product box with it.</p>' +
-        recentSaleItemsTable();
-
-    openDetailModal('Receipt #' + s.sale_id, s.customer_name + ' · ' + String(s.sale_date).slice(0, 16),
-        'R' + s.sale_id, [{ label: 'Receipt', body: body }],
-        '<button type="button" class="btn btn-success" onclick="refundFromRecentSale()">Refund from this receipt</button>',
-        { wide: true });
-}
-
-// the lines of the open receipt; the pressed line is shaded
-function recentSaleItemsTable() {
-    const rows = [];
-    for (let i = 0; i < recentSale.items.length; i++) {
-        const it = recentSale.items[i];
-        let refundedCell = '<span class="muted">None</span>';
-        if (Number(it.refunded_quantity) > 0) {
-            refundedCell = escapeHtml(qtyText(it.refunded_quantity, it.base_unit)) +
-                '<span class="cell-sub">' + peso(it.refunded_amount) + '</span>';
-        }
-        rows.push([
-            escapeHtml(it.product_name),
-            escapeHtml(qtyText(it.quantity, it.unit_name)),
-            peso(it.unit_price),
-            peso(it.subtotal),
-            refundedCell
-        ]);
-    }
-
-    return pagedTable('recent-sale-items', ['Product', 'Qty', 'Unit Price', 'Total', 'Refunded'], rows,
-        [1, 2, 3, 4], {
-            empty: 'This receipt has no items.',
-            pageSize: 8,
-            rowAttrs: function (index) {
-                return 'class="row-clickable" title="Refund this item" ' +
-                    'onclick="pickRecentSaleItem(' + index + ')"' +
-                    (index === recentSale.picked ? ' style="background: var(--go-dim);"' : '');
-            }
-        });
-}
-
-// pressing a line chooses it; pressing it again lets it go
-function pickRecentSaleItem(index) {
-    if (!recentSale) return;
-
-    recentSale.picked = recentSale.picked === index ? -1 : index;
-
-    const hint = document.getElementById('recent-sale-pick');
-    if (hint) {
-        if (recentSale.picked === -1) {
-            hint.textContent = 'Press an item to fill the Product box with it.';
-        } else {
-            hint.textContent = 'Chosen: ' + recentSale.items[index].product_name + '. It goes into the Product box.';
-        }
-    }
-    pagedTableGo('recent-sale-items', 0);
-}
-
-// true when the open receipt has a line for this product
-function receiptHasProduct(productId) {
-    for (let i = 0; i < recentSale.items.length; i++) {
-        if (recentSale.items[i].product_id === productId) return true;
-    }
-    return false;
-}
-
-// puts the receipt number (and the pressed item) into the refund form, closes
-// the popup, and moves the cursor to the next box still empty
-async function refundFromRecentSale() {
-    if (!recentSale) return;
-    const form = document.getElementById('refund-form');
-    if (!form) return;
-
-    let line = null;
-    if (recentSale.picked !== -1) line = recentSale.items[recentSale.picked];
-    form.elements.saleId.value = recentSale.saleId;
-    closeModal('detail-modal');
-
-    if (line) {
+    if (refundSale.lines.length === 1) {
+        // one item: the boxes are filled in, everything still left to refund
+        const line = refundSale.lines[0];
         await ensureCatalogLoaded(false);
-        // the product may be gone from the catalogue (archived): say so
-        if (findCatalogProduct(line.product_id)) {
-            pickRefundProduct(line.product_id);
+        if (findCatalogProduct(line.productId)) {
+            form.elements.quantity.value = line.left > 0 ? String(line.left) : '1';
+            form.elements.refundAmount.value = '0';
+            refundAmountSuggested = null;
+            pickRefundProduct(line.productId);
         } else {
             clearRefundProduct();
-            notifyWarning(line.product_name + ' cannot be picked here, it may have been archived. ' +
+            notifyWarning(line.name + ' cannot be picked here, it may have been archived. ' +
                 'Type the product by hand.', 'Product not filled in');
         }
-    } else if (refundProduct && !receiptHasProduct(refundProduct.product_id)) {
-        // a product chosen earlier that is not on this receipt would be refunded against it
+    } else if (refundProduct) {
         clearRefundProduct();
     }
 
-    let next = document.getElementById('return-reason');
-    if (!refundProduct) next = refundProductBox();
-    else if (!(Number(form.elements.quantity.value) > 0)) next = form.elements.quantity;
-    else if (!(Number(form.elements.refundAmount.value) > 0)) next = form.elements.refundAmount;
+    renderRefundForm();
+    markRefundSaleRow();
 
+    const next = isRefundMulti() ? document.getElementById('refund-line-qty-0') : document.getElementById('return-reason');
     if (next) next.focus();
-
-    // The form may be above or below what is on the screen (a narrow window, a
-    // scrolled page), so it is brought into view and the cashier is told what was
-    // filled in; the popup closing alone looked as if nothing had happened.
     form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    let filledText = 'Receipt #' + form.elements.saleId.value + ' is in the Sale ID box.';
-    if (refundProduct) filledText = 'Receipt #' + form.elements.saleId.value + ' and ' + refundProduct.product_name + ' are filled in.';
-    notifyInfo(filledText + ' Check the quantity and the reason, then press Issue Refund.', 'Refund started');
+}
+
+// the sale on the form is shaded in the list beside it
+function markRefundSaleRow() {
+    const rows = document.querySelectorAll('#recent-sales-table tbody tr');
+    for (let i = 0; i < rows.length; i++) {
+        const id = Number(rows[i].getAttribute('data-sale-id'));
+        rows[i].classList.toggle('is-picked', Boolean(refundSale) && id === refundSale.saleId);
+    }
+}
+
+// Clear on the strip: the sale comes off the form, back to typing by hand
+function clearRefundSale() {
+    const form = document.getElementById('refund-form');
+    refundSale = null;
+    if (form) {
+        form.elements.saleId.value = '';
+        form.elements.quantity.value = '1';
+        form.elements.refundAmount.value = '0';
+    }
+    refundAmountSuggested = null;
+    clearRefundProduct();
+    renderRefundForm();
+    markRefundSaleRow();
+}
+
+// a Sale ID typed by hand is not the sale on the form any more
+function onRefundSaleInput() {
+    const form = document.getElementById('refund-form');
+    if (!form || !refundSale) return;
+    if (Number(form.elements.saleId.value) !== refundSale.saleId) {
+        refundSale = null;
+        renderRefundForm();
+        markRefundSaleRow();
+        suggestRefundAmount();
+    }
+}
+
+// the strip, the table or the single boxes, and the preview, for what is on the form
+function renderRefundForm() {
+    const form = document.getElementById('refund-form');
+    const multi = isRefundMulti();
+
+    // the boxes for one item are off while the table is on the form, so the
+    // browser does not ask for them
+    const single = document.getElementById('refund-single');
+    if (single) {
+        single.hidden = multi;
+        const boxes = single.querySelectorAll('input');
+        for (let i = 0; i < boxes.length; i++) boxes[i].disabled = multi;
+    }
+    if (form && multi) form.elements.saleId.disabled = false;
+
+    renderRefundSource();
+    renderRefundLines();
+    renderRefundPreview();
+}
+
+function renderRefundSource() {
+    const box = document.getElementById('refund-source');
+    if (!box) return;
+    if (!refundSale) { box.hidden = true; box.innerHTML = ''; return; }
+
+    const count = refundSale.lines.length;
+    box.hidden = false;
+    box.innerHTML =
+        '<div class="adjust-source-text">' +
+            '<span class="adjust-source-eyebrow">Sale</span>' +
+            '<span class="adjust-source-title">#' + refundSale.saleId + ' · ' + escapeHtml(refundSale.customerName) + '</span>' +
+            '<span class="adjust-source-sub">' + escapeHtml(refundSale.saleDate) + ' · ' + escapeHtml(refundSale.method) +
+                ' · ' + count + (count === 1 ? ' item' : ' items') + '. The refund is at what the customer paid.</span>' +
+        '</div>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-no-icon onclick="clearRefundSale()">Clear</button>';
+}
+
+function renderRefundLines() {
+    const box = document.getElementById('refund-lines');
+    if (!box) return;
+    if (!isRefundMulti()) { box.hidden = true; box.innerHTML = ''; return; }
+
+    let rows = '';
+    for (let i = 0; i < refundSale.lines.length; i++) {
+        const line = refundSale.lines[i];
+        let sub = 'Bought ' + qtyText(line.sold, line.baseUnit);
+        if (line.left < line.sold) sub += ' · ' + (line.left > 0 ? qtyText(line.left, line.baseUnit) + ' left to refund' : 'refunded in full');
+        rows += '<tr>' +
+            '<td class="cell-name">' + escapeHtml(line.name) +
+                '<span class="cell-sub">' + escapeHtml(sub) + '</span>' +
+                '<span class="adjust-line-note" id="refund-line-note-' + i + '"></span></td>' +
+            '<td>' + escapeHtml(line.baseUnit) + '</td>' +
+            '<td class="cell-num"><input type="number" class="form-control adjust-line-qty" ' +
+                'id="refund-line-qty-' + i + '" min="0" max="' + line.left + '" step="any" value="0" ' +
+                (line.left > 0 ? '' : 'disabled ') +
+                'onfocus="this.select()" oninput="renderRefundPreview()" ' +
+                'aria-label="How many came back: ' + escapeHtml(line.name) + '"></td>' +
+            '</tr>';
+    }
+
+    const count = refundSale.lines.length;
+    box.hidden = false;
+    box.innerHTML =
+        '<p class="adjust-lines-head">' + count + ' items</p>' +
+        '<div class="adjust-lines-scroll">' +
+            '<table class="mini-table adjust-lines-table">' +
+                '<thead><tr><th>Product</th><th>Unit</th><th class="col-num">Quantity</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody>' +
+            '</table>' +
+        '</div>';
+}
+
+// what each line of a sale of several items will refund, read from the table
+function refundTableLines() {
+    const lines = [];
+    if (!isRefundMulti()) return lines;
+    for (let i = 0; i < refundSale.lines.length; i++) {
+        const line = refundSale.lines[i];
+        const box = document.getElementById('refund-line-qty-' + i);
+        const text = box ? box.value.trim() : '0';
+        const quantity = text === '' ? 0 : Number(text);
+        let problem = '';
+        if (!Number.isFinite(quantity) || quantity < 0) problem = 'Type 0 or more.';
+        else if (quantity > line.left + 0.0005) problem = 'Only ' + qtyText(line.left, line.baseUnit) + ' can be refunded.';
+        lines.push({ line: line, quantity: quantity, amount: problem ? 0 : refundLineAmount(line, quantity), problem: problem });
+    }
+    return lines;
+}
+
+function renderRefundPreview() {
+    const box = document.getElementById('refund-preview');
+    if (!box) return;
+    box.className = 'adjust-preview';
+    box.innerHTML = '';
+    if (!isRefundMulti()) return;
+
+    const lines = refundTableLines();
+    let picked = 0;
+    let total = 0;
+    let bad = false;
+    for (let i = 0; i < lines.length; i++) {
+        const note = document.getElementById('refund-line-note-' + i);
+        const l = lines[i];
+        if (note) {
+            if (l.problem) { note.className = 'adjust-line-note is-bad'; note.textContent = l.problem; }
+            else if (l.quantity > 0) { note.className = 'adjust-line-note is-refund'; note.textContent = 'Refund ' + peso(l.amount); }
+            else { note.className = 'adjust-line-note'; note.textContent = ''; }
+        }
+        if (l.problem) bad = true;
+        else if (l.quantity > 0) { picked++; total += l.amount; }
+    }
+
+    if (bad) {
+        box.className = 'adjust-preview is-stop';
+        box.textContent = 'A quantity is more than can be refunded, or is not a number. Type 0 for what did not come back.';
+        return;
+    }
+    box.className = 'adjust-preview is-good';
+    box.innerHTML = '<span class="preview-name">Sale #' + refundSale.saleId + '</span>' +
+        '<span class="preview-figures">' + picked + ' of ' + lines.length + ' items will be refunded' +
+            (picked > 0 ? ': <strong>' + peso(Math.round(total * 100) / 100) + '</strong>' : '') + '</span>' +
+        (picked === 0 ? '<span class="preview-note">Type how many of each item came back.</span>' : '');
+}
+
+// Cancel: the form is emptied, then back to the first screen
+function cancelRefundForm(event) {
+    const form = document.getElementById('refund-form');
+    if (form) {
+        form.elements.reason.value = '';
+    }
+    clearRefundSale();
+    showCashierHome(event);
 }
 
 // Sales report. The server sends a cashier their own sales and no others, so
@@ -4014,12 +3881,13 @@ function buildSalesPanel() {
 
         renderRow: function (row, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
-                'onclick="openReceipt(' + row.sale_id + ')">' +
+                'onclick="openReceipt(' + row.sale_id + ', true)">' +
                 '<td class="cell-id">OR-' + String(row.sale_id).padStart(6, '0') + '</td>' +
                 '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 10)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
                 '<td>' + escapeHtml(row.payment_method) + '</td>' +
-                '<td>' + statusBadge(row.payment_status) + '</td>' +
+                '<td>' + statusBadge(row.payment_status) +
+                    (row.void_request_id ? ' <span class="badge badge-danger">Void requested</span>' : '') + '</td>' +
                 '<td class="cell-num">' + peso(row.final_amount) + '</td></tr>';
         }
     });
@@ -4140,22 +4008,15 @@ async function openPaymentForm(saleId) {
             escapeHtml(penaltyRateWord(row.penalty_rate)) + ' a month, ' + row.penalty_months +
             monthWord + ' overdue)</span>';
     }
-    let paymentCountNote = '';
-    if (Number(row.payment_count) > 0) {
-        let paymentWord = ' payments';
-        if (row.payment_count === 1) paymentWord = ' payment';
-        paymentCountNote = ' <span class="muted">' + row.payment_count + paymentWord + '</span>';
-    }
-
+    // two to a row; the seventh, Balance, runs the full width under the rest
     document.getElementById('payment-facts').innerHTML =
-        detailField('Customer', escapeHtml(row.customer_name) +
-            (row.phone ? ' <span class="muted">' + escapeHtml(row.phone) + '</span>' : '')) +
-        detailField('Sale', escapeHtml(String(row.sale_date).slice(0, 10)) +
-            ' <span class="muted">' + escapeHtml(row.payment_method) + '</span>') +
-        detailField('Total', peso(row.final_amount) + penaltyNote) +
-        detailField('Paid So Far', peso(row.amount_paid) + paymentCountNote) +
-        detailField('Balance', '<span class="cell-due">' + peso(balance) + '</span>') +
-        detailField('Due', debtDueCell(row));
+        detailField('Customer', escapeHtml(row.customer_name)) +
+        detailField('Phone', row.phone ? escapeHtml(row.phone) : '<span class="muted">No phone on file</span>') +
+        detailField('Sale Date', escapeHtml(String(row.sale_date).slice(0, 10))) +
+        detailField('Due Date', debtDueCell(row)) +
+        detailField('Amount Due', peso(row.final_amount) + penaltyNote) +
+        detailField('Total Payment', peso(row.amount_paid)) +
+        detailField('Balance', '<span class="cell-due">' + peso(balance) + '</span>');
 
     const fields = paymentFormFields();
     if (fields) {
@@ -4163,12 +4024,11 @@ async function openPaymentForm(saleId) {
         fields.amount.value = '0';
         fields.amount.max = balance.toFixed(2);
         fields.paymentMethod.value = 'Cash';
-        fields.referenceNo.value = '';
         clearPaymentDetails('pay-debt');
     }
 
     const button = document.getElementById('payment-save-btn');
-    if (button) { button.disabled = false; button.textContent = 'Record the Payment'; }
+    if (button) { button.disabled = false; button.textContent = 'Confirm Payment'; }
     const qrButton = document.getElementById('payment-qr-btn');
     if (qrButton) qrButton.disabled = false;
 
@@ -4177,15 +4037,20 @@ async function openPaymentForm(saleId) {
     setTimeout(function () { if (fields && fields.amount) { fields.amount.focus(); fields.amount.select(); } }, 60);
 }
 
-// Paid or cancelled, the form goes back to the customer's card it was opened
-// from, read afresh so the balance on it is the new one.
-function closePaymentForm() {
+// Cancelled, the form goes back to where it was opened from: the customer's card
+// (read afresh), or the Credit Payment list when it was opened straight from there.
+// Paid, nothing opens behind it: the receipt is shown on its own.
+function closePaymentForm(cancelled) {
     paymentSale = null;
     closeModal('payment-modal');
 
     const customerId = paymentReturnCustomer;
+    const toPicker = paymentReturnPicker;
     paymentReturnCustomer = null;
-    if (customerId) openCustomerCredit(customerId, 'unpaid');
+    paymentReturnPicker = false;
+    if (!cancelled) return;
+    if (toPicker) openCreditPaymentPicker();
+    else if (customerId) openCustomerCredit(customerId, 'unpaid');
 }
 
 function fillPayment(share) {
@@ -4208,23 +4073,8 @@ function renderPaymentVerdict() {
     // the cheque's details, or the customer's bank and account for a transfer
     showPaymentDetails('pay-debt', fields.paymentMethod.value);
 
-    // The reference is on screen only for a method that has a number to trace it
-    // by (REFERENCE_WORDS): not for cash. When it goes, so does anything typed.
-    const refField = document.getElementById('payment-ref-field');
-    const words = REFERENCE_WORDS[fields.paymentMethod.value];
-    if (refField) {
-        refField.classList.toggle('is-blank', !words);
-        if (words) {
-            const hint = document.getElementById('payment-ref-hint');
-            if (hint) hint.textContent = words.hint;
-            fields.referenceNo.placeholder = words.placeholder;
-        } else if (fields.referenceNo.value !== '') {
-            fields.referenceNo.value = '';
-        }
-    }
-
-    // GCash or PayMaya: the customer can pay by QR code instead of a typed reference.
-    // A bank transfer is only taken through PayMongo, so Record the Payment is not offered for it.
+    // GCash, PayMaya and a bank transfer are only taken through PayMongo (the QR
+    // code), so Confirm Payment is not offered for them.
     const isTransfer = fields.paymentMethod.value === 'Bank Transfer';
     const qrButton = document.getElementById('payment-qr-btn');
     if (qrButton) {
@@ -4232,12 +4082,12 @@ function renderPaymentVerdict() {
         qrButton.textContent = isTransfer ? 'Pay by Bank Transfer' : 'Pay by QR';
     }
     const saveButton = document.getElementById('payment-save-btn');
-    if (saveButton) saveButton.hidden = isTransfer;
+    if (saveButton) saveButton.hidden = QR_METHODS.indexOf(fields.paymentMethod.value) !== -1;
     qrAmountChanged('credit_payment', amount);
 
     if (amount <= 0) {
         box.className = 'credit-verdict';
-        box.textContent = 'Type what was handed over.';
+        box.textContent = '';
         return;
     }
     if (amount > balance + 0.004) {
@@ -4267,7 +4117,9 @@ async function handleTakePayment(event, viaQr) {
     const balance = Number(paymentSale.balance_due) || 0;
     const amount = Math.round((parseFloat(fields.amount.value) || 0) * 100) / 100;
     const method = fields.paymentMethod.value;
-    const reference = fields.referenceNo.value.trim();
+    // no reference is asked for: a cheque is traced by its account, bank and date,
+    // an e-wallet or transfer by its QR payment
+    const reference = '';
 
     if (amount <= 0) {
         notifyWarning('Type the amount that was handed over.', 'Nothing to record');
@@ -4282,7 +4134,9 @@ async function handleTakePayment(event, viaQr) {
     }
 
     // a bank transfer is only taken through PayMongo, whichever way the form was sent (Enter too)
-    if (method === 'Bank Transfer') viaQr = true;
+    // GCash, PayMaya and a bank transfer are only taken through PayMongo, whichever
+    // way the form was sent (Enter too)
+    if (QR_METHODS.indexOf(method) !== -1) viaQr = true;
 
     // A cheque is taken with its account name, account number, bank, branch and
     // date; a bank transfer with the customer's bank and account.
@@ -4296,12 +4150,6 @@ async function handleTakePayment(event, viaQr) {
             return;
         }
         chequeDetails = read.details;
-
-        if (reference === '') {
-            notifyWarning('A cheque is traced by its cheque number. Put it in the Reference box.', 'Reference needed');
-            fields.referenceNo.focus();
-            return;
-        }
     } else if (method === 'Bank Transfer') {
         const read = readTransferDetails('pay-debt');
         if (read.problem) {
@@ -4324,7 +4172,7 @@ async function handleTakePayment(event, viaQr) {
     const button = document.getElementById('payment-save-btn');
     const qrButton = document.getElementById('payment-qr-btn');
     function ready() {
-        if (button) { button.disabled = false; button.textContent = 'Record the Payment'; }
+        if (button) { button.disabled = false; button.textContent = 'Confirm Payment'; }
         if (qrButton) qrButton.disabled = false;
     }
 
@@ -4344,7 +4192,7 @@ async function handleTakePayment(event, viaQr) {
     ];
     if (!viaQr && reference !== '') details.push('Reference: ' + reference);
     if (chequeDetails) {
-        details.push('Cheque: ' + chequeDetails.bank + ', ' + chequeDetails.branch + ' \u00b7 dated ' + chequeDetails.chequeDate);
+        details.push('Cheque: ' + chequeDetails.bank + ' \u00b7 dated ' + chequeDetails.chequeDate);
         details.push('Account: ' + chequeDetails.accountName + ', ' + chequeDetails.accountNumber);
     }
     if (transferDetails) {
@@ -4451,6 +4299,8 @@ let customerOpenSales = [];
 
 // the card to go back to once the payment form closes
 let paymentReturnCustomer = null;
+// true when the form was opened straight from the Credit Payment list: Cancel goes back there
+let paymentReturnPicker = false;
 
 // the administrator can switch payments off for the cashiers (debt-payments)
 function canTakePayments() {
@@ -4462,15 +4312,17 @@ function canTakePayments() {
 function payCustomerSale(saleId) {
     if (!openCustomer) return;
     paymentReturnCustomer = openCustomerId;
+    paymentReturnPicker = false;
     closeModal('customer-modal');
     openPaymentForm(saleId);
 }
 
-// Credit Settlement in the card's foot: one sale owing is opened at once;
-// several are listed on the Unpaid Sales tab to pick from.
+// Credit Settlement in the card's foot opens the payment form on the oldest
+// sale still owing (the top row of Unpaid Sales); pressing a row there pays
+// that sale instead.
 function payFromCustomerCard() {
     if (!openCustomer) return;
-    if (customerOpenSales.length === 1) {
+    if (customerOpenSales.length > 0) {
         payCustomerSale(customerOpenSales[0].sale_id);
     } else {
         showCustomerTab('unpaid');
@@ -4480,16 +4332,6 @@ function payFromCustomerCard() {
 function renderCustomerUnpaid() {
     const box = document.getElementById('customer-unpaid');
     if (!box) return;
-
-    const owed = sumOf(customerOpenSales, 'balance_due');
-    let intro = '';
-    if (customerOpenSales.length !== 0) {
-        let saleWord = ' sales';
-        if (customerOpenSales.length === 1) saleWord = ' sale';
-        intro = '<p class="panel-sub" style="margin-bottom: 12px;">' + peso(owed) + ' owed on ' +
-            customerOpenSales.length + saleWord +
-            ', oldest first. Press the one the money is for.</p>';
-    }
 
     const unpaidRows = [];
     for (let i = 0; i < customerOpenSales.length; i++) {
@@ -4507,7 +4349,7 @@ function renderCustomerUnpaid() {
         ]);
     }
 
-    box.innerHTML = intro + pagedTable('cash-unpaid', ['Receipt', 'Sold', 'Balance', 'Due'],
+    box.innerHTML = pagedTable('cash-unpaid', ['Receipt', 'Sold', 'Balance', 'Due'],
         unpaidRows, [2], {
             empty: 'Nothing is owed on any sale.',
             // the row itself opens the payment form for that sale
@@ -4669,11 +4511,10 @@ async function openCustomerCredit(customerId, tab) {
             (c.phone || 'No phone on file') + ' · Credit Rating: ' + (CASH_RATING_WORD[c.standing] || c.standing);
         document.getElementById('customer-avatar').textContent = initialsOf(c.customer_name);
 
-        let availableCell = peso(c.available_credit);
-        if (c.standing === 'Hold') availableCell = '<span class="cell-due">Nothing, on hold</span>';
-
-        let overdueNote = '';
-        if (Number(c.overdue_sales) > 0) overdueNote = ' <span class="cell-due">' + c.overdue_sales + ' overdue</span>';
+        // nothing left to charge (over the limit, or on hold) reads as zero
+        let available = Math.max(Number(c.available_credit) || 0, 0);
+        if (c.standing === 'Hold') available = 0;
+        const availableCell = '<span class="' + (available > 0 ? '' : 'cell-due') + '">' + peso(available) + '</span>';
 
         let penaltiesFact = '';
         if (Number(c.penalties_owed) > 0) {
@@ -4681,9 +4522,6 @@ async function openCustomerCredit(customerId, tab) {
                 '</span> <span class="muted">of the amount owed, at ' +
                 escapeHtml(penaltyRateWord(c.penalty_rate)) + ' a month</span>');
         }
-
-        let noteFact = '';
-        if (c.credit_notes) noteFact = detailField('Manager Note', escapeHtml(c.credit_notes));
 
         document.getElementById('customer-facts').innerHTML =
             detailField('Credit Limit', peso(c.credit_limit)) +
@@ -4694,12 +4532,10 @@ async function openCustomerCredit(customerId, tab) {
             detailField('Credit Rating', '<span class="badge ' +
                 (CASH_RATING_TONE[c.standing] || 'badge-neutral') + '">' +
                 escapeHtml(CASH_RATING_WORD[c.standing] || c.standing) + '</span>') +
-            detailField('Why', escapeHtml(c.standing_reason || '')) +
-            detailField('Open Sales', String(c.open_sales) + overdueNote) +
+            detailField('Open Sales', String(c.open_sales)) +
             penaltiesFact +
             detailField('Lifetime Purchases', peso(c.total_purchase)) +
-            detailField('Address', c.address ? escapeHtml(c.address) : '<span class="muted">Not on file</span>') +
-            noteFact;
+            detailField('Address', c.address ? escapeHtml(c.address) : '<span class="muted">Not on file</span>');
 
         resetHistoryFilters();
         renderCustomerHistory();
@@ -4715,7 +4551,7 @@ async function openCustomerCredit(customerId, tab) {
 
         // the two prints, each switched on its own (Access Control)
         document.getElementById('customer-print-card').hidden = !holdsFeature('customer-card-print');
-        document.getElementById('customer-print-terms').hidden = !holdsFeature('credit-terms-print');
+        // Print Terms and Conditions is not offered on the customer's card
 
         let open = 'account';
         if (tab === 'unpaid' && hasUnpaid) open = 'unpaid';
@@ -4727,8 +4563,8 @@ async function openCustomerCredit(customerId, tab) {
     }
 }
 
-// Print Customer Card (the card, then the terms page) or Print Credit Terms
-// (the terms page alone) for the customer whose card is open
+// Print Customer Card (the card alone) or Print Credit Terms (the terms page
+// alone) for the customer whose card is open
 function printOpenCustomer(kind) {
     if (!openCustomerId) return;
     if (kind === 'card') {
@@ -4798,6 +4634,7 @@ function renderCustomerHistory() {
     const total = document.getElementById('customer-history-total');
     if (total) total.textContent = peso(openCustomer.credit.total_purchase);
 
+    const onlyPaid = status === 'paid';
     const purchaseRows = [];
     for (let i = 0; i < rows.length; i++) {
         const p = rows[i];
@@ -4805,18 +4642,23 @@ function renderCustomerHistory() {
         if (Number(p.penalty_amount) > 0) {
             penaltyNote = '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty</span>';
         }
-        let balanceCell = '<span class="muted">Paid</span>';
-        if (Number(p.balance_due) > 0) balanceCell = '<span class="cell-due">' + peso(p.balance_due) + '</span>';
-        purchaseRows.push([
+        const cells = [
             escapeHtml(dayOfStamp(p.sale_date)),
             '#' + p.sale_id + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
-            peso(p.final_amount) + penaltyNote,
-            balanceCell
-        ]);
+            peso(p.final_amount) + penaltyNote
+        ];
+        if (!onlyPaid) {
+            let balanceCell = '<span class="muted">Paid</span>';
+            if (Number(p.balance_due) > 0) balanceCell = '<span class="cell-due">' + peso(p.balance_due) + '</span>';
+            cells.push(balanceCell);
+        }
+        purchaseRows.push(cells);
     }
 
-    box.innerHTML = pagedTable('cash-purchases', ['Date', 'Sale', 'Amount', 'Balance'],
-        purchaseRows, [2, 3], {
+    // only paid sales listed: every balance would read Paid, so the column goes
+    box.innerHTML = pagedTable('cash-purchases',
+        onlyPaid ? ['Date', 'Sale', 'Amount'] : ['Date', 'Sale', 'Amount', 'Balance'],
+        purchaseRows, onlyPaid ? [2] : [2, 3], {
             empty: emptyHistoryNote('Nothing bought yet.', from, to, status !== 'all' || from || to)
         });
 }
@@ -4853,15 +4695,15 @@ function renderCustomerPayments() {
         // the sale (receipt) the payment was put against
         let receiptCell = '<span class="muted">-</span>';
         if (p.sale_id) receiptCell = '#' + p.sale_id;
-        paymentRows.push([
-            escapeHtml(dayOfStamp(p.payment_date)),
-            peso(p.amount),
-            escapeHtml(p.payment_method),
-            receiptCell
-        ]);
+        const cells = [escapeHtml(dayOfStamp(p.payment_date)), peso(p.amount)];
+        if (how === 'all') cells.push(escapeHtml(p.payment_method));
+        cells.push(receiptCell);
+        paymentRows.push(cells);
     }
 
-    box.innerHTML = pagedTable('cash-payments', ['Date', 'Amount', 'Method', 'Receipt'],
+    // one method picked: every row would say it, so the column goes
+    box.innerHTML = pagedTable('cash-payments',
+        how === 'all' ? ['Date', 'Amount', 'Method', 'Receipt'] : ['Date', 'Amount', 'Receipt'],
         paymentRows, [1], {
             empty: emptyHistoryNote('No payments recorded.', from, to, how !== 'all' || from || to)
         });
@@ -4922,9 +4764,6 @@ function askForExtension() {
     limitReturnCustomer = c.customer_id;
 
     document.getElementById('limit-sub').textContent = c.customer_name;
-    document.getElementById('limit-intro').textContent =
-        c.customer_name + ' may currently owe up to ' + peso(current) + ' and owes ' + peso(c.current_credit) +
-        '. A manager decides the new limit; nothing changes until they do.';
 
     const form = document.getElementById('limit-form');
     form.elements.requestedLimit.value = current > 0 ? String(Math.round(current * 1.5)) : '';
@@ -5364,7 +5203,10 @@ async function pickCreditPayCustomer(customerId) {
     closeModal('credit-pay-modal');
     await openCustomerCredit(customerId, 'unpaid');
 
-    if (isModalOpen('customer-modal') && customerOpenSales.length === 1) payFromCustomerCard();
+    if (isModalOpen('customer-modal') && customerOpenSales.length === 1) {
+        payFromCustomerCard();
+        paymentReturnPicker = true;
+    }
 }
 
 // ==========================================
@@ -5392,7 +5234,10 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
             'Refund Report':  { label: 'Refunds', panelId: 'panel-refund',
                                 open: function () { showRefunds(); } },
             'Credit Request': creditAlert,
-            'Late Penalty':   creditAlert
+            'Late Penalty':   creditAlert,
+            // a manager approved or declined a request to void a sale
+            'Void Request':   { label: 'Sales Report', panelId: 'panel-salesreport',
+                                open: function () { showSalesReport(); }, key: 'cash-sales' }
         });
 
         renderCatalogEmpty();

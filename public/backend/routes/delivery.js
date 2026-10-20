@@ -24,6 +24,7 @@ function registerDeliveryRoutes(app, deps) {
   const isDateText = deps.isDateText;
   const DELIVERY_CONTACT_SQL = deps.DELIVERY_CONTACT_SQL;
   const DELIVERY_PHONE_SQL = deps.DELIVERY_PHONE_SQL;
+  const qrPayments = deps.qrPayments;
 
   // Delivered and finished are different: a delivered order with money owed
   // sits at Pending Payment until the balance is cleared. Derived from
@@ -187,11 +188,11 @@ function registerDeliveryRoutes(app, deps) {
   // manager are told, and every screen watching sales, credit and deliveries
   // reads again.
   // A cheque is collected with the same details the counter takes (account name and
-  // number, bank, branch, date). The driver has no QR screen, so a bank transfer shown
-  // at the door is only taken on the driver's word: the customer's bank, account name
-  // and account number, and the bank's reference. It is not verified through PayMongo.
+  // number, bank, date). GCash, PayMaya and a bank transfer are paid by a QR code the
+  // driver shows (routes/qr-payments.js), checked again here before the money is
+  // recorded, as at the counter; a bank transfer is taken no other way.
   const PAYMENT_METHODS = ["Cash", "GCash", "PayMaya", "Cheque", "Bank Transfer"];
-  const REFERENCE_NEEDED = ["Cheque", "Bank Transfer"];
+  const QR_METHODS = ["GCash", "PayMaya", "Bank Transfer"];
 
   // "\u20B1" is the peso sign, written as an escape to keep this file plain ASCII
   function pesoText(value) {
@@ -217,23 +218,21 @@ function registerDeliveryRoutes(app, deps) {
     if (!PAYMENT_METHODS.includes(paymentMethod)) {
       return response.status(400).json({ error: "Pick how the customer paid: " + PAYMENT_METHODS.join(", ") + "." });
     }
-    if (REFERENCE_NEEDED.includes(paymentMethod) && referenceNo === "") {
-      let whichNumber = "transfer reference";
-      if (paymentMethod === "Cheque") {
-        whichNumber = "cheque number";
-      }
-      return response.status(400).json({
-        error: "A " + paymentMethod.toLowerCase() + " payment needs its reference: the " + whichNumber +
-               ". It is how the money is traced if it does not arrive."
-      });
+    const qrPaymentId = request.body.qrPaymentId;
+    if (paymentMethod === "Bank Transfer" && !qrPaymentId) {
+      return response.status(400).json({ error: "A bank transfer is taken only by its QR code. Press Pay by Bank Transfer." });
+    }
+    if (qrPaymentId && !QR_METHODS.includes(paymentMethod)) {
+      return response.status(400).json({ error: "A QR payment can only pay for money taken by GCash, PayMaya or bank transfer." });
     }
     if (referenceNo.length > 60) {
       return response.status(400).json({ error: "A reference is at most 60 characters." });
     }
 
-    // the bank and account behind a cheque or a bank transfer
+    // the account, bank and date of a cheque (a bank transfer's are on its QR payment,
+    // and are copied from there when the money is recorded)
     let payDetails = null;
-    if (paymentMethod === "Cheque" || paymentMethod === "Bank Transfer") {
+    if (paymentMethod === "Cheque") {
       const cleaned = cleanPaymentDetails(paymentMethod, request.body.paymentDetails);
       if (cleaned.problem) {
         return response.status(400).json({ error: cleaned.problem });
@@ -241,6 +240,8 @@ function registerDeliveryRoutes(app, deps) {
       payDetails = JSON.stringify(cleaned.details);
     }
 
+    let qr = null;
+    let recorded = false;
     try {
       const deliveryResult = await db.query(
         "SELECT d.sale_id, d.delivery_staff_id, s.payment_method FROM deliveries d " +
@@ -264,14 +265,32 @@ function registerDeliveryRoutes(app, deps) {
       }
 
       const saleId = rows[0].sale_id;
+
+      // a QR payment is checked with the provider again here and used once
+      if (qrPaymentId) {
+        try {
+          qr = await qrPayments.verifyForMoney(qrPaymentId, amount, paymentMethod, getActorId(request),
+            request.body.paymentDetails);
+        } catch (error) {
+          if (!(error instanceof qrPayments.QrPaymentError)) throw error;
+          return response.status(error.status).json({ error: error.message, code: error.code });
+        }
+        referenceNo = qr.reference || "";
+      }
+
       // the procedure refuses more than the sale still owes, and a sale already paid
       const output = await deliveryProcedures.recordCreditPayment(
-        [saleId, amount, paymentMethod, referenceNo || null, getActorId(request), null, payDetails]
+        [saleId, amount, paymentMethod, referenceNo || null, getActorId(request), qr ? qr.id : null, payDetails]
       );
 
       if (output.status_code !== 200) {
-        return response.status(output.status_code).json({ error: output.message });
+        // the customer paid and nothing was recorded: said on the row first
+        let code;
+        if (qr) code = await qrPayments.recordUnsaved(qr.id, getActorId(request));
+        return response.status(output.status_code).json({ error: output.message, code: code || undefined });
       }
+      recorded = true;
+      if (qr) qrPayments.announceUsed(qr.id);
 
       // From here the money is recorded. Whatever goes wrong below (reading the
       // sale again, writing the alerts) is only logged: the driver is told the
@@ -330,7 +349,10 @@ function registerDeliveryRoutes(app, deps) {
       });
     } catch (error) {
       console.error("Delivery payment failed:", error.message);
-      response.status(500).json({ error: "Unable to record the payment" });
+      if (qr && !recorded) await qrPayments.recordUnsaved(qr.id, getActorId(request));
+      if (!response.headersSent) response.status(500).json({ error: "Unable to record the payment" });
+    } finally {
+      if (qr) qr.release();
     }
   });
 

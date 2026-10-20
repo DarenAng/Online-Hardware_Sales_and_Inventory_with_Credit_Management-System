@@ -48,28 +48,21 @@ function apiGetOpenSales() {
     return getJson('/api/credit/open-sales');
 }
 
+// POST /api/sales/:id/void-request -- ask a manager to void a sale of today: { reason }
+function apiRequestVoid(saleId, reason) {
+    return sendJson('/api/sales/' + encodeURIComponent(saleId) + '/void-request', 'POST', { reason: reason });
+}
+
+// POST /api/returns/batch -- a refund of several items of one sale, in one report:
+// { reportType: 'Refunded', saleId, reason, items: [{ productId, quantity, refundAmount }] }.
+// All or nothing; the answer has offBalance (how much came off what the customer owes).
+function apiFileRefundBatch(data) {
+    return sendJson('/api/returns/batch', 'POST', data);
+}
+
 // POST /api/sales/:id/payment -- a Credit Settlement payment on a sale; the answer has the receipt
 function apiTakePayment(saleId, payment) {
     return sendJson('/api/sales/' + saleId + '/payment', 'POST', payment);
-}
-
-// POST /api/qr-payments -- a QR code for a GCash, PayMaya or bank-transfer payment.
-// qr is { amount, wallet, purpose: 'sale' or 'credit_payment', saleId }, and for a Bank Transfer
-// also { bankCode, accountName, accountNumber } (the customer's bank and account);
-// the answer has id, qrImage (a picture to show), payUrl, secondsLeft and badge
-function apiCreateQrPayment(qr) {
-    return sendJson('/api/qr-payments', 'POST', qr);
-}
-
-// GET /api/qr-payments/:id -- has the customer paid? { status, reference, errorMessage, secondsLeft }
-function apiGetQrPayment(id) {
-    return getJson('/api/qr-payments/' + encodeURIComponent(id));
-}
-
-// POST /api/qr-payments/:id/cancel -- give up on a code; the answer says how it
-// ended, which is paid if the customer got there first
-function apiCancelQrPayment(id) {
-    return sendJson('/api/qr-payments/' + encodeURIComponent(id) + '/cancel', 'POST', {});
 }
 
 // POST /api/credit/requests -- ask the manager for a higher credit limit

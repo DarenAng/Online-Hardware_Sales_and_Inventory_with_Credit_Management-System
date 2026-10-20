@@ -186,7 +186,10 @@ function showArchives(event)      { showManagerPanel('panel-archives', 'Archives
 // everything staff have filed: a screen of its own, apart from Reports
 function showActivityLog(event)   { showManagerPanel('panel-activity', 'Activity Log', event); }
 // Sales Transactions
-function showSalesTransactions(event) { showReport('report-sales', event); }
+function showSalesTransactions(event) {
+    showReport('report-sales', event);
+    alertWaitingVoidRequests();
+}
 
 // Policy Maintenance. Credit Maintenance: the shop's late-payment rate and the
 // credit policy. Customer Data Terms and Refund Policy: their wording. Each page
@@ -1412,7 +1415,8 @@ function buildSalesPanel() {
                 '<td>' + escapeHtml(s.payment_group) +
                     (s.payment_group !== s.payment_method
                         ? ' <span class="muted">' + escapeHtml(s.payment_method) + '</span>' : '') + '</td>' +
-                '<td><span class="badge ' + tone + '">' + escapeHtml(s.transaction_status) + '</span></td>' +
+                '<td><span class="badge ' + tone + '">' + escapeHtml(s.transaction_status) + '</span>' +
+                    (s.void_request_id ? ' <span class="badge badge-danger">Void requested</span>' : '') + '</td>' +
                 '<td class="cell-num">' + peso(s.final_amount) + '</td></tr>';
         }
     });
@@ -3001,14 +3005,37 @@ function saleQrWallet(q) {
     return way;
 }
 
-// A sale opened from a report (Sales Transactions, Receivables) is only read:
-// reports do not change data, so there is no Void button.
+// A sale opened from a report (Sales Transactions, Receivables) is only read,
+// except for a cashier's request to void it: then the request is shown on top,
+// the manager is alerted, and Approve Void / Decline are offered.
 async function openSaleDetail(saleId) {
     try {
         const data = await apiGetSale(saleId);
         const s = data.sale;
+        const vr = data.voidRequest;
+        const voidWaiting = Boolean(vr && vr.status === 'Pending' && !Number(s.is_archived));
 
-        const summary = '<div class="detail-grid">' +
+        let voidBox = '';
+        if (vr) {
+            const when = escapeHtml(String(vr.requested_at || '').replace('T', ' ').slice(0, 16));
+            const who = escapeHtml(vr.requested_by || 'A cashier');
+            if (voidWaiting) {
+                voidBox = '<div class="void-request-box is-waiting">' +
+                    '<p class="void-request-title">Void requested by ' + who + ' on ' + when + '</p>' +
+                    '<p class="void-request-reason">Reason: ' + escapeHtml(vr.reason) + '</p>' +
+                    '<p class="void-request-hint">Approve Void voids the sale and puts the goods back on the shelf. ' +
+                        'Decline keeps it, and the cashier is told why.</p></div>';
+            } else {
+                voidBox = '<div class="void-request-box">' +
+                    '<p class="void-request-title">Void ' + escapeHtml(String(vr.status).toLowerCase()) +
+                        (vr.decided_by ? ' by ' + escapeHtml(vr.decided_by) : '') + '</p>' +
+                    '<p class="void-request-reason">Asked by ' + who + ' on ' + when + ': ' + escapeHtml(vr.reason) + '</p>' +
+                    (vr.decision_note ? '<p class="void-request-hint">Note: ' + escapeHtml(vr.decision_note) + '</p>' : '') +
+                    '</div>';
+            }
+        }
+
+        const summary = voidBox + '<div class="detail-grid">' +
             detailField('Sale ID', '#' + s.sale_id) +
             detailField('Date', escapeHtml(s.sale_date)) +
             detailField('Customer', escapeHtml(s.customer_name)) +
@@ -3176,11 +3203,74 @@ async function openSaleDetail(saleId) {
                 (d.remarks ? '<p class="detail-note">' + escapeHtml(d.remarks) + '</p>' : '') });
         }
 
+        let foot = '';
+        if (voidWaiting) {
+            foot = '<button type="button" class="btn btn-danger" data-icon="x-circle" onclick="decideVoidRequest(' +
+                    vr.request_id + ', ' + s.sale_id + ', false)">Decline Void</button>' +
+                '<button type="button" class="btn btn-accent" data-icon="slash-circle" onclick="decideVoidRequest(' +
+                    vr.request_id + ', ' + s.sale_id + ', true)">Approve Void</button>';
+        }
+
         openDetailModal('Sale #' + s.sale_id, s.customer_name + ' · ' + s.payment_method,
-            'S' + s.sale_id, pages);
+            'S' + s.sale_id, pages, foot);
+
+        if (voidWaiting) {
+            notifyWarning((vr.requested_by || 'A cashier') + ' asks to void sale #' + s.sale_id + ': ' + vr.reason +
+                '. Approve or decline it below.', 'Void request');
+        }
     } catch (error) {
         notifyError('That sale could not be opened.', 'Nothing to show');
     }
+}
+
+// Approve Void (the sale is voided) or Decline (a note for the cashier is required)
+async function decideVoidRequest(requestId, saleId, approve) {
+    let note = '';
+    if (approve) {
+        const yes = await askDanger('Sale #' + saleId + ' will be voided: it reads Voided in Sales Transactions and ' +
+            'its goods go back on the shelf. This cannot be undone.', {
+            title: 'Approve the void?', eyebrow: 'Void request', confirmLabel: 'Approve Void', cancelLabel: 'Go back'
+        });
+        if (!yes) return;
+    } else {
+        const typed = await askInput({
+            title: 'Decline the void?', eyebrow: 'Void request',
+            message: 'Sale #' + saleId + ' stays as it is. Say why, so the cashier knows.',
+            label: 'Reason for declining', confirmLabel: 'Decline Void', cancelLabel: 'Go back',
+            check: function (value) {
+                return String(value || '').trim() === '' ? 'Type why the void is declined.' : null;
+            }
+        });
+        if (typeof typed !== 'string') return;
+        note = typed.trim();
+    }
+
+    try {
+        const response = await apiDecideVoidRequest(requestId, approve, note);
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, approve ? 'Not voided' : 'Not declined');
+            return;
+        }
+        notifySuccess(result.message, approve ? 'Sale voided' : 'Void declined');
+        closeModal('detail-modal');
+        const panel = getDataPanel('mgr-sales');
+        if (panel && panel.state === 'ready') await panel.refresh();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// Opening Sales Transactions: the void requests still waiting are said at once
+async function alertWaitingVoidRequests() {
+    let rows;
+    try { rows = await apiGetVoidRequests(); } catch (error) { return; }
+    if (!rows || rows.length === 0) return;
+    const names = [];
+    for (let i = 0; i < rows.length && i < 5; i++) names.push('#' + rows[i].sale_id);
+    notifyWarning(rows.length + (rows.length === 1 ? ' void request is' : ' void requests are') +
+        ' waiting for you: sale ' + names.join(', ') + (rows.length > 5 ? ' and more' : '') +
+        '. Open the sale to approve or decline it.', 'Void requests');
 }
 
 function openStockDetail(productId) {
@@ -4161,6 +4251,14 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
                     showCreditRequests();
                 },
                 key: 'mgr-requests'
+            },
+            // a cashier asks to void a sale: Sales Transactions, where the sale is decided
+            'Void Request':     {
+                label: 'Sales Transactions', panelId: 'panel-reports',
+                open: function () {
+                    showSalesTransactions();
+                },
+                key: 'mgr-sales'
             },
             'Late Penalty':     {
                 label: 'Receivables', panelId: 'panel-reports',

@@ -335,32 +335,6 @@ td.cell-num .stock-level { margin-left: auto; }
 .unit-verdict.is-stop { color: var(--stop-hi); font-weight: 500; }
 
 /* ==========================================================================
-   WHAT THIS WILL DO TO THE SHELF -- the material, then "40 pcs -> 45 pcs (+5)":
-   green when the shelf goes up, amber when it goes down, red when it cannot be done
-   ========================================================================== */
-.adjust-preview {
-    margin: 14px 0 0;
-    padding: 10px 13px;
-    font-size: 14px;
-    line-height: 1.5;
-    border-radius: var(--radius);
-    border-left: var(--rule) solid var(--steel-soft);
-    background: var(--paper);
-    font-variant-numeric: tabular-nums;
-}
-.adjust-preview:empty { display: none; }
-.adjust-preview.is-good  { border-left-color: var(--ok);   background: var(--ok-dim); }
-.adjust-preview.is-down  { border-left-color: var(--signal); background: var(--signal-dim); }
-.adjust-preview.is-stop  { border-left-color: var(--stop); background: var(--stop-dim); }
-
-.preview-name   { display: block; font-size: 13px; color: var(--steel); }
-.preview-figures { display: block; font-size: 17px; font-weight: 600; color: var(--ink); }
-.adjust-preview.is-good .preview-figures strong { color: var(--ok-ink); }
-.adjust-preview.is-down .preview-figures strong { color: var(--signal-ink); }
-.adjust-preview.is-stop .preview-figures strong { color: var(--stop-hi); }
-.preview-note   { display: block; margin-top: 4px; font-size: 13px; color: var(--signal-ink); }
-
-/* ==========================================================================
    NEEDS ATTENTION -- beside the adjustment form: out of stock, then low
    ========================================================================== */
 .attention-hint { margin: 0 0 12px; font-size: 13.5px; color: var(--steel-soft); }
@@ -403,53 +377,8 @@ td.cell-num .stock-level { margin-left: auto; }
 .reference-toolbar { margin-bottom: 10px; }
 
 
-/* ==========================================================================
-   AN ORDER OR A RETURN ON THE ADJUSTMENT FORM
-   ========================================================================== */
-/* which one is being worked, and the way back to a single material */
-.adjust-source {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 14px;
-    padding: 10px 13px;
-    border-radius: var(--radius);
-    border-left: var(--rule) solid var(--signal);
-    background: var(--paper);
-}
-.adjust-source[hidden] { display: none; }
-.adjust-source-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.adjust-source-eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--steel-soft); }
-.adjust-source-title { font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
-.adjust-source-sub { font-size: 13px; color: var(--steel); }
-.adjust-source .btn { flex-shrink: 0; white-space: nowrap; }
-
-/* the items: a few rows show, the rest scroll inside the table */
-.adjust-lines { margin-bottom: 14px; }
-.adjust-lines[hidden] { display: none; }
-.adjust-lines-head { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--steel); }
-.adjust-lines-scroll {
-    max-height: 260px;
-    overflow-y: auto;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-}
-.adjust-lines-table { margin: 0; width: 100%; }
-.adjust-lines-table thead th { position: sticky; top: 0; z-index: 1; }
-.adjust-lines-table .cell-sub { display: block; font-size: 12px; color: var(--steel-soft); }
-.adjust-line-qty { width: 100px; margin-left: auto; text-align: right; }
-/* under or over the order, as the clerk types what arrived */
-.adjust-line-note { display: block; font-size: 12px; font-weight: 600; }
-.adjust-line-note:empty { display: none; }
-.adjust-line-note.is-under { color: var(--signal-ink); }
-.adjust-line-note.is-over { color: var(--go); }
-.adjust-line-note.is-bad { color: var(--stop-hi); }
-
-@media (max-width: 640px) {
-    .adjust-source { flex-direction: column; }
-    .adjust-line-qty { width: 80px; }
-}
+/* the preview, the order or return strip and its items table are shared with
+   the cashier's refund form, so their rules are in shared/general-ui.css */
 
 /* a phone: the card heading sits at the left, like the form's (.pair-layout centred it) */
 @media (max-width: 640px) {

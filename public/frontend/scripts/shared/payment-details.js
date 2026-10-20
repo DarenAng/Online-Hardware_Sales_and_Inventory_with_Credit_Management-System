@@ -39,12 +39,12 @@ function pdDayText(date) {
         String(date.getDate()).padStart(2, '0');
 }
 
-// the earliest and latest date a cheque may carry: stale after six months,
+// the earliest and latest date a cheque may carry: no earlier than today,
 // and more than a year ahead is a typing mistake
 function pdChequeLimits() {
     const now = new Date();
     return {
-        earliest: pdDayText(new Date(now.getFullYear(), now.getMonth() - 6, now.getDate())),
+        earliest: pdDayText(now),
         latest: pdDayText(new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()))
     };
 }
@@ -64,7 +64,7 @@ function pdChequeDateProblem(text) {
     if (!pdIsRealDay(text)) return 'The cheque date is not a real date. Use the date picker.';
 
     const limits = pdChequeLimits();
-    if (text < limits.earliest) return 'That cheque is dated more than six months ago, so the bank will not take it (stale cheque).';
+    if (text < limits.earliest) return 'A cheque cannot be dated before today. Pick today or a later date.';
     if (text > limits.latest) return 'That cheque is dated more than a year ahead. Check the date written on it.';
     return null;
 }

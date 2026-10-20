@@ -178,6 +178,9 @@ function registerCashierRoutes(app, deps) {
           "              d.delivery_id, d.status AS delivery_status,\n" +
           "              " + SALE_CUSTOMER_SQL + " AS customer_name,\n" +
           "              st.full_name AS cashier_name,\n" +
+          "              DATE(s.sale_date) = CURDATE() AS is_today,\n" +
+          "              (SELECT vr.request_id FROM void_requests vr\n" +
+          "                WHERE vr.sale_id = s.sale_id AND vr.status = 'Pending' LIMIT 1) AS void_request_id,\n" +
           "              (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.sale_id) AS item_count,\n" +
           // everything refunded or returned on the sale, including the cash handed back
           // (refunded_amount above is only the part that came off what the customer owed)
@@ -503,6 +506,9 @@ function registerCashierRoutes(app, deps) {
     const phoneProblem = phoneComplaint(contactPhone);
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
+    if (!String(scheduledDate || "").trim()) {
+      return response.status(400).json({ error: "Pick the date and time of the delivery." });
+    }
     const scheduled = toMysqlDateTime(scheduledDate);
 
     // a schedule typed but not understood must not become "unscheduled" silently
@@ -778,6 +784,7 @@ function registerCashierRoutes(app, deps) {
     try {
       const rowsResult = await db.query(
         "SELECT s.*, " + SALE_CUSTOMER_SQL + " AS customer_name,\n" +
+          "              DATE(s.sale_date) = CURDATE() AS is_today,\n" +
           "              c.phone AS customer_phone, c.address AS customer_address,\n" +
           "              st.full_name AS cashier_name,\n" +
           // everything refunded or returned on the sale (the cash handed back as well); the
@@ -862,8 +869,20 @@ function registerCashierRoutes(app, deps) {
         [request.params.saleId]
       );
 
+      // the latest request to void the sale (waiting, approved or declined), if any
+      const voidResult = await db.query(
+        "SELECT vr.request_id, vr.reason, vr.status, vr.requested_at, vr.decided_at, vr.decision_note,\n" +
+          "       rq.full_name AS requested_by, dc.full_name AS decided_by\n" +
+          "  FROM void_requests vr\n" +
+          "  LEFT JOIN staff rq ON rq.staff_id = vr.requested_by_staff_id\n" +
+          "  LEFT JOIN staff dc ON dc.staff_id = vr.decided_by_staff_id\n" +
+          " WHERE vr.sale_id = ? ORDER BY vr.request_id DESC LIMIT 1",
+        [request.params.saleId]
+      );
+
       response.json({ sale: rows[0], items: items, payments: payments, delivery: delivery[0] || null,
-                      qrPayments: qrPaid, paymentDetails: detailsResult[0] });
+                      qrPayments: qrPaid, paymentDetails: detailsResult[0],
+                      voidRequest: voidResult[0][0] || null });
     } catch (error) {
       console.error("Sale detail failed:", error.message);
       response.status(500).json({ error: error.message });
@@ -885,13 +904,9 @@ function registerCashierRoutes(app, deps) {
     // and a bank transfer only through a PayMongo payment
     let reference = referenceNo || null;
     let payDetails = null;
+    // the same as a sale, no reference is required: a cheque is traced by its
+    // account, bank and date
     if (paymentMethod === "Cheque") {
-      if (String(referenceNo || "").trim() === "") {
-        return response.status(400).json({
-          error: "A cheque payment needs its reference: the cheque number. " +
-                 "It is how the money is traced if it does not arrive."
-        });
-      }
       const cleaned = cleanPaymentDetails("Cheque", typedDetails);
       if (cleaned.problem) {
         return response.status(400).json({ error: cleaned.problem });

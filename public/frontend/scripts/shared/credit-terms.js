@@ -5,7 +5,7 @@
 // PDF" is in that dialogue):
 //   printCreditTerms(customerId)  the terms page alone
 //   printCustomerCard(customerId) the physical customer card (front and back,
-//                                 true size, to cut out), then the terms page
+//                                 true size, to cut out), on one page
 //
 // The back of the card carries the three policies the manager keeps in Policy
 // Maintenance (credit policy, customer data terms, refund policy).
@@ -239,13 +239,9 @@ function customerCardSheet(data) {
     const back = measure.innerHTML;
     measure.remove();
 
+    // the card alone: no store heading, instructions or printed-by line
     return '<section class="cp-page cc-sheet">' +
-        creditPrintHead(data) +
-        '<h2>Customer Card</h2>' +
-        '<p class="cc-instructions">Cut along the dotted line, fold at the middle so the printed sides face out, ' +
-            'and laminate. The cardholder signs the back.</p>' +
         '<div class="cc-pair">' + customerCardFrontHtml(data) + back + '</div>' +
-        creditPrintFoot(data) +
         '</section>';
 }
 
@@ -257,7 +253,9 @@ function finishCreditPrint() {
     if (creditPrintRestore) creditPrintRestore();
 }
 
-function printCreditSheets(html) {
+// pageMargin: the paper's margin (16mm when left out). The card prints with
+// none, so the browser has no room for its own date, title and address lines.
+function printCreditSheets(html, pageMargin) {
     // a print still waiting to be put back (a second press) is finished first
     finishCreditPrint();
 
@@ -270,7 +268,7 @@ function printCreditSheets(html) {
     // A4 with an even margin; added now and removed after, like the receipt's paper size
     const style = document.createElement('style');
     style.id = CREDIT_PRINT_PAGE_STYLE_ID;
-    style.textContent = '@media print { @page { size: A4; margin: 16mm; } }';
+    style.textContent = '@media print { @page { size: A4; margin: ' + (pageMargin || '16mm') + '; } }';
     document.head.appendChild(style);
 
     document.body.classList.add('printing-credit');
@@ -328,7 +326,7 @@ async function printCreditTerms(customerId) {
     printCreditSheets(creditTermsPage(data));
 }
 
-// the card, then the terms page after it
+// the card alone, on one page
 async function printCustomerCard(customerId) {
     if (typeof holdsFeature === 'function' && !holdsFeature('customer-card-print')) {
         notifyWarning('Printing a customer card is switched off for your role.', 'Not allowed');
@@ -337,5 +335,5 @@ async function printCustomerCard(customerId) {
     const data = await readCreditPrint(apiGetCustomerCard, customerId, 'customer card');
     if (!data) return;
 
-    printCreditSheets(customerCardSheet(data) + creditTermsPage(data));
+    printCreditSheets(customerCardSheet(data), '0');
 }

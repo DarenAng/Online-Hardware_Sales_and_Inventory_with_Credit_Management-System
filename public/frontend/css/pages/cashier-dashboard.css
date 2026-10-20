@@ -379,56 +379,8 @@
 .credit-verdict.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
 .credit-verdict.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); color: var(--ink); }
 
-/* PAY BY QR -- the code turned to face the customer: the amount above it large
-   enough to read across the counter, the code on white with a quiet margin (a
-   scanner needs one), and one line saying what is happening. */
-.qr-box { max-width: 440px; }
-.qr-box .modal-body { text-align: center; }
-.qr-amount {
-    margin: 0 0 12px;
-    font-family: var(--font-figure);
-    font-variant-numeric: tabular-nums;
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--ink);
-}
-.qr-frame {
-    display: inline-block;
-    padding: 12px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: #fff;
-    line-height: 0;
-}
-/* drawn square and crisp: a blurred edge between modules is what fails to scan */
-.qr-frame img {
-    display: block;
-    width: 240px;
-    height: 240px;
-    image-rendering: pixelated;
-}
-.qr-frame img:not([src]) { visibility: hidden; }
-.qr-ask { margin: 12px 0 0; font-size: 15px; color: var(--ink); }
-.qr-link { margin: 8px 0 0; font-size: 14.5px; }
-.qr-link a { color: var(--go); font-weight: 600; overflow-wrap: anywhere; }
-.qr-status { margin: 0 0 4px; min-height: 1.5em; font-size: 14px; font-weight: 600; color: var(--steel); }
-.qr-status.is-good { color: var(--ok-ink); }
-.qr-status.is-stop { color: var(--stop-hi); }
-.qr-clock { margin: 0 0 12px; font-size: 13.5px; color: var(--steel); }
-.qr-clock strong { font-family: var(--font-figure); font-variant-numeric: tabular-nums; color: var(--ink); }
-.qr-clock.is-ending strong { color: var(--stop-hi); }
-/* a failed or expired code: the code is greyed so nobody scans it again */
-.qr-box.is-over .qr-frame img { opacity: 0.25; filter: grayscale(1); }
-/* a short screen: a smaller code (still well above what a phone needs) keeps
-   the whole card on one page */
-@media (max-height: 760px) {
-    .qr-amount { font-size: 22px; margin-bottom: 6px; }
-    .qr-frame { padding: 8px; }
-    .qr-frame img { width: 170px; height: 170px; }
-    .qr-ask { font-size: 13.5px; }
-}
-/* the buttons wrap rather than squeeze on a narrow screen */
-.qr-foot { flex-wrap: wrap; }
+/* PAY BY QR: the card is shared with the driver's page, so its rules are in
+   shared/general-ui.css */
 
 /* Quick fill. Typing "half of 8,437.50" at a counter with somebody waiting is
    how a down payment gets recorded wrong. */
@@ -530,6 +482,7 @@
 }
 .customer-verdict.is-good { color: var(--ok-ink); font-weight: 500; }
 .customer-verdict.is-stop { color: var(--stop-hi); font-weight: 500; }
+.customer-verdict:empty { display: none; }
 /* Add Customer, under the line that says the name matches nobody */
 .customer-add-btn { margin-top: 8px; }
 
@@ -590,6 +543,11 @@
 
 /* Credit Payment's list of who owes */
 .credit-pay-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
+/* modals hide scrollbars by default (general-ui.css); this list shows one so it is plain there are more below */
+.modal .credit-pay-list { scrollbar-width: thin; scrollbar-color: var(--steel-soft) transparent; padding-right: 4px; }
+.modal .credit-pay-list::-webkit-scrollbar { display: block; width: 8px; }
+.modal .credit-pay-list::-webkit-scrollbar-thumb { background: var(--steel-soft); border-radius: 4px; }
+.modal .credit-pay-list::-webkit-scrollbar-track { background: transparent; }
 .credit-pay-item {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
     width: 100%; padding: 10px 13px; text-align: left;
@@ -603,7 +561,7 @@
 .credit-pay-meta { display: block; font-size: 12.5px; font-weight: 400; color: var(--steel-soft); }
 .credit-pay-owes { font-family: var(--font-figure); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 
-.add-customer-note, .limit-intro { margin: 4px 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
+.add-customer-note { margin: 4px 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
 
 /* the product field is capped so the name and the price read as a pair */
 #refund-form .suggest-wrap,
@@ -781,8 +739,22 @@
 /* the form's facts read like the customer card's */
 #payment-modal .detail-grid + form { margin-top: 16px; }
 #payment-modal .downpayment-quick { margin-top: 2px; }
-/* The card keeps one size whichever method is picked, so choosing GCash does not
-   make it jump: the reference box keeps its room when it is blank (cash), and the
-   line under the form keeps room for two lines of words. */
-#payment-ref-field.is-blank { visibility: hidden; }
+/* the line under the form keeps room for two lines of words, so it does not jump
+   between one message and the next */
 #payment-modal .credit-verdict { min-height: 64px; }
+
+/* the sale whose items are on Issue a Refund, in the list beside it */
+#recent-sales-table tbody tr.is-picked { background: var(--signal-dim); box-shadow: inset 3px 0 0 var(--signal); }
+
+/* Issue a Refund's items table sits in the narrow form column: it fits the
+   column (no sideways scroll), the product name wrapping under itself */
+#refund-lines .adjust-lines-scroll { overflow-x: hidden; }
+#refund-lines .adjust-lines-table { table-layout: fixed; }
+#refund-lines .adjust-lines-table th,
+#refund-lines .adjust-lines-table td { padding-left: 8px; padding-right: 8px; }
+#refund-lines .adjust-lines-table th:nth-child(2) { width: 52px; }
+#refund-lines .adjust-lines-table th:nth-child(3) { width: 88px; }
+#refund-lines .adjust-lines-table td.cell-name { white-space: normal; overflow-wrap: anywhere; }
+#refund-lines .adjust-line-qty { width: 72px; padding-left: 6px; padding-right: 6px; }
+#refund-lines .adjust-lines-table .cell-sub { white-space: normal; }
+#refund-lines .adjust-line-note.is-refund { color: var(--ok-ink); }

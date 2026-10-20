@@ -68,6 +68,7 @@ const registerCashierRoutes = require("./routes/cashier").registerCashierRoutes;
 const registerDeliveryRoutes = require("./routes/delivery").registerDeliveryRoutes;
 const registerInventoryRoutes = require("./routes/inventory-clerk").registerInventoryRoutes;
 const registerQrPaymentRoutes = require("./routes/qr-payments").registerQrPaymentRoutes;
+const registerVoidRequestRoutes = require("./routes/void-requests").registerVoidRequestRoutes;
 const registerSharedRoutes = require("./routes/shared").registerSharedRoutes;
 
 const app = express();
@@ -419,13 +420,21 @@ const managerModule = registerManagerRoutes(app, {
 // ==========================================
 const qrPayments = registerQrPaymentRoutes(app, {
   db: db, getActorId: getActorId, publishChange: publishChange, isDateText: isDateText,
-  CASHIER: CASHIER, port: port
+  CASHIER: CASHIER, DRIVER: DRIVER, port: port
 });
 
 // ==========================================
 // CASHIER MODULE -- in routes/cashier.js: the sales list, ringing up a sale, creating
 // and moving a delivery, the end-of-shift summary, payments on a sale
 // ==========================================
+// ==========================================
+// VOID REQUESTS -- in routes/void-requests.js: a cashier asks for a sale of the
+// same day to be voided, and a manager approves or declines it
+// ==========================================
+registerVoidRequestRoutes(app, {
+  db: db, getActorId: getActorId, publishChange: publishChange, CASHIER: CASHIER
+});
+
 registerCashierRoutes(app, {
   db: db, getActorId: getActorId, DRIVER: DRIVER, CASHIER: CASHIER, isDateText: isDateText,
   SALE_CUSTOMER_SQL: SALE_CUSTOMER_SQL, phoneComplaint: phoneComplaint, cleanPhone: cleanPhone,
@@ -438,7 +447,8 @@ registerCashierRoutes(app, {
 // ==========================================
 registerDeliveryRoutes(app, {
   db: db, getActorId: getActorId, isDateText: isDateText, publishChange: publishChange,
-  DELIVERY_CONTACT_SQL: DELIVERY_CONTACT_SQL, DELIVERY_PHONE_SQL: DELIVERY_PHONE_SQL
+  DELIVERY_CONTACT_SQL: DELIVERY_CONTACT_SQL, DELIVERY_PHONE_SQL: DELIVERY_PHONE_SQL,
+  qrPayments: qrPayments
 });
 
 // ==========================================
