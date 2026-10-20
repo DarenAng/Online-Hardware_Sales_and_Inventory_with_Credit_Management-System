@@ -196,8 +196,11 @@ function makeTypable(select) {
         box.select();
         suggest(true);
     });
+    // pressed again after a pick: the whole list, with the text ready to type over
     box.addEventListener('click', function () {
-        if (list.hidden) suggest(true);
+        if (!list.hidden) return;
+        box.select();
+        suggest(true);
     });
     box.addEventListener('input', function () { suggest(false); });
     box.addEventListener('keydown', function (event) {

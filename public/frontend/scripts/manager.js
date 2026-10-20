@@ -1123,15 +1123,15 @@ function buildReportPanels() {
                 (filters.method === 'all' || row.payment_method === filters.method) &&
                 dateInRange(row.sale_date, filters.from, filters.to);
         },
+        // the methods are a fixed list (every way a sale can be paid); the
+        // statuses are the ones the loaded sales have
         onLoaded: function (rows) {
             const statuses = [];
-            const methods = [];
             for (let i = 0; i < rows.length; i++) {
                 statuses.push(rows[i].payment_status);
-                methods.push(rows[i].payment_method);
             }
             fillFilterOptions('unpaid-status', statuses, 'Every status');
-            fillFilterOptions('unpaid-method', methods, 'Every method');
+            showUnpaidMethodField(document.getElementById('unpaid-status').value);
         },
         renderRow: function (u, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -1230,6 +1230,27 @@ function repeatCustomerMatches(row, filters) {
 
 // A dropdown filled from the loaded rows: one option per value they hold,
 // sorted, keeping the one already picked when it is still there.
+// Receivables: the payment method is asked only with Every status or Partial.
+// An Unpaid sale has had nothing paid on it, so the method box goes, and its
+// choice goes back to Every method.
+function showUnpaidMethodField(status) {
+    const offered = status === 'all' || status === 'Partial';
+    const field = document.getElementById('unpaid-method-field');
+    if (field) field.hidden = !offered;
+    return offered;
+}
+
+function unpaidStatusPicked(status) {
+    const method = document.getElementById('unpaid-method');
+    const offered = showUnpaidMethodField(status);
+    if (!offered && method && method.value !== 'all') {
+        method.value = 'all';
+        dataPanelFilter('mgr-unpaid', 'method', 'all');
+        syncFilteredColumns('unpaid-table');
+    }
+    dataPanelFilter('mgr-unpaid', 'status', status);
+}
+
 function fillFilterOptions(id, values, allLabel) {
     const select = document.getElementById(id);
     if (!select) return;
