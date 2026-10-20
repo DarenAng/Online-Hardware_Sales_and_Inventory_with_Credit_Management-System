@@ -2933,6 +2933,16 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     background: var(--paper);
 }
 .pay-details[hidden] { display: none; }
+/* what is wrong with a box, under it, and its red edge (payment-details.js pdMark) */
+.pay-details .field-error {
+    display: block;
+    margin-top: 4px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--stop-hi);
+}
+.pay-details .field-error[hidden] { display: none; }
+.pay-details .form-control.is-bad { border-color: var(--stop); box-shadow: 0 0 0 2px var(--stop-dim); }
 .pay-details-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: var(--ink); }
 .pay-details-note { margin: 0 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
 

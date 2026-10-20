@@ -111,15 +111,15 @@ function cleanPaymentDetails(method, raw) {
 
   const details = { bank: bank, accountName: accountName, accountNumber: accountNumber };
   if (cheque) {
+    // the branch is no longer asked for; one sent is still kept
     const branch = tidy(body.branch);
-    if (branch.length < 2) return { problem: "Enter the bank's branch.", details: null };
     if (branch.length > 80) return { problem: "The branch is at most 80 characters.", details: null };
 
     const chequeDate = tidy(body.chequeDate);
     const dateComplaint = chequeDateProblem(chequeDate);
     if (dateComplaint) return { problem: dateComplaint, details: null };
 
-    details.branch = branch;
+    if (branch !== "") details.branch = branch;
     details.chequeDate = chequeDate;
   }
 

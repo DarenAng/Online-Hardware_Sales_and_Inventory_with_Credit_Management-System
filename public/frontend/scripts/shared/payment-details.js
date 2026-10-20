@@ -2,9 +2,10 @@
 // Loaded by: cashier-dashboard.html (the Payment card and the Credit Settlement card), delivery.html (Receive Payment)
 //
 // A cheque is taken with the account name and account number printed on it,
-// the bank and its branch, and the date written on it (the cheque number is the
-// payment's Reference, typed in its own box). A bank transfer is taken with the
-// customer's bank, account name and account number.
+// the bank and the date written on it. A bank transfer is taken with the
+// customer's bank, account name and account number. Each box keeps out what
+// cannot belong in it as it is typed (letters in an account number) and says
+// what is wrong under itself.
 //
 //   buildPaymentDetailsBox(boxId, prefix, transferByList)  puts the boxes in the page, once
 //   showPaymentDetails(prefix, method)     shows the boxes the method needs
@@ -69,14 +70,65 @@ function pdChequeDateProblem(text) {
 }
 
 // ---------- the boxes ----------
-function pdField(id, label, hint, extra) {
-    return '<div class="form-group"><label for="' + id + '">' + label +
-        (hint ? ' <span class="label-hint">' + hint + '</span>' : '') + '</label>' + extra + '</div>';
+// a box with its label and, under it, the line that says what is wrong with it
+function pdField(id, label, extra) {
+    return '<div class="form-group"><label for="' + id + '">' + label + '</label>' + extra +
+        '<span class="field-error" id="' + id + '-error" hidden></span></div>';
 }
 
-function pdInput(id, maxLength, placeholder, mode) {
+// kind: 'name' (letters, spaces and . , ' -), 'digits' (an account number) or
+// 'bank' (letters, digits, spaces and . & -); what does not belong is kept out
+// as it is typed
+function pdInput(id, maxLength, placeholder, kind) {
     return '<input type="text" id="' + id + '" class="form-control" maxlength="' + maxLength + '" ' +
-        'autocomplete="off" placeholder="' + placeholder + '"' + (mode ? ' inputmode="' + mode + '"' : '') + '>';
+        'autocomplete="off" placeholder="' + placeholder + '"' +
+        (kind === 'digits' ? ' inputmode="numeric"' : '') +
+        ' oninput="pdLiveCheck(this, \'' + kind + '\')" onblur="pdLiveCheck(this, \'' + kind + '\', true)">';
+}
+
+const PD_KEEP = {
+    name: { strip: /[^A-Za-z\u00C0-\u024F\u00D1\u00F1 .,'-]/g, words: 'Letters only.' },
+    digits: { strip: /[^0-9]/g, words: 'Digits only.' },
+    bank: { strip: /[^A-Za-z0-9\u00C0-\u024F .&-]/g, words: 'Letters and digits only.' }
+};
+
+// As a box is typed in: what does not belong is taken out, and the box says so.
+// On leaving it (done): a figure too short is said too.
+function pdLiveCheck(box, kind, done) {
+    const rule = PD_KEEP[kind];
+    if (!box || !rule) return;
+    const before = box.value;
+    const kept = before.replace(rule.strip, '');
+    if (kept !== before) {
+        const at = box.selectionStart - (before.length - kept.length);
+        box.value = kept;
+        if (at >= 0 && box.setSelectionRange) box.setSelectionRange(at, at);
+        pdMark(box.id, rule.words);
+        return;
+    }
+    let problem = null;
+    if (done && kept.trim() !== '') {
+        if (kind === 'digits' && pdAccountDigits(kept) === null) problem = 'An account number is 6 to 20 digits.';
+        else if (kind !== 'digits' && kept.trim().length < 2) problem = 'Too short.';
+    }
+    pdMark(box.id, problem);
+}
+
+// shows (or, with no text, clears) the line under a box and its red edge
+function pdMark(id, text) {
+    const box = document.getElementById(id);
+    const line = document.getElementById(id + '-error');
+    if (box) box.classList.toggle('is-bad', Boolean(text));
+    if (line) {
+        line.textContent = text || '';
+        line.hidden = !text;
+    }
+}
+
+// the answer of a check, with the box it is about marked
+function pdProblem(text, id) {
+    pdMark(id, text);
+    return { problem: text, field: id };
 }
 
 // Puts the cheque boxes and the bank-transfer boxes into the element boxId. Both
@@ -94,14 +146,13 @@ function buildPaymentDetailsBox(boxId, prefix, transferByList) {
         for (let i = 0; i < PAYMONGO_BANKS.length; i++) {
             options += '<option value="' + PAYMONGO_BANKS[i].code + '">' + escapeHtml(PAYMONGO_BANKS[i].name) + '</option>';
         }
-        bankBox = pdField(prefix + '-transfer-bank', 'Bank', 'the customer\'s bank',
-            '<select id="' + prefix + '-transfer-bank" class="form-control">' + options + '</select>');
-        transferNote = 'Once you confirm, a QR code and a link to the bank\'s own page are made. The customer ' +
-            'logs in to their bank and approves the transfer on their phone. It is recorded only after PayMongo ' +
-            'says it was paid. BDO takes ' + peso(100) + ' or more.';
+        bankBox = pdField(prefix + '-transfer-bank', 'Bank',
+            '<select id="' + prefix + '-transfer-bank" class="form-control" ' +
+                'onchange="pdMark(this.id, null)">' + options + '</select>');
+        transferNote = '';
     } else {
-        bankBox = pdField(prefix + '-transfer-bank', 'Bank', 'the customer\'s bank',
-            pdInput(prefix + '-transfer-bank', 80, 'e.g. BDO'));
+        bankBox = pdField(prefix + '-transfer-bank', 'Bank',
+            pdInput(prefix + '-transfer-bank', 80, 'e.g. BDO', 'bank'));
         transferNote = 'Written down as the customer shows it. This transfer is not checked with PayMongo, ' +
             'so put the bank\'s own reference in the Reference box.';
     }
@@ -110,30 +161,29 @@ function buildPaymentDetailsBox(boxId, prefix, transferByList) {
         '<div class="pay-details" id="' + prefix + '-cheque" hidden>' +
             '<p class="pay-details-title">Cheque details</p>' +
             '<div class="grid-2">' +
-                pdField(prefix + '-cheque-name', 'Account name', 'as printed on the cheque',
-                    pdInput(prefix + '-cheque-name', 100, 'e.g. Juan Dela Cruz')) +
-                pdField(prefix + '-cheque-number', 'Account number', 'digits only',
-                    pdInput(prefix + '-cheque-number', 24, 'e.g. 0123456789', 'numeric')) +
+                pdField(prefix + '-cheque-name', 'Account name',
+                    pdInput(prefix + '-cheque-name', 100, 'e.g. Juan Dela Cruz', 'name')) +
+                pdField(prefix + '-cheque-number', 'Account number',
+                    pdInput(prefix + '-cheque-number', 20, 'e.g. 0123456789', 'digits')) +
             '</div>' +
             '<div class="grid-2">' +
-                pdField(prefix + '-cheque-bank', 'Bank', 'the bank it is drawn on',
-                    pdInput(prefix + '-cheque-bank', 80, 'e.g. BDO')) +
-                pdField(prefix + '-cheque-branch', 'Branch', '',
-                    pdInput(prefix + '-cheque-branch', 80, 'e.g. Nasugbu')) +
+                pdField(prefix + '-cheque-bank', 'Bank',
+                    pdInput(prefix + '-cheque-bank', 80, 'e.g. BDO', 'bank')) +
+                pdField(prefix + '-cheque-date', 'Cheque date',
+                    '<input type="date" id="' + prefix + '-cheque-date" class="form-control" ' +
+                        'onchange="pdMark(this.id, pdChequeDateProblem(this.value))">') +
             '</div>' +
-            pdField(prefix + '-cheque-date', 'Cheque date', 'the date written on it',
-                '<input type="date" id="' + prefix + '-cheque-date" class="form-control">') +
         '</div>' +
         '<div class="pay-details" id="' + prefix + '-transfer" hidden>' +
             '<p class="pay-details-title">Bank transfer</p>' +
             bankBox +
             '<div class="grid-2">' +
-                pdField(prefix + '-transfer-name', 'Account name', 'the customer\'s',
-                    pdInput(prefix + '-transfer-name', 100, 'e.g. Juan Dela Cruz')) +
-                pdField(prefix + '-transfer-number', 'Account number', 'digits only',
-                    pdInput(prefix + '-transfer-number', 24, 'e.g. 0123456789', 'numeric')) +
+                pdField(prefix + '-transfer-name', 'Account name',
+                    pdInput(prefix + '-transfer-name', 100, 'e.g. Juan Dela Cruz', 'name')) +
+                pdField(prefix + '-transfer-number', 'Account number',
+                    pdInput(prefix + '-transfer-number', 20, 'e.g. 0123456789', 'digits')) +
             '</div>' +
-            '<p class="pay-details-note">' + transferNote + '</p>' +
+            (transferNote ? '<p class="pay-details-note">' + transferNote + '</p>' : '') +
         '</div>';
 
     // a cheque date outside what a bank takes cannot be picked
@@ -190,27 +240,28 @@ function pdAccountNameProblem(name, whose) {
 function readChequeDetails(prefix) {
     const name = pdTidy(pdValue(prefix + '-cheque-name'));
     const nameProblem = pdAccountNameProblem(name, ' on the cheque');
-    if (nameProblem) return { problem: nameProblem, field: prefix + '-cheque-name' };
+    if (nameProblem) return pdProblem(nameProblem, prefix + '-cheque-name');
+    pdMark(prefix + '-cheque-name', null);
 
     const number = pdAccountDigits(pdValue(prefix + '-cheque-number'));
     if (number === null) {
-        return { problem: 'Enter the account number on the cheque: 6 to 20 digits, no letters.', field: prefix + '-cheque-number' };
+        return pdProblem('Enter the account number on the cheque: 6 to 20 digits, no letters.', prefix + '-cheque-number');
     }
+    pdMark(prefix + '-cheque-number', null);
 
     const bank = pdTidy(pdValue(prefix + '-cheque-bank'));
-    if (bank.length < 2) return { problem: 'Enter the bank the cheque is drawn on.', field: prefix + '-cheque-bank' };
-
-    const branch = pdTidy(pdValue(prefix + '-cheque-branch'));
-    if (branch.length < 2) return { problem: 'Enter the bank\'s branch.', field: prefix + '-cheque-branch' };
+    if (bank.length < 2) return pdProblem('Enter the bank the cheque is drawn on.', prefix + '-cheque-bank');
+    pdMark(prefix + '-cheque-bank', null);
 
     const date = pdValue(prefix + '-cheque-date');
     const dateProblem = pdChequeDateProblem(date);
-    if (dateProblem) return { problem: dateProblem, field: prefix + '-cheque-date' };
+    if (dateProblem) return pdProblem(dateProblem, prefix + '-cheque-date');
+    pdMark(prefix + '-cheque-date', null);
 
     return {
         problem: null,
         field: null,
-        details: { bank: bank, branch: branch, accountName: name, accountNumber: number, chequeDate: date }
+        details: { bank: bank, accountName: name, accountNumber: number, chequeDate: date }
     };
 }
 
@@ -222,22 +273,25 @@ function readTransferDetails(prefix) {
     let bankCode = null;
     if (bankBox && bankBox.tagName === 'SELECT') {
         const picked = paymongoBank(bankBox.value);
-        if (!picked) return { problem: 'Pick the customer\'s bank from the list.', field: prefix + '-transfer-bank' };
+        if (!picked) return pdProblem('Pick the customer\'s bank from the list.', prefix + '-transfer-bank');
         bank = picked.name;
         bankCode = picked.code;
     } else {
         bank = pdTidy(pdValue(prefix + '-transfer-bank'));
-        if (bank.length < 2) return { problem: 'Enter the customer\'s bank.', field: prefix + '-transfer-bank' };
+        if (bank.length < 2) return pdProblem('Enter the customer\'s bank.', prefix + '-transfer-bank');
     }
+    pdMark(prefix + '-transfer-bank', null);
 
     const name = pdTidy(pdValue(prefix + '-transfer-name'));
     const nameProblem = pdAccountNameProblem(name, '');
-    if (nameProblem) return { problem: nameProblem, field: prefix + '-transfer-name' };
+    if (nameProblem) return pdProblem(nameProblem, prefix + '-transfer-name');
+    pdMark(prefix + '-transfer-name', null);
 
     const number = pdAccountDigits(pdValue(prefix + '-transfer-number'));
     if (number === null) {
-        return { problem: 'Enter the account number: 6 to 20 digits, no letters.', field: prefix + '-transfer-number' };
+        return pdProblem('Enter the account number: 6 to 20 digits, no letters.', prefix + '-transfer-number');
     }
+    pdMark(prefix + '-transfer-number', null);
 
     return {
         problem: null,
@@ -248,12 +302,13 @@ function readTransferDetails(prefix) {
 
 // Empties the boxes; kind is 'cheque' or 'transfer' for one set, nothing for both.
 function clearPaymentDetails(prefix, kind) {
-    const ids = ['-cheque-name', '-cheque-number', '-cheque-bank', '-cheque-branch', '-cheque-date',
+    const ids = ['-cheque-name', '-cheque-number', '-cheque-bank', '-cheque-date',
                  '-transfer-bank', '-transfer-name', '-transfer-number'];
     for (let i = 0; i < ids.length; i++) {
         if (kind && ids[i].indexOf('-' + kind + '-') !== 0) continue;
         const box = document.getElementById(prefix + ids[i]);
         if (box) box.value = '';
+        pdMark(prefix + ids[i], null);
     }
 }
 

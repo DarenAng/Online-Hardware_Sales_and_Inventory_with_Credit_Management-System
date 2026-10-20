@@ -1602,14 +1602,11 @@ function checkoutLabel(t) {
 // transfer is verified through PayMongo: the customer's bank and account are
 // asked for, and the reference is PayMongo's own payment number, not typed.
 // An e-wallet prints a reference too, taken when the cashier has it. Cash needs none.
-const REFERENCE_REQUIRED = ['Cheque'];
-const REFERENCE_OPTIONAL = ['GCash', 'PayMaya', 'PayPal'];
-
+// the reference asked for on the Credit Settlement card (a sale asks for none)
 const REFERENCE_WORDS = {
     'Cheque':        { hint: 'required, the cheque number', placeholder: 'e.g. 001234' },
     'GCash':         { hint: 'optional, the GCash reference', placeholder: 'e.g. 1012 345 678901' },
-    'PayMaya':       { hint: 'optional, the Maya reference', placeholder: 'e.g. 5A3F9C21' },
-    'PayPal':        { hint: 'optional, the PayPal transaction ID', placeholder: 'e.g. 8TY12345AB678901C' }
+    'PayMaya':       { hint: 'optional, the Maya reference', placeholder: 'e.g. 5A3F9C21' }
 };
 
 // what the money taken today arrives by: the sale's own method, or on a
@@ -1645,13 +1642,12 @@ buildPaymentDetailsBox('payment-details-box', 'pay-debt', true);
 function renderSalePaymentExtras(totals) {
     const t = totals || cartTotals();
 
-    // The reference is on screen only while the money taken now has a number to
-    // trace it by (REFERENCE_WORDS): not for cash, not for cash on delivery, and
-    // not for a credit sale with nothing paid now (taken is null then) or a part
-    // payment in cash. When it goes, so does anything typed in it.
+    // A sale asks for no reference: not for an e-wallet, which is paid by QR
+    // code, and not for a cheque, which is traced by its account, bank and date.
+    // (The Credit Settlement card still asks for one: REFERENCE_WORDS.)
     const taken = methodTakenNow(t);
     const field = document.getElementById('sale-reference-field');
-    const words = REFERENCE_WORDS[taken];
+    const words = null;
     if (field) {
         field.hidden = !words;
         const box = document.getElementById('sale-reference');
@@ -2444,18 +2440,7 @@ async function handleCheckout(event, viaQr) {
         }
     }
 
-    // a cheque is traced by its number; the server refuses one without it too
     const reference = saleReference();
-    if (REFERENCE_REQUIRED.indexOf(taken) !== -1 && reference === '') {
-        let referenceSubject = 'A cheque sale';
-        if (t.onCredit) referenceSubject = 'The part payment is by cheque, so it';
-        notifyWarning(
-            referenceSubject +
-            ' needs its reference: the cheque number. It is how the money is traced if it does not arrive.',
-            'Reference needed');
-        focusBox('sale-reference');
-        return;
-    }
 
     // Asked before anything is sent: the amount due, the method, and the change
     // or the balance that goes on the account. Paying by QR is its own
@@ -2472,8 +2457,6 @@ async function handleCheckout(event, viaQr) {
             question.detail.push('Customer\'s bank: ' + transferDetails.bank);
             question.detail.push('Account name: ' + transferDetails.accountName);
             question.detail.push('Account number: ' + transferDetails.accountNumber);
-            question.message += ' A QR code and a link to the bank\'s page are made next; nothing is recorded ' +
-                'until the customer has approved the transfer in their bank.';
             question.confirmLabel = 'Make the QR code';
         }
         const yes = await askConfirm(question.message, {
