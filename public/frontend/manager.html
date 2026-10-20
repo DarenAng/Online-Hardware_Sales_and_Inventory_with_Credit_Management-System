@@ -437,16 +437,6 @@
                                 <label for="unpaid-to">To</label>
                                 <input type="date" id="unpaid-to" onchange="dateFilterChanged('mgr-unpaid', 'unpaid')">
                             </div>
-                            <div class="toolbar-field">
-                                <label for="unpaid-age">Age</label>
-                                <select id="unpaid-age" onchange="dataPanelFilter('mgr-unpaid', 'age', this.value)">
-                                    <option value="all">Any age</option>
-                                    <option value="0-30">Up to 30 days</option>
-                                    <option value="31-60">31 to 60 days</option>
-                                    <option value="61-90">61 to 90 days</option>
-                                    <option value="90+">Over 90 days</option>
-                                </select>
-                            </div>
                             <div class="toolbar-spacer"></div>
                         </div>
 
@@ -555,12 +545,16 @@
                             </div>
                             <div class="toolbar-field" id="po-totals-month-field">
                                 <label for="po-totals-month">Month</label>
-                                <!-- filled from the loaded orders (renderPurchaseTotalsMonths) -->
-                                <select id="po-totals-month" onchange="purchaseTotalsMonth(this.value)"></select>
+                                <!-- type to search, then pick: every month from January 2025 to December
+                                     of this year (renderPurchaseTotalsMonths) -->
+                                <input type="text" id="po-totals-month" class="form-control month-search" list="po-totals-month-list"
+                                       autocomplete="off" placeholder="Search a month"
+                                       onchange="purchaseTotalsMonthTyped(this)" onfocus="this.select()">
+                                <datalist id="po-totals-month-list"></datalist>
                             </div>
                             <div class="toolbar-field" id="po-totals-year-field" hidden>
                                 <label for="po-totals-year">Year</label>
-                                <!-- filled from the loaded orders (renderPurchaseTotalsYears) -->
+                                <!-- every year from 2025 to this one (renderPurchaseTotalsYears) -->
                                 <select id="po-totals-year" onchange="purchaseTotalsYear(this.value)"></select>
                             </div>
                             <div class="toolbar-field toolbar-date" id="po-totals-from-field" hidden>
