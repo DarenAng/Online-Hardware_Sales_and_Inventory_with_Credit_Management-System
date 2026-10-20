@@ -21,6 +21,7 @@ CREATE TABLE staff (
     phone VARCHAR(20),
     role_id INT NOT NULL,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    deactivated_at TIMESTAMP NULL,
     archived_at TIMESTAMP NULL,
     archived_by_staff_id INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

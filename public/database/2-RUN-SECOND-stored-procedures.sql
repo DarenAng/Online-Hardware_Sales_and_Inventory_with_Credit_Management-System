@@ -164,7 +164,7 @@ SELECT 'Staff' AS module, s.staff_id AS record_id,
 FROM staff s
 JOIN roles r ON r.role_id = s.role_id
 LEFT JOIN staff a ON a.staff_id = s.archived_by_staff_id
-WHERE s.is_active = FALSE
+WHERE s.archived_at IS NOT NULL
 UNION ALL
 SELECT 'Inventory', p.product_id, p.product_name,
        CONCAT('Stock ', COALESCE(i.quantity_in_stock, 0)), p.archived_at,
@@ -480,15 +480,17 @@ PROC_BODY: BEGIN
         END IF;
     END IF;
 
-    -- the same stamp sp_archive_record leaves, so the restore card can say
-    -- when and by whom whichever screen it was done from
+    -- Deactivating is not archiving: the account stays in the Staff Directory
+    -- as Deactivated, and deactivated_at starts its 30 days. It goes to the
+    -- archive by hand (sp_archive_record) or by the daily sweep after 30 days
+    -- (sp_sweep_archives). A second deactivation does not restart the count.
     IF p_is_active = FALSE THEN
         UPDATE staff
-        SET is_active = FALSE, archived_at = NOW(), archived_by_staff_id = p_by_staff_id
+        SET is_active = FALSE, deactivated_at = COALESCE(deactivated_at, NOW())
         WHERE staff_id = p_staff_id;
     ELSE
         UPDATE staff
-        SET is_active = TRUE, archived_at = NULL, archived_by_staff_id = NULL
+        SET is_active = TRUE, deactivated_at = NULL, archived_at = NULL, archived_by_staff_id = NULL
         WHERE staff_id = p_staff_id;
     END IF;
 
@@ -1250,29 +1252,24 @@ PROC_BODY: BEGIN
     END;
 
     IF p_module = 'Staff' THEN
-        SELECT COUNT(*) INTO v_found FROM staff WHERE staff_id = p_record_id AND is_active = TRUE;
+        SELECT COUNT(*) INTO v_found FROM staff WHERE staff_id = p_record_id AND archived_at IS NULL;
         IF v_found = 0 THEN
             SET p_status_code = 404;
-            SET p_message = 'Active staff record not found.';
+            SET p_message = 'Staff record not found, or it is already archived.';
             LEAVE PROC_BODY;
         END IF;
 
-        SELECT role_id INTO v_role_id FROM staff WHERE staff_id = p_record_id;
-
-        IF v_role_id = 1 THEN
-            SELECT COUNT(*) INTO v_admin_count
-            FROM staff
-            WHERE role_id = 1 AND is_active = TRUE AND staff_id <> p_record_id;
-
-            IF v_admin_count = 0 THEN
-                SET p_status_code = 400;
-                SET p_message = 'You cannot archive the last active system administrator.';
-                LEAVE PROC_BODY;
-            END IF;
+        -- only a deactivated account is archived; an active one is deactivated first
+        SELECT COUNT(*) INTO v_found FROM staff WHERE staff_id = p_record_id AND is_active = TRUE;
+        IF v_found > 0 THEN
+            SET p_status_code = 409;
+            SET p_message = 'Only a deactivated account can be archived. Deactivate it first.';
+            LEAVE PROC_BODY;
         END IF;
 
         UPDATE staff
-        SET is_active = FALSE, archived_at = NOW(), archived_by_staff_id = p_staff_id
+        SET archived_at = NOW(), archived_by_staff_id = p_staff_id,
+            deactivated_at = COALESCE(deactivated_at, NOW())
         WHERE staff_id = p_record_id;
 
     ELSEIF p_module = 'Inventory' THEN
@@ -1476,7 +1473,7 @@ PROC_BODY: BEGIN
     END;
 
     IF p_module = 'Staff' THEN
-        SELECT COUNT(*) INTO v_found FROM staff WHERE staff_id = p_record_id AND is_active = FALSE;
+        SELECT COUNT(*) INTO v_found FROM staff WHERE staff_id = p_record_id AND archived_at IS NOT NULL;
         IF v_found = 0 THEN
             SET p_status_code = 404;
             SET p_message = 'Archived staff record not found.';
@@ -1484,7 +1481,7 @@ PROC_BODY: BEGIN
         END IF;
 
         UPDATE staff
-        SET is_active = TRUE, archived_at = NULL, archived_by_staff_id = NULL
+        SET is_active = TRUE, deactivated_at = NULL, archived_at = NULL, archived_by_staff_id = NULL
         WHERE staff_id = p_record_id;
 
     ELSEIF p_module = 'Inventory' THEN
@@ -4438,6 +4435,7 @@ END //
 -- 30. THE ARCHIVE SWEEP -- called by the server at startup and once a day
 --
 --   MATERIALS   nothing on the shelf and not sold, moved or ordered in 180 days
+--   STAFF       an account deactivated for 30 days (deactivated_at)
 --
 -- Deliveries, sales and credit are never archived: only customers, products,
 -- units, categories, suppliers and staff accounts can be. p_deliveries stays
@@ -4450,6 +4448,8 @@ CREATE PROCEDURE sp_sweep_archives (
     OUT p_materials INT
 )
 BEGIN
+    DECLARE v_staff INT DEFAULT 0;
+
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         -- first, before anything clears it: the real error, for the server log
@@ -4478,6 +4478,20 @@ BEGIN
       AND NOT EXISTS (SELECT 1 FROM purchase_order_items poi JOIN purchase_orders po ON po.po_id = poi.po_id
                       WHERE poi.product_id = p.product_id AND po.status = 'Pending');
     SET p_materials = ROW_COUNT();
+
+    -- a staff account deactivated for 30 days goes to the archive
+    UPDATE staff
+    SET archived_at = NOW(), archived_by_staff_id = NULL
+    WHERE is_active = FALSE AND archived_at IS NULL
+      AND deactivated_at IS NOT NULL AND deactivated_at <= DATE_SUB(NOW(), INTERVAL 30 DAY);
+    SET v_staff = ROW_COUNT();
+
+    IF v_staff > 0 THEN
+        INSERT INTO audit_logs (staff_id, action, action_type, details)
+        VALUES (NULL, 'ARCHIVE_SWEEP', 'DELETE',
+                CONCAT('Archived ', v_staff, ' staff ', IF(v_staff = 1, 'account', 'accounts'),
+                       ' deactivated for 30 days'));
+    END IF;
 
     IF p_materials > 0 THEN
         INSERT INTO audit_logs (staff_id, action, action_type, details)

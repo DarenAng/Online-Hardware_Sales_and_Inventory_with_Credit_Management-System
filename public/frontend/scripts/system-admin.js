@@ -141,12 +141,12 @@ async function loadRoles() {
     }
 }
 
-// Active/Inactive is a decision about the account. Whether somebody is at a
+// Active/Deactivated is a decision about the account. Whether somebody is at a
 // screen right now is not the directory's business; Last Login is on the card.
 let selectedUser = null;
 
 function accountCell(user) {
-    if (!user.is_active) return '<span class="badge badge-danger">Inactive</span>';
+    if (!user.is_active) return '<span class="badge badge-danger">Deactivated</span>';
     // held after too many wrong passwords; a password reset releases it
     if (user.held_until) return '<span class="badge badge-warning" title="Held until ' + escapeHtml(whenText(user.held_until)) + ' after too many wrong passwords">Held</span>';
     return '<span class="badge badge-success">Active</span>';
@@ -316,7 +316,10 @@ async function openUserModal(staffId) {
 
     const hasLogin = Boolean(selectedUser.user_id);
     document.getElementById('modal-login-btn').style.display = hasLogin ? 'none' : 'inline-block';
-    document.getElementById('modal-reset-btn').style.display = hasLogin ? 'inline-block' : 'none';
+    // a deactivated account cannot sign in, so its password is not reset
+    document.getElementById('modal-reset-btn').style.display = hasLogin && selectedUser.is_active ? 'inline-block' : 'none';
+    // only a deactivated account can be archived
+    document.getElementById('modal-archive-btn').style.display = selectedUser.is_active ? 'none' : 'inline-block';
     // Lift Hold only while the account is held after too many wrong passwords
     document.getElementById('modal-hold-btn').style.display =
         hasLogin && selectedUser.held_until ? 'inline-block' : 'none';
@@ -326,7 +329,7 @@ async function openUserModal(staffId) {
     const own = isOwnAccount(selectedUser);
     document.getElementById('modal-own-note').style.display = own ? 'block' : 'none';
     document.getElementById('modal-edit-tab').style.display = own ? 'none' : '';
-    const buttonIds = ['modal-login-btn', 'modal-hold-btn', 'modal-reset-btn', 'modal-status-btn'];
+    const buttonIds = ['modal-login-btn', 'modal-hold-btn', 'modal-reset-btn', 'modal-status-btn', 'modal-archive-btn'];
     for (let i = 0; i < buttonIds.length; i++) {
         const button = document.getElementById(buttonIds[i]);
         button.disabled = own;
@@ -489,7 +492,8 @@ async function toggleUserStatus() {
                 confirmLabel: 'Deactivate the account',
                 detail: [
                     'Any session they have open is ended immediately.',
-                    'They cannot sign in again until an administrator restores the account.',
+                    'They cannot sign in again until an administrator activates the account.',
+                    'It stays in the Staff Directory as Deactivated, and is archived after 30 days.',
                     'Their sales, records and history are kept and are not deleted.'
                 ]
             });
@@ -502,6 +506,41 @@ async function toggleUserStatus() {
         doneMessage = 'The account is active again.';
     }
     await sendUserRequest(apiSetStaffActive(selectedUser.staff_id, makeActive), doneMessage);
+}
+
+// Archive Account: only on a deactivated account. It leaves the Staff
+// Directory for Archived Accounts, where it can be restored.
+async function archiveUserAccount() {
+    if (!selectedUser) return;
+
+    if (isOwnAccount(selectedUser)) {
+        notifyWarning('You cannot archive your own account. Another administrator can.', 'Not allowed');
+        return;
+    }
+    if (selectedUser.is_active) {
+        notifyWarning('Only a deactivated account can be archived. Deactivate it first.', 'Account is active');
+        return;
+    }
+
+    const name = staffName(selectedUser);
+    const yes = await askArchive(name + ' (' + selectedUser.role_name + ')', {
+        title: 'Archive this account?',
+        eyebrow: 'Accounts Management',
+        confirmLabel: 'Archive the account',
+        detail: [
+            'It leaves the Staff Directory and is listed under Archived Accounts.',
+            'Their sales, records and history stay on record.',
+            'The account can be restored from Archived Accounts.'
+        ]
+    });
+    if (!yes) return;
+
+    const result = await sendUserRequest(apiArchiveStaff(selectedUser.staff_id));
+    if (!result) return;
+
+    notifySuccess(name + '\'s account is archived.', 'Account archived');
+    const archive = getDataPanel('admin-archive');
+    if (archive && archive.state === 'ready') await archive.refresh();
 }
 
 // Lift Hold: the account was held after too many wrong passwords. This lets
@@ -541,11 +580,15 @@ async function resetUserPassword() {
         return;
     }
 
+    if (!selectedUser.is_active) {
+        notifyWarning('This account is deactivated. Activate it before resetting its password.', 'Account deactivated');
+        return;
+    }
+
     // nobody types the new password: the server makes it and sends it
     const name = staffName(selectedUser);
     const yes = await askDanger(
-        'A new password is made for ' + name + ' and sent to ' + selectedUser.email + '. ' +
-        'The one they have now stops working the moment you confirm.',
+        'A new password is made for ' + name + ' and sent to ' + selectedUser.email + '.',
         {
             title: 'Reset this password?',
             eyebrow: 'Accounts Management',
@@ -553,8 +596,7 @@ async function resetUserPassword() {
             cancelLabel: 'Cancel',
             detail: [
                 'Every screen they are signed in on is signed out.',
-                'They sign in with the new password and are asked to choose their own.',
-                'If the mail cannot go, the password is shown to you once, to hand over.'
+                'They sign in with the new password and are asked to choose their own.'
             ]
         });
 
@@ -1181,12 +1223,12 @@ function buildArchivePanel() {
 
         gate: {
             title: 'The archive is not loaded',
-            text: 'Press Load Data to read the deactivated staff accounts, or type a name.',
+            text: 'Press Load Data to read the archived staff accounts, or type a name.',
             button: 'Load Data'
         },
 
         load: function () {
-            return apiGetStaff('?status=inactive');
+            return apiGetStaff('?status=archived');
         },
 
         match: function (user, query) {

@@ -32,7 +32,7 @@
                         Accounts Management <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="accounts-dropdown" class="nav-sub" style="display: none;">
-                        <li><a href="#" data-panel-link="panel-accounts" onclick="showAllUsers(event)"><i class="bi bi-person-lines-fill nav-icon" aria-hidden="true"></i>List Users</a></li>
+                        <li><a href="#" data-panel-link="panel-accounts" onclick="showAllUsers(event)"><i class="bi bi-person-lines-fill nav-icon" aria-hidden="true"></i>Staff Directory</a></li>
                         <li><a href="#" data-panel-link="panel-archive" onclick="showArchiveModule(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
                     </ul>
                 </li>
@@ -59,7 +59,7 @@
 
             <div class="content-area">
 
-                <!-- LIST USERS -->
+                <!-- STAFF DIRECTORY -- every account that is not archived -->
                 <div class="card" id="panel-accounts" data-panel>
                     <div class="panel-head">
                         <div>
@@ -82,7 +82,7 @@
                             <select id="accounts-status" onchange="reloadUsers()">
                                 <option value="all">All</option>
                                 <option value="active">Active only</option>
-                                <option value="inactive">Inactive only</option>
+                                <option value="inactive">Deactivated only</option>
                             </select>
                         </div>
 
@@ -633,6 +633,8 @@
                 <button type="button" class="btn btn-gold" id="modal-hold-btn" onclick="liftUserHold()" style="display: none;">Lift Hold</button>
                 <button type="button" class="btn btn-ghost" id="modal-reset-btn" onclick="resetUserPassword()">Reset Password</button>
                 <button type="button" class="btn btn-danger" id="modal-status-btn" onclick="toggleUserStatus()">Deactivate Account</button>
+                <!-- only a deactivated account can be archived; one left deactivated 30 days is archived by itself -->
+                <button type="button" class="btn btn-ghost" id="modal-archive-btn" onclick="archiveUserAccount()" style="display: none;">Archive Account</button>
             </div>
         </div>
     </div>
