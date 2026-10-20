@@ -101,12 +101,14 @@ function addressPartsFrom(body) {
 
 // null when the parts are fine, otherwise the one sentence to show. whose is
 // the words after "for the": "delivery address", "customer's address".
-function addressPartsProblem(parts, whose) {
+// streetRequired: a customer's record needs the house number and street too;
+// a delivery address may leave it out.
+function addressPartsProblem(parts, whose, streetRequired) {
   for (let i = 0; i < ADDRESS_PARTS.length; i++) {
     const key = ADDRESS_PARTS[i][0];
     const label = ADDRESS_PARTS[i][1];
     const longest = ADDRESS_PARTS[i][2];
-    const required = ADDRESS_PARTS[i][3];
+    const required = ADDRESS_PARTS[i][3] || (streetRequired === true && key === "street");
     // a barangay can be a single number ("5"); the other parts are at least two characters
     let shortest = 2;
     if (key === "barangay") shortest = 1;

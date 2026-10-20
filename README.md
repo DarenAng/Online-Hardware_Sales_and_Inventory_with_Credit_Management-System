@@ -911,8 +911,9 @@ create screen says so in plain words and asks for a different one.
 **Add Customer** (in Customers Record, and from the register when a typed name
 is not on record) asks for a **first name** and **last name**, an optional
 **middle name**, a **phone number** (required, +63 9XXXXXXXXX) and the address in
-the same parts the **Make a Delivery** card uses: house number and street
-(optional), barangay, town or city, province, and an optional landmark. The
+the same parts the **Make a Delivery** card uses: house number and street,
+barangay, town or city and province (all four required for a customer; a
+delivery address may leave out the street), and an optional landmark. The
 server joins the parts into one line, with "Brgy." put in front of a barangay
 written without the word, and keeps that line in `customers.address`, so every
 screen, receipt and report that reads `address` is unchanged. The parts are kept

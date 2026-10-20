@@ -3318,7 +3318,7 @@ async function openEditRecord(index) {
             editFieldHtml('middleName', 'Middle name', row.middle_name) +
             editFieldHtml('lastName', 'Last name', row.last_name, { required: true }) +
             editFieldHtml('phone', 'Phone', '', { kind: 'phone', required: true }) +
-            editFieldHtml('street', 'House and street', row.address_street, { max: 150 }) +
+            editFieldHtml('street', 'House and street', row.address_street, { required: true, max: 150 }) +
             editFieldHtml('barangay', 'Barangay', row.address_barangay, { required: true }) +
             editFieldHtml('city', 'Town or city', row.address_city, { required: true }) +
             editFieldHtml('province', 'Province', row.address_province, { required: true }) +
@@ -3363,6 +3363,10 @@ async function saveEditRecord(event) {
         }
         const problem = phoneComplaint(form.elements.phone);
         if (problem) { notifyWarning(problem, 'Check the phone number'); return; }
+        if (value('street').length < 2 || value('barangay') === '' || value('city').length < 2 || value('province').length < 2) {
+            notifyWarning('Fill in the house number and street, barangay, town or city and province.', 'Fill in the form');
+            return;
+        }
         data = { firstName: value('firstName'), middleName: value('middleName'), lastName: value('lastName'),
                  phone: phoneToStore(form.elements.phone), street: value('street'), barangay: value('barangay'),
                  city: value('city'), province: value('province'), landmark: value('landmark') };
