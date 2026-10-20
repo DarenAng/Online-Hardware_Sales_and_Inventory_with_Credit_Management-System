@@ -561,7 +561,7 @@
 .credit-pay-meta { display: block; font-size: 12.5px; font-weight: 400; color: var(--steel-soft); }
 .credit-pay-owes { font-family: var(--font-figure); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
 
-.add-customer-note, .limit-intro { margin: 4px 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
+.add-customer-note { margin: 4px 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
 
 /* the product field is capped so the name and the price read as a pair */
 #refund-form .suggest-wrap,
@@ -742,3 +742,19 @@
 /* the line under the form keeps room for two lines of words, so it does not jump
    between one message and the next */
 #payment-modal .credit-verdict { min-height: 64px; }
+
+/* the sale whose items are on Issue a Refund, in the list beside it */
+#recent-sales-table tbody tr.is-picked { background: var(--signal-dim); box-shadow: inset 3px 0 0 var(--signal); }
+
+/* Issue a Refund's items table sits in the narrow form column: it fits the
+   column (no sideways scroll), the product name wrapping under itself */
+#refund-lines .adjust-lines-scroll { overflow-x: hidden; }
+#refund-lines .adjust-lines-table { table-layout: fixed; }
+#refund-lines .adjust-lines-table th,
+#refund-lines .adjust-lines-table td { padding-left: 8px; padding-right: 8px; }
+#refund-lines .adjust-lines-table th:nth-child(2) { width: 52px; }
+#refund-lines .adjust-lines-table th:nth-child(3) { width: 88px; }
+#refund-lines .adjust-lines-table td.cell-name { white-space: normal; overflow-wrap: anywhere; }
+#refund-lines .adjust-line-qty { width: 72px; padding-left: 6px; padding-right: 6px; }
+#refund-lines .adjust-lines-table .cell-sub { white-space: normal; }
+#refund-lines .adjust-line-note.is-refund { color: var(--ok-ink); }

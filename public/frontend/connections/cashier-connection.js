@@ -48,6 +48,13 @@ function apiGetOpenSales() {
     return getJson('/api/credit/open-sales');
 }
 
+// POST /api/returns/batch -- a refund of several items of one sale, in one report:
+// { reportType: 'Refunded', saleId, reason, items: [{ productId, quantity, refundAmount }] }.
+// All or nothing; the answer has offBalance (how much came off what the customer owes).
+function apiFileRefundBatch(data) {
+    return sendJson('/api/returns/batch', 'POST', data);
+}
+
 // POST /api/sales/:id/payment -- a Credit Settlement payment on a sale; the answer has the receipt
 function apiTakePayment(saleId, payment) {
     return sendJson('/api/sales/' + saleId + '/payment', 'POST', payment);

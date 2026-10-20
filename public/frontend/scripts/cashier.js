@@ -752,7 +752,11 @@ function suggestRefundAmount() {
     }
 
     const quantity = Number(form.elements.quantity.value) || 0;
-    const suggested = Math.round(Number(refundProduct.price) * Math.max(quantity, 0) * 100) / 100;
+    // from a sale on the form: what the customer paid for it; otherwise today's price
+    const saleLine = refundSaleLine(refundProduct.product_id);
+    const suggested = saleLine
+        ? refundLineAmount(saleLine, Math.max(quantity, 0))
+        : Math.round(Number(refundProduct.price) * Math.max(quantity, 0) * 100) / 100;
 
     const current = parseFloat(field.value);
     const untouched = !field.value || current === 0 || current === refundAmountSuggested;
@@ -762,16 +766,18 @@ function suggestRefundAmount() {
         refundAmountSuggested = suggested;
         if (note) {
             note.className = 'amount-source';
-            note.textContent = quantity + ' at ' + peso(refundProduct.price) + '. Change it if the '
-                + 'customer paid a different price.';
+            note.textContent = saleLine
+                ? 'What the customer paid for ' + quantity + ' on sale #' + refundSale.saleId + '.'
+                : quantity + ' at ' + peso(refundProduct.price) + '. Change it if the customer paid a different price.';
         }
         return;
     }
 
     if (note) {
         note.className = 'amount-source is-edited';
-        note.textContent = 'Your figure. ' + quantity + ' at today\'s price would be '
-            + peso(suggested) + '.';
+        note.textContent = saleLine
+            ? 'Your figure. The customer paid ' + peso(suggested) + ' for ' + quantity + '.'
+            : 'Your figure. ' + quantity + ' at today\'s price would be ' + peso(suggested) + '.';
     }
 }
 
@@ -3329,6 +3335,12 @@ async function handleIssueRefund(event) {
 
     const reason = form.elements.reason.value.trim();
 
+    // a sale of several items: every line with a quantity, in one report
+    if (isRefundMulti()) {
+        await issueRefundForLines(form, reason);
+        return;
+    }
+
     // the check is on what was chosen, not what is typed
     if (!refundProduct || !form.elements.productId.value) {
         notifyWarning('Type a few letters of the product and choose it from the list. ' +
@@ -3384,8 +3396,71 @@ async function handleIssueRefund(event) {
 
         form.reset();
         // form.reset() knows nothing about the hidden id, the strip or the suggested figure
-        clearRefundProduct();
-        refundAmountSuggested = null;
+        clearRefundSale();
+        catalogLoaded = false;
+        await loadRecentSales();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// Issue Refund for a sale of several items: the lines with a quantity go in one
+// report (POST /api/returns/batch); if the server refuses one, nothing is filed.
+async function issueRefundForLines(form, reason) {
+    const lines = refundTableLines();
+    const items = [];
+    let total = 0;
+    for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        if (l.problem) {
+            notifyWarning(l.line.name + ': ' + l.problem, 'Check the quantities');
+            const box = document.getElementById('refund-line-qty-' + i);
+            if (box) box.focus();
+            return;
+        }
+        if (l.quantity > 0) {
+            if (!(l.amount > 0)) {
+                notifyWarning(l.line.name + ': that is too few to refund any money. Type a larger quantity, or 0.',
+                    'Check the quantities');
+                return;
+            }
+            items.push({ productId: l.line.productId, quantity: l.quantity, refundAmount: l.amount });
+            total += l.amount;
+        }
+    }
+    if (items.length === 0) {
+        notifyWarning('Type how many of each item came back. Leave 0 for what did not.', 'Nothing to refund');
+        const first = document.getElementById('refund-line-qty-0');
+        if (first) first.focus();
+        return;
+    }
+    if (reason === '') {
+        notifyWarning('Type the reason for the refund.', 'A reason is required');
+        const field = document.getElementById('return-reason');
+        if (field) field.focus();
+        return;
+    }
+
+    const saleId = refundSale.saleId;
+    try {
+        const response = await apiFileRefundBatch({
+            reportType: 'Refunded', saleId: saleId, reason: reason, items: items
+        });
+        const result = await response.json();
+        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error, 'Refund not issued'); return; }
+
+        total = Math.round(total * 100) / 100;
+        const offBalance = Number(result.offBalance) || 0;
+        const cashBack = Math.round((total - offBalance) * 100) / 100;
+        let balanceNote = '';
+        if (offBalance > 0) balanceNote = ' ' + peso(offBalance) + ' came off what the customer owes on sale #' + saleId + '.';
+        if (cashBack > 0) balanceNote += ' Hand back ' + peso(cashBack) + ' in cash.';
+        notifySuccess(items.length + (items.length === 1 ? ' item' : ' items') + ' refunded on sale #' + saleId +
+            '. The goods are set aside for the stockroom; the clerk has been asked to inspect them.' + balanceNote,
+            'Refund issued');
+
+        form.elements.reason.value = '';
+        clearRefundSale();
         catalogLoaded = false;
         await loadRecentSales();
     } catch (error) {
@@ -3437,8 +3512,10 @@ function buildRecentSalesPanel() {
             if (Number(row.returned_total) > 0) {
                 refundedNote = '<span class="cell-sub">refunded ' + peso(row.returned_total) + '</span>';
             }
-            return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
-                'onclick="openRecentSale(' + row.sale_id + ')">' +
+            const picked = refundSale && refundSale.saleId === row.sale_id ? ' is-picked' : '';
+            return '<tr class="row-clickable row-reveal' + picked + '" data-sale-id="' + row.sale_id + '" ' +
+                'style="animation-delay:' + (index % 8) * 28 + 'ms" title="Refund from this sale" ' +
+                'onclick="fillRefundFromSale(' + row.sale_id + ')">' +
                 '<td class="cell-id">#' + row.sale_id + '</td>' +
                 '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 16)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
@@ -3458,142 +3535,286 @@ async function loadRecentSales() {
     else await panel.open();
 }
 
-// the receipt open in the popup: its lines, and the line the cashier pressed
-let recentSale = null;
+// ---------- a sale picked from Sales in the Past 3 Days ----------
+// Pressing a sale fills Issue a Refund in from it. A sale of one item fills
+// the Product, Quantity, Refund amount and Sale ID boxes. A sale of several
+// items puts them on the form as a table, like the clerk's Stock Adjustment for
+// a purchase order: each line with how many came back (0 for none), and the
+// refund for those pieces at what the customer paid for them.
+//
+// refundSale: { saleId, customerName, saleDate, method, lines: [...] } or null.
+// Each line is one product (two lines of the same product on the receipt are
+// added together, as the server counts them):
+//   { productId, name, baseUnit, sold, left, paidPerUnit }
+// counted in the product's own unit (what left the shelf), as a refund is.
+let refundSale = null;
 
-async function openRecentSale(saleId) {
+// money down to the centavo, never up: the server refuses a refund over what was paid
+function floorCentavo(value) {
+    return Math.floor(Number(value) * 100 + 1e-6) / 100;
+}
+
+function refundLinesFromSale(sale, items) {
+    // the lines add up to total_amount; the customer paid final_amount, after the discount
+    let afterDiscount = 1;
+    if (Number(sale.total_amount) > 0) afterDiscount = Number(sale.final_amount) / Number(sale.total_amount);
+
+    const lines = [];
+    for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        let line = null;
+        for (let k = 0; k < lines.length; k++) {
+            if (lines[k].productId === it.product_id) line = lines[k];
+        }
+        if (!line) {
+            line = { productId: it.product_id, name: it.product_name, baseUnit: it.base_unit || '',
+                     sold: 0, worth: 0, refunded: Number(it.refunded_quantity) || 0 };
+            lines.push(line);
+        }
+        line.sold += Number(it.base_quantity) || 0;
+        line.worth += Number(it.subtotal) || 0;
+    }
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        line.left = Math.max(0, Math.round((line.sold - line.refunded) * 1000) / 1000);
+        line.paidPerUnit = line.sold > 0 ? line.worth * afterDiscount / line.sold : 0;
+    }
+    return lines;
+}
+
+// the refund for this many pieces of the line, at what the customer paid
+function refundLineAmount(line, quantity) {
+    return floorCentavo(line.paidPerUnit * quantity);
+}
+
+// the line of the sale on the form for this product, or null
+function refundSaleLine(productId) {
+    if (!refundSale) return null;
+    for (let i = 0; i < refundSale.lines.length; i++) {
+        if (refundSale.lines[i].productId === productId) return refundSale.lines[i];
+    }
+    return null;
+}
+
+function isRefundMulti() {
+    return Boolean(refundSale && refundSale.lines.length > 1);
+}
+
+async function fillRefundFromSale(saleId) {
+    const form = document.getElementById('refund-form');
+    if (!form) return;
+
     let data;
     try { data = await apiGetSale(saleId); }
     catch (error) {
-        notifyWarning('The receipt could not be opened. Check the connection and try again.', 'Receipt unavailable');
+        notifyWarning('The sale could not be read. Check the connection and try again.', 'Sale unavailable');
         return;
     }
 
     const s = data.sale;
-    recentSale = { saleId: s.sale_id, items: data.items, picked: -1 };
+    refundSale = {
+        saleId: s.sale_id,
+        customerName: s.customer_name,
+        saleDate: String(s.sale_date).slice(0, 16),
+        method: s.payment_method,
+        lines: refundLinesFromSale(s, data.items || [])
+    };
+    form.elements.saleId.value = s.sale_id;
 
-    // everything refunded on the sale, as the list row says; s.refunded_amount is only the part that came off the balance
-    let refundedText = '<span class="muted">Nothing yet</span>';
-    if (Number(s.returned_total) > 0) refundedText = peso(s.returned_total);
-
-    const facts = '<div class="detail-grid">' +
-        detailField('Date', escapeHtml(String(s.sale_date).slice(0, 16))) +
-        detailField('Customer', escapeHtml(s.customer_name)) +
-        detailField('Rung Up By', escapeHtml(s.cashier_name)) +
-        detailField('Total', peso(s.final_amount)) +
-        detailField('Payment', escapeHtml(s.payment_method) + ' ' + statusBadge(s.payment_status)) +
-        detailField('Refunded Already', refundedText) +
-        '</div>';
-
-    const body = facts +
-        paymentDetailsCardHtml(data) +
-        '<h4 class="detail-subhead">Items</h4>' +
-        '<p class="detail-note" id="recent-sale-pick">Press an item to fill the Product box with it.</p>' +
-        recentSaleItemsTable();
-
-    openDetailModal('Receipt #' + s.sale_id, s.customer_name + ' · ' + String(s.sale_date).slice(0, 16),
-        'R' + s.sale_id, [{ label: 'Receipt', body: body }],
-        '<button type="button" class="btn btn-success" onclick="refundFromRecentSale()">Refund from this receipt</button>',
-        { wide: true });
-}
-
-// the lines of the open receipt; the pressed line is shaded
-function recentSaleItemsTable() {
-    const rows = [];
-    for (let i = 0; i < recentSale.items.length; i++) {
-        const it = recentSale.items[i];
-        let refundedCell = '<span class="muted">None</span>';
-        if (Number(it.refunded_quantity) > 0) {
-            refundedCell = escapeHtml(qtyText(it.refunded_quantity, it.base_unit)) +
-                '<span class="cell-sub">' + peso(it.refunded_amount) + '</span>';
-        }
-        rows.push([
-            escapeHtml(it.product_name),
-            escapeHtml(qtyText(it.quantity, it.unit_name)),
-            peso(it.unit_price),
-            peso(it.subtotal),
-            refundedCell
-        ]);
-    }
-
-    return pagedTable('recent-sale-items', ['Product', 'Qty', 'Unit Price', 'Total', 'Refunded'], rows,
-        [1, 2, 3, 4], {
-            empty: 'This receipt has no items.',
-            pageSize: 8,
-            rowAttrs: function (index) {
-                return 'class="row-clickable" title="Refund this item" ' +
-                    'onclick="pickRecentSaleItem(' + index + ')"' +
-                    (index === recentSale.picked ? ' style="background: var(--go-dim);"' : '');
-            }
-        });
-}
-
-// pressing a line chooses it; pressing it again lets it go
-function pickRecentSaleItem(index) {
-    if (!recentSale) return;
-
-    recentSale.picked = recentSale.picked === index ? -1 : index;
-
-    const hint = document.getElementById('recent-sale-pick');
-    if (hint) {
-        if (recentSale.picked === -1) {
-            hint.textContent = 'Press an item to fill the Product box with it.';
-        } else {
-            hint.textContent = 'Chosen: ' + recentSale.items[index].product_name + '. It goes into the Product box.';
-        }
-    }
-    pagedTableGo('recent-sale-items', 0);
-}
-
-// true when the open receipt has a line for this product
-function receiptHasProduct(productId) {
-    for (let i = 0; i < recentSale.items.length; i++) {
-        if (recentSale.items[i].product_id === productId) return true;
-    }
-    return false;
-}
-
-// puts the receipt number (and the pressed item) into the refund form, closes
-// the popup, and moves the cursor to the next box still empty
-async function refundFromRecentSale() {
-    if (!recentSale) return;
-    const form = document.getElementById('refund-form');
-    if (!form) return;
-
-    let line = null;
-    if (recentSale.picked !== -1) line = recentSale.items[recentSale.picked];
-    form.elements.saleId.value = recentSale.saleId;
-    closeModal('detail-modal');
-
-    if (line) {
+    if (refundSale.lines.length === 1) {
+        // one item: the boxes are filled in, everything still left to refund
+        const line = refundSale.lines[0];
         await ensureCatalogLoaded(false);
-        // the product may be gone from the catalogue (archived): say so
-        if (findCatalogProduct(line.product_id)) {
-            pickRefundProduct(line.product_id);
+        if (findCatalogProduct(line.productId)) {
+            form.elements.quantity.value = line.left > 0 ? String(line.left) : '1';
+            form.elements.refundAmount.value = '0';
+            refundAmountSuggested = null;
+            pickRefundProduct(line.productId);
         } else {
             clearRefundProduct();
-            notifyWarning(line.product_name + ' cannot be picked here, it may have been archived. ' +
+            notifyWarning(line.name + ' cannot be picked here, it may have been archived. ' +
                 'Type the product by hand.', 'Product not filled in');
         }
-    } else if (refundProduct && !receiptHasProduct(refundProduct.product_id)) {
-        // a product chosen earlier that is not on this receipt would be refunded against it
+    } else if (refundProduct) {
         clearRefundProduct();
     }
 
-    let next = document.getElementById('return-reason');
-    if (!refundProduct) next = refundProductBox();
-    else if (!(Number(form.elements.quantity.value) > 0)) next = form.elements.quantity;
-    else if (!(Number(form.elements.refundAmount.value) > 0)) next = form.elements.refundAmount;
+    renderRefundForm();
+    markRefundSaleRow();
 
+    const next = isRefundMulti() ? document.getElementById('refund-line-qty-0') : document.getElementById('return-reason');
     if (next) next.focus();
-
-    // The form may be above or below what is on the screen (a narrow window, a
-    // scrolled page), so it is brought into view and the cashier is told what was
-    // filled in; the popup closing alone looked as if nothing had happened.
     form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    let filledText = 'Receipt #' + form.elements.saleId.value + ' is in the Sale ID box.';
-    if (refundProduct) filledText = 'Receipt #' + form.elements.saleId.value + ' and ' + refundProduct.product_name + ' are filled in.';
-    notifyInfo(filledText + ' Check the quantity and the reason, then press Issue Refund.', 'Refund started');
+}
+
+// the sale on the form is shaded in the list beside it
+function markRefundSaleRow() {
+    const rows = document.querySelectorAll('#recent-sales-table tbody tr');
+    for (let i = 0; i < rows.length; i++) {
+        const id = Number(rows[i].getAttribute('data-sale-id'));
+        rows[i].classList.toggle('is-picked', Boolean(refundSale) && id === refundSale.saleId);
+    }
+}
+
+// Clear on the strip: the sale comes off the form, back to typing by hand
+function clearRefundSale() {
+    const form = document.getElementById('refund-form');
+    refundSale = null;
+    if (form) {
+        form.elements.saleId.value = '';
+        form.elements.quantity.value = '1';
+        form.elements.refundAmount.value = '0';
+    }
+    refundAmountSuggested = null;
+    clearRefundProduct();
+    renderRefundForm();
+    markRefundSaleRow();
+}
+
+// a Sale ID typed by hand is not the sale on the form any more
+function onRefundSaleInput() {
+    const form = document.getElementById('refund-form');
+    if (!form || !refundSale) return;
+    if (Number(form.elements.saleId.value) !== refundSale.saleId) {
+        refundSale = null;
+        renderRefundForm();
+        markRefundSaleRow();
+        suggestRefundAmount();
+    }
+}
+
+// the strip, the table or the single boxes, and the preview, for what is on the form
+function renderRefundForm() {
+    const form = document.getElementById('refund-form');
+    const multi = isRefundMulti();
+
+    // the boxes for one item are off while the table is on the form, so the
+    // browser does not ask for them
+    const single = document.getElementById('refund-single');
+    if (single) {
+        single.hidden = multi;
+        const boxes = single.querySelectorAll('input');
+        for (let i = 0; i < boxes.length; i++) boxes[i].disabled = multi;
+    }
+    if (form && multi) form.elements.saleId.disabled = false;
+
+    renderRefundSource();
+    renderRefundLines();
+    renderRefundPreview();
+}
+
+function renderRefundSource() {
+    const box = document.getElementById('refund-source');
+    if (!box) return;
+    if (!refundSale) { box.hidden = true; box.innerHTML = ''; return; }
+
+    const count = refundSale.lines.length;
+    box.hidden = false;
+    box.innerHTML =
+        '<div class="adjust-source-text">' +
+            '<span class="adjust-source-eyebrow">Sale</span>' +
+            '<span class="adjust-source-title">#' + refundSale.saleId + ' · ' + escapeHtml(refundSale.customerName) + '</span>' +
+            '<span class="adjust-source-sub">' + escapeHtml(refundSale.saleDate) + ' · ' + escapeHtml(refundSale.method) +
+                ' · ' + count + (count === 1 ? ' item' : ' items') + '. The refund is at what the customer paid.</span>' +
+        '</div>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-no-icon onclick="clearRefundSale()">Clear</button>';
+}
+
+function renderRefundLines() {
+    const box = document.getElementById('refund-lines');
+    if (!box) return;
+    if (!isRefundMulti()) { box.hidden = true; box.innerHTML = ''; return; }
+
+    let rows = '';
+    for (let i = 0; i < refundSale.lines.length; i++) {
+        const line = refundSale.lines[i];
+        let sub = 'Bought ' + qtyText(line.sold, line.baseUnit);
+        if (line.left < line.sold) sub += ' · ' + (line.left > 0 ? qtyText(line.left, line.baseUnit) + ' left to refund' : 'refunded in full');
+        rows += '<tr>' +
+            '<td class="cell-name">' + escapeHtml(line.name) +
+                '<span class="cell-sub">' + escapeHtml(sub) + '</span>' +
+                '<span class="adjust-line-note" id="refund-line-note-' + i + '"></span></td>' +
+            '<td>' + escapeHtml(line.baseUnit) + '</td>' +
+            '<td class="cell-num"><input type="number" class="form-control adjust-line-qty" ' +
+                'id="refund-line-qty-' + i + '" min="0" max="' + line.left + '" step="any" value="0" ' +
+                (line.left > 0 ? '' : 'disabled ') +
+                'onfocus="this.select()" oninput="renderRefundPreview()" ' +
+                'aria-label="How many came back: ' + escapeHtml(line.name) + '"></td>' +
+            '</tr>';
+    }
+
+    const count = refundSale.lines.length;
+    box.hidden = false;
+    box.innerHTML =
+        '<p class="adjust-lines-head">' + count + ' items</p>' +
+        '<div class="adjust-lines-scroll">' +
+            '<table class="mini-table adjust-lines-table">' +
+                '<thead><tr><th>Product</th><th>Unit</th><th class="col-num">Quantity</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody>' +
+            '</table>' +
+        '</div>';
+}
+
+// what each line of a sale of several items will refund, read from the table
+function refundTableLines() {
+    const lines = [];
+    if (!isRefundMulti()) return lines;
+    for (let i = 0; i < refundSale.lines.length; i++) {
+        const line = refundSale.lines[i];
+        const box = document.getElementById('refund-line-qty-' + i);
+        const text = box ? box.value.trim() : '0';
+        const quantity = text === '' ? 0 : Number(text);
+        let problem = '';
+        if (!Number.isFinite(quantity) || quantity < 0) problem = 'Type 0 or more.';
+        else if (quantity > line.left + 0.0005) problem = 'Only ' + qtyText(line.left, line.baseUnit) + ' can be refunded.';
+        lines.push({ line: line, quantity: quantity, amount: problem ? 0 : refundLineAmount(line, quantity), problem: problem });
+    }
+    return lines;
+}
+
+function renderRefundPreview() {
+    const box = document.getElementById('refund-preview');
+    if (!box) return;
+    box.className = 'adjust-preview';
+    box.innerHTML = '';
+    if (!isRefundMulti()) return;
+
+    const lines = refundTableLines();
+    let picked = 0;
+    let total = 0;
+    let bad = false;
+    for (let i = 0; i < lines.length; i++) {
+        const note = document.getElementById('refund-line-note-' + i);
+        const l = lines[i];
+        if (note) {
+            if (l.problem) { note.className = 'adjust-line-note is-bad'; note.textContent = l.problem; }
+            else if (l.quantity > 0) { note.className = 'adjust-line-note is-refund'; note.textContent = 'Refund ' + peso(l.amount); }
+            else { note.className = 'adjust-line-note'; note.textContent = ''; }
+        }
+        if (l.problem) bad = true;
+        else if (l.quantity > 0) { picked++; total += l.amount; }
+    }
+
+    if (bad) {
+        box.className = 'adjust-preview is-stop';
+        box.textContent = 'A quantity is more than can be refunded, or is not a number. Type 0 for what did not come back.';
+        return;
+    }
+    box.className = 'adjust-preview is-good';
+    box.innerHTML = '<span class="preview-name">Sale #' + refundSale.saleId + '</span>' +
+        '<span class="preview-figures">' + picked + ' of ' + lines.length + ' items will be refunded' +
+            (picked > 0 ? ': <strong>' + peso(Math.round(total * 100) / 100) + '</strong>' : '') + '</span>' +
+        (picked === 0 ? '<span class="preview-note">Type how many of each item came back.</span>' : '');
+}
+
+// Cancel: the form is emptied, then back to the first screen
+function cancelRefundForm(event) {
+    const form = document.getElementById('refund-form');
+    if (form) {
+        form.elements.reason.value = '';
+    }
+    clearRefundSale();
+    showCashierHome(event);
 }
 
 // Sales report. The server sends a cashier their own sales and no others, so
@@ -4515,9 +4736,6 @@ function askForExtension() {
     limitReturnCustomer = c.customer_id;
 
     document.getElementById('limit-sub').textContent = c.customer_name;
-    document.getElementById('limit-intro').textContent =
-        c.customer_name + ' may currently owe up to ' + peso(current) + ' and owes ' + peso(c.current_credit) +
-        '. A manager decides the new limit; nothing changes until they do.';
 
     const form = document.getElementById('limit-form');
     form.elements.requestedLimit.value = current > 0 ? String(Math.round(current * 1.5)) : '';
