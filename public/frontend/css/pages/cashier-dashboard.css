@@ -591,6 +591,11 @@
 
 /* Credit Payment's list of who owes */
 .credit-pay-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
+/* modals hide scrollbars by default (general-ui.css); this list shows one so it is plain there are more below */
+.modal .credit-pay-list { scrollbar-width: thin; scrollbar-color: var(--steel-soft) transparent; padding-right: 4px; }
+.modal .credit-pay-list::-webkit-scrollbar { display: block; width: 8px; }
+.modal .credit-pay-list::-webkit-scrollbar-thumb { background: var(--steel-soft); border-radius: 4px; }
+.modal .credit-pay-list::-webkit-scrollbar-track { background: transparent; }
 .credit-pay-item {
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
     width: 100%; padding: 10px 13px; text-align: left;

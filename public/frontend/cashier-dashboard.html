@@ -520,7 +520,8 @@
                            placeholder="Type a name or phone, or pick from the list"
                            oninput="renderCreditPayList()">
                 </div>
-                <div id="credit-pay-list" class="credit-pay-list"></div>
+                <!-- data-no-icon: each row is a customer name, so "Mark Aguilar" must not get the "Mark ..." icon -->
+                <div id="credit-pay-list" class="credit-pay-list" data-no-icon></div>
             </div>
 
             <div class="modal-foot">
