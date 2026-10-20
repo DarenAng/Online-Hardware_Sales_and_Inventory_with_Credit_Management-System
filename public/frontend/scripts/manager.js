@@ -21,7 +21,6 @@
 let recordType = 'supplier';
 let incomeRange = { name: 'monthly', from: null, to: null };
 let incomeData = null;
-let incomeCashier = 'all';    // 'all', or the staff id of the cashier picked in the Cashier box
 let policyProduct = null;
 
 // the view showing on each tabbed screen; opening the screen again goes back to it
@@ -215,9 +214,8 @@ function showAccountManagement(event) {
     showManagerPanel('panel-accounts', 'Account Management', event);
 }
 
-// Sales Summary. The date picker is a Quick range box and two dates, From and
-// To. A quick range counts back from today and fills both dates; a date typed
-// or picked in either box makes the range a custom one.
+// Sales Summary. The date picker is a Period box; Custom date shows two dates,
+// From and To, beside it. A period counts back from today.
 const INCOME_RANGES = [
     ['daily', 'Today', 0],
     ['weekly', 'Last 7 days', 6],
@@ -245,7 +243,7 @@ function limitDatesToToday(ids) {
     }
 }
 
-// The Quick range box: the named ranges, then Custom (the dates typed below)
+// The Period box: the named periods, then Custom date (the two dates beside it)
 function renderIncomeRanges() {
     const select = document.getElementById('income-period');
     if (!select) return;
@@ -254,11 +252,12 @@ function renderIncomeRanges() {
     for (let i = 0; i < INCOME_RANGES.length; i++) {
         html += '<option value="' + INCOME_RANGES[i][0] + '">' + escapeHtml(INCOME_RANGES[i][1]) + '</option>';
     }
-    html += '<option value="custom">Custom dates</option>';
+    html += '<option value="custom">Custom date...</option>';
 
     select.innerHTML = html;
     select.value = incomeRange.name;
     fillIncomeDates();
+    showPeriodDates('income', incomeRange.name === 'custom');
 }
 
 // the two date boxes show the range in use
@@ -286,14 +285,119 @@ async function pickIncomeRange(name) {
     await incomeRangeChanged();
 }
 
-// the Quick range box changed: a named range applies at once; Custom waits for the dates
+// the Period box changed: a named period applies at once; Custom date shows the
+// two dates and waits for them
 function incomePeriodPicked(value) {
     if (value === 'custom') {
+        showPeriodDates('income', true);
         const from = document.getElementById('income-from');
         if (from) from.focus();
         return;
     }
     pickIncomeRange(value);
+}
+
+// ==========================================
+// THE PERIOD BOX ON EVERY DATE FILTER
+// ==========================================
+// Every report with dates has one Period box: All time, the named periods, and
+// Custom date. Custom date shows From and To beside the box; any other choice
+// hides them and fills them in itself, so whatever reads the two dates (the
+// server's sales list, the QR list, a table's own filter) reads the period.
+// The Sales Summary has its own box (above), without All time.
+const PERIOD_CHOICES = [
+    ['all', 'All time', null],
+    ['daily', 'Today', 0],
+    ['weekly', 'Last 7 days', 6],
+    ['monthly', 'Last 30 days', 29],
+    ['quarterly', 'Last 90 days', 89],
+    ['six-month', 'Last 6 months', 182],
+    ['annual', 'Last 12 months', 364]
+];
+
+// what each report does once its dates have changed
+const PERIOD_APPLY = {
+    sales: function () { reloadSales(); },
+    mqr: function () { reloadQrPayments('mqr'); },
+    unpaid: function () { dateFilterChanged('mgr-unpaid', 'unpaid'); },
+    'stock-moves': function () { dateFilterChanged('mgr-stock-moves', 'stock-moves'); },
+    all: function () { dateFilterChanged('mgr-all', 'all'); }
+};
+
+// shows or hides the From and To boxes beside a Period box
+function showPeriodDates(prefix, show) {
+    const ids = [prefix + '-from', prefix + '-to'];
+    for (let i = 0; i < ids.length; i++) {
+        const box = document.getElementById(ids[i]);
+        const field = box ? box.closest('.toolbar-field') : null;
+        if (field) field.hidden = !show;
+    }
+}
+
+// the From and To a named period stands for ('' and '' for All time)
+function periodDates(value) {
+    for (let i = 0; i < PERIOD_CHOICES.length; i++) {
+        if (PERIOD_CHOICES[i][0] !== value) continue;
+        if (PERIOD_CHOICES[i][2] === null) return { from: '', to: '' };
+        return { from: localIsoDay(PERIOD_CHOICES[i][2]), to: localIsoDay() };
+    }
+    return null;
+}
+
+// fills every Period box (data-period-for) with the choices, on All time
+function buildPeriodBoxes() {
+    const boxes = document.querySelectorAll('select[data-period-for]');
+    for (let b = 0; b < boxes.length; b++) {
+        let html = '';
+        for (let i = 0; i < PERIOD_CHOICES.length; i++) {
+            html += '<option value="' + PERIOD_CHOICES[i][0] + '">' + escapeHtml(PERIOD_CHOICES[i][1]) + '</option>';
+        }
+        html += '<option value="custom">Custom date...</option>';
+        boxes[b].innerHTML = html;
+        boxes[b].value = 'all';
+    }
+    syncPeriodBoxes();
+}
+
+// A Period box changed: Custom date shows the dates and waits for them; any
+// other period fills them in and the report follows at once.
+function periodPicked(prefix) {
+    const select = document.getElementById(prefix + '-period');
+    if (!select) return;
+
+    if (select.value === 'custom') {
+        showPeriodDates(prefix, true);
+        const from = document.getElementById(prefix + '-from');
+        if (from) from.focus();
+        return;
+    }
+
+    showPeriodDates(prefix, false);
+    const dates = periodDates(select.value);
+    const from = document.getElementById(prefix + '-from');
+    const to = document.getElementById(prefix + '-to');
+    if (from) from.value = dates.from;
+    if (to) to.value = dates.to;
+    if (PERIOD_APPLY[prefix]) PERIOD_APPLY[prefix]();
+}
+
+// A table put back after a reload brings its dates back but not its Period
+// box: dates that are not the period shown make the box read Custom date, with
+// the dates beside it. Runs whenever a table changes.
+function syncPeriodBoxes() {
+    const boxes = document.querySelectorAll('select[data-period-for]');
+    for (let b = 0; b < boxes.length; b++) {
+        const prefix = boxes[b].dataset.periodFor;
+        const from = document.getElementById(prefix + '-from');
+        const to = document.getElementById(prefix + '-to');
+        if (!from || !to) continue;
+
+        if (boxes[b].value !== 'custom') {
+            const dates = periodDates(boxes[b].value);
+            if (!dates || dates.from !== from.value || dates.to !== to.value) boxes[b].value = 'custom';
+        }
+        showPeriodDates(prefix, boxes[b].value === 'custom');
+    }
 }
 
 // a date typed or picked: once both are there and in order, the range is custom
@@ -322,19 +426,12 @@ async function incomeDatesPicked() {
     await incomeRangeChanged();
 }
 
-// the period, then the cashier if one is picked; the screen, the Spreadsheet and Print all use this
+// the period, for every cashier; the screen, the Spreadsheet and Print all use this
 function incomeQuery() {
-    let query;
     if (incomeRange.name === 'custom') {
-        query = '?from=' + encodeURIComponent(incomeRange.from) + '&to=' + encodeURIComponent(incomeRange.to);
-    } else {
-        query = '?range=' + encodeURIComponent(incomeRange.name);
+        return '?from=' + encodeURIComponent(incomeRange.from) + '&to=' + encodeURIComponent(incomeRange.to);
     }
-
-    if (incomeCashier !== 'all') {
-        query += '&cashier=' + encodeURIComponent(incomeCashier);
-    }
-    return query;
+    return '?range=' + encodeURIComponent(incomeRange.name);
 }
 
 // the figures are on screen (a table can be loaded without them)
@@ -346,28 +443,6 @@ let incomeStale = false;
 async function fetchIncome() {
     incomeData = await apiGetIncome(incomeQuery());
     incomeStale = false;
-    renderIncomeCashiers();
-}
-
-// The Cashier box: "All cashiers", then everyone who has made a sale. The
-// list comes with the income data, so it is filled once data has loaded.
-function renderIncomeCashiers() {
-    const select = document.getElementById('income-cashier');
-    if (!select || !incomeData) return;
-
-    let html = '<option value="all">All cashiers</option>';
-    for (let i = 0; i < incomeData.cashierChoices.length; i++) {
-        const cashier = incomeData.cashierChoices[i];
-        html += '<option value="' + cashier.staff_id + '">' + escapeHtml(cashier.full_name) + '</option>';
-    }
-    select.innerHTML = html;
-    select.value = incomeCashier;
-}
-
-// the Cashier box changed: reload whatever is already showing for that cashier
-async function incomeCashierPicked(value) {
-    incomeCashier = value;
-    await incomeRangeChanged();
 }
 
 // Load Data: the figures and both tables for the chosen period
@@ -415,17 +490,6 @@ function renderIncome() {
             // a custom range is already named by its dates
             const dates = data.range.from + ' to ' + data.range.to;
             note.textContent = data.range.label === dates ? dates : data.range.label + ': ' + dates;
-        }
-
-        // who the figures are for; this line is on the printout too
-        const cashierNote = document.getElementById('income-cashier-note');
-        if (cashierNote) {
-            if (data.cashier) {
-                cashierNote.textContent = 'Cashier: ' + data.cashier.name;
-            } else {
-                cashierNote.textContent = 'All cashiers';
-            }
-            cashierNote.hidden = false;
         }
     }
 
@@ -1332,7 +1396,7 @@ function buildSalesPanel() {
         pagerId: 'sales-pager',
         idField: 'sale_id',
         // the boxes that load() reads, put back with the table after a reload
-        inputs: ['sales-method', 'sales-status', 'sales-from', 'sales-to'],
+        inputs: ['sales-method', 'sales-status', 'sales-period', 'sales-from', 'sales-to'],
         sortKeys: ['sale_id', 'sale_date', 'customer_name', 'payment_group', 'transaction_status',
                    function (row) { return Number(row.final_amount); }],
         gate: {
@@ -4439,11 +4503,13 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
         limitDatesToToday(['income-from', 'income-to', 'sales-from', 'sales-to', 'all-from', 'all-to',
                            'unpaid-from', 'unpaid-to', 'stock-moves-from', 'stock-moves-to']);
         renderIncomeRanges();
+        buildPeriodBoxes();
         applyExportPermissions();
         buildExportMenus();
         stopAutofill(document);
 
         document.addEventListener('datapanel:change', syncExportButtons);
+        document.addEventListener('datapanel:change', syncPeriodBoxes);
         syncExportButtons();
 
         // the no-price strip follows products added, priced or put away by anybody (live-sync.js)

@@ -378,3 +378,8 @@
 /* the Note on a credit account saves on its own */
 .note-save-row { display: flex; gap: 8px; align-items: stretch; }
 .note-save-row .form-control { flex: 1; }
+
+/* Custom date puts From and To beside the Period box: the search box gives up
+   some width so the row still fits on a laptop screen */
+.panel-toolbar:has(.toolbar-date:not([hidden])) .search-wrap { flex: 1 1 150px; min-width: 140px; }
+.panel-toolbar:has(.toolbar-date:not([hidden])) .toolbar-date input { width: 150px; }

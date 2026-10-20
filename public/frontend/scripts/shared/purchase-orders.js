@@ -1794,6 +1794,13 @@ function syncPurchaseTotalsPeriod() {
     const yearField = document.getElementById('po-totals-year-field');
     if (monthField) monthField.hidden = period !== 'month';
     if (yearField) yearField.hidden = period !== 'year';
+
+    // Custom date shows From and To beside the box; any other period hides them
+    const dateFields = ['po-totals-from-field', 'po-totals-to-field'];
+    for (let i = 0; i < dateFields.length; i++) {
+        const field = document.getElementById(dateFields[i]);
+        if (field) field.hidden = period !== 'custom';
+    }
 }
 
 // a period, month or year replaces any dates typed, and the dates replace them
@@ -1810,6 +1817,15 @@ function clearPurchaseTotalsDates(panel) {
 function purchaseTotalsPeriod(value) {
     const panel = getDataPanel(PO_TOTALS_KEY);
     if (!panel) return;
+
+    // Custom date shows the two dates and waits for them
+    if (value === 'custom') {
+        panel.filters.period = 'custom';
+        syncPurchaseTotalsPeriod();
+        const from = document.getElementById('po-totals-from');
+        if (from) from.focus();
+        return;
+    }
     clearPurchaseTotalsDates(panel);
 
     // the month or year starts on the one the box already shows
@@ -1907,7 +1923,7 @@ function buildPurchaseTotalsPanel() {
         pageSize: 8,            // the manager's Reports tab: eight a page, like the other reports
         pagerId: 'po-totals-pager',
         idField: 'po_id',
-        // period: 'month' (the month box), 'year' (the year box) or 'all'
+        // period: 'month' (the month box), 'year' (the year box), 'all', or 'custom' (From and To)
         filters: { period: 'month', month: poThisMonth(), year: poThisYear(), supplier: 'all', from: '', to: '' },
         inputs: ['po-totals-from', 'po-totals-to', 'po-totals-period', 'po-totals-month', 'po-totals-year', 'po-totals-supplier'],
 
@@ -1992,11 +2008,9 @@ function purchaseTotalsDates() {
     panel.filters.from = from.value;
     panel.filters.to = to.value;
 
-    // dates typed stand in for the period, so it moves to All Time
-    if (from.value || to.value) {
-        panel.filters.period = 'all';
-        syncPurchaseTotalsPeriod();
-    }
+    // the dates are the period: Custom date
+    panel.filters.period = 'custom';
+    syncPurchaseTotalsPeriod();
     panel.page = 1;
     if (panel.state === 'ready') panel.apply();
     else if (panel.state === 'closed' || panel.state === 'error') panel.open();

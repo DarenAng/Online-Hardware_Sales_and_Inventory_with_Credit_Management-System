@@ -192,8 +192,6 @@
                                 <div>
                                     <h3>Sales Summary</h3>
                                     <p class="panel-sub" id="income-range-note">Pick the dates, then press Load Data.</p>
-                                    <!-- which cashier the figures are for; filled by manager.js renderIncome, and printed -->
-                                    <p class="panel-sub" id="income-cashier-note" hidden></p>
                                 </div>
                                 <div class="panel-actions no-print">
                                     <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -206,28 +204,21 @@
                                 </div>
                             </div>
 
-                            <!-- THE DATE PICKER: a quick range fills From and To; typing or picking
-                                 a date in either makes it a custom range (manager.js) -->
+                            <!-- THE DATE PICKER: a period applies at once; Custom date shows From and
+                                 To beside it (manager.js) -->
                             <div class="panel-toolbar summary-toolbar no-print">
                                 <div class="toolbar-field">
-                                    <label for="income-period">Quick range</label>
+                                    <label for="income-period">Period</label>
                                     <!-- filled by manager.js renderIncomeRanges -->
                                     <select id="income-period" onchange="incomePeriodPicked(this.value)"></select>
                                 </div>
-                                <div class="toolbar-field toolbar-date">
+                                <div class="toolbar-field toolbar-date" hidden>
                                     <label for="income-from">From</label>
                                     <input type="date" id="income-from" onchange="incomeDatesPicked()">
                                 </div>
-                                <div class="toolbar-field toolbar-date">
+                                <div class="toolbar-field toolbar-date" hidden>
                                     <label for="income-to">To</label>
                                     <input type="date" id="income-to" onchange="incomeDatesPicked()">
-                                </div>
-                                <div class="toolbar-field">
-                                    <label for="income-cashier">Cashier</label>
-                                    <!-- the cashiers are filled in by manager.js once the data has loaded -->
-                                    <select id="income-cashier" onchange="incomeCashierPicked(this.value)">
-                                        <option value="all">All cashiers</option>
-                                    </select>
                                 </div>
                                 <div class="toolbar-spacer"></div>
                                 <button type="button" class="btn btn-accent" onclick="loadIncome()">Load Data</button>
@@ -305,11 +296,16 @@
                                 </select>
                             </div>
 
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field">
+                                <label for="sales-period">Period</label>
+                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                                <select id="sales-period" data-period-for="sales" onchange="periodPicked('sales')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="sales-from">From</label>
                                 <input type="date" id="sales-from" onchange="reloadSales()">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="sales-to">To</label>
                                 <input type="date" id="sales-to" onchange="reloadSales()">
                             </div>
@@ -349,11 +345,16 @@
                                        placeholder="Search QR Payments"
                                        oninput="dataPanelSearchInput('mqr', event)" onkeydown="dataPanelSearchKey('mqr', event)" autocomplete="off">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field">
+                                <label for="mqr-period">Period</label>
+                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                                <select id="mqr-period" data-period-for="mqr" onchange="periodPicked('mqr')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="mqr-from">From</label>
                                 <input type="date" id="mqr-from" onchange="reloadQrPayments('mqr')">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="mqr-to">To</label>
                                 <input type="date" id="mqr-to" onchange="reloadQrPayments('mqr')">
                             </div>
@@ -423,11 +424,16 @@
                                     <option value="all">Every method</option>
                                 </select>
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field">
+                                <label for="unpaid-period">Period</label>
+                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                                <select id="unpaid-period" data-period-for="unpaid" onchange="periodPicked('unpaid')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="unpaid-from">From</label>
                                 <input type="date" id="unpaid-from" onchange="dateFilterChanged('mgr-unpaid', 'unpaid')">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="unpaid-to">To</label>
                                 <input type="date" id="unpaid-to" onchange="dateFilterChanged('mgr-unpaid', 'unpaid')">
                             </div>
@@ -544,6 +550,7 @@
                                     <option value="month">Every Month</option>
                                     <option value="year">Every Year</option>
                                     <option value="all">All Time</option>
+                                    <option value="custom">Custom date...</option>
                                 </select>
                             </div>
                             <div class="toolbar-field" id="po-totals-month-field">
@@ -556,11 +563,11 @@
                                 <!-- filled from the loaded orders (renderPurchaseTotalsYears) -->
                                 <select id="po-totals-year" onchange="purchaseTotalsYear(this.value)"></select>
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" id="po-totals-from-field" hidden>
                                 <label for="po-totals-from">From</label>
                                 <input type="date" id="po-totals-from" onchange="purchaseTotalsDates()">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" id="po-totals-to-field" hidden>
                                 <label for="po-totals-to">To</label>
                                 <input type="date" id="po-totals-to" onchange="purchaseTotalsDates()">
                             </div>
@@ -768,11 +775,16 @@
                                     <option value="PO_RECEIVED">Orders received</option>
                                 </select>
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field">
+                                <label for="stock-moves-period">Period</label>
+                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                                <select id="stock-moves-period" data-period-for="stock-moves" onchange="periodPicked('stock-moves')"></select>
+                            </div>
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="stock-moves-from">From</label>
                                 <input type="date" id="stock-moves-from" onchange="dateFilterChanged('mgr-stock-moves', 'stock-moves')">
                             </div>
-                            <div class="toolbar-field toolbar-date">
+                            <div class="toolbar-field toolbar-date" hidden>
                                 <label for="stock-moves-to">To</label>
                                 <input type="date" id="stock-moves-to" onchange="dateFilterChanged('mgr-stock-moves', 'stock-moves')">
                             </div>
@@ -1148,11 +1160,16 @@
                                 <option value="all">Every report</option>
                             </select>
                         </div>
-                        <div class="toolbar-field toolbar-date">
+                        <div class="toolbar-field">
+                            <label for="all-period">Period</label>
+                            <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
+                            <select id="all-period" data-period-for="all" onchange="periodPicked('all')"></select>
+                        </div>
+                        <div class="toolbar-field toolbar-date" hidden>
                             <label for="all-from">From</label>
                             <input type="date" id="all-from" onchange="dateFilterChanged('mgr-all', 'all')">
                         </div>
-                        <div class="toolbar-field toolbar-date">
+                        <div class="toolbar-field toolbar-date" hidden>
                             <label for="all-to">To</label>
                             <input type="date" id="all-to" onchange="dateFilterChanged('mgr-all', 'all')">
                         </div>

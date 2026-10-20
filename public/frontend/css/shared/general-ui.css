@@ -3271,3 +3271,6 @@ table th.th-sortable::after {
 }
 table th.th-sortable[aria-sort="ascending"]::after  { content: "\25B2"; opacity: 1; }
 table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity: 1; }
+
+/* a toolbar box put away (the From and To beside a Period box until Custom date) */
+.toolbar-field[hidden] { display: none !important; }
