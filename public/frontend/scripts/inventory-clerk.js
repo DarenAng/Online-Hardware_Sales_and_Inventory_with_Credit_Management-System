@@ -2527,10 +2527,7 @@ function openReturnDetail(returnId) {
         detailField('Inspected', r.inspected_by
             ? escapeHtml(r.inspected_by) + ' <span class="muted">' + escapeHtml(String(r.inspected_at || '').slice(0, 16)) + '</span>'
             : '<span class="muted">' + notInspected + '</span>') +
-        '</div>' +
-        '<p class="detail-note">' + escapeHtml(r.reason || 'No reason given.') + '</p>' +
-        (r.inspection_note
-            ? '<p class="detail-note"><strong>Inspection:</strong> ' + escapeHtml(r.inspection_note) + '</p>' : '');
+        '</div>';
 
     openDetailModal(r.report_type + ' Report #' + r.return_id,
         r.product_name + ' · ' + (awaiting ? 'Awaiting inspection' : r.status),
