@@ -565,7 +565,7 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="stocks-status">Stock status</label>
-                                <select id="stocks-status" data-filter-table="stocks-table" data-hides-column="5"
+                                <select id="stocks-status" data-filter-table="stocks-table" data-hides-column="4"
                                         onchange="dataPanelFilter('mgr-stocks', 'status', this.value)">
                                     <option value="all">Every status</option>
                                     <option value="In Stock">In stock</option>
@@ -581,8 +581,7 @@
                         <div class="table-responsive grid-10">
                             <table id="stocks-table">
                                 <thead>
-                                    <tr><th>Product</th><th>Category</th><th>On Hand</th>
-                                        <th>Days of Cover</th><th>Status</th></tr>
+                                    <tr><th>Product</th><th>Category</th><th>On Hand</th><th>Status</th></tr>
                                 </thead>
                                 <tbody></tbody>
                             </table>

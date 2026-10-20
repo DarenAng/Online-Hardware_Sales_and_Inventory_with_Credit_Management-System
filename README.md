@@ -1338,8 +1338,8 @@ rule about ordering. It says nothing about how much is actually on the shelf,
 which is the question a manager walking the stockroom is asking. So the stock
 report also filters by quantity — nothing on hand, below the reorder point,
 within a quarter above it, or a band of round numbers — and sorts by what is
-on hand, by how far under the reorder point a product has fallen, by stock
-value, or by days of cover.
+on hand, by how far under the reorder point a product has fallen, or by stock
+value.
 
 ### The price is the manager's
 
@@ -1413,9 +1413,8 @@ stock is at or below it, the product shows on **Reorder Alerts**, with a
 suggested order that brings it back to twice the reorder point. The manager
 changes it from the product's card in Stocks; the clerk from the Material List.
 
-How fast a product sells (its average daily sales over the last ninety days of
-trading, and the days of cover that gives) is shown on the product's card to
-help pick the figure, but nothing is calculated for it. An older database whose products were
+What a product sold over the last ninety days is shown on the product's card
+to help pick the figure, but nothing is calculated for it. An older database whose products were
 set to a calculated (Dynamic) reorder point is switched to the typed figure on
 the next `npm start`.
 

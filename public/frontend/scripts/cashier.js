@@ -2720,7 +2720,7 @@ async function openReceipt(saleId) {
             { key: 'cashier', label: 'Cashier', value: s.cashier_name },
             { key: 'customer', label: 'Customer', value: s.customer_name },
             { key: 'payment', label: 'Payment', value: s.payment_method },
-            { key: 'reference', label: 'Reference', value: s.reference_no }
+            { key: 'reference', label: 'Reference', value: paymentReference(s.payment_method, s.reference_no) }
         ],
         itemsHtml: itemsHtml,
         itemCount: receiptItemCount(data.items),
@@ -2783,7 +2783,7 @@ async function showPaymentReceipt(info) {
             { key: 'customer', label: 'Customer', value: info.customerName },
             { label: 'Applied to', value: saleNumber },
             { key: 'payment', label: 'Method', value: info.method },
-            { key: 'reference', label: 'Reference', value: info.reference }
+            { key: 'reference', label: 'Reference', value: paymentReference(info.method, info.reference) }
         ],
         totals: [
             { label: 'Balance Before', value: peso(info.balanceBefore) },

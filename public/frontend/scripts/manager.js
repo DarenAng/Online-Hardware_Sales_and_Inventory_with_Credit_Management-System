@@ -1453,12 +1453,11 @@ function buildStockPanels() {
     createDataPanel({
         key: 'mgr-stocks',
         tableId: 'stocks-table',
-        columns: 5,
+        columns: 4,
         pagerId: 'stocks-pager',
         idField: 'product_id',
         filters: { status: 'all' },
-        sortKeys: ['product_name', 'category_name', function (p) { return Number(p.quantity_in_stock); },
-                   function (p) { return p.days_of_cover === null ? '' : Number(p.days_of_cover); }, 'stock_status'],
+        sortKeys: ['product_name', 'category_name', function (p) { return Number(p.quantity_in_stock); }, 'stock_status'],
         gate: {
             title: 'The stock report is not loaded',
             text: 'Search for a product, pick a status or a quantity, or press Load Data for the whole inventory.',
@@ -1479,9 +1478,6 @@ function buildStockPanels() {
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
                 '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
-                '<td class="cell-num">' + (p.days_of_cover === null || p.days_of_cover === undefined
-                    ? '<span class="muted">no sales</span>'
-                    : Number(p.days_of_cover).toFixed(0) + ' days') + '</td>' +
                 '<td>' + statusBadge(p.stock_status) + '</td></tr>';
         }
     });
@@ -2917,7 +2913,8 @@ async function openSaleDetail(saleId, options) {
             detailField('Cashier', escapeHtml(s.cashier_name)) +
             detailField('Payment Method', escapeHtml(s.payment_method)) +
             detailField('Payment Status', statusBadge(s.payment_status)) +
-            detailField('Reference No', s.reference_no ? escapeHtml(s.reference_no) : '<span class="muted">None</span>') +
+            detailField('Reference No', paymentReference(s.payment_method, s.reference_no)
+                ? escapeHtml(paymentReference(s.payment_method, s.reference_no)) : '<span class="muted">None</span>') +
             '</div>';
 
         const balance = saleAmountDue(s) - Number(s.amount_paid);
@@ -2969,7 +2966,7 @@ async function openSaleDetail(saleId, options) {
             const p = data.payments[i];
             if (p.reference_no) references[p.reference_no] = true;
             paidList.push({ when: String(p.payment_date || ''), amount: p.amount, method: p.payment_method,
-                            reference: p.reference_no, by: p.received_by });
+                            reference: paymentReference(p.payment_method, p.reference_no), by: p.received_by });
         }
         const qrPaid = data.qrPayments || [];
         for (let i = 0; i < qrPaid.length; i++) {
@@ -3110,17 +3107,12 @@ function openStockDetail(productId) {
         detailField('Suggested Order', p.suggested_order + ' ' + escapeHtml(p.unit_name || '')) +
         '</div>';
 
-    // the reorder point is typed; how fast it sells is shown beside it
-    const daily = Number(p.avg_daily_sales) || 0;
+    // the reorder point is typed; what sold recently is shown beside it
     const reorder = '<div class="detail-grid">' +
         detailField('Reorder Point', p.reorder_point + ' ' + escapeHtml(p.unit_name || '')) +
         detailField('On Hand', p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '')) +
         detailField('Sold Recently', p.units_sold_window + ' ' + escapeHtml(p.unit_name || '') +
             ' over ' + p.window_days + ' days') +
-        detailField('Average Daily Sales', daily.toFixed(3)) +
-        detailField('Days of Cover', p.days_of_cover === null
-            ? '<span class="muted">Nothing sold in the window</span>'
-            : Number(p.days_of_cover).toFixed(1) + ' days') +
         '</div>' +
         '<div class="detail-actions">' +
         '<button type="button" class="btn btn-accent" onclick="changeReorderPoint(' + p.product_id + ')">' +

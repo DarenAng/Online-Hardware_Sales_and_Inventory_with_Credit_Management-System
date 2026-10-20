@@ -112,6 +112,16 @@ function statusWord(text) {
     return STATUS_WORDS[text] || text;
 }
 
+// The reference to show for a payment: none for cash (cash has no reference
+// number), and none for the note the till stores on a down payment.
+const DOWN_PAYMENT_NOTE = 'Down payment at counter';
+
+function paymentReference(method, reference) {
+    if (String(method || '').toLowerCase() === 'cash') return '';
+    if (!reference || reference === DOWN_PAYMENT_NOTE) return '';
+    return String(reference);
+}
+
 function tableMessage(tableId, columns, text) {
     const tbody = document.querySelector('#' + tableId + ' tbody');
     if (tbody) tbody.innerHTML = '<tr><td colspan="' + columns + '" class="table-empty">' + text + '</td></tr>';
