@@ -129,10 +129,11 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/cashier\/summary$/,               [CASHIER]],
 
   // --- GCash or Maya paid by QR code (routes/qr-payments.js): wherever
-  // money is taken, a sale or a balance. A cashier's list is their own. ---
-  ["POST",  /^\/api\/qr-payments$/,                    [CASHIER, MANAGER]],
-  ["GET",   /^\/api\/qr-payments\/\d+$/,               [CASHIER, MANAGER]],
-  ["POST",  /^\/api\/qr-payments\/\d+\/cancel$/,       [CASHIER, MANAGER]],
+  // money is taken, a sale, a balance, or a COD delivery at the door. A
+  // cashier's or a driver's codes are their own. ---
+  ["POST",  /^\/api\/qr-payments$/,                    [CASHIER, MANAGER, DRIVER]],
+  ["GET",   /^\/api\/qr-payments\/\d+$/,               [CASHIER, MANAGER, DRIVER]],
+  ["POST",  /^\/api\/qr-payments\/\d+\/cancel$/,       [CASHIER, MANAGER, DRIVER]],
   // PayMongo itself, with no session; its signature is the permission
   ["POST",  /^\/api\/paymongo\/webhook$/,              PUBLIC],
 

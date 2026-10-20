@@ -497,3 +497,25 @@ function apiReceivePurchaseOrder(poId, received, discount, remarks) {
 function apiGetPurchaseOrderReport(poId) {
     return getJson('/api/purchase-orders/' + poId + '/reports');
 }
+
+// ==========================================
+// QR PAYMENTS (the cashier, and the driver at the door; scripts/shared/qr-pay.js)
+// ==========================================
+// POST /api/qr-payments -- a QR code for a GCash, PayMaya or bank-transfer payment.
+// qr is { amount, wallet, purpose: 'sale' or 'credit_payment', saleId }, and for a Bank Transfer
+// also { bankCode, accountName, accountNumber } (the customer's bank and account);
+// the answer has id, qrImage (a picture to show), payUrl, secondsLeft and badge
+function apiCreateQrPayment(qr) {
+    return sendJson('/api/qr-payments', 'POST', qr);
+}
+
+// GET /api/qr-payments/:id -- has the customer paid? { status, reference, errorMessage, secondsLeft }
+function apiGetQrPayment(id) {
+    return getJson('/api/qr-payments/' + encodeURIComponent(id));
+}
+
+// POST /api/qr-payments/:id/cancel -- give up on a code; the answer says how it
+// ended, which is paid if the customer got there first
+function apiCancelQrPayment(id) {
+    return sendJson('/api/qr-payments/' + encodeURIComponent(id) + '/cancel', 'POST', {});
+}

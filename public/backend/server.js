@@ -419,7 +419,7 @@ const managerModule = registerManagerRoutes(app, {
 // ==========================================
 const qrPayments = registerQrPaymentRoutes(app, {
   db: db, getActorId: getActorId, publishChange: publishChange, isDateText: isDateText,
-  CASHIER: CASHIER, port: port
+  CASHIER: CASHIER, DRIVER: DRIVER, port: port
 });
 
 // ==========================================
@@ -438,7 +438,8 @@ registerCashierRoutes(app, {
 // ==========================================
 registerDeliveryRoutes(app, {
   db: db, getActorId: getActorId, isDateText: isDateText, publishChange: publishChange,
-  DELIVERY_CONTACT_SQL: DELIVERY_CONTACT_SQL, DELIVERY_PHONE_SQL: DELIVERY_PHONE_SQL
+  DELIVERY_CONTACT_SQL: DELIVERY_CONTACT_SQL, DELIVERY_PHONE_SQL: DELIVERY_PHONE_SQL,
+  qrPayments: qrPayments
 });
 
 // ==========================================

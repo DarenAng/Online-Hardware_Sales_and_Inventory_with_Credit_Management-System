@@ -1033,52 +1033,6 @@
         </div>
     </div>
 
-    <!-- ============================================================
-         PAY BY QR -- the code the customer scans for a GCash or Maya
-         payment, for a sale or for a payment on a balance. Opened by
-         collectQrPayment() in scripts/cashier.js. The code holds the address
-         of the page the customer pays on (kept on the image as data-pay-url).
-         Locked: it closes only through its own buttons, so the checking
-         always stops. data-modal-scroll: the card stays 440 wide on one page, so
-         the code is never moved off the screen onto a second page (modals.js).
-         ============================================================ -->
-    <div class="modal" id="qr-modal" data-modal-locked data-modal-scroll>
-        <div class="modal-box qr-box">
-            <div class="modal-head">
-                <div class="modal-identity">
-                    <div class="avatar"><i class="bi bi-qr-code" aria-hidden="true"></i></div>
-                    <div>
-                        <h3 id="qr-title">Pay by QR</h3>
-                        <span class="modal-role" id="qr-sub"></span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="modal-body">
-                <p class="qr-amount" id="qr-amount"></p>
-                <!-- above the code, so it is never pushed onto a second page on a short screen -->
-                <p class="qr-status" id="qr-status" role="status" aria-live="polite"></p>
-                <p class="qr-clock" id="qr-clock">The code expires in <strong id="qr-countdown">10:00</strong></p>
-                <div class="qr-frame">
-                    <img id="qr-image" alt="QR code for the customer to scan" width="240" height="240">
-                </div>
-                <p class="qr-ask" id="qr-ask">Ask the customer to scan the code with their phone's camera.</p>
-                <!-- a bank transfer only: the same page the code opens, for testing in PayMongo test mode or a customer who is
-                     at this computer rather than scanning -->
-                <p class="qr-link" id="qr-link-row" hidden>
-                    <a id="qr-link" href="#" target="_blank" rel="noopener">Open the bank's page on this computer</a>
-                </p>
-            </div>
-
-            <div class="modal-foot qr-foot">
-                <button type="button" class="btn btn-ghost" id="qr-cancel-btn" onclick="cancelQrPayment()">Cancel</button>
-                <!-- after a failed or expired code -->
-                <button type="button" class="btn btn-ghost" id="qr-other-btn" onclick="chooseAnotherMethod()" hidden>Choose another method</button>
-                <button type="button" class="btn btn-success" id="qr-new-btn" onclick="newQrCode()" hidden>New QR</button>
-            </div>
-        </div>
-    </div>
-
     <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="scripts/shared/icons.js"></script>
     <script src="scripts/shared/helpers.js"></script>
@@ -1101,6 +1055,7 @@
     <script src="scripts/shared/delivery-schedule.js"></script>
     <script src="scripts/shared/credit-terms.js"></script>
     <script src="scripts/shared/payment-details.js"></script>
+    <script src="scripts/shared/qr-pay.js"></script>
     <script src="connections/cashier-connection.js"></script>
     <script src="scripts/cashier.js"></script>
 </body>
