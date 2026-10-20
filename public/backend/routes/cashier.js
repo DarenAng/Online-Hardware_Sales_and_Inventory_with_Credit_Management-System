@@ -885,13 +885,9 @@ function registerCashierRoutes(app, deps) {
     // and a bank transfer only through a PayMongo payment
     let reference = referenceNo || null;
     let payDetails = null;
+    // the same as a sale, no reference is required: a cheque is traced by its
+    // account, bank and date
     if (paymentMethod === "Cheque") {
-      if (String(referenceNo || "").trim() === "") {
-        return response.status(400).json({
-          error: "A cheque payment needs its reference: the cheque number. " +
-                 "It is how the money is traced if it does not arrive."
-        });
-      }
       const cleaned = cleanPaymentDetails("Cheque", typedDetails);
       if (cleaned.problem) {
         return response.status(400).json({ error: cleaned.problem });

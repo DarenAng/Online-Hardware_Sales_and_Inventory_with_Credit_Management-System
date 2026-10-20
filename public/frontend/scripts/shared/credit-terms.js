@@ -5,7 +5,7 @@
 // PDF" is in that dialogue):
 //   printCreditTerms(customerId)  the terms page alone
 //   printCustomerCard(customerId) the physical customer card (front and back,
-//                                 true size, to cut out), then the terms page
+//                                 true size, to cut out), on one page
 //
 // The back of the card carries the three policies the manager keeps in Policy
 // Maintenance (credit policy, customer data terms, refund policy).
@@ -328,7 +328,7 @@ async function printCreditTerms(customerId) {
     printCreditSheets(creditTermsPage(data));
 }
 
-// the card, then the terms page after it
+// the card alone, on one page
 async function printCustomerCard(customerId) {
     if (typeof holdsFeature === 'function' && !holdsFeature('customer-card-print')) {
         notifyWarning('Printing a customer card is switched off for your role.', 'Not allowed');
@@ -337,5 +337,5 @@ async function printCustomerCard(customerId) {
     const data = await readCreditPrint(apiGetCustomerCard, customerId, 'customer card');
     if (!data) return;
 
-    printCreditSheets(customerCardSheet(data) + creditTermsPage(data));
+    printCreditSheets(customerCardSheet(data));
 }

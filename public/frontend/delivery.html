@@ -314,17 +314,16 @@
                     </div>
                     <!-- the bank and account of a cheque or a transfer (payment-details.js) -->
                     <div id="pay-details-box"></div>
-                    <div class="form-group">
-                        <label for="pay-ref">Reference no. <span class="label-hint" id="pay-ref-hint">optional</span></label>
-                        <input type="text" id="pay-ref" name="referenceNo" class="form-control" maxlength="60"
-                               placeholder="GCash or Maya reference, cheque number, transfer reference">
-                    </div>
                 </form>
             </div>
 
             <div class="modal-foot">
                 <button type="button" class="btn btn-ghost" onclick="cancelDriverPayment()">Cancel</button>
-                <button type="submit" class="btn btn-success" form="pay-form">Record Payment</button>
+                <!-- GCash, PayMaya or a bank transfer: the customer scans a QR code (qr-pay.js),
+                     the only way to take those, so Record Payment is hidden for them -->
+                <button type="button" class="btn" id="pay-qr-btn" data-icon="qr-code"
+                        onclick="handleDriverPayment(event, true)" hidden>Pay by QR</button>
+                <button type="submit" class="btn btn-success" id="pay-save-btn" form="pay-form">Record Payment</button>
             </div>
         </div>
     </div>
@@ -383,6 +382,7 @@
     <script src="scripts/shared/deliveries.js"></script>
     <script src="scripts/shared/delivery-schedule.js"></script>
     <script src="scripts/shared/payment-details.js"></script>
+    <script src="scripts/shared/qr-pay.js"></script>
     <script src="connections/delivery-connection.js"></script>
     <script src="scripts/delivery-personnel.js"></script>
 </body>

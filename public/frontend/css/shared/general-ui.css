@@ -3420,3 +3420,55 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
 
 /* a toolbar box put away (the From and To beside a Period box until Custom date) */
 .toolbar-field[hidden] { display: none !important; }
+
+/* ---------- Pay by QR (scripts/shared/qr-pay.js): the counter and the driver at the door ---------- */
+/* PAY BY QR -- the code turned to face the customer: the amount above it large
+   enough to read across the counter, the code on white with a quiet margin (a
+   scanner needs one), and one line saying what is happening. */
+.qr-box { max-width: 440px; }
+.qr-box .modal-body { text-align: center; }
+.qr-amount {
+    margin: 0 0 12px;
+    font-family: var(--font-figure);
+    font-variant-numeric: tabular-nums;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--ink);
+}
+.qr-frame {
+    display: inline-block;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    line-height: 0;
+}
+/* drawn square and crisp: a blurred edge between modules is what fails to scan */
+.qr-frame img {
+    display: block;
+    width: 240px;
+    height: 240px;
+    image-rendering: pixelated;
+}
+.qr-frame img:not([src]) { visibility: hidden; }
+.qr-ask { margin: 12px 0 0; font-size: 15px; color: var(--ink); }
+.qr-link { margin: 8px 0 0; font-size: 14.5px; }
+.qr-link a { color: var(--go); font-weight: 600; overflow-wrap: anywhere; }
+.qr-status { margin: 0 0 4px; min-height: 1.5em; font-size: 14px; font-weight: 600; color: var(--steel); }
+.qr-status.is-good { color: var(--ok-ink); }
+.qr-status.is-stop { color: var(--stop-hi); }
+.qr-clock { margin: 0 0 12px; font-size: 13.5px; color: var(--steel); }
+.qr-clock strong { font-family: var(--font-figure); font-variant-numeric: tabular-nums; color: var(--ink); }
+.qr-clock.is-ending strong { color: var(--stop-hi); }
+/* a failed or expired code: the code is greyed so nobody scans it again */
+.qr-box.is-over .qr-frame img { opacity: 0.25; filter: grayscale(1); }
+/* a short screen: a smaller code (still well above what a phone needs) keeps
+   the whole card on one page */
+@media (max-height: 760px) {
+    .qr-amount { font-size: 22px; margin-bottom: 6px; }
+    .qr-frame { padding: 8px; }
+    .qr-frame img { width: 170px; height: 170px; }
+    .qr-ask { font-size: 13.5px; }
+}
+/* the buttons wrap rather than squeeze on a narrow screen */
+.qr-foot { flex-wrap: wrap; }

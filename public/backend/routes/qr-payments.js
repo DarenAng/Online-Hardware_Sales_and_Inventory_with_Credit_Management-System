@@ -5,7 +5,7 @@
 // Routes in this file:
 //   POST /api/qr-payments                 make a QR code for an amount
 //   GET  /api/qr-payments/:id             has it been paid? (the till asks every 3 seconds)
-//   POST /api/qr-payments/:id/cancel      the cashier gives up on a code
+//   POST /api/qr-payments/:id/cancel      the cashier (or the driver) gives up on a code
 //   GET  /api/qr-payments                 every attempt, with counts and the success rate
 //   POST /api/paymongo/webhook            PayMongo telling us about a payment (optional)
 //   GET  /pay/done                        where the customer's phone lands after paying
@@ -141,6 +141,7 @@ function registerQrPaymentRoutes(app, deps) {
   const getActorId = deps.getActorId;
   const publishChange = deps.publishChange;
   const CASHIER = deps.CASHIER;
+  const DRIVER = deps.DRIVER;
   const port = deps.port;
 
   const provider = pickProvider();
@@ -245,9 +246,10 @@ function registerQrPaymentRoutes(app, deps) {
     return work;
   }
 
-  // a cashier sees and acts on their own codes; the manager on everyone's
+  // a cashier or a driver sees and acts on their own codes; the manager on everyone's
   function mayTouch(request, row) {
-    return request.actor.roleName !== CASHIER || Number(row.created_by_staff_id) === Number(request.actor.staffId);
+    const ownOnly = request.actor.roleName === CASHIER || request.actor.roleName === DRIVER;
+    return !ownOnly || Number(row.created_by_staff_id) === Number(request.actor.staffId);
   }
 
   // ---------- make a code ----------
@@ -299,6 +301,21 @@ function registerQrPaymentRoutes(app, deps) {
     try {
       // a payment on a balance is checked against the sale before the
       // customer is asked to pay anything
+      // a driver only takes money at the door: a payment on a COD sale whose
+      // delivery they took
+      if (request.actor.roleName === DRIVER) {
+        if (purpose !== "credit_payment" || !saleId) {
+          return response.status(403).json({ error: "A driver makes a QR code only for a delivery being paid at the door." });
+        }
+        const ownResult = await db.query(
+          "SELECT 1 FROM deliveries d JOIN sales s ON s.sale_id = d.sale_id\n" +
+            "           WHERE d.sale_id = ? AND d.delivery_staff_id = ? AND d.is_archived = FALSE\n" +
+            "             AND s.payment_method = 'COD' LIMIT 1",
+          [saleId, request.actor.staffId]);
+        if (ownResult[0].length === 0) {
+          return response.status(403).json({ error: "Take this delivery before collecting on it." });
+        }
+      }
       if (purpose === "credit_payment") {
         if (!saleId) return response.status(400).json({ error: "Say which sale the payment is for." });
         const salesResult = await db.query(
@@ -478,8 +495,8 @@ function registerQrPaymentRoutes(app, deps) {
       "<style>body{margin:0;font-family:system-ui,sans-serif;background:#f4f5f7;color:#1f2933}\n" +
       ".card{max-width:420px;margin:48px auto;background:#fff;border-radius:14px;padding:28px 20px;\n" +
       "box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style></head>\n" +
-      "<body><div class=\"card\"><h2>You can return to the cashier</h2>\n" +
-      "<p>The cashier's screen shows whether the payment went through.</p></div></body></html>");
+      "<body><div class=\"card\"><h2>Payment sent</h2>\n" +
+      "<p>The cashier's or the driver's screen shows whether the payment went through.</p></div></body></html>");
   });
 
   // ---------- for cashier.js: money recorded against a QR payment ----------
