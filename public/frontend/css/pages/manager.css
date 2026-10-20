@@ -380,9 +380,14 @@
 .form-group > .label-hint { float: right; margin-left: 8px; text-align: right; }
 .form-group > .label-hint { float: none; display: block; }
 
-/* the Note on a credit account saves on its own */
-.note-save-row { display: flex; gap: 8px; align-items: stretch; }
-.note-save-row .form-control { flex: 1; }
+/* a credit account's card is one fixed size on every tab (Account, Purchases,
+   Payments, Extension Requests), so switching tabs never moves its edges */
+@media (min-width: 641px) and (min-height: 561px) {
+    #credit-modal .modal-box {
+        height: min(590px, calc(100vh - 52px - 4vh));
+    }
+    #credit-modal .modal-body { overflow-y: auto; }
+}
 
 /* Custom date puts From and To beside the Period box: the search box gives up
    some width so the row still fits on a laptop screen */

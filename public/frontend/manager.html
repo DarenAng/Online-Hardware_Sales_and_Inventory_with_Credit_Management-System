@@ -840,7 +840,7 @@
                             <select id="credit-owing"
                                     onchange="dataPanelFilter('mgr-credit', 'owing', this.value)">
                                 <option value="all">Everyone</option>
-                                <option value="owing">Has a balance</option>
+                                <option value="owing">With balance</option>
                                 <option value="over">Over the limit</option>
                                 <option value="clear">No balance</option>
                             </select>
@@ -1256,7 +1256,7 @@
         </div>
     </div>
 
-    <!-- ONE CREDIT ACCOUNT -- limit and standing edited together -->
+    <!-- ONE CREDIT ACCOUNT -- read only: the facts and the history, one fixed size -->
     <div class="modal" id="credit-modal" onclick="closeModalOnBackdrop(event, 'credit-modal')">
         <div class="modal-box modal-wide">
             <div class="modal-head">
@@ -1284,60 +1284,12 @@
             <div class="modal-body">
                 <div id="credit-account-tab">
                     <div class="detail-grid" id="credit-facts"></div>
-
-                    <form id="credit-form" onsubmit="saveCreditLimit(event)">
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label for="credit-limit-input">Credit limit</label>
-                                <input type="number" id="credit-limit-input" name="creditLimit"
-                                       class="form-control" min="0" step="0.01" required
-                                       oninput="previewCreditLimit()">
-                            </div>
-                            <div class="form-group">
-                                <label for="credit-standing-input">Standing override
-                                    <span class="label-hint">the figures decide unless you say otherwise</span></label>
-                                <select id="credit-standing-input" name="standing" class="form-control"
-                                        onchange="previewCreditLimit()">
-                                    <option value="Good">None: let the figures decide</option>
-                                    <option value="Watch">Watch: flag it whatever the figures say</option>
-                                    <option value="Hold">Hold: no new credit whatever the figures say</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="grid-2">
-                            <div class="form-group">
-                                <label for="credit-penalty-input">Late-payment rate for this account, % a month
-                                    <span class="label-hint" id="credit-penalty-hint">1 to 3; blank means the shop's rate</span></label>
-                                <input type="number" id="credit-penalty-input" name="penaltyRate"
-                                       class="form-control" min="1" max="3" step="0.01"
-                                       oninput="previewCreditLimit()">
-                            </div>
-                            <div class="form-group">
-                                <label for="credit-notes-input">Note <span class="label-hint">why this limit, why this standing</span></label>
-                                <div class="note-save-row">
-                                    <input type="text" id="credit-notes-input" name="notes" class="form-control" maxlength="255">
-                                    <button type="button" class="btn btn-sm btn-success" onclick="saveCreditNote()">Save Note</button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <p class="formula-preview" id="credit-preview"></p>
-                    </form>
                 </div>
 
                 <!-- the history, one table to a tab (renderCreditHistory) -->
                 <div id="credit-history-tab" style="display: none;">
                     <div id="credit-history"></div>
                 </div>
-            </div>
-
-            <!-- the buttons belong to the Account tab's form; the foot hides them
-                 on the history tabs (showCreditTab) -->
-            <div class="modal-foot" id="credit-foot">
-                <button type="button" class="btn btn-ghost" id="credit-print-card" onclick="printCreditCardOpen('card')">Print Customer Card</button>
-                <button type="button" class="btn btn-ghost" id="credit-print-terms" onclick="printCreditCardOpen('terms')">Print Terms and Conditions</button>
-                <button type="button" class="btn btn-ghost" onclick="closeModal('credit-modal')">Cancel</button>
-                <button type="submit" form="credit-form" class="btn btn-success">Save Credit Terms</button>
             </div>
         </div>
     </div>
