@@ -2381,7 +2381,7 @@ async function requestVoidSale() {
     const typed = await askInput({
         title: 'Request a void?', eyebrow: 'Sales Report',
         message: receiptNo + ' is sent to a manager. Once they approve, the sale is voided and its goods go back on the shelf.',
-        label: 'Reason', placeholder: 'Wrong items rung up', confirmLabel: 'Send Request', cancelLabel: 'Go back',
+        label: 'Reason', confirmLabel: 'Send Request', cancelLabel: 'Go back',
         check: function (value) {
             return String(value || '').trim() === '' ? 'Type why the sale should be voided.' : null;
         }
