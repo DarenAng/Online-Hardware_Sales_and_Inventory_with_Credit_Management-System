@@ -1808,15 +1808,6 @@ function poMonthMatches(text) {
     return found;
 }
 
-// the line under a month in the list: its quarter and its days
-function poMonthNote(month) {
-    const parts = String(month).split('-');
-    const year = Number(parts[0]);
-    const index = Number(parts[1]);
-    const days = new Date(year, index, 0).getDate();
-    return 'Quarter ' + Math.ceil(index / 3) + ' \u00B7 ' + days + ' days';
-}
-
 // the × shows while the box holds text
 function poMonthSyncClear() {
     const box = document.getElementById('po-totals-month');
@@ -1856,21 +1847,13 @@ function poMonthSuggest(openAll) {
         list.innerHTML = '<li class="suggest-item is-empty"><span class="suggest-name">No month matches</span></li>';
     } else {
         const current = poMonthInUse();
-        const thisMonth = poThisMonth();
         let html = '';
         for (let i = 0; i < matches.length; i++) {
-            let figure = '';
-            if (matches[i] === current) figure = 'In use';
-            else if (matches[i] === thisMonth) figure = 'This month';
             html += '<li class="suggest-item' + (matches[i] === current ? ' is-current' : '') + '" role="option" ' +
                 'id="po-month-option-' + i + '" data-month="' + matches[i] + '" aria-selected="false" ' +
                 // mousedown, so the pick lands before the box loses focus and closes the list
                 'onmousedown="event.preventDefault(); poMonthPick(\'' + matches[i] + '\')">' +
-                '<span class="suggest-line">' +
-                    '<span class="suggest-name">' + escapeHtml(poMonthLabel(matches[i])) + '</span>' +
-                    (figure ? '<span class="suggest-figure">' + figure + '</span>' : '') +
-                '</span>' +
-                '<span class="suggest-note">' + escapeHtml(poMonthNote(matches[i])) + '</span></li>';
+                '<span class="suggest-name">' + escapeHtml(poMonthLabel(matches[i])) + '</span></li>';
         }
         list.innerHTML = html;
     }

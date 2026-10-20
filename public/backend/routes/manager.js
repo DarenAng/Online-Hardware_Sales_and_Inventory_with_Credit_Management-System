@@ -704,8 +704,7 @@ function registerManagerRoutes(app, deps) {
       );
       const stockRows = stockRowsResult[0];
       const stock = stockRows[0];
-      const lowStockRowsResult = await db.query(LOW_STOCK_EFFECTIVE_SQL,
-        [SALES_WINDOW_DAYS, SALES_WINDOW_DAYS, SALES_WINDOW_DAYS]);
+      const lowStockRowsResult = await db.query(LOW_STOCK_EFFECTIVE_SQL);
       const lowStockRows = lowStockRowsResult[0];
       const lowStock = lowStockRows[0];
       stock.low_stock = lowStock.n;
@@ -1633,14 +1632,12 @@ function registerManagerRoutes(app, deps) {
   });
 
   // ==========================================
-  // STOCKS, AND THE REORDER POINT THE SYSTEM WORKS OUT FOR ITSELF
+  // STOCKS, AND THE REORDER POINT
   //
-  //     ROP = (average daily sales x lead time) + safety stock
-  //
-  // Average daily sales is over a window of real trading (90 days), divided by
-  // the days the shop has actually recorded sales. The effective reorder point
-  // is the calculated one only when the product is set to Dynamic; otherwise
-  // the typed figure, with the calculated one shown beside it.
+  // The reorder point is the figure the shop types for each product; nothing
+  // works it out. Average daily sales (over a window of real trading, 90 days,
+  // divided by the days the shop has recorded sales) is still shown, with the
+  // days of cover it gives.
   // ==========================================
   const SALES_WINDOW_DAYS = 90;
 
@@ -1678,7 +1675,7 @@ function registerManagerRoutes(app, deps) {
         "GROUP BY si.product_id " +
         ") " +
         "SELECT p.product_id, p.product_name, p.price, p.reorder_point, p.status, " +
-        "p.lead_time_days, p.safety_stock, p.reorder_mode, " +
+        "p.lead_time_days, p.safety_stock, " +
         "COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, " +
         "i.last_updated, " +
         "c.category_name, b.brand_name, u.unit_name, " +
@@ -1687,29 +1684,16 @@ function registerManagerRoutes(app, deps) {
         "w.days AS window_days, " +
         "COALESCE(rc.units, 0) AS units_sold_window, " +
         "ROUND(COALESCE(rc.units, 0) / w.days, 3) AS avg_daily_sales, " +
-        "-- the formula, rounded up: half a bag of cement short is short\n" +
-        "CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
-        "AS calculated_rop, " +
-        "CASE WHEN p.reorder_mode = 'Dynamic' " +
-        "THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
-        "ELSE p.reorder_point " +
-        "END AS effective_rop, " +
+        "p.reorder_point AS effective_rop, " +
         "CASE " +
         "WHEN COALESCE(i.quantity_in_stock, 0) = 0 THEN 'Out of Stock' " +
-        "WHEN COALESCE(i.quantity_in_stock, 0) <= " +
-        "CASE WHEN p.reorder_mode = 'Dynamic' " +
-        "THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
-        "ELSE p.reorder_point END " +
+        "WHEN COALESCE(i.quantity_in_stock, 0) <= p.reorder_point " +
         "THEN 'Low Stock' " +
         "ELSE 'In Stock' " +
         "END AS stock_status, " +
         "-- order back up to twice the reorder point, so the next order is\n" +
         "-- not due the week after this one arrives\n" +
-        "GREATEST( " +
-        "(CASE WHEN p.reorder_mode = 'Dynamic' " +
-        "THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
-        "ELSE p.reorder_point END) * 2 " +
-        "- COALESCE(i.quantity_in_stock, 0), 0) AS suggested_order, " +
+        "GREATEST(p.reorder_point * 2 - COALESCE(i.quantity_in_stock, 0), 0) AS suggested_order, " +
         "-- roughly how long what is on the shelf will last at the\n" +
         "-- current rate. NULL when nothing is moving, because \"forever\"\n" +
         "-- is not a number worth printing.\n" +
@@ -1725,10 +1709,7 @@ function registerManagerRoutes(app, deps) {
         "LEFT JOIN units u ON u.unit_id = p.unit_id " +
         "LEFT JOIN suppliers sup ON sup.supplier_id = p.supplier_id " +
         "WHERE p.is_archived = FALSE " +
-        "ORDER BY (COALESCE(i.quantity_in_stock, 0) <= " +
-        "CASE WHEN p.reorder_mode = 'Dynamic' " +
-        "THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock " +
-        "ELSE p.reorder_point END) DESC, " +
+        "ORDER BY (COALESCE(i.quantity_in_stock, 0) <= p.reorder_point) DESC, " +
         "p.product_name",
         [SALES_WINDOW_DAYS, SALES_WINDOW_DAYS, SALES_WINDOW_DAYS]
       );
@@ -1740,93 +1721,49 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // the manager sets the policy; the clerk sets a manual reorder point
+  // The manager sets a product's reorder point: one figure, typed. (The clerk
+  // sets it from the Material List the same way.)
   app.put("/api/stocks/:productId/reorder-policy", async function (request, response) {
-    const leadTimeDays = request.body.leadTimeDays;
-    const safetyStock = request.body.safetyStock;
-    const reorderMode = request.body.reorderMode;
-    const reorderPoint = request.body.reorderPoint;
+    const typed = (request.body || {}).reorderPoint;
+    const point = parseInt(typed, 10);
 
-    const lead = parseInt(leadTimeDays, 10);
-    const safety = parseInt(safetyStock, 10);
-    const mode = String(reorderMode || "Manual");
-
-    if (!Number.isInteger(lead) || lead < 1 || lead > 365) {
-      return response.status(400).json({ error: "Lead time must be between 1 and 365 days" });
+    if (typed === undefined || typed === null || typed === "" || !Number.isInteger(point) || point < 0) {
+      return response.status(400).json({ error: "The reorder point must be a whole number, zero or more." });
     }
-    if (!Number.isInteger(safety) || safety < 0 || safety > 1000000) {
-      return response.status(400).json({ error: "Safety stock cannot be negative" });
-    }
-    if (mode !== "Manual" && mode !== "Dynamic") {
-      return response.status(400).json({ error: "Reorder mode must be Manual or Dynamic" });
-    }
-
-    // a manual reorder point left out means "do not touch what is there"
-    let manual;
-    if (reorderPoint === undefined || reorderPoint === null || reorderPoint === "") {
-      manual = null;
-    } else {
-      manual = parseInt(reorderPoint, 10);
-    }
-
-    if (manual !== null && (!Number.isInteger(manual) || manual < 0)) {
-      return response.status(400).json({ error: "The reorder point cannot be negative" });
+    if (point > 1000000) {
+      return response.status(400).json({ error: "That reorder point is more than the shop could hold." });
     }
 
     try {
       const existingResult = await db.query(
-        "SELECT product_name, reorder_point, lead_time_days, safety_stock, reorder_mode " +
-        "FROM products WHERE product_id = ? AND is_archived = FALSE",
+        "SELECT product_name, reorder_point FROM products WHERE product_id = ? AND is_archived = FALSE",
         [request.params.productId]
       );
       const existing = existingResult[0];
-
       if (existing.length === 0) {
         return response.status(404).json({ error: "That product was not found." });
       }
-
       const before = existing[0];
 
       await db.query(
-        "UPDATE products " +
-        "SET lead_time_days = ?, safety_stock = ?, reorder_mode = ?, " +
-        "reorder_point = COALESCE(?, reorder_point) " +
-        "WHERE product_id = ?",
-        [lead, safety, mode, manual, request.params.productId]
+        "UPDATE products SET reorder_point = ?, reorder_mode = 'Manual' WHERE product_id = ?",
+        [point, request.params.productId]
       );
-
-      // no manual figure typed means the reorder point stays as it was
-      let newReorderPoint = manual;
-      if (manual === null) {
-        newReorderPoint = before.reorder_point;
-      }
 
       await writeAuditLog(
         request,
-        "UPDATE_REORDER_POLICY",
-        before.product_name + ": " + mode.toLowerCase() + " reorder point, " + lead + " day lead time",
+        "UPDATE_REORDER_POINT",
+        before.product_name + ": reorder point " + before.reorder_point + " to " + point,
         {
           product_id: Number(request.params.productId),
-          changes: fieldChanges(
-            {
-              lead_time_days: before.lead_time_days,
-              safety_stock: before.safety_stock,
-              reorder_mode: before.reorder_mode,
-              reorder_point: before.reorder_point
-            },
-            {
-              lead_time_days: lead,
-              safety_stock: safety,
-              reorder_mode: mode,
-              reorder_point: newReorderPoint
-            })
+          changes: fieldChanges({ reorder_point: before.reorder_point }, { reorder_point: point })
         }
       );
 
-      response.json({ message: "Reorder policy updated for " + before.product_name + "." });
+      response.json({ message: before.product_name + " now reorders at " + point + "." });
     } catch (error) {
-      console.error("Reorder policy failed:", error.message);
-      response.status(500).json({ error: "Unable to save the reorder policy" });
+      console.error("Reorder point failed:", error.message);
+      response.status(500).json({ error: "Unable to save the reorder point" });
     }
   });
 

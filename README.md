@@ -1389,26 +1389,18 @@ The screens are one piece of code (`shared/purchase-orders.js`) that each
 page configures with what it is allowed to do, so the two desks cannot
 disagree about what an order is.
 
-## The reorder point the system works out for itself
+## The reorder point
 
-```
-ROP = (average daily sales x lead time) + safety stock
-```
+Each product has one reorder point, the figure the shop types for it. Once the
+stock is at or below it, the product shows on **Reorder Alerts**, with a
+suggested order that brings it back to twice the reorder point. The manager
+changes it from the product's card in Stocks; the clerk from the Material List.
 
-Average daily sales the system already knew: it is in the sale lines, counted
-over the last ninety days of real trading rather than over all history. What it
-did not know is how long a supplier takes and how much cover the shop wants on
-top, so those two are now attributes of the product.
-
-Each product is **Manual** or **Dynamic**. Manual keeps the number somebody
-typed. Dynamic recalculates as the product sells faster or slower. It is a
-per-product choice on purpose: a fast-moving consumable earns its formula, and
-a slow item nobody has bought in a year would only get a reorder point of zero
-out of one.
-
-The calculated figure is shown beside the manual one either way, so the formula
-can be judged before it is trusted, and switching a product to Dynamic asks
-first and says what the new figure will be.
+How fast a product sells (its average daily sales over the last ninety days of
+trading, and the days of cover that gives) is shown beside it to help pick the
+figure, but nothing is calculated for it. An older database whose products were
+set to a calculated (Dynamic) reorder point is switched to the typed figure on
+the next `npm start`.
 
 ## Delivered is not the same as paid for
 

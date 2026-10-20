@@ -4,30 +4,13 @@
 // Never sent to a browser.
 // ============================================================
 
-// How many materials sit at or under their EFFECTIVE reorder point
-// (calculated for a product on Dynamic): the same formula as /api/stocks;
-// the three ? are SALES_WINDOW_DAYS.
-const LOW_STOCK_EFFECTIVE_SQL = "\n  WITH window_days AS (\n" +
-  "    SELECT GREATEST(LEAST(?, COALESCE(DATEDIFF(CURDATE(), DATE(MIN(sale_date))) + 1, ?)), 1) AS days\n" +
-  "    FROM sales WHERE is_archived = FALSE\n" +
-  "  ),\n" +
-  "  recent AS (\n" +
-  "    SELECT si.product_id, COALESCE(SUM(si.quantity), 0) AS units\n" +
-  "    FROM sale_items si\n" +
-  "    JOIN sales s ON s.sale_id = si.sale_id\n" +
-  "    WHERE s.is_archived = FALSE AND s.sale_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)\n" +
-  "    GROUP BY si.product_id\n" +
-  "  )\n" +
-  "  SELECT COUNT(*) AS n\n" +
+// How many materials sit at or under their reorder point (the figure the shop
+// types; nothing is calculated)
+const LOW_STOCK_EFFECTIVE_SQL = "\n  SELECT COUNT(*) AS n\n" +
   "  FROM products p\n" +
-  "  CROSS JOIN window_days w\n" +
-  "  LEFT JOIN recent rc ON rc.product_id = p.product_id\n" +
   "  LEFT JOIN inventory i ON i.product_id = p.product_id\n" +
   "  WHERE p.is_archived = FALSE\n" +
-  "    AND COALESCE(i.quantity_in_stock, 0) <=\n" +
-  "        CASE WHEN p.reorder_mode = 'Dynamic'\n" +
-  "             THEN CEIL((COALESCE(rc.units, 0) / w.days) * p.lead_time_days) + p.safety_stock\n" +
-  "             ELSE p.reorder_point END";
+  "    AND COALESCE(i.quantity_in_stock, 0) <= p.reorder_point";
 
 // archived_at and archived_by because the restore card says when and by whom
 const USER_SELECT = "\n  SELECT s.staff_id, s.first_name, s.middle_name, s.last_name, s.full_name,\n" +
