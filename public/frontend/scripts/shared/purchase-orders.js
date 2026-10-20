@@ -2072,12 +2072,9 @@ function renderPurchaseTotalsFigures() {
     const ready = panel && panel.state === 'ready';
     const orders = ready ? panel.visible : [];
     let total = 0;
-    let units = 0;
     for (let i = 0; i < orders.length; i++) {
         total = total + poOrderValue(orders[i]);
-        units = units + (Number(orders[i].total_units) || 0);
     }
-    const average = orders.length === 0 ? 0 : total / orders.length;
     const shown = function (text) {
         return ready ? text : '0';
     };
@@ -2089,9 +2086,7 @@ function renderPurchaseTotalsFigures() {
 
     const kpis = [
         ['Total Purchases', shown(peso(total)), covers],
-        ['Orders', shown(orders.length.toLocaleString('en-PH')), orders.length === 1 ? 'purchase order' : 'purchase orders'],
-        ['Units Ordered', shown(units.toLocaleString('en-PH')), 'across every line'],
-        ['Average Order', shown(peso(average)), 'per purchase order']
+        ['Orders', shown(orders.length.toLocaleString('en-PH')), orders.length === 1 ? 'purchase order' : 'purchase orders']
     ];
 
     let cards = '';
@@ -2234,12 +2229,32 @@ async function printPurchaseOrder(poId) {
 // only the order's document reaches the paper (the styles are in the Purchase
 // orders section at the end of css/shared/responsive.css, with css/pages/manager.css
 // and css/pages/inventory-dashboard.css)
+// A4 with no page margin: the browser then prints none of its own header and
+// footer (the date, the page's title, the address and the page number). The
+// document keeps its own margin inside (css/shared/responsive.css).
+const PO_PRINT_PAGE_STYLE_ID = 'po-print-page-style';
+
 function printPurchaseOrderNow() {
     // a credit page still on the paper is put back first (only the pages that have one)
     if (typeof finishCreditPrint === 'function') finishCreditPrint();
     document.body.classList.add('printing-po');
+
+    const style = document.createElement('style');
+    style.id = PO_PRINT_PAGE_STYLE_ID;
+    style.textContent = '@media print { @page { size: A4; margin: 0; } }';
+    document.head.appendChild(style);
+
+    // "Save as PDF" names the file after the page's title: the order's number
+    const title = document.title;
+    if (poDocument && poDocument.order) document.title = 'Purchase Order #' + poDocument.order.po_id;
+
+    let finished = false;
     const done = function () {
+        if (finished) return;
+        finished = true;
         document.body.classList.remove('printing-po');
+        style.remove();
+        document.title = title;
         window.removeEventListener('afterprint', done);
     };
     window.addEventListener('afterprint', done);
@@ -2849,7 +2864,7 @@ async function openPurchaseOrderDetail(poId) {
     const pages = [
         { label: 'Order', body: '<div class="po-detail-layout">' +
             '<div class="po-detail-facts">' + summary + contact + '</div>' +
-            '<div class="po-detail-lines"><h4 class="detail-subhead">What is ordered</h4>' + lines + '</div>' +
+            '<div class="po-detail-lines"><h4 class="detail-subhead">Ordered Items</h4>' + lines + '</div>' +
           '</div>' }
     ];
     if (reports.length > 0) {

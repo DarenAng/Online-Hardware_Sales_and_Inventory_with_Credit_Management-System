@@ -790,7 +790,7 @@ let printRestore = null;
 
 // The Deliveries printout holds only the rows the filters leave; the Totals
 // table counts those rows in each of these fulfilment states, in this order.
-const PRINT_DELIVERY_STATES = ['Pending Cash Collection', 'Completed', 'Out for Delivery',
+const PRINT_DELIVERY_STATES = ['Pending Payment', 'Completed', 'Out for Delivery',
                                'In Transit', 'Pending', 'Delayed', 'Failed'];
 
 function printTotalRows(container, panel) {
@@ -2429,7 +2429,7 @@ async function decideCreditRequest(approve) {
 // ==========================================
 const FULFILMENT_TONE = {
     'Completed': 'badge-success',
-    'Pending Cash Collection': 'badge-warning',
+    'Pending Payment': 'badge-warning',
     'Out for Delivery': 'badge-warning',
     'In Transit': 'badge-warning',
     'Pending': 'badge-warning',
@@ -3035,7 +3035,7 @@ async function openSaleDetail(saleId, options) {
             if (d.status !== 'Delivered') {
                 state = d.status;
             } else if (owed > 0) {
-                state = 'Pending Cash Collection';
+                state = 'Pending Payment';
             } else {
                 state = 'Completed';
             }

@@ -26,12 +26,12 @@ function registerDeliveryRoutes(app, deps) {
   const DELIVERY_PHONE_SQL = deps.DELIVERY_PHONE_SQL;
 
   // Delivered and finished are different: a delivered order with money owed
-  // sits at Pending Cash Collection until the balance is cleared. Derived from
+  // sits at Pending Payment until the balance is cleared. Derived from
   // the sale's own figures, so there is no second flag to forget.
   const FULFILMENT_SQL =
     "\n  CASE" +
     "\n    WHEN d.status <> 'Delivered' THEN d.status" +
-    "\n    WHEN GREATEST(s.amount_due - s.amount_paid, 0) > 0 THEN 'Pending Cash Collection'" +
+    "\n    WHEN GREATEST(s.amount_due - s.amount_paid, 0) > 0 THEN 'Pending Payment'" +
     "\n    ELSE 'Completed'" +
     "\n  END";
 
