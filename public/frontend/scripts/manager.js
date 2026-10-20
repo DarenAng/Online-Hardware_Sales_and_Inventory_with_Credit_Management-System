@@ -3207,14 +3207,12 @@ function openStockDetail(productId) {
         '<button type="button" class="btn btn-accent" onclick="changeReorderPoint(' + p.product_id + ')">' +
         'Change Reorder Point</button></div>';
 
-    // the price is not set here: it belongs to the product, in Records > Products
     const product = '<div class="detail-grid">' +
         detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
         detailField('Brand', escapeHtml(p.brand_name || 'No brand')) +
         detailField('Product Status', statusBadge(p.status)) +
         detailField('Last Updated', escapeHtml(p.last_updated || 'Never')) +
-        '</div>' +
-        '<p class="detail-note">The selling price is set on the product, in Records, Products.</p>';
+        '</div>';
 
     const supplier = '<div class="detail-grid">' +
         detailField('Supplier', escapeHtml(p.supplier_name || 'No supplier')) +
