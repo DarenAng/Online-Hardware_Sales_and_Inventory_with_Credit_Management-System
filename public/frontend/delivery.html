@@ -257,14 +257,11 @@
 
             <div class="modal-body">
                 <form id="refund-form" onsubmit="handleDriverRefund(event)" autocomplete="off">
-                    <p class="detail-note" id="refund-explain"></p>
-
                     <div class="refund-lines" id="refund-lines"></div>
                     <p class="refund-total" id="refund-total"></p>
 
                     <div class="form-group">
-                        <label for="refund-reason">What was wrong
-                            <span class="label-hint">required, say what happened</span></label>
+                        <label for="refund-reason">Remarks</label>
                         <textarea id="refund-reason" class="form-control" rows="3" minlength="10" required
                                   placeholder="Two tins arrived dented and the customer would not take them."></textarea>
                     </div>

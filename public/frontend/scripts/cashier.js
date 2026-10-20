@@ -1597,7 +1597,7 @@ function checkoutLabel(t) {
     if (t.method === 'COD') return 'Place COD Order';
     if (t.onCredit) {
         if (cart.length > 0 && t.amountOnAccount <= 0) return 'Complete Sale';
-        if (t.down > 0) return 'Take Part Payment & Charge the Rest';
+        // a part paid now still reads Charge to Account: the rest goes on the account
         return 'Charge to Account';
     }
     return 'Complete Sale';
