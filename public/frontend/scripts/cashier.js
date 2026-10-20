@@ -1080,7 +1080,7 @@ function renderCustomerVerdict() {
 
     if (typed === '') {
         box.className = 'customer-verdict';
-        box.textContent = 'Walk-in. To put the sale on a customer, type their name and pick them from the list.';
+        box.textContent = '';
         return;
     }
 
