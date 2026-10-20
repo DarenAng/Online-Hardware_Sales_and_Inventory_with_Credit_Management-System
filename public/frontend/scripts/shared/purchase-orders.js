@@ -1714,71 +1714,99 @@ function poThisYear() {
     return String(new Date().getFullYear());
 }
 
-// "3 orders", "1 order"
-function poOrderCount(count) {
-    return count + (count === 1 ? ' order' : ' orders');
+// the first year the Month and Year boxes offer
+const PO_TOTALS_FIRST_YEAR = 2025;
+
+// the earliest year to offer: 2025, or earlier when an order is older than that
+function poFirstYear(rows) {
+    let first = PO_TOTALS_FIRST_YEAR;
+    for (let i = 0; i < rows.length; i++) {
+        const year = Number(String(rows[i].order_date).slice(0, 4));
+        if (year && year < first) first = year;
+    }
+    return first;
 }
 
-// every month that has an order, newest first, and this month even when it
-// has none; each says how many orders it holds
-function renderPurchaseTotalsMonths(rows) {
-    const select = document.getElementById('po-totals-month');
-    if (!select) return;
-
-    const months = [poThisMonth()];       // every month that has an order, this month first
-    const counts = {};                    // month -> how many orders it holds
-    counts[poThisMonth()] = 0;
-    for (let i = 0; i < rows.length; i++) {
-        const month = String(rows[i].order_date).slice(0, 7);
-        if (!poHas(counts, month)) {
-            counts[month] = 0;
-            months.push(month);
+// every month from January of the first year to December of this year, in
+// order: ['2025-01', '2025-02', ...]
+function poTotalsMonths(rows) {
+    const months = [];
+    const last = Number(poThisYear());
+    for (let year = poFirstYear(rows || []); year <= last; year++) {
+        for (let month = 1; month <= 12; month++) {
+            months.push(year + '-' + String(month).padStart(2, '0'));
         }
-        counts[month] = counts[month] + 1;
     }
-    months.sort();
-    months.reverse();
+    return months;
+}
+
+// "october 2026" (any capitals, extra spaces) -> "2026-10"; null when it is no month on the list
+function poMonthFromLabel(text) {
+    const wanted = String(text || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const months = poTotalsMonths(purchaseOrderRowsLoaded());
+    for (let i = 0; i < months.length; i++) {
+        if (poMonthLabel(months[i]).toLowerCase() === wanted || months[i] === wanted) return months[i];
+    }
+    return null;
+}
+
+// the orders the Total Purchases table has loaded, or none yet
+function purchaseOrderRowsLoaded() {
+    const panel = getDataPanel(PO_TOTALS_KEY);
+    return panel && panel.rows ? panel.rows : [];
+}
+
+// The Month box is a search box: every month from January 2025 to December of
+// this year is on its list, January first. It shows the month in use.
+function renderPurchaseTotalsMonths(rows) {
+    const box = document.getElementById('po-totals-month');
+    const list = document.getElementById('po-totals-month-list');
+    if (!box || !list) return;
+
+    const months = poTotalsMonths(rows);
+    let options = '';
+    for (let i = 0; i < months.length; i++) {
+        options += '<option value="' + escapeHtml(poMonthLabel(months[i])) + '"></option>';
+    }
+    list.innerHTML = options;
 
     const panel = getDataPanel(PO_TOTALS_KEY);
     const current = panel ? panel.filters.month : poThisMonth();
-
-    let monthOptions = '';
-    for (let i = 0; i < months.length; i++) {
-        monthOptions += '<option value="' + months[i] + '">' + escapeHtml(poMonthLabel(months[i])) +
-            ' (' + poOrderCount(counts[months[i]]) + ')</option>';
-    }
-    select.innerHTML = monthOptions;
-    select.value = poHas(counts, current) ? current : poThisMonth();
+    box.value = poMonthLabel(months.indexOf(current) !== -1 ? current : poThisMonth());
 }
 
-// the same for years: every year with an order, and this year even when empty
+// a month typed or picked in the Month box; anything not on the list goes back
+// to the month in use
+function purchaseTotalsMonthTyped(box) {
+    const month = poMonthFromLabel(box.value);
+    const panel = getDataPanel(PO_TOTALS_KEY);
+    if (!month) {
+        notifyWarning('Pick a month from the list, like ' + poMonthLabel(poThisMonth()) + '.', 'No such month');
+        box.value = poMonthLabel(panel ? panel.filters.month : poThisMonth());
+        return;
+    }
+    box.value = poMonthLabel(month);
+    purchaseTotalsMonth(month);
+}
+
+// every year from 2025 to this one, the oldest first
 function renderPurchaseTotalsYears(rows) {
     const select = document.getElementById('po-totals-year');
     if (!select) return;
 
-    const years = [poThisYear()];         // every year that has an order, this year first
-    const counts = {};                    // year -> how many orders it holds
-    counts[poThisYear()] = 0;
-    for (let i = 0; i < rows.length; i++) {
-        const year = String(rows[i].order_date).slice(0, 4);
-        if (!poHas(counts, year)) {
-            counts[year] = 0;
-            years.push(year);
-        }
-        counts[year] = counts[year] + 1;
-    }
-    years.sort();
-    years.reverse();
+    const years = [];
+    const last = Number(poThisYear());
+    for (let year = poFirstYear(rows); year <= last; year++) years.push(String(year));
 
     const panel = getDataPanel(PO_TOTALS_KEY);
     const current = panel ? panel.filters.year : poThisYear();
 
     let yearOptions = '';
     for (let i = 0; i < years.length; i++) {
-        yearOptions += '<option value="' + years[i] + '">' + years[i] + ' (' + poOrderCount(counts[years[i]]) + ')</option>';
+        yearOptions += '<option value="' + years[i] + '">' + years[i] + '</option>';
     }
     select.innerHTML = yearOptions;
-    select.value = poHas(counts, current) ? current : poThisYear();
+    select.value = years.indexOf(current) !== -1 ? current : poThisYear();
 }
 
 // The Period box decides which second box shows: Month for Every Month,
@@ -1831,7 +1859,7 @@ function purchaseTotalsPeriod(value) {
     // the month or year starts on the one the box already shows
     const month = document.getElementById('po-totals-month');
     const year = document.getElementById('po-totals-year');
-    panel.filters.month = month && month.value ? month.value : poThisMonth();
+    panel.filters.month = (month && poMonthFromLabel(month.value)) || poThisMonth();
     panel.filters.year = year && year.value ? year.value : poThisYear();
 
     dataPanelFilter(PO_TOTALS_KEY, 'period', value);

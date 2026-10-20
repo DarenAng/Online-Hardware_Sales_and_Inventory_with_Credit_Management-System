@@ -383,3 +383,6 @@
    some width so the row still fits on a laptop screen */
 .panel-toolbar:has(.toolbar-date:not([hidden])) .search-wrap { flex: 1 1 150px; min-width: 140px; }
 .panel-toolbar:has(.toolbar-date:not([hidden])) .toolbar-date input { width: 150px; }
+
+/* Total Purchases: the Month box is typed in, with the months as its list */
+.toolbar-field .month-search { min-width: 190px; }
