@@ -1979,46 +1979,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // a product's name, category, brand, unit and supplier; the price has its own route
-  app.put("/api/stocks/:productId/details", requireRole(MANAGER), async function (request, response) {
-    const body = request.body || {};
-    const name = tidyName(body.name, 150);
-    if (name === "") return response.status(400).json({ error: "The product needs a name." });
-
-    // an id from a box, or null for "none"
-    function idOrNull(value) {
-      const number = Number(value);
-      return Number.isInteger(number) && number > 0 ? number : null;
-    }
-    const after = {
-      product_name: name,
-      category_id: idOrNull(body.categoryId),
-      brand_id: idOrNull(body.brandId),
-      unit_id: idOrNull(body.unitId),
-      supplier_id: idOrNull(body.supplierId)
-    };
-
-    try {
-      const id = request.params.productId;
-      const beforeResult = await db.query(
-        "SELECT product_name, category_id, brand_id, unit_id, supplier_id FROM products " +
-        "WHERE product_id = ? AND is_archived = FALSE", [id]);
-      if (beforeResult[0].length === 0) return response.status(404).json({ error: "That product was not found." });
-      const before = beforeResult[0][0];
-
-      await db.query(
-        "UPDATE products SET product_name = ?, category_id = ?, brand_id = ?, unit_id = ?, supplier_id = ? " +
-        "WHERE product_id = ?",
-        [after.product_name, after.category_id, after.brand_id, after.unit_id, after.supplier_id, id]);
-      await writeAuditLog(request, "UPDATE_PRODUCT", "Product " + name + " edited",
-        { product_id: Number(id), changes: fieldChanges(before, after) });
-      response.json({ message: name + " was saved." });
-    } catch (error) {
-      console.error("Editing a product failed:", error.message);
-      response.status(500).json({ error: "Unable to save the product" });
-    }
-  });
-
   // The late-payment sweep: once at startup and every hour after. The rule
   // is in sp_apply_late_penalties; here each run that charged something is
   // logged and announced on the live channel, so an open credit screen redraws.

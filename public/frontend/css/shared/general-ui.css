@@ -2550,6 +2550,39 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 }
 
 /* ==========================================================================
+   TYPABLE FILTERS (shared/typable-select.js) -- a toolbar dropdown becomes a
+   box to type in, with its list under it; the real <select> stays, out of sight
+   ========================================================================== */
+.typable-wrap { display: flex; }
+.typable-wrap[hidden] { display: none; }
+.typable-native {
+    position: absolute !important;
+    width: 1px !important; height: 1px !important; min-width: 0 !important; min-height: 0 !important;
+    padding: 0 !important; margin: 0 !important; border: 0 !important;
+    opacity: 0; pointer-events: none;
+    clip-path: inset(50%);
+}
+.typable-wrap .typable-box { width: 100%; padding-right: 56px; text-overflow: ellipsis; cursor: pointer; }
+.typable-wrap .typable-box:focus { cursor: text; }
+.typable-caret {
+    position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+    font-size: 11px; line-height: 1; color: var(--steel); cursor: pointer;
+}
+.typable-caret span { display: block; transition: transform 120ms ease; }
+.typable-wrap .typable-box[aria-expanded="true"] ~ .typable-caret span { transform: rotate(180deg); }
+.typable-wrap .typable-clear { right: 28px; }
+.typable-wrap .typable-clear[hidden] { display: none; }
+.typable-list { min-width: 100%; width: max-content; max-width: 360px; max-height: 300px; }
+.typable-list .suggest-item.is-current .suggest-name { color: var(--go); }
+.typable-list .suggest-item.is-empty { cursor: default; }
+.typable-list .suggest-item.is-empty .suggest-name { font-weight: 400; color: var(--steel-soft); }
+.typable-wrap .typable-box:disabled { cursor: not-allowed; opacity: 0.6; }
+@media screen and (max-width: 640px) {
+    .typable-wrap { width: 100%; }
+    .typable-list { max-width: 100%; width: auto; right: 0; }
+}
+
+/* ==========================================================================
    THE PHYSICAL CUSTOMER CARD (shared/credit-terms.js) -- ID-1 size, 85.6 x 54 mm,
    drawn in mm so the print is true size. The same card is the preview on the
    Policy Maintenance pages (scaled up there) and is measured out of sight

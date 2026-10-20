@@ -685,6 +685,27 @@ async function migrateCreditTerms() {
   console.log("Added store_settings.credit_terms for the printed credit terms and conditions.");
 }
 
+// Deliveries are no longer archived (only customers, products, units,
+// categories, suppliers and staff accounts are). One put away by the old daily
+// sweep or by hand comes back into Delivery History. A delivery cancelled with
+// a voided sale stays put away: its sale is voided (archived) too.
+async function restoreArchivedDeliveries() {
+  const tablesResult = await db.query(
+    "SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'deliveries'",
+    [DB_NAME]);
+  if (Number(tablesResult[0][0].n) === 0) return;
+
+  const result = await db.query(
+    "UPDATE deliveries d JOIN sales s ON s.sale_id = d.sale_id\n" +
+    "   SET d.is_archived = FALSE, d.archived_at = NULL, d.archived_by_staff_id = NULL\n" +
+    " WHERE d.is_archived = TRUE AND s.is_archived = FALSE");
+  const brought = result[0].affectedRows || 0;
+  if (brought > 0) {
+    console.log("Brought back " + brought + " archived " + (brought === 1 ? "delivery" : "deliveries") +
+      " into Delivery History: deliveries are no longer archived.");
+  }
+}
+
 // The other two policies on the back of the customer card: how the store
 // handles a customer's data, and its refund policy. NULL means the default text.
 async function migratePolicyTexts() {
@@ -1405,7 +1426,8 @@ async function routinesAreOld() {
     ["sp_update_delivery_status", "FOR UPDATE"],
     ["sp_receive_purchase_order", "purchase_order_ordered_items"],
     ["sp_receive_purchase_order", "received_at = NOW()"],
-    ["sp_create_customer", "p_address_barangay"]
+    ["sp_create_customer", "p_address_barangay"],
+    ["sp_sweep_archives", "deliveries are never archived"]
   ];
 
   const routinesResult = await db.query(
@@ -1415,7 +1437,7 @@ async function routinesAreOld() {
       "                            'sp_create_sale_transaction', 'sp_resolve_return_report', 'sp_archive_record',\n" +
       "                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',\n" +
       "                            'sp_adjust_stock', 'sp_receive_purchase_order', 'sp_create_customer',\n" +
-      "                            'sp_create_qr_payment')",
+      "                            'sp_create_qr_payment', 'sp_sweep_archives')",
     [DB_NAME]
   );
   const routines = routinesResult[0];
@@ -1603,6 +1625,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateReceiptLayout();
   await migrateCreditTerms();
   await migratePolicyTexts();
+  await restoreArchivedDeliveries();
   await migrateNewProductAlert();
   await migrateRemoveDeliveryAreas();
   await migratePasswordResets();

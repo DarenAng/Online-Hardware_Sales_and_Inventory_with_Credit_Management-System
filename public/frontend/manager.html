@@ -1217,10 +1217,10 @@
                                    oninput="dataPanelSearchInput('mgr-archives', event)" onkeydown="dataPanelSearchKey('mgr-archives', event)" autocomplete="off">
                         </div>
                         <div class="toolbar-field">
-                            <label for="archives-module">Module</label>
+                            <label for="archives-type">Type</label>
                             <!-- filled from the loaded rows, with how many each holds (manager.js) -->
-                            <select id="archives-module" data-filter-table="archives-table" data-hides-column="1" onchange="dataPanelFilter('mgr-archives', 'module', this.value)">
-                                <option value="all">Every module</option>
+                            <select id="archives-type" data-filter-table="archives-table" data-hides-column="1" onchange="dataPanelFilter('mgr-archives', 'type', this.value)">
+                                <option value="all">Every type</option>
                             </select>
                         </div>
                         <div class="toolbar-spacer"></div>
@@ -1229,7 +1229,7 @@
                     <div class="table-responsive grid-10">
                         <table id="archives-table">
                             <thead>
-                                <tr><th>Module</th><th>Record</th><th>Detail</th><th>Handled By</th><th>Archived On</th><th>Archived By</th></tr>
+                                <tr><th>Type</th><th>Record</th><th>Detail</th><th>Archived On</th><th>Archived By</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -1557,6 +1557,7 @@
     <script src="scripts/shared/ui-kit.js"></script>
     <script src="scripts/shared/tables.js"></script>
     <script src="scripts/shared/data-panel.js"></script>
+    <script src="scripts/shared/typable-select.js"></script>
     <script src="scripts/shared/live-sync.js"></script>
     <script src="scripts/shared/modals.js"></script>
     <script src="scripts/shared/detail-modal.js"></script>

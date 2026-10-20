@@ -2551,7 +2551,8 @@ const RECORD_ARCHIVE_MODULE = {
 };
 
 // the kinds of record the manager edits here (categories and units are the clerk's)
-const RECORD_EDITABLE = ['supplier', 'customer', 'product'];
+// a product is edited by the inventory clerk only; the manager sets its price and archives it
+const RECORD_EDITABLE = ['supplier', 'customer'];
 
 // the kind of record is a screen in the strip
 function showRecordType(type, event) {
@@ -2773,46 +2774,54 @@ async function saveAddRecord(event) {
 }
 
 // ==========================================
-// ARCHIVES
+// ARCHIVES -- customers, products, units, categories, suppliers and users
+// (staff accounts). Sales, deliveries and credit are never archived.
 // ==========================================
+// the kind of data each archived record is, in plain words
+const ARCHIVE_TYPE_NAMES = {
+    Customer: 'Customer', Inventory: 'Product', Unit: 'Unit',
+    Category: 'Category', Supplier: 'Supplier', Staff: 'User'
+};
+
+function archiveTypeName(module) {
+    return ARCHIVE_TYPE_NAMES[module] || module;
+}
+
 function buildArchivePanel() {
     createDataPanel({
         key: 'mgr-archives',
         tableId: 'archives-table',
-        columns: 6,
-        sortKeys: ['module', 'record_name', 'detail', 'handled_by', 'archived_at', 'archived_by'],
+        columns: 5,
+        sortKeys: [function (a) { return archiveTypeName(a.module); }, 'record_name', 'detail', 'archived_at', 'archived_by'],
         pagerId: 'archives-pager',
-        filters: { module: 'all' },
+        filters: { type: 'all' },
         gate: {
             title: 'The archive is not loaded',
-            text: 'Press Load Data for everything archived across all modules.',
+            text: 'Press Load Data for every archived customer, product, unit, category, supplier and user.',
             button: 'Load Data'
         },
         load: function () {
             return apiGetArchives();
         },
         match: function (a, query) {
-            return prefixMatch([a.record_name, a.detail, a.module, a.archived_by, a.handled_by], query);
+            return prefixMatch([a.record_name, a.detail, archiveTypeName(a.module), a.archived_by], query);
         },
         filter: function (a, filters) {
-            return filters.module === 'all' || a.module === filters.module;
+            return filters.type === 'all' || archiveTypeName(a.module) === filters.type;
         },
         onLoaded: function (rows) {
-            const modules = [];
+            const types = [];
             for (let i = 0; i < rows.length; i++) {
-                modules.push(rows[i].module);
+                types.push(archiveTypeName(rows[i].module));
             }
-            fillCountedOptions('archives-module', modules, 'Every module');
+            fillCountedOptions('archives-type', types, 'Every type');
         },
         renderRow: function (a, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                     'onclick="openArchiveEntry(' + index + ')">' +
-                '<td>' + statusBadge(a.module) + '</td>' +
+                '<td>' + statusBadge(archiveTypeName(a.module)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(a.record_name) + '</td>' +
                 '<td>' + escapeHtml(a.detail || '') + '</td>' +
-                '<td>' + (a.handled_by
-                    ? escapeHtml(a.handled_by) + ' <span class="muted">' + escapeHtml(a.handled_label || '') + '</span>'
-                    : '<span class="muted">Not recorded</span>') + '</td>' +
                 '<td class="cell-id">' + escapeHtml(a.archived_at || 'Unknown') + '</td>' +
                 '<td>' + escapeHtml(a.archived_by || 'Not recorded') + '</td></tr>';
         }
@@ -2825,14 +2834,11 @@ function openArchiveEntry(index) {
     const entry = panel ? panel.visible[index] : null;
     if (!entry) return;
 
+    const type = archiveTypeName(entry.module);
     const body = '<div class="detail-grid">' +
-        detailField('Module', statusBadge(entry.module)) +
+        detailField('Type', statusBadge(type)) +
         detailField('Record', escapeHtml(entry.record_name)) +
         detailField('Detail', escapeHtml(entry.detail || 'None recorded')) +
-        (entry.handled_by
-            ? detailField(entry.handled_label || 'Handled By', escapeHtml(entry.handled_by) +
-                (entry.handled_at ? ' <span class="muted">' + escapeHtml(String(entry.handled_at).slice(0, 16)) + '</span>' : ''))
-            : '') +
         detailField('Archived On', escapeHtml(entry.archived_at || 'Not recorded')) +
         detailField('Archived By', escapeHtml(entry.archived_by || 'Not recorded')) +
         '</div>' +
@@ -2841,20 +2847,20 @@ function openArchiveEntry(index) {
             entry.module + '\', ' + entry.record_id + ')">Restore This Record</button>' +
         '</div>';
 
-    openDetailModal(entry.record_name, entry.module + ' · archived',
+    openDetailModal(entry.record_name, type + ' · archived',
         initialsOf(entry.record_name), [{ label: 'Archived Record', body: body }]);
 }
 
 async function restoreArchive(module, recordId) {
     const yes = await askConfirm(
-        'This ' + module.toLowerCase() + ' record goes back into circulation and appears on the ' +
+        'This ' + archiveTypeName(module).toLowerCase() + ' record goes back into circulation and appears on the ' +
         'normal lists again.',
         {
             title: 'Restore this record?',
             eyebrow: 'Archives',
             confirmLabel: 'Restore the record',
             detail: [
-                'It reappears everywhere its module lists records.',
+                'It reappears on every list that shows its type of record.',
                 'Anything that was hidden because it was archived becomes visible again.'
             ]
         });
@@ -2877,11 +2883,6 @@ async function restoreArchive(module, recordId) {
         let keys = ['mgr-archives'];
         if (module === 'Inventory') {
             keys = keys.concat(['mgr-stocks', 'mgr-reorder', 'mgr-stock-moves', 'mgr-records', 'mgr-po']);
-        } else if (module === 'Sales') {
-            keys = keys.concat(['mgr-sales', 'mgr-unpaid', 'mgr-credit', 'mgr-loyal',
-                'mgr-stocks', 'mgr-reorder', 'mgr-stock-moves', 'mgr-deliveries']);
-        } else if (module === 'Delivery') {
-            keys = keys.concat(['mgr-deliveries']);
         } else if (module === 'Staff') {
             keys = keys.concat(['mgr-staff']);
         } else {
@@ -3060,8 +3061,8 @@ async function openSaleDetail(saleId, options) {
     }
 }
 
-// Voiding a sale archives it; the database holds the rules (same day, goods
-// not out for delivery, stock returned).
+// Voiding a sale; the database holds the rules (same day, goods not out for
+// delivery, stock returned).
 async function voidSale(saleId, isCredit) {
     const word = isCredit ? 'credit' : 'sale';
     const yes = await askDanger(
@@ -3080,13 +3081,13 @@ async function voidSale(saleId, isCredit) {
 
     if (!yes) return;
 
-    const result = await apiArchiveSale(saleId);
+    const result = await apiVoidSale(saleId);
     if (!result) return;
 
     closeModal('detail-modal');
     notifySuccess('Sale #' + saleId + ' is voided and its stock is back on the shelf.', 'Sale voided');
 
-    const keys = ['mgr-sales', 'mgr-archives', 'mgr-deliveries'];
+    const keys = ['mgr-sales', 'mgr-deliveries'];
     for (let i = 0; i < keys.length; i++) {
         const panel = getDataPanel(keys[i]);
         if (panel && panel.state === 'ready') await panel.refresh();
@@ -3151,7 +3152,7 @@ function openStockDetail(productId) {
 function openDeliveryDetail(deliveryId) {
     const panel = getDataPanel('mgr-deliveries');
     // the manager reads a delivery; the driver moves it along
-    showDeliveryRecord(panel ? panel.find(deliveryId, 'delivery_id') : null, false, false);
+    showDeliveryRecord(panel ? panel.find(deliveryId, 'delivery_id') : null, false);
 }
 
 async function openRecordDetail(index) {
@@ -3179,15 +3180,17 @@ async function openRecordDetail(index) {
             : '');
     const pages = [{ label: 'Details', body: body }];
 
-    // a category lists the products filed under it, on a page of its own
-    if (type === 'category') {
+    // a category lists the products filed under it, and a unit the products
+    // counted in it, on a page of their own
+    if (type === 'category' || type === 'unit') {
+        const field = type === 'category' ? 'category_name' : 'unit_name';
         let productsBody;
         try {
             const allProducts = await apiGetRecords('product');
             const productRows = [];
             for (let i = 0; i < allProducts.length; i++) {
                 const p = allProducts[i];
-                if (p.category_name !== row.name) continue;
+                if (p[field] !== row.name) continue;
                 productRows.push([
                     escapeHtml(p.name),
                     p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>',
@@ -3200,11 +3203,12 @@ async function openRecordDetail(index) {
             pages.push({ label: 'Products (' + productRows.length + ')', body: productsBody });
         } catch (error) {
             pages.push({ label: 'Products', body:
-                '<p class="detail-note detail-warn">The products in this category could not be loaded.</p>' });
+                '<p class="detail-note detail-warn">The products ' + (type === 'category' ? 'in this category' : 'using this unit') +
+                ' could not be loaded.</p>' });
         }
     }
 
-    // the buttons: edit (suppliers, customers, products), the price (products), archive (all)
+    // the buttons: edit (suppliers, customers), the price (products), archive (all)
     let foot = '';
     if (RECORD_ARCHIVE_MODULE[type]) {
         foot += '<button type="button" class="btn btn-danger" onclick="archiveRecord(' + index + ')">Archive</button>';
@@ -3316,20 +3320,6 @@ async function openEditRecord(index) {
             editFieldHtml('city', 'Town or city', row.address_city, { required: true }) +
             editFieldHtml('province', 'Province', row.address_province, { required: true }) +
             editFieldHtml('landmark', 'Landmark', row.address_landmark, { max: 150 });
-    } else {
-        let lists;
-        try {
-            lists = await Promise.all([apiGetRecords('category'), apiGetRecords('brand'),
-                                       apiGetRecords('unit'), apiGetRecords('supplier')]);
-        } catch (error) {
-            notifyOffline();
-            return;
-        }
-        html = editFieldHtml('name', 'Product name', row.name, { required: true, max: 150 }) +
-            editFieldHtml('categoryId', 'Category', row.category_id, { kind: 'select', choices: recordChoices(lists[0]) }) +
-            editFieldHtml('brandId', 'Brand', row.brand_id, { kind: 'select', choices: recordChoices(lists[1]) }) +
-            editFieldHtml('unitId', 'Unit', row.unit_id, { kind: 'select', choices: recordChoices(lists[2]) }) +
-            editFieldHtml('supplierId', 'Supplier', row.supplier_id, { kind: 'select', choices: recordChoices(lists[3]) });
     }
 
     editRecord = { type: type, row: row };
@@ -3373,10 +3363,6 @@ async function saveEditRecord(event) {
         data = { firstName: value('firstName'), middleName: value('middleName'), lastName: value('lastName'),
                  phone: phoneToStore(form.elements.phone), street: value('street'), barangay: value('barangay'),
                  city: value('city'), province: value('province'), landmark: value('landmark') };
-    } else {
-        if (value('name') === '') { notifyWarning('Product name is required.', 'Fill in the form'); return; }
-        data = { name: value('name'), categoryId: value('categoryId'), brandId: value('brandId'),
-                 unitId: value('unitId'), supplierId: value('supplierId') };
     }
 
     const button = document.getElementById('record-edit-save');

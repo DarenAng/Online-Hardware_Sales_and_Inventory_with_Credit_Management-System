@@ -4437,9 +4437,11 @@ END //
 -- ==========================================
 -- 30. THE ARCHIVE SWEEP -- called by the server at startup and once a day
 --
---   DELIVERIES  Delivered and fully paid, or Failed, ninety days after close
 --   MATERIALS   nothing on the shelf and not sold, moved or ordered in 180 days
 --
+-- Deliveries, sales and credit are never archived: only customers, products,
+-- units, categories, suppliers and staff accounts can be. p_deliveries stays
+-- in the call so the server's reader does not change; it is always 0.
 -- Nothing else is archived automatically. Each run that put something away
 -- writes one audit line with no staff id, so the screen shows "System".
 -- ==========================================
@@ -4459,17 +4461,7 @@ BEGIN
 
     START TRANSACTION;
 
-    UPDATE deliveries d
-    JOIN sales s ON s.sale_id = d.sale_id
-    SET d.is_archived = TRUE, d.archived_at = NOW(), d.archived_by_staff_id = NULL
-    WHERE d.is_archived = FALSE
-      AND (
-            (d.status = 'Delivered' AND s.payment_status = 'Paid'
-             AND d.delivered_at < DATE_SUB(NOW(), INTERVAL 90 DAY))
-         OR (d.status = 'Failed'
-             AND d.updated_at < DATE_SUB(NOW(), INTERVAL 90 DAY))
-      );
-    SET p_deliveries = ROW_COUNT();
+    SET p_deliveries = 0;
 
     UPDATE products p
     JOIN inventory i ON i.product_id = p.product_id
@@ -4487,11 +4479,11 @@ BEGIN
                       WHERE poi.product_id = p.product_id AND po.status = 'Pending');
     SET p_materials = ROW_COUNT();
 
-    IF p_deliveries > 0 OR p_materials > 0 THEN
+    IF p_materials > 0 THEN
         INSERT INTO audit_logs (staff_id, action, action_type, details)
         VALUES (NULL, 'ARCHIVE_SWEEP', 'DELETE',
-                CONCAT('Archived ', p_deliveries, ' closed deliveries older than 90 days and ',
-                       p_materials, ' materials with no stock and no movement in 180 days'));
+                CONCAT('Archived ', p_materials, ' materials with no stock and no movement in 180 days ',
+                       '(deliveries are never archived)'));
     END IF;
 
     COMMIT;

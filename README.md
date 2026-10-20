@@ -1601,44 +1601,59 @@ an undo.
 
 ## What "archived" means, and when it happens
 
-Nothing in this system is deleted. A record that is finished with is
-**archived**: it leaves the live lists and the figures, keeps every field it
-had, shows on the manager's **Archives** screen with who archived it and
-when, and can be restored from there. What "finished with" means is
-different for each of the four kinds of record, and so is who decides:
+Nothing in this system is deleted. Only six kinds of data can be
+**archived**: **customers, products, units, categories, suppliers and users**
+(staff accounts). An archived record leaves the live lists, keeps every field
+it had, shows on the manager's **Archives** screen (filtered by **Type**) with
+who archived it and when, and can be restored from there.
+
+**Sales, deliveries and credit are never archived.** They are the record of
+what happened, so the server refuses to archive them whichever screen asks. A
+sale rung up by mistake is **voided** instead (below); a delivery stays in
+Delivery History for good. Deliveries put away before this rule are brought
+back into Delivery History on the next `npm start` (not one cancelled with a
+voided sale).
 
 | Record | Archived means | By hand | On its own |
 |---|---|---|---|
-| **Staff** | the account is deactivated and cannot sign in | the administrator, from the staff card; the last active administrator cannot be | never — a person leaving is a decision |
-| **Material** | the shop no longer stocks it: off the material list, the catalog and the register | the clerk or a manager, from the material card, and only once nothing is left on the shelf and no purchase order for it is open | nightly, once it has had **no stock, no sale, no stock movement and no open order for 180 days** |
-| **Sale** | it is **voided**: it reads Voided on every screen and counts for nothing | a manager, from the sale's card, **on the day it was made only**, and only while its goods are not out for delivery | never — an old sale is corrected with a return or a refund, which keeps the money trail |
-| **Delivery** | it is closed: Delivered with the sale paid for, or Failed | a manager, from the delivery's card, once it is closed | nightly, **90 days** after it closed |
+| **User** | the account is deactivated and cannot sign in | the administrator, or a manager for cashier, clerk and driver accounts; the last active administrator cannot be | never — a person leaving is a decision |
+| **Product** | the shop no longer stocks it: off the material list, the catalog and the register | the clerk or a manager, and only once nothing is left on the shelf and no purchase order for it is open | nightly, once it has had **no stock, no sale, no stock movement and no open order for 180 days** |
+| **Customer** | off the customer lists | a manager, once they owe nothing | never |
+| **Supplier** | off the supplier lists | a manager, once no purchase order to them is open | never |
+| **Category**, **Unit** | off the pick lists | the clerk or a manager, once no product uses it | never |
 
-The rules live in the database rather than in the screens — `sp_archive_record`
-holds the manual ones and `sp_sweep_archives` the automatic ones — so a
-request that breaks one is refused with the reason whichever screen sends
-it, and the two sets cannot drift apart.
+The rules live on the server: `sp_archive_record` and the archive routes hold
+the manual ones and `sp_sweep_archives` the automatic one. A request that
+breaks one is refused with the reason, whichever screen sends it.
 
-**Voiding a sale puts the stock back.** Every line on it goes back on the
-shelf with an entry in the stock log saying which sale was voided, a delivery
-created for it and not yet on the road is cancelled with it, and restoring the
-sale takes the stock off again — and is refused if that stock has since been
-sold to somebody else. Money already taken is not touched: a void is for a
-sale rung up twice, and the cash for the duplicate is handed back at the
-counter. The same-day rule is what keeps that honest; a sale from last week
-that was wrong is a return, not a void.
+**Voiding a sale puts the stock back.** A manager voids a sale from its card
+in Sales Transactions (`POST /api/sales/:id/void`), **on the day it was made
+only**, and only while its goods are not out for delivery. Every line on it
+goes back on the shelf with an entry in the stock log saying which sale was
+voided, and a delivery created for it and not yet on the road is cancelled
+with it. Money already taken is not touched: a void is for a sale rung up
+twice, and the cash for the duplicate is handed back at the counter. A sale
+from last week that was wrong is a return, not a void. A voided sale reads
+Voided in Sales Transactions; it is not on Archives.
 
-**A material with stock on hand cannot be archived.** A shelf the system has
+**A product with stock on hand cannot be archived.** A shelf the system has
 stopped counting is a shelf somebody counts by hand in three months and
 cannot explain. Sell it off or write it off first, and then it can go.
 
-**The sweep** runs when the server starts and once a day after that. Ninety
-days is three statement cycles — long enough for any query about a drop to
-have come and gone — and a hundred and eighty days with nothing on the shelf
-and no movement is dead stock. Each run that put something away writes one
-line to the audit trail saying what and how many, with no staff id, so the
-Archives screen shows "System" against those rows. Nothing else is ever
-archived automatically.
+**The sweep** runs when the server starts and once a day after that. A
+hundred and eighty days with nothing on the shelf and no movement is dead
+stock. Each run that put something away writes one line to the audit trail,
+with no staff id, so the Archives screen shows "System" against those rows.
+Nothing else is ever archived automatically.
+
+## Typing in a filter
+
+Every dropdown filter in a toolbar can be typed in, like the Month box on Total
+Purchases (`shared/typable-select.js`): press it for the whole list, or type
+and the list narrows to the choices with a word starting with what was typed.
+Enter or a click picks one, Escape puts it back, and the × returns to the
+first choice ("Every ..."). The real dropdown stays underneath and holds the
+value, so every filter works as before.
 
 ## Asking before doing
 

@@ -97,14 +97,9 @@ function apiRestoreArchive(module, recordId) {
     return sendJson('/api/archives/restore', 'POST', { module: module, recordId: recordId });
 }
 
-// POST /api/archives/archive -- gives back the answer, or null if refused
-function apiArchiveSale(saleId) {
-    return postJson('/api/archives/archive', { module: 'Sales', recordId: saleId });
-}
-
-// POST /api/archives/archive -- gives back the answer, or null if refused
-function apiArchiveDelivery(deliveryId) {
-    return postJson('/api/archives/archive', { module: 'Delivery', recordId: deliveryId });
+// POST /api/sales/:id/void -- gives back the answer, or null if refused
+function apiVoidSale(saleId) {
+    return postJson('/api/sales/' + saleId + '/void', {});
 }
 
 // ---------- account management (creating accounts, sign-in holds) ----------
@@ -180,13 +175,12 @@ function apiArchiveRecord(module, recordId) {
     return postJson('/api/archives/archive', { module: module, recordId: recordId });
 }
 
-// PUT /api/suppliers/:id, /api/customers/:id, /api/stocks/:id/details -- the
-// manager corrects a record; the answer, or null if refused
+// PUT /api/suppliers/:id, /api/customers/:id -- the manager corrects a
+// record; the answer, or null if refused (a product is the clerk's to edit)
 function apiEditRecord(kind, id, data) {
     const path = {
         supplier: '/api/suppliers/' + id,
-        customer: '/api/customers/' + id,
-        product: '/api/stocks/' + id + '/details'
+        customer: '/api/customers/' + id
     }[kind];
     return postJson(path, data, 'PUT');
 }

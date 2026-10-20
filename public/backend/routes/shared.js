@@ -148,6 +148,8 @@ const RECORD_QUERIES = {
 // both routes, so a role that cannot put a record away cannot restore it
 // either (the route rule above lets a clerk reach both routes, so the kind of
 // record is checked here). The procedure holds the rules for each kind.
+// Sales and Delivery are listed for restoring only: one put away before they
+// stopped being archivable can still be brought back (ARCHIVABLE below).
 const ARCHIVE_ROLES = {
   Inventory: [CLERK, ADMIN, MANAGER],
   Sales: MANAGEMENT,
@@ -159,6 +161,11 @@ const ARCHIVE_ROLES = {
   Category: [CLERK, ADMIN, MANAGER],
   Unit: [CLERK, ADMIN, MANAGER]
 };
+
+// What can be put away: customers, products (Inventory), units, categories,
+// suppliers and staff accounts. Sales, deliveries and credit are records of
+// what happened and are never archived.
+const ARCHIVABLE = ["Customer", "Inventory", "Unit", "Category", "Supplier", "Staff"];
 
 // The records archived here, in the server rather than by sp_archive_record:
 // the table, its key, the column holding its name, and what has to be true
@@ -538,41 +545,29 @@ function registerSharedRoutes(app, deps) {
   // ARCHIVES
   app.get("/api/archives", async function (request, response) {
     try {
-      // vw_archives, with who handled the record before it was put away (the
-      // driver who delivered it, the cashier who rang the sale up, the role of
-      // a staff account), then the records archived by the server
+      // what can be archived: staff accounts and products (vw_archives), then
+      // the records archived by the server. Voided sales and deliveries are not
+      // archived data and are not listed.
       const rowsResult = await db.query(
         "SELECT a.module, a.record_id, a.record_name, a.detail, a.archived_at,\n" +
-          "       COALESCE(a.archived_by, 'System') AS archived_by,\n" +
-          "       CASE a.module\n" +
-          "         WHEN 'Delivery' THEN drv.full_name\n" +
-          "         WHEN 'Sales' THEN cas.full_name\n" +
-          "       END AS handled_by,\n" +
-          "       CASE a.module\n" +
-          "         WHEN 'Delivery' THEN 'Delivered By'\n" +
-          "         WHEN 'Sales' THEN 'Cashier'\n" +
-          "       END AS handled_label,\n" +
-          "       CASE a.module WHEN 'Delivery' THEN d.delivered_at END AS handled_at\n" +
+          "       COALESCE(a.archived_by, 'System') AS archived_by\n" +
           "FROM vw_archives a\n" +
-          "LEFT JOIN deliveries d ON a.module = 'Delivery' AND d.delivery_id = a.record_id\n" +
-          "LEFT JOIN staff drv ON drv.staff_id = d.delivery_staff_id\n" +
-          "LEFT JOIN sales sa ON a.module = 'Sales' AND sa.sale_id = a.record_id\n" +
-          "LEFT JOIN staff cas ON cas.staff_id = sa.cashier_staff_id\n" +
+          "WHERE a.module IN ('Staff', 'Inventory')\n" +
           "UNION ALL\n" +
           "SELECT 'Supplier', x.supplier_id, x.supplier_name, x.contact_person, x.archived_at,\n" +
-          "       COALESCE(a.full_name, 'System'), NULL, NULL, NULL\n" +
+          "       COALESCE(a.full_name, 'System')\n" +
           "FROM suppliers x LEFT JOIN staff a ON a.staff_id = x.archived_by_staff_id WHERE x.is_archived = TRUE\n" +
           "UNION ALL\n" +
           "SELECT 'Customer', x.customer_id, x.full_name, x.phone, x.archived_at,\n" +
-          "       COALESCE(a.full_name, 'System'), NULL, NULL, NULL\n" +
+          "       COALESCE(a.full_name, 'System')\n" +
           "FROM customers x LEFT JOIN staff a ON a.staff_id = x.archived_by_staff_id WHERE x.is_archived = TRUE\n" +
           "UNION ALL\n" +
           "SELECT 'Category', x.category_id, x.category_name, NULL, x.archived_at,\n" +
-          "       COALESCE(a.full_name, 'System'), NULL, NULL, NULL\n" +
+          "       COALESCE(a.full_name, 'System')\n" +
           "FROM categories x LEFT JOIN staff a ON a.staff_id = x.archived_by_staff_id WHERE x.is_archived = TRUE\n" +
           "UNION ALL\n" +
           "SELECT 'Unit', x.unit_id, x.unit_name, NULL, x.archived_at,\n" +
-          "       COALESCE(a.full_name, 'System'), NULL, NULL, NULL\n" +
+          "       COALESCE(a.full_name, 'System')\n" +
           "FROM units x LEFT JOIN staff a ON a.staff_id = x.archived_by_staff_id WHERE x.is_archived = TRUE\n" +
           "ORDER BY archived_at DESC, module"
       );
@@ -632,6 +627,26 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
+  // Voiding a sale: same day only, goods not out for delivery, stock back on
+  // the shelf (sp_archive_record holds the rules). A voided sale reads Voided
+  // in Sales Transactions; it is not archived data and is not on Archives.
+  app.post("/api/sales/:saleId/void", async function (request, response) {
+    const saleId = Number(request.params.saleId);
+    if (!saleId) return response.status(400).json({ error: "Say which sale to void." });
+
+    try {
+      const output = await sharedProcedures.archiveRecord(["Sales", saleId, getActorId(request)]);
+      if (output.status_code !== 200) {
+        return response.status(output.status_code).json({ error: output.message });
+      }
+      await announceArchiveChange(request, "Sales", "voided", saleId);
+      response.json({ message: output.message });
+    } catch (error) {
+      console.error("Void sale failed:", error.message);
+      response.status(500).json({ error: "Unable to void the sale" });
+    }
+  });
+
   app.post("/api/archives/archive", async function (request, response) {
     const module = request.body.module;
     const recordId = request.body.recordId;
@@ -640,6 +655,11 @@ function registerSharedRoutes(app, deps) {
       return response.status(400).json({ error: "Module and record id are required" });
     }
 
+    if (!ARCHIVABLE.includes(module)) {
+      return response.status(400).json({
+        error: "Only customers, products, units, categories, suppliers and staff accounts can be archived."
+      });
+    }
     const allowed = ARCHIVE_ROLES[module];
     if (!allowed || !allowed.includes(request.actor.roleName)) {
       return response.status(403).json({ error: "Your role cannot archive " + module + " records." });

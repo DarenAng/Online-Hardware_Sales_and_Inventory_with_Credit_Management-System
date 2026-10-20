@@ -117,6 +117,7 @@ const FEATURES = [
     description: "Every sale rung up, with its lines and its payments.",
     available: [MANAGER], defaults: [MANAGER],
     routes: [["GET", /^\/api\/sales$/], ["GET", /^\/api\/sales\/\d+$/], ["POST", /^\/api\/sales\/\d+\/payment$/],
+             ["POST", /^\/api\/sales\/\d+\/void$/],
              ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
              ["POST", /^\/api\/qr-payments\/\d+\/cancel$/]] },
 
@@ -221,11 +222,11 @@ const FEATURES = [
 
   // --- records ---
   { key: "records", name: "Records", module: "Records",
-    description: "Suppliers, customers, products, categories and units. The manager adds and edits suppliers, customers and products and archives records; the clerk alone adds categories and units.",
+    description: "Suppliers, customers, products, categories and units. The manager edits suppliers and customers, prices products and archives records (only the clerk edits a product); the clerk alone adds categories and units.",
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
     routes: [["POST", /^\/api\/categories$/], ["POST", /^\/api\/units$/],
              ["PUT", /^\/api\/suppliers\/\d+$/], ["PUT", /^\/api\/customers\/\d+$/],
-             ["PUT", /^\/api\/stocks\/\d+\/details$/], ["PUT", /^\/api\/stocks\/\d+\/price$/]] },
+             ["PUT", /^\/api\/stocks\/\d+\/price$/]] },
   { key: "archives", name: "Archives", module: "Records",
     description: "What has been put away, and restoring it.",
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],

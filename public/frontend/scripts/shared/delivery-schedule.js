@@ -288,7 +288,6 @@ function renderDeliverySchedule() {
     const canOpen = typeof showDeliveryRecord === 'function';
     // the driver moves a delivery along; the manager reads the schedule only
     const canUpdate = typeof hasRole === 'function' && hasRole('Delivery Personnel');
-    const canArchive = false;
 
     // a filter on driver or status means every row says the same there,
     // so that column is not drawn (tables.js hides the columns listed here)
@@ -321,7 +320,6 @@ function renderDeliverySchedule() {
         '<tbody>' + rowsHtml + '</tbody></table></div>';
 
     body.dataset.canUpdate = canUpdate ? '1' : '';
-    body.dataset.canArchive = canArchive ? '1' : '';
 }
 
 // ---------- sorting by pressing a column header ----------
@@ -380,5 +378,5 @@ function openScheduledDelivery(deliveryId) {
         }
     }
 
-    showDeliveryRecord(delivery, canUpdate, Boolean(body && body.dataset.canArchive));
+    showDeliveryRecord(delivery, canUpdate);
 }
