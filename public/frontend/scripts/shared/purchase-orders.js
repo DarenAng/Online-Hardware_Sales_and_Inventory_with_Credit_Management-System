@@ -1631,11 +1631,7 @@ function buildPurchaseOrderPanel() {
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
             (poSetup.showLines ? '<td class="cell-num">' + po.line_count + '</td>' : '') +
             '<td class="cell-num">' + poValueCell(po) + '</td>' +
-            '<td>' + poStatusBadge(po) +
-                (Number(po.missing_reports) > 0
-                    ? ' <span class="badge badge-danger" title="The stockroom reported goods missing from this delivery">' +
-                      po.missing_reports + ' missing reported</span>'
-                    : '') + '</td></tr>';
+            '<td>' + poStatusBadge(po) + '</td></tr>';
         }
     });
 }
@@ -2699,10 +2695,10 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     let items = [];
     try { items = await apiGetPurchaseOrderItems(poId); } catch (error) { items = []; }
 
-    // what the stockroom reported missing from this order's delivery
-    let reports = [];
-    if (Number(po.missing_reports) > 0) {
-        try { reports = await apiGetPurchaseOrderReports(poId); } catch (error) { reports = []; }
+    // a received order's delivery Report: what came in under or over the order
+    let report = null;
+    if (po.status === 'Received') {
+        try { report = await apiGetPurchaseOrderReport(poId); } catch (error) { report = null; }
     }
 
     const waiting = po.status === 'For Approval';
@@ -2865,35 +2861,52 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     }
 
     // one wide page: the facts and the supplier's contact on the left, every
-    // material on the right; a very long order scrolls. Missing-goods reports
-    // filed against the order get a page of their own.
+    // material on the right; a very long order scrolls. A delivery that came
+    // in under or over the order gets a Report page of its own.
     const pages = [
         { label: 'Order', body: '<div class="po-detail-layout">' +
             '<div class="po-detail-facts">' + summary + contact + '</div>' +
             '<div class="po-detail-lines"><h4 class="detail-subhead">Ordered Items</h4>' + lines + '</div>' +
           '</div>' }
     ];
-    if (reports.length > 0) {
-        const reportRows = [];
-        for (let i = 0; i < reports.length; i++) {
-            const r = reports[i];
-            reportRows.push([
-                escapeHtml(String(r.return_date).slice(0, 16)),
-                escapeHtml(r.product_name),
-                escapeHtml(qtyText(r.quantity, r.unit_name)),
-                escapeHtml(r.reason || ''),
-                escapeHtml(r.reported_by || 'Not recorded'),
-                statusBadge(r.status)
-            ]);
-        }
-        pages.push({ label: 'Missing Reports (' + reports.length + ')',
-            body: '<p class="detail-note detail-warn">The stockroom reported these goods missing from this ' +
-                  'order\'s delivery.</p>' +
-                  detailTable(['Reported', 'Material', 'Qty Missing', 'Reason', 'Reported By', 'Status'],
-                      reportRows, [2]) });
+    if (report && report.lines && report.lines.length > 0) {
+        pages.push({ label: 'Report', body: poDeliveryReportHtml(report) });
     }
     openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(poStage(po)), 'P' + po.po_id,
         pages, foot, { wide: 'xl', scroll: true });
+}
+
+// The delivery Report: who counted the delivery in and when, then each
+// material with how many were missing or over and why (Under-delivery or
+// Over-delivery), then the clerk's remarks.
+function poDeliveryReportHtml(report) {
+    let rows = '';
+    for (let i = 0; i < report.lines.length; i++) {
+        const line = report.lines[i];
+        const under = line.reason === 'Under-delivery';
+        rows += '<tr>' +
+            '<td>' + escapeHtml(line.product_name) + '</td>' +
+            '<td>' + escapeHtml(qtyText(line.quantity, line.unit_name || '')) +
+                ' <span class="muted">' + (under ? 'missing' : 'over') + '</span></td>' +
+            '<td><span class="badge ' + (under ? 'badge-warning' : 'badge-info') + '">' +
+                escapeHtml(line.reason) + '</span></td>' +
+            '</tr>';
+    }
+
+    return '<div class="po-report">' +
+            '<div class="po-report-head">' +
+                '<p><span class="po-report-label">Reported by:</span> ' +
+                    (report.reported_by ? escapeHtml(report.reported_by) : '<span class="muted">Not recorded</span>') + '</p>' +
+                '<p><span class="po-report-label">Date reported:</span> ' +
+                    (report.reported_at ? escapeHtml(poWhen(report.reported_at)) : '<span class="muted">Not recorded</span>') + '</p>' +
+            '</div>' +
+            '<table class="po-report-table">' +
+                '<thead><tr><th>Material</th><th>Quantity</th><th>Reason</th></tr></thead>' +
+                '<tbody>' + rows + '</tbody>' +
+            '</table>' +
+            '<p class="po-report-remarks"><span class="po-report-label">Remarks:</span> ' +
+                (report.remarks ? escapeHtml(report.remarks) : '<span class="muted">None</span>') + '</p>' +
+        '</div>';
 }
 
 // The manager's decision. Approving asks once; declining asks for the reason,

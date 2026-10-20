@@ -954,6 +954,19 @@ async function migratePasswordResets() {
   console.log("Added the password_resets table for signing in again with a code sent by email.");
 }
 
+// The clerk's remarks on a delivery, typed when it is counted in on Stock
+// Adjustment and shown on the order's Report (under- or over-delivery).
+async function migrateDeliveryRemarks() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'delivery_remarks'",
+    [DB_NAME]
+  );
+  if (columnsResult[0].length > 0) return;
+  await db.query("ALTER TABLE purchase_orders ADD COLUMN delivery_remarks VARCHAR(255) NULL AFTER received_at");
+  console.log("Added purchase_orders.delivery_remarks, the clerk's remarks on a delivery.");
+}
+
 // The clerk's Reference card on Stock Adjustment. Receiving corrects a
 // purchase order's lines to what arrived; the lines as they were ordered are
 // copied into purchase_order_ordered_items first, and the day it was received
@@ -1630,6 +1643,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateRemoveDeliveryAreas();
   await migratePasswordResets();
   await migrateOrderReference();
+  await migrateDeliveryRemarks();
   await migrateSupplierResponse();
   await migrateSupplierQuote();
   await migrateQrPayments();

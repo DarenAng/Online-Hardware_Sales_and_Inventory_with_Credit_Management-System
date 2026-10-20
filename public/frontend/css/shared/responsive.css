@@ -719,6 +719,39 @@
     .po-detail-lines .detail-subhead:first-child { margin-top: 4px; }
 }
 
+/* AN ORDER'S DELIVERY REPORT -- laid out like the paper form: who and when on
+   top, a ruled Material / Quantity / Reason table, then the remarks */
+.po-report { padding: 4px 2px; }
+.po-report-head {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 24px;
+    margin-bottom: 14px;
+}
+.po-report-head p, .po-report-remarks { margin: 0; font-size: 15px; color: var(--ink); }
+.po-report-label { font-weight: 600; color: var(--steel); margin-right: 4px; }
+.po-report-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 2px solid var(--ink);
+}
+.po-report-table th,
+.po-report-table td {
+    border: 1.5px solid var(--ink);
+    padding: 10px 14px;
+    text-align: left;
+    vertical-align: top;
+}
+.po-report-table th {
+    background: transparent;
+    color: var(--ink);
+    font-weight: 600;
+    border-radius: 0;
+}
+.po-report-table td { font-size: 15px; }
+.po-report-remarks { margin-top: 14px; }
+
 /* Print PDF on an order's card or its page: the order's document alone, wherever
    the screen was (shared/purchase-orders.js printPurchaseOrderNow) */
 @media print {

@@ -438,6 +438,12 @@ td.cell-num .stock-level { margin-left: auto; }
 .adjust-lines-table thead th { position: sticky; top: 0; z-index: 1; }
 .adjust-lines-table .cell-sub { display: block; font-size: 12px; color: var(--steel-soft); }
 .adjust-line-qty { width: 100px; margin-left: auto; text-align: right; }
+/* under or over the order, as the clerk types what arrived */
+.adjust-line-note { display: block; font-size: 12px; font-weight: 600; }
+.adjust-line-note:empty { display: none; }
+.adjust-line-note.is-under { color: var(--signal-ink); }
+.adjust-line-note.is-over { color: var(--go); }
+.adjust-line-note.is-bad { color: var(--stop-hi); }
 
 @media (max-width: 640px) {
     .adjust-source { flex-direction: column; }

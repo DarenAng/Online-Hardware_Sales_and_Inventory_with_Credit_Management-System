@@ -746,9 +746,7 @@ function registerInventoryRoutes(app, deps) {
         "COALESCE(SUM(i.quantity), 0) AS total_units, " +
         "COALESCE(SUM(i.line_cost), 0) AS goods_cost, " +
         "po.discount, " +
-        "COALESCE(SUM(i.line_cost), 0) - po.discount AS total_cost, " +
-        // reports the clerk filed against this order (goods missing from its delivery)
-        "(SELECT COUNT(*) FROM returned_items r WHERE r.po_id = po.po_id) AS missing_reports " +
+        "COALESCE(SUM(i.line_cost), 0) - po.discount AS total_cost " +
         "FROM purchase_orders po " +
         "JOIN suppliers s ON s.supplier_id = po.supplier_id " +
         "LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id " +
@@ -793,25 +791,93 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The reports filed against one order: goods the clerk found missing from its
-  // delivery. Read by the manager's order card as well as the clerk's.
+  // The delivery Report on one received order: every material that came in
+  // under or over what was ordered, by how much, who counted it in and when,
+  // and the clerk's remarks. Worked out from the lines as they were ordered
+  // (purchase_order_ordered_items) against the lines as received
+  // (purchase_order_items). Read by the manager's order card as well as the
+  // clerk's. lines is empty when the delivery matched the order, or when the
+  // order was received before the ordered lines were kept.
   app.get("/api/purchase-orders/:poId/reports", async function (request, response) {
+    const poId = Number(request.params.poId);
     try {
-      const rowsResult = await db.query(
-        "SELECT r.return_id, r.report_type, r.quantity, r.reason, r.status, r.return_date, " +
-        "p.product_name, u.unit_name, st.full_name AS reported_by " +
-        "FROM returned_items r " +
-        "JOIN products p ON p.product_id = r.product_id " +
-        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
-        "LEFT JOIN staff st ON st.staff_id = r.reported_by_staff_id " +
-        "WHERE r.po_id = ? " +
-        "ORDER BY r.return_date DESC, r.return_id DESC",
-        [request.params.poId]
+      const ordersResult = await db.query(
+        "SELECT po.po_id, po.status, po.received_at, po.delivery_remarks, " +
+        "(SELECT st.full_name FROM audit_logs a JOIN staff st ON st.staff_id = a.staff_id " +
+        " WHERE a.action = 'PO_RECEIVED' AND a.details LIKE CONCAT('PO #', po.po_id, ' received%') " +
+        " ORDER BY a.log_id DESC LIMIT 1) AS reported_by " +
+        "FROM purchase_orders po WHERE po.po_id = ?",
+        [poId]
       );
-      response.json(rowsResult[0]);
+      const order = ordersResult[0][0];
+      if (!order) return response.status(404).json({ error: "That purchase order does not exist" });
+
+      const report = {
+        reported_by: order.reported_by || null,
+        reported_at: order.received_at || null,
+        remarks: order.delivery_remarks || null,
+        lines: []
+      };
+      if (order.status !== "Received") return response.json(report);
+
+      const orderedResult = await db.query(
+        "SELECT o.product_id, SUM(o.quantity) AS quantity, p.product_name, u.unit_name " +
+        "FROM purchase_order_ordered_items o " +
+        "JOIN products p ON p.product_id = o.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "WHERE o.po_id = ? GROUP BY o.product_id, p.product_name, u.unit_name " +
+        "ORDER BY MIN(o.ordered_item_id)",
+        [poId]
+      );
+      const ordered = orderedResult[0];
+      // an order received before the ordered lines were kept has nothing to compare
+      if (ordered.length === 0) return response.json(report);
+
+      const receivedResult = await db.query(
+        "SELECT i.product_id, SUM(i.quantity) AS quantity, p.product_name, u.unit_name " +
+        "FROM purchase_order_items i " +
+        "JOIN products p ON p.product_id = i.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "WHERE i.po_id = ? GROUP BY i.product_id, p.product_name, u.unit_name " +
+        "ORDER BY MIN(i.po_item_id)",
+        [poId]
+      );
+      const received = receivedResult[0];
+
+      const arrived = {};
+      for (let i = 0; i < received.length; i++) {
+        arrived[received[i].product_id] = Number(received[i].quantity) || 0;
+      }
+      const wasOrdered = {};
+
+      // the ordered lines, in their order, then anything that came without being ordered
+      for (let i = 0; i < ordered.length; i++) {
+        const line = ordered[i];
+        wasOrdered[line.product_id] = true;
+        const difference = (arrived[line.product_id] || 0) - (Number(line.quantity) || 0);
+        if (difference === 0) continue;
+        report.lines.push({
+          product_name: line.product_name,
+          unit_name: line.unit_name,
+          quantity: Math.abs(difference),
+          reason: difference < 0 ? "Under-delivery" : "Over-delivery"
+        });
+      }
+      for (let i = 0; i < received.length; i++) {
+        const line = received[i];
+        if (wasOrdered[line.product_id] || !(Number(line.quantity) > 0)) continue;
+        report.lines.push({
+          product_name: line.product_name,
+          unit_name: line.unit_name,
+          quantity: Number(line.quantity),
+          reason: "Over-delivery"
+        });
+      }
+
+      response.json(report);
     } catch (error) {
-      console.error("PO reports failed:", error.message);
-      response.status(500).json({ error: "Unable to read the reports on this order" });
+      console.error("PO report failed:", error.message);
+      response.status(500).json({ error: "Unable to read the report on this order" });
     }
   });
 
@@ -1636,6 +1702,13 @@ function registerInventoryRoutes(app, deps) {
 
       if (output.status_code !== 200) {
         return response.status(output.status_code).json({ error: output.message });
+      }
+
+      // the clerk's remarks on the delivery, for the order's Report
+      const remarks = shortText(body.remarks, 255);
+      if (remarks) {
+        await db.query("UPDATE purchase_orders SET delivery_remarks = ? WHERE po_id = ?",
+          [remarks, Number(request.params.poId)]);
       }
 
       response.json({ message: output.message, lines: output.lines, extras: output.extras });

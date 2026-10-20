@@ -1366,16 +1366,21 @@ function renderAdjustForm() {
     show('adjust-qty-field', kind === 'material');
     // an order is always added to stock, so it has no type to choose
     show('adjust-type-field', kind !== 'po');
-    // receiving an order writes its own reason
-    show('adjust-reason-field', kind !== 'po');
-
     const reasonLabel = document.getElementById('adjust-reason-label');
     const reason = document.getElementById('adjust-reason');
     if (reasonLabel) {
-        reasonLabel.innerHTML = kind === 'return'
-            ? 'Note <span class="label-hint">optional</span>' : 'Reason';
+        let label = 'Reason';
+        if (kind === 'return') label = 'Note <span class="label-hint">optional</span>';
+        // an order's remarks go on its delivery Report
+        else if (kind === 'po') label = 'Remarks <span class="label-hint">optional, shown on the order\'s report</span>';
+        reasonLabel.innerHTML = label;
     }
-    if (reason) reason.placeholder = kind === 'return' ? 'Box unopened, seals intact' : 'Damaged on the shelf';
+    if (reason) {
+        let hint = 'Damaged on the shelf';
+        if (kind === 'return') hint = 'Box unopened, seals intact';
+        else if (kind === 'po') hint = 'Two boxes to follow next week';
+        reason.placeholder = hint;
+    }
 
     renderAdjustTypeOptions(kind);
     renderAdjustSource();
@@ -1477,10 +1482,11 @@ function renderAdjustLines() {
             const item = items[i];
             rows += '<tr>' +
                 '<td class="cell-name">' + escapeHtml(item.product_name) +
-                    '<span class="cell-sub">Ordered ' + escapeHtml(poQuantityText(item)) + '</span></td>' +
+                    '<span class="cell-sub">Ordered ' + escapeHtml(poQuantityText(item)) + '</span>' +
+                    '<span class="adjust-line-note" id="adjust-line-note-' + i + '"></span></td>' +
                 '<td>' + escapeHtml(item.unit_name || '') + '</td>' +
                 '<td class="cell-num"><input type="number" class="form-control adjust-line-qty" ' +
-                    'id="adjust-line-qty-' + i + '" min="0" step="0.001" value="' + Number(item.quantity) + '" ' +
+                    'id="adjust-line-qty-' + i + '" min="0" step="1" value="' + Number(item.quantity) + '" ' +
                     'oninput="renderAdjustPreview()" aria-label="Quantity arrived: ' + escapeHtml(item.product_name) + '"></td>' +
                 '</tr>';
         }
@@ -1550,19 +1556,29 @@ function renderSourcePreview(box) {
         const lines = poAdjustLines();
         let total = 0;
         let blank = false;
+        let off = 0;
         for (let i = 0; i < lines.length; i++) {
-            if (!Number.isFinite(lines[i].quantity) || lines[i].quantity < 0) blank = true;
+            const state = poLineState(lines[i]);
+            const note = document.getElementById('adjust-line-note-' + i);
+            if (note) {
+                note.className = 'adjust-line-note' + (state.kind ? ' is-' + state.kind : '');
+                note.textContent = state.text;
+            }
+            if (state.kind === 'bad') blank = true;
             else if (lines[i].quantity > 0) total++;
+            if (state.kind === 'under' || state.kind === 'over') off++;
         }
         if (blank) {
             box.className = 'adjust-preview is-stop';
-            box.textContent = 'Every line needs a quantity of 0 or more. Type 0 for what did not arrive.';
+            box.textContent = 'Every line needs a whole number of 0 or more. Type 0 for what did not arrive.';
             return;
         }
         box.className = 'adjust-preview is-good';
         box.innerHTML = '<span class="preview-name">PO #' + escapeHtml(String(adjustSource.po.po_id)) + '</span>' +
             '<span class="preview-figures">' + total + ' of ' + lines.length +
-                (lines.length === 1 ? ' item' : ' items') + ' will be added to stock</span>';
+                (lines.length === 1 ? ' item' : ' items') + ' will be added to stock</span>' +
+            (off > 0 ? '<span class="preview-note">' + off + (off === 1 ? ' item differs' : ' items differ') +
+                ' from the order, so a Report is added to the order.</span>' : '');
         return;
     }
 
@@ -1575,6 +1591,18 @@ function renderSourcePreview(box) {
             ? 'Back on the shelf: ' + items.length + (items.length === 1 ? ' item' : ' items')
             : 'Discarded: ' + items.length + (items.length === 1 ? ' item' : ' items')) + '</span>' +
         '<span class="preview-note">The report' + (items.length === 1 ? ' is' : 's are') + ' then closed.</span>';
+}
+
+// One order line against what was ordered: kind is '' (as ordered), 'under',
+// 'over' or 'bad' (not a whole number of 0 or more); text says so for the line.
+function poLineState(line) {
+    const quantity = line.quantity;
+    if (!Number.isInteger(quantity) || quantity < 0) return { kind: 'bad', text: 'Type a whole number, 0 or more.' };
+    const difference = quantity - Number(line.item.quantity);
+    const unit = line.item.unit_name || '';
+    if (difference < 0) return { kind: 'under', text: 'Under-delivery: ' + qtyText(-difference, unit) + ' missing' };
+    if (difference > 0) return { kind: 'over', text: 'Over-delivery: ' + qtyText(difference, unit) + ' over' };
+    return { kind: '', text: '' };
 }
 
 // what each line of the order says arrived, in the material's own unit
@@ -1662,16 +1690,18 @@ async function applyPoAdjustment() {
     if (lines.length === 0) { notifyWarning('This order has no items to add.', 'Nothing to add'); return; }
 
     const received = [];
-    let short = 0;
+    const differs = [];
     for (let i = 0; i < lines.length; i++) {
         const quantity = lines[i].quantity;
-        if (!Number.isFinite(quantity) || quantity < 0) {
-            notifyWarning('Type how many of ' + lines[i].item.product_name + ' arrived, or 0.', 'Quantity needed');
+        const state = poLineState(lines[i]);
+        if (state.kind === 'bad') {
+            notifyWarning('Type how many of ' + lines[i].item.product_name + ' arrived, as a whole number, or 0.',
+                'Quantity needed');
             const field = document.getElementById('adjust-line-qty-' + i);
             if (field) field.focus();
             return;
         }
-        if (quantity < Number(lines[i].item.quantity)) short++;
+        if (state.kind) differs.push(lines[i].item.product_name + ': ' + state.text);
         received.push({
             productId: lines[i].item.product_id,
             quantity: quantity,
@@ -1679,19 +1709,24 @@ async function applyPoAdjustment() {
         });
     }
 
+    const form = document.getElementById('adjust-form');
+    const remarks = form ? form.elements.reason.value.trim() : '';
+
     const yes = await askConfirm(
         'The quantities on the form go onto the shelf, and purchase order #' + po.po_id + ' is marked Received.' +
-        (short > 0 ? ' ' + short + (short === 1 ? ' line came' : ' lines came') +
-            ' in under the order, and the order will say so.' : ''),
-        { title: 'Add this delivery to stock?', eyebrow: 'Stock Adjustment', confirmLabel: 'Add to stock' });
+        (differs.length > 0 ? ' The delivery differs from the order, so a Report is added to the order.' : ''),
+        { title: 'Add this delivery to stock?', eyebrow: 'Stock Adjustment', confirmLabel: 'Add to stock',
+          detail: differs.length > 0 ? differs : undefined });
     if (!yes) return;
 
     try {
-        const response = await apiReceivePurchaseOrder(po.po_id, received, Number(po.discount) || 0);
+        const response = await apiReceivePurchaseOrder(po.po_id, received, Number(po.discount) || 0, remarks);
         const result = await response.json();
         if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
 
-        notifySuccess(result.message, 'Delivery added to stock');
+        notifySuccess(result.message + (differs.length > 0 ? ' A Report was added to the order.' : ''),
+            'Delivery added to stock');
+        if (form) form.elements.reason.value = '';
         if (typeof poMaterialsLoaded !== 'undefined') poMaterialsLoaded = false;
         setAdjustSource(null);
 
