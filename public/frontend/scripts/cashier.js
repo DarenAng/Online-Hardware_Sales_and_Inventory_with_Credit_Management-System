@@ -2345,8 +2345,7 @@ async function openReceipt(saleId, fromReport) {
         taxHtml: receiptTaxBlock(s),
         paid: s.payment_status === 'Paid',
         balanceText: s.payment_status.toUpperCase() + ' BALANCE ' + peso(saleAmountDue(s) - Number(s.amount_paid)),
-        detailsHtml: paymentDetailsReceiptHtml(paymentDetailItems(data), true),
-        bankHtml: receiptBankBlock(shop, s, receiptNo)
+        detailsHtml: paymentDetailsReceiptHtml(paymentDetailItems(data), true)
     });
 
     renderVoidButton(fromReport ? data : null);
@@ -2468,31 +2467,6 @@ async function showPaymentReceipt(info) {
     renderVoidButton(null);
 
     showModal('receipt-modal');
-}
-
-// The shop's account on the invoice, as the way to pay when the sale leaves a
-// balance, with the invoice number to quote so the money can be matched to this
-// sale when it lands. (A transfer taken at the counter shows the customer's own
-// bank and account instead: paymentDetailsReceiptHtml.)
-function receiptBankBlock(shop, sale, receiptNo) {
-    if (!shop || !shop.bank_account_number) return '';
-
-    const balance = saleAmountDue(sale) - Number(sale.amount_paid);
-    const owing = sale.payment_status !== 'Paid' && balance > 0.004;
-
-    if (!owing) return '';
-
-    const quoteHtml = '<p class="rc-bank-note">Quote <strong>' + escapeHtml(receiptNo) + '</strong> as the transfer ' +
-        'reference, so the payment is matched to this invoice.</p>';
-
-    return '<div class="rc-rule"></div>' +
-        '<div class="rc-bank">' +
-            '<p class="rc-bank-head">Pay the balance by bank transfer</p>' +
-            '<div><span>Bank</span><span>' + escapeHtml(shop.bank_name) + '</span></div>' +
-            '<div><span>Account name</span><span>' + escapeHtml(shop.bank_account_name) + '</span></div>' +
-            '<div><span>Account no.</span><span>' + escapeHtml(shop.bank_account_number) + '</span></div>' +
-            quoteHtml +
-        '</div>';
 }
 
 function printReceipt() {

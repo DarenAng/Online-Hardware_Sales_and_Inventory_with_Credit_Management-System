@@ -3007,15 +3007,6 @@ function renderStorePreview() {
               '<div><span>Exempt Sales</span><span>' + peso(0) + '</span></div></div>';
     }
 
-    let bank = '';
-    if (shop.bank_account_number) {
-        bank = '<div class="rc-rule"></div><div class="rc-bank">' +
-            '<p class="rc-bank-head">Paid by bank transfer</p>' +
-            '<div><span>Bank</span><span>' + escapeHtml(shop.bank_name) + '</span></div>' +
-            '<div><span>Account name</span><span>' + escapeHtml(shop.bank_account_name) + '</span></div>' +
-            '<div><span>Account no.</span><span>' + escapeHtml(shop.bank_account_number) + '</span></div></div>';
-    }
-
     const now = new Date();
     applyReceiptPaper(box, shop);
     box.innerHTML = receiptHtml(shop, {
@@ -3038,8 +3029,7 @@ function renderStorePreview() {
             { label: 'Change', value: peso(0) }
         ],
         taxHtml: tax,
-        paid: true,
-        bankHtml: bank
+        paid: true
     });
 }
 
@@ -3133,8 +3123,7 @@ function previewPartsFor(box, form, name) {
         case 'show_tax':          return { parts: firstFound(all('.rc-tax'), all('.rc-totals')) };
         case 'bankName':
         case 'bankAccountName':
-        case 'bankAccountNumber':
-        case 'show_bank':         return { parts: firstFound(all('.rc-bank'), all('.rc-foot')) };
+        case 'bankAccountNumber': return { parts: all('.rc-foot') };
         case 'title':             return { parts: firstFound(all('.rc-line'), all('.rc-no')) };
         case 'show_item_count':   return { parts: all('.rc-due') };
         case 'invoiceNote':
