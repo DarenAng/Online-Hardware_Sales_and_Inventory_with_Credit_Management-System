@@ -718,6 +718,111 @@ async function handleDriverRefund(event) {
     }
 }
 
+// ---------- the Period box on each list ----------
+// Pending Deliveries, Deliveries Handled and Payments Collected each pick their
+// dates with one Period box. A named period fills the From and To boxes itself
+// and keeps them out of sight; Custom date shows them for the driver to set.
+// Pending has All as well (every active delivery, whatever its scheduled day).
+const DRIVER_PERIODS = [
+    ['today', 'Today', 0],
+    ['7d', 'Last 7 days', 6],
+    ['30d', 'Last 30 days', 29],
+    ['90d', 'Last 90 days', 89],
+    ['6m', 'Last 6 months', 182],
+    ['12m', 'Last 12 months', 364]
+];
+
+// each list: what it starts on, and what it does once its dates have changed
+const DRIVER_PERIOD_LISTS = {
+    dpend: { first: 'all', apply: function (from, to) {
+        dataPanelFilter('driver-pending', 'from', from);
+        dataPanelFilter('driver-pending', 'to', to);
+    } },
+    dhand: { first: 'today', apply: function () { reportDatesPicked('driver-report', 'dhand-from', 'dhand-to'); } },
+    dpay:  { first: 'today', apply: function () { reportDatesPicked('driver-report-pay', 'dpay-from', 'dpay-to'); } }
+};
+
+// the From and To a named period stands for ('' and '' for All)
+function driverPeriodDates(value) {
+    if (value === 'all') return { from: '', to: '' };
+    for (let i = 0; i < DRIVER_PERIODS.length; i++) {
+        if (DRIVER_PERIODS[i][0] !== value) continue;
+        const start = new Date();
+        start.setDate(start.getDate() - DRIVER_PERIODS[i][2]);
+        return { from: dateText(start), to: todayText() };
+    }
+    return null;
+}
+
+function showDriverPeriodDates(prefix, show) {
+    const ids = [prefix + '-from', prefix + '-to'];
+    for (let i = 0; i < ids.length; i++) {
+        const box = document.getElementById(ids[i]);
+        const field = box ? box.closest('.toolbar-field') : null;
+        if (field) field.hidden = !show;
+    }
+}
+
+// fills each Period box with its choices, and its dates with its first period
+function buildDriverPeriodBoxes() {
+    for (const prefix in DRIVER_PERIOD_LISTS) {
+        const select = document.getElementById(prefix + '-period');
+        if (!select) continue;
+
+        let html = prefix === 'dpend' ? '<option value="all">All</option>' : '';
+        for (let i = 0; i < DRIVER_PERIODS.length; i++) {
+            html += '<option value="' + DRIVER_PERIODS[i][0] + '">' + escapeHtml(DRIVER_PERIODS[i][1]) + '</option>';
+        }
+        html += '<option value="custom">Custom date...</option>';
+        select.innerHTML = html;
+        select.value = DRIVER_PERIOD_LISTS[prefix].first;
+
+        const dates = driverPeriodDates(select.value);
+        document.getElementById(prefix + '-from').value = dates.from;
+        document.getElementById(prefix + '-to').value = dates.to;
+        showDriverPeriodDates(prefix, false);
+    }
+}
+
+// A Period box changed: Custom date shows the dates and waits for them; any
+// other period fills them in and the list follows at once.
+function driverPeriodPicked(prefix) {
+    const select = document.getElementById(prefix + '-period');
+    const list = DRIVER_PERIOD_LISTS[prefix];
+    if (!select || !list) return;
+
+    if (select.value === 'custom') {
+        showDriverPeriodDates(prefix, true);
+        const from = document.getElementById(prefix + '-from');
+        if (from) from.focus();
+        return;
+    }
+
+    showDriverPeriodDates(prefix, false);
+    const dates = driverPeriodDates(select.value);
+    document.getElementById(prefix + '-from').value = dates.from;
+    document.getElementById(prefix + '-to').value = dates.to;
+    list.apply(dates.from, dates.to);
+}
+
+// A list put back after a reload brings its dates back but not its Period box:
+// dates that are not the period shown make the box read Custom date, with the
+// dates beside it. Runs whenever a list changes.
+function syncDriverPeriodBoxes() {
+    for (const prefix in DRIVER_PERIOD_LISTS) {
+        const select = document.getElementById(prefix + '-period');
+        const from = document.getElementById(prefix + '-from');
+        const to = document.getElementById(prefix + '-to');
+        if (!select || !from || !to) continue;
+
+        if (select.value !== 'custom') {
+            const dates = driverPeriodDates(select.value);
+            if (!dates || dates.from !== from.value || dates.to !== to.value) select.value = 'custom';
+        }
+        showDriverPeriodDates(prefix, select.value === 'custom');
+    }
+}
+
 // ---------- the reports ----------
 // Two views, each with its own search box and its own From / To dates. The dates
 // are sent to the server (it sends back the driver's report for that range); the
@@ -773,7 +878,7 @@ function buildReportPanels() {
         // the Balance box narrows the rows already loaded
         filters: { balance: 'all' },
         gate: { title: 'The report is not loaded',
-                text: 'Pick the dates above, or press Load Data for this month so far.',
+                text: 'Pick a period above, or press Load Data.',
                 button: 'Load Data' },
 
         load: async function () {
@@ -820,7 +925,7 @@ function buildReportPanels() {
         // the Method box narrows the rows already loaded
         filters: { method: 'all' },
         gate: { title: 'The report is not loaded',
-                text: 'Pick the dates above, or press Load Data for this month so far.',
+                text: 'Pick a period above, or press Load Data.',
                 button: 'Load Data' },
 
         load: async function () {
@@ -858,7 +963,7 @@ const DRIVER_PRINTS = {
     'driver-report': {
         title: 'Deliveries Handled', searchId: 'dhand-search',
         filterName: 'Balance', filterKey: 'balance',
-        filterLabels: { all: 'All', paid: 'Paid in full', owing: 'With balance' }
+        filterLabels: { all: 'All', paid: 'Fully paid', owing: 'With balance' }
     },
     'driver-report-pay': {
         title: 'Payments Collected', searchId: 'dpay-search',
@@ -999,8 +1104,12 @@ function printDriverReport(key) {
 // ==========================================
 if (window.location.pathname.toLowerCase().endsWith('delivery.html')) {
     document.addEventListener('DOMContentLoaded', function () {
+        buildDriverPeriodBoxes();
         buildDriverPanels();
         buildReportPanels();
+
+        // a list put back after a reload: its Period box follows the dates it came back with
+        document.addEventListener('datapanel:change', syncDriverPeriodBoxes);
 
         // the Print / PDF buttons follow the reports: on once rows are showing
         document.addEventListener('datapanel:change', syncDriverPrintButtons);

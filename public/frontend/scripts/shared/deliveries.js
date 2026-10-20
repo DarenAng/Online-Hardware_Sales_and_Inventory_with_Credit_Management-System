@@ -363,7 +363,7 @@ function openDelayReason(deliveryId, status) {
 
     document.getElementById('delay-subtitle').textContent = 'Delivery #' + deliveryId;
     document.getElementById('delay-title').textContent = failed ? 'Mark Failed' : 'Mark Delayed';
-    document.getElementById('delay-label').textContent = failed ? 'Why it failed' : 'Reason for the delay';
+    document.getElementById('delay-label').textContent = failed ? 'Reason' : 'Reason for the delay';
     document.getElementById('delay-reason').value = '';
 
     const button = document.getElementById('delay-save');
