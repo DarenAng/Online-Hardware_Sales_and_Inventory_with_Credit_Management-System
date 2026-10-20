@@ -2597,8 +2597,8 @@ function openArchivedMaterial(productId) {
 }
 
 // ---------- records: suppliers, products, categories and units ----------
-// To look at only. Adding a supplier, a category or a unit is the manager's
-// (the server refuses it for any other role), so there is no Add button here.
+// Categories and units are added here, by the inventory clerk alone (the server
+// refuses any other role). Suppliers are the manager's to add.
 let clerkRecordType = 'supplier';
 
 const CLERK_RECORD_COLUMNS = {
@@ -2630,6 +2630,7 @@ function showClerkRecordType(type, event) {
     if (title) title.textContent = CLERK_RECORD_TITLES[type];
 
     writeClerkRecordHeaders();
+    syncClerkRecordAddButton();
     if (changed) fillClerkRecordSort();
 
     const panel = getDataPanel('clerk-records');
@@ -2751,6 +2752,56 @@ function buildClerkRecordsPanel() {
                 cells + '</tr>';
         }
     });
+}
+
+// ---------- adding a category or a unit (the clerk's alone) ----------
+const CLERK_RECORD_ADDABLE = {
+    category: { title: 'Add Category', label: 'Category name', max: 50 },
+    unit:     { title: 'Add Unit', label: 'Unit name', max: 20 }
+};
+
+// the Add button names the kind on screen, and goes for suppliers and products
+function syncClerkRecordAddButton() {
+    const button = document.getElementById('clerk-records-add');
+    if (!button) return;
+    const kind = CLERK_RECORD_ADDABLE[clerkRecordType];
+    button.hidden = !kind;
+    if (kind) button.textContent = kind.title;
+}
+
+async function addClerkRecord() {
+    const type = clerkRecordType;
+    const kind = CLERK_RECORD_ADDABLE[type];
+    if (!kind) return;
+
+    const typed = await askInput({
+        title: kind.title,
+        eyebrow: 'Records',
+        message: 'The name must not already be on file.',
+        label: kind.label,
+        confirmLabel: 'Save',
+        check: function (value) {
+            const name = String(value || '').trim();
+            if (name === '') return kind.label + ' is required.';
+            if (name.length > kind.max) return 'At most ' + kind.max + ' characters.';
+            return null;
+        }
+    });
+    if (typed === false || typed === null || typed === undefined) return;
+
+    try {
+        const response = await apiAddCategoryOrUnit(type, String(typed).trim());
+        const body = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, body)) notifyError(body.error, 'Not added');
+            return;
+        }
+        notifySuccess(body.message, kind.title.replace('Add ', '') + ' added');
+        const panel = getDataPanel('clerk-records');
+        if (panel) await panel.open();
+    } catch (error) {
+        notifyOffline();
+    }
 }
 
 // the fields a record's card shows, in order
@@ -3306,6 +3357,7 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         buildInventoryArchivePanel();
         buildClerkRecordsPanel();
         writeClerkRecordHeaders();
+        syncClerkRecordAddButton();
         fillClerkRecordSort();
 
         // the schedule follows what the administrator switched on for this role

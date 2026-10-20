@@ -136,11 +136,12 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/paymongo\/webhook$/,              PUBLIC],
 
   // --- deliveries ---
-  ["POST",  /^\/api\/deliveries$/,                     [CASHIER, MANAGER]],
+  ["POST",  /^\/api\/deliveries$/,                     [CASHIER]],
   ["GET",   /^\/api\/deliveries$/,                     [CASHIER, MANAGER, DRIVER]],
   ["GET",   /^\/api\/deliveries\/drivers$/,            [CASHIER, MANAGER]],
   ["GET",   /^\/api\/deliveries\/\d+\/items$/,         [CASHIER, MANAGER, DRIVER, CLERK]],
-  ["PATCH", /^\/api\/deliveries\/\d+\/status$/,        [DRIVER, MANAGER]],
+  // the driver moves a delivery along; the manager reads the history only
+  ["PATCH", /^\/api\/deliveries\/\d+\/status$/,        [DRIVER]],
   ["GET",   /^\/api\/delivery\/list$/,                 [DRIVER]],
   ["GET",   /^\/api\/delivery\/summary$/,              [DRIVER]],
   ["POST",  /^\/api\/delivery\/\d+\/claim$/,           [DRIVER]],
@@ -159,17 +160,23 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/inventory\/adjust$/,              [CLERK]],
   ["PUT",   /^\/api\/inventory\/reorder\/\d+$/,        [CLERK]],
 
-  // suppliers, categories and units are the manager's to add and correct
+  // suppliers are the manager's to add; categories and units the inventory clerk's alone
   ["POST",  /^\/api\/suppliers$/,                     [MANAGER]],
-  ["POST",  /^\/api\/categories$/,                    [MANAGER]],
-  ["POST",  /^\/api\/units$/,                         [MANAGER]],
-  ["PUT",   /^\/api\/units\/\d+$/,                     [MANAGER]],
+  // the manager corrects a supplier, a customer or a product's details from Records
+  ["PUT",   /^\/api\/suppliers\/\d+$/,                 [MANAGER]],
+  ["PUT",   /^\/api\/customers\/\d+$/,                 [MANAGER]],
+  ["PUT",   /^\/api\/stocks\/\d+\/details$/,           [MANAGER]],
+  ["POST",  /^\/api\/categories$/,                    [CLERK]],
+  ["POST",  /^\/api\/units$/,                         [CLERK]],
+  ["PUT",   /^\/api\/units\/\d+$/,                     [CLERK]],
 
   // purchase orders: the clerk raises one and, once the manager has confirmed
   // it, counts the delivery in; the manager only confirms or declines
   ["GET",   /^\/api\/purchase-orders$/,                [CLERK, MANAGER]],
   ["GET",   /^\/api\/purchase-orders\/\d+\/items$/,    [CLERK, MANAGER]],
   ["GET",   /^\/api\/purchase-orders\/\d+\/document$/, [CLERK, MANAGER]],
+  // the missing-goods reports filed against an order
+  ["GET",   /^\/api\/purchase-orders\/\d+\/reports$/,  [CLERK, MANAGER]],
   // a received order beside what arrived: the clerk's Reference card
   ["GET",   /^\/api\/purchase-orders\/\d+\/reference$/, [CLERK]],
   ["POST",  /^\/api\/purchase-orders$/,                [CLERK]],

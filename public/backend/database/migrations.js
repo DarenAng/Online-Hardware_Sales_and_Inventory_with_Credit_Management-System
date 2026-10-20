@@ -1503,6 +1503,41 @@ function procedureAdvice() {
 // The start-up work below runs once per copy of the server. On a PC that is
 // once; on Vercel it is every time a new copy wakes up, and the first request
 // waits for it (see the hook after this) so it never meets a missing table.
+// Suppliers, customers, categories and units can be archived like products:
+// is_archived, archived_at and archived_by_staff_id on each. A database made
+// before this has none of them, and the records lists and Archives fail.
+async function migrateRecordArchives() {
+  const tables = ["suppliers", "customers", "categories", "units"];
+  const columnsResult = await db.query(
+    "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('suppliers', 'customers', 'categories', 'units')\n" +
+      "       AND COLUMN_NAME IN ('is_archived', 'archived_at', 'archived_by_staff_id')",
+    [DB_NAME]
+  );
+  const have = [];
+  for (let i = 0; i < columnsResult[0].length; i++) {
+    const row = columnsResult[0][i];
+    have.push(row.TABLE_NAME + "." + row.COLUMN_NAME);
+  }
+
+  const wanted = [
+    ["is_archived", "BOOLEAN NOT NULL DEFAULT FALSE"],
+    ["archived_at", "TIMESTAMP NULL"],
+    ["archived_by_staff_id", "INT NULL"]
+  ];
+  let added = 0;
+  for (let t = 0; t < tables.length; t++) {
+    for (let c = 0; c < wanted.length; c++) {
+      if (have.indexOf(tables[t] + "." + wanted[c][0]) !== -1) continue;
+      await db.query("ALTER TABLE " + tables[t] + " ADD COLUMN " + wanted[c][0] + " " + wanted[c][1]);
+      added++;
+    }
+  }
+  if (added > 0) {
+    console.log("Added " + added + " archive column(s) to suppliers, customers, categories and units.");
+  }
+}
+
 async function migrateDatabase(runSqlScript) {
   // first: sign-in reads user_sessions on every request
   await migrateServerTables();
@@ -1543,6 +1578,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateQrPayments();
   await migratePaymentDetails();
   await migrateCheckConstraints();
+  await migrateRecordArchives();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();
   await warnIfAdminPasswordIsDefault();

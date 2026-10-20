@@ -42,6 +42,7 @@ const removeExpiredSessions = sessions.removeExpiredSessions;
 const renewSessionAfterPasswordChange = sessions.renewSessionAfterPasswordChange;
 const getActorId = sessions.getActorId;
 const featuresOf = require("../features").featuresOf;
+const ROLES_MANAGED_BY_MANAGER = require("../features").ROLES_MANAGED_BY_MANAGER;
 const USER_SELECT = require("../shared-sql").USER_SELECT;
 const validation = require("../validation");
 const phoneComplaint = validation.phoneComplaint;
@@ -90,6 +91,7 @@ const RECORD_QUERIES = {
     "                    COUNT(p.product_id) AS product_count\n" +
     "             FROM suppliers sup\n" +
     "             LEFT JOIN products p ON p.supplier_id = sup.supplier_id AND p.is_archived = FALSE\n" +
+    "             WHERE sup.is_archived = FALSE\n" +
     "             GROUP BY sup.supplier_id, sup.supplier_name, sup.contact_person,\n" +
     "                      sup.contact_number, sup.email, sup.address\n" +
     "             ORDER BY sup.supplier_name",
@@ -104,12 +106,14 @@ const RECORD_QUERIES = {
     "             FROM customers c\n" +
     "             LEFT JOIN vw_customer_credit v ON v.customer_id = c.customer_id\n" +
     "             LEFT JOIN sales s ON s.customer_id = c.customer_id AND s.is_archived = FALSE\n" +
+    "             WHERE c.is_archived = FALSE\n" +
     "             GROUP BY c.customer_id, c.first_name, c.middle_name, c.last_name, c.phone, c.address, c.created_at,\n" +
     "                      c.address_street, c.address_barangay, c.address_city,\n" +
     "                      c.address_province, c.address_landmark,\n" +
     "                      v.credit_limit, v.total_purchase, v.current_credit\n" +
     "             ORDER BY c.first_name",
   product: "SELECT p.product_id AS id, p.product_name AS name, p.price, p.reorder_point, p.status,\n" +
+    "                   p.category_id, p.brand_id, p.unit_id, p.supplier_id,\n" +
     "                   b.brand_name, c.category_name, u.unit_name, sup.supplier_name,\n" +
     "                   COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, p.created_at\n" +
     "            FROM products p\n" +
@@ -125,6 +129,7 @@ const RECORD_QUERIES = {
     "             FROM categories c\n" +
     "             LEFT JOIN products p ON p.category_id = c.category_id AND p.is_archived = FALSE\n" +
     "             LEFT JOIN inventory i ON i.product_id = p.product_id\n" +
+    "             WHERE c.is_archived = FALSE\n" +
     "             GROUP BY c.category_id, c.category_name ORDER BY c.category_name",
   brand: "SELECT b.brand_id AS id, b.brand_name AS name,\n" +
     "                 COUNT(p.product_id) AS product_count\n" +
@@ -135,6 +140,7 @@ const RECORD_QUERIES = {
     "                COUNT(p.product_id) AS product_count\n" +
     "         FROM units u\n" +
     "         LEFT JOIN products p ON p.unit_id = u.unit_id AND p.is_archived = FALSE\n" +
+    "         WHERE u.is_archived = FALSE\n" +
     "         GROUP BY u.unit_id, u.unit_name ORDER BY u.unit_name"
 };
 
@@ -146,8 +152,111 @@ const ARCHIVE_ROLES = {
   Inventory: [CLERK, ADMIN, MANAGER],
   Sales: MANAGEMENT,
   Delivery: MANAGEMENT,
-  Staff: [ADMIN]
+  // a manager archives cashier, clerk and driver accounts only (checked in the route)
+  Staff: [ADMIN, MANAGER],
+  Supplier: MANAGEMENT,
+  Customer: MANAGEMENT,
+  Category: [CLERK, ADMIN, MANAGER],
+  Unit: [CLERK, ADMIN, MANAGER]
 };
+
+// The records archived here, in the server rather than by sp_archive_record:
+// the table, its key, the column holding its name, and what has to be true
+// before it may go (a check that answers a reason when it may not).
+const SIMPLE_ARCHIVES = {
+  Supplier: {
+    table: "suppliers", key: "supplier_id", name: "supplier_name",
+    blocked: async function (id) {
+      const open = await db.query(
+        "SELECT COUNT(*) AS n FROM purchase_orders WHERE supplier_id = ? " +
+        "AND status NOT IN ('Received', 'Cancelled')", [id]);
+      if (Number(open[0][0].n) > 0) {
+        return "This supplier has a purchase order that is not finished. Receive or cancel it first.";
+      }
+      return null;
+    }
+  },
+  Customer: {
+    table: "customers", key: "customer_id", name: "full_name",
+    blocked: async function (id) {
+      const owed = await db.query(
+        "SELECT COUNT(*) AS n FROM sales WHERE customer_id = ? AND is_archived = FALSE " +
+        "AND payment_status <> 'Paid'", [id]);
+      if (Number(owed[0][0].n) > 0) {
+        return "This customer still owes money on a sale. Collect it before archiving the account.";
+      }
+      return null;
+    }
+  },
+  Category: {
+    table: "categories", key: "category_id", name: "category_name",
+    blocked: async function (id) {
+      const used = await db.query(
+        "SELECT COUNT(*) AS n FROM products WHERE category_id = ? AND is_archived = FALSE", [id]);
+      if (Number(used[0][0].n) > 0) {
+        return "Products are still filed under this category. Move or archive them first.";
+      }
+      return null;
+    }
+  },
+  Unit: {
+    table: "units", key: "unit_id", name: "unit_name",
+    blocked: async function (id) {
+      const used = await db.query(
+        "SELECT COUNT(*) AS n FROM products WHERE unit_id = ? AND is_archived = FALSE", [id]);
+      if (Number(used[0][0].n) > 0) {
+        return "Products are still counted in this unit. Change or archive them first.";
+      }
+      return null;
+    }
+  }
+};
+
+// Puts away (archive true) or brings back (archive false) one of SIMPLE_ARCHIVES.
+// Answers { status, message } like the procedures do.
+async function setSimpleArchive(request, module, recordId, archive) {
+  const plan = SIMPLE_ARCHIVES[module];
+  const found = await db.query(
+    "SELECT " + plan.name + " AS name FROM " + plan.table + " WHERE " + plan.key + " = ? AND is_archived = ?",
+    [recordId, !archive]);
+  if (found[0].length === 0) {
+    return { status: 404, message: (archive ? "Active " : "Archived ") + module.toLowerCase() + " record not found." };
+  }
+  const name = found[0][0].name;
+
+  if (archive) {
+    const reason = await plan.blocked(recordId);
+    if (reason) return { status: 409, message: reason };
+    await db.query(
+      "UPDATE " + plan.table + " SET is_archived = TRUE, archived_at = NOW(), archived_by_staff_id = ? " +
+      "WHERE " + plan.key + " = ?", [getActorId(request), recordId]);
+  } else {
+    await db.query(
+      "UPDATE " + plan.table + " SET is_archived = FALSE, archived_at = NULL, archived_by_staff_id = NULL " +
+      "WHERE " + plan.key + " = ?", [recordId]);
+  }
+
+  await writeAuditLog(request, archive ? "ARCHIVE" : "RESTORE",
+    module + " " + name + " (#" + recordId + ") " + (archive ? "archived" : "restored"),
+    { module: module, record_id: Number(recordId) });
+  return { status: 200, message: archive ? "Record archived." : "Record restored." };
+}
+
+// A manager may archive or restore a cashier, clerk or driver account, never
+// an administrator's or another manager's. Answers a reason, or null.
+async function staffOutOfReach(request, recordId) {
+  if (request.actor.roleName === ADMIN) return null;
+  const found = await db.query(
+    "SELECT r.role_name FROM staff s JOIN roles r ON r.role_id = s.role_id WHERE s.staff_id = ?", [recordId]);
+  if (found[0].length === 0) return null;   // the procedure says it is not found
+  if (ROLES_MANAGED_BY_MANAGER.indexOf(found[0][0].role_name) === -1) {
+    return "A manager can only archive cashier, inventory clerk and driver accounts.";
+  }
+  if (Number(recordId) === Number(getActorId(request))) {
+    return "You cannot archive your own account.";
+  }
+  return null;
+}
 
 // The live channel files every /api/archives write under "archives" (see scopeOf in
 // live-changes.js), which only the manager's Archives table reads. What an archive or a
@@ -157,7 +266,11 @@ const ARCHIVE_SCOPES = {
   Inventory: ["inventory"],
   Sales: ["sales", "inventory", "deliveries"],
   Delivery: ["deliveries"],
-  Staff: ["staff"]
+  Staff: ["staff"],
+  Supplier: ["inventory"],
+  Customer: ["credit"],
+  Category: ["inventory"],
+  Unit: ["inventory"]
 };
 
 async function announceArchiveChange(request, module, what, recordId) {
@@ -425,11 +538,43 @@ function registerSharedRoutes(app, deps) {
   // ARCHIVES
   app.get("/api/archives", async function (request, response) {
     try {
+      // vw_archives, with who handled the record before it was put away (the
+      // driver who delivered it, the cashier who rang the sale up, the role of
+      // a staff account), then the records archived by the server
       const rowsResult = await db.query(
-        "SELECT module, record_id, record_name, detail, archived_at,\n" +
-          "                COALESCE(archived_by, 'System') AS archived_by\n" +
-          "         FROM vw_archives\n" +
-          "         ORDER BY archived_at DESC, module"
+        "SELECT a.module, a.record_id, a.record_name, a.detail, a.archived_at,\n" +
+          "       COALESCE(a.archived_by, 'System') AS archived_by,\n" +
+          "       CASE a.module\n" +
+          "         WHEN 'Delivery' THEN drv.full_name\n" +
+          "         WHEN 'Sales' THEN cas.full_name\n" +
+          "       END AS handled_by,\n" +
+          "       CASE a.module\n" +
+          "         WHEN 'Delivery' THEN 'Delivered By'\n" +
+          "         WHEN 'Sales' THEN 'Cashier'\n" +
+          "       END AS handled_label,\n" +
+          "       CASE a.module WHEN 'Delivery' THEN d.delivered_at END AS handled_at\n" +
+          "FROM vw_archives a\n" +
+          "LEFT JOIN deliveries d ON a.module = 'Delivery' AND d.delivery_id = a.record_id\n" +
+          "LEFT JOIN staff drv ON drv.staff_id = d.delivery_staff_id\n" +
+          "LEFT JOIN sales sa ON a.module = 'Sales' AND sa.sale_id = a.record_id\n" +
+          "LEFT JOIN staff cas ON cas.staff_id = sa.cashier_staff_id\n" +
+          "UNION ALL\n" +
+          "SELECT 'Supplier', x.supplier_id, x.supplier_name, x.contact_person, x.archived_at,\n" +
+          "       COALESCE(a.full_name, 'System'), NULL, NULL, NULL\n" +
+          "FROM suppliers x LEFT JOIN staff a ON a.staff_id = x.archived_by_staff_id WHERE x.is_archived = TRUE\n" +
+          "UNION ALL\n" +
+          "SELECT 'Customer', x.customer_id, x.full_name, x.phone, x.archived_at,\n" +
+          "       COALESCE(a.full_name, 'System'), NULL, NULL, NULL\n" +
+          "FROM customers x LEFT JOIN staff a ON a.staff_id = x.archived_by_staff_id WHERE x.is_archived = TRUE\n" +
+          "UNION ALL\n" +
+          "SELECT 'Category', x.category_id, x.category_name, NULL, x.archived_at,\n" +
+          "       COALESCE(a.full_name, 'System'), NULL, NULL, NULL\n" +
+          "FROM categories x LEFT JOIN staff a ON a.staff_id = x.archived_by_staff_id WHERE x.is_archived = TRUE\n" +
+          "UNION ALL\n" +
+          "SELECT 'Unit', x.unit_id, x.unit_name, NULL, x.archived_at,\n" +
+          "       COALESCE(a.full_name, 'System'), NULL, NULL, NULL\n" +
+          "FROM units x LEFT JOIN staff a ON a.staff_id = x.archived_by_staff_id WHERE x.is_archived = TRUE\n" +
+          "ORDER BY archived_at DESC, module"
       );
       const rows = rowsResult[0];
       response.json(rows);
@@ -450,6 +595,23 @@ function registerSharedRoutes(app, deps) {
     const allowed = ARCHIVE_ROLES[module];
     if (!allowed || !allowed.includes(request.actor.roleName)) {
       return response.status(403).json({ error: "Your role cannot restore " + module + " records." });
+    }
+
+    if (SIMPLE_ARCHIVES[module]) {
+      try {
+        const done = await setSimpleArchive(request, module, recordId, false);
+        if (done.status !== 200) return response.status(done.status).json({ error: done.message });
+        await announceArchiveChange(request, module, "restored", recordId);
+        return response.json({ message: done.message });
+      } catch (error) {
+        console.error("Restore failed:", error.message);
+        return response.status(500).json({ error: "Unable to restore the record" });
+      }
+    }
+
+    if (module === "Staff") {
+      const reason = await staffOutOfReach(request, recordId);
+      if (reason) return response.status(403).json({ error: reason });
     }
 
     try {
@@ -483,6 +645,23 @@ function registerSharedRoutes(app, deps) {
       return response.status(403).json({ error: "Your role cannot archive " + module + " records." });
     }
 
+    if (SIMPLE_ARCHIVES[module]) {
+      try {
+        const done = await setSimpleArchive(request, module, recordId, true);
+        if (done.status !== 200) return response.status(done.status).json({ error: done.message });
+        await announceArchiveChange(request, module, "archived", recordId);
+        return response.json({ message: done.message });
+      } catch (error) {
+        console.error("Archive failed:", error.message);
+        return response.status(500).json({ error: "Unable to archive the record" });
+      }
+    }
+
+    if (module === "Staff") {
+      const reason = await staffOutOfReach(request, recordId);
+      if (reason) return response.status(403).json({ error: reason });
+    }
+
     try {
       const output = await sharedProcedures.archiveRecord(
         [module, recordId, getActorId(request)]
@@ -496,7 +675,8 @@ function registerSharedRoutes(app, deps) {
       // open is signed out; it reads this reason on its next request.
       if (module === "Staff") {
         await endSessionsForStaff(recordId, null,
-          "Your account was archived by the System Administrator.");
+          "Your account was archived by " +
+            (request.actor.roleName === ADMIN ? "the System Administrator." : "a manager."));
       }
 
       await announceArchiveChange(request, module, "archived", recordId);

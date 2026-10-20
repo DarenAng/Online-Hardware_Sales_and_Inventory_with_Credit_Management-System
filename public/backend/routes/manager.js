@@ -371,11 +371,9 @@ function registerManagerRoutes(app, deps) {
         ["To", data.range.to],
         ["Cashier", data.cashier ? data.cashier.name : "All cashiers"],
         ["Transactions", data.totals.saleCount],
-        ["Units sold", data.totals.unitsSold],
         ["Billed", data.totals.billed],
         ["Collected", data.totals.collected],
-        ["Outstanding", data.totals.outstanding],
-        ["Average sale", data.totals.averageSale]
+        ["Outstanding", data.totals.outstanding]
         ];
       }
     },
@@ -406,7 +404,6 @@ function registerManagerRoutes(app, deps) {
           addSection("Over time", EXPORTS["income-series"].headers, EXPORTS["income-series"].rows(data));
         }
         addSection("By payment method", EXPORTS["payment-methods"].headers, EXPORTS["payment-methods"].rows(data));
-        addSection("Best sellers", EXPORTS["top-products"].headers, EXPORTS["top-products"].rows(data));
         return rows;
       }
     }
@@ -440,10 +437,7 @@ function registerManagerRoutes(app, deps) {
         headers: ["Figure", "Value"], rows: summary, money: [] },
       { name: "By Payment Method", title: "By Payment Method", subtitle: subtitle,
         headers: EXPORTS["payment-methods"].headers, rows: EXPORTS["payment-methods"].rows(data),
-        money: EXPORT_MONEY["payment-methods"] },
-      { name: "Best Sellers", title: "Best Sellers", subtitle: subtitle,
-        headers: EXPORTS["top-products"].headers, rows: EXPORTS["top-products"].rows(data),
-        money: EXPORT_MONEY["top-products"] }
+        money: EXPORT_MONEY["payment-methods"] }
     ];
 
     // the by-day sheet goes last, and only when the period has more than one day
@@ -810,7 +804,7 @@ function registerManagerRoutes(app, deps) {
       "CONCAT(pr.product_name, ': ', sa.adjustment_type, ' ', " + qty("sa.quantity_before") + ", ' to ', " +
       qty("sa.quantity_after") + ", " +
       "IF(sa.unit_name IS NULL OR sa.unit_name = '', '', CONCAT(' ', sa.unit_name)), " +
-      "IF(sa.reason IS NULL OR sa.reason = '', '', CONCAT(' - ', sa.reason))) " +
+      "IF(sa.reason IS NULL OR sa.reason = '', '', CONCAT(', ', sa.reason))) " +
       "FROM stock_adjustments sa JOIN products pr ON pr.product_id = sa.product_id " +
       "UNION ALL " +
       "SELECT 'DELIVERY', COALESCE(d.created_date, d.scheduled_date, d.updated_at), d.delivery_staff_id, d.delivery_id, " +
@@ -831,21 +825,25 @@ function registerManagerRoutes(app, deps) {
       "SELECT IF(po.status = 'Cancelled', 'PO_DECLINED', 'PO_CONFIRMED'), po.confirmed_at, po.confirmed_by_staff_id, po.po_id, " +
       "CONCAT('PO #', po.po_id, ' to ', sup.supplier_name, " +
       "IF(po.status = 'Cancelled', ' declined', ' confirmed'), " +
-      "IF(po.decision_note IS NULL OR po.decision_note = '', '', CONCAT(' - ', po.decision_note))) " +
+      "IF(po.decision_note IS NULL OR po.decision_note = '', '', CONCAT(', ', po.decision_note))) " +
       "FROM purchase_orders po JOIN suppliers sup ON sup.supplier_id = po.supplier_id " +
       "WHERE po.confirmed_at IS NOT NULL " +
+      "UNION ALL " +
+      // the clerk counting a delivery in against its order
+      "SELECT 'PO_RECEIVED', al.created_at, al.staff_id, al.log_id, al.details " +
+      "FROM audit_logs al WHERE al.action = 'PO_RECEIVED' " +
       "UNION ALL " +
       "SELECT 'CREDIT_REQUEST', cr.created_at, cr.requested_by_staff_id, cr.request_id, " +
       "CONCAT(c.full_name, ': ', FORMAT(cr.previous_limit, 2), ' to ', " +
       "FORMAT(cr.requested_limit, 2), " +
-      "IF(cr.reason IS NULL OR cr.reason = '', '', CONCAT(' - ', cr.reason)), ' (', cr.status, ')') " +
+      "IF(cr.reason IS NULL OR cr.reason = '', '', CONCAT(', ', cr.reason)), ' (', cr.status, ')') " +
       "FROM credit_requests cr JOIN customers c ON c.customer_id = cr.customer_id " +
       "UNION ALL " +
       "SELECT IF(cr.status = 'Approved', 'CREDIT_APPROVED', 'CREDIT_DECLINED'), cr.decided_at, " +
       "cr.decided_by_staff_id, cr.request_id, " +
       "CONCAT(c.full_name, ': request #', cr.request_id, ' ', " +
       "IF(cr.status = 'Approved', CONCAT('approved at ', FORMAT(cr.requested_limit, 2)), 'declined'), " +
-      "IF(cr.decision_note IS NULL OR cr.decision_note = '', '', CONCAT(' - ', cr.decision_note))) " +
+      "IF(cr.decision_note IS NULL OR cr.decision_note = '', '', CONCAT(', ', cr.decision_note))) " +
       "FROM credit_requests cr JOIN customers c ON c.customer_id = cr.customer_id " +
       "WHERE cr.decided_at IS NOT NULL " +
       "UNION ALL " +
@@ -1888,6 +1886,152 @@ function registerManagerRoutes(app, deps) {
       response.status(500).json({ error: "Unable to change the price" });
     }
   });
+  // ==========================================
+  // EDITING A RECORD -- the manager corrects a supplier, a customer or a
+  // product's details from Records. Each answers what changed, and the change
+  // goes to the audit trail with the values before and after.
+  // ==========================================
+  app.put("/api/suppliers/:supplierId", requireRole(MANAGER), async function (request, response) {
+    const body = request.body || {};
+    const name = tidyName(body.name, 100);
+    const email = String(body.email || "").trim().slice(0, 100);
+    if (name === "") return response.status(400).json({ error: "The supplier needs a company name." });
+    if (email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return response.status(400).json({ error: "That email address does not look right." });
+    }
+    const phoneProblem = String(body.contactNumber || "").trim() === "" ? null : phoneComplaint(body.contactNumber);
+    if (phoneProblem) return response.status(400).json({ error: phoneProblem });
+
+    try {
+      const id = request.params.supplierId;
+      const beforeResult = await db.query(
+        "SELECT supplier_name, contact_person, contact_number, email, address FROM suppliers " +
+        "WHERE supplier_id = ? AND is_archived = FALSE", [id]);
+      if (beforeResult[0].length === 0) return response.status(404).json({ error: "That supplier was not found." });
+      const before = beforeResult[0][0];
+
+      const takenResult = await db.query(
+        "SELECT 1 FROM suppliers WHERE LOWER(supplier_name) = LOWER(?) AND supplier_id <> ?", [name, id]);
+      if (takenResult[0].length > 0) return response.status(409).json({ error: name + " is already on file." });
+
+      const after = {
+        supplier_name: name,
+        contact_person: tidyName(body.contactPerson, 100) || null,
+        contact_number: cleanPhone(body.contactNumber) || null,
+        email: email || null,
+        address: String(body.address || "").trim().slice(0, 255) || null
+      };
+      await db.query(
+        "UPDATE suppliers SET supplier_name = ?, contact_person = ?, contact_number = ?, email = ?, address = ? " +
+        "WHERE supplier_id = ?",
+        [after.supplier_name, after.contact_person, after.contact_number, after.email, after.address, id]);
+      await writeAuditLog(request, "UPDATE_SUPPLIER", "Supplier " + name + " edited",
+        { supplier_id: Number(id), changes: fieldChanges(before, after) });
+      response.json({ message: name + " was saved." });
+    } catch (error) {
+      console.error("Editing a supplier failed:", error.message);
+      response.status(500).json({ error: "Unable to save the supplier" });
+    }
+  });
+
+  app.put("/api/customers/:customerId", requireRole(MANAGER), async function (request, response) {
+    const body = request.body || {};
+    const first = tidy(body.firstName).slice(0, 100);
+    const middle = tidy(body.middleName).slice(0, 100);
+    const last = tidy(body.lastName).slice(0, 100);
+    if (first === "") return response.status(400).json({ error: "A customer needs a first name" });
+    if (last === "") return response.status(400).json({ error: "A customer needs a last name" });
+    if (!String(body.phone || "").trim()) return response.status(400).json({ error: "A customer needs a phone number" });
+    const phoneProblem = phoneComplaint(body.phone);
+    if (phoneProblem) return response.status(400).json({ error: phoneProblem });
+
+    const parts = addressPartsFrom(body);
+    const addressProblem = addressPartsProblem(parts, "customer's address");
+    if (addressProblem) return response.status(400).json({ error: addressProblem });
+    const addressLine = buildFullAddress(parts).slice(0, 500);
+
+    try {
+      const id = request.params.customerId;
+      const beforeResult = await db.query(
+        "SELECT first_name, middle_name, last_name, phone, address_street, address_barangay, address_city, " +
+        "address_province, address_landmark FROM customers WHERE customer_id = ? AND is_archived = FALSE", [id]);
+      if (beforeResult[0].length === 0) return response.status(404).json({ error: "That customer was not found." });
+      const before = beforeResult[0][0];
+
+      const sameResult = await db.query(
+        "SELECT 1 FROM customers WHERE LOWER(TRIM(first_name)) = LOWER(?) " +
+        "AND LOWER(TRIM(IFNULL(middle_name, ''))) = LOWER(?) AND LOWER(TRIM(last_name)) = LOWER(?) " +
+        "AND customer_id <> ? LIMIT 1", [first, middle, last, id]);
+      if (sameResult[0].length > 0) {
+        return response.status(409).json({ error: "Another customer on record already has that name." });
+      }
+
+      const after = {
+        first_name: first, middle_name: middle || null, last_name: last, phone: cleanPhone(body.phone) || null,
+        address_street: parts.street || null, address_barangay: parts.barangay || null,
+        address_city: parts.city || null, address_province: parts.province || null,
+        address_landmark: parts.landmark || null
+      };
+      await db.query(
+        "UPDATE customers SET first_name = ?, middle_name = ?, last_name = ?, phone = ?, address = ?, " +
+        "address_street = ?, address_barangay = ?, address_city = ?, address_province = ?, address_landmark = ? " +
+        "WHERE customer_id = ?",
+        [after.first_name, after.middle_name, after.last_name, after.phone, addressLine,
+         after.address_street, after.address_barangay, after.address_city, after.address_province,
+         after.address_landmark, id]);
+
+      let fullName = first;
+      if (middle !== "") fullName += " " + middle.charAt(0).toUpperCase() + ".";
+      fullName += " " + last;
+      await writeAuditLog(request, "UPDATE_CUSTOMER", "Customer " + fullName + " edited",
+        { customer_id: Number(id), changes: fieldChanges(before, after) });
+      response.json({ message: fullName + " was saved." });
+    } catch (error) {
+      console.error("Editing a customer failed:", error.message);
+      response.status(500).json({ error: "Unable to save the customer" });
+    }
+  });
+
+  // a product's name, category, brand, unit and supplier; the price has its own route
+  app.put("/api/stocks/:productId/details", requireRole(MANAGER), async function (request, response) {
+    const body = request.body || {};
+    const name = tidyName(body.name, 150);
+    if (name === "") return response.status(400).json({ error: "The product needs a name." });
+
+    // an id from a box, or null for "none"
+    function idOrNull(value) {
+      const number = Number(value);
+      return Number.isInteger(number) && number > 0 ? number : null;
+    }
+    const after = {
+      product_name: name,
+      category_id: idOrNull(body.categoryId),
+      brand_id: idOrNull(body.brandId),
+      unit_id: idOrNull(body.unitId),
+      supplier_id: idOrNull(body.supplierId)
+    };
+
+    try {
+      const id = request.params.productId;
+      const beforeResult = await db.query(
+        "SELECT product_name, category_id, brand_id, unit_id, supplier_id FROM products " +
+        "WHERE product_id = ? AND is_archived = FALSE", [id]);
+      if (beforeResult[0].length === 0) return response.status(404).json({ error: "That product was not found." });
+      const before = beforeResult[0][0];
+
+      await db.query(
+        "UPDATE products SET product_name = ?, category_id = ?, brand_id = ?, unit_id = ?, supplier_id = ? " +
+        "WHERE product_id = ?",
+        [after.product_name, after.category_id, after.brand_id, after.unit_id, after.supplier_id, id]);
+      await writeAuditLog(request, "UPDATE_PRODUCT", "Product " + name + " edited",
+        { product_id: Number(id), changes: fieldChanges(before, after) });
+      response.json({ message: name + " was saved." });
+    } catch (error) {
+      console.error("Editing a product failed:", error.message);
+      response.status(500).json({ error: "Unable to save the product" });
+    }
+  });
+
   // The late-payment sweep: once at startup and every hour after. The rule
   // is in sp_apply_late_penalties; here each run that charged something is
   // logged and announced on the live channel, so an open credit screen redraws.

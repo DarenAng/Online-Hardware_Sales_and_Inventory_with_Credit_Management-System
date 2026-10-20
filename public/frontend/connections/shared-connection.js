@@ -454,6 +454,11 @@ function apiGetPurchaseOrderItems(poId) {
     return getJson('/api/purchase-orders/' + poId + '/items');
 }
 
+// GET /api/purchase-orders/:id/reports -- goods reported missing from its delivery
+function apiGetPurchaseOrderReports(poId) {
+    return getJson('/api/purchase-orders/' + poId + '/reports');
+}
+
 // GET /api/purchase-orders/:id/document -- the printed order
 function apiGetPurchaseOrderDocument(poId) {
     return getJson('/api/purchase-orders/' + poId + '/document');

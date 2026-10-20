@@ -45,7 +45,7 @@
                     </ul>
                 </li>
                 <li data-feature="damage-report"><a href="#" data-panel-link="panel-report" onclick="showDamageReport(event)"><i class="bi bi-clipboard-plus nav-icon" aria-hidden="true"></i>Make a Report</a></li>
-                <!-- Records: to look at only; adding one is the manager's -->
+                <!-- Records: categories and units are added here; suppliers by the manager -->
                 <li data-sidebar-dropdown data-feature="records">
                     <a href="#records" onclick="sidebarHeading(event, 'records-nav', 'records-dropdown', showClerkRecords)" class="nav-parent" id="records-nav"
                        data-panel-link="panel-records"><i class="bi bi-folder2-open nav-icon" aria-hidden="true"></i>
@@ -676,6 +676,9 @@
                             <h3 id="records-title">Suppliers</h3>
                         </div>
                         <div class="panel-actions">
+                            <!-- categories and units are added by the inventory clerk only -->
+                            <button type="button" class="btn btn-success" id="clerk-records-add" hidden
+                                    onclick="addClerkRecord()">Add Category</button>
                         </div>
                     </div>
                     <div class="panel-toolbar">

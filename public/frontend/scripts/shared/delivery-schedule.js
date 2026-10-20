@@ -44,19 +44,8 @@ function buildDeliverySchedulePanel() {
         '            <div class="panel-toolbar no-print">\n' +
         '                <div class="search-wrap">\n' +
         '                    <input type="search" id="schedule-search" class="form-control search-input"\n' +
-        '                           placeholder="Search by customer, destination or driver"\n' +
+        '                           placeholder="Search Deliveries" autocomplete="off"\n' +
         '                           oninput="onScheduleSearch(this.value)">\n' +
-        '                </div>\n' +
-        '                <div class="toolbar-field">\n' +
-        '                    <label for="schedule-due">Due</label>\n' +
-        '                    <select id="schedule-due" onchange="renderDeliverySchedule()">\n' +
-        '                        <option value="all">Any day</option>\n' +
-        '                        <option value="overdue">Overdue</option>\n' +
-        '                        <option value="today">Today</option>\n' +
-        '                        <option value="tomorrow">Tomorrow</option>\n' +
-        '                        <option value="later">Later</option>\n' +
-        '                        <option value="unset">No date yet</option>\n' +
-        '                    </select>\n' +
         '                </div>\n' +
         '                <div class="toolbar-field">\n' +
         '                    <label for="schedule-status">Status</label>\n' +
@@ -249,8 +238,6 @@ function scheduleMatches(d) {
         if (!prefixMatch([d.customer_name || 'Walk-in', d.delivery_address || '', d.driver_name || 'Unassigned',
                           d.delivery_id], query)) return false;
     }
-    const due = scheduleValue('schedule-due');
-    if (due !== 'all' && scheduleGroupOf(d) !== due) return false;
     const status = scheduleValue('schedule-status');
     if (status !== 'all' && d.status !== status) return false;
     const driver = scheduleValue('schedule-driver');
@@ -283,13 +270,13 @@ function renderDeliverySchedule() {
 
     // a delivery opens from here only on a page that loaded the delivery popup
     const canOpen = typeof showDeliveryRecord === 'function';
-    const canUpdate = typeof hasRole === 'function' && hasRole('Manager', 'Delivery Personnel');
-    const canArchive = typeof hasRole === 'function' && hasRole('Manager');
+    // the driver moves a delivery along; the manager reads the schedule only
+    const canUpdate = typeof hasRole === 'function' && hasRole('Delivery Personnel');
+    const canArchive = false;
 
-    // a filter on due day, driver or status means every row says the same there,
+    // a filter on driver or status means every row says the same there,
     // so that column is not drawn (tables.js hides the columns listed here)
     const hidden = [];
-    if (scheduleValue('schedule-due') !== 'all') hidden.push(2);
     if (scheduleValue('schedule-driver') !== 'all') hidden.push(5);
     if (scheduleValue('schedule-status') !== 'all') hidden.push(6);
 

@@ -174,12 +174,13 @@ const FEATURES = [
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
     routes: [["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/],
              ["GET", /^\/api\/purchase-orders\/\d+\/document$/], ["POST", /^\/api\/purchase-orders$/],
+             ["GET", /^\/api\/purchase-orders\/\d+\/reports$/],
              ["POST", /^\/api\/purchase-orders\/\d+\/decide$/],
              ["POST", /^\/api\/purchase-orders\/\d+\/receive$/]] },
 
   // --- deliveries ---
-  { key: "deliveries", name: "Delivery Tracking", module: "Deliveries",
-    description: "Every delivery created and where it has got to; the manager's copy can move one along.",
+  { key: "deliveries", name: "Delivery History", module: "Deliveries",
+    description: "Every delivery created and where it has got to. The manager's copy is to read only.",
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
     routes: [["GET", /^\/api\/deliveries$/], ["GET", /^\/api\/deliveries\/\d+\/items$/],
              ["PATCH", /^\/api\/deliveries\/\d+\/status$/]] },
@@ -211,9 +212,11 @@ const FEATURES = [
 
   // --- records ---
   { key: "records", name: "Records", module: "Records",
-    description: "Suppliers, customers, products, categories and units. The clerk sees suppliers, products, categories and units, and cannot add any.",
+    description: "Suppliers, customers, products, categories and units. The manager adds and edits suppliers, customers and products and archives records; the clerk alone adds categories and units.",
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
-    routes: [] },
+    routes: [["POST", /^\/api\/categories$/], ["POST", /^\/api\/units$/],
+             ["PUT", /^\/api\/suppliers\/\d+$/], ["PUT", /^\/api\/customers\/\d+$/],
+             ["PUT", /^\/api\/stocks\/\d+\/details$/], ["PUT", /^\/api\/stocks\/\d+\/price$/]] },
   { key: "archives", name: "Archives", module: "Records",
     description: "What has been put away, and restoring it.",
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],

@@ -93,3 +93,9 @@ function apiRemoveSellingUnit(productId, unitId) {
         headers: apiHeaders()
     });
 }
+
+// POST /api/categories or /api/units -- the inventory clerk adds one (theirs alone)
+function apiAddCategoryOrUnit(kind, name) {
+    const path = { category: '/api/categories', unit: '/api/units' }[kind];
+    return sendJson(path, 'POST', { name: name });
+}

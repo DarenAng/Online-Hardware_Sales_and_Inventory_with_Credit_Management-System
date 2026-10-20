@@ -746,7 +746,9 @@ function registerInventoryRoutes(app, deps) {
         "COALESCE(SUM(i.quantity), 0) AS total_units, " +
         "COALESCE(SUM(i.line_cost), 0) AS goods_cost, " +
         "po.discount, " +
-        "COALESCE(SUM(i.line_cost), 0) - po.discount AS total_cost " +
+        "COALESCE(SUM(i.line_cost), 0) - po.discount AS total_cost, " +
+        // reports the clerk filed against this order (goods missing from its delivery)
+        "(SELECT COUNT(*) FROM returned_items r WHERE r.po_id = po.po_id) AS missing_reports " +
         "FROM purchase_orders po " +
         "JOIN suppliers s ON s.supplier_id = po.supplier_id " +
         "LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id " +
@@ -788,6 +790,28 @@ function registerInventoryRoutes(app, deps) {
     } catch (error) {
       console.error("PO items failed:", error.message);
       response.status(500).json({ error: error.message });
+    }
+  });
+
+  // The reports filed against one order: goods the clerk found missing from its
+  // delivery. Read by the manager's order card as well as the clerk's.
+  app.get("/api/purchase-orders/:poId/reports", async function (request, response) {
+    try {
+      const rowsResult = await db.query(
+        "SELECT r.return_id, r.report_type, r.quantity, r.reason, r.status, r.return_date, " +
+        "p.product_name, u.unit_name, st.full_name AS reported_by " +
+        "FROM returned_items r " +
+        "JOIN products p ON p.product_id = r.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "LEFT JOIN staff st ON st.staff_id = r.reported_by_staff_id " +
+        "WHERE r.po_id = ? " +
+        "ORDER BY r.return_date DESC, r.return_id DESC",
+        [request.params.poId]
+      );
+      response.json(rowsResult[0]);
+    } catch (error) {
+      console.error("PO reports failed:", error.message);
+      response.status(500).json({ error: "Unable to read the reports on this order" });
     }
   });
 

@@ -317,9 +317,9 @@
                                 <label for="sales-status">Transaction status</label>
                                 <select id="sales-status" data-filter-table="sales-table" data-hides-column="5" onchange="reloadSales()">
                                     <option value="all">Every status</option>
-                                    <option value="Completed">Completed</option>
-                                    <option value="Pending Delivery">Pending Delivery</option>
-                                    <option value="Partial Credit">Partial Credit</option>
+                                    <option value="Paid">Paid</option>
+                                    <option value="Partially Paid">Partially Paid</option>
+                                    <option value="Unpaid">Unpaid</option>
                                     <option value="Voided">Voided</option>
                                 </select>
                             </div>
@@ -834,6 +834,7 @@
                                     <option value="PURCHASE_ORDER">Purchase orders raised</option>
                                     <option value="PO_CONFIRMED">Orders confirmed</option>
                                     <option value="PO_DECLINED">Orders declined</option>
+                                    <option value="PO_RECEIVED">Orders received</option>
                                 </select>
                             </div>
                             <div class="toolbar-field">
@@ -1535,14 +1536,14 @@
 
     <!-- CREATE ACCOUNT -- the manager's version: fill in the form, read the review (the
          details and the first password), then confirm. Locked like the other forms that hold typed data. -->
-    <div class="modal" id="account-modal" data-modal-locked data-modal-scroll>
+    <div class="modal" id="newacct-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box create-box">
             <div class="modal-head">
                 <div class="modal-identity">
                     <div class="avatar">+</div>
                     <div>
                         <h3>Create Account</h3>
-                        <span class="modal-role" id="account-subtitle">Account Management</span>
+                        <span class="modal-role" id="newacct-subtitle">Account Management</span>
                     </div>
                 </div>
                 <button type="button" class="modal-close" onclick="closeAccountModal()" aria-label="Close">&times;</button>
@@ -1550,58 +1551,58 @@
 
             <div class="modal-body">
                 <!-- step 1: the form -->
-                <form id="account-form" onsubmit="reviewNewAccount(event)" novalidate autocomplete="off">
+                <form id="newacct-form" onsubmit="reviewNewAccount(event)" novalidate autocomplete="off">
                     <div class="grid-2">
                         <div class="form-group">
-                            <label for="account-first">First name <span class="req">*</span></label>
-                            <input type="text" id="account-first" name="firstName" class="form-control" maxlength="100" required oninput="onAccountNameInput(this)">
-                            <span class="field-error" id="account-first-error" hidden></span>
+                            <label for="newacct-first">First name <span class="req">*</span></label>
+                            <input type="text" id="newacct-first" name="firstName" class="form-control" maxlength="100" required oninput="onAccountNameInput(this)">
+                            <span class="field-error" id="newacct-first-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="account-middle">Middle name</label>
-                            <input type="text" id="account-middle" name="middleName" class="form-control"
+                            <label for="newacct-middle">Middle name</label>
+                            <input type="text" id="newacct-middle" name="middleName" class="form-control"
                                    maxlength="100" placeholder="Dela Cruz" oninput="onAccountNameInput(this)">
-                            <span class="field-error" id="account-middle-error" hidden></span>
+                            <span class="field-error" id="newacct-middle-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="account-last">Last name <span class="req">*</span></label>
-                            <input type="text" id="account-last" name="lastName" class="form-control" maxlength="100" required oninput="onAccountNameInput(this)">
-                            <span class="field-error" id="account-last-error" hidden></span>
+                            <label for="newacct-last">Last name <span class="req">*</span></label>
+                            <input type="text" id="newacct-last" name="lastName" class="form-control" maxlength="100" required oninput="onAccountNameInput(this)">
+                            <span class="field-error" id="newacct-last-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="account-phone">Phone <span class="req">*</span></label>
+                            <label for="newacct-phone">Phone <span class="req">*</span></label>
                             <div class="phone-field">
                                 <span class="phone-prefix">+63</span>
-                                <input type="text" id="account-phone" name="phone" class="form-control"
+                                <input type="text" id="newacct-phone" name="phone" class="form-control"
                                        inputmode="numeric" autocomplete="tel" required
                                        maxlength="20" placeholder="9XXXXXXXXX"
                                        oninput="setAccountError(this, ''); onPhoneInput(this)" onblur="checkAccountPhoneFree(this)">
                             </div>
-                            <span class="field-error" id="account-phone-error" hidden></span>
+                            <span class="field-error" id="newacct-phone-error" hidden></span>
                         </div>
                         <div class="form-group">
-                            <label for="account-role">Role <span class="req">*</span></label>
-                            <select id="account-role" name="roleId" class="form-control" required></select>
+                            <label for="newacct-role">Role <span class="req">*</span></label>
+                            <select id="newacct-role" name="roleId" class="form-control" required></select>
                         </div>
                         <div class="form-group">
-                            <label for="account-email">Email <span class="req">*</span></label>
-                            <input type="email" id="account-email" name="email" class="form-control"
+                            <label for="newacct-email">Email <span class="req">*</span></label>
+                            <input type="email" id="newacct-email" name="email" class="form-control"
                                    maxlength="100" autocomplete="off" placeholder="name@example.com" required
                                    oninput="onAccountEmailInput(this)" onblur="checkAccountEmailFree(this)">
-                            <span class="field-error" id="account-email-error" hidden></span>
+                            <span class="field-error" id="newacct-email-error" hidden></span>
                         </div>
                     </div>
                 </form>
 
                 <!-- step 2: the review, filled in by showAccountReview -->
-                <div id="account-review" hidden></div>
+                <div id="newacct-review" hidden></div>
             </div>
 
             <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" id="account-cancel" onclick="closeAccountModal()">Cancel</button>
-                <button type="button" class="btn btn-ghost" id="account-back" onclick="backToAccountForm()" hidden>Back</button>
-                <button type="submit" form="account-form" class="btn btn-success" id="account-review-btn">Review</button>
-                <button type="button" class="btn btn-success" id="account-confirm-btn" onclick="confirmNewAccount()" hidden>Confirm</button>
+                <button type="button" class="btn btn-ghost" id="newacct-cancel" onclick="closeAccountModal()">Cancel</button>
+                <button type="button" class="btn btn-ghost" id="newacct-back" onclick="backToAccountForm()" hidden>Back</button>
+                <button type="submit" form="newacct-form" class="btn btn-success" id="newacct-review-btn">Review</button>
+                <button type="button" class="btn btn-success" id="newacct-confirm-btn" onclick="confirmNewAccount()" hidden>Confirm</button>
             </div>
         </div>
     </div>

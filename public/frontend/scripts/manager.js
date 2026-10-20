@@ -943,6 +943,7 @@ const ACTIVITY_KINDS = {
     PURCHASE_ORDER: 'Purchase order',
     PO_CONFIRMED: 'Order confirmed',
     PO_DECLINED: 'Order declined',
+    PO_RECEIVED: 'Order received',
     CREDIT_REQUEST: 'Credit request',
     CREDIT_APPROVED: 'Credit approved',
     CREDIT_DECLINED: 'Credit declined',
@@ -1203,10 +1204,10 @@ function fillCountedOptions(id, values, allLabel) {
 
 // Sales. Both filters go back to the server, where the figures are computed.
 const SALE_STATUS_TONE = {
-    'Completed': 'badge-success',
-    'Pending Delivery': 'badge-warning',
-    'Partial Credit': 'badge-warning',
-    'Voided': 'badge-danger'
+    'Paid': 'badge-success',
+    'Partially Paid': 'badge-warning',
+    'Unpaid': 'badge-danger',
+    'Voided': 'badge-neutral'
 };
 
 // A sales date after today is a typo, not a filter: it is emptied with a
@@ -1451,7 +1452,7 @@ function buildStockPanels() {
 
 // Stock Movements: the stock side of the activity log -- what staff filed that
 // moved or will move goods on the shelf
-const STOCK_MOVE_KINDS = ['STOCK_ADJUST', 'DAMAGE', 'MISSING', 'RETURN', 'PURCHASE_ORDER', 'PO_CONFIRMED', 'PO_DECLINED'];
+const STOCK_MOVE_KINDS = ['STOCK_ADJUST', 'DAMAGE', 'MISSING', 'RETURN', 'PURCHASE_ORDER', 'PO_CONFIRMED', 'PO_DECLINED', 'PO_RECEIVED'];
 
 function buildStockMovesPanel() {
     createDataPanel({
@@ -3523,21 +3524,21 @@ const ACCOUNT_REQUIRED = [
 ];
 
 function openCreateAccount() {
-    const form = document.getElementById('account-form');
+    const form = document.getElementById('newacct-form');
     if (!form) return;
 
     clearAccountForm();
     showAccountStep('form');
-    showModal('account-modal');
+    showModal('newacct-modal');
     loadAccountRoles();
     setTimeout(function () {
-        document.getElementById('account-first').focus();
+        document.getElementById('newacct-first').focus();
     }, 60);
 }
 
 // the form emptied, so the next person does not find a half-typed account
 function clearAccountForm() {
-    const form = document.getElementById('account-form');
+    const form = document.getElementById('newacct-form');
     form.reset();
     accountReview = null;
 
@@ -3551,7 +3552,7 @@ function clearAccountForm() {
 
 // the roles the server allows this manager to create, as the Role box's choices
 async function loadAccountRoles() {
-    const select = document.getElementById('account-role');
+    const select = document.getElementById('newacct-role');
     select.innerHTML = '<option value="">Loading...</option>';
 
     try {
@@ -3577,19 +3578,19 @@ async function loadAccountRoles() {
 // which half of the card shows: 'form' or 'review'
 function showAccountStep(step) {
     const reviewing = step === 'review';
-    document.getElementById('account-form').hidden = reviewing;
-    document.getElementById('account-review').hidden = !reviewing;
-    document.getElementById('account-review-btn').hidden = reviewing;
-    document.getElementById('account-confirm-btn').hidden = !reviewing;
-    document.getElementById('account-back').hidden = !reviewing;
-    document.getElementById('account-subtitle').textContent =
+    document.getElementById('newacct-form').hidden = reviewing;
+    document.getElementById('newacct-review').hidden = !reviewing;
+    document.getElementById('newacct-review-btn').hidden = reviewing;
+    document.getElementById('newacct-confirm-btn').hidden = !reviewing;
+    document.getElementById('newacct-back').hidden = !reviewing;
+    document.getElementById('newacct-subtitle').textContent =
         reviewing ? 'Review before creating' : 'Account Management';
 }
 
 function closeAccountModal() {
     if (accountBusy) return;
     clearAccountForm();
-    closeModal('account-modal');
+    closeModal('newacct-modal');
 }
 
 function backToAccountForm() {
@@ -3748,7 +3749,7 @@ async function reviewNewAccount(event) {
     }
 
     // switched off while the requests run, so a double click sends one request
-    const button = document.getElementById('account-review-btn');
+    const button = document.getElementById('newacct-review-btn');
     accountBusy = true;
     button.disabled = true;
     button.textContent = 'Checking...';
@@ -3795,7 +3796,7 @@ function showAccountReview(review) {
 
     const minutes = Math.max(1, Math.round(review.expiresInSeconds / 60));
 
-    document.getElementById('account-review').innerHTML =
+    document.getElementById('newacct-review').innerHTML =
         '<div class="detail-grid">' +
         detailField('Name', escapeHtml(review.fullName)) +
         detailField('Role', escapeHtml(review.roleName)) +
@@ -3814,8 +3815,8 @@ async function confirmNewAccount() {
     const review = accountReview;
 
     // switched off while the request runs, so a double click sends one request
-    const button = document.getElementById('account-confirm-btn');
-    const back = document.getElementById('account-back');
+    const button = document.getElementById('newacct-confirm-btn');
+    const back = document.getElementById('newacct-back');
     accountBusy = true;
     button.disabled = true;
     back.disabled = true;
@@ -3833,7 +3834,7 @@ async function confirmNewAccount() {
 
         accountReview = null;
         clearAccountForm();
-        closeModal('account-modal');
+        closeModal('newacct-modal');
 
         // a list that is already loaded shows the new account (one not loaded stays closed)
         const staffPanel = getDataPanel('mgr-staff');
