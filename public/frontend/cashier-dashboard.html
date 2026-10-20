@@ -867,7 +867,7 @@
                         <span class="modal-role" id="payment-sub">Against a sale</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closePaymentForm()" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="closePaymentForm(true)" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-body">
@@ -900,20 +900,12 @@
                     </div>
                     <!-- the cheque's or the transfer's bank and account (payment-details.js) -->
                     <div id="payment-details-box" style="margin-top: 14px;"></div>
-                    <!-- asked for only when the method has a number to trace it by
-                         (renderPaymentVerdict); cash needs none, and the box is left blank with
-                         its room kept so the card does not change size -->
-                    <div class="form-group is-blank" id="payment-ref-field" style="margin-top: 14px;">
-                        <label for="pay-debt-ref">Reference <span class="label-hint" id="payment-ref-hint">optional</span></label>
-                        <input type="text" id="pay-debt-ref" name="referenceNo" class="form-control" maxlength="60"
-                               placeholder="e.g. cheque 001234">
-                    </div>
                     <p class="credit-verdict" id="payment-verdict"></p>
                 </form>
             </div>
 
             <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closePaymentForm()">Cancel</button>
+                <button type="button" class="btn btn-ghost" onclick="closePaymentForm(true)">Cancel</button>
                 <button type="button" class="btn" id="payment-qr-btn" data-icon="qr-code"
                         onclick="handleTakePayment(event, true)" hidden>Pay by QR</button>
                 <button type="button" class="btn btn-success" id="payment-save-btn" onclick="handleTakePayment(event)">Record the Payment</button>

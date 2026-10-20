@@ -787,8 +787,6 @@
 /* the form's facts read like the customer card's */
 #payment-modal .detail-grid + form { margin-top: 16px; }
 #payment-modal .downpayment-quick { margin-top: 2px; }
-/* The card keeps one size whichever method is picked, so choosing GCash does not
-   make it jump: the reference box keeps its room when it is blank (cash), and the
-   line under the form keeps room for two lines of words. */
-#payment-ref-field.is-blank { visibility: hidden; }
+/* the line under the form keeps room for two lines of words, so it does not jump
+   between one message and the next */
 #payment-modal .credit-verdict { min-height: 64px; }

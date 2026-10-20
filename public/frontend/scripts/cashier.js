@@ -1602,12 +1602,6 @@ function checkoutLabel(t) {
 // transfer is verified through PayMongo: the customer's bank and account are
 // asked for, and the reference is PayMongo's own payment number, not typed.
 // An e-wallet prints a reference too, taken when the cashier has it. Cash needs none.
-// the reference asked for on the Credit Settlement card (a sale asks for none)
-const REFERENCE_WORDS = {
-    'Cheque':        { hint: 'required, the cheque number', placeholder: 'e.g. 001234' },
-    'GCash':         { hint: 'optional, the GCash reference', placeholder: 'e.g. 1012 345 678901' },
-    'PayMaya':       { hint: 'optional, the Maya reference', placeholder: 'e.g. 5A3F9C21' }
-};
 
 // what the money taken today arrives by: the sale's own method, or on a
 // Credit sale the part payment's; nothing is taken on COD, nor on credit
@@ -1644,7 +1638,7 @@ function renderSalePaymentExtras(totals) {
 
     // A sale asks for no reference: not for an e-wallet, which is paid by QR
     // code, and not for a cheque, which is traced by its account, bank and date.
-    // (The Credit Settlement card still asks for one: REFERENCE_WORDS.)
+    // (The Credit Settlement card asks for none either.)
     const taken = methodTakenNow(t);
     const field = document.getElementById('sale-reference-field');
     const words = null;
@@ -4163,7 +4157,6 @@ async function openPaymentForm(saleId) {
         fields.amount.value = '0';
         fields.amount.max = balance.toFixed(2);
         fields.paymentMethod.value = 'Cash';
-        fields.referenceNo.value = '';
         clearPaymentDetails('pay-debt');
     }
 
@@ -4178,14 +4171,18 @@ async function openPaymentForm(saleId) {
 }
 
 // Paid or cancelled, the form goes back to the customer's card it was opened
-// from, read afresh so the balance on it is the new one.
-function closePaymentForm() {
+// from, read afresh so the balance on it is the new one. Cancelled after it was
+// opened straight from the Credit Payment list, it goes back to that list.
+function closePaymentForm(cancelled) {
     paymentSale = null;
     closeModal('payment-modal');
 
     const customerId = paymentReturnCustomer;
+    const toPicker = paymentReturnPicker;
     paymentReturnCustomer = null;
-    if (customerId) openCustomerCredit(customerId, 'unpaid');
+    paymentReturnPicker = false;
+    if (cancelled && toPicker) openCreditPaymentPicker();
+    else if (customerId) openCustomerCredit(customerId, 'unpaid');
 }
 
 function fillPayment(share) {
@@ -4208,21 +4205,6 @@ function renderPaymentVerdict() {
     // the cheque's details, or the customer's bank and account for a transfer
     showPaymentDetails('pay-debt', fields.paymentMethod.value);
 
-    // The reference is on screen only for a method that has a number to trace it
-    // by (REFERENCE_WORDS): not for cash. When it goes, so does anything typed.
-    const refField = document.getElementById('payment-ref-field');
-    const words = REFERENCE_WORDS[fields.paymentMethod.value];
-    if (refField) {
-        refField.classList.toggle('is-blank', !words);
-        if (words) {
-            const hint = document.getElementById('payment-ref-hint');
-            if (hint) hint.textContent = words.hint;
-            fields.referenceNo.placeholder = words.placeholder;
-        } else if (fields.referenceNo.value !== '') {
-            fields.referenceNo.value = '';
-        }
-    }
-
     // GCash or PayMaya: the customer can pay by QR code instead of a typed reference.
     // A bank transfer is only taken through PayMongo, so Record the Payment is not offered for it.
     const isTransfer = fields.paymentMethod.value === 'Bank Transfer';
@@ -4237,7 +4219,7 @@ function renderPaymentVerdict() {
 
     if (amount <= 0) {
         box.className = 'credit-verdict';
-        box.textContent = 'Type what was handed over.';
+        box.textContent = '';
         return;
     }
     if (amount > balance + 0.004) {
@@ -4267,7 +4249,9 @@ async function handleTakePayment(event, viaQr) {
     const balance = Number(paymentSale.balance_due) || 0;
     const amount = Math.round((parseFloat(fields.amount.value) || 0) * 100) / 100;
     const method = fields.paymentMethod.value;
-    const reference = fields.referenceNo.value.trim();
+    // no reference is asked for: a cheque is traced by its account, bank and date,
+    // an e-wallet or transfer by its QR payment
+    const reference = '';
 
     if (amount <= 0) {
         notifyWarning('Type the amount that was handed over.', 'Nothing to record');
@@ -4296,12 +4280,6 @@ async function handleTakePayment(event, viaQr) {
             return;
         }
         chequeDetails = read.details;
-
-        if (reference === '') {
-            notifyWarning('A cheque is traced by its cheque number. Put it in the Reference box.', 'Reference needed');
-            fields.referenceNo.focus();
-            return;
-        }
     } else if (method === 'Bank Transfer') {
         const read = readTransferDetails('pay-debt');
         if (read.problem) {
@@ -4451,6 +4429,8 @@ let customerOpenSales = [];
 
 // the card to go back to once the payment form closes
 let paymentReturnCustomer = null;
+// true when the form was opened straight from the Credit Payment list: Cancel goes back there
+let paymentReturnPicker = false;
 
 // the administrator can switch payments off for the cashiers (debt-payments)
 function canTakePayments() {
@@ -4462,6 +4442,7 @@ function canTakePayments() {
 function payCustomerSale(saleId) {
     if (!openCustomer) return;
     paymentReturnCustomer = openCustomerId;
+    paymentReturnPicker = false;
     closeModal('customer-modal');
     openPaymentForm(saleId);
 }
@@ -5364,7 +5345,10 @@ async function pickCreditPayCustomer(customerId) {
     closeModal('credit-pay-modal');
     await openCustomerCredit(customerId, 'unpaid');
 
-    if (isModalOpen('customer-modal') && customerOpenSales.length === 1) payFromCustomerCard();
+    if (isModalOpen('customer-modal') && customerOpenSales.length === 1) {
+        payFromCustomerCard();
+        paymentReturnPicker = true;
+    }
 }
 
 // ==========================================
