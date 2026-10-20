@@ -273,17 +273,6 @@
 #loyal-table .cell-due { font-weight: 600; }
 
 /* ==========================================================================
-   SALES TRANSACTIONS AND QR PAYMENTS -- two tabs of one report. The tabs
-   stand where the heading would be; the heading is only printed.
-   ========================================================================== */
-.report-tabs { margin-bottom: 0; }
-.report-print-title { display: none; }
-
-@media print {
-    .report-print-title { display: block; }
-}
-
-/* ==========================================================================
    DELIVERY TRACKING
    ========================================================================== */
 /* the balance still owed is the figure this screen is read for */

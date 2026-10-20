@@ -858,10 +858,10 @@ sale's reference. A code lasts 10 minutes. A failed or expired code offers
 **New QR** or **Choose another method**, and nothing is recorded for it.
 
 Every attempt is a row in `qr_payments` with how it ended (paid, failed,
-expired, cancelled), and **QR Payments** lists the successful (paid) ones only,
-with no status filter: the manager sees everyone's. A paid code whose sale could not be
-saved (an item ran out) stays paid and says *paid but sale not saved – refund
-needed*.
+expired, cancelled). There is no separate QR Payments screen: a paid code is
+listed in its sale's **Payments** tab beside the other payments (date, amount,
+wallet, reference, who took it), once even when it was also recorded as a
+payment on the account.
 
 `PAYMENT_PROVIDER` in `.env` decides who takes the money:
 

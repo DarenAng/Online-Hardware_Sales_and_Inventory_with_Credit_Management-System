@@ -136,24 +136,10 @@ function qrRefusal(row, amountNow, wallet) {
   return null;
 }
 
-// The tiles over the QR Payments list. The success rate is out of the attempts
-// that have finished: one still waiting has not failed yet.
-function summarize(rows) {
-  const counts = { attempts: rows.length, pending: 0, paid: 0, failed: 0, expired: 0, cancelled: 0 };
-  for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
-    const row = rows[rowIndex];
-    if (counts[row.status] !== undefined) counts[row.status] += 1;
-  }
-  const finished = counts.attempts - counts.pending;
-  counts.successRate = finished > 0 ? Math.round((counts.paid / finished) * 1000) / 10 : null;
-  return counts;
-}
-
 function registerQrPaymentRoutes(app, deps) {
   const db = deps.db;
   const getActorId = deps.getActorId;
   const publishChange = deps.publishChange;
-  const isDateText = deps.isDateText;
   const CASHIER = deps.CASHIER;
   const port = deps.port;
 
@@ -448,50 +434,6 @@ function registerQrPaymentRoutes(app, deps) {
     }
   });
 
-  // ---------- the record of every successful payment ----------
-  // Only paid codes are listed: one that failed, expired, was cancelled or is
-  // still waiting is not a transaction and is not part of the record.
-  app.get("/api/qr-payments", async function (request, response) {
-    const from = String(request.query.from || "");
-    const to = String(request.query.to || "");
-
-    // a cashier's list is their own, whatever the address asks for
-    let staff = request.query.staff ? Number(request.query.staff) : null;
-    if (request.actor.roleName === CASHIER) staff = Number(request.actor.staffId);
-
-    const where = ["q.status = 'paid'"];
-    const params = [];
-    if (isDateText(from)) { where.push("q.created_at >= ?"); params.push(from + " 00:00:00"); }
-    if (isDateText(to))   { where.push("q.created_at <= ?"); params.push(to + " 23:59:59"); }
-    if (staff)            { where.push("q.created_by_staff_id = ?"); params.push(staff); }
-    const whereSql = "WHERE " + where.join(" AND ");
-
-    try {
-      // Codes left waiting past their time (a till closed with one on screen)
-      // are settled before the list is read, so it never shows them pending.
-      const dueResult = await db.query(
-        ROW_SQL + " WHERE q.status = 'pending' AND q.expires_at <= NOW() ORDER BY q.qr_payment_id LIMIT 20");
-      const due = dueResult[0];
-      for (let dueIndex = 0; dueIndex < due.length; dueIndex++) {
-        await refresh(due[dueIndex], null);
-      }
-
-      const rowsResult = await db.query(ROW_SQL + " " + whereSql + " ORDER BY q.created_at DESC, q.qr_payment_id DESC LIMIT 1000",
-        params);
-      const rows = rowsResult[0];
-      const summary = summarize(rows);
-      const listed = [];
-      for (let i = 0; i < rows.length; i++) {
-        listed.push(shape(rows[i]));
-      }
-
-      response.json({ rows: listed, summary: summary });
-    } catch (error) {
-      console.error("QR payments list failed:", error.message);
-      response.status(500).json({ error: "Unable to read the QR payments." });
-    }
-  });
-
   // ---------- PayMongo telling us (optional) ----------
   // The till's own checking is what confirms a payment; PayMongo cannot reach
   // a server on localhost. When the server is reachable, this catches what the
@@ -657,7 +599,6 @@ function registerQrPaymentRoutes(app, deps) {
 module.exports = {
   registerQrPaymentRoutes: registerQrPaymentRoutes,
   qrRefusal: qrRefusal,
-  summarize: summarize,
   UNSAVED_NOTE: UNSAVED_NOTE,
   QR_MINUTES: QR_MINUTES
 };
