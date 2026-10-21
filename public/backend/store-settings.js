@@ -1,11 +1,3 @@
-// ============================================================
-// store-settings.js -- the shop's default settings and receipt layout
-// Loaded by: server.js (handed on to the route files) and database/migrations.js.
-// Never sent to a browser.
-// ============================================================
-
-// Who the shop is and how it is registered. Above the 3,000,000 threshold a
-// shop is VAT-registered with 12% inside its prices; below it charges no VAT.
 const DEFAULT_STORE_SETTINGS = {
   store_name: "Lucelyn Hardware",
   proprietor: null,
@@ -24,10 +16,6 @@ const DEFAULT_STORE_SETTINGS = {
   refund_policy: null
 };
 
-// The plain terms printed with a customer's credit account, one term to a
-// line, until the manager writes their own (store_settings.credit_terms). They
-// hold no figures: the credit limit, the due date and the late-payment rate are
-// printed above them from the account itself, so they cannot go out of date.
 const DEFAULT_CREDIT_TERMS = [
   "Every credit purchase is paid in full by its due date, shown on the receipt.",
   "A purchase paid late is charged the late-payment penalty for every month or part of a month it stays unpaid.",
@@ -37,9 +25,6 @@ const DEFAULT_CREDIT_TERMS = [
   "By signing, the customer confirms these details and accepts these terms."
 ].join("\n");
 
-// The terms on how the store handles a customer's personal data, one term to a
-// line, until the manager writes their own (store_settings.data_terms). Printed
-// on the back of the customer card.
 const DEFAULT_DATA_TERMS = [
   "The store collects the customer's name, address, contact number and purchase records only to sell, deliver, give credit and collect payment.",
   "This information is seen only by authorized staff and is not sold or shared, except with a courier or where the law requires.",
@@ -47,8 +32,6 @@ const DEFAULT_DATA_TERMS = [
   "Handled under the Data Privacy Act of 2012 (RA 10173)."
 ].join("\n");
 
-// The store's refund policy, one rule to a line, until the manager writes their
-// own (store_settings.refund_policy). Printed on the back of the customer card.
 const DEFAULT_REFUND_POLICY = [
   "Returns within 3 days of purchase, with the receipt.",
   "Goods must be unused, undamaged and in their original packaging.",
@@ -56,9 +39,6 @@ const DEFAULT_REFUND_POLICY = [
   "A refund on a credit purchase first reduces the balance owed."
 ].join("\n");
 
-// What the receipt looks like until the administrator changes it in Receipt
-// Maintenance. Written into store_settings.receipt_layout by the migration,
-// so the till and the preview read it from the database like everything else.
 const DEFAULT_RECEIPT_LAYOUT = {
   paperWidth: 80,
   fontSize: 12,
@@ -72,8 +52,6 @@ const DEFAULT_RECEIPT_LAYOUT = {
   }
 };
 
-// The stored layout, checked and filled in from the defaults. Text that is not
-// a layout (or a database from before the column) gives the defaults back.
 function receiptLayoutFrom(raw) {
   let stored = raw;
   if (typeof raw === "string") {
@@ -85,13 +63,11 @@ function receiptLayoutFrom(raw) {
   }
   if (!stored || typeof stored !== "object") stored = {};
 
-  // text trimmed, each run of white space made one space, cut to max characters
   const tidy = function (value, max) {
     let textValue = value;
     if (value === null || value === undefined) textValue = "";
     return String(textValue).trim().replace(/\s+/g, " ").slice(0, max);
   };
-  // a list of lines: each tidied to 80 characters, empty ones dropped, at most 10 kept
   const lines = function (value, fallback) {
     if (!Array.isArray(value)) return fallback.slice();
     const kept = [];
@@ -134,7 +110,6 @@ function receiptLayoutFrom(raw) {
     paperWidth: paperWidth,
     fontSize: fontSize,
     title: text(stored.title, DEFAULT_RECEIPT_LAYOUT.title, 40),
-    // fixed wording, not a setting: it only prints on a sale that is fully paid
     paidLabel: DEFAULT_RECEIPT_LAYOUT.paidLabel,
     headerLines: lines(stored.headerLines, DEFAULT_RECEIPT_LAYOUT.headerLines),
     footerLines: lines(stored.footerLines, DEFAULT_RECEIPT_LAYOUT.footerLines),

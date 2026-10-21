@@ -1,50 +1,38 @@
-# installed packages, rebuilt with npm install
 node_modules/
 
-# editor, tool and OS files
 .vscode/
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# secrets: passwords and keys stay on this computer
 .env
 .env.*
 !.env.example
 mail-password.txt
 
-# local notes and database dumps
 *.log
 *.dump.sql
 
-# dated backups written by the Backup & Recovery screen
 backups/*.sql
 backups/**/*.sql
 backups/auto-backup.json
 
-# paper drafts
 Capstone outputs/
 ~$*
 
-# screenshots written by tests/shots.js
 shots/
 
-# local folder-tidying scripts
 *.bat
 
-# old snapshots kept locally only
 _unused/
 _to_delete/
 *-1.js
 *-1.css
 *-1.html
 
-# Vercel: the build output and the CLI's project link
 vercel-static/
 .vercel/
 
-# a database CA certificate saved for DB_SSL_CA_FILE
 *.pem
 
-# test scripts, kept off GitHub (they are not part of the app)
 tests/

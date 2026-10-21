@@ -1,42 +1,17 @@
-// ============================================================
-// cashier.js -- the Cashier dashboard (the till)
-// Loaded by: cashier-dashboard.html
-//
-// What is in this file, from top to bottom:
-//   - switching screens (showRegister, showRefunds, showCustomers, ...)
-//   - the product catalog on the left of the till, with search and filters
-//   - refunds: picking the product, the amount, and filing the refund; the
-//     sales of the past three days beside the form, to refund from
-//   - the customer box: typing a name, suggestions, picking a customer
-//   - the cart: adding lines, sizes (e.g. sack / kg), quantities, totals
-//   - the Payment window (Proceed to Payment): the customer, cash, cheque,
-//     e-wallet, bank transfer, credit or COD
-//   - checkout (handleCheckout) and the printed receipt
-//   - scheduling a delivery for the sale
-//   - the lists: deliveries, recent sales (for refunds), sales report
-//   - the customer credit screen: adding a customer, the card with its
-//     history tabs, asking for a higher limit, and payments taken from a
-//     customer's card (or from the register, with Credit Payment)
-//   - the page start-up code at the very bottom ("CASHIER PAGE BOOT")
-// ============================================================
 let catalog = [];
 let catalogLoaded = false;
-let catalogMode = 'idle';     // 'idle' keeps the grid clean, 'all' lists the whole catalog (ten a page)
+let catalogMode = 'idle';
 let cart = [];
 let lastReceipt = null;
 
-// eight rows is what fits above the fold on the counter machine
 const CASHIER_ROWS_PER_PAGE = 8;
 
-// eight a page keeps the form and the list of recent sales on one screen without scrolling
 const RECENT_SALES_ROWS_PER_PAGE = 8;
 
-// the customer list, read once and searched in memory behind the typing box
 let customerDirectory = [];
 let customerDirectoryLoaded = false;
 let suggestHighlight = -1;
 
-// a delivery filled in in the Payment window; written the moment the sale exists
 let pendingDelivery = null;
 
 function showCashierPanel(panelId, title, event) {
@@ -61,15 +36,9 @@ function showCashierPanel(panelId, title, event) {
     leaveScreenFurniture();
 }
 
-// Opening a screen never unfolds the Point of Sale list: only the heading's
-// caret does (shared/helpers.js sidebarHeading); the heading lights up on its
-// own while a screen beneath it is the open one.
-
 function showRegister(event) {
     showCashierPanel('panel-pos', 'Point of Sale', event);
 
-    // the catalog keeps what it showed when the cashier left; the page draws
-    // it empty once, when it starts
     renderCart();
 }
 
@@ -77,13 +46,10 @@ function showCashierHome(event) {
     showRegister(event);
 }
 
-// tracking only; empty until the search box or Load Data asks
 function showCashierDeliveries(event) {
     showCashierPanel('panel-delivery', 'Delivery Tracking', event);
 }
 
-// the refund form's product box needs the catalogue; the recent sales are read
-// again every time this screen opens, so a sale just rung up is in the list
 function showRefunds(event) {
     showCashierPanel('panel-refund', 'Refunds', event);
     loadCatalogOptions();
@@ -96,7 +62,6 @@ function showSalesReport(event) {
     showCashierPanel('panel-salesreport', 'Sales Report', event);
 }
 
-// ---------- product catalog ----------
 async function ensureCatalogLoaded(force) {
     if (catalogLoaded && !force) return true;
     try {
@@ -154,15 +119,10 @@ function renderCatalogNoMatch(keyword) {
     holdBoxHeight(grid);
 }
 
-// The catalog is a table, not a grid of cards. Pressing a row anywhere puts
-// the product on the order; only in-stock products are listed. A product that
-// is already on the order is greyed and cannot be pressed again: its amount is
-// changed with + and - on the order (pressCatalogRow, markCatalogRows).
 const catalogFilters = { category: 'all' };
 
 function setCatalogFilter(name, value) {
     catalogFilters[name] = value;
-    // a filter is an ask, like the search
     if (!catalogLoaded || catalogMode === 'idle') {
         catalogMode = 'all';
         loadCatalogAll();
@@ -174,11 +134,9 @@ function setCatalogFilter(name, value) {
 const CATALOG_ROW_TITLE = {
     off: 'Press to put it on the order',
     on: 'Already on the order. Change the amount with + and − on the order.',
-    // a product the clerk added that the manager has not priced yet
     noPrice: 'No price yet. Ask the manager to set it; it cannot be sold until then.'
 };
 
-// The order line for this product, or undefined when it is not on the order
 function findCartLine(productId) {
     for (let i = 0; i < cart.length; i++) {
         if (cart[i].product_id === productId) return cart[i];
@@ -186,7 +144,6 @@ function findCartLine(productId) {
     return undefined;
 }
 
-// The catalog product with this id, or undefined
 function findCatalogProduct(productId) {
     for (let i = 0; i < catalog.length; i++) {
         if (catalog[i].product_id === productId) return catalog[i];
@@ -194,8 +151,6 @@ function findCatalogProduct(productId) {
     return undefined;
 }
 
-// the click on a row: a product on the order is not added a second time; the
-// line it is on lights up instead, so the cashier can see where to change it
 function pressCatalogRow(productId) {
     const product = findCatalogProduct(productId);
     if (product && isUnpriced(product)) {
@@ -210,7 +165,6 @@ function pressCatalogRow(productId) {
     addToCart(productId);
 }
 
-// only products that can be sold are listed; out of stock ones stay off the table
 function isCatalogAvailable(p) { return Number(p.quantity_in_stock) > 0; }
 
 function catalogMatchesFilters(p) {
@@ -223,7 +177,6 @@ function fillCatalogCategories() {
     const select = document.getElementById('catalog-category');
     if (!select) return;
 
-    // every category name of the products for sale, each one once, A to Z
     const names = [];
     for (let i = 0; i < catalog.length; i++) {
         const p = catalog[i];
@@ -265,9 +218,6 @@ function applyCatalogView() {
     renderCatalog(rows, text);
 }
 
-// Ten rows at a time, with Previous and Next under the table. The page is
-// kept while the same rows are redrawn (a line put on the order) and starts
-// over when the search or a filter changes what is listed.
 const CATALOG_PAGE_ROWS = 10;
 let catalogShown = [];
 let catalogShownKey = '';
@@ -300,7 +250,6 @@ function renderCatalog(rows, keyword) {
     const start = (catalogPage - 1) * CATALOG_PAGE_ROWS;
     const slice = sortedCatalogRows(rows).slice(start, start + CATALOG_PAGE_ROWS);
 
-    // one page needs no pager; the count pill already says how many
     let pager = '';
     if (pages > 1) {
         pager = '<div class="pager">' +
@@ -313,11 +262,7 @@ function renderCatalog(rows, keyword) {
               '</div></div>';
     }
 
-    // No stock count on a row at the till; every row listed is in stock. The
-    // sizes a product also sells in are listed under its unit, and picked on
-    // the order line.
     setPill('catalog-count', rows.length + (rows.length === 1 ? ' product' : ' products'));
-    // the table rows, one for each product on this page
     let rowsHtml = '';
     for (let i = 0; i < slice.length; i++) {
         const p = slice[i];
@@ -336,7 +281,6 @@ function renderCatalog(rows, keyword) {
             markHidden = '';
             markText = escapeHtml(qtyText(inCart.quantity, inCart.unit)) + ' on order';
         }
-        // no price yet: greyed and cannot be pressed (the server refuses it as well)
         const noPrice = isUnpriced(p);
         if (noPrice) {
             rowClass = ' is-unpriced';
@@ -377,7 +321,6 @@ function renderCatalog(rows, keyword) {
         '<table class="catalog-table" id="catalog-table">' +
         '<thead><tr>' + catalogHeaders() + '</tr></thead>' +
         '<tbody>' + rowsHtml +
-        // a short page is topped up to ten so the pager stays put (tables.js)
         fillerRows(CATALOG_PAGE_ROWS - slice.length, 5) +
         '</tbody></table>' + pager;
 
@@ -385,7 +328,6 @@ function renderCatalog(rows, keyword) {
     holdBoxHeight(grid);
 }
 
-// ---------- sorting the catalog by pressing a column header ----------
 const CATALOG_HEADERS = ['Product', 'Category', 'Brand', 'Sold By', 'Price'];
 const CATALOG_SORT_KEYS = [
     function (p) { return p.product_name || ''; },
@@ -394,7 +336,7 @@ const CATALOG_SORT_KEYS = [
     function (p) { return p.unit_name || ''; },
     function (p) { return isUnpriced(p) ? '' : Number(p.price); }
 ];
-let catalogSort = null;    // { column, descending } once a header is pressed
+let catalogSort = null;
 
 function sortedCatalogRows(rows) {
     if (!catalogSort) return rows;
@@ -424,7 +366,6 @@ function catalogHeaders() {
     return html;
 }
 
-// pressing a header sorts by it; pressing it again turns the order round
 function sortCatalog(column) {
     if (catalogSort && catalogSort.column === column) catalogSort.descending = !catalogSort.descending;
     else catalogSort = { column: column, descending: false };
@@ -432,7 +373,6 @@ function sortCatalog(column) {
     renderCatalog(catalogShown);
 }
 
-// Load Data: the whole catalog (in stock), ten a page like every other list
 function loadCatalogAll(event) { return loadCatalogView('all', event); }
 
 async function loadCatalogView(mode, event) {
@@ -458,7 +398,6 @@ async function loadCatalogView(mode, event) {
     loadCustomerOptions();
 }
 
-// the catalog narrows as the cashier types; Escape clears
 let catalogSearchTimer = null;
 
 function onCatalogSearchInput(event) {
@@ -511,13 +450,9 @@ async function filterCatalog(keyword) {
     applyCatalogView();
 }
 
-// The refund product is typed, not picked, and shares the customer box's
-// shape. Until a product is picked there is no strip under the box and the
-// form refuses to send. Picking one fills the refund amount in.
 let refundProduct = null;
 let refundSuggestHighlight = -1;
 
-// what the amount box last had put into it by this code; a typed figure is never overwritten
 let refundAmountSuggested = null;
 
 function refundProductBox() { return document.getElementById('refund-product'); }
@@ -527,7 +462,6 @@ function refundProductIdBox() {
     return form ? form.elements.productId : null;
 }
 
-// kept under its old name because showRefunds calls it
 async function loadCatalogOptions() {
     if (!document.getElementById('refund-product')) return;
     await ensureCatalogLoaded(false);
@@ -541,7 +475,6 @@ async function onRefundProductInput(value) {
 
     if (!catalogLoaded && text !== '') await ensureCatalogLoaded(false);
 
-    // typing after a choice unmakes the choice
     if (refundProduct && String(refundProduct.product_name).trim() !== text) {
         setRefundProduct(null);
     }
@@ -571,7 +504,6 @@ function renderRefundSuggestions(text) {
         return;
     }
 
-    // names that start with the text come before a later word in the name
     const starts = [];
     const words = [];
     const other = [];
@@ -592,7 +524,6 @@ function renderRefundSuggestions(text) {
     let suggestHtml = '';
     for (let i = 0; i < found.length; i++) {
         const p = found[i];
-        // brand and category separate two products whose names read almost the same
         const meta = [];
         if (p.category_name) meta.push(escapeHtml(p.category_name));
         if (p.brand_name) meta.push(escapeHtml(p.brand_name));
@@ -683,7 +614,6 @@ function clearRefundProduct() {
     if (box) box.focus();
 }
 
-// one place decides what is chosen so the field, strip, verdict and amount agree
 function setRefundProduct(product) {
     refundProduct = product || null;
 
@@ -695,7 +625,6 @@ function setRefundProduct(product) {
     suggestRefundAmount();
 }
 
-// the strip is the whole answer to "have I chosen something yet"
 function renderRefundProductStrip() {
     const strip = document.getElementById('refund-product-strip');
     if (!strip) return;
@@ -736,8 +665,6 @@ function renderRefundProductVerdict() {
     box.textContent = 'No product chosen yet. A refund moves stock, so it has to name a real product.';
 }
 
-// Choosing the product and saying how many fills the amount in. It stays
-// editable; the note under the box says which figure is in it.
 function suggestRefundAmount() {
     const form = document.getElementById('refund-form');
     const note = document.getElementById('refund-amount-source');
@@ -752,7 +679,6 @@ function suggestRefundAmount() {
     }
 
     const quantity = Number(form.elements.quantity.value) || 0;
-    // from a sale on the form: what the customer paid for it; otherwise today's price
     const saleLine = refundSaleLine(refundProduct.product_id);
     const suggested = saleLine
         ? refundLineAmount(saleLine, Math.max(quantity, 0))
@@ -789,15 +715,10 @@ function onRefundAmountInput() {
 
     const typed = parseFloat(form.elements.refundAmount.value);
 
-    // typing the suggested figure back in by hand is still the suggested figure
     if (typed !== refundAmountSuggested) refundAmountSuggested = null;
     suggestRefundAmount();
 }
 
-// The customer is typed and picked. A name picked from the suggestions is an
-// account (the credit strip appears); nothing typed is a walk-in. A name that
-// matches nobody is refused (handleCheckout): the till does not open accounts,
-// Customers Record does.
 async function loadCustomerDirectory(force) {
     if (customerDirectoryLoaded && !force) return true;
 
@@ -806,8 +727,6 @@ async function loadCustomerDirectory(force) {
         customerDirectoryLoaded = true;
         return true;
     } catch (error) {
-        // not fatal: a cash sale to a walk-in needs none of this (a typed name
-        // cannot be checked against the customer list until it loads, and is refused then)
         customerDirectoryLoaded = false;
         return false;
     }
@@ -824,27 +743,19 @@ function selectedCustomerId() {
     return box && box.value ? parseInt(box.value, 10) : null;
 }
 
-// trimmed and collapsed: "Maria  Santos" and "Maria Santos" are one customer
 function typedCustomerName() {
     const box = customerNameBox();
     return box ? box.value.trim().replace(/\s+/g, ' ') : '';
 }
 
-// first and last name only, without the middle name: "Maria Santos" for "Maria S. Santos"
 function customerShortName(c) {
     return (String(c.first_name || '') + ' ' + String(c.last_name || '')).trim();
 }
 
-// the middle name written out: "Maria Reyes Santos" for "Maria R. Santos"
 function customerSpelledName(c) {
     return (String(c.first_name || '') + ' ' + String(c.middle_name || '') + ' ' + String(c.last_name || '')).replace(/\s+/g, ' ').trim();
 }
 
-// The account a typed name stands for, or null. The name as the record writes it
-// ("Maria R. Santos") comes first. The name with the middle name written out, and the
-// first and last name alone, count only when exactly one customer has that spelling:
-// with a Maria R. Santos and a Maria L. Santos on record, "Maria Santos" is nobody
-// yet, and the list under the box is how the cashier says which.
 function customerMatchingName(typed) {
     const text = String(typed || '').trim().replace(/\s+/g, ' ').toLowerCase();
     if (text === '') return null;
@@ -864,7 +775,6 @@ function customerMatchingName(typed) {
     return null;
 }
 
-// the account whose name is in the box, only while the text still matches exactly
 function customerMatchingTypedName() {
     return customerMatchingName(typedCustomerName());
 }
@@ -880,7 +790,6 @@ async function onCustomerInput(value) {
 
     const exact = customerMatchingTypedName();
 
-    // an id that no longer agrees with the text puts the sale against the wrong account
     if (idBox) {
         const nextId = exact ? String(exact.id) : '';
         if (idBox.value !== nextId) {
@@ -893,9 +802,6 @@ async function onCustomerInput(value) {
     renderCustomerVerdict();
 }
 
-// The suggestion list is drawn under the Payment card's customer box and under
-// the delivery form's recipient box the same way; only the elements and the
-// function a pick calls differ.
 const CUSTOMER_PICKERS = {
     payment: { boxId: 'customer-name', listId: 'customer-suggest', pick: 'pickCustomer' },
     delivery: { boxId: 'dl-name', listId: 'dl-customer-suggest', pick: 'pickDeliveryCustomer' }
@@ -917,7 +823,6 @@ function renderCustomerSuggestions(text, where) {
         return;
     }
 
-    // names that start with the text first; six fits under the box
     const starts = [];
     const words = [];
 
@@ -943,7 +848,6 @@ function renderCustomerSuggestions(text, where) {
         const owed = Number(c.current_credit) || 0;
         const bought = Number(c.purchase_count) || 0;
 
-        // a regular, or an account that already owes, is worth knowing before the sale
         const notes = [];
         if (bought > 0) notes.push(bought + (bought === 1 ? ' purchase' : ' purchases'));
         if (owed > 0) notes.push('owes ' + peso(owed));
@@ -974,7 +878,6 @@ function hideCustomerSuggestions(where) {
     suggestHighlight = -1;
 }
 
-// arrow keys and Enter: a cashier's hands are on the keyboard
 function onCustomerKey(event) {
     customerSuggestKey(event, 'customer-suggest', 'payment');
 }
@@ -1011,7 +914,6 @@ function customerSuggestKey(event, listId, where) {
     if (event.key === 'Escape') hideCustomerSuggestions(where);
 }
 
-// The customer in the directory with this id, or undefined
 function findCustomer(customerId) {
     for (let i = 0; i < customerDirectory.length; i++) {
         if (customerDirectory[i].id === customerId) return customerDirectory[i];
@@ -1021,7 +923,6 @@ function findCustomer(customerId) {
 
 async function pickCustomer(customerId) {
     let found = findCustomer(customerId);
-    // a customer added a moment ago may not be in the list yet: load it again once
     if (!found) {
         customerDirectoryLoaded = false;
         await loadCustomerDirectory(true);
@@ -1059,7 +960,6 @@ async function clearCustomer() {
     if (nameBox) nameBox.focus();
 }
 
-// one line under the box saying which outcome is in force
 function renderCustomerVerdict() {
     const box = document.getElementById('customer-verdict');
     if (!box) return;
@@ -1067,7 +967,6 @@ function renderCustomerVerdict() {
     const typed = typedCustomerName();
     const id = selectedCustomerId();
 
-    // Add Customer shows only for a name that matches nobody
     const addButton = document.getElementById('customer-add-btn');
     const offerAdd = !id && typed !== '' && canAddCustomers();
     if (addButton) addButton.hidden = !offerAdd;
@@ -1090,7 +989,6 @@ function renderCustomerVerdict() {
         return;
     }
 
-    // a name that matches nobody is a stop until the account is opened
     box.className = 'customer-verdict is-stop';
     if (offerAdd) {
         box.textContent = 'Not a customer on record. Press Add Customer to open their account, ' +
@@ -1101,29 +999,20 @@ function renderCustomerVerdict() {
     }
 }
 
-// opening an account needs the Customers Record screen (POST /api/customers is part of it)
 function canAddCustomers() {
     return typeof holdsFeature !== 'function' || holdsFeature('credit');
 }
 
-// Add Customer from the payment form: the form opens over it with the typed
-// name filled in, and the new account is put on the sale once it is saved.
 function addCustomerFromPayment() {
     openAddCustomer();
     addCustomerFor = 'sale';
     prefillAddCustomerName(typedCustomerName());
 }
 
-// kept under the old name because the boot sequence and the catalog loader call it
 async function loadCustomerOptions() {
     await loadCustomerDirectory(false);
 }
 
-// ---------- the cart ----------
-// One line per product. A line is counted in the unit chosen on it: the
-// product's own (kilos, pieces) or one of the sizes the clerk listed for it
-// (a sack of 25 kilos, a box of 10). Stock is always checked in the
-// product's own unit, so 2 sacks ask the shelf for 50 kilos.
 function sellingUnitsOf(product) {
     const list = Array.isArray(product.selling_units) ? product.selling_units : [];
     const usable = [];
@@ -1134,13 +1023,11 @@ function sellingUnitsOf(product) {
     return usable;
 }
 
-// "kg" for a kilogram, otherwise the unit's own name
 function unitShort(unit) {
     const measure = measuredUnit(unit);
     return measure ? measure.short : String(unit || '').trim();
 }
 
-// the choices on a line: the product's own unit first, then the sizes, smallest up
 function lineUnitChoices(line) {
     const own = { unit_name: line.base_unit || 'unit', units_per: 1, price: line.price, own: true };
     const sorted = line.sizes.slice().sort(function (a, b) {
@@ -1173,10 +1060,8 @@ function lineChoice(line) {
     return choices[0];
 }
 
-// the price of one of what the line is counted in
 function lineUnitPrice(line) { return lineChoice(line).price; }
 
-// what the line asks of the shelf, in the product's own unit
 function lineBaseQty(line) {
     return Number((line.quantity * lineChoice(line).units_per).toFixed(3));
 }
@@ -1185,7 +1070,6 @@ function lineSubtotal(line) {
     return Math.round(line.quantity * lineUnitPrice(line) * 100) / 100;
 }
 
-// the most of the chosen unit the shelf can give; a measured own unit can be a fraction
 function lineCeiling(line) {
     const choice = lineChoice(line);
     const most = line.on_hand / choice.units_per;
@@ -1193,7 +1077,6 @@ function lineCeiling(line) {
     return Math.floor(most);
 }
 
-// a fraction only on the product's own measured unit (2.5 kg); sizes are whole
 function lineStep(line) {
     const choice = lineChoice(line);
     if (choice.own && isMeasuredUnit(line.base_unit)) return measuredUnit(line.base_unit).step;
@@ -1211,8 +1094,6 @@ function tellAllOfIt(line) {
         'That is all of it');
 }
 
-// Pressing a product puts one of its own unit on the order, or one more if
-// it is already there. The unit and the amount are changed on the line.
 function addToCart(productId) {
     const p = findCatalogProduct(productId);
     if (!p) return;
@@ -1248,7 +1129,6 @@ function addToCart(productId) {
         quantity: 1,
         on_hand: onHand
     };
-    // a shelf holding less than one (0.4 kg of nails) still sells what it has
     if (onHand < 1) fresh.quantity = lineCeiling(fresh);
     cart.push(fresh);
     renderCart();
@@ -1273,13 +1153,12 @@ function changeCartQty(productId, delta) {
     renderCart();
 }
 
-// the amount box on a line: typed, then checked against the shelf when it is left
 function onCartQtyInput(productId, value) {
     const line = findCartLine(productId);
     if (!line) return;
 
     const amount = Number(String(value).replace(/,/g, '').trim());
-    if (!Number.isFinite(amount) || amount <= 0) return;   // settled on blur
+    if (!Number.isFinite(amount) || amount <= 0) return;
 
     const rounded = lineAllowsFraction(line) ? Math.round(amount * 1000) / 1000 : Math.floor(amount);
     if (rounded <= 0) return;
@@ -1295,8 +1174,6 @@ function onCartQtyBlur(productId) {
     renderCart();
 }
 
-// Changing the unit keeps the count where it can: 3 boxes become 3 kilos,
-// capped at what the shelf holds in the new size.
 function changeCartUnit(productId, unitName) {
     const line = findCartLine(productId);
     if (!line) return;
@@ -1304,7 +1181,6 @@ function changeCartUnit(productId, unitName) {
     line.unit = unitName;
     const most = lineCeiling(line);
     if (most <= 0) {
-        // not even one of that size on the shelf; go back to the product's own unit
         line.unit = line.base_unit;
         notifyWarning('There is not a whole ' + unitName + ' of ' + line.name + ' left (' +
             qtyText(line.on_hand, line.base_unit) + ' on the shelf).', 'Not enough for that size');
@@ -1341,26 +1217,21 @@ async function clearCart() {
         if (form.elements.downPayment) form.elements.downPayment.value = '0';
     }
 
-    // a delivery left attached to an emptied cart is a delivery for goods nobody chose
     pendingDelivery = null;
     renderDeliveryAttached();
     await clearCustomer();
     renderCart();
 }
 
-// No discount box: a markdown belongs on the product, set by a manager.
-// discount stays in these totals as a fixed zero because the sales table, the
-// receipt and the reports still carry the column.
 function cartTotals() {
     const form = document.getElementById('checkout-form');
-    // the total of every line in the cart
     let gross = 0;
     for (let i = 0; i < cart.length; i++) {
         gross = gross + lineSubtotal(cart[i]);
     }
     const discount = 0;
     const due = Math.max(gross - discount, 0);
-    let tendered = 0;        // the money the customer handed over
+    let tendered = 0;
     let method = 'Cash';
     if (form) {
         tendered = parseFloat(form.elements.amountPaid.value) || 0;
@@ -1370,7 +1241,6 @@ function cartTotals() {
     const onCredit = method === 'Credit';
     const onAccount = onCredit || method === 'COD';
 
-    // half now and half on account; capped at the bill because there is no change
     let rawDown;
     if (form && form.elements.downPayment) {
         rawDown = parseFloat(form.elements.downPayment.value) || 0;
@@ -1380,10 +1250,9 @@ function cartTotals() {
 
     let down = 0;
     if (onCredit) {
-        down = Math.max(0, Math.min(rawDown, due));   // between 0 and the amount due
+        down = Math.max(0, Math.min(rawDown, due));
     }
 
-    // what goes on the customer's account (still owed after this sale)
     let amountOnAccount = 0;
     if (onCredit) {
         amountOnAccount = due - down;
@@ -1405,7 +1274,6 @@ function cartTotals() {
     };
 }
 
-// the words under a line: "2 sacks = 50 kg" when the unit is a size, or the price of one
 function cartLineNote(l) {
     const choice = lineChoice(l);
     if (choice.own) {
@@ -1481,13 +1349,11 @@ function renderCart() {
     markCatalogRows();
 }
 
-// the catalog rows say what is already on the order, without being redrawn:
-// a product on the order is greyed and cannot be pressed (pressCatalogRow)
 function markCatalogRows() {
     const catalogRows = document.querySelectorAll('#catalog-table tr[data-product-row]');
     for (let i = 0; i < catalogRows.length; i++) {
         const row = catalogRows[i];
-        if (row.classList.contains('is-unpriced')) continue;   // it never goes on the order
+        if (row.classList.contains('is-unpriced')) continue;
         const line = findCartLine(Number(row.dataset.productRow));
         row.classList.toggle('is-on-order', Boolean(line));
         row.title = CATALOG_ROW_TITLE[line ? 'on' : 'off'];
@@ -1500,8 +1366,6 @@ function markCatalogRows() {
     }
 }
 
-// the figures alone, while an amount is being typed: rebuilding the line
-// would take the cursor out of the box
 function renderCartFigures() {
     for (let i = 0; i < cart.length; i++) {
         const l = cart[i];
@@ -1513,11 +1377,9 @@ function renderCartFigures() {
 
     const t = cartTotals();
 
-    // the order's own box: what the lines come to, and nothing about payment
     const totals = document.getElementById('cart-totals');
     if (totals) {
         let html = '<div class="total-row"><span>Subtotal</span><span>' + peso(t.gross) + '</span></div>';
-        // no discount box at the till; shown only if a total ever carries one
         if (t.discount > 0) {
             html += '<div class="total-row"><span>Discount</span><span>' + peso(t.discount) + '</span></div>';
         }
@@ -1525,13 +1387,11 @@ function renderCartFigures() {
         totals.innerHTML = html;
     }
 
-    // the Payment window's own figures: the amount due, then what becomes of it
     const payTotals = document.getElementById('pay-totals');
     if (payTotals) {
         let html = '<div class="total-row total-due"><span>Amount Due</span><span>' + peso(t.due) + '</span></div>';
 
         if (t.onCredit) {
-            // credit: part paid now, the rest goes on the account
             html += '<div class="total-row"><span>Paid now</span><span>' + peso(t.down) + '</span></div>';
             if (t.amountOnAccount > 0) {
                 html += '<div class="total-row total-short"><span>On account</span><span>' + peso(t.amountOnAccount) + '</span></div>';
@@ -1539,15 +1399,12 @@ function renderCartFigures() {
                 html += '<div class="total-row total-change"><span>Paid in full</span><span>' + peso(t.amountOnAccount) + '</span></div>';
             }
         } else if (t.onAccount) {
-            // cash on delivery: nothing is paid at the counter
             html += '<div class="total-row total-note"><span>Collected on delivery</span><span>' +
                     peso(t.due) + '</span></div>';
         } else if (t.method === 'Bank Transfer') {
-            // the customer pays through their bank: exactly the bill, so no change
             html += '<div class="total-row total-note"><span>Paid by bank transfer</span><span>' +
                     peso(t.due) + '</span></div>';
         } else if (t.tendered < t.due) {
-            // paid now, and what was handed over does not cover it yet
             html += '<div class="total-row total-short"><span>Short by</span><span>' +
                     peso(t.due - t.tendered) + '</span></div>';
         } else {
@@ -1558,15 +1415,12 @@ function renderCartFigures() {
         payTotals.innerHTML = html;
     }
 
-    // nothing to pay for until something is on the order
     const proceed = document.getElementById('proceed-btn');
     if (proceed) proceed.disabled = cart.length === 0;
 
     renderCreditVerdict(t);
     renderSalePaymentExtras(t);
 
-    // GCash, PayMaya and a bank transfer are only ever taken through PayMongo
-    // (Pay by QR), so Complete Sale is not offered for them.
     const taken = methodTakenNow(t);
     const button = document.getElementById('checkout-btn');
     if (button) {
@@ -1575,45 +1429,26 @@ function renderCartFigures() {
         button.textContent = checkoutLabel(t);
     }
 
-    // GCash, PayMaya or a bank transfer taken now: the QR code is the other way to
-    // finish (the only way for a transfer), and needs no amount typed, as the code
-    // is for the bill (or the part paid) exactly
     const qrButton = document.getElementById('qr-pay-btn');
     if (qrButton) {
         qrButton.hidden = QR_METHODS.indexOf(taken) === -1;
-        // GCash or PayMaya paid in full: the amount entered has to cover the bill
         const short = !t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due;
         qrButton.disabled = cart.length === 0 || short;
         qrButton.textContent = 'Pay by QR';
     }
 
-    // a code on screen is for the old total; it is cancelled, not paid wrong
     qrAmountChanged('sale', t.onCredit ? t.down : t.due);
 }
 
-// The button says what pressing it does, so nobody charges a sale to an
-// account thinking they took the money for it.
 function checkoutLabel(t) {
     if (t.method === 'COD') return 'Place COD Order';
     if (t.onCredit) {
         if (cart.length > 0 && t.amountOnAccount <= 0) return 'Complete Sale';
-        // a part paid now still reads Charge to Account: the rest goes on the account
         return 'Charge to Account';
     }
     return 'Complete Sale';
 }
 
-// ---------- how the money arrives: its reference, and the bank and account ----------
-// A cheque is only money once it clears, and it is traced by its number, so it
-// needs one before the sale is rung up, with the account name and number printed
-// on it, the bank and its branch, and the date (payment-details.js). A bank
-// transfer is verified through PayMongo: the customer's bank and account are
-// asked for, and the reference is PayMongo's own payment number, not typed.
-// An e-wallet prints a reference too, taken when the cashier has it. Cash needs none.
-
-// what the money taken today arrives by: the sale's own method, or on a
-// Credit sale the part payment's; nothing is taken on COD, nor on credit
-// with nothing paid now
 function methodTakenNow(t) {
     if (t.onCredit) {
         if (t.down > 0) return downPaymentMethod();
@@ -1629,24 +1464,18 @@ function downPaymentMethod() {
     return 'Cash';
 }
 
-// the reference typed, but only while the box is on screen
 function saleReference() {
     const field = document.getElementById('sale-reference-field');
     const box = document.getElementById('sale-reference');
     return field && !field.hidden && box ? box.value.trim() : '';
 }
 
-// the boxes for a cheque's details and for a bank transfer's (payment-details.js)
 buildPaymentDetailsBox('sale-details-box', 'sale', true);
 buildPaymentDetailsBox('payment-details-box', 'pay-debt', true);
 
-// the reference box and the cheque or bank-transfer boxes under the payment fields
 function renderSalePaymentExtras(totals) {
     const t = totals || cartTotals();
 
-    // A sale asks for no reference: not for an e-wallet, which is paid by QR
-    // code, and not for a cheque, which is traced by its account, bank and date.
-    // (The Credit Settlement card asks for none either.)
     const taken = methodTakenNow(t);
     const field = document.getElementById('sale-reference-field');
     const words = null;
@@ -1656,25 +1485,17 @@ function renderSalePaymentExtras(totals) {
         if (words) {
             const hint = document.getElementById('sale-reference-hint');
             if (hint) hint.textContent = words.hint;
-            // not the browser's required: handleCheckout says which number it needs, in words
             if (box) box.placeholder = words.placeholder;
         } else if (box && box.value !== '') {
             box.value = '';
         }
     }
 
-    // The cheque or the transfer boxes follow the method taken now; on a credit
-    // sale that is the part payment's, even before an amount is typed, so the
-    // cashier can ask for the details as it is agreed.
     let detailsFor = taken;
     if (t.onCredit) detailsFor = downPaymentMethod();
     showPaymentDetails('sale', detailsFor);
 }
 
-// The inventory moved (somebody added a product, the manager set a price): when the
-// catalogue is loaded it is read again and redrawn, so a product that was just priced
-// stops being greyed without pressing Load Data. Only the catalogue is touched: the
-// order, the customer and the payment boxes stay as they are.
 let catalogRefreshing = false;
 
 async function refreshCatalogQuietly() {
@@ -1685,7 +1506,6 @@ async function refreshCatalogQuietly() {
         fillCatalogCategories();
         applyCatalogView();
     } catch (error) {
-        // the catalogue on screen stays as it was; the next change reads it again
     } finally {
         catalogRefreshing = false;
     }
@@ -1695,8 +1515,6 @@ if (typeof onLiveChange === 'function') {
     onLiveChange(['inventory'], refreshCatalogQuietly);
 }
 
-// Pay by QR, beside Complete Sale: the same checkout, with the money taken by
-// the code instead of typed in
 function payByQr() {
     const form = document.getElementById('checkout-form');
     if (!form) return;
@@ -1710,22 +1528,18 @@ function onPaymentMethodChange(method) {
     const onCredit = method === 'Credit';
     const onAccount = onCredit || method === 'COD';
 
-    // only one of the tender box and the down payment box is ever shown
     if (tender) tender.style.display = (onAccount || method === 'Bank Transfer') ? 'none' : 'block';
     if (down) down.style.display = onCredit ? 'block' : 'none';
 
     renderCart();
 }
 
-// Credit at the counter: the account is read when the customer is picked and
-// printed above the payment fields rather than raised as an error after.
 let selectedCustomerCredit = null;
 
 async function onCustomerChange(customerId) {
     const strip = document.getElementById('credit-strip');
     selectedCustomerCredit = null;
 
-    // a delivery already attached goes to the customer the sale is now for
     syncDeliveryToSaleCustomer(customerId);
 
     if (!customerId) {
@@ -1769,7 +1583,6 @@ function renderCreditStrip() {
         availableText = 'Nothing, on hold';
     }
 
-    // a short note: why the credit rating is not Good, or the manager's notes
     let note = '';
     if (c.standing !== 'Good' && c.standing_reason) {
         note = '<p class="credit-strip-note">' + escapeHtml(c.standing_reason) + '</p>';
@@ -1780,7 +1593,6 @@ function renderCreditStrip() {
     strip.className = 'credit-strip ' + tone;
     strip.style.display = 'block';
     strip.innerHTML =
-        // the rating in words as well as in the strip's colour
         '<div class="credit-strip-row">' +
             '<span class="credit-strip-label">Credit Rating</span>' +
             '<span class="credit-strip-value">' + escapeHtml(CASH_RATING_WORD[c.standing] || c.standing || '') + '</span>' +
@@ -1800,7 +1612,6 @@ function renderCreditStrip() {
         note;
 }
 
-// what will happen if this sale is completed as it stands, before the button
 function renderCreditVerdict(totals) {
     const box = document.getElementById('credit-verdict');
     if (!box) return;
@@ -1823,7 +1634,6 @@ function renderCreditVerdict(totals) {
     const available = Number(c.available_credit) || 0;
     const name = c.customer_name;
 
-    // a COD order goes on the account for the whole bill, so it meets the same hold and limit
     if (!t.onCredit) {
         if (c.standing === 'Hold') {
             box.className = 'credit-verdict is-stop';
@@ -1877,11 +1687,6 @@ function fillDownPayment(share) {
     renderCart();
 }
 
-// ---------- the Payment window ----------
-// Proceed to Payment, under the order, opens the checkout form (the customer,
-// the method, the amounts, the reference, a delivery). It is locked: it closes
-// through Back to the Order, its x, or a finished sale, never by a stray click,
-// so what was typed in it is not lost.
 function openCheckoutModal() {
     if (cart.length === 0) {
         notifyWarning('Add at least one item before going to payment.', 'The order is empty');
@@ -1905,8 +1710,6 @@ function closeCheckoutModal() {
     closeModal('checkout-modal');
 }
 
-// the name the confirmation and the messages use for whoever the sale is for;
-// '' when the sale is on no customer record
 function checkoutCustomerName() {
     const id = selectedCustomerId();
     if (!id) return '';
@@ -1916,13 +1719,8 @@ function checkoutCustomerName() {
     return typedCustomerName();
 }
 
-// ---------- checkout ----------
-// The question asked before a sale is rung up: what it comes to, how it is
-// paid, and what the customer gets back or still owes. Its words follow the
-// button that was pressed.
 function checkoutQuestion(t, customerName) {
     const methodName = t.method === 'COD' ? 'Cash on Delivery' : t.method;
-    // a sale on no customer record says so, and the question names no one
     const detail = ['Customer: ' + (customerName || 'No record'), 'Amount due: ' + peso(t.due), 'Payment method: ' + methodName];
 
     let title = 'Complete this sale?';
@@ -1961,13 +1759,11 @@ function checkoutQuestion(t, customerName) {
     return { title: title, message: message, confirmLabel: confirmLabel, detail: detail };
 }
 
-// puts the cursor in the box with this id
 function focusBox(id) {
     const box = document.getElementById(id);
     if (box) box.focus();
 }
 
-// viaQr: pressed as Pay by QR; the money is taken by the QR code
 async function handleCheckout(event, viaQr) {
     event.preventDefault();
     if (cart.length === 0) {
@@ -1979,17 +1775,12 @@ async function handleCheckout(event, viaQr) {
     const t = cartTotals();
     const typedName = typedCustomerName();
 
-    // GCash, PayMaya and a bank transfer are only taken through PayMongo, whichever
-    // way the sale was sent (Enter too)
     if (QR_METHODS.indexOf(methodTakenNow(t)) !== -1) viaQr = true;
 
-    // Walk-in is allowed (nothing typed). A name has to be a customer picked
-    // from the list; the till does not open an account from a typed name.
     let customerId = null;
     if (form.elements.customerId.value) {
         customerId = parseInt(form.elements.customerId.value, 10);
     } else if (typedName !== '') {
-        // the customer list may not have been read yet when the name was typed
         await loadCustomerDirectory(false);
         const exact = customerMatchingTypedName();
         if (exact) {
@@ -2009,13 +1800,11 @@ async function handleCheckout(event, viaQr) {
         }
     }
 
-    // a delivery is for a customer on record: when the sale has none, it takes the delivery's
     if (pendingDelivery && !customerId && pendingDelivery.customerId) {
         customerId = pendingDelivery.customerId;
         await pickCustomer(customerId);
     }
 
-    // a settled-later sale needs a customer, not just a walk-in
     if (t.onAccount && !customerId) {
         notifyWarning(
             'A ' + t.method + ' sale is settled later, so it has to be charged to a customer. '
@@ -2031,9 +1820,6 @@ async function handleCheckout(event, viaQr) {
         return;
     }
 
-    // A cheque is taken with its account name, account number, bank, branch and
-    // date; a bank transfer with the customer's bank and account. The server
-    // refuses them missing too.
     const taken = methodTakenNow(t);
     let chequeDetails = null;
     let transferDetails = null;
@@ -2054,7 +1840,6 @@ async function handleCheckout(event, viaQr) {
         }
         transferDetails = read.details;
 
-        // PayMongo refuses a transfer below the bank's smallest
         const bank = paymongoBank(transferDetails.bankCode);
         const transferAmount = t.onCredit ? t.down : t.due;
         if (bank && transferAmount < bank.minimum) {
@@ -2067,10 +1852,6 @@ async function handleCheckout(event, viaQr) {
 
     const reference = saleReference();
 
-    // Asked before anything is sent: the amount due, the method, and the change
-    // or the balance that goes on the account. Paying by QR is its own
-    // confirmation (the customer pays the code), except that a balance left on
-    // the account is still asked about.
     if (!viaQr || (t.onCredit && t.amountOnAccount > 0) || transferDetails) {
         const question = checkoutQuestion(t, checkoutCustomerName());
         if (chequeDetails) {
@@ -2094,14 +1875,12 @@ async function handleCheckout(event, viaQr) {
         if (!yes) return;
     }
 
-    // how much money is taken now
     let amountPaid = t.tendered;
     if (t.onCredit) {
         amountPaid = t.down;
     } else if (t.onAccount) {
         amountPaid = 0;
     } else if (viaQr) {
-        // the code is for the bill exactly: no change
         amountPaid = t.due;
     }
 
@@ -2110,8 +1889,6 @@ async function handleCheckout(event, viaQr) {
         downPaymentMethod = form.elements.downPaymentMethod.value;
     }
 
-    // by QR code: the customer pays first, and the sale is sent only once the
-    // payment is in
     let qr = null;
     if (viaQr) {
         if (QR_METHODS.indexOf(taken) === -1) return;
@@ -2121,7 +1898,6 @@ async function handleCheckout(event, viaQr) {
         if (!qr) return;
     }
 
-    // the cart lines; quantity is in the unit named, and a plain line names no unit
     const items = [];
     for (let i = 0; i < cart.length; i++) {
         const l = cart[i];
@@ -2135,7 +1911,6 @@ async function handleCheckout(event, viaQr) {
     let referenceNo = reference || null;
     if (qr) referenceNo = null;
 
-    // no name goes with a walk-in: the customer is an account or nobody
     const data = {
         customerId: customerId,
         walkInName: null,
@@ -2166,11 +1941,8 @@ async function handleCheckout(event, viaQr) {
         }
         if (qr) qrPaidUnused = null;
 
-        // the delivery is written against the sale before the till is cleared, so a
-        // failure is reported while the details are still on screen
         const deliveryMade = await createAttachedDelivery(result.saleId);
 
-        // the sale stands; a reference the server could not keep is said, not hidden
         if (result.referenceNote) notifyWarning(result.referenceNote, 'Reference not saved');
 
         cart = [];
@@ -2181,15 +1953,11 @@ async function handleCheckout(event, viaQr) {
 
         if (deliveryMade) { pendingDelivery = null; renderDeliveryAttached(); }
 
-        // the balance changed, so the customer list is read again
         if (customerId) {
             customerDirectoryLoaded = false;
             await loadCustomerDirectory(true);
         }
 
-        // the next sale starts clean: no customer and Cash, so nothing has to be
-        // cleared by hand. A delivery that could not be created keeps its
-        // customer, so the cashier can still see who it was for.
         if (!pendingDelivery) {
             await clearCustomer();
             form.elements.paymentMethod.value = 'Cash';
@@ -2204,19 +1972,11 @@ async function handleCheckout(event, viaQr) {
 
         await openReceipt(result.saleId);
     } catch (error) {
-        // the sale may or may not have been saved; trying again either uses
-        // the payment or is told it is already on a sale
         if (qr) qrPaidUnused = qr;
         notifyOffline();
     }
 }
 
-// ---------- receipt ----------
-// The invoice (RR 7-2024: an Official Receipt is no longer the primary
-// document for goods). The OR- numbering stays as this system's reference.
-// Posted prices include VAT, so it is extracted from the total, and the split
-// is read off the sale as recorded on the day. A non-VAT shop prints no VAT
-// block.
 let storeSettings = null;
 
 async function loadStoreSettings(force) {
@@ -2225,7 +1985,6 @@ async function loadStoreSettings(force) {
     try {
         storeSettings = await apiGetStoreSettings();
     } catch (error) {
-        // not fatal: a placeholder header is better than no invoice
         storeSettings = null;
     }
 
@@ -2237,7 +1996,6 @@ function receiptTaxBlock(sale) {
     const rate = Number(sale.vat_rate) || 0;
 
     if (registration !== 'VAT') {
-        // percentage tax is paid by the shop, not charged to the customer; only the base is shown
         return '<div class="rc-tax">' +
             '<div><span>Sales Subject to Percentage Tax</span><span>' +
                 peso(Number(sale.final_amount) - Number(sale.vat_exempt_sale || 0)) + '</span></div>' +
@@ -2253,21 +2011,16 @@ function receiptTaxBlock(sale) {
         '</div>';
 }
 
-// "3" or "3 (2 lines)"; a measured line counts as one item
-// the number of pieces bought, shown beside Total Due; a measured line
-// (kg, m) counts as one item
 function receiptItemCount(items) {
     const list = Array.isArray(items) ? items : [];
     const units = pieceCount(list);
     return Number.isInteger(units) ? String(units) : units.toFixed(2);
 }
 
-// whether a sale names a customer: an account, or a name taken at the till
 function saleHasCustomer(s) {
     return Boolean(s.customer_id) || String(s.walk_in_name || '').trim() !== '';
 }
 
-// fromReport: opened from Sales Report, where a sale of today can be asked to be voided
 async function openReceipt(saleId, fromReport) {
     let data;
     try { data = await apiGetSale(saleId); }
@@ -2282,7 +2035,6 @@ async function openReceipt(saleId, fromReport) {
     const s = data.sale;
     const receiptNo = 'OR-' + String(s.sale_id).padStart(6, '0');
 
-    // the header comes from the settings row so one installation is one shop
     const shop = storeSettings || {};
 
     document.getElementById('receipt-heading').textContent = 'Invoice ' + receiptNo;
@@ -2292,7 +2044,6 @@ async function openReceipt(saleId, fromReport) {
     let itemsHtml = '';
     for (let i = 0; i < data.items.length; i++) {
         const it = data.items[i];
-        // a size shows what it came to on the shelf: "2 sack (50 kg)"
         let shelfNote = '';
         if (it.base_unit && it.unit_name && it.base_unit !== it.unit_name) {
             shelfNote = ' (' + escapeHtml(qtyText(it.base_quantity, it.base_unit)) + ')';
@@ -2309,17 +2060,14 @@ async function openReceipt(saleId, fromReport) {
     }
 
     const totals = [{ label: 'Subtotal', value: peso(s.total_amount) }];
-    // only when there was one; older sales still carry real figures
     if (Number(s.discount) > 0) totals.push({ label: 'Discount', value: peso(s.discount) });
     totals.push({ label: 'Total Due', value: peso(s.final_amount), due: true });
-    // a late-payment penalty, when one has been charged since the sale
     if (Number(s.penalty_amount) > 0) {
         totals.push({
             label: 'Late Penalty (' + penaltyRateWord(s.penalty_rate) + '/mo \u00d7 ' + s.penalty_months + ')',
             value: peso(s.penalty_amount)
         });
     }
-    // everything refunded on the sale, then the part of it that came off what the customer owed
     if (Number(s.returned_total) > 0) totals.push({ label: 'Refunded', value: '-' + peso(s.returned_total) });
     if (Number(s.refunded_amount) > 0) totals.push({ label: 'Taken off the balance', value: '-' + peso(s.refunded_amount) });
     totals.push({ label: 'Received Amount', value: peso(s.amount_paid) });
@@ -2333,7 +2081,6 @@ async function openReceipt(saleId, fromReport) {
         meta: [
             { key: 'date', label: 'Date', value: s.sale_date },
             { key: 'cashier', label: 'Cashier', value: s.cashier_name },
-            // a sale on no customer record leaves the line blank
             { key: 'customer', label: 'Customer', keepBlank: true,
               value: saleHasCustomer(s) ? s.customer_name : '' },
             { key: 'payment', label: 'Payment', value: s.payment_method },
@@ -2352,8 +2099,6 @@ async function openReceipt(saleId, fromReport) {
     showModal('receipt-modal');
 }
 
-// Request Void on the invoice: only from Sales Report, only for a sale of today
-// not yet voided; while a request waits for the manager it reads Void Requested.
 function renderVoidButton(data) {
     const button = document.getElementById('receipt-void-btn');
     if (!button) return;
@@ -2403,19 +2148,12 @@ async function requestVoidSale() {
     }
 }
 
-// The receipt of one Credit Settlement payment, on the invoice's own paper and head
-// (receiptHtml, format.js): the date, who took it, whose it is, the sale it was put
-// against, how it was paid, and what the sale owed before and after.
-// info: { saleId, paymentId, paymentDate, cashierName, customerName, taxRegistration,
-//         amount, method, reference, balanceBefore, balanceAfter }
 async function showPaymentReceipt(info) {
     await loadStoreSettings(false);
     const shop = storeSettings || {};
 
     const saleNumber = 'OR-' + String(info.saleId).padStart(6, '0');
 
-    // when the server could not send the payment's own number, the receipt does not
-    // borrow the sale's invoice number
     let receiptNo = 'CS-UNNUMBERED';
     if (info.paymentId) receiptNo = 'CS-' + String(info.paymentId).padStart(6, '0');
 
@@ -2457,12 +2195,10 @@ async function showPaymentReceipt(info) {
         detailsHtml: info.details
             ? paymentDetailsReceiptHtml([{ detail: info.details, reference: info.reference, label: info.method + ' details' }], true)
             : '',
-        // a payment receipt, not a sales invoice: no invoice note, its own thanks
         noInvoiceNote: true,
         footerLines: ['Thank you for your payment']
     });
 
-    // it is not a sale's invoice: no void to offer
     lastReceipt = null;
     renderVoidButton(null);
 
@@ -2470,7 +2206,6 @@ async function showPaymentReceipt(info) {
 }
 
 function printReceipt() {
-    // a credit page still on the paper is put back first
     if (typeof finishCreditPrint === 'function') finishCreditPrint();
     setReceiptPageSize(storeSettings || {});
     document.body.classList.add('printing-receipt');
@@ -2478,23 +2213,11 @@ function printReceipt() {
     setTimeout(function () { document.body.classList.remove('printing-receipt'); }, 400);
 }
 
-// Make a delivery: filled in beside the order, held as pendingDelivery on
-// this screen, and posted by handleCheckout once a sale id comes back.
-// The date it is created on is not asked for: the server takes it from the sale.
 function deliveryFormFields() {
     const form = document.getElementById('make-delivery-form');
     return form ? form.elements : null;
 }
 
-// ---------- the delivery's customer ----------
-// The recipient is a customer on record, picked the way the Payment card picks
-// one (the same suggestion list, the same "Not a customer on record" line with
-// an Add Customer button). A pick fills the contact number and the address
-// boxes from the customer's record; the cashier can still change any of them
-// for this one delivery. The sale and its delivery share one customer: attaching the
-// delivery puts the sale on its customer (a pick alone changes nothing outside this
-// card, so Cancel leaves everything as it was), and picking another customer on the
-// Payment card moves an attached delivery to them (syncDeliveryToSaleCustomer).
 let deliveryFormIsOpen = false;
 
 function deliveryCustomerIdBox() {
@@ -2512,11 +2235,6 @@ function typedDeliveryName() {
     return fields ? fields.contactName.value.trim().replace(/\s+/g, ' ') : '';
 }
 
-// A customer's address as the boxes want it. One added through Add Customer has
-// its parts. One from before that has only the old one-line address: every box is
-// left empty and the line is shown above them (oldLine), for the cashier to copy
-// what is needed. It is not put into a box: it already says the barangay, town and
-// province, so the joined address would say them twice.
 function savedAddressParts(account) {
     const empty = { street: '', barangay: '', city: '', province: '', landmark: '', oldLine: '' };
     if (!account) return empty;
@@ -2537,7 +2255,6 @@ function savedAddressParts(account) {
     return empty;
 }
 
-// what the customer record knows, put into the contact number and address boxes
 function fillDeliveryFromCustomer(account) {
     const fields = deliveryFormFields();
     if (!fields) return;
@@ -2551,7 +2268,6 @@ function fillDeliveryFromCustomer(account) {
     fields.province.value = saved.province;
     fields.landmark.value = saved.landmark;
 
-    // an old one-line address is only shown; the boxes are for the cashier to fill in
     const note = document.getElementById('dl-saved-address');
     if (note) {
         note.textContent = '';
@@ -2559,13 +2275,10 @@ function fillDeliveryFromCustomer(account) {
     }
 }
 
-// What a customer pick filled in is taken out again: the number, the address boxes
-// and the old-address note. Used when the name no longer says that customer.
 function clearDeliveryFilledBoxes() {
     fillDeliveryFromCustomer(null);
 }
 
-// one line under the recipient box saying whether it is a customer on record
 function renderDeliveryCustomerVerdict() {
     const box = document.getElementById('dl-customer-verdict');
     const addButton = document.getElementById('dl-customer-add-btn');
@@ -2584,7 +2297,6 @@ function renderDeliveryCustomerVerdict() {
         box.className = 'customer-verdict';
         box.textContent = "Type the customer's name and pick them from the list.";
     } else {
-        // a name that matches nobody is a stop until the account is opened
         box.className = 'customer-verdict is-stop';
         if (offerAdd) {
             box.textContent = 'Not a customer on record. Press Add Customer to open their account, ' +
@@ -2603,19 +2315,16 @@ async function onDeliveryCustomerInput(value) {
 
     if (!customerDirectoryLoaded && text !== '') await loadCustomerDirectory(false);
 
-    // a name that is exactly a customer on record is a pick; any other text is nobody
     const exact = customerMatchingName(text);
     if (exact && idBox && idBox.value !== String(exact.id)) {
         await pickDeliveryCustomer(exact.id);
         return;
     }
-    // the text no longer says the customer that was picked: what the pick filled in goes too
     if (!exact && idBox && idBox.value !== '') {
         idBox.value = '';
         clearDeliveryFilledBoxes();
     }
 
-    // a customer already picked needs no list under the box
     if (exact) hideCustomerSuggestions('delivery');
     else renderCustomerSuggestions(text, 'delivery');
     renderDeliveryCustomerVerdict();
@@ -2639,8 +2348,6 @@ async function pickDeliveryCustomer(customerId) {
     fillDeliveryFromCustomer(found);
     clearDeliveryErrors();
     renderDeliveryCustomerVerdict();
-    // the sale moves to this customer only when the delivery is attached (saveDeliveryForm);
-    // Cancel leaves the sale as it was
 }
 
 function clearDeliveryCustomer() {
@@ -2658,8 +2365,6 @@ function clearDeliveryCustomer() {
     fields.contactName.focus();
 }
 
-// Add Customer from the delivery form: the card opens over it with the typed
-// name filled in, and the new customer is picked once it is saved.
 function addCustomerFromDelivery() {
     const typed = typedDeliveryName();
     openAddCustomer();
@@ -2667,10 +2372,6 @@ function addCustomerFromDelivery() {
     prefillAddCustomerName(typed);
 }
 
-// The customer on the Payment card changed while a delivery is attached: the
-// delivery goes to the same customer, with that customer's number and address
-// (the date, the driver and the remarks stay). Not done while the delivery card
-// is open: it is the one making the change.
 function syncDeliveryToSaleCustomer(customerId) {
     if (!pendingDelivery || deliveryFormIsOpen) return;
     if (!customerId || pendingDelivery.customerId === Number(customerId)) return;
@@ -2681,8 +2382,6 @@ function syncDeliveryToSaleCustomer(customerId) {
     const saved = savedAddressParts(account);
     const phone = account.phone || '';
 
-    // an address with a required part missing cannot stay attached: the delivery
-    // is made again to finish it (an older customer has only the one line)
     const complete = phone !== '' && saved.barangay !== '' && saved.city !== '' && saved.province !== '';
     if (!complete) {
         pendingDelivery = null;
@@ -2707,8 +2406,6 @@ function syncDeliveryToSaleCustomer(customerId) {
         'Delivery moved');
 }
 
-// The whole address as one line, the way the server joins it: street, barangay,
-// town or city, province, then the landmark in brackets.
 function fullDeliveryAddress(d) {
     let barangay = d.barangay;
     if (!/^(brgy|barangay|poblacion|zone|purok|sitio)\b/i.test(barangay)) barangay = 'Brgy. ' + barangay;
@@ -2719,9 +2416,6 @@ function fullDeliveryAddress(d) {
     return line;
 }
 
-// The driver box: type to search the active drivers, pick one from the list.
-// A delivery needs a driver, so the box cannot be left empty. The roster is
-// read fresh each time the form opens, so a driver added or switched off since is right.
 let driverRoster = [];
 let driverSuggestHighlight = -1;
 let pickedDriverName = null;
@@ -2749,14 +2443,13 @@ async function fillDriverPicker(chosenId, chosenName) {
     try {
         driverRoster = await apiGetDeliveryDrivers();
     } catch (error) {
-        driverRoster = [];   // offline: no one can be picked until the form is opened again
+        driverRoster = [];
     }
 }
 
 function onDriverInput(text) {
     const id = driverIdField();
 
-    // typing over a picked name un-picks it
     if (id && id.value && text !== pickedDriverName) {
         id.value = '';
         pickedDriverName = null;
@@ -2767,7 +2460,6 @@ function onDriverInput(text) {
     renderDriverSuggestions(id && id.value ? '' : text);
 }
 
-// an empty box lists every driver; typing narrows it, first names first
 function renderDriverSuggestions(text) {
     const list = document.getElementById('driver-suggest');
     const box = document.getElementById('dl-driver');
@@ -2780,7 +2472,6 @@ function renderDriverSuggestions(text) {
     if (query === '') {
         found = driverRoster;
     } else {
-        // drivers whose name starts with the text, then those with a later word that does
         const startsWith = [];
         const laterWord = [];
         for (let i = 0; i < driverRoster.length; i++) {
@@ -2876,7 +2567,6 @@ function onDriverKey(event) {
     if (event.key === 'Escape' || event.key === 'Tab') hideDriverSuggestions();
 }
 
-// The red words under each box of the delivery form, and the red edge on the box
 const DELIVERY_ERROR_BOXES = {
     contactName: 'dl-name-error',
     contactPhone: 'dl-phone-error',
@@ -2898,7 +2588,6 @@ function showDeliveryFieldError(name, text) {
     }
     if (fields && fields[name]) {
         fields[name].classList.add('is-bad');
-        // the phone box sits in a frame that carries the red edge
         const frame = fields[name].closest('.phone-field');
         if (frame) frame.classList.add('is-bad');
     }
@@ -2930,12 +2619,10 @@ function clearDeliveryErrors() {
     if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
 }
 
-// typing in a box takes its own complaint away
 function onDeliveryFieldTyped(event) {
     const target = event.target;
     if (target && target.name && DELIVERY_ERROR_BOXES[target.name]) clearDeliveryFieldError(target.name);
 
-    // the line at the foot goes once the cashier starts putting things right
     const verdict = document.getElementById('delivery-verdict');
     if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
     if (target && target.id === 'dl-driver') {
@@ -2949,7 +2636,6 @@ async function openDeliveryForm() {
     const fields = deliveryFormFields();
     if (!fields) return;
 
-    // the customer list is what the recipient box searches
     await loadCustomerDirectory(false);
     deliveryFormIsOpen = true;
 
@@ -2971,7 +2657,6 @@ async function openDeliveryForm() {
         fields.scheduledDate.value = '';
         fields.remarks.value = '';
 
-        // the customer already chosen on the Payment card is the recipient; so is a name typed there
         const saleCustomer = selectedCustomerId() ? findCustomer(selectedCustomerId()) : null;
         if (saleCustomer) {
             fields.contactName.value = saleCustomer.name;
@@ -3004,7 +2689,6 @@ async function openDeliveryForm() {
 
     clearDeliveryErrors();
 
-    // typing in any box clears that box's complaint (one listener, set once)
     const form = document.getElementById('make-delivery-form');
     if (form && !form.dataset.typingWired) {
         form.addEventListener('input', onDeliveryFieldTyped);
@@ -3023,7 +2707,6 @@ async function saveDeliveryForm(event) {
 
     clearDeliveryErrors();
 
-    // many spaces become one, like the server does
     function tidy(box) { return box.value.trim().replace(/\s+/g, ' '); }
 
     const contactName = tidy(fields.contactName);
@@ -3036,14 +2719,12 @@ async function saveDeliveryForm(event) {
     const landmark = tidy(fields.landmark);
     const scheduledDate = fields.scheduledDate.value;
 
-    // every box with a problem is marked at once; the first one gets the cursor
     let firstBad = null;
     function complain(name, text) {
         showDeliveryFieldError(name, text);
         if (!firstBad) firstBad = fields[name];
     }
 
-    // the recipient is a customer on record, picked from the list (the hidden id is set only by a pick)
     const customerId = selectedDeliveryCustomerId();
     if (contactName === '') {
         complain('contactName', 'Pick the customer who receives the delivery.');
@@ -3055,14 +2736,10 @@ async function saveDeliveryForm(event) {
     } else if (phoneProblem) {
         complain('contactPhone', phoneProblem);
     }
-    // the barangay, town or city and province are needed; the house number and
-    // street may be left out (not every house has them)
     if (street !== '' && street.length < 2) complain('street', 'The house number and street is too short; leave it empty if there is none.');
     if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
     if (province.length < 2) complain('province', 'Enter the province.');
-    // the longest each may be is what the server accepts: a delivery refused there is
-    // refused after the sale is saved, so it is stopped here
     if (street.length > 150) complain('street', 'The house number and street is at most 150 characters.');
     if (barangay.length > 100) complain('barangay', 'The barangay is at most 100 characters.');
     if (city.length > 100) complain('city', 'The town or city is at most 100 characters.');
@@ -3070,14 +2747,12 @@ async function saveDeliveryForm(event) {
     if (landmark.length > 150) complain('landmark', 'The landmark is at most 150 characters.');
     if (fields.remarks.value.trim().length > 255) complain('remarks', 'The remarks are at most 255 characters.');
 
-    // the date and time are required; a slot in the past is almost always a typing slip
     if (!scheduledDate) {
         complain('scheduledDate', 'Pick the date and time of the delivery.');
     } else if (new Date(scheduledDate).getTime() < Date.now() - 60000) {
         complain('scheduledDate', 'That date has already passed. Check the date and time.');
     }
 
-    // the driver is required, and has to be picked from the list: a name typed but never picked is not a driver
     const driverBox = document.getElementById('dl-driver');
     let driverId = null;
     if (fields.driverStaffId && fields.driverStaffId.value) driverId = Number(fields.driverStaffId.value);
@@ -3104,7 +2779,6 @@ async function saveDeliveryForm(event) {
         return;
     }
 
-    // the name is the customer's own, as it is on the record
     const account = findCustomer(customerId);
     pendingDelivery = {
         customerId: customerId,
@@ -3115,7 +2789,6 @@ async function saveDeliveryForm(event) {
         city: city,
         province: province,
         landmark: landmark,
-        // the whole address as one line, for the strip, the receipt and the old single address
         address: fullDeliveryAddress({ street: street, barangay: barangay, city: city, province: province, landmark: landmark }),
         scheduledDate: scheduledDate,
         remarks: fields.remarks.value.trim(),
@@ -3127,7 +2800,6 @@ async function saveDeliveryForm(event) {
     deliveryFormIsOpen = false;
     closeModal('delivery-modal');
 
-    // the sale is for the same customer as its delivery
     if (selectedCustomerId() !== customerId) await pickCustomer(customerId);
     renderCustomerVerdict();
 
@@ -3135,8 +2807,6 @@ async function saveDeliveryForm(event) {
     notifyInfo('It will be created when you complete this sale.', 'Delivery attached');
 }
 
-// Cancel closes the form and leaves whatever was already attached alone;
-// Remove Delivery is what removes it.
 function cancelDeliveryForm() {
     deliveryFormIsOpen = false;
     closeModal('delivery-modal');
@@ -3151,7 +2821,6 @@ function dropDeliveryForm() {
     renderCustomerVerdict();
 }
 
-// the strip above the buttons
 function renderDeliveryAttached() {
     const strip = document.getElementById('delivery-attached');
     const button = document.getElementById('make-delivery-btn');
@@ -3190,7 +2859,6 @@ function renderDeliveryAttached() {
         remarksLine;
 }
 
-// posted once the sale exists; a failure here does not undo the sale
 async function createAttachedDelivery(saleId) {
     if (!pendingDelivery) return true;
 
@@ -3233,7 +2901,6 @@ async function createAttachedDelivery(saleId) {
     }
 }
 
-// Delivery tracking: read only, empty until the search box or Load Data asks.
 function buildDeliveryPanel() {
     createDataPanel({
         key: 'cash-deliveries',
@@ -3273,8 +2940,6 @@ function buildDeliveryPanel() {
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
                 '<td>' + escapeHtml(row.delivery_address) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(scheduleText(row.scheduled_date)) + '</td>' +
-                // what the driver still has to collect; it falls as payments come in.
-                // A sale on account is paid at the counter, so nothing is collected at the door.
                 (row.payment_method === 'Credit'
                     ? '<td class="cell-num"><span class="muted">On account</span></td>'
                     : Number(row.balance_due) > 0
@@ -3285,7 +2950,6 @@ function buildDeliveryPanel() {
     });
 }
 
-// midnight is what a date-only schedule became, so it is shown as a plain day
 function scheduleText(stamp) {
     if (!stamp) return 'Not set';
 
@@ -3312,23 +2976,17 @@ function openCashierDeliveryDetail(deliveryId) {
     const panel = getDataPanel('cash-deliveries');
     if (panel) showDeliveryRecord(panel.find(deliveryId));
 }
-// ---------- refunds ----------
-// The reason is compulsory. Where the goods go is not the counter's call:
-// the refund is filed awaiting inspection, and the inventory clerk decides
-// whether it can be sold again.
 async function handleIssueRefund(event) {
     event.preventDefault();
     const form = event.target;
 
     const reason = form.elements.reason.value.trim();
 
-    // a sale of several items: every line with a quantity, in one report
     if (isRefundMulti()) {
         await issueRefundForLines(form, reason);
         return;
     }
 
-    // the check is on what was chosen, not what is typed
     if (!refundProduct || !form.elements.productId.value) {
         notifyWarning('Type a few letters of the product and choose it from the list. ' +
             'A refund moves stock, so it has to name a real product.', 'No product chosen');
@@ -3368,7 +3026,6 @@ async function handleIssueRefund(event) {
         const result = await response.json();
         if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
 
-        // where the money went: off what the customer owes first, the rest is cash to hand back
         const offBalance = Number(result.offBalance) || 0;
         const cashBack = Math.round((data.refundAmount - offBalance) * 100) / 100;
         let balanceNote = '';
@@ -3382,7 +3039,6 @@ async function handleIssueRefund(event) {
             'them and will put them back on the shelf or write them off.' + balanceNote, 'Refund issued');
 
         form.reset();
-        // form.reset() knows nothing about the hidden id, the strip or the suggested figure
         clearRefundSale();
         catalogLoaded = false;
         await loadRecentSales();
@@ -3391,8 +3047,6 @@ async function handleIssueRefund(event) {
     }
 }
 
-// Issue Refund for a sale of several items: the lines with a quantity go in one
-// report (POST /api/returns/batch); if the server refuses one, nothing is filed.
 async function issueRefundForLines(form, reason) {
     const lines = refundTableLines();
     const items = [];
@@ -3455,12 +3109,6 @@ async function issueRefundForLines(form, reason) {
     }
 }
 
-// Sales in the Past 3 Days (beside the refund form): the receipts a refund can
-// be made from. The server sends every cashier's sales (a customer can bring a
-// refund to any counter) from today and the
-// two days before, newest first. A voided sale is left out: it did not happen,
-// so there is nothing to refund on it. The list reads on its own whenever the
-// Refunds screen opens (showRefunds), so there is no Load Data button.
 function buildRecentSalesPanel() {
     createDataPanel({
         key: 'cash-recent-sales',
@@ -3469,7 +3117,6 @@ function buildRecentSalesPanel() {
         pageSize: RECENT_SALES_ROWS_PER_PAGE,
         pagerId: 'recent-sales-pager',
         idField: 'sale_id',
-        // it is small and is read again on every visit, so it is not remembered
         remember: false,
 
         gate: {
@@ -3494,7 +3141,6 @@ function buildRecentSalesPanel() {
         },
 
         renderRow: function (row, index) {
-            // everything refunded on the sale, the cash handed back as well as what came off the balance
             let refundedNote = '';
             if (Number(row.returned_total) > 0) {
                 refundedNote = '<span class="cell-sub">refunded ' + peso(row.returned_total) + '</span>';
@@ -3514,7 +3160,6 @@ function buildRecentSalesPanel() {
     });
 }
 
-// reads the list now: opens it the first time, reads it again after that
 async function loadRecentSales() {
     const panel = getDataPanel('cash-recent-sales');
     if (!panel) return;
@@ -3522,27 +3167,13 @@ async function loadRecentSales() {
     else await panel.open();
 }
 
-// ---------- a sale picked from Sales in the Past 3 Days ----------
-// Pressing a sale fills Issue a Refund in from it. A sale of one item fills
-// the Product, Quantity, Refund amount and Sale ID boxes. A sale of several
-// items puts them on the form as a table, like the clerk's Stock Adjustment for
-// a purchase order: each line with how many came back (0 for none), and the
-// refund for those pieces at what the customer paid for them.
-//
-// refundSale: { saleId, customerName, saleDate, method, lines: [...] } or null.
-// Each line is one product (two lines of the same product on the receipt are
-// added together, as the server counts them):
-//   { productId, name, baseUnit, sold, left, paidPerUnit }
-// counted in the product's own unit (what left the shelf), as a refund is.
 let refundSale = null;
 
-// money down to the centavo, never up: the server refuses a refund over what was paid
 function floorCentavo(value) {
     return Math.floor(Number(value) * 100 + 1e-6) / 100;
 }
 
 function refundLinesFromSale(sale, items) {
-    // the lines add up to total_amount; the customer paid final_amount, after the discount
     let afterDiscount = 1;
     if (Number(sale.total_amount) > 0) afterDiscount = Number(sale.final_amount) / Number(sale.total_amount);
 
@@ -3569,12 +3200,10 @@ function refundLinesFromSale(sale, items) {
     return lines;
 }
 
-// the refund for this many pieces of the line, at what the customer paid
 function refundLineAmount(line, quantity) {
     return floorCentavo(line.paidPerUnit * quantity);
 }
 
-// the line of the sale on the form for this product, or null
 function refundSaleLine(productId) {
     if (!refundSale) return null;
     for (let i = 0; i < refundSale.lines.length; i++) {
@@ -3609,7 +3238,6 @@ async function fillRefundFromSale(saleId) {
     form.elements.saleId.value = s.sale_id;
 
     if (refundSale.lines.length === 1) {
-        // one item: the boxes are filled in, everything still left to refund
         const line = refundSale.lines[0];
         await ensureCatalogLoaded(false);
         if (findCatalogProduct(line.productId)) {
@@ -3634,7 +3262,6 @@ async function fillRefundFromSale(saleId) {
     form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-// the sale on the form is shaded in the list beside it
 function markRefundSaleRow() {
     const rows = document.querySelectorAll('#recent-sales-table tbody tr');
     for (let i = 0; i < rows.length; i++) {
@@ -3643,7 +3270,6 @@ function markRefundSaleRow() {
     }
 }
 
-// Clear on the strip: the sale comes off the form, back to typing by hand
 function clearRefundSale() {
     const form = document.getElementById('refund-form');
     refundSale = null;
@@ -3658,7 +3284,6 @@ function clearRefundSale() {
     markRefundSaleRow();
 }
 
-// a Sale ID typed by hand is not the sale on the form any more
 function onRefundSaleInput() {
     const form = document.getElementById('refund-form');
     if (!form || !refundSale) return;
@@ -3670,13 +3295,10 @@ function onRefundSaleInput() {
     }
 }
 
-// the strip, the table or the single boxes, and the preview, for what is on the form
 function renderRefundForm() {
     const form = document.getElementById('refund-form');
     const multi = isRefundMulti();
 
-    // the boxes for one item are off while the table is on the form, so the
-    // browser does not ask for them
     const single = document.getElementById('refund-single');
     if (single) {
         single.hidden = multi;
@@ -3742,7 +3364,6 @@ function renderRefundLines() {
         '</div>';
 }
 
-// what each line of a sale of several items will refund, read from the table
 function refundTableLines() {
     const lines = [];
     if (!isRefundMulti()) return lines;
@@ -3794,7 +3415,6 @@ function renderRefundPreview() {
         (picked === 0 ? '<span class="preview-note">Type how many of each item came back.</span>' : '');
 }
 
-// Cancel: the form is emptied, then back to the first screen
 function cancelRefundForm(event) {
     const form = document.getElementById('refund-form');
     if (form) {
@@ -3804,8 +3424,6 @@ function cancelRefundForm(event) {
     showCashierHome(event);
 }
 
-// Sales report. The server sends a cashier their own sales and no others, so
-// there is no Mine / All switch: whatever is loaded is theirs.
 function buildSalesPanel() {
     createDataPanel({
         key: 'cash-sales',
@@ -3874,14 +3492,8 @@ async function loadCashierSales() {
     else await panel.refresh();
 }
 
-// ==========================================
-// DEBT PAYMENTS -- taken from the customer's card (Unpaid Sales tab), one
-// sale at a time. The server records it through sp_record_credit_payment,
-// which refuses more than the balance.
-// ==========================================
 const DEBT_TERM_DAYS = 30;
 
-// days until the balance is due: negative once it is late
 function debtDaysLeft(row) {
     return DEBT_TERM_DAYS - (Number(row.days_old) || 0);
 }
@@ -3918,7 +3530,6 @@ function debtDueCell(row) {
         '<span class="badge ' + tone + '">' + escapeHtml(word) + '</span>';
 }
 
-// the sale a payment is being taken against
 let paymentSale = null;
 
 function paymentFormFields() {
@@ -3926,7 +3537,6 @@ function paymentFormFields() {
     return form ? form.elements : null;
 }
 
-// the row in this list for the sale, or null
 function findSaleRow(list, saleId) {
     for (let i = 0; i < list.length; i++) {
         if (list[i].sale_id === saleId) return list[i];
@@ -3937,7 +3547,6 @@ function findSaleRow(list, saleId) {
 async function openPaymentForm(saleId) {
     let row = findSaleRow(customerOpenSales, saleId);
 
-    // not among the card's rows: read the list for the one row
     if (!row) {
         try {
             const rows = await apiGetOpenSales();
@@ -3968,7 +3577,6 @@ async function openPaymentForm(saleId) {
             escapeHtml(penaltyRateWord(row.penalty_rate)) + ' a month, ' + row.penalty_months +
             monthWord + ' overdue)</span>';
     }
-    // two to a row; the seventh, Balance, runs the full width under the rest
     document.getElementById('payment-facts').innerHTML =
         detailField('Customer', escapeHtml(row.customer_name)) +
         detailField('Phone', row.phone ? escapeHtml(row.phone) : '<span class="muted">No phone on file</span>') +
@@ -3980,7 +3588,6 @@ async function openPaymentForm(saleId) {
 
     const fields = paymentFormFields();
     if (fields) {
-        // starts at nothing: the cashier types what was handed over, or uses a quick fill
         fields.amount.value = '0';
         fields.amount.max = balance.toFixed(2);
         fields.paymentMethod.value = 'Cash';
@@ -3997,9 +3604,6 @@ async function openPaymentForm(saleId) {
     setTimeout(function () { if (fields && fields.amount) { fields.amount.focus(); fields.amount.select(); } }, 60);
 }
 
-// Cancelled, the form goes back to where it was opened from: the customer's card
-// (read afresh), or the Credit Payment list when it was opened straight from there.
-// Paid, nothing opens behind it: the receipt is shown on its own.
 function closePaymentForm(cancelled) {
     paymentSale = null;
     closeModal('payment-modal');
@@ -4021,7 +3625,6 @@ function fillPayment(share) {
     renderPaymentVerdict();
 }
 
-// what the balance becomes if this is recorded, said before the button
 function renderPaymentVerdict() {
     const box = document.getElementById('payment-verdict');
     const fields = paymentFormFields();
@@ -4030,11 +3633,8 @@ function renderPaymentVerdict() {
     const balance = Number(paymentSale.balance_due) || 0;
     const amount = parseFloat(fields.amount.value) || 0;
 
-    // the cheque's details, or the customer's bank and account for a transfer
     showPaymentDetails('pay-debt', fields.paymentMethod.value);
 
-    // GCash, PayMaya and a bank transfer are only taken through PayMongo (the QR
-    // code), so Confirm Payment is not offered for them.
     const qrButton = document.getElementById('payment-qr-btn');
     if (qrButton) {
         qrButton.hidden = QR_METHODS.indexOf(fields.paymentMethod.value) === -1;
@@ -4066,7 +3666,6 @@ function renderPaymentVerdict() {
     box.innerHTML = peso(left) + ' stays on the account after this payment.';
 }
 
-// viaQr: pressed as Pay by QR; the money is taken by the QR code
 async function handleTakePayment(event, viaQr) {
     if (event && typeof event.preventDefault === 'function') event.preventDefault();
 
@@ -4076,8 +3675,6 @@ async function handleTakePayment(event, viaQr) {
     const balance = Number(paymentSale.balance_due) || 0;
     const amount = Math.round((parseFloat(fields.amount.value) || 0) * 100) / 100;
     const method = fields.paymentMethod.value;
-    // no reference is asked for: a cheque is traced by its account, bank and date,
-    // an e-wallet or transfer by its QR payment
     const reference = '';
 
     if (amount <= 0) {
@@ -4092,13 +3689,8 @@ async function handleTakePayment(event, viaQr) {
         return;
     }
 
-    // a bank transfer is only taken through PayMongo, whichever way the form was sent (Enter too)
-    // GCash, PayMaya and a bank transfer are only taken through PayMongo, whichever
-    // way the form was sent (Enter too)
     if (QR_METHODS.indexOf(method) !== -1) viaQr = true;
 
-    // A cheque is taken with its account name, account number, bank, branch and
-    // date; a bank transfer with the customer's bank and account.
     let chequeDetails = null;
     let transferDetails = null;
     if (method === 'Cheque') {
@@ -4118,7 +3710,6 @@ async function handleTakePayment(event, viaQr) {
         }
         transferDetails = read.details;
 
-        // PayMongo refuses a transfer below the bank's smallest
         const bank = paymongoBank(transferDetails.bankCode);
         if (bank && amount < bank.minimum) {
             notifyWarning(bank.name + ' takes transfers of ' + peso(bank.minimum) + ' or more. This one is ' +
@@ -4137,8 +3728,6 @@ async function handleTakePayment(event, viaQr) {
 
     if (viaQr && QR_METHODS.indexOf(method) === -1) return;
 
-    // Asked for every method, before a QR code is made or anything is sent. The
-    // buttons are held while the question is open, so it cannot be asked twice.
     if (button) button.disabled = true;
     if (qrButton) qrButton.disabled = true;
 
@@ -4175,7 +3764,6 @@ async function handleTakePayment(event, viaQr) {
     });
     if (!yes) { ready(); return; }
 
-    // by QR code: the customer pays the code before anything is recorded
     let qr = null;
     if (viaQr) {
         qr = await collectQrPayment(amount, 'Payment on OR-' + String(paymentSale.sale_id).padStart(6, '0'), method,
@@ -4218,8 +3806,6 @@ async function handleTakePayment(event, viaQr) {
             leftText,
             'Payment recorded');
 
-        // The receipt is what the server recorded; when it did not send it, what
-        // this card knew is enough to print one.
         let receiptInfo = result.receipt;
         if (!receiptInfo) {
             receiptInfo = {
@@ -4237,7 +3823,6 @@ async function handleTakePayment(event, viaQr) {
         closePaymentForm();
         await showPaymentReceipt(receiptInfo);
 
-        // the credit list and a customer picked at the till follow
         const credit = getDataPanel('cash-credit');
         if (credit && credit.state === 'ready') await credit.refresh();
         const pickedId = selectedCustomerId();
@@ -4249,25 +3834,16 @@ async function handleTakePayment(event, viaQr) {
     }
 }
 
-// ==========================================
-// PAYING FROM THE CUSTOMER'S CARD
-// ==========================================
-// the open card's customer, and their sales still owing (full rows for the payment form)
 let openCustomerId = null;
 let customerOpenSales = [];
 
-// the card to go back to once the payment form closes
 let paymentReturnCustomer = null;
-// true when the form was opened straight from the Credit Payment list: Cancel goes back there
 let paymentReturnPicker = false;
 
-// the administrator can switch payments off for the cashiers (debt-payments)
 function canTakePayments() {
     return typeof holdsFeature !== 'function' || holdsFeature('debt-payments');
 }
 
-// Pay on one row: the card steps aside for the payment form (the two are
-// not stacked) and comes back when it closes.
 function payCustomerSale(saleId) {
     if (!openCustomer) return;
     paymentReturnCustomer = openCustomerId;
@@ -4276,9 +3852,6 @@ function payCustomerSale(saleId) {
     openPaymentForm(saleId);
 }
 
-// Credit Settlement in the card's foot opens the payment form on the oldest
-// sale still owing (the top row of Unpaid Sales); pressing a row there pays
-// that sale instead.
 function payFromCustomerCard() {
     if (!openCustomer) return;
     if (customerOpenSales.length > 0) {
@@ -4311,7 +3884,6 @@ function renderCustomerUnpaid() {
     box.innerHTML = pagedTable('cash-unpaid', ['Receipt', 'Sold', 'Balance', 'Due'],
         unpaidRows, [2], {
             empty: 'Nothing is owed on any sale.',
-            // the row itself opens the payment form for that sale
             rowAttrs: function (index) {
                 return 'class="row-clickable" title="Credit Settlement on this sale" ' +
                     'onclick="payCustomerSale(' + customerOpenSales[index].sale_id + ')"';
@@ -4319,12 +3891,8 @@ function renderCustomerUnpaid() {
         });
 }
 
-// Customers and credit: the cashier can read an account and ask a manager
-// for more room. Setting a limit is refused by the server here.
 const CASH_RATING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
 
-// The cashier's list reads by due date: oldest unpaid sale plus thirty days,
-// the same thirty after which the credit rating turns to Watch (vw_customer_credit).
 const CREDIT_TERM_DAYS = 30;
 
 function creditDueDate(row) {
@@ -4372,7 +3940,6 @@ function creditDueCell(row) {
         '<span class="badge ' + tone + '" title="' + escapeHtml(row.standing_reason || '') + '">' +
         escapeHtml(word) + '</span>';
 }
-// a customer's Credit Rating (the data still calls it "standing")
 const CASH_RATING_WORD = { Good: 'Good', Watch: 'Watch', Hold: 'On hold' };
 
 let openCustomer = null;
@@ -4425,8 +3992,6 @@ function buildCustomerPanel() {
     });
 }
 
-// Clear forgets the rows: a credit table left open on a shared counter is
-// somebody's balance on display to the next customer
 function clearCreditPanel() {
     const panel = getDataPanel('cash-credit');
     if (panel) panel.reset();
@@ -4438,8 +4003,6 @@ function clearCreditPanel() {
     if (due) due.value = 'all';
 }
 
-// tab: which tab to open on ('account' unless asked; 'unpaid' after a payment,
-// falling back to the account once nothing is owed; 'history' or 'payments')
 async function openCustomerCredit(customerId, tab) {
     try {
         const data = await apiGetCustomerHistory(customerId);
@@ -4449,8 +4012,6 @@ async function openCustomerCredit(customerId, tab) {
         const c = data.credit;
         const owed = Number(c.current_credit) || 0;
 
-        // the sales still owing, read only when there is something to pay and
-        // the role may take the money
         customerOpenSales = [];
         const payable = owed > 0 && canTakePayments();
         if (payable) {
@@ -4470,7 +4031,6 @@ async function openCustomerCredit(customerId, tab) {
             (c.phone || 'No phone on file') + ' · Credit Rating: ' + (CASH_RATING_WORD[c.standing] || c.standing);
         document.getElementById('customer-avatar').textContent = initialsOf(c.customer_name);
 
-        // nothing left to charge (over the limit, or on hold) reads as zero
         let available = Math.max(Number(c.available_credit) || 0, 0);
         if (c.standing === 'Hold') available = 0;
         const availableCell = '<span class="' + (available > 0 ? '' : 'cell-due') + '">' + peso(available) + '</span>';
@@ -4501,16 +4061,13 @@ async function openCustomerCredit(customerId, tab) {
         renderCustomerPayments();
         renderCustomerUnpaid();
 
-        // the Unpaid Sales tab and Credit Settlement, only when there is something to pay
         const hasUnpaid = payable && customerOpenSales.length > 0;
         const unpaidTab = document.getElementById('customer-tab-unpaid');
         if (unpaidTab) unpaidTab.hidden = !hasUnpaid;
         const pay = document.getElementById('customer-pay-btn');
         if (pay) pay.hidden = !hasUnpaid;
 
-        // the two prints, each switched on its own (Access Control)
         document.getElementById('customer-print-card').hidden = !holdsFeature('customer-card-print');
-        // Print Terms and Conditions is not offered on the customer's card
 
         let open = 'account';
         if (tab === 'unpaid' && hasUnpaid) open = 'unpaid';
@@ -4522,8 +4079,6 @@ async function openCustomerCredit(customerId, tab) {
     }
 }
 
-// Print Customer Card (the card alone) or Print Credit Terms (the terms page
-// alone) for the customer whose card is open
 function printOpenCustomer(kind) {
     if (!openCustomerId) return;
     if (kind === 'card') {
@@ -4533,7 +4088,6 @@ function printOpenCustomer(kind) {
     }
 }
 
-// the account, the unpaid sales, the purchases and the payments, one tab each
 function showCustomerTab(name) {
     const tabNames = ['account', 'unpaid', 'history', 'payments'];
     for (let i = 0; i < tabNames.length; i++) {
@@ -4545,18 +4099,11 @@ function showCustomerTab(name) {
     }
 }
 
-// ---------- the history tabs ----------
-// Purchase History and Credit Payments are a tab each, paged with Previous
-// and Next rather than scrolled, and filtered in the browser over the rows
-// the card already loaded (openCustomer): a date range on both, the sale's
-// status on purchases and the method on payments. Changing a filter starts
-// the table again at its first page.
 function filterValue(id) {
     const box = document.getElementById(id);
     return box ? box.value : '';
 }
 
-// "2026-09-05 10:00:00" -> "2026-09-05"; the day is what the date boxes compare
 function dayOfStamp(value) { return String(value || '').slice(0, 10); }
 
 function dayInRange(day, from, to) {
@@ -4565,7 +4112,6 @@ function dayInRange(day, from, to) {
     return true;
 }
 
-// the sentence under a filtered table that has no rows
 function emptyHistoryNote(nothing, from, to, filtered) {
     if (from && to && from > to) return 'The From date is after the To date.';
     if (filtered) return 'Nothing matches these filters.';
@@ -4614,7 +4160,6 @@ function renderCustomerHistory() {
         purchaseRows.push(cells);
     }
 
-    // only paid sales listed: every balance would read Paid, so the column goes
     box.innerHTML = pagedTable('cash-purchases',
         onlyPaid ? ['Date', 'Sale', 'Amount'] : ['Date', 'Sale', 'Amount', 'Balance'],
         purchaseRows, onlyPaid ? [2] : [2, 3], {
@@ -4651,7 +4196,6 @@ function renderCustomerPayments() {
     const paymentRows = [];
     for (let i = 0; i < rows.length; i++) {
         const p = rows[i];
-        // the sale (receipt) the payment was put against
         let receiptCell = '<span class="muted">-</span>';
         if (p.sale_id) receiptCell = '#' + p.sale_id;
         const cells = [escapeHtml(dayOfStamp(p.payment_date)), peso(p.amount)];
@@ -4660,7 +4204,6 @@ function renderCustomerPayments() {
         paymentRows.push(cells);
     }
 
-    // one method picked: every row would say it, so the column goes
     box.innerHTML = pagedTable('cash-payments',
         how === 'all' ? ['Date', 'Amount', 'Method', 'Receipt'] : ['Date', 'Amount', 'Receipt'],
         paymentRows, [1], {
@@ -4668,8 +4211,6 @@ function renderCustomerPayments() {
         });
 }
 
-// a card just opened: the filters start empty, and the method list is the
-// methods this customer has actually paid by
 function resetHistoryFilters() {
     const filterIds = ['hist-from', 'hist-to', 'pay-from', 'pay-to'];
     for (let i = 0; i < filterIds.length; i++) {
@@ -4696,10 +4237,6 @@ function resetHistoryFilters() {
     }
 }
 
-// ---------- asking for a higher limit ----------
-// One form: the new limit and why. The reason is required, here and at the
-// server. The customer's card steps aside while the form is up (the form
-// would otherwise sit beneath it) and comes back if the request is dropped.
 let limitReturnCustomer = null;
 
 function askForExtension() {
@@ -4737,13 +4274,11 @@ function askForExtension() {
     setTimeout(function () { form.elements.requestedLimit.focus(); }, 60);
 }
 
-// an earlier complaint goes once the form is being fixed
 function renderLimitVerdict() {
     const verdict = document.getElementById('limit-verdict');
     if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
 }
 
-// Cancel puts the customer's card back, read afresh
 function closeLimitForm() {
     closeModal('limit-modal');
     const customerId = limitReturnCustomer;
@@ -4808,15 +4343,8 @@ async function handleLimitRequest(event) {
     }
 }
 
-// ---------- Add Customer ----------
-// The one place an account is opened (the till no longer opens one from a
-// typed name). First name, last name, phone number, barangay, town or city
-// and province are required; the middle name, the house number and street,
-// and the landmark are optional. The server refuses a name already on the
-// list, any case, and gives the account a credit limit of zero.
-let addCustomerFor = '';   // 'sale': opened from the payment form, the new account goes on the sale; 'delivery': from the delivery form
+let addCustomerFor = '';
 
-// the boxes that have a red line of words under them
 const ADD_CUSTOMER_ERROR_BOXES = {
     firstName: 'ac-first-error',
     lastName: 'ac-last-error',
@@ -4836,7 +4364,6 @@ function showAddCustomerFieldError(name, text) {
     }
     if (form && form.elements[name]) {
         form.elements[name].classList.add('is-bad');
-        // the phone box sits in a frame that carries the red edge
         const frame = form.elements[name].closest('.phone-field');
         if (frame) frame.classList.add('is-bad');
     }
@@ -4863,7 +4390,6 @@ function clearAddCustomerErrors() {
     if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
 }
 
-// typing in a box takes its own complaint away
 function onAddCustomerTyped(event) {
     const target = event.target;
     if (target && target.name && ADD_CUSTOMER_ERROR_BOXES[target.name]) clearAddCustomerFieldError(target.name);
@@ -4872,7 +4398,6 @@ function onAddCustomerTyped(event) {
     if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
 }
 
-// a name typed on another card: the first word is the first name, the rest the last name
 function prefillAddCustomerName(typed) {
     const form = document.getElementById('add-customer-form');
     if (!form) return;
@@ -4883,7 +4408,6 @@ function prefillAddCustomerName(typed) {
     form.elements.lastName.value = words.join(' ');
 }
 
-// the same card adds a customer or edits one (editCustomerId set)
 let editCustomerId = null;
 
 function setAddCustomerMode(editing, name) {
@@ -4909,7 +4433,6 @@ function openAddCustomer() {
     phoneFill(form.elements.phone, '');
     clearAddCustomerErrors();
 
-    // typing in any box clears that box's complaint (one listener, set once)
     if (!form.dataset.typingWired) {
         form.addEventListener('input', onAddCustomerTyped);
         form.dataset.typingWired = 'yes';
@@ -4928,8 +4451,6 @@ function cancelAddCustomer() {
     closeModal('add-customer-modal');
 }
 
-// Edit Customer, from the customer's card: the same form, filled with what is
-// on record (the name, phone and address parts are read from the records list)
 async function editOpenCustomer() {
     if (!openCustomerId) return;
     let row = null;
@@ -4969,7 +4490,6 @@ async function handleAddCustomer(event) {
 
     clearAddCustomerErrors();
 
-    // many spaces become one, like the server does
     function tidy(box) { return box.value.trim().replace(/\s+/g, ' '); }
 
     const firstName = tidy(form.elements.firstName);
@@ -4983,7 +4503,6 @@ async function handleAddCustomer(event) {
     const province = tidy(form.elements.province);
     const landmark = tidy(form.elements.landmark);
 
-    // every box with a problem is marked at once; the first one gets the cursor
     let firstBad = null;
     function complain(name, text) {
         showAddCustomerFieldError(name, text);
@@ -4997,8 +4516,6 @@ async function handleAddCustomer(event) {
     } else if (phoneProblem) {
         complain('phone', phoneProblem);
     }
-    // the barangay, town or city and province are needed; the house number and
-    // street may be left out (not every house has them)
     if (street !== '' && street.length < 2) complain('street', 'The house number and street is too short; leave it empty if there is none.');
     if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
@@ -5018,7 +4535,6 @@ async function handleAddCustomer(event) {
     const save = document.getElementById('add-customer-save');
     if (save) save.disabled = true;
 
-    // editing a customer already on record
     if (editCustomerId) {
         const customerId = editCustomerId;
         try {
@@ -5066,17 +4582,14 @@ async function handleAddCustomer(event) {
         closeModal('add-customer-modal');
         notifySuccess(result.message, 'Customer added');
 
-        // the register's customer box reads the customer list afresh, and the list shows the new account
         customerDirectoryLoaded = false;
 
-        // opened from the payment form: the new account is the sale's customer
         const openedFor = addCustomerFor;
         addCustomerFor = '';
         if (openedFor === 'sale') {
             await loadCustomerDirectory(true);
             await pickCustomer(Number(result.customerId));
         } else if (openedFor === 'delivery') {
-            // opened from the delivery form: the new account is its recipient (and the sale's customer)
             await loadCustomerDirectory(true);
             await pickDeliveryCustomer(Number(result.customerId));
         }
@@ -5092,11 +4605,6 @@ async function handleAddCustomer(event) {
     }
 }
 
-// ---------- Credit Payment, from the register ----------
-// Takes a payment against a customer's balance without going to Customers
-// Record: pick who owes, and the card's own flow follows -- the card opens on
-// Unpaid Sales, a sale opens the payment form, and the form offers Pay by QR.
-// A customer owing on one sale only goes straight to that sale's form.
 async function openCreditPaymentPicker() {
     if (!canTakePayments()) return;
 
@@ -5109,7 +4617,6 @@ async function openCreditPaymentPicker() {
     showModal('credit-pay-modal');
     setTimeout(function () { if (search) search.focus(); }, 60);
 
-    // read fresh: a balance paid a moment ago must not be offered again
     const loaded = await loadCustomerDirectory(true);
     if (!loaded && list) {
         list.innerHTML = '<p class="detail-empty">The customers could not be read. Check the connection and try again.</p>';
@@ -5168,23 +4675,17 @@ async function pickCreditPayCustomer(customerId) {
     }
 }
 
-// ==========================================
-// CASHIER PAGE BOOT
-// ==========================================
 if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
     document.addEventListener('DOMContentLoaded', function () {
-        // building a panel only draws its closed state; none queries until asked
         buildCustomerPanel();
         buildDeliveryPanel();
         buildSalesPanel();
         buildRecentSalesPanel();
 
-        // the schedule follows what the administrator switched on for this role
         configureDeliverySchedule({ showPanel: function (panelId, title) { showCashierPanel(panelId, title); } });
         buildDeliverySchedulePanel();
         configureFeatures({ home: function () { showCashierHome(); } });
 
-        // Go to, on an opened alert: the screen that alert is about
         const creditAlert = { label: 'Customers Record', panelId: 'panel-customers',
                               open: function () { showCustomers(); }, key: 'cash-credit' };
         configureNotificationTargets({
@@ -5194,7 +4695,6 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
                                 open: function () { showRefunds(); } },
             'Credit Request': creditAlert,
             'Late Penalty':   creditAlert,
-            // a manager approved or declined a request to void a sale
             'Void Request':   { label: 'Sales Report', panelId: 'panel-salesreport',
                                 open: function () { showSalesReport(); }, key: 'cash-sales' }
         });
@@ -5205,13 +4705,10 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
         renderDeliveryAttached();
         showCashierHome();
         unfoldSidebarAtOpenScreen();
-        // the customer list is fetched the first time somebody types; the store
-        // details are read on arrival because they head every receipt
         loadStoreSettings(false);
         loadNotifications();
     });
 
-    // a click anywhere else closes the suggestion list
     document.addEventListener('click', function (event) {
         if (event.target.closest('.suggest-wrap')) return;
         hideCustomerSuggestions();

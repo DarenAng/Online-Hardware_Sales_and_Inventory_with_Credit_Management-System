@@ -24,12 +24,8 @@
                     <span class="brand-sub">Sales &amp; Inventory</span>
                 </span>
             </a>
-            <!-- data-feature names the screen an item opens; shared/features.js hides
-                 the ones switched off for this role and mirrors the counts -->
             <ul class="sidebar-nav">
                 <li data-feature="delivery-runs"><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>Pending Deliveries</a></li>
-                <!-- A folding heading does two things (shared/helpers.js sidebarHeading): its
-                     words open the module's first screen, its caret alone folds the list -->
                 <li data-sidebar-dropdown data-feature="delivery-reports">
                     <a href="#reports" onclick="sidebarHeading(event, 'reports-nav', 'reports-dropdown', showDeliveredReport)" class="nav-parent" id="reports-nav"><i class="bi bi-bar-chart-line nav-icon" aria-hidden="true"></i>
                         Reports <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
@@ -41,14 +37,12 @@
                             Payments Collected</a></li>
                     </ul>
                 </li>
-                <!-- drawn by shared/delivery-schedule.js; hidden until features.js hears the role has it -->
                 <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
                     Delivery Schedule</a></li>
 
             </ul>
         </aside>
 
-        <!-- the shade behind the menu once it slides over the page -->
         <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
 
         <main class="main-content">
@@ -63,7 +57,6 @@
 
             <div class="content-area">
 
-                <!-- DEFAULT: PENDING DELIVERIES -->
                 <div id="panel-pending" data-panel>
                     <div class="card">
                         <div class="panel-head">
@@ -91,10 +84,8 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="dpend-period">Period</label>
-                                <!-- filled by delivery-personnel.js buildDriverPeriodBoxes; Custom date shows From and To -->
                                 <select id="dpend-period" data-driver-period="dpend" onchange="driverPeriodPicked('dpend')"></select>
                             </div>
-                            <!-- the scheduled day can be ahead of today, so these two boxes are not held to today -->
                             <div class="toolbar-field toolbar-date" hidden>
                                 <label for="dpend-from">From</label>
                                 <input type="date" id="dpend-from" data-any-date title="Scheduled from"
@@ -118,7 +109,6 @@
                     </div>
                 </div>
 
-                <!-- REPORT: DELIVERIES HANDLED -- only deliveries that were delivered, by the day they were delivered -->
                 <div id="panel-report-delivered" data-panel style="display: none;">
                     <div class="card">
                         <div class="panel-head">
@@ -147,7 +137,6 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="dhand-period">Period</label>
-                                <!-- filled by delivery-personnel.js buildDriverPeriodBoxes; Custom date shows From and To -->
                                 <select id="dhand-period" data-driver-period="dhand" onchange="driverPeriodPicked('dhand')"></select>
                             </div>
                             <div class="toolbar-field toolbar-date" hidden>
@@ -171,7 +160,6 @@
                     </div>
                 </div>
 
-                <!-- REPORT: PAYMENTS COLLECTED -- by the day each payment was taken -->
                 <div id="panel-report-payments" data-panel style="display: none;">
                     <div class="card">
                         <div class="panel-head">
@@ -203,7 +191,6 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="dpay-period">Period</label>
-                                <!-- filled by delivery-personnel.js buildDriverPeriodBoxes; Custom date shows From and To -->
                                 <select id="dpay-period" data-driver-period="dpay" onchange="driverPeriodPicked('dpay')"></select>
                             </div>
                             <div class="toolbar-field toolbar-date" hidden>
@@ -231,7 +218,6 @@
         </main>
     </div>
 
-    <!-- PAGED DETAIL POPUP -->
     <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
         <div class="modal-box">
             <div class="modal-head">
@@ -257,8 +243,6 @@
         </div>
     </div>
 
-    <!-- REFUND AT THE DOOR -- items the customer turns away; opened from a delivery's card.
-         Locked like the other forms that hold typed data; kept to one page that scrolls. -->
     <div class="modal" id="refund-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box modal-wide">
             <div class="modal-head">
@@ -292,9 +276,6 @@
         </div>
     </div>
 
-    <!-- PAYMENT -- opened by Proceed Payment on a delivery's card, laid out like the
-         counter's Payment window. The customer is the delivery's own. Recording the
-         payment also marks the delivery Delivered. Locked and scrolling like the refund form. -->
     <div class="modal" id="pay-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
             <div class="modal-head">
@@ -309,7 +290,6 @@
             </div>
 
             <div class="modal-body">
-                <!-- the amount due, and what happens to it: short by, change, paid by transfer -->
                 <div class="pay-totals" id="pay-totals"></div>
 
                 <form id="pay-form" class="pay-form" onsubmit="handleDriverPayment(event)" autocomplete="off">
@@ -327,21 +307,17 @@
                             <option value="Bank Transfer">Bank Transfer</option>
                         </select>
                     </div>
-                    <!-- a bank transfer is for the whole balance, so no amount is typed for it -->
                     <div class="form-group" id="pay-amount-field">
                         <label for="pay-amount">Amount entered</label>
                         <input type="number" id="pay-amount" name="amount" class="form-control" min="0" step="0.01"
                                placeholder="0.00" oninput="onDriverPayAmountChange()">
                     </div>
-                    <!-- the bank and account of a cheque or a transfer (payment-details.js) -->
                     <div id="pay-details-box"></div>
                 </form>
             </div>
 
             <div class="modal-foot">
                 <button type="button" class="btn btn-ghost" onclick="cancelDriverPayment()">Cancel</button>
-                <!-- GCash, PayMaya or a bank transfer: the customer scans a QR code (qr-pay.js),
-                     the only way to take those, so Complete Sale is hidden for them -->
                 <button type="button" class="btn btn-accent" id="pay-qr-btn" data-icon="qr-code"
                         onclick="handleDriverPayment(event, true)" hidden>Pay by QR</button>
                 <button type="submit" class="btn btn-accent" id="pay-save-btn" form="pay-form">Complete Sale</button>
@@ -349,8 +325,6 @@
         </div>
     </div>
 
-    <!-- WHY IS IT DELAYED OR FAILED -- opened by the Delayed and Failed buttons on a delivery's card. The reason is
-         required and is saved as the delivery's remarks. Locked like the other forms that hold typed data. -->
     <div class="modal" id="delay-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
             <div class="modal-head">

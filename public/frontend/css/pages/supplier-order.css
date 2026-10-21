@@ -1,12 +1,3 @@
-/* ==========================================================================
-   supplier-order.css -- styles only the supplier's order page uses
-   Loads after general-ui.css only (this page has no responsive.css), so anything
-   here wins. The page a supplier opens from the QR code or link on the purchase
-   order (supplier-order.html, scripts/supplier-order.js). No menu and no sign-in.
-   Built for a phone first: one column read top to bottom, every action a button
-   that looks like one, and one Send button at the end.
-   ========================================================================== */
-
 .so-body {
     margin: 0;
     min-height: 100vh;
@@ -19,7 +10,6 @@
 
 .so-stripe { height: 6px; background: var(--hazard); }
 
-/* ---- the head ---- */
 .so-head { background: var(--chrome); color: #fff; }
 .so-head-inner {
     max-width: 720px;
@@ -54,7 +44,6 @@
 }
 .so-loading { color: var(--steel); }
 
-/* ---- small shared pieces ---- */
 .so-tag {
     display: block;
     font-size: 11px;
@@ -93,7 +82,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-flash.is-ok { background: var(--ok-dim); color: var(--ok-ink); }
 .so-flash.is-stop { background: var(--stop-dim); color: var(--stop); }
 
-/* ---- buttons: every action looks like a button ---- */
 .so-btn {
     display: inline-flex;
     align-items: center;
@@ -127,7 +115,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-btn:disabled { opacity: 0.65; cursor: wait; }
 .so-pdf { margin-top: 14px; }
 
-/* ---- the opening ---- */
 .so-hero { padding: 0 2px 18px; }
 .so-hero .so-track { margin-top: 4px; }
 .so-hello { margin: 0 0 4px; color: var(--steel); font-size: 15px; }
@@ -148,7 +135,7 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
     grid-template-columns: repeat(3, minmax(0, 1fr));
     position: relative;
 }
-.so-track::before {   /* the rail the three stops sit on */
+.so-track::before {
     content: '';
     position: absolute;
     top: 13px; left: 16.6%; right: 16.6%;
@@ -171,7 +158,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-stop-label { font-size: 13px; font-weight: 600; }
 .so-stop-sub { font-size: 12px; color: var(--steel-soft); }
 
-/* ---- the numbered parts ---- */
 .so-panel {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -195,7 +181,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-step p { margin: 0; color: var(--steel); font-size: 14px; line-height: 1.5; }
 .so-step p strong { color: var(--ink); }
 
-/* 1. the order: one line each, its price, and its Edit price button */
 .so-lines { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
 .so-line { padding: 14px 0; border-bottom: 1px solid var(--line); }
 .so-line.is-changed { background: linear-gradient(90deg, var(--signal-dim), transparent 70%); margin: 0 -18px; padding: 14px 18px; }
@@ -227,7 +212,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
     border-radius: 4px;
 }
 
-/* the price box opens under the line once Edit price is pressed */
 .so-edit { display: none; margin: 4px 0 0 26px; }
 .so-line.is-editing .so-edit { display: block; }
 .so-edit .so-label { margin-top: 8px; }
@@ -250,14 +234,13 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
     width: 100%;
     min-width: 0;
     padding: 9px 4px;
-    font: 600 17px var(--font-figure);   /* 16px or more keeps phones from zooming in */
+    font: 600 17px var(--font-figure);
     background: transparent;
     color: var(--ink);
 }
 .so-money:focus-within { box-shadow: 0 0 0 3px var(--signal-dim); }
 .so-line.is-bad .so-money { border-color: var(--stop); }
 
-/* the discount off the whole order: a box, and pesos or a percentage */
 .so-discount { padding-top: 6px; }
 .so-discount-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .so-switch {
@@ -295,7 +278,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-order-total .is-total > span:first-child { color: var(--ink); font-weight: 700; font-size: 15px; }
 .so-order-total .is-total .so-fig { font-size: 19px; }
 
-/* 2. the answer: two big buttons */
 .so-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .so-choice {
     display: flex;
@@ -322,7 +304,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-choice.is-decline.is-on { border-color: var(--stop); background: var(--stop); color: #fff; }
 .so-choice.is-on i, .so-choice.is-on .so-choice-sub { color: #fff; }
 
-/* 3. the ship date: one calendar box, from tomorrow on */
 .so-date-box {
     display: inline-flex;
     align-items: center;
@@ -366,7 +347,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 }
 .so-input:focus { outline: none; border-color: var(--chrome); }
 
-/* ---- what will be sent, and the Send button ---- */
 .so-send { margin: 4px 0 8px; }
 .so-send[hidden] { display: none; }
 .so-summary {
@@ -386,7 +366,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-error { color: var(--stop); font-weight: 600; margin: 0 0 10px; font-size: 14.5px; }
 .so-error:empty { display: none; }
 
-/* ---- answered: the receipt ---- */
 .so-receipt {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -441,7 +420,6 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-rline.is-changed .so-rprice { color: var(--signal-ink); }
 .so-quote { margin: 16px 0 0; font-size: 14px; color: var(--steel); }
 
-/* a link that does not work */
 .so-closed { text-align: center; padding: 34px 20px; }
 .so-closed > i { font-size: 34px; color: var(--steel-soft); }
 .so-closed h1 { font-size: 22px; margin: 8px 0 6px; }

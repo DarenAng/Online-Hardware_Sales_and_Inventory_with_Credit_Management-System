@@ -1,26 +1,3 @@
-// ============================================================
-// shared.js -- the routes every signed-in role uses
-// Loaded by: server.js only.
-// Never sent to a browser.
-//
-// Routes in this file:
-//   GET   /api/events/poll          what changed since a version (the live channel)
-//   GET   /api/events/status        how many screens are connected
-//   GET   /api/me/access            what the signed-in person is
-//   GET   /api/me/features          the screens this person's menu holds
-//   GET   /api/me                   My Account
-//   PUT   /api/me                   change your own name and phone
-//   POST  /api/me/password          change your own password (administrator only)
-//   GET   /api/records/:type        suppliers, customers, products, categories, brands, units
-//   GET   /api/archives             what has been put away
-//   POST  /api/archives/archive     put a record away
-//   POST  /api/archives/restore     bring one back
-//   GET   /api/cron/daily           the daily job (Vercel Cron)
-//
-// The access rules in access-control.js have already checked the user's role
-// before any of these routes run.
-// ============================================================
-
 const crypto = require("crypto");
 const db = require("../database/connection").db;
 const sharedProcedures = require("../database/procedures/shared-procedures");
@@ -56,8 +33,6 @@ const passwords = require("../services/passwords");
 const hashPassword = passwords.hashPassword;
 const verifyPassword = passwords.verifyPassword;
 
-// Refuses an administrator changing their own details from the My Account
-// screen: another administrator makes those changes.
 function notOwnDetailsIfAdmin(request, response, next) {
   if (request.actor && request.actor.roleName === ADMIN) {
     return response.status(403).json({
@@ -68,11 +43,6 @@ function notOwnDetailsIfAdmin(request, response, next) {
   next();
 }
 
-// A credential (the sign-in email, the password, the role) is not changed by
-// its own holder from here: a standard user edits name and phone only. A new
-// password comes from "Forgot your password?" on the sign-in page, from a
-// manager (counter, stockroom and delivery staff), or from the administrator.
-// The administrator keeps the right to change their own password.
 function notOwnCredentials(request, response, next) {
   if (request.actor && request.actor.roleName !== ADMIN) {
     return response.status(403).json({
@@ -84,7 +54,6 @@ function notOwnCredentials(request, response, next) {
   next();
 }
 
-// RECORDS: one route, five record types
 const RECORD_QUERIES = {
   supplier: "SELECT sup.supplier_id AS id, sup.supplier_name AS name, sup.contact_person,\n" +
     "                    sup.contact_number, sup.email, sup.address,\n" +
@@ -144,17 +113,10 @@ const RECORD_QUERIES = {
     "         GROUP BY u.unit_id, u.unit_name ORDER BY u.unit_name"
 };
 
-// Who may archive a kind of record, and who may bring it back. One list for
-// both routes, so a role that cannot put a record away cannot restore it
-// either (the route rule above lets a clerk reach both routes, so the kind of
-// record is checked here). The procedure holds the rules for each kind.
-// Sales and Delivery are listed for restoring only: one put away before they
-// stopped being archivable can still be brought back (ARCHIVABLE below).
 const ARCHIVE_ROLES = {
   Inventory: [CLERK, ADMIN, MANAGER],
   Sales: MANAGEMENT,
   Delivery: MANAGEMENT,
-  // a manager archives cashier, clerk and driver accounts only (checked in the route)
   Staff: [ADMIN, MANAGER],
   Supplier: MANAGEMENT,
   Customer: MANAGEMENT,
@@ -162,14 +124,8 @@ const ARCHIVE_ROLES = {
   Unit: [CLERK, ADMIN, MANAGER]
 };
 
-// What can be put away: customers, products (Inventory), units, categories,
-// suppliers and staff accounts. Sales, deliveries and credit are records of
-// what happened and are never archived.
 const ARCHIVABLE = ["Customer", "Inventory", "Unit", "Category", "Supplier", "Staff"];
 
-// The records archived here, in the server rather than by sp_archive_record:
-// the table, its key, the column holding its name, and what has to be true
-// before it may go (a check that answers a reason when it may not).
 const SIMPLE_ARCHIVES = {
   Supplier: {
     table: "suppliers", key: "supplier_id", name: "supplier_name",
@@ -219,8 +175,6 @@ const SIMPLE_ARCHIVES = {
   }
 };
 
-// Puts away (archive true) or brings back (archive false) one of SIMPLE_ARCHIVES.
-// Answers { status, message } like the procedures do.
 async function setSimpleArchive(request, module, recordId, archive) {
   const plan = SIMPLE_ARCHIVES[module];
   const found = await db.query(
@@ -249,13 +203,11 @@ async function setSimpleArchive(request, module, recordId, archive) {
   return { status: 200, message: archive ? "Record archived." : "Record restored." };
 }
 
-// A manager may archive or restore a cashier, clerk or driver account, never
-// an administrator's or another manager's. Answers a reason, or null.
 async function staffOutOfReach(request, recordId) {
   if (request.actor.roleName === ADMIN) return null;
   const found = await db.query(
     "SELECT r.role_name FROM staff s JOIN roles r ON r.role_id = s.role_id WHERE s.staff_id = ?", [recordId]);
-  if (found[0].length === 0) return null;   // the procedure says it is not found
+  if (found[0].length === 0) return null;
   if (ROLES_MANAGED_BY_MANAGER.indexOf(found[0][0].role_name) === -1) {
     return "A manager can only archive cashier, inventory clerk and driver accounts.";
   }
@@ -265,10 +217,6 @@ async function staffOutOfReach(request, recordId) {
   return null;
 }
 
-// The live channel files every /api/archives write under "archives" (see scopeOf in
-// live-changes.js), which only the manager's Archives table reads. What an archive or a
-// restore really moves is listed here, so the other screens (the material list, the
-// till's catalogue, the sales and delivery lists, the staff list) read it again too.
 const ARCHIVE_SCOPES = {
   Inventory: ["inventory"],
   Sales: ["sales", "inventory", "deliveries"],
@@ -294,21 +242,10 @@ function sameSecret(given, expected) {
   return crypto.timingSafeEqual(a, b);
 }
 
-// adminModule and managerModule are what registerAdminRoutes and registerManagerRoutes
-// gave back; the daily job runs their sweeps.
 function registerSharedRoutes(app, deps) {
   const adminModule = deps.adminModule;
   const managerModule = deps.managerModule;
 
-  // ==========================================
-  // THE LIVE CHANNEL
-  //
-  // Every signed-in browser asks here every few seconds what changed since the
-  // version it last saw. The first ask (no "since") only learns the version.
-  // The access check ahead of it has already refreshed the session, so asking
-  // also marks the person present. A browser further behind than the log is
-  // told so (gap) and offered a reload.
-  // ==========================================
   app.get("/api/events/poll", async function (request, response) {
     const since = parseInt(request.query.since, 10);
 
@@ -340,7 +277,6 @@ function registerSharedRoutes(app, deps) {
 
       response.json({
         version: await latestChangeVersion(),
-        // screens that asked within the presence window
         connections: Number(rows[0].connections),
         people: Number(rows[0].people),
         logged: Number(logged[0].total),
@@ -352,11 +288,6 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // YOUR OWN ACCOUNT -- always the signed-in account; the role is not editable here
-  // ==========================================
-  // What the signed-in person is, for the screens to shape themselves around.
-  // A convenience for the page and never a permission.
   app.get("/api/me/access", function (request, response) {
     const actor = request.actor;
 
@@ -372,13 +303,10 @@ function registerSharedRoutes(app, deps) {
     });
   });
 
-  // What this person's menu holds. A convenience
-  // for the page; the access hook reads the same table for itself.
   app.get("/api/me/features", async function (request, response) {
     try {
       const features = await featuresOf(request.actor.roleName);
 
-      // the keys of the screens this person has switched on
       const heldKeys = [];
       for (let featureIndex = 0; featureIndex < features.length; featureIndex++) {
         const feature = features[featureIndex];
@@ -426,7 +354,6 @@ function registerSharedRoutes(app, deps) {
       return response.status(400).json({ error: "First name and last name are required" });
     }
 
-    // the email is a credential (see notOwnCredentials); refused rather than dropped
     if (email !== undefined && email !== null && String(email).trim() !== "" &&
         String(email).trim().toLowerCase() !== String(actor.email || "").toLowerCase()) {
       return response.status(403).json({
@@ -434,7 +361,6 @@ function registerSharedRoutes(app, deps) {
       });
     }
 
-    // the phone number is required on your own details
     if (!phone || String(phone).trim() === "") {
       return response.status(400).json({ error: "A phone number is required" });
     }
@@ -443,8 +369,6 @@ function registerSharedRoutes(app, deps) {
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
     try {
-      // a new phone number must not belong to another staff member; keeping
-      // the one on file is always fine
       const mineResult = await db.query("SELECT phone FROM staff WHERE staff_id = ?", [actor.staffId]);
       const mine = mineResult[0];
       const oldPhone = mine[0] ? mine[0].phone : null;
@@ -455,7 +379,6 @@ function registerSharedRoutes(app, deps) {
         }
       }
 
-      // the role and the email are the ones on file, never from the browser
       const output = await sharedProcedures.updateOwnAccount(
         [actor.staffId, String(firstName).trim(), cleanMiddleName(middleName),
          String(lastName).trim(), cleanPhone(phone),
@@ -486,8 +409,6 @@ function registerSharedRoutes(app, deps) {
       return response.status(400).json({ error: "Enter your current password" });
     }
 
-    // the old password typed in the new box from habit is refused before the
-    // database is asked
     if (newPassword === currentPassword) {
       return response.status(400).json({ error: "The new password must be different from your current password" });
     }
@@ -542,12 +463,8 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  // ARCHIVES
   app.get("/api/archives", async function (request, response) {
     try {
-      // what can be archived: staff accounts and products (vw_archives), then
-      // the records archived by the server. Voided sales and deliveries are not
-      // archived data and are not listed.
       const rowsResult = await db.query(
         "SELECT a.module, a.record_id, a.record_name, a.detail, a.archived_at,\n" +
           "       COALESCE(a.archived_by, 'System') AS archived_by\n" +
@@ -572,8 +489,6 @@ function registerSharedRoutes(app, deps) {
           "ORDER BY archived_at DESC, module"
       );
       const rows = rowsResult[0];
-      // a product's stock without the trailing zeros of the column:
-      // "Stock 44", and "Stock 2.5" for a measured material
       for (let i = 0; i < rows.length; i++) {
         const match = /^Stock (-?\d+(?:\.\d+)?)$/.exec(String(rows[i].detail || ""));
         if (rows[i].module === "Inventory" && match) rows[i].detail = "Stock " + String(Number(match[1]));
@@ -633,9 +548,6 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  // Voiding a sale: same day only, goods not out for delivery, stock back on
-  // the shelf (sp_archive_record holds the rules). A voided sale reads Voided
-  // in Sales Transactions; it is not archived data and is not on Archives.
   app.post("/api/sales/:saleId/void", async function (request, response) {
     const saleId = Number(request.params.saleId);
     if (!saleId) return response.status(400).json({ error: "Say which sale to void." });
@@ -697,8 +609,6 @@ function registerSharedRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      // An archived staff member can no longer work, so any screen they have
-      // open is signed out; it reads this reason on its next request.
       if (module === "Staff") {
         await endSessionsForStaff(recordId, null,
           "Your account was archived by " +
@@ -714,13 +624,6 @@ function registerSharedRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // THE DAILY JOB -- on Vercel, where no timer runs between requests.
-  // vercel.json calls it once a day; Vercel sends "Authorization: Bearer
-  // <CRON_SECRET>", and without that secret nobody else can start it. On a PC
-  // the same work runs on the timers started above.
-  // ==========================================
-
   app.get("/api/cron/daily", async function (request, response) {
     const secret = process.env.CRON_SECRET;
     if (!secret) {
@@ -730,7 +633,6 @@ function registerSharedRoutes(app, deps) {
       return response.status(401).json({ error: "Not allowed" });
     }
 
-    // each step on its own, so one failing does not stop the rest
     const steps = {
       penalties: function () { return managerModule.runPenaltySweep(); },
       archives: function () { return adminModule.runArchiveSweep(); },

@@ -1,22 +1,3 @@
-// ============================================================
-// system-admin.js -- the System Administrator dashboard
-// Loaded by: system.html
-//
-// What is in this file, from top to bottom:
-//   - switching screens (showPanel and the show... functions)
-//   - the staff directory: list, create (review then confirm), edit,
-//     activate / deactivate, reset password, archived accounts
-//   - Access Control: which screens each role can open
-//   - the audit logs
-//   - Backup & Recovery: make, download, restore and delete backups
-//   - Receipt Maintenance: the store name, TIN, VAT and bank details
-//   - the page start-up code at the very bottom ("SYSTEM PAGE BOOT")
-// ============================================================
-
-// ==========================================
-// PANEL SWITCHING (System page)
-// ==========================================
-// what the top bar says on each screen
 const ADMIN_TITLES = {
     'panel-accounts':    'Staff Directory',
     'panel-archive':     'Archived Accounts',
@@ -25,9 +6,6 @@ const ADMIN_TITLES = {
     'panel-maintenance': 'Backup & Recovery',
     'panel-store':       'Receipt Maintenance'
 };
-
-// Account screens are a list under a folded heading; opening one unfolds
-// the list, except the one the page opens on by itself.
 
 function showPanel(panelId, event) {
     if (event) event.preventDefault();
@@ -51,20 +29,13 @@ function showPanel(panelId, event) {
     leaveScreenFurniture();
 }
 
-// Opening a screen fetches nothing. The default view is the directory.
 function showAccountsList(event) {
     showPanel('panel-accounts', event);
 }
 
-// Two ways to load the directory: Load Data, or a search. The filters only
-// narrow what has arrived (on a closed table they apply to the first load).
 function showAllUsers(event) {
     showPanel('panel-accounts', event);
 }
-
-// Opening a screen never unfolds the Accounts Management list: only the
-// heading's caret does (shared/helpers.js sidebarHeading); the heading lights
-// up on its own while a screen beneath it is the open one.
 
 function showCreateAccount(event) {
     if (event) event.preventDefault();
@@ -75,8 +46,6 @@ function showCreateAccount(event) {
 }
 function showArchiveModule(event) { showPanel('panel-archive', event); }
 function showAuditLogs(event)     { showPanel('panel-logs', event); }
-// Backup & Recovery loads everything on opening: the daily backup's state
-// and every saved backup.
 function showMaintenance(event) {
     showPanel('panel-maintenance', event);
     const panel = getDataPanel('admin-backups');
@@ -84,15 +53,11 @@ function showMaintenance(event) {
 }
 function showStoreSettings(event) { showPanel('panel-store', event); loadStoreSettingsForm(); }
 
-// read on opening; not re-read while switches wait for Confirm Configuration, or are being saved
 function showAccessControl(event) {
     showPanel('panel-features', event);
     if (!featureSaving && featureMatrixChanges().length === 0) loadFeatureMatrix();
 }
 
-// ==========================================
-// ROLES
-// ==========================================
 let systemRoles = [];
 
 async function loadRoles() {
@@ -118,12 +83,10 @@ async function loadRoles() {
             const select = roleFilters[i];
             select.innerHTML = '<option value="all">Every role</option>' + options;
 
-            // a role chosen before the list arrived (a table loaded again after a reload) stays shown
             const users = getDataPanel('admin-users');
             if (users) setBoxValue(select, users.filters.roleId);
         }
 
-        // the audit trail keeps the role's name as it was at the time, so it filters by name
         let nameOptions = '';
         for (let i = 0; i < systemRoles.length; i++) {
             const roleName = escapeHtml(systemRoles[i].role_name);
@@ -141,13 +104,10 @@ async function loadRoles() {
     }
 }
 
-// Active/Deactivated is a decision about the account. Whether somebody is at a
-// screen right now is not the directory's business; Last Login is on the card.
 let selectedUser = null;
 
 function accountCell(user) {
     if (!user.is_active) return '<span class="badge badge-danger">Deactivated</span>';
-    // held after too many wrong passwords; a password reset releases it
     if (user.held_until) return '<span class="badge badge-warning" title="Held until ' + escapeHtml(whenText(user.held_until)) + ' after too many wrong passwords">Held</span>';
     return '<span class="badge badge-success">Active</span>';
 }
@@ -159,7 +119,6 @@ function userSearchFields(user) {
     ];
 }
 
-// the account-state filter goes back to the server; the role is decided here
 function currentStatusFilter() {
     const select = document.getElementById('accounts-status');
     return select ? select.value : 'all';
@@ -171,7 +130,6 @@ async function reloadUsers() {
     const panel = getDataPanel('admin-users');
     if (!panel) return;
 
-    // on an open table the server filter means re-reading; a closed one reads it on load
     if (panel.state === 'ready') await panel.refresh();
 }
 
@@ -180,9 +138,6 @@ function filterDirectory(name, value) {
     syncDirectoryColumns();
 }
 
-// While a filter is set, the column it decides is not drawn. Positions are
-// 1-based to match the <th> order in system.html; tables.js re-applies them
-// on every redraw.
 const DIRECTORY_COLUMN = { role: 4, status: 5 };
 const LOG_COLUMN = { role: 3 };
 
@@ -199,7 +154,6 @@ function syncDirectoryColumns() {
     setHiddenColumns(document.getElementById('accounts-table'), hidden);
 }
 
-// the date boxes are left out: a range still leaves a different timestamp per row
 function syncLogColumns() {
     const hidden = [];
     if (selectValue('logs-role') !== 'all') hidden.push(LOG_COLUMN.role);
@@ -217,7 +171,6 @@ function buildUsersPanel() {
         idField: 'staff_id',
         filters: { roleId: 'all' },
 
-        // filters set up a query rather than run one; see dataPanelFilter
         loadOnFilter: false,
 
         gate: {
@@ -257,7 +210,6 @@ function buildUsersPanel() {
 }
 
 async function openUserModal(staffId) {
-    // opening a card over a dirty Edit form would refill it: ask first
     if (editUserDirty() && !(await confirmCloseEditUser())) return;
 
     const panel = getDataPanel('admin-users');
@@ -316,16 +268,11 @@ async function openUserModal(staffId) {
 
     const hasLogin = Boolean(selectedUser.user_id);
     document.getElementById('modal-login-btn').style.display = hasLogin ? 'none' : 'inline-block';
-    // a deactivated account cannot sign in, so its password is not reset
     document.getElementById('modal-reset-btn').style.display = hasLogin && selectedUser.is_active ? 'inline-block' : 'none';
-    // only a deactivated account can be archived
     document.getElementById('modal-archive-btn').style.display = selectedUser.is_active ? 'none' : 'inline-block';
-    // Lift Hold only while the account is held after too many wrong passwords
     document.getElementById('modal-hold-btn').style.display =
         hasLogin && selectedUser.held_until ? 'inline-block' : 'none';
 
-    // The server refuses every change to the signed-in person's own record
-    // (notOwnAccount in access-control.js), so the buttons are taken away here too.
     const own = isOwnAccount(selectedUser);
     document.getElementById('modal-own-note').style.display = own ? 'block' : 'none';
     document.getElementById('modal-edit-tab').style.display = own ? 'none' : '';
@@ -353,13 +300,9 @@ function showUserTab(tab) {
     document.getElementById('modal-edit-tab').classList.toggle('active', isEdit);
 }
 
-// "request" is a call that was already sent to the server, for example
-// apiUpdateStaff(5, data) (see connections/admin-connection.js).
-// Returns the server's reply on success and false on failure. No
-// successMessage means the caller does the talking.
 async function sendUserRequest(request, successMessage) {
     try {
-        const response = await request;   // wait for the server's answer
+        const response = await request;
         const result = await response.json();
 
         if (!response.ok) {
@@ -391,7 +334,6 @@ async function handleUpdateUser(event) {
 
     const form = event.target;
 
-    // a save of nothing writes an "unchanged" audit entry and signs the person out
     if (!isFormDirty(form)) {
         notifyInfo('Nothing on this form has been changed, so there is nothing to save.', 'No changes');
         return;
@@ -412,13 +354,11 @@ async function handleUpdateUser(event) {
         return;
     }
 
-    // the phone number may be empty, but one that is given has to be free
     if (!(await checkPhoneFree(form.elements.phone))) {
         form.elements.phone.focus();
         return;
     }
 
-    // a login's address cannot be emptied, and it has to be free
     if (selectedUser.user_id && form.elements.email.value.trim() === '') {
         setEmailError(form.elements.email, 'An email address is required.');
         form.elements.email.focus();
@@ -440,9 +380,6 @@ async function handleUpdateUser(event) {
 
     const name = staffName(selectedUser);
 
-    // One card for the whole save. A new role or sign-in email ends the
-    // person's sessions (the server does this in PUT /api/users/:staffId), so
-    // those saves say so and take the danger look; a corrected name or phone does not.
     const roleChanged = Number(data.roleId) !== Number(selectedUser.role_id);
     const emailChanged = data.email !== String(selectedUser.email || '').trim().toLowerCase();
     const signsOut = Boolean(selectedUser.user_id) && (roleChanged || emailChanged);
@@ -508,8 +445,6 @@ async function toggleUserStatus() {
     await sendUserRequest(apiSetStaffActive(selectedUser.staff_id, makeActive), doneMessage);
 }
 
-// Archive Account: only on a deactivated account. It leaves the Staff
-// Directory for Archived Accounts, where it can be restored.
 async function archiveUserAccount() {
     if (!selectedUser) return;
 
@@ -543,8 +478,6 @@ async function archiveUserAccount() {
     if (archive && archive.state === 'ready') await archive.refresh();
 }
 
-// Lift Hold: the account was held after too many wrong passwords. This lets
-// the person sign in again straight away with the password they already have.
 async function liftUserHold() {
     if (!selectedUser) return;
 
@@ -562,7 +495,6 @@ async function liftUserHold() {
         });
     if (!yes) return;
 
-    // sendUserRequest shows the server's message, closes the card and reloads the list
     const result = await sendUserRequest(apiReleaseHold(selectedUser.staff_id));
     if (result && result.message) notifySuccess(result.message, 'Hold lifted');
 }
@@ -585,7 +517,6 @@ async function resetUserPassword() {
         return;
     }
 
-    // nobody types the new password: the server makes it and sends it
     const name = staffName(selectedUser);
     const yes = await askDanger(
         'A new password is made for ' + name + ' and sent to ' + selectedUser.email + '.',
@@ -609,7 +540,6 @@ async function resetUserPassword() {
     await reportResetPassword(result, selectedUser.email, name);
 }
 
-// the same two outcomes as a first password, worded for a reset
 async function reportResetPassword(result, email, name) {
     if (result.emailed) {
         notifySuccess('A new password was emailed to ' + email + '. ' +
@@ -636,9 +566,6 @@ async function reportResetPassword(result, email, name) {
         });
 }
 
-// Save is off until something in the form differs from what the record said.
-// Spaces at the ends do not count: the server trims them.
-// (a WeakMap: it remembers one text per form element, and forgets the form with the page)
 const formBaselines = new WeakMap();
 
 function formValues(form) {
@@ -647,7 +574,7 @@ function formValues(form) {
     for (let i = 0; i < fields.length; i++) {
         const field = fields[i];
         if (!field.name || field.disabled) continue;
-        if (field.hasAttribute('data-untracked')) continue;   // the receipt's line boxes: see below
+        if (field.hasAttribute('data-untracked')) continue;
         if (field.type === 'checkbox') {
             values[field.name] = field.checked;
             continue;
@@ -655,9 +582,6 @@ function formValues(form) {
         values[field.name] = String(field.value === undefined ? '' : field.value).trim();
     }
 
-    // The receipt's header and footer boxes are numbered as they are drawn, and
-    // a box added but left empty is no change; what counts is the lines that
-    // would be printed, in order.
     if (form.id === 'store-form') {
         values.headerLines = readReceiptLines('header');
         values.footerLines = readReceiptLines('footer');
@@ -693,16 +617,14 @@ function watchFormEdits(form, button) {
     form.addEventListener('change', update);
 }
 
-// ---------- what the form changes, said before it is saved ----------
-const CHANGE_VALUE_MAX = 40;      // characters of one value in the list
-const CHANGE_LINES_MAX = 8;       // lines in the list; the rest are counted
+const CHANGE_VALUE_MAX = 40;
+const CHANGE_LINES_MAX = 8;
 
 function clipValue(text) {
     const value = String(text);
     return value.length > CHANGE_VALUE_MAX ? value.slice(0, CHANGE_VALUE_MAX - 1) + '\u2026' : value;
 }
 
-// A box as the person reads it: its label, and a list's choice by its words.
 function fieldLabelText(form, field) {
     if (field.type === 'checkbox') {
         const wrap = field.closest('label');
@@ -714,7 +636,7 @@ function fieldLabelText(form, field) {
 
 function fieldValueText(field, value) {
     if (field.type === 'checkbox') return value ? 'Yes' : 'No';
-    if (field.type === 'email') value = String(value).toLowerCase();   // the server stores it so
+    if (field.type === 'email') value = String(value).toLowerCase();
     if (field.tagName === 'SELECT') {
         for (let i = 0; i < field.options.length; i++) {
             if (field.options[i].value === String(value)) {
@@ -725,9 +647,6 @@ function fieldValueText(field, value) {
     return value === '' ? '(empty)' : clipValue(value);
 }
 
-// "Field: old -> new" for every box that differs from the record it was
-// filled from. "skip" is asked the name of a box that is not part of the change.
-// The lines are plain text: the confirm card escapes them.
 function formChangeLines(form, skip) {
     const before = JSON.parse(formBaselines.get(form) || '{}');
     const after = JSON.parse(formValues(form));
@@ -744,14 +663,12 @@ function formChangeLines(form, skip) {
     return lines;
 }
 
-// the list as the card shows it: long lists are cut and the rest counted
 function changeListFor(lines) {
     if (lines.length <= CHANGE_LINES_MAX) return lines;
     const more = lines.length - (CHANGE_LINES_MAX - 1);
     return lines.slice(0, CHANGE_LINES_MAX - 1).concat('and ' + more + ' more changes');
 }
 
-// ---------- unsaved changes: asked about, never lost quietly ----------
 function askDiscardChanges(message, eyebrow) {
     return askDanger(message, {
         title: 'Discard your changes?',
@@ -761,8 +678,6 @@ function askDiscardChanges(message, eyebrow) {
     });
 }
 
-// Dirty means different from the record the form was last filled from. A form
-// that was never filled has no record to differ from, so it is not dirty.
 function editUserDirty() {
     const form = document.getElementById('edit-user-form');
     const modal = document.getElementById('user-modal');
@@ -777,7 +692,6 @@ function storeFormDirty() {
                    formBaselines.has(form) && isFormDirty(form));
 }
 
-// The Edit Account card: the x button and Escape ask before closing it.
 async function confirmCloseEditUser() {
     if (!editUserDirty()) return true;
     return askDiscardChanges('The changes made to this account have not been saved. ' +
@@ -786,8 +700,6 @@ async function confirmCloseEditUser() {
 
 setModalCloseGuard('user-modal', confirmCloseEditUser);
 
-// Leaving a screen with a dirty form. The click is held, the question asked,
-// and the same click let through once the answer is "discard".
 let sidebarLeaveAllowed = false;
 
 document.addEventListener('click', async function (event) {
@@ -811,24 +723,19 @@ document.addEventListener('click', async function (event) {
     link.click();
 }, true);
 
-// closing or reloading the tab: the browser's own question, with its own words
 window.addEventListener('beforeunload', function (event) {
-    // every sign-out removes currentUser before it leaves: the way out is not questioned
     if (!localStorage.getItem('currentUser')) return;
     if (!storeFormDirty() && !editUserDirty()) return;
     event.preventDefault();
     event.returnValue = '';
 });
 
-// Cancelling the create form empties it so the next person does not find a
-// half-typed account waiting.
 function clearCreateForm() {
     const form = document.getElementById('create-user-form');
     if (!form) return;
 
     form.reset();
 
-    // reset() does not clear the box's verdict, nor the country button
     const phone = form.elements.phone;
     if (phone) phoneFill(phone, '');
 
@@ -837,7 +744,6 @@ function clearCreateForm() {
     hideNameErrors(form);
 }
 
-// the "Letters only" lines under the name boxes, put away
 function hideNameErrors(form) {
     const boxes = form.querySelectorAll('.name-error');
     for (let i = 0; i < boxes.length; i++) {
@@ -850,11 +756,6 @@ function cancelCreateAccount() {
     closeModal('create-modal');
 }
 
-// ==========================================
-// THE EMAIL BOX -- an address and nothing else, and one no other account uses
-// ==========================================
-// matches name@domain.tld: letters, digits and . _ % + - before the @, then a domain
-// of letters, digits and hyphens split by dots, ending in a dot and 2 or more letters
 const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 
 function emailComplaint(value) {
@@ -874,21 +775,16 @@ function setEmailError(input, text) {
     }
 }
 
-// spaces cannot be part of an address, so they never get into the box
 function onEmailInput(input) {
     const cleaned = input.value.replace(/\s+/g, '');
     if (cleaned !== input.value) input.value = cleaned;
     setEmailError(input, '');
 }
 
-// Asked when the box is left: is this address already signing in to an
-// account? Every role counts, active or archived. The server asks again on
-// save, so this is only for saying it early.
 async function checkEmailFree(input) {
     if (!input) return true;
     const email = input.value.trim();
 
-    // the edit form may leave the address as it was
     const own = input.id === 'edit-email' && selectedUser &&
         String(selectedUser.email || '').toLowerCase() === email.toLowerCase();
     if (own || (email === '' && input.id === 'edit-email')) {
@@ -905,7 +801,6 @@ async function checkEmailFree(input) {
     try {
         const answer = await apiCheckEmail(email, input.id === 'edit-email' && selectedUser ? selectedUser.staff_id : null);
 
-        // typed something else while the answer was coming: that address gets its own check
         if (input.value.trim() !== email) return true;
 
         if (answer && answer.taken) {
@@ -913,20 +808,14 @@ async function checkEmailFree(input) {
             return false;
         }
     } catch (error) {
-        // offline: the server says so on save
     }
     setEmailError(input, '');
     return true;
 }
 
-// ==========================================
-// THE PHONE BOX -- format is checked by format.js; here, one no other staff member uses
-// ==========================================
 function setPhoneError(input, text) {
     if (!input) return;
     const box = document.getElementById(input.id + '-error');
-    // A badly written number keeps its red edge (format.js put it there);
-    // only a number that is well written but taken gets it from here.
     const badlyWritten = input.value !== '' && phoneComplaint(input) !== null;
     input.classList.toggle('is-bad', Boolean(text) || badlyWritten);
     if (box) {
@@ -935,21 +824,15 @@ function setPhoneError(input, text) {
     }
 }
 
-// Asked when the box is left: does another staff member already have this
-// number? Every role counts, active or archived. The server asks again on
-// save, so this is only for saying it early.
 async function checkPhoneFree(input) {
     if (!input) return true;
-    const phone = phoneToStore(input);   // like +639171234567, the way it is stored
+    const phone = phoneToStore(input);
 
-    // An empty box (the edit form allows it) or a badly written number is not
-    // a clash; the format check says what is wrong with it.
     if (phone === '' || phoneComplaint(input) !== null) {
         setPhoneError(input, '');
         return true;
     }
 
-    // the edit form may leave the number as it was
     const own = input.id === 'edit-phone' && selectedUser &&
         phoneToStore(selectedUser.phone) === phone;
     if (own) {
@@ -960,7 +843,6 @@ async function checkPhoneFree(input) {
     try {
         const answer = await apiCheckPhone(phone, input.id === 'edit-phone' && selectedUser ? selectedUser.staff_id : null);
 
-        // typed something else while the answer was coming: that number gets its own check
         if (phoneToStore(input) !== phone) return true;
 
         if (answer && answer.taken) {
@@ -968,13 +850,11 @@ async function checkPhoneFree(input) {
             return false;
         }
     } catch (error) {
-        // offline: the server says so on save
     }
     setPhoneError(input, '');
     return true;
 }
 
-// what a required box says when it was left empty
 function firstEmptyRequired(form) {
     const fields = form.querySelectorAll('[required]');
     for (let i = 0; i < fields.length; i++) {
@@ -983,7 +863,6 @@ function firstEmptyRequired(form) {
     return undefined;
 }
 
-// Emailed is a corner card; not emailed keeps the password on screen in a dialog.
 async function reportFirstPassword(result, email, name) {
     if (result.emailed) {
         notifySuccess('The first password was emailed to ' + email + '. ' +
@@ -1010,8 +889,6 @@ async function reportFirstPassword(result, email, name) {
         });
 }
 
-// what the working card says while the account is being made; the steps
-// are what the server does, in order, and the card ticks through them
 function creatingCard(review) {
     return {
         title: 'Creating the account',
@@ -1028,23 +905,14 @@ function creatingCard(review) {
     };
 }
 
-// One press of Create: the form is checked here, the server checks it again
-// and makes the password, and the account is created straight away.
-// ---------- names: letters only ----------
-// First, middle and last name take letters only. Letters with accents (é, ñ)
-// count, and spaces between words stay. Numbers and symbols are taken out as
-// they are typed or pasted, and a line under the box says why.
-// matches words made only of letters and accent marks, with single spaces between the words
 const NAME_LETTERS = /^[\p{L}\p{M}]+( [\p{L}\p{M}]+)*$/u;
 
 function onNameInput(input) {
     const typed = input.value;
-    // takes out everything that is not a letter, an accent mark or a space
-    const cleaned = typed.replace(/[^\p{L}\p{M} ]/gu, '');   // keep letters, accents and spaces
+    const cleaned = typed.replace(/[^\p{L}\p{M} ]/gu, '');
     const box = document.getElementById(input.id + '-error');
 
     if (cleaned !== typed) {
-        // keep the cursor where it was, less the characters taken out
         const cursor = Math.max(0, input.selectionStart - (typed.length - cleaned.length));
         input.value = cleaned;
         input.setSelectionRange(cursor, cursor);
@@ -1057,8 +925,6 @@ function onNameInput(input) {
     }
 }
 
-// the first name box on this form that is not letters only, or null
-// (a name saved before this rule can still hold a number)
 function firstBadName(form) {
     const fields = ['firstName', 'middleName', 'lastName'];
     for (let i = 0; i < fields.length; i++) {
@@ -1148,8 +1014,6 @@ async function handleCreateUser(event) {
         clearCreateForm();
         showPanel('panel-accounts');
 
-        // the new account shows in the directory: an open one is re-read, a
-        // closed one is loaded now
         const panel = getDataPanel('admin-users');
         if (panel) {
             if (panel.state === 'ready') await panel.refresh(); else await panel.open();
@@ -1209,8 +1073,6 @@ async function createLoginAccount() {
     }
 }
 
-// Archived accounts: the row opens the person, and Restore is one labelled
-// action on that card rather than a button on every row.
 let selectedArchived = null;
 
 function buildArchivePanel() {
@@ -1285,7 +1147,6 @@ function openRestoreCard(staffId) {
             ? '<span class="badge badge-warning">Temporary</span>'
             : '<span class="badge badge-neutral">Set by user</span>');
 
-    // an account with no login cannot sign in whatever its state
     const warning = document.getElementById('restore-warning');
 
     if (user.email) {
@@ -1340,14 +1201,9 @@ async function restoreSelectedAccount() {
     }
 }
 
-// Access control: a role is picked from the dropdown beside the search and its
-// screens are a list of switches below. Every screen in the system is listed for
-// every role. Every role's list is drawn and all but the picked one hidden, so a
-// change made under one role survives looking at another. Nothing is saved until
-// Confirm Configuration reads the changes back.
-let featureMatrix = null;       // what /api/features last answered
-let featureRoleId = null;       // the role whose list is showing
-let featureSaving = false;      // true while Confirm Configuration is saving
+let featureMatrix = null;
+let featureRoleId = null;
+let featureSaving = false;
 
 function featureCellState(cell) {
     if (!cell.available) return 'unavailable';
@@ -1356,14 +1212,12 @@ function featureCellState(cell) {
     return 'revoked';
 }
 
-// the word beside a switch only when it differs from the role's default
 function featureStateWord(state, on) {
     if (state === 'unavailable' || state === 'default') return '';
     if (on) return 'switched on';
     return 'switched off';
 }
 
-// "on" that agrees with the default is by role; otherwise a grant or a revocation
 function featureStateOf(byDefault, on) {
     if (on === byDefault) return 'default';
     if (on) return 'granted';
@@ -1384,8 +1238,6 @@ async function loadFeatureMatrix() {
     renderFeatureMatrix();
 }
 
-// The roles in the dropdown; the first is picked until somebody chooses.
-// A role with changes not yet confirmed says so in its name.
 function renderFeatureRoleList(roles) {
     const select = document.getElementById('features-role');
     if (!select) return;
@@ -1412,7 +1264,6 @@ function selectFeatureRole(value) {
     showFeatureRole();
 }
 
-// all but the picked role's list are hidden, not removed: their switches keep their changes
 function showFeatureRole() {
     const strips = document.querySelectorAll('#features-matrix .feature-strip');
     for (let i = 0; i < strips.length; i++) {
@@ -1428,14 +1279,12 @@ function showFeatureRole() {
     filterFeatureScreens();
 }
 
-// the switches as they were when the screen was drawn: "screen key|role id" -> on
 function featureBaseline() {
     const mount = document.getElementById('features-matrix');
     if (mount && mount.dataset.baseline) return JSON.parse(mount.dataset.baseline);
     return {};
 }
 
-// whether each role carries changes not yet granted
 function syncFeatureRoleNote() {
     const before = featureBaseline();
 
@@ -1443,7 +1292,7 @@ function syncFeatureRoleNote() {
     for (let i = 0; i < strips.length; i++) {
         const strip = strips[i];
         const boxes = strip.querySelectorAll('.feature-box');
-        let unsaved = false;    // has any switch been flipped since the screen was drawn?
+        let unsaved = false;
         for (let b = 0; b < boxes.length; b++) {
             if (before[boxes[b].dataset.feature + '|' + boxes[b].dataset.role] !== boxes[b].checked) unsaved = true;
         }
@@ -1456,9 +1305,6 @@ function syncFeatureRoleNote() {
     }
 }
 
-// one row: the screen and what it does, the state it is in, the checkbox, then
-// "Default" when the role has it by default; every row shares the same four
-// columns, so the checkboxes line up
 function featureRowHtml(feature, role) {
     const cell = feature.roles[role.role_name];
     const state = featureCellState(cell);
@@ -1499,13 +1345,11 @@ function renderFeatureMatrix() {
 
     renderFeatureRoleList(roles);
 
-    // the module names, in the order their screens come
     const modules = [];
     for (let i = 0; i < features.length; i++) {
         if (!modules.includes(features[i].module)) modules.push(features[i].module);
     }
 
-    // one list per role: every screen in the system, grouped under the module name
     let html = '';
     for (let r = 0; r < roles.length; r++) {
         const role = roles[r];
@@ -1541,8 +1385,6 @@ function renderFeatureMatrix() {
     syncFeatureSaveButton();
 }
 
-// The search box narrows the role's list to the screens whose name, module
-// or description holds what was typed; a module left with nothing goes too.
 function filterFeatureScreens(query) {
     let wanted = query;
     if (wanted === undefined) {
@@ -1563,7 +1405,6 @@ function filterFeatureScreens(query) {
         groups[g].hidden = shown === 0;
     }
 
-    // "no match" only for the role on screen
     const strip = document.querySelector('#features-matrix .feature-strip:not([hidden])');
     const none = document.getElementById('features-no-match');
     if (none) {
@@ -1593,7 +1434,6 @@ function onFeatureBoxChange(box) {
     syncFeatureSaveButton();
 }
 
-// every switch flipped since the screen was drawn
 function featureMatrixChanges() {
     const mount = document.getElementById('features-matrix');
     if (!mount || !mount.dataset.baseline || !featureMatrix) return [];
@@ -1643,14 +1483,11 @@ function syncFeatureSaveButton() {
     }
 }
 
-// Discard Changes: every switch back to how it was saved
 function discardFeatureChanges() {
     if (featureSaving) return;
     renderFeatureMatrix();
 }
 
-// Leaving Access Control (another screen in the menu) with changes not yet
-// confirmed asks first: keep editing, or discard them and go.
 function featureScreenOpen() {
     const panel = document.getElementById('panel-features');
     return Boolean(panel) && panel.style.display !== 'none';
@@ -1661,7 +1498,6 @@ document.addEventListener('click', async function (event) {
     if (!link || link.dataset.leaveChecked === '1') return;
     if (!featureScreenOpen() || featureSaving || featureMatrixChanges().length === 0) return;
     if (link.dataset.panelLink === 'panel-features') return;
-    // the caret only folds a heading; it does not leave the screen
     if (event.target.closest('.nav-caret')) return;
 
     event.preventDefault();
@@ -1690,7 +1526,6 @@ document.addEventListener('click', async function (event) {
     }
 }, true);
 
-// closing the tab or reloading with changes waiting: the browser asks too
 window.addEventListener('beforeunload', function (event) {
     if (featureScreenOpen() && !featureSaving && featureMatrixChanges().length > 0) {
         event.preventDefault();
@@ -1698,7 +1533,6 @@ window.addEventListener('beforeunload', function (event) {
     }
 });
 
-// Confirm Configuration: read back first, role by role, every screen changed.
 async function saveFeatureMatrix() {
     const changes = featureMatrixChanges();
     if (changes.length === 0) {
@@ -1706,7 +1540,6 @@ async function saveFeatureMatrix() {
         return;
     }
 
-    // Role: Manager / Access: Account Management - turned off, ...
     const byRole = [];
     for (let i = 0; i < changes.length; i++) {
         let group = null;
@@ -1785,8 +1618,6 @@ async function saveFeatureMatrix() {
     await loadFeatureMatrix();
 }
 
-// The audit trail. The row carries time, person, role, machine and kind;
-// the entry itself carries the before-and-after values.
 const AUDIT_TONE = {
     CREATE: 'badge-success',
     UPDATE: 'badge-neutral',
@@ -1834,8 +1665,6 @@ function auditLogQuery() {
     return parts.length ? '?' + parts.join('&') : '';
 }
 
-// A role picked before a reload is put back as an option straight away, so the
-// table loads again with it before the role list arrives from the server.
 function keepSavedLogRole() {
     const select = document.getElementById('logs-role');
     const saved = (readLoadedPanels()[thisPageName()] || {})['admin-logs'];
@@ -1846,9 +1675,6 @@ function keepSavedLogRole() {
     select.value = role;
 }
 
-// ---------- the Period box on the audit trail ----------
-// All time, a named period, or Custom date (which shows From and To). A named
-// period fills the two date boxes itself, so the query and the export read it.
 const LOG_PERIODS = [
     ['all', 'All time', null],
     ['today', 'Today', 0],
@@ -1897,7 +1723,6 @@ function buildLogPeriodBox() {
     syncLogPeriodBox();
 }
 
-// Custom date shows the dates and waits for both; any other period applies at once
 function logPeriodPicked() {
     const select = document.getElementById('logs-period');
     if (!select) return;
@@ -1914,7 +1739,6 @@ function logPeriodPicked() {
     refreshAuditLogs();
 }
 
-// a custom range is read once both dates are in, and the right way round
 function logDatesPicked() {
     const from = document.getElementById('logs-from').value;
     const to = document.getElementById('logs-to').value;
@@ -1926,7 +1750,6 @@ function logDatesPicked() {
     refreshAuditLogs();
 }
 
-// a table put back after a reload brings its dates back: the Period box follows them
 function syncLogPeriodBox() {
     const select = document.getElementById('logs-period');
     const from = document.getElementById('logs-from');
@@ -1939,7 +1762,6 @@ function syncLogPeriodBox() {
     showLogDates(select.value === 'custom');
 }
 
-// Export opens Excel and PDF under it; a click anywhere else closes it
 function toggleLogExportMenu(event) {
     if (event) event.stopPropagation();
     const menu = document.getElementById('logs-export-menu');
@@ -1967,7 +1789,6 @@ document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeLogExportMenu();
 });
 
-// the role box and the two date boxes narrow the query itself
 async function refreshAuditLogs() {
     syncLogColumns();
 
@@ -2020,8 +1841,6 @@ function buildLogsPanel() {
     });
 }
 
-// Export: the same filters as the table (type, dates, and the search box),
-// written by the server as an Excel workbook or a PDF and downloaded.
 function exportAuditLogs(format) {
     const query = auditLogQuery();
     const search = document.getElementById('logs-search');
@@ -2065,9 +1884,6 @@ function openLogEntry(logId) {
     showModal('log-modal');
 }
 
-// Backup & recovery. A backup is one .sql file of the whole system, written
-// into backups/ under the date and time. Actions open in a drawer with the
-// one backup they belong to.
 let selectedBackup = null;
 
 function formatBytes(bytes) {
@@ -2078,7 +1894,6 @@ function formatBytes(bytes) {
 }
 
 function backupTakenAt(fileName) {
-    // finds _YYYY-MM-DD_HHMM in the file name: year, month, day, hour, minute
     const parts = /_(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})/.exec(fileName);
     if (!parts) return { day: fileName, time: '' };
 
@@ -2087,20 +1902,16 @@ function backupTakenAt(fileName) {
     return { day: day, time: parts[4] + ':' + parts[5] };
 }
 
-// "02:00" for an hour of the day
 function hourText(hour) {
     return String(Number(hour) || 0).padStart(2, '0') + ':00';
 }
 
-// Every fact on this card comes from the server, so a dead timer cannot keep
-// reading "backing up every day". A failure is said in plain words.
 function renderAutoBackupCard(auto, procedures) {
     const card = document.getElementById('auto-backup-card');
     const state = document.getElementById('auto-backup-state');
     const text = document.getElementById('auto-backup-text');
     if (!card || !state || !text) return;
 
-    // the switch says what pressing it will do, and only shows once the server has answered
     const toggle = document.getElementById('auto-backup-toggle');
     if (toggle) {
         toggle.style.display = auto ? '' : 'none';
@@ -2121,8 +1932,6 @@ function renderAutoBackupCard(auto, procedures) {
         return;
     }
 
-    // missing stored procedures outrank anything this card would say about backups;
-    // a count the server did not give (null) is not a reason to warn
     if (procedures && typeof procedures.loaded === 'number' && procedures.loaded < procedures.expected) {
         card.className = 'card auto-backup is-bad';
         state.textContent = 'Read this';
@@ -2152,7 +1961,6 @@ function renderAutoBackupCard(auto, procedures) {
         (auto.lastFileName ? ' Latest: ' + auto.lastFileName + '.' : '');
 }
 
-// the limits under Saved Backups, from the server
 function renderBackupLimits(limits) {
     const note = document.getElementById('backup-limit-note');
     if (!note || !limits) return;
@@ -2160,7 +1968,6 @@ function renderBackupLimits(limits) {
         'Backups older than ' + limits.keepDays + ' days are deleted automatically.';
 }
 
-// reads the state without opening the table
 async function loadAutoBackupState() {
     try {
         const body = await apiGetBackups();
@@ -2171,8 +1978,6 @@ async function loadAutoBackupState() {
     }
 }
 
-// The switch on the card. Off stops the daily backup; the files already
-// there stay until they are deleted by hand.
 async function toggleAutoBackup() {
     const toggle = document.getElementById('auto-backup-toggle');
     const turningOff = toggle && toggle.textContent.trim() === 'Turn Off';
@@ -2199,7 +2004,6 @@ async function toggleAutoBackup() {
     } catch (error) {
         notifyOffline();
     } finally {
-        // the card re-reads the server rather than trusting what was just pressed
         await loadAutoBackupState();
     }
 }
@@ -2207,7 +2011,7 @@ async function toggleAutoBackup() {
 function buildBackupPanel() {
     createDataPanel({
         key: 'admin-backups',
-        remember: false,   // it loads by itself whenever its screen opens
+        remember: false,
         tableId: 'backup-table',
         columns: 6,
         pagerId: 'backup-pager',
@@ -2230,7 +2034,6 @@ function buildBackupPanel() {
             return prefixMatch([file.fileName], query);
         },
 
-        // the Folder dropdown: Manual backups (Run Backup Now) or Automatic backups (the system's own)
         filters: { folder: 'all' },
         filter: function (file, filters) {
             if (filters.folder === 'manual') return !file.automatic;
@@ -2248,7 +2051,6 @@ function buildBackupPanel() {
                 kind = '<span class="badge badge-success">Manual</span>';
             }
 
-            // the name goes through a handler so it can never close the quote it sits in
             return '<tr class="row-clickable row-reveal" style="animation-delay:' +
                     (index % 10) * 28 + 'ms" ' +
                     'onclick="openBackupDrawer(' + index + ')" ' +
@@ -2264,7 +2066,6 @@ function buildBackupPanel() {
     });
 }
 
-// who made a backup, as the server read it from the audit log
 function backupMadeBy(file) {
     if (file.madeBy) return escapeHtml(file.madeBy);
     return '<span class="muted">Not recorded</span>';
@@ -2286,8 +2087,6 @@ function openBackupDrawer(index) {
         detailRow('Kind', selectedBackup.automatic ? 'Automatic' : 'Manual') +
         detailRow('Made By', backupMadeBy(selectedBackup));
 
-    // only a backup made by hand can be deleted; the system's own ones stay
-    // until the system removes them after the days it keeps them
     const deleteButton = document.getElementById('backup-delete-btn');
     if (deleteButton) deleteButton.hidden = Boolean(selectedBackup.automatic);
     const autoNote = document.getElementById('backup-auto-note');
@@ -2306,7 +2105,6 @@ function closeBackupDrawer() {
 }
 
 document.addEventListener('keydown', function (event) {
-    // a confirm card over the drawer answers its own Escape (modals.js stops it reaching here)
     if (event.key === 'Escape') closeBackupDrawer();
 });
 
@@ -2327,7 +2125,6 @@ async function runBackup() {
     const button = document.getElementById('run-backup-btn');
     if (button) button.disabled = true;
 
-    // a loading card covers the screen while the backup is written
     showWorking({
         title: 'Backing up data',
         eyebrow: 'Backup',
@@ -2461,7 +2258,6 @@ async function handleRestoreFile(event) {
 
     event.target.value = '';
 
-    // a name that ends in .sql (capitals allowed)
     if (!/\.sql$/i.test(file.name)) {
         notifyWarning('A backup is a .sql file. ' + file.name + ' is not one.', 'Wrong kind of file');
         return;
@@ -2503,22 +2299,12 @@ async function handleRestoreFile(event) {
     }
 }
 
-
-// Receipt maintenance: what every invoice claims about the business. Above
-// the 3,000,000 threshold a shop is VAT-registered with 12% inside its
-// prices; below it charges no VAT. Each sale carries the registration and
-// rate it was issued under, so changing this touches no past sale.
 let storeSettings = null;
 
-// A TIN is nine digits and a branch code, 000-000-000-00000 (00000 for the
-// head office; an older three-digit branch code is widened with two zeros).
-// The box works like the phone box: digits only, dashes put in as typed.
-// The same rule is enforced again in validation.js.
 const TIN_BASE_DIGITS = 9;
 const TIN_BRANCH_DIGITS = 5;
 
 function tinDigits(value) {
-    // keeps the digits only (takes out everything that is not 0 to 9)
     return String(value === null || value === undefined ? '' : value)
         .replace(/\D/g, '')
         .slice(0, TIN_BASE_DIGITS + TIN_BRANCH_DIGITS);
@@ -2533,18 +2319,15 @@ function tinFormat(digits) {
     return used.join('-');
 }
 
-// oninput on the TIN box; rewrites rather than blocks so paste works
 function onTinInput(input) {
     if (!input) return;
 
     const shaped = tinFormat(tinDigits(input.value));
     if (shaped !== input.value) input.value = shaped;
 
-    // no verdict while empty: the form says so at submit
     input.classList.toggle('is-bad', shaped !== '' && tinComplaint(shaped) !== null);
 }
 
-// the sentence said about a bad TIN, or null; returned, not shown
 function tinComplaint(value) {
     const digits = tinDigits(value);
 
@@ -2559,7 +2342,6 @@ function tinComplaint(value) {
                'written 000-000-000-00000. That one has ' + digits.length + ' digits.';
     }
 
-    // the first nine digits are all zeros
     if (/^0+$/.test(digits.slice(0, TIN_BASE_DIGITS))) {
         return '000-000-000 is the placeholder, not a TIN. Enter the number on the ' +
                'shop\'s BIR certificate of registration.';
@@ -2568,7 +2350,6 @@ function tinComplaint(value) {
     return null;
 }
 
-// the stored form; a value that does not pass is handed back as it was
 function tinToStore(value) {
     const digits = tinDigits(value);
     if (tinComplaint(digits) !== null) return String(value || '').trim();
@@ -2578,13 +2359,11 @@ function tinToStore(value) {
     return tinFormat(base + branch);
 }
 
-// the receipt's switches, by the name of their checkbox (show_<name>)
 const RECEIPT_SWITCHES = ['proprietor', 'cashier', 'customer', 'payment', 'reference',
                           'item_count', 'tax', 'bank', 'note'];
-const RECEIPT_LINE_MAX = 10;        // lines in the header, and in the footer
-const RECEIPT_LINE_LENGTH = 80;     // characters in one line
+const RECEIPT_LINE_MAX = 10;
+const RECEIPT_LINE_LENGTH = 80;
 
-// Reset puts the saved details back, after asking if there is anything to lose.
 async function resetStoreForm() {
     if (storeFormDirty() &&
         !(await askDiscardChanges('Reset puts back the details as last saved. ' +
@@ -2616,11 +2395,9 @@ async function loadStoreSettingsForm() {
     form.elements.bankAccountName.value = storeSettings.bank_account_name || '';
     form.elements.bankAccountNumber.value = storeSettings.bank_account_number || '';
 
-    // a non-VAT shop stores a zero rate; a useless value to put back in the box
     const rate = Number(storeSettings.vat_rate) || 0;
     form.elements.vatRate.value = rate > 0 ? rate : 12;
 
-    // the layout, as the database holds it
     const layout = receiptLayoutOf(storeSettings);
     form.elements.paperWidth.value = String(layout.paperWidth);
     form.elements.fontSize.value = String(layout.fontSize);
@@ -2640,7 +2417,6 @@ async function loadStoreSettingsForm() {
     markFormClean(form, document.getElementById('store-save-btn'));
 }
 
-// ---------- the header and footer lines: added, moved (header only) and removed here ----------
 function receiptLineList(kind) {
     return document.getElementById('store-' + kind + '-lines');
 }
@@ -2648,7 +2424,6 @@ function receiptLineList(kind) {
 function readReceiptLines(kind) {
     const list = receiptLineList(kind);
     if (!list) return [];
-    // the text of every box, trimmed, leaving out the empty ones
     const inputs = list.querySelectorAll('input');
     const lines = [];
     for (let i = 0; i < inputs.length; i++) {
@@ -2667,9 +2442,6 @@ function renderReceiptLines(kind, lines) {
     for (let index = 0; index < values.length; index++) {
         const line = values[index];
 
-        // The header lines can be put in a different order. The footer lines
-        // have no arrows: the footer always prints at the bottom of the
-        // receipt, in the order the lines were added.
         let arrows = '';
         if (kind === 'header') {
             arrows =
@@ -2691,7 +2463,6 @@ function renderReceiptLines(kind, lines) {
     list.innerHTML = html;
 }
 
-// the lines as typed, empty ones kept, so a box just added stays on screen
 function typedReceiptLines(kind) {
     const list = receiptLineList(kind);
     const lines = [];
@@ -2740,7 +2511,6 @@ function removeReceiptLine(kind, index) {
     receiptLinesChanged(kind, lines);
 }
 
-// everything about the layout, as it is sent to the server
 function readReceiptLayout(form) {
     const show = {};
     for (let i = 0; i < RECEIPT_SWITCHES.length; i++) {
@@ -2752,7 +2522,6 @@ function readReceiptLayout(form) {
         paperWidth: Number(form.elements.paperWidth.value),
         fontSize: Number(form.elements.fontSize.value),
         title: form.elements.title.value.trim(),
-        // not a box on the form: the fixed wording the server sends, so the preview shows it
         paidLabel: receiptLayoutOf(storeSettings).paidLabel,
         headerLines: readReceiptLines('header'),
         footerLines: readReceiptLines('footer'),
@@ -2760,26 +2529,18 @@ function readReceiptLayout(form) {
     };
 }
 
-// the rate box only means anything to a VAT-registered shop
 function onRegistrationChange(value) {
     const field = document.getElementById('store-rate-field');
     if (field) field.style.display = value === 'VAT' ? 'block' : 'none';
     renderStorePreview();
 }
 
-// The bank account: all three boxes, or none (the boxes are hidden now, and an
-// empty set keeps whatever is stored). The same rule as the server's
-// (admin.js bankDetailsFrom).
 const BANK_FIELDS = ['bankName', 'bankAccountName', 'bankAccountNumber'];
 
-// Philippine bank accounts run from 10 digits (BPI, Landbank) to 13 (Metrobank)
-// and a few more; 10 to 16 covers them
 const BANK_DIGITS_MIN = 10;
 const BANK_DIGITS_MAX = 16;
 
-// what is wrong with an account number, or null when it is fine
 function bankNumberComplaint(number) {
-    // groups of digits with one space or one dash between them, e.g. "0012 3456 7890"
     const digitCount = number.replace(/\D/g, '').length;
     if (!/^[0-9]+([ -][0-9]+)*$/.test(number) ||
         digitCount < BANK_DIGITS_MIN || digitCount > BANK_DIGITS_MAX) {
@@ -2805,11 +2566,9 @@ function bankComplaint(form) {
     return bankNumberComplaint(values[2]);
 }
 
-// only digits, spaces and dashes get into the account number box; anything
-// else typed or pasted is taken out, with a line saying so
 function onBankNumberInput(input) {
     const typed = input.value;
-    const cleaned = typed.replace(/[^0-9 -]/g, '');   // keep digits, spaces and dashes
+    const cleaned = typed.replace(/[^0-9 -]/g, '');
     if (cleaned !== typed) {
         const cursor = Math.max(0, input.selectionStart - (typed.length - cleaned.length));
         input.value = cleaned;
@@ -2824,7 +2583,6 @@ function onBankNumberInput(input) {
     }
 }
 
-// marks the account number box as soon as what is in it is wrong
 function onBankInput() {
     const form = document.getElementById('store-form');
     const note = document.getElementById('store-bank-note');
@@ -2856,7 +2614,6 @@ async function handleSaveStoreSettings(event) {
         return;
     }
 
-    // every box marked * first, with the bank boxes marked as well
     const empty = firstEmptyRequired(form);
     if (empty) {
         const label = form.querySelector('label[for="' + empty.id + '"]');
@@ -2892,8 +2649,6 @@ async function handleSaveStoreSettings(event) {
         }
     }
 
-    // One card for the whole save: what changes, and what that does to invoices.
-    // Switching the registration changes what every future invoice claims.
     const registrationChanged = Boolean(storeSettings) && storeSettings.registration_type !== registration;
 
     let consequence = 'Invoices printed from now on use these details. Sales already rung up keep the ones they were issued with.';
@@ -2906,7 +2661,6 @@ async function handleSaveStoreSettings(event) {
             ' Sales already rung up keep the registration they were issued under.';
     }
 
-    // the rate is only part of a VAT shop; a shop becoming VAT lists the rate it starts on
     const becomesVat = registrationChanged && registration === 'VAT';
     const changes = formChangeLines(form, function (name) {
         return name === 'vatRate' && (registration !== 'VAT' || becomesVat);
@@ -2957,7 +2711,6 @@ async function handleSaveStoreSettings(event) {
 
         showStoreVerdict('');
 
-        // saved: nothing is left to lose, even if the re-read below cannot reach the server
         markFormClean(form, document.getElementById('store-save-btn'));
 
         notifySuccess(result.message, 'Receipt saved');
@@ -2967,7 +2720,6 @@ async function handleSaveStoreSettings(event) {
     }
 }
 
-// the settings as the form has them now, in the shape the till reads
 function storeFromForm(form) {
     return {
         store_name: form.elements.storeName.value.trim(),
@@ -2982,8 +2734,6 @@ function storeFromForm(form) {
     };
 }
 
-// A worked example: one sale of one thousand pesos, drawn by the same
-// builder as the till's invoice from what is in the boxes now.
 function renderStorePreview() {
     const box = document.getElementById('store-preview');
     const form = document.getElementById('store-form');
@@ -2994,7 +2744,6 @@ function renderStorePreview() {
     const rate = registration === 'VAT' ? (parseFloat(form.elements.vatRate.value) || 0) : 0;
     const total = 1000;
 
-    // the same arithmetic the database does: rate extracted from the total, VAT rounded first
     const vat = rate > 0 ? Math.round(total * rate / (100 + rate) * 100) / 100 : 0;
     const vatable = rate > 0 ? total - vat : 0;
 
@@ -3037,21 +2786,13 @@ function renderStorePreview() {
     });
 }
 
-// ---------- the preview follows the box being changed ----------
-// Each box is matched to the part of the receipt it draws. After a pause in
-// typing, the preview scrolls that part into view -- inside the preview, never
-// the page, so the box being typed in stays where it is -- and washes it with
-// a colour that fades (.rc-flash in system.css). A box whose part is not
-// drawn (a switch turned off, an empty line) shows the place it was.
-const PREVIEW_FOLLOW_DELAY = 200;     // quiet needed after a keystroke before the preview moves
-const PREVIEW_FLASH_MS = 1100;        // as long as the fade in system.css
+const PREVIEW_FOLLOW_DELAY = 200;
+const PREVIEW_FLASH_MS = 1100;
 
 let previewFollowTimer = null;
 let previewFlashTimer = null;
 
-// the receipt's parts for a box: { parts: [elements] }, or { whole: true }
 function previewPartsFor(box, form, name) {
-    // every element of the preview that matches the selector, as a list
     function all(selector) {
         const found = box.querySelectorAll(selector);
         const list = [];
@@ -3061,7 +2802,6 @@ function previewPartsFor(box, form, name) {
         return list;
     }
 
-    // the first of the lists that has something in it, or an empty list
     function firstFound() {
         for (let i = 0; i < arguments.length; i++) {
             if (arguments[i].length > 0) return arguments[i];
@@ -3069,11 +2809,9 @@ function previewPartsFor(box, form, name) {
         return [];
     }
 
-    // address (when there is one), TIN, then the shop's own lines, all one class
     const headLines = all('.rc-head .rc-addr');
     const lead = form.elements.address.value.trim() ? 1 : 0;
 
-    // a row of the meta grid is two cells: the label, then the value
     function metaRow(label) {
         const cells = all('.rc-meta > span');
         let at = -1;
@@ -3086,7 +2824,6 @@ function previewPartsFor(box, form, name) {
         return at < 0 ? [] : [cells[at], cells[at + 1]];
     }
 
-    // the nth line typed counts only the lines before it that are not empty
     function lineRank(kind, index) {
         const typed = typedReceiptLines(kind);
         if (index < 0 || !typed[index] || typed[index].trim() === '') return -1;
@@ -3098,7 +2835,6 @@ function previewPartsFor(box, form, name) {
     }
 
     const metaOf = { show_cashier: 'Cashier', show_customer: 'Customer', show_payment: 'Payment', show_reference: 'Reference' };
-    // a box name like headerLine_0 or footerLine_-1: the kind, then the position
     const line = /^(header|footer)Line_(-?\d+)$/.exec(name);
 
     if (line) {
@@ -3146,7 +2882,6 @@ function clearPreviewFlash() {
     }
 }
 
-// Scrolls the preview's own stage, not the page; nothing moves when the part is already in view.
 function scrollPreviewTo(element) {
     const stage = element.closest('.store-preview-stage');
     if (!stage || stage.scrollHeight <= stage.clientHeight + 1) return;
@@ -3173,7 +2908,7 @@ function followPreview(name) {
     if (parts.length === 0) return;
 
     clearPreviewFlash();
-    void box.offsetWidth;   // a reflow between the class going and coming back, so the fade starts again
+    void box.offsetWidth;
     if (!found.whole) scrollPreviewTo(parts[0]);
 
     for (let i = 0; i < parts.length; i++) {
@@ -3182,7 +2917,6 @@ function followPreview(name) {
     previewFlashTimer = setTimeout(clearPreviewFlash, PREVIEW_FLASH_MS);
 }
 
-// typing waits for a pause; a switch or a list is followed at once
 function queuePreviewFollow(name, atOnce) {
     clearTimeout(previewFollowTimer);
     previewFollowTimer = setTimeout(function () {
@@ -3195,16 +2929,15 @@ function followFormEvent(event) {
     if (!field || !field.name) return;
 
     const discrete = field.type === 'checkbox' || field.tagName === 'SELECT';
-    if (event.type === 'change' && !discrete) return;   // typing was followed as it happened
+    if (event.type === 'change' && !discrete) return;
     queuePreviewFollow(field.name, discrete);
 }
 
-// prints the preview alone, at the roll's width, to try the printer
 function printStorePreview() {
     const form = document.getElementById('store-form');
     if (!form) return;
     clearTimeout(previewFollowTimer);
-    clearPreviewFlash();   // the wash is for the screen
+    clearPreviewFlash();
     renderStorePreview();
     setReceiptPageSize(storeFromForm(form));
     document.body.classList.add('printing-receipt');
@@ -3217,9 +2950,6 @@ function syncTopbarHeight() {
     if (bar) document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
 }
 
-// ==========================================
-// SYSTEM PAGE BOOT
-// ==========================================
 if (window.location.pathname.toLowerCase().endsWith('system.html')) {
     document.addEventListener('DOMContentLoaded', async function () {
         buildUsersPanel();
@@ -3228,13 +2958,11 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
         buildLogsPanel();
         keepSavedLogRole();
 
-        // the audit trail put back after a reload: its Period box follows the dates it came back with
         document.addEventListener('datapanel:change', function (event) {
             if (!event.detail || event.detail.key === 'admin-logs') syncLogPeriodBox();
         });
         buildBackupPanel();
 
-        // a switch thrown by another administrator reaches this screen, unless this one has changes of its own
         if (typeof onLiveChange === 'function') {
             onLiveChange(['features'], function () {
                 const panel = document.getElementById('panel-features');
@@ -3247,11 +2975,9 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
         showAccountsList();
         unfoldSidebarAtOpenScreen();
 
-        // the receipt preview sticks below the top bar, whatever height that bar has
         syncTopbarHeight();
         window.addEventListener('resize', syncTopbarHeight);
 
-        // the preview redraws as the boxes are typed into
         const storeForm = document.getElementById('store-form');
         if (storeForm) {
             storeForm.addEventListener('input', function (event) {
@@ -3271,7 +2997,6 @@ if (window.location.pathname.toLowerCase().endsWith('system.html')) {
         watchFormEdits(document.getElementById('edit-user-form'),
                        document.getElementById('edit-user-save-btn'));
 
-        // the browser remembers dropdowns across a reload
         syncDirectoryColumns();
         syncLogColumns();
 

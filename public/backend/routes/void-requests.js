@@ -1,20 +1,3 @@
-// ============================================================
-// void-requests.js -- a cashier asks for a sale to be voided; a manager decides
-// Loaded by: server.js only (from the routes folder). Never sent to a browser.
-//
-// Routes in this file:
-//   POST /api/sales/:saleId/void-request       the cashier asks (a reason is required)
-//   GET  /api/void-requests                     the requests still waiting (the manager)
-//   POST /api/void-requests/:requestId/approve  the manager voids the sale
-//   POST /api/void-requests/:requestId/decline  the manager says no, with a note
-//
-// Only a sale of the same day can be voided, and only the cashier who rang it
-// up can ask. One request waits per sale at a time. Approving voids the sale
-// through sp_archive_record, the same as before (the goods go back on the
-// shelf, and a sale out for delivery is refused there). The manager is told of
-// a new request, and the cashiers of the decision, through notifications.
-// ============================================================
-
 const sharedProcedures = require("../database/procedures/shared-procedures");
 
 const MOST_REASON = 255;
@@ -35,7 +18,6 @@ function registerVoidRequestRoutes(app, deps) {
     publishChange("notifications", what, origin);
   }
 
-  // ---------- the cashier asks ----------
   app.post("/api/sales/:saleId/void-request", async function (request, response) {
     const saleId = Number(request.params.saleId);
     if (!Number.isInteger(saleId) || saleId <= 0) {
@@ -79,7 +61,6 @@ function registerVoidRequestRoutes(app, deps) {
       );
       const requestId = inserted[0].insertId;
 
-      // the managers are told
       await db.query(
         "INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)\n" +
           "SELECT role_id, 'Void Request', ?, ?, ? FROM roles WHERE role_name = 'Manager'",
@@ -102,7 +83,6 @@ function registerVoidRequestRoutes(app, deps) {
     }
   });
 
-  // ---------- the requests still waiting ----------
   app.get("/api/void-requests", async function (request, response) {
     try {
       const rowsResult = await db.query(
@@ -121,7 +101,6 @@ function registerVoidRequestRoutes(app, deps) {
     }
   });
 
-  // the request, still waiting, or an answer to send back
   async function waitingRequest(requestId) {
     const rowsResult = await db.query(
       "SELECT vr.*, st.full_name AS requested_by FROM void_requests vr\n" +
@@ -142,7 +121,6 @@ function registerVoidRequestRoutes(app, deps) {
     );
   }
 
-  // ---------- the manager approves: the sale is voided ----------
   app.post("/api/void-requests/:requestId/approve", async function (request, response) {
     const requestId = Number(request.params.requestId);
     const note = typeof request.body.note === "string" ? request.body.note.trim().slice(0, 255) : "";
@@ -151,7 +129,6 @@ function registerVoidRequestRoutes(app, deps) {
       if (found.error) return response.status(found.status).json({ error: found.error });
       const row = found.row;
 
-      // taken first, so two managers cannot both act on it
       const taken = await db.query(
         "UPDATE void_requests SET status = 'Approved', decided_by_staff_id = ?, decided_at = NOW(),\n" +
           "       decision_note = ? WHERE request_id = ? AND status = 'Pending'",
@@ -161,7 +138,6 @@ function registerVoidRequestRoutes(app, deps) {
         return response.status(409).json({ error: "Another manager has just decided this request." });
       }
 
-      // the void itself, with its own rules (same day, not out for delivery)
       let output;
       try {
         output = await sharedProcedures.archiveRecord(["Sales", row.sale_id, getActorId(request)]);
@@ -170,7 +146,6 @@ function registerVoidRequestRoutes(app, deps) {
         console.error("Void sale failed:", error.message);
       }
       if (output.status_code !== 200) {
-        // the sale stays as it was, so the request waits again
         await db.query(
           "UPDATE void_requests SET status = 'Pending', decided_by_staff_id = NULL, decided_at = NULL,\n" +
             "       decision_note = NULL WHERE request_id = ?", [requestId]);
@@ -190,7 +165,6 @@ function registerVoidRequestRoutes(app, deps) {
     }
   });
 
-  // ---------- the manager declines ----------
   app.post("/api/void-requests/:requestId/decline", async function (request, response) {
     const requestId = Number(request.params.requestId);
     const note = typeof request.body.note === "string" ? request.body.note.trim() : "";

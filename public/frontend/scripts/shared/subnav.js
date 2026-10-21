@@ -1,13 +1,3 @@
-// subnav.js -- the submodule tab strip
-// Loaded by: all five dashboards
-//
-// The left menu holds modules; the strip holds the screens inside the open
-// module. Tabs are read from the menu itself (.sidebar-nav > li > .nav-sub),
-// so a screen a role cannot reach never gets a tab. A module marked
-//   <li data-access="Manager,Inventory Clerk">  is dropped for other roles
-//   <li data-sidebar-dropdown>                  stays a dropdown, no strip
-// If this file does not run the menu keeps its sub-lists and still works.
-
 let subnavModules = [];
 let subnavBuilt = false;
 
@@ -15,7 +5,6 @@ function subnavRoot() {
     return document.getElementById('subnav');
 }
 
-// ---------- reading the menu ----------
 function readSubnavModules() {
     const nav = document.querySelector('.sidebar-nav');
     if (!nav) return [];
@@ -28,8 +17,6 @@ function readSubnavModules() {
         }
     }
 
-    // May this role see the element? data-access="Manager,Cashier" lists the
-    // roles that may; an element without data-access is for everyone.
     function allowed(element) {
         const list = element.getAttribute('data-access');
         if (!list) return true;
@@ -59,7 +46,6 @@ function readSubnavModules() {
         const parent = item.querySelector(':scope > a');
         if (!parent) continue;
 
-        // the screens under this heading that this role may see
         const sub = item.querySelector(':scope > .nav-sub');
         const screens = [];
         if (sub) {
@@ -70,7 +56,6 @@ function readSubnavModules() {
                     screens.push({
                         link: link,
                         panelId: link.getAttribute('data-panel-link'),
-                        // one panel can hold several views (the four reports); see data-view
                         view: link.getAttribute('data-panel-view'),
                         name: subnavLabel(link)
                     });
@@ -81,7 +66,6 @@ function readSubnavModules() {
         modules.push({
             item: item,
             link: parent,
-            // a module with a sub-list is named by its parent link
             name: subnavLabel(parent),
             screens: screens,
             panelId: parent.getAttribute('data-panel-link') || null
@@ -91,18 +75,15 @@ function readSubnavModules() {
     return modules;
 }
 
-// The link's own words, without the caret.
 function subnavLabel(link) {
     const copy = link.cloneNode(true);
     const carets = copy.querySelectorAll('.nav-caret');
     for (let i = 0; i < carets.length; i++) {
         carets[i].remove();
     }
-    // runs of spaces and line breaks become one space
     return copy.textContent.replace(/\s+/g, ' ').trim();
 }
 
-// ---------- building the strip ----------
 function buildSubnav() {
     if (subnavBuilt) return;
 
@@ -122,8 +103,6 @@ function buildSubnav() {
     subnavBuilt = true;
     document.body.classList.add('has-subnav');
 
-    // A module heading opens its current (or first) screen; a heading that
-    // kept its list (data-sidebar-dropdown) keeps its own click.
     document.addEventListener('click', function (event) {
         const parent = event.target.closest('.sidebar-nav .nav-parent');
         if (parent && document.body.classList.contains('has-subnav')) {
@@ -137,7 +116,6 @@ function buildSubnav() {
             const screens = module ? offeredScreens(module) : [];
             if (module && screens.length > 0) {
                 event.preventDefault();
-                // the screen that is open now, or the first one
                 let current = null;
                 for (let i = 0; i < screens.length; i++) {
                     if (screens[i].link.classList.contains('active')) {
@@ -155,8 +133,6 @@ function buildSubnav() {
         }
     });
 
-    // Screens can also be opened by script (a finished purchase order opens its
-    // print copy), so the panels themselves are watched.
     if (typeof MutationObserver === 'function') {
         const panels = document.querySelectorAll('[data-panel]');
         if (panels.length > 0) {
@@ -176,8 +152,6 @@ function buildSubnav() {
     syncSubnav();
 }
 
-// features.js may hide screens in the menu after the strip has read it, so
-// the strip reads the menu as it stands now.
 function offeredScreens(module) {
     const offered = [];
     for (let i = 0; i < module.screens.length; i++) {
@@ -188,7 +162,6 @@ function offeredScreens(module) {
     return offered;
 }
 
-// The module (menu heading) whose screens include this panel, or null.
 function findSubnavModule(panelId) {
     for (let i = 0; i < subnavModules.length; i++) {
         const screens = subnavModules[i].screens;
@@ -199,9 +172,6 @@ function findSubnavModule(panelId) {
     return null;
 }
 
-// ---------- which screen is open ----------
-// A screen opened from inside another (a printed order) has no tab; it says
-// which screen it belongs to with data-panel-of.
 function visiblePanel() {
     const panels = document.querySelectorAll('[data-panel]');
     for (let i = 0; i < panels.length; i++) {
@@ -233,7 +203,6 @@ function syncSubnav() {
 
     const module = findSubnavModule(open);
 
-    // the module heading takes the current mark; the strip says which screen
     for (let i = 0; i < subnavModules.length; i++) {
         const entry = subnavModules[i];
         if (entry.screens.length > 0) {
@@ -274,14 +243,12 @@ function renderSubnav(module, openPanelId) {
     strip.dataset.module = module.name;
     placeSubnav(strip);
 
-    // on a phone the strip scrolls; keep the current tab in view
     const current = strip.querySelector('.subnav-tab.is-current');
     if (current && typeof current.scrollIntoView === 'function') {
         current.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     }
 }
 
-// One element, moved into the card of the open screen under its heading.
 function placeSubnav(strip) {
     const panel = visiblePanel();
     if (!panel) return;
@@ -307,7 +274,6 @@ function openSubnavScreen(index) {
     window.setTimeout(syncSubnav, 0);
 }
 
-// built after the session check, so a page bouncing to sign-in never builds one
 document.addEventListener('DOMContentLoaded', function () {
     window.setTimeout(buildSubnav, 0);
 });

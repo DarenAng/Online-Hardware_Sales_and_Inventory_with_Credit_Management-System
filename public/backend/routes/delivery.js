@@ -1,19 +1,3 @@
-// ============================================================
-// delivery.js -- Delivery module (delivery personnel)
-// Loaded by: server.js only (from the routes folder). Never sent to a browser.
-//
-// Routes in this file:
-//   GET  /api/deliveries                 every delivery (read by several roles)
-//   GET  /api/deliveries/:id/items       what is being delivered
-//   GET  /api/delivery/list              the driver's own deliveries
-//   POST /api/delivery/:id/claim         a driver takes an unclaimed delivery
-//   POST /api/delivery/:id/payment       money collected at the customer's door (any method)
-//   GET  /api/delivery/summary           the driver's report for a date range
-//
-// server.js passes in the database and its helpers ("deps"). The access
-// rules in access-control.js have already checked the user's role.
-// ============================================================
-
 const deliveryProcedures = require("../database/procedures/delivery-procedures");
 const cleanPaymentDetails = require("../payment-details").cleanPaymentDetails;
 
@@ -26,9 +10,6 @@ function registerDeliveryRoutes(app, deps) {
   const DELIVERY_PHONE_SQL = deps.DELIVERY_PHONE_SQL;
   const qrPayments = deps.qrPayments;
 
-  // Delivered and finished are different: a delivered order with money owed
-  // sits at Pending Payment until the balance is cleared. Derived from
-  // the sale's own figures, so there is no second flag to forget.
   const FULFILMENT_SQL =
     "\n  CASE" +
     "\n    WHEN d.status <> 'Delivered' THEN d.status" +
@@ -49,7 +30,6 @@ function registerDeliveryRoutes(app, deps) {
 
     try {
       const result = await db.query(
-        // delivery_staff_id: a driver's card offers status buttons only on their own delivery
         "SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks, d.cashier_remarks, " +
         "d.address_street, d.address_barangay, d.address_city, d.address_province, d.address_landmark, " +
         "d.scheduled_date, d.created_date, d.delivered_at, d.updated_at, d.delivery_staff_id, " +
@@ -76,11 +56,6 @@ function registerDeliveryRoutes(app, deps) {
     }
   });
 
-  // what is on the lorry: the sale's lines, for the delivery popup on every
-  // screen. Read the way the receipt reads them, so 2 sacks shows as 2 sacks.
-  // The driver's refund form also needs the product, the sale and how much
-  // of the line has already been taken back (refunded_quantity, in the
-  // shelf's own unit like base_quantity).
   app.get("/api/deliveries/:deliveryId/items", async function (request, response) {
     try {
       const result = await db.query(
@@ -110,13 +85,7 @@ function registerDeliveryRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // DELIVERY PERSONNEL MODULE
-  // ==========================================
-
-  // deliveries assigned to this driver, plus any nobody claimed yet
   app.get("/api/delivery/list", async function (request, response) {
-    // from the session, so one driver cannot pull up another's round
     const staffId = request.actor.staffId;
 
     try {
@@ -147,8 +116,6 @@ function registerDeliveryRoutes(app, deps) {
     }
   });
 
-  // A driver takes an unclaimed delivery; the UPDATE only matches while nobody
-  // else has it, so two drivers clicking at once cannot both win.
   app.post("/api/delivery/:deliveryId/claim", async function (request, response) {
     const staffId = request.actor.staffId;
     const deliveryId = Number(request.params.deliveryId);
@@ -182,19 +149,9 @@ function registerDeliveryRoutes(app, deps) {
     }
   });
 
-  // Money collected at the customer's door, cash or not. The payment goes on the
-  // sale itself (sp_record_credit_payment), so the cashier's lists, the receipt
-  // and the manager's reports all read it from there. Then the cashier and the
-  // manager are told, and every screen watching sales, credit and deliveries
-  // reads again.
-  // A cheque is collected with the same details the counter takes (account name and
-  // number, bank, date). GCash, PayMaya and a bank transfer are paid by a QR code the
-  // driver shows (routes/qr-payments.js), checked again here before the money is
-  // recorded, as at the counter; a bank transfer is taken no other way.
   const PAYMENT_METHODS = ["Cash", "GCash", "PayMaya", "Cheque", "Bank Transfer"];
   const QR_METHODS = ["GCash", "PayMaya", "Bank Transfer"];
 
-  // "\u20B1" is the peso sign, written as an escape to keep this file plain ASCII
   function pesoText(value) {
     return "\u20B1" + Number(value || 0).toLocaleString("en-PH",
       { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -210,7 +167,6 @@ function registerDeliveryRoutes(app, deps) {
     if (!request.body.amount || !paymentMethod) {
       return response.status(400).json({ error: "Amount and payment method are required" });
     }
-    // rounded to the centavo; it has to be more than nothing
     const amount = Math.round(Number(request.body.amount) * 100) / 100;
     if (!(amount > 0)) {
       return response.status(400).json({ error: "The amount received has to be more than zero." });
@@ -229,8 +185,6 @@ function registerDeliveryRoutes(app, deps) {
       return response.status(400).json({ error: "A reference is at most 60 characters." });
     }
 
-    // the account, bank and date of a cheque (a bank transfer's are on its QR payment,
-    // and are copied from there when the money is recorded)
     let payDetails = null;
     if (paymentMethod === "Cheque") {
       const cleaned = cleanPaymentDetails(paymentMethod, request.body.paymentDetails);
@@ -253,17 +207,12 @@ function registerDeliveryRoutes(app, deps) {
       if (rows.length === 0) {
         return response.status(404).json({ error: "Delivery not found" });
       }
-      // money is taken only on a delivery this driver took
       if (Number(rows[0].delivery_staff_id) !== Number(request.actor.staffId)) {
         return response.status(403).json({ error: "Take this delivery before collecting on it." });
       }
-      // Whatever the sale still owes (a Credit sale with nothing or part paid at
-      // the counter, an old COD sale) can be collected at the door; the procedure
-      // below refuses more than is owed, and a sale already paid in full.
 
       const saleId = rows[0].sale_id;
 
-      // a QR payment is checked with the provider again here and used once
       if (qrPaymentId) {
         try {
           qr = await qrPayments.verifyForMoney(qrPaymentId, amount, paymentMethod, getActorId(request),
@@ -275,13 +224,11 @@ function registerDeliveryRoutes(app, deps) {
         referenceNo = qr.reference || "";
       }
 
-      // the procedure refuses more than the sale still owes, and a sale already paid
       const output = await deliveryProcedures.recordCreditPayment(
         [saleId, amount, paymentMethod, referenceNo || null, getActorId(request), qr ? qr.id : null, payDetails]
       );
 
       if (output.status_code !== 200) {
-        // the customer paid and nothing was recorded: said on the row first
         let code;
         if (qr) code = await qrPayments.recordUnsaved(qr.id, getActorId(request));
         return response.status(output.status_code).json({ error: output.message, code: code || undefined });
@@ -289,13 +236,9 @@ function registerDeliveryRoutes(app, deps) {
       recorded = true;
       if (qr) qrPayments.announceUsed(qr.id);
 
-      // From here the money is recorded. Whatever goes wrong below (reading the
-      // sale again, writing the alerts) is only logged: the driver is told the
-      // payment was recorded, so it is never taken a second time.
       const deliveryId = Number(request.params.deliveryId);
       let sale = null;
       try {
-        // what the sale owes now, for the answer and for the notification
         const saleResult = await db.query(
           "SELECT s.payment_status, s.amount_paid, GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
           "(SELECT full_name FROM staff WHERE staff_id = ?) AS driver_name " +
@@ -320,7 +263,6 @@ function registerDeliveryRoutes(app, deps) {
           message += " The sale is now paid in full.";
         }
 
-        // the cashier and the manager are told, like the other alerts
         await db.query(
           "INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id) " +
           "SELECT role_id, 'Delivery', ?, ?, ? FROM roles WHERE role_name IN ('Cashier', 'Manager')",
@@ -330,8 +272,6 @@ function registerDeliveryRoutes(app, deps) {
         console.error("The delivery payment was recorded, but telling the cashier failed:", error.message);
       }
 
-      // The deliveries scope goes out by itself on this address (scopeOf in
-      // live-changes.js). The sale's figures, the credit lists and the bell moved too.
       const origin = request.headers["x-client-id"] || null;
       publishChange("sales", "delivery payment " + deliveryId, origin);
       publishChange("credit", "delivery payment " + deliveryId, origin);
@@ -354,9 +294,8 @@ function registerDeliveryRoutes(app, deps) {
   });
 
   app.get("/api/delivery/summary", async function (request, response) {
-    const staffId = request.actor.staffId;   // this driver's own round, never another's
+    const staffId = request.actor.staffId;
 
-    // a missing or unreadable date means "no limit" on that side
     let from = "2000-01-01";
     let to = "2100-12-31";
     if (isDateText(request.query.from)) {
@@ -399,7 +338,6 @@ function registerDeliveryRoutes(app, deps) {
       );
       const payments = paymentsResult[0];
 
-      // money owed is counted only against the driver actually carrying the order
       const openResult = await db.query(
         "SELECT COUNT(*) AS cod_count, " +
         "COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS cod_due " +

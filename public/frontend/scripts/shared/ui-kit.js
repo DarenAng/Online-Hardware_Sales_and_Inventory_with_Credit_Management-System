@@ -1,8 +1,3 @@
-// ui-kit.js -- cards, dialogs and prompts that replace alert/confirm/prompt
-// Loaded by: every page
-// Bootstrap supplies the toast base; if it has not loaded the cards still
-// appear and close themselves.
-
 const TOAST_LOOK = {
     success: { mark: '✓', title: 'Done' },
     danger:  { mark: '!', title: 'That did not work' },
@@ -10,11 +5,8 @@ const TOAST_LOOK = {
     info:    { mark: '●', title: 'Notice' }
 };
 
-// How long a popup card stays on screen: 5 seconds for every kind.
-// A card that must not leave on its own is passed stay: true.
 const TOAST_LIFE = 5000;
 
-// shared furniture built once rather than repeated in five HTML files
 function ensureUiFurniture() {
     if (!document.body || document.getElementById('toast-deck')) return;
 
@@ -56,7 +48,6 @@ function ensureUiFurniture() {
         '        </div>';
     document.body.appendChild(ask);
 
-    // the wait between a confirm and its result; no buttons, cannot be closed
     const work = document.createElement('div');
     work.className = 'modal';
     work.id = 'work-modal';
@@ -90,7 +81,6 @@ function ensureUiFurniture() {
     buildAccountModal();
 }
 
-// ---------- popup notification cards ----------
 function showCard(options) {
     ensureUiFurniture();
 
@@ -169,10 +159,6 @@ function showCard(options) {
     return card;
 }
 
-// Quantities come from the database with three decimals ("3.000 set"): a whole
-// number reads without them (3) and a fraction without its trailing zeros
-// (2.5). Only three-decimal figures are touched, so a peso amount (12,500.00)
-// keeps its centavos.
 function tidyQuantities(text) {
     return String(text).replace(/(\d)\.(\d{3})(?![\d.])/g, function (match, lead, decimals) {
         const kept = decimals.replace(/0+$/, '');
@@ -189,8 +175,6 @@ function clearCards() {
     }
 }
 
-// the fourth argument overrides the life for callers whose reader is looking away
-// Object.assign copies every field of "options" onto the card settings
 function notifySuccess(message, title, options) {
     return showCard(Object.assign({ tone: 'success', title: title, message: message }, options));
 }
@@ -209,7 +193,6 @@ function notifyOffline() {
         'Cannot reach the server');
 }
 
-// ---------- confirm and prompt, as cards ----------
 let askResolve = null;
 let askOptions = {};
 
@@ -220,7 +203,6 @@ function openAsk(options) {
     document.getElementById('ask-title').textContent = options.title || 'Please confirm';
     document.getElementById('ask-eyebrow').textContent = options.eyebrow || 'Confirmation';
     document.getElementById('ask-mark').textContent = options.mark || '?';
-    // messageHtml is markup the caller built with escapeHtml (the Access Control read-back)
     document.getElementById('ask-text').innerHTML = options.messageHtml || escapeHtml(options.message || '');
     document.getElementById('ask-cancel').textContent = options.cancelLabel || 'Cancel';
 
@@ -228,8 +210,6 @@ function openAsk(options) {
     okButton.textContent = options.confirmLabel || 'Confirm';
     okButton.className = 'btn ' + (options.tone === 'danger' ? 'btn-danger' : 'btn-accent');
 
-    // One consequence per line. A line written "Label: value" is set as two
-    // columns in the figure face (for checking an email, phone or password).
     const detail = document.getElementById('ask-detail');
     if (Array.isArray(options.detail) && options.detail.length > 0) {
         let detailHtml = '';
@@ -253,7 +233,6 @@ function openAsk(options) {
         detail.style.display = 'none';
     }
 
-    // crimson only on a card that destroys something; grey otherwise
     detail.classList.toggle('is-plain', options.tone !== 'danger');
 
     const field = document.getElementById('ask-field');
@@ -312,24 +291,11 @@ function submitAsk() {
     closeAsk(value);
 }
 
-// ---------- the wait between a confirm and its result ----------
-// Shown while the server does something long enough to notice: creating an
-// account and mailing its password can take twenty seconds, and a screen that
-// shows nothing in that time reads as a click that did not take. The card has
-// no buttons and does not close on Escape: nothing the reader could do here
-// is safe to do twice.
-//
-// The server does the work in one request, so the card cannot know which
-// part it is on; it walks its steps on a clock instead, one every STEP_MS,
-// and holds the last until the answer comes. On success finishWorking ticks
-// every step, turns the head green and leaves after a beat; on failure
-// hideWorking leaves at once and the error card says why. The card is never
-// up for less than WORK_MIN_MS, so a quick server does not make it flash.
 const WORK_STEP_MS = 1100;
 const WORK_MIN_MS = 900;
 const WORK_DONE_MS = 700;
 
-let workState = null;     // { openedAt, timer, steps }
+let workState = null;
 
 function renderWorkSteps(current, done) {
     const list = document.getElementById('work-steps');
@@ -384,7 +350,6 @@ function pause(ms) {
     });
 }
 
-// the answer arrived and it was good: every step ticks, then the card leaves
 async function finishWorking(title) {
     if (!workState) return;
     const state = workState;
@@ -401,7 +366,6 @@ async function finishWorking(title) {
     hideWorking();
 }
 
-// the answer was bad, or never came: the card leaves and the error card speaks
 function hideWorking() {
     if (workState && workState.timer) clearInterval(workState.timer);
     workState = null;
@@ -423,8 +387,6 @@ function askConfirm(message, options) {
     });
 }
 
-// For actions that cannot be taken back: the tone, the mark and the wording of
-// the buttons are decided here so the dangerous dialog looks different.
 function askDanger(message, options) {
     const settings = options || {};
 
@@ -444,9 +406,6 @@ function askInput(options) {
     return openAsk(Object.assign({ ask: true, mark: '✎', eyebrow: 'Input needed' }, options));
 }
 
-// A safeguard before anything is archived: the card names what goes and what
-// it means, and the word ARCHIVE has to be typed before it goes. Answers true
-// only when it was typed and confirmed.
 async function askArchive(what, options) {
     const settings = options || {};
     const typed = await openAsk({

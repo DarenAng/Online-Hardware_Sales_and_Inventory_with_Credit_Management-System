@@ -1,4 +1,3 @@
-# never uploaded to Vercel by "vercel deploy" (a git deploy only sees committed files)
 .env
 .env.*
 !.env.example

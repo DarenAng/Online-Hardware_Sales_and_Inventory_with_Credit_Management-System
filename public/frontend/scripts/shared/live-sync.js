@@ -1,30 +1,17 @@
-// live-sync.js -- every browser asks the server every few seconds what changed
-// (apiOpenLiveUpdates in shared-connection.js); a change event names a
-// scope ("inventory moved"), and any panel reading that scope re-reads through
-// its normal route. Tables are never redrawn while somebody is reading them.
-// Loaded by: all five dashboards
-
-// A random id for this browser tab, made again on every load:
-// two tabs on one machine are two screens.
 function makeClientId() {
     try {
         if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
     } catch (error) {
-        // an old browser: use the simple way below
     }
     return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
 const CLIENT_ID = makeClientId();
 
-// Which panels refresh on which scope. A panel can override with its own
-// scopes option. The audit trail is absent on purpose: it only ever grows.
 const PANEL_SCOPES = {
-    // system administrator
     'admin-users':        ['staff'],
     'admin-archive':      ['staff'],
     'admin-backups':      ['system'],
 
-    // manager
     'mgr-sales':          ['sales', 'deliveries'],
     'mgr-reorder':        ['inventory', 'sales', 'returns'],
     'mgr-stocks':         ['inventory', 'sales', 'returns'],
@@ -41,7 +28,6 @@ const PANEL_SCOPES = {
     'mgr-income-products': ['sales'],
     'mgr-staff':          ['staff'],
 
-    // inventory clerk
     'clerk-materials':    ['inventory', 'sales', 'returns'],
     'clerk-reorder':      ['inventory', 'sales', 'returns'],
     'clerk-adjustments':  ['inventory'],
@@ -49,14 +35,12 @@ const PANEL_SCOPES = {
     'clerk-returns':      ['returns'],
     'clerk-archive':      ['inventory'],
 
-    // cashier
     'cash-credit':        ['credit', 'sales'],
     'cash-deliveries':    ['deliveries', 'sales'],
     'cash-sales':         ['sales', 'deliveries'],
     'cash-recent-sales':  ['sales', 'returns'],
     'cash-summary':       ['sales', 'returns'],
 
-    // delivery personnel
     'driver-pending':     ['deliveries', 'sales'],
     'driver-report':      ['deliveries', 'sales'],
     'driver-report-pay':  ['sales', 'deliveries']
@@ -66,9 +50,6 @@ let liveSource = null;
 let liveVersion = 0;
 let liveConnected = false;
 
-// ==========================================
-// THE CONNECTION
-// ==========================================
 function startLiveSync() {
     if (liveSource) return;
 
@@ -82,7 +63,7 @@ function startLiveSync() {
 
 function openLiveStream() {
     if (liveSource) {
-        try { liveSource.close(); } catch (error) { /* already closed */ }
+        try { liveSource.close(); } catch (error) {  }
     }
 
     liveSource = apiOpenLiveUpdates();
@@ -113,13 +94,11 @@ function openLiveStream() {
 
         liveVersion = Math.max(liveVersion, data.version || 0);
 
-        // our own writes have already been handled by the screen that made them
         if (data.origin && data.origin === CLIENT_ID) return;
 
         noticeChange(data.scope, data);
     });
 
-    // server lost track of how far behind this browser is (long disconnection)
     liveSource.addEventListener('resync', function () {
         notifyWarning('This screen was disconnected long enough to fall behind. ' +
             'Reload the page to be sure of what you are looking at.',
@@ -127,12 +106,10 @@ function openLiveStream() {
         setLiveIndicator('stale', 'Behind');
     });
 
-    // One person holds one session; signed in elsewhere means this one ends.
-    // Close by hand first or EventSource keeps reconnecting and being refused.
     liveSource.addEventListener('evicted', function (event) {
         const data = readLiveEvent(event) || {};
 
-        try { liveSource.close(); } catch (error) { /* already closed */ }
+        try { liveSource.close(); } catch (error) {  }
         liveSource = null;
         liveConnected = false;
 
@@ -156,12 +133,10 @@ function readLiveEvent(event) {
     }
 }
 
-// Widgets that are not tables (KPI tiles) subscribe to scopes here.
 const liveListeners = [];
 
 function onLiveChange(scopes, handler) {
     if (typeof handler !== 'function') return;
-    // accept one scope ('sales') or a list of scopes (['sales', 'credit'])
     let list = [];
     if (Array.isArray(scopes)) {
         list = scopes;
@@ -195,14 +170,12 @@ function noticeChange(scope, change) {
 
     let touched = 0;
 
-    // dataPanels (data-panel.js) holds every table on this page, by key
     for (const key in dataPanels) {
         const panel = dataPanels[key];
 
         const scopes = panel.config.scopes || PANEL_SCOPES[panel.key] || [];
         if (scopes.indexOf(scope) === -1) continue;
 
-        // a table still reading may have asked before this change was made: read it once more when it lands
         if (panel.state === 'loading') {
             panel.reloadWanted = true;
             continue;
@@ -221,7 +194,6 @@ function noticeChange(scope, change) {
     }
 }
 
-// Rows moving under a pointer lose the row about to be clicked.
 function safeToRefresh(panel) {
     if (document.querySelector('.modal.open, .drawer.open')) return false;
 
@@ -245,7 +217,6 @@ async function refreshQuietly(panel) {
     flashPanel(panel, 'Updated just now');
 }
 
-// A quiet mark beside the count, not a popup card.
 function flashPanel(panel, text) {
     if (!panel.config.countPillId) return;
 
@@ -278,9 +249,6 @@ function markPanelStale(panel, scope) {
     watchStalePanels();
 }
 
-// A table marked stale (a popup was open, or the cashier was typing in its
-// filters) reads itself again as soon as that is over, so nobody has to press
-// Refresh. Checked once a second while any table waits.
 let staleWatch = null;
 
 function watchStalePanels() {
@@ -303,12 +271,10 @@ async function refreshStalePanel(key) {
     const panel = getDataPanel(key);
     if (!panel) return;
 
-    await panel.refresh();      // redrawing the pager takes the note with it
+    await panel.refresh();
     flashPanel(panel, 'Updated just now');
 }
 
-// The connection indicator dot was removed; the state is still tracked (it
-// drives the stale footer and the reload card) and these stay as no-ops.
 function buildLiveIndicator() {}
 
 let liveState = 'connecting';

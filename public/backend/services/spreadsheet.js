@@ -1,22 +1,9 @@
-// ============================================================
-// spreadsheet.js -- reports as Excel workbooks (.xlsx)
-// Loaded by: routes/manager.js
-//
-// Every report a manager takes off a screen is written here: one worksheet
-// per table, a title and a line saying what it covers, a dark header row that
-// stays put while scrolling, and each column as wide as what it holds, so the
-// file opens readable rather than squeezed into Excel's default widths.
-// Money is stored as a number with two decimals, so it adds up in Excel.
-// ============================================================
 const ExcelJS = require("exceljs");
 
-const MIN_WIDTH = 8;       // characters
-const MAX_WIDTH = 60;      // a long detail wraps instead of running off the screen
+const MIN_WIDTH = 8;
+const MAX_WIDTH = 60;
 
-// "Receivables / March" -> "Receivables - March": Excel refuses : \ / ? * [ ] in a sheet name
-// "used" is the list of sheet names (in lower case) already taken in this workbook
 function sheetName(text, used) {
-  // the characters Excel refuses in a sheet name ( : \ / ? * [ ] ) become a "-"
   let name = String(text || "Sheet").replace(/[:\\/?*[\]]/g, "-").trim().slice(0, 31) || "Sheet";
   let candidate = name;
   let counter = 2;
@@ -29,14 +16,12 @@ function sheetName(text, used) {
   return candidate;
 }
 
-// a cell as Excel should hold it: a number when it is one, otherwise the text
 function cellValue(value) {
   if (value === null || value === undefined) return "";
   if (typeof value === "number") return Number.isFinite(value) ? value : "";
   return String(value);
 }
 
-// sheets: [{ name, title?, subtitle?, headers: [..], rows: [[..], ..], money?: [column indexes] }]
 async function buildWorkbook(sheets) {
   const workbook = new ExcelJS.Workbook();
   workbook.created = new Date();
@@ -54,12 +39,10 @@ async function buildWorkbook(sheets) {
     if (Array.isArray(sheet.rows)) {
       rows = sheet.rows;
     }
-    // the column numbers (counting from 0) that hold money
     let money = [];
     if (Array.isArray(sheet.money)) {
       money = sheet.money;
     }
-    // the most columns on any row, or in the header
     let columnCount = Math.max(headers.length, 1);
     for (let i = 0; i < rows.length; i++) {
       if (Array.isArray(rows[i]) && rows[i].length > columnCount) {
@@ -69,7 +52,6 @@ async function buildWorkbook(sheets) {
 
     const ws = workbook.addWorksheet(sheetName(sheet.name, used));
 
-    // the title, and what the table covers
     let headerRow = 1;
     if (sheet.title) {
       ws.getCell(1, 1).value = String(sheet.title);
@@ -80,7 +62,7 @@ async function buildWorkbook(sheets) {
         ws.getCell(2, 1).font = { italic: true, size: 10, color: { argb: "FF4D5661" } };
         headerRow = 3;
       }
-      headerRow += 1;   // a blank line before the table
+      headerRow += 1;
     }
 
     if (headers.length > 0) {
@@ -96,7 +78,6 @@ async function buildWorkbook(sheets) {
       ws.autoFilter = { from: { row: headerRow, column: 1 }, to: { row: headerRow, column: headers.length } };
     }
 
-    // the widest thing in each column decides its width
     const widths = new Array(columnCount).fill(MIN_WIDTH);
     for (let index = 0; index < headers.length; index++) {
       widths[index] = Math.max(widths[index], headers[index].length + 2);
@@ -130,7 +111,6 @@ async function buildWorkbook(sheets) {
   return workbook;
 }
 
-// sends the workbook as a download
 async function sendWorkbook(response, fileName, sheets) {
   const workbook = await buildWorkbook(sheets);
   const safe = String(fileName || "report").replace(/[^\w.-]+/g, "-").replace(/^-|-$/g, "") || "report";

@@ -1,5 +1,3 @@
-// modals.js -- modals
-// Loaded by: all five dashboards
 function showModal(id) {
     const modal = document.getElementById(id);
     if (modal) modal.classList.add('open');
@@ -10,23 +8,15 @@ function closeModal(id) {
     if (modal) modal.classList.remove('open');
 }
 
-// A click on the backdrop does nothing: a misjudged click must not discard a
-// form. Kept because seventeen modals name it from their markup.
 function closeModalOnBackdrop(event, id) {
 }
 
-// Escape still closes a card unless it is marked data-modal-locked.
 function isModalLocked(modal) {
     return Boolean(modal) && modal.hasAttribute('data-modal-locked');
 }
 
-// A card with something to lose can ask first. The guard is a function that
-// answers true (or a promise of true) when the card may close; "Discard your
-// changes?" is one. It is asked when a person closes the card (the x button
-// or Escape, through requestCloseModal) and never when the page itself closes
-// it with closeModal after an action, so a saved form is not questioned.
-const modalCloseGuards = {};      // modal id -> guard
-const modalCloseAsking = {};      // modal id -> a guard is being answered
+const modalCloseGuards = {};
+const modalCloseAsking = {};
 
 function setModalCloseGuard(id, guard) {
     modalCloseGuards[id] = guard;
@@ -38,7 +28,7 @@ async function requestCloseModal(id) {
 
     const guard = modalCloseGuards[id];
     if (guard) {
-        if (modalCloseAsking[id]) return false;   // the question is already on screen
+        if (modalCloseAsking[id]) return false;
         modalCloseAsking[id] = true;
         let allowed = false;
         try { allowed = await guard(); } finally { modalCloseAsking[id] = false; }
@@ -51,9 +41,6 @@ async function requestCloseModal(id) {
 document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
 
-    // a question card (confirm, discard) is the one on top: Escape answers
-    // "no" to it and leaves the cards beneath alone (and stops the page's other
-    // Escape listeners, such as a drawer, from also reading this key)
     const question = document.getElementById('ask-modal');
     if (question && question.classList.contains('open') && typeof closeAsk === 'function') {
         closeAsk(false);
@@ -73,14 +60,7 @@ document.addEventListener('keydown', function (event) {
     }
 });
 
-// A card grows to fit what it holds, up to the window's height. When it is
-// still too tall it first gets wider (modal-roomy) to become shorter.
-// A card does not scroll (unless marked data-modal-scroll); content taller than the body is flowed into pages
-// (browser column layout, one column per page) with a pager of its own under
-// the content -- "Page 1 of 3" and Previous/Next -- never in the foot, which
-// holds the card's actions only.
-// Runs again when the card's content changes or the window resizes.
-const PAGE_GAP = 48;   // wider than the body's side padding, so the next page never peeks in
+const PAGE_GAP = 48;
 
 function modalBodyOf(modal) {
     return modal.querySelector('.modal-body');
@@ -97,12 +77,10 @@ function unpaginateModal(modal) {
     if (pager) pager.remove();
 }
 
-// does everything in the body fit without a second page?
 function modalBodyFits(body) {
     return body.scrollHeight <= body.clientHeight + 1;
 }
 
-// Is someone typing in a box of this card (a text box, a list, a note)?
 function boxBeingTypedIn(modal) {
     const active = document.activeElement;
     if (!active || !modal.contains(active)) return null;
@@ -112,12 +90,6 @@ function boxBeingTypedIn(modal) {
     return null;
 }
 
-// Laying the pages out moves the card's boxes in and out of the page, and a
-// box that is moved loses the cursor. On a phone that closes the keyboard, and
-// the keyboard opening is itself a resize that lays the pages out again, so
-// the keyboard would never stay open. So while someone types, the pages stay
-// as they are (they are laid out again when the box is left, see 'focusout'
-// below); and when they must be laid out anyway, the cursor is put back.
 function paginateModal(modal, resetPage) {
     const typing = modal && modal.classList.contains('open') ? boxBeingTypedIn(modal) : null;
     if (typing && !resetPage) return;
@@ -134,7 +106,6 @@ function layoutModalPages(modal, resetPage) {
         if (modal) {
             unpaginateModal(modal);
             delete modal._pages;
-            // a closed card goes back to its normal width for next time
             const box = modal.querySelector('.modal-box');
             if (box) box.classList.remove('modal-roomy');
         }
@@ -147,14 +118,10 @@ function layoutModalPages(modal, resetPage) {
     const previous = modal._pages;
     unpaginateModal(modal);
 
-    // a card marked data-modal-scroll keeps one page and scrolls its body
     if (modal.hasAttribute('data-modal-scroll')) { delete modal._pages; return; }
 
     if (modalBodyFits(body)) { delete modal._pages; return; }
 
-    // Too tall for the window? Before adding pages, make the card wider
-    // (.modal-roomy in general-ui.css puts three facts to a row), so it gets
-    // shorter. Only if it still does not fit does it turn pages.
     const box = modal.querySelector('.modal-box');
     if (box && !box.classList.contains('modal-roomy')) {
         box.classList.add('modal-roomy');
@@ -173,8 +140,6 @@ function layoutModalPages(modal, resetPage) {
     wrap.style.height = height + 'px';
     wrap.style.columnGap = PAGE_GAP + 'px';
 
-    // the furthest fragment says how many pages; measured on the same scale as
-    // the rects because the opening animation scales the box
     const stride = width + PAGE_GAP;
     const wrapRect = wrap.getBoundingClientRect();
     const scale = wrapRect.width > 0 ? wrapRect.width / width : 1;
@@ -197,7 +162,6 @@ function layoutModalPages(modal, resetPage) {
     if (!resetPage && previous) page = Math.min(previous.page, count - 1);
     modal._pages = { page: page, count: count, stride: stride };
 
-    // the pager sits right under the content it turns
     const pager = document.createElement('div');
     pager.className = 'modal-pager pager';
     pager.innerHTML =
@@ -238,13 +202,9 @@ function turnModalPage(modal, direction) {
     showModalPage(modal);
 }
 
-// ---- when to lay the pages out again ----
-// The cards waiting to be laid out. Each one is { modal: the card, reset: true
-// if it goes back to page one }.
 const pendingModals = [];
 
 function schedulePaginate(modal, resetPage) {
-    // is this card already waiting?
     let entry = null;
     for (let i = 0; i < pendingModals.length; i++) {
         if (pendingModals[i].modal === modal) {
@@ -259,14 +219,13 @@ function schedulePaginate(modal, resetPage) {
     }
     entry.reset = Boolean(resetPage) || entry.reset;
     if (already || pendingModals.length > 1) return;
-    // a timeout rather than a frame: frames stop in a background tab
     setTimeout(function () {
         const batch = pendingModals.slice();
         pendingModals.length = 0;
         for (let i = 0; i < batch.length; i++) {
             paginateModal(batch[i].modal, batch[i].reset);
         }
-        modalWatcher.takeRecords();   // the layout's own edits are not a reason to lay out again
+        modalWatcher.takeRecords();
     });
 }
 
@@ -283,16 +242,13 @@ const modalWatcher = new MutationObserver(function (records) {
         const modal = target.closest('.modal');
         if (!modal || !modal.classList.contains('open')) continue;
         if (target.closest('.modal-pager')) continue;
-        if (target.classList.contains('modal-pages')) continue;   // the slide between pages
+        if (target.classList.contains('modal-pages')) continue;
 
-        // a whole page replaced starts from page one; smaller changes keep the page
         const body = modalBodyOf(modal);
         const wrap = body && body.querySelector(':scope > .modal-pages');
         const pageRoot = wrap || body;
         const topLevel = target.parentElement === pageRoot;
 
-        // deep class changes are ignored: the table module restamps headers on every
-        // move, which would lay the pages out for ever
         if (record.type === 'attributes' && record.attributeName === 'class' && !topLevel) continue;
 
         const wholePage = target === body || target === wrap ||
@@ -306,7 +262,6 @@ modalWatcher.observe(document.documentElement, {
     attributes: true, attributeFilter: ['class', 'style', 'hidden'],
 });
 
-// the body changing size is the signal, whatever changed it
 let modalSizer;
 if (typeof ResizeObserver === 'function') {
     modalSizer = new ResizeObserver(function (entries) {
@@ -326,8 +281,6 @@ window.addEventListener('resize', function () {
     }
 });
 
-// a box was left: the pages held still while it was typed in, so lay them out
-// now for whatever changed (a message under the box, the keyboard closing)
 document.addEventListener('focusout', function (event) {
     const modal = event.target.closest ? event.target.closest('.modal.open') : null;
     if (modal) schedulePaginate(modal, false);

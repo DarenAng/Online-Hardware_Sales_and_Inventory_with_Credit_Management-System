@@ -1,19 +1,10 @@
-// delivery-schedule.js -- open deliveries in a table, soonest due first
-// Loaded by: the four staff dashboards
-//
-// Drawn by script because the administrator can hand this screen to any role
-// (Access Control); the page supplies only the hidden menu item.
-//
-//   configureDeliverySchedule({ showPanel: showManagerPanel });
-//   buildDeliverySchedulePanel();       // draws the panel into .content-area
-
 const scheduleSetup = {
     showPanel: null,
     panelId: 'panel-delivery-schedule',
     title: 'Delivery Schedule'
 };
 
-let scheduleRows = null;            // what /api/deliveries last answered, null until asked
+let scheduleRows = null;
 
 function configureDeliverySchedule(options) {
     Object.assign(scheduleSetup, options || {});
@@ -78,7 +69,6 @@ function buildDeliverySchedulePanel() {
 
     area.appendChild(panel);
 
-    // deliveries moved on another machine reach this list live
     if (typeof onLiveChange === 'function') {
         onLiveChange(['deliveries', 'sales'], function () {
             if (scheduleRows === null || document.querySelector('.modal.open')) return;
@@ -105,8 +95,6 @@ function showDeliverySchedule(event) {
     }
 }
 
-// Each delivery is placed by its scheduled date against the browser's today and
-// shows it in the When column. A delivery with no date is listed last.
 const SCHEDULE_GROUPS = {
     overdue:  { label: 'Overdue',     badge: 'badge-danger' },
     today:    { label: 'Today',       badge: 'badge-warning' },
@@ -163,7 +151,6 @@ async function loadDeliverySchedule(quiet) {
 
     try {
         const rows = await apiGetDeliveries();
-        // keep only the deliveries that still have to go out
         scheduleRows = [];
         if (Array.isArray(rows)) {
             for (let i = 0; i < rows.length; i++) {
@@ -181,20 +168,17 @@ async function loadDeliverySchedule(quiet) {
     }
 }
 
-// ---------- searching and filtering the schedule ----------
 function scheduleValue(id) {
     const field = document.getElementById(id);
     return field ? field.value : 'all';
 }
 
-// the Status and Driver boxes offer what the loaded deliveries hold
 function fillScheduleOptions() {
     function fill(id, values, allLabel) {
         const select = document.getElementById(id);
         if (!select) return;
         const picked = select.value;
 
-        // each value once (empty ones left out), in alphabetical order
         const unique = [];
         for (let i = 0; i < values.length; i++) {
             if (values[i] && unique.indexOf(values[i]) === -1) {
@@ -223,7 +207,6 @@ function fillScheduleOptions() {
     fill('schedule-driver', drivers, 'Every driver');
 }
 
-// typing on a list not loaded yet loads it, as the tables do
 function onScheduleSearch(text) {
     if (scheduleRows === null) {
         if (searchText(text) !== '') loadDeliverySchedule();
@@ -249,7 +232,6 @@ function renderDeliverySchedule() {
     const body = document.getElementById('schedule-body');
     if (!body || scheduleRows === null) return;
 
-    // the deliveries that fit the search and filters, soonest first
     const rows = [];
     for (let i = 0; i < scheduleRows.length; i++) {
         if (scheduleMatches(scheduleRows[i])) rows.push(scheduleRows[i]);
@@ -258,7 +240,6 @@ function renderDeliverySchedule() {
         return String(a.scheduled_date || '9999').localeCompare(String(b.scheduled_date || '9999'));
     });
 
-    // a pressed header sorts by its column instead; empty values stay last
     if (scheduleSort) {
         const key = SCHEDULE_SORT_KEYS[scheduleSort.column];
         const descending = scheduleSort.descending;
@@ -284,18 +265,13 @@ function renderDeliverySchedule() {
         return;
     }
 
-    // a delivery opens from here only on a page that loaded the delivery popup
     const canOpen = typeof showDeliveryRecord === 'function';
-    // the driver moves a delivery along; the manager reads the schedule only
     const canUpdate = typeof hasRole === 'function' && hasRole('Delivery Personnel');
 
-    // a filter on driver or status means every row says the same there,
-    // so that column is not drawn (tables.js hides the columns listed here)
     const hidden = [];
     if (scheduleValue('schedule-driver') !== 'all') hidden.push(5);
     if (scheduleValue('schedule-status') !== 'all') hidden.push(6);
 
-    // one row for each delivery
     let rowsHtml = '';
     for (let i = 0; i < rows.length; i++) {
         const d = rows[i];
@@ -322,7 +298,6 @@ function renderDeliverySchedule() {
     body.dataset.canUpdate = canUpdate ? '1' : '';
 }
 
-// ---------- sorting by pressing a column header ----------
 const SCHEDULE_HEADERS = ['Due', 'When', 'Customer', 'Destination', 'Driver', 'Status'];
 const SCHEDULE_GROUP_ORDER = ['overdue', 'today', 'tomorrow', 'later', 'unset'];
 const SCHEDULE_SORT_KEYS = [
@@ -333,7 +308,7 @@ const SCHEDULE_SORT_KEYS = [
     function (d) { return d.driver_name || 'Unassigned'; },
     function (d) { return d.status || ''; }
 ];
-let scheduleSort = null;    // { column, descending } once a header is pressed
+let scheduleSort = null;
 
 function scheduleHeaders() {
     let html = '';
@@ -348,7 +323,6 @@ function scheduleHeaders() {
     return html;
 }
 
-// pressing a header sorts by it; pressing it again turns the order round
 function sortDeliverySchedule(column) {
     if (scheduleSort && scheduleSort.column === column) scheduleSort.descending = !scheduleSort.descending;
     else scheduleSort = { column: column, descending: false };
@@ -357,7 +331,7 @@ function sortDeliverySchedule(column) {
 
 function openScheduledDelivery(deliveryId) {
     if (typeof showDeliveryRecord !== 'function' || scheduleRows === null) return;
-    let delivery;   // stays undefined when the delivery is not in the list
+    let delivery;
     for (let i = 0; i < scheduleRows.length; i++) {
         if (Number(scheduleRows[i].delivery_id) === Number(deliveryId)) {
             delivery = scheduleRows[i];
@@ -369,8 +343,6 @@ function openScheduledDelivery(deliveryId) {
     const body = document.getElementById('schedule-body');
     let canUpdate = Boolean(body && body.dataset.canUpdate);
 
-    // A driver moves only a delivery assigned to them; another driver's, or one
-    // nobody has taken yet (taken from Pending Deliveries), is only shown here.
     const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
     if (canUpdate && user && user.role_name === 'Delivery Personnel') {
         if (delivery.delivery_staff_id == null || Number(delivery.delivery_staff_id) !== Number(user.staff_id)) {

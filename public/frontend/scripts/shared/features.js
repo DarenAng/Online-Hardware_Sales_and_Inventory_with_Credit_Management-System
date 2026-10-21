@@ -1,26 +1,11 @@
-// features.js -- which screens this menu holds
-// Loaded by: the four staff dashboards (not the administrator's)
-//
-// A menu item names the screen it opens, <li data-feature="credit-requests">,
-// and is hidden or shown by /api/me/features (Access Control on the
-// administrator's page). Items held only by grant start hidden in the markup.
-// This file shows and hides, and never grants: the server refuses the routes.
-
 const featuresSetup = {
-    home: null,             // () -- the page's own way back to its first screen
-    onApply: null           // () -- after the marks are applied, for tabs inside a screen
+    home: null,
+    onApply: null
 };
 
-let heldFeatureKeys = null;         // list of keys (no repeats), null until the server has answered
-let heldFeatureList = [];           // what /api/me/features said about each screen (name, hosts, held)
+let heldFeatureKeys = null;
+let heldFeatureList = [];
 
-// ==========================================
-// SCREENS ON ANOTHER ROLE'S DASHBOARD
-// Any screen can be granted to any role (Access Control). A screen this role's
-// own dashboard does not draw is opened on a dashboard that does: its "host"
-// page. The person's own menu gets a More Screens list of links to them, and
-// the host page, when visited, shows only those granted screens and a way back.
-// ==========================================
 const ROLE_PAGES = {
     'Manager': 'manager.html',
     'Inventory Clerk': 'inventory-dashboard.html',
@@ -28,7 +13,6 @@ const ROLE_PAGES = {
     'Delivery Personnel': 'delivery.html'
 };
 
-// the screens each dashboard has a menu entry for (its sidebar's data-feature keys)
 const PAGE_SCREENS = {
     'manager.html': ['income', 'sales', 'reports', 'stock-reports', 'reorder-alerts', 'purchase-orders',
                      'credit', 'credit-requests', 'deliveries', 'delivery-schedule', 'records',
@@ -55,13 +39,10 @@ function ownPageName() {
     return user ? String(ROLE_PAGES[user.role_name] || '').toLowerCase() : '';
 }
 
-// true on another role's dashboard, opened for a granted screen
 function isVisitingPage() {
     return document.documentElement.classList.contains('is-visiting');
 }
 
-// the page that draws a screen this role's own page does not: the first host
-// whose menu has it. Null when the own page draws it (or nobody's menu does).
 function foreignPageFor(feature) {
     const own = ownPageName();
     if ((PAGE_SCREENS[own] || []).indexOf(feature.key) !== -1) return null;
@@ -73,7 +54,6 @@ function foreignPageFor(feature) {
     return null;
 }
 
-// the granted screens drawn on another dashboard, in menu order
 function foreignScreens() {
     const list = [];
     for (let i = 0; i < heldFeatureList.length; i++) {
@@ -85,8 +65,6 @@ function foreignScreens() {
     return list;
 }
 
-// On this person's own dashboard: More Screens, one link per granted screen
-// that lives on another dashboard. It goes when there are none.
 function renderMoreScreens() {
     const nav = document.querySelector('.sidebar-nav');
     if (!nav) return;
@@ -102,7 +80,6 @@ function renderMoreScreens() {
     for (let i = 0; i < screens.length; i++) {
         const screen = screens[i];
         const target = screen.page + '#screen=' + encodeURIComponent(screen.key);
-        // the menu's own click handling stays on the page, so the link goes by itself
         links += '<li><a href="' + target + '" onclick="event.preventDefault(); event.stopPropagation(); ' +
             'window.location.href = \'' + target + '\'">' +
             '<i class="bi bi-box-arrow-up-right nav-icon" aria-hidden="true"></i>' +
@@ -124,8 +101,6 @@ function renderMoreScreens() {
         '<ul id="more-screens-list" class="nav-sub" style="display: none;">' + links + '</ul>';
 }
 
-// On another role's dashboard: only the granted screens it draws are offered,
-// with a way back. With none left, the person goes back to their own dashboard.
 function visitingKeys() {
     const keys = [];
     const page = currentPageName();
@@ -147,7 +122,6 @@ function renderVisitBar() {
     nav.insertBefore(item, nav.firstChild);
 }
 
-// opens the menu entry for a screen key, the way a click on it would
 function openScreenByKey(key) {
     const nav = document.querySelector('.sidebar-nav');
     if (!nav) return false;
@@ -165,7 +139,6 @@ function openScreenByKey(key) {
     return false;
 }
 
-// the screen asked for in the address (#screen=key), or the first one offered
 function openVisitedScreen() {
     const match = /screen=([\w-]+)/.exec(window.location.hash || '');
     const keys = visitingKeys();
@@ -179,7 +152,6 @@ function configureFeatures(options) {
     Object.assign(featuresSetup, options || {});
 }
 
-// a copy of the list with every key only once
 function uniqueKeys(list) {
     const keys = [];
     for (let i = 0; i < list.length; i++) {
@@ -190,12 +162,10 @@ function uniqueKeys(list) {
     return keys;
 }
 
-// saves the keys in the browser tab, so the next page load can use them at once
 function rememberFeatureKeys(keys) {
     try {
         sessionStorage.setItem('featureKeys', JSON.stringify(keys));
     } catch (error) {
-        // private browsing mode: nothing is saved, which is fine
     }
 }
 
@@ -211,10 +181,6 @@ function recallFeatureKeys() {
     }
 }
 
-// ==========================================
-// SHOWING AND HIDING THE MENU
-// ==========================================
-// data-feature="a, b" -> ['a', 'b']
 function featureKeysOf(element) {
     const text = String(element.getAttribute('data-feature') || '');
     const keys = [];
@@ -228,7 +194,6 @@ function featureKeysOf(element) {
     return keys;
 }
 
-// true when this person holds at least one of the keys
 function holdsAnyFeature(keys) {
     for (let i = 0; i < keys.length; i++) {
         if (holdsFeature(keys[i])) {
@@ -249,22 +214,18 @@ function applyFeatureMarks() {
     const visiting = isVisitingPage();
     const visitKeys = visiting ? visitingKeys() : [];
     if (visiting && heldFeatureList.length > 0 && visitKeys.length === 0) {
-        // nothing here is granted (any more): back to the person's own dashboard
         window.location.replace(ownPageName() || 'Login.html');
         return;
     }
 
-    // an <li> marked with the screen it opens, or an <a> inside one
     const marks = nav.querySelectorAll('[data-feature]');
     for (let i = 0; i < marks.length; i++) {
         const element = marks[i];
         const item = element.closest('li') || element;
-        // data-access (read by subnav.js) wins over the switches
         if (item.hasAttribute('data-access') && typeof hasRole === 'function' &&
             !hasRole.apply(null, item.getAttribute('data-access').split(','))) continue;
         const keys = featureKeysOf(element);
         item.hidden = keys.length > 0 && !holdsAnyFeature(keys);
-        // visiting: only the screens granted from this dashboard
         if (visiting && keys.length > 0) {
             let offered = false;
             for (let k = 0; k < keys.length; k++) {
@@ -274,18 +235,15 @@ function applyFeatureMarks() {
         }
     }
 
-    // a heading whose screens have all gone goes with them
     for (let m = 0; m < nav.children.length; m++) {
         const module = nav.children[m];
         if (module.tagName !== 'LI' || module.hasAttribute('data-feature')) continue;
         const sub = module.querySelector(':scope > .nav-sub');
         if (!sub) continue;
 
-        // does this heading have any screens that are switched by a feature?
         const marked = sub.querySelectorAll(':scope > li[data-feature], :scope > li > a[data-feature]');
         if (marked.length === 0) continue;
 
-        // is at least one of its screens still showing?
         let offered = false;
         const screens = sub.querySelectorAll(':scope > li');
         for (let s = 0; s < screens.length; s++) {
@@ -296,7 +254,6 @@ function applyFeatureMarks() {
         module.hidden = !offered;
     }
 
-    // other marked things on the page (not in the menu)
     const others = document.querySelectorAll('[data-feature]');
     for (let i = 0; i < others.length; i++) {
         const element = others[i];
@@ -312,7 +269,6 @@ function applyFeatureMarks() {
     if (visiting && heldFeatureList.length > 0) {
         renderVisitBar();
         document.documentElement.classList.add('visit-ready');
-        // the first time: open the screen the link asked for
         if (!visitOpened) {
             visitOpened = true;
             openVisitedScreen();
@@ -324,7 +280,6 @@ function applyFeatureMarks() {
     if (typeof syncSubnav === 'function') syncSubnav();
 }
 
-// The open screen was just switched off: go back to the first and say so.
 function leaveWithdrawnScreen() {
     if (heldFeatureKeys === null) return;
 
@@ -345,7 +300,7 @@ function leaveWithdrawnScreen() {
     const item = link.closest('li');
     let module = null;
     if (item) {
-        module = item.parentElement.closest('li');   // the heading above it
+        module = item.parentElement.closest('li');
     }
     const withdrawn = (item && item.hidden) || (module && module.hidden);
     if (!withdrawn) return;
@@ -355,7 +310,6 @@ function leaveWithdrawnScreen() {
     for (let i = 0; i < carets.length; i++) {
         carets[i].remove();
     }
-    // runs of spaces and line breaks become one space
     const title = name.textContent.replace(/\s+/g, ' ').trim() || 'That screen';
 
     if (typeof closeModal === 'function') {
@@ -365,7 +319,6 @@ function leaveWithdrawnScreen() {
         }
     }
 
-    // visiting: back to a granted screen, not the dashboard's own first screen
     if (isVisitingPage()) {
         openVisitedScreen();
         return;
@@ -390,7 +343,7 @@ async function refreshFeatures() {
     try {
         answer = await apiGetMyScreens();
     } catch (error) {
-        return;     // the session has ended, or the server is away; handled elsewhere
+        return;
     }
 
     if (Array.isArray(answer.held)) {
@@ -403,7 +356,6 @@ async function refreshFeatures() {
     applyFeatureMarks();
 }
 
-// After the session check, and only on a page with a menu to shape.
 function startFeatures() {
     const nav = document.querySelector('.sidebar-nav');
     if (!nav || !document.querySelector('[data-feature]')) return;

@@ -1,27 +1,11 @@
-/* ==========================================================================
-   cashier-dashboard.css -- styles only the Cashier page uses
-   Loads after general-ui.css and responsive.css, so anything here wins.
-   Two columns: the order on the left, the catalog on the right.
-   ========================================================================== */
-
-/* ==========================================================================
-   THE SALES INVOICE
-   ========================================================================== */
 .rc-bank-note { margin: 5px 0 0; text-align: center; font-size: 0.92em; line-height: 1.45; color: var(--steel); }
 
-/* ==========================================================================
-   THE REGISTER -- the order on the left, the catalog on the right, as on
-   Refunds. The catalog shows ten products a page and never scrolls on its
-   own: the search and the Next button are how the list is browsed. The
-   order keeps up with the page.
-   ========================================================================== */
 .pos-layout {
     display: grid;
     grid-template-columns: 1fr 1.9fr;
     gap: 16px;
     align-items: start;
 }
-/* the catalog comes first in the page, so on one column it stays on top */
 .pos-layout > .order-summary { order: -1; }
 
 .order-summary {
@@ -34,15 +18,12 @@
 }
 
 @media (min-width: 1025px) {
-    /* the window, less the top bar (61) and the page's own padding (22 + 44) */
     .pos-layout { min-height: calc(100vh - 127px); }
     .pos-catalog {
         display: flex; flex-direction: column;
         margin-bottom: 0;
     }
     .pos-catalog .catalog-scroll { flex: 1 1 auto; overflow: visible; }
-    /* the order never runs the page past the window: a long cart scrolls its
-       own lines, and the totals and the Complete Sale button stay in view */
     .order-summary {
         max-height: calc(100vh - 127px);
         display: flex; flex-direction: column;
@@ -54,15 +35,7 @@
 .order-summary .panel-head { margin-bottom: 12px; padding-bottom: 10px; }
 .order-summary h3 { margin-bottom: 0; }
 
-/* ==========================================================================
-   THE CATALOG -- a list, one product a line, and the row is the button:
-   pressing it anywhere puts the product on the order. One that has run out
-   is still shown but cannot be pressed.
-   ========================================================================== */
 .catalog-table { margin-top: 0; }
-/* its sizes are the shared table's (general-ui.css), which every screen
-   takes from this one */
-/* "per pcs" sits after the price, and drops under it only when the column is tight */
 .catalog-table td.catalog-price { white-space: normal; }
 .catalog-table tbody tr.row-clickable:hover td { background: var(--go-dim); }
 .catalog-table .catalog-price { font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -81,14 +54,11 @@
     color: var(--steel-soft);
     white-space: nowrap;
 }
-/* a smaller laptop: the narrow catalog box has no room for the line of other
-   sizes on one line, so it wraps under the unit */
 @media (min-width: 641px) and (max-width: 1279px) {
     .catalog-table .unit-sizes { white-space: normal; }
 }
 .catalog-scroll .pager { padding: 12px 4px 0; }
 
-/* a product already on the order says so on its row */
 .catalog-table tbody tr.is-on-order td.cell-name { color: var(--go-hi); }
 .on-order-mark {
     display: inline-block;
@@ -105,9 +75,6 @@
 }
 .on-order-mark[hidden] { display: none; }
 
-/* ==========================================================================
-   THE CART -- the quantity buttons are sized to be hit, not aimed at
-   ========================================================================== */
 .cart-empty {
     text-align: center;
     padding: 26px 12px;
@@ -115,8 +82,6 @@
     font-size: 14.5px;
 }
 
-/* Two rows a line: the name and the price of one above; the amount, the
-   unit it is counted in, and what the line comes to below. */
 .cart-line {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -143,7 +108,6 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* a line that was just pressed onto the order lights up for a moment */
 @keyframes cart-line-added {
     from { background: var(--go-dim); }
     to   { background: transparent; }
@@ -152,7 +116,6 @@
 
 .cart-qty { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
 
-/* the amount is typed as well as stepped: 2.5 kilos is one box, not five presses */
 .qty-input {
     width: 64px;
     height: 30px;
@@ -168,7 +131,6 @@
 }
 .qty-input:focus { outline: none; border-color: var(--go); box-shadow: 0 0 0 3px var(--go-dim); }
 
-/* the size the line is counted in: kilos, or a sack of them */
 .cart-unit-pick {
     height: 30px;
     margin-left: 4px;
@@ -219,9 +181,6 @@
 .cart-remove:hover { color: var(--stop); }
 .cart-remove:focus-visible { outline: 2px solid var(--signal); outline-offset: 1px; }
 
-/* ---------- what it comes to ----------
-   the amount due is twice the size of the other lines; change is green,
-   short is red, on account is amber */
 .cart-totals {
     margin: 14px 0;
     padding: 12px 0;
@@ -258,11 +217,8 @@
 .total-short  span:last-child { color: var(--stop);      font-weight: 600; }
 .total-note   span:last-child { color: var(--signal-ink); font-weight: 600; }
 
-/* The disabled treatment is general-ui's now, one rule for every button in
-   the system, so the two lines that used to fake it here have gone. */
 #checkout-btn { min-height: 46px; font-size: 16.5px; }
 
-/* only the receipt reaches the paper */
 @media print {
     body.printing-receipt .wrapper,
     body.printing-receipt .no-print,
@@ -292,9 +248,6 @@
     @page { margin: 10mm; }
 }
 
-/* ==========================================================================
-   ON A SMALL SCREEN -- one column, the order underneath the catalog
-   ========================================================================== */
 @media (max-width: 1024px) {
     .pos-layout { grid-template-columns: 1fr; }
     .pos-layout > .order-summary { order: 0; }
@@ -304,7 +257,6 @@
 @media (max-width: 640px) {
     .order-summary { padding: 16px 14px; }
 
-    /* the two most-pressed controls in the system, at thumb size */
     .qty-btn { width: 38px; height: 38px; font-size: 19.5px; }
     .qty-input { width: 70px; height: 38px; font-size: 16px; }
     .cart-unit-pick { height: 38px; }
@@ -316,14 +268,9 @@
     .receipt-box { max-width: none; }
 }
 
-/* the due date on the cashier's credit records: the date, then how far off */
 .cell-due-date { white-space: nowrap; }
 .due-date { font-family: var(--font-figure); font-size: 13.5px; margin-right: 6px; }
 
-/* ==========================================================================
-   CREDIT AT THE COUNTER -- the account is read when the customer is picked
-   and sits above the payment fields: green room, yellow look, red no
-   ========================================================================== */
 .credit-strip {
     background: var(--paper);
     border: 1px solid var(--line);
@@ -350,7 +297,6 @@
     font-variant-numeric: tabular-nums;
     color: var(--ink);
 }
-/* the figure the cashier is actually deciding on */
 .credit-strip-main { margin-top: 4px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,0.07); }
 .credit-strip-main .credit-strip-label { font-weight: 600; color: var(--ink); }
 .credit-strip-main .credit-strip-value { font-size: 17px; font-weight: 700; }
@@ -363,8 +309,6 @@
     font-style: italic;
 }
 
-/* What will happen if this sale is completed as it stands, in words, before
-   the button is pressed rather than as a refusal after it. */
 .credit-verdict {
     margin: 10px 0 0;
     padding: 10px 13px;
@@ -379,19 +323,12 @@
 .credit-verdict.is-watch { border-left-color: var(--signal); background: var(--signal-dim); }
 .credit-verdict.is-stop  { border-left-color: var(--stop);   background: var(--stop-dim); color: var(--ink); }
 
-/* PAY BY QR: the card is shared with the driver's page, so its rules are in
-   shared/general-ui.css */
-
-/* Quick fill. Typing "half of 8,437.50" at a counter with somebody waiting is
-   how a down payment gets recorded wrong. */
 .downpayment-quick {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
     gap: 6px;
 }
-/* the buttons sit a little closer under the boxes than the next field would;
-   the grid owns that space (see --field-row-gap in general-ui.css) */
 #downpayment-field > .grid-2 { margin-bottom: calc(-4px - var(--field-row-gap, 0px)); }
 .quick-label {
     font-size: 13px;
@@ -399,9 +336,6 @@
     margin-right: 2px;
 }
 
-/* ==========================================================================
-   WHERE THE GOODS GO -- two cards, neither preselected, sized for a thumb
-   ========================================================================== */
 .disposition-choice {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -436,7 +370,6 @@
 .disposition-title { font-size: 15.5px; font-weight: 600; color: var(--ink); }
 .disposition-note { font-size: 13.5px; line-height: 1.5; color: var(--steel); }
 
-/* the chosen one takes its meaning: green it goes back, red it does not */
 .disposition-option:has(input:checked) {
     background: var(--ok-dim);
     border-color: var(--ok);
@@ -449,7 +382,6 @@
 }
 .disposition-option:has(input:focus-visible) { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-/* asked for and not answered */
 .disposition-choice.is-missing .disposition-option {
     border-color: var(--stop);
     border-left-color: var(--stop);
@@ -472,8 +404,6 @@
     .disposition-choice { grid-template-columns: 1fr; }
 }
 
-/* Which of the three outcomes is in force, said before the sale is completed
-   rather than as a refusal after it. */
 .customer-verdict {
     margin: 6px 0 0;
     font-size: 13px;
@@ -483,22 +413,14 @@
 .customer-verdict.is-good { color: var(--ok-ink); font-weight: 500; }
 .customer-verdict.is-stop { color: var(--stop-hi); font-weight: 500; }
 .customer-verdict:empty { display: none; }
-/* Add Customer, under the line that says the name matches nobody */
 .customer-add-btn { margin-top: 8px; }
 
-/* Under the order: Proceed to Payment takes the row, Clear sits beside it */
 .order-summary .order-actions { flex-wrap: nowrap; margin-top: 0; }
 .order-summary .order-actions #proceed-btn { flex: 1 1 auto; min-height: 46px; font-size: 16.5px; }
 .order-summary .order-actions #clear-btn { flex: 0 0 auto; white-space: nowrap; min-height: 46px; }
-/* Credit Payment, in the order's heading, is a small second action */
 .order-summary .panel-head { align-items: center; }
 .order-summary .panel-actions .btn { white-space: nowrap; }
 
-/* ==========================================================================
-   THE PAYMENT WINDOW -- Proceed to Payment. The amount due and what happens
-   to it sit at the top of the card, where they stay in view while the fields
-   below are filled in. Complete Sale is the only orange button in the foot.
-   ========================================================================== */
 .pay-totals { margin: 0 0 16px; padding: 10px 0 12px; }
 .checkout-foot { flex-wrap: wrap; }
 .checkout-foot #checkout-btn { min-height: 46px; font-size: 16.5px; }
@@ -506,9 +428,6 @@
 .checkout-foot .btn { white-space: nowrap; }
 .checkout-foot #checkout-btn { margin-left: auto; }
 
-/* Money fields read from the right, like every column of figures: the typed
-   amount and the 0.00 hint in an empty box sit at the right edge. The hint on
-   a label ("required", "optional") sits on the right of the label row too. */
 .amount-field { text-align: right; }
 .checkout-box .form-group > label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 .checkout-box .form-group > label .label-hint { margin-left: auto; text-align: right; }
@@ -517,22 +436,18 @@
 #add-customer-modal .form-group > label .label-hint { margin-left: auto; }
 #add-customer-modal .form-group > label { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
 
-/* a product already on the order cannot be pressed again: its line is changed
-   with + and - on the order (markCatalogRows) */
 .catalog-table tbody tr.is-on-order,
 .catalog-table tbody tr.is-on-order.row-clickable { cursor: not-allowed; }
 .catalog-table tbody tr.is-on-order td { opacity: 0.55; }
 .catalog-table tbody tr.is-on-order td.cell-name { opacity: 1; }
 .catalog-table tbody tr.is-on-order.row-clickable:hover td { background: transparent; }
 
-/* a product with no price yet (the manager has not set one) cannot be sold: greyed, not pressable */
 .catalog-table tbody tr.is-unpriced,
 .catalog-table tbody tr.is-unpriced.row-clickable { cursor: not-allowed; }
 .catalog-table tbody tr.is-unpriced td { opacity: 0.55; }
 .catalog-table tbody tr.is-unpriced td.catalog-price { opacity: 1; }
 .catalog-table tbody tr.is-unpriced.row-clickable:hover td { background: transparent; }
 
-/* Customers Record's customer card: the filters over a history table */
 .history-filters {
     display: flex; flex-wrap: wrap; gap: 10px 14px;
     margin: 0 0 12px;
@@ -541,9 +456,7 @@
 .history-filters select,
 .history-filters input { min-width: 130px; }
 
-/* Credit Payment's list of who owes */
 .credit-pay-list { display: flex; flex-direction: column; gap: 6px; max-height: 300px; overflow-y: auto; }
-/* modals hide scrollbars by default (general-ui.css); this list shows one so it is plain there are more below */
 .modal .credit-pay-list { scrollbar-width: thin; scrollbar-color: var(--steel-soft) transparent; padding-right: 4px; }
 .modal .credit-pay-list::-webkit-scrollbar { display: block; width: 8px; }
 .modal .credit-pay-list::-webkit-scrollbar-thumb { background: var(--steel-soft); border-radius: 4px; }
@@ -563,17 +476,14 @@
 
 .add-customer-note { margin: 4px 0 10px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
 
-/* the product field is capped so the name and the price read as a pair */
 #refund-form .suggest-wrap,
 #refund-form .pick-strip,
 #refund-form .pick-verdict { max-width: 560px; }
 
-/* quantity and amount are short figures, so they share a row and the page never scrolls */
 @media (min-width: 641px) {
     #refund-form .grid-2 { grid-template-columns: 1fr 1fr; gap: 0 14px; --field-row-gap: 0px; }
 }
 
-/* where the refund figure came from; marked once a person has overridden it */
 .amount-source {
     margin: 6px 0 0;
     font-size: 12.5px;
@@ -583,10 +493,6 @@
 .amount-source:empty { display: none; }
 .amount-source.is-edited { color: var(--signal-ink); }
 
-/* ==========================================================================
-   THE DELIVERY ATTACHED TO THIS ORDER -- shown above the buttons so it
-   cannot be forgotten
-   ========================================================================== */
 .delivery-attached {
     margin: 12px 0 0;
     padding: 10px 12px;
@@ -635,7 +541,6 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* what the delivery form says when it will not accept what is in it */
 .delivery-verdict {
     margin: 4px 0 0;
     padding: 9px 12px;
@@ -648,8 +553,6 @@
 .delivery-verdict:empty { display: none; }
 .delivery-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
 
-/* the delivery form: a red star on what is required, a line of red words under
-   a field that is missing or wrong (the words say it, the colour only helps) */
 .req-mark { color: var(--stop); font-weight: 700; }
 .field-error {
     display: block;
@@ -668,11 +571,8 @@
 #delivery-modal .detail-subhead.delivery-first-head,
 #add-customer-modal .detail-subhead.delivery-first-head { margin-top: 0; }
 
-/* Cancel sits apart on the left, Remove is coloured like the destruction
-   it is, attaching is the orange one */
 #delivery-modal .modal-foot { justify-content: flex-end; }
 
-/* the driver list opens over Remarks; kept short enough that the card does not clip it */
 #driver-suggest { max-height: 150px; }
 #driver-suggest .suggest-item.is-empty { cursor: default; }
 #driver-suggest .suggest-item.is-empty:hover { background: transparent; }
@@ -681,9 +581,6 @@
 .btn-quiet { color: var(--stop); }
 .btn-quiet:hover { color: var(--stop-hi); border-color: var(--stop); background: var(--stop-dim); }
 
-/* ==========================================================================
-   WHAT WENT BACK TODAY -- the refunds figure opens into this, item by item
-   ========================================================================== */
 .refund-lines {
     display: flex;
     flex-direction: column;
@@ -733,21 +630,12 @@
     .refund-line-side { align-items: flex-start; flex-direction: row; align-items: center; }
 }
 
-/* ==========================================================================
-   TAKING A PAYMENT -- from the Unpaid Sales tab of the customer's card
-   ========================================================================== */
-/* the form's facts read like the customer card's */
 #payment-modal .detail-grid + form { margin-top: 16px; }
 #payment-modal .downpayment-quick { margin-top: 2px; }
-/* the line under the form keeps room for two lines of words, so it does not jump
-   between one message and the next */
 #payment-modal .credit-verdict { min-height: 64px; }
 
-/* the sale whose items are on Issue a Refund, in the list beside it */
 #recent-sales-table tbody tr.is-picked { background: var(--signal-dim); box-shadow: inset 3px 0 0 var(--signal); }
 
-/* Issue a Refund's items table sits in the narrow form column: it fits the
-   column (no sideways scroll), the product name wrapping under itself */
 #refund-lines .adjust-lines-scroll { overflow-x: hidden; }
 #refund-lines .adjust-lines-table { table-layout: fixed; }
 #refund-lines .adjust-lines-table th,

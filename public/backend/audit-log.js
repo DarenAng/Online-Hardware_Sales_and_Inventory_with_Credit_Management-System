@@ -1,23 +1,6 @@
-// ============================================================
-// audit-log.js -- the audit trail: who did what, from where, with the values before and after
-// Loaded by: server.js (handed on to the route files) and routes/shared.js.
-// Never sent to a browser.
-// ============================================================
-
 const db = require("./database/connection").db;
 const IS_VERCEL = require("./database/connection").IS_VERCEL;
 
-// ==========================================
-// THE AUDIT TRAIL
-//
-// An entry carries the role the person held at the time (written, not joined,
-// so a promotion does not rewrite history), the machine it came from, the kind
-// of action, and the values before and after.
-// ==========================================
-
-// TRUST_PROXY=1 in .env only behind a reverse proxy you control; otherwise
-// any browser can put whatever it likes in X-Forwarded-For. Vercel is such a
-// proxy: it replaces the header with the real address, so it is trusted there.
 const trustProxySetting = String(process.env.TRUST_PROXY || "").toLowerCase();
 const TRUST_PROXY_HEADERS = IS_VERCEL || ["1", "true", "yes", "on"].includes(trustProxySetting);
 
@@ -30,14 +13,12 @@ function clientIp(request) {
     address = request.socket.remoteAddress;
   }
 
-  // an IPv4 address over an IPv6 socket comes wrapped
   if (address.startsWith("::ffff:")) address = address.slice(7);
   if (address === "::1") address = "127.0.0.1";
 
   return address || null;
 }
 
-// the category the audit screen filters on
 const AUDIT_TYPES = [
   "CREATE", "UPDATE", "DELETE", "VOID", "RESTORE", "BACKUP",
   "LOGIN", "LOGOUT", "LOGIN_FAILURE", "SECURITY", "PAYMENT",
@@ -48,7 +29,6 @@ function actionTypeOf(action) {
   const name = String(action || "").toUpperCase();
 
   if (AUDIT_TYPES.includes(name)) return name;
-  // a screen switched on or off for a role
   if (name.startsWith("GRANT_") || name.startsWith("REVOKE_")) return "ACCESS";
   if (name.includes("VOID")) return "VOID";
   if (name.includes("PASSWORD") || name.includes("HELD") || name.includes("RELEASE")) return "SECURITY";
@@ -65,10 +45,7 @@ function actionTypeOf(action) {
   return "OTHER";
 }
 
-// Takes the request itself, or a plain staff id from the few places that
-// write an entry before a session exists.
 function auditContext(context) {
-  // 1) it is the request itself (it has headers)
   if (context && typeof context === "object" && context.headers) {
     const who = { staffId: null, roleName: null, ip: clientIp(context) };
     if (context.actor) {
@@ -78,7 +55,6 @@ function auditContext(context) {
     return who;
   }
 
-  // 2) it is a small object like { staffId, roleName, request }
   if (context && typeof context === "object") {
     const who = { staffId: null, roleName: null, ip: null };
     if (context.staffId !== undefined) who.staffId = context.staffId;
@@ -87,12 +63,9 @@ function auditContext(context) {
     return who;
   }
 
-  // 3) it is just a staff id number
-
   return { staffId: context || null, roleName: null, ip: null };
 }
 
-// stored as text so it survives any backup, and capped
 function auditMetadata(metadata) {
   if (metadata === undefined || metadata === null) return null;
 
@@ -100,7 +73,7 @@ function auditMetadata(metadata) {
     const text = JSON.stringify(metadata);
     if (!text) return null;
     if (text.length > 4000) {
-      return text.slice(0, 3997) + "...";   // cut very long text short
+      return text.slice(0, 3997) + "...";
     }
     return text;
   } catch (error) {
@@ -108,7 +81,6 @@ function auditMetadata(metadata) {
   }
 }
 
-// only the fields that actually moved
 function fieldChanges(before, after) {
   if (!before) return after;
 
@@ -122,8 +94,6 @@ function fieldChanges(before, after) {
     if (was === undefined) was = null;
     if (now === undefined) now = null;
 
-    // Compared as text on purpose: the number 5 from the database and
-    // the text "5" from a form count as the same value.
     let wasText = "";
     let nowText = "";
     if (was !== null) wasText = String(was);

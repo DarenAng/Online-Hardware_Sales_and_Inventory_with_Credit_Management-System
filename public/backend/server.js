@@ -1,66 +1,12 @@
-// ============================================================
-// server.js -- the main file of the back end (start it with: npm start)
-//
-// What this file does, from top to bottom:
-//   1. Reads the settings from the .env file and connects to MySQL
-//      (the connection itself is in database/connection.js).
-//   2. Starts the database work that has to be done before the first request
-//      (database/migrations.js): add what an older database is missing and
-//      load the stored procedures.
-//   3. Sets up Express: serves the pages, css, page scripts and connections
-//      files in public/frontend/ and Bootstrap in public/vendor/. Nothing else
-//      (server code, SQL files) is served.
-//   4. Checks who is signed in and what each role may open.
-//   5. Loads the route files from the routes folder and starts listening on
-//      the port.
-//
-// The rest of the back end, one job per file:
-//   routes/            what each role's screens ask the server for
-//     login.js           signing in and out (every user)
-//     admin.js           System Administrator
-//     manager.js         Manager
-//     cashier.js         Cashier
-//     inventory-clerk.js Inventory Clerk
-//     delivery.js        Delivery Personnel
-//     qr-payments.js     GCash, Maya and bank transfers paid by QR code (PayMongo)
-//     shared.js          routes every signed-in role uses (My Account, the live channel, archives ...)
-//   database/          connection.js (the MySQL pool), migrations.js (start-up work),
-//                      procedures/ (every stored-procedure CALL, one file per role)
-//   services/          mailer, passwords, purchase-order PDF, spreadsheets, SQL scripts, QR providers
-//   tools/             recover-password.js (run by hand on the server's PC)
-//   roles.js           the five role names and each role's page
-//   sessions.js        signed-in sessions, the cookie, who is present
-//   access-control.js  who may call which /api route
-//   features.js        screens by role (what the administrator switches on and off)
-//   audit-log.js       the audit trail
-//   live-changes.js    the live channel (what changed since a version)
-//   validation.js      phone, password, name and TIN rules
-//   helpers.js         word-start search, date text
-//   shared-sql.js      SQL text several routes use
-//   store-settings.js  the shop's default settings and receipt layout
-//   env-settings.js    reading a number from .env
-//
-// Two things you will see a lot:
-//   const result = await db.query(...);   const rows = result[0];
-//     db.query() gives back a list of two things: [rows, fields].
-//     We only need the rows, so we take the first item, result[0].
-//   const email = request.body.email;
-//     reads one field the browser sent, from request.body.
-// ============================================================
-
-// Load the settings (database password etc.) from the .env file in the project folder
 const dotenv = require("dotenv");
 dotenv.config({ path: require("path").join(__dirname, "..", "..", ".env"), quiet: true });
 
 const express = require("express");
 const path = require("path");
-// sqlValue("it's") makes a value safe to put inside SQL text,
-// sqlName("users") does the same for a table or column name
 const mysqlTools = require("mysql2");
 const sqlValue = mysqlTools.escape;
 const sqlName = mysqlTools.escapeId;
 
-// The routes of each kind of user are in the routes folder (see the list above).
 const registerLoginRoutes = require("./routes/login").registerLoginRoutes;
 const registerAdminRoutes = require("./routes/admin").registerAdminRoutes;
 const registerManagerRoutes = require("./routes/manager").registerManagerRoutes;
@@ -73,35 +19,25 @@ const registerSharedRoutes = require("./routes/shared").registerSharedRoutes;
 
 const app = express();
 
-// Express matches routes without caring about letter case by default, so
-// /API/backups would reach the same route as /api/backups. Turning this on
-// makes "/API/..." match no route at all.
 app.set("case sensitive routing", true);
 
-// the port the website runs on (http://localhost:3000)
 const port = Number(process.env.HARDWARE_PORT) || 3000;
 
-// the MySQL connection lives in database/connection.js
 const database = require("./database/connection");
 const db = database.db;
 const DB_NAME = database.DB_NAME;
 const DB_HOST = database.DB_HOST;
 const DB_PORT = database.DB_PORT;
-// true when running as a Vercel Function: no timers, no files, many copies
 const IS_VERCEL = database.IS_VERCEL;
 
-// Behind Vercel's proxy, request.protocol reads "https" from X-Forwarded-Proto,
-// so links built from the request (the supplier's order link) are https too.
 if (IS_VERCEL) app.set("trust proxy", true);
 
-// hashing and generating passwords, shared with the recovery script
 const passwords = require("./services/passwords");
 const hashPassword = passwords.hashPassword;
 const isHashed = passwords.isHashed;
 const generatePassword = passwords.generatePassword;
 const verifyPassword = passwords.verifyPassword;
 
-// the five roles, spelled exactly as the roles table spells them
 const roles = require("./roles");
 const ADMIN = roles.ADMIN;
 const MANAGER = roles.MANAGER;
@@ -111,7 +47,6 @@ const DRIVER = roles.DRIVER;
 const PAGE_ROLES = roles.PAGE_ROLES;
 const ROLE_PAGES = roles.ROLE_PAGES;
 
-// the start-up database work, and the stored procedures' count
 const migrations = require("./database/migrations");
 const EXPECTED_PROCEDURES = migrations.EXPECTED_PROCEDURES;
 const SERVER_TABLES = migrations.SERVER_TABLES;
@@ -120,7 +55,6 @@ const proceduresAreMissing = migrations.proceduresAreMissing;
 const proceduresLoadedCount = migrations.proceduresLoadedCount;
 const forgetProcedureCount = migrations.forgetProcedureCount;
 
-// the helpers the route files are handed (below, in the deps of each route file)
 const validation = require("./validation");
 const phoneComplaint = validation.phoneComplaint;
 const passwordComplaint = validation.passwordComplaint;
@@ -182,10 +116,6 @@ const SALE_CUSTOMER_SQL = sharedSql.SALE_CUSTOMER_SQL;
 const DELIVERY_CONTACT_SQL = sharedSql.DELIVERY_CONTACT_SQL;
 const DELIVERY_PHONE_SQL = sharedSql.DELIVERY_PHONE_SQL;
 
-// The start-up work below runs once per copy of the server. On a PC that is
-// once; on Vercel it is every time a new copy wakes up, and the first request
-// waits for it (see the hook after this) so it never meets a missing table.
-// (adminModule is made further down; this runs after that is done.)
 const startup = db.getConnection()
   .then(async function (connection) {
     connection.release();
@@ -193,9 +123,6 @@ const startup = db.getConnection()
 
     await migrations.migrateOneAtATime(adminModule.runSqlScript);
 
-    // last, so the first backup is not taken of a schema about to change.
-    // On Vercel nothing runs between requests, so the daily job at
-    // /api/cron/daily (vercel.json) does this work instead of timers.
     if (!IS_VERCEL) {
       adminModule.startAutoBackup();
       adminModule.startArchiveSweep();
@@ -219,15 +146,8 @@ app.use(async function (request, response, next) {
   next();
 });
 
-// PayMongo signs the exact bytes it sends, so its webhook is read raw: this
-// comes before express.json(), which would parse the body and lose them.
 app.use("/api/paymongo/webhook", express.raw({ type: "*/*", limit: "1mb" }));
 
-// Every route reads JSON with the default limit (100 kb), far more than any form
-// sends, so one huge body cannot be pushed at a route to use up memory. The one
-// exception is the restore upload, a whole .sql file: it is skipped here and
-// read by its own route in routes/admin.js, which has a 50 MB limit and
-// only after the administrator check has passed.
 const smallJson = express.json();
 app.use(function (request, response, next) {
   if (request.method === "POST" && request.path === "/api/restore") return next();
@@ -238,7 +158,6 @@ app.get("/", function (request, response) {
   response.redirect("/Login.html");
 });
 
-// every browser asks for this; a 404 in the console hides real errors
 const FAVICON =
   "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\">" +
   "<rect width=\"32\" height=\"32\" rx=\"6\" fill=\"#1d4ed8\"/>" +
@@ -250,42 +169,25 @@ app.get(["/favicon.ico", "/favicon.svg"], function (request, response) {
   response.send(FAVICON);
 });
 
-// Only these are handed to a browser (see express.static below):
-//   public/frontend/               the pages and css            at /
-//   public/frontend/scripts/       the page scripts             at /scripts/
-//   public/frontend/connections/   the browser's API calls     at /connections/
-//   public/vendor/                 Bootstrap                    at /vendor/
-// Everything else stays private: the server code in public/backend/
-// (services/mailer.js names the mail account, services/mail-password.txt holds its
-// password, routes/login.js holds the sign-in rules), the SQL files in
-// public/database/ and the deployment tools in public/deployment/. The server
-// code no longer sits next to the browser files, so nothing there can be reached
-// by a spelling of an address. The guard below refuses those addresses outright as
-// well, in case a folder is ever served from higher up again (public/ itself, say).
 const PRIVATE_FILES = [
   /^\/back-?end(\/|$)/i,
   /^\/database(\/|$)/i,
   /^\/deployment(\/|$)/i
 ];
 
-// express.static percent-decodes and normalises the path before choosing a
-// file, so the guard has to resolve it the same way or a spelling it did not
-// think of walks past it.
 function resolvedPath(rawPath) {
   let pathname;
 
   try {
     pathname = decodeURIComponent(rawPath);
   } catch (error) {
-    return null;   // a malformed %-escape; nothing legitimate is spelled this way
+    return null;
   }
 
-  // a null byte truncates a filename; a backslash is a separator on Windows
   if (pathname.indexOf("\0") !== -1) return null;
-  pathname = pathname.replace(/\\/g, "/");     // turn every \ into /
-  pathname = pathname.replace(/\/{2,}/g, "/");  // turn // (or ///) into a single /
+  pathname = pathname.replace(/\\/g, "/");
+  pathname = pathname.replace(/\/{2,}/g, "/");
 
-  // clean up things like "/a/../b" into "/b"
   pathname = path.posix.normalize(pathname);
   if (!pathname.startsWith("/")) {
     pathname = "/" + pathname;
@@ -300,7 +202,6 @@ app.use(function (request, response, next) {
     return response.status(400).send("Bad request");
   }
 
-  // pretend private files do not exist
   for (let patternIndex = 0; patternIndex < PRIVATE_FILES.length; patternIndex++) {
     const pattern = PRIVATE_FILES[patternIndex];
     if (pattern.test(pathname)) {
@@ -311,16 +212,12 @@ app.use(function (request, response, next) {
   next();
 });
 
-// A dashboard page is served to its role only (PAGE_ROLES in roles.js), checked
-// here from the session cookie before the file server sees the request.
 app.use(async function (request, response, next) {
   if (request.method !== "GET" && request.method !== "HEAD") return next();
 
   const pathname = resolvedPath(request.path);
   if (pathname === null) return next();
 
-  // Is this one of the dashboard pages? Compared without caring about
-  // upper/lower case, because Windows file names do not care either.
   let page = null;
   const pageNames = Object.keys(PAGE_ROLES);
   for (let nameIndex = 0; nameIndex < pageNames.length; nameIndex++) {
@@ -344,9 +241,6 @@ app.use(async function (request, response, next) {
   next();
 });
 
-// Another role's dashboard is served to a staff member holding a screen that
-// page draws (granted under Access Control); the page then shows only those
-// screens (shared/features.js). The administrator's page is never visited.
 async function mayVisitPage(roleName, page) {
   if (roleName === ADMIN || PAGE_ROLES[page].includes(ADMIN)) return false;
   try {
@@ -365,21 +259,12 @@ async function mayVisitPage(roleName, page) {
   return false;
 }
 
-// the folders a browser may read from (everything else stays private)
-const PUBLIC_DIR = path.join(__dirname, "..");                // public/
-app.use(express.static(path.join(PUBLIC_DIR, "frontend")));   // /Login.html, /css/..., /scripts/..., /connections/...
-app.use("/vendor", express.static(path.join(PUBLIC_DIR, "vendor")));         // /vendor/bootstrap/...
+const PUBLIC_DIR = path.join(__dirname, "..");
+app.use(express.static(path.join(PUBLIC_DIR, "frontend")));
+app.use("/vendor", express.static(path.join(PUBLIC_DIR, "vendor")));
 
-// every /api request is checked against the access rules (access-control.js)
 app.use(accessControl.accessHook);
 
-// ==========================================
-// THE ROUTES -- each route file gets "app" plus an object with the helpers it needs
-// ==========================================
-
-// ==========================================
-// AUTH -- in routes/login.js: sign in, sign out, heartbeat, first-sign-in password
-// ==========================================
 registerLoginRoutes(app, {
   db: db, writeAuditLog: writeAuditLog, hashPassword: hashPassword, isHashed: isHashed,
   verifyPassword: verifyPassword, startSession: startSession, setSessionCookie: setSessionCookie,
@@ -390,14 +275,6 @@ registerLoginRoutes(app, {
   passwordComplaint: passwordComplaint
 });
 
-// ==========================================
-// SYSTEM ADMINISTRATION -- in routes/admin.js: staff accounts, the audit trail,
-// backup and recovery, screens by role, store settings
-// ==========================================
-// Each route file is handed an object such as { db: db, getActorId: getActorId }.
-
-// routes/admin.js calls this after a restore. Loading the procedures needs a way
-// to run a whole SQL file, and that is routes/admin.js's own (runSqlScript).
 function loadProceduresIfMissing() {
   return migrations.loadProceduresIfMissing(adminModule.runSqlScript);
 }
@@ -420,10 +297,6 @@ const adminModule = registerAdminRoutes(app, {
   receiptLayoutFrom: receiptLayoutFrom, ROLES_MANAGED_BY_MANAGER: ROLES_MANAGED_BY_MANAGER
 });
 
-// ==========================================
-// MANAGER MODULE -- in routes/manager.js: the reports, the dashboard summary, credit
-// management, and stocks with the reorder point and the selling price.
-// ==========================================
 const managerModule = registerManagerRoutes(app, {
   db: db, getActorId: getActorId, writeAuditLog: writeAuditLog, fieldChanges: fieldChanges,
   wordStartSearch: wordStartSearch, requireRole: requireRole, MANAGER: MANAGER,
@@ -433,25 +306,11 @@ const managerModule = registerManagerRoutes(app, {
   cleanPhone: cleanPhone, phoneComplaint: phoneComplaint
 });
 
-// ==========================================
-// QR PAYMENTS -- in routes/qr-payments.js: the QR code for a GCash or
-// Maya payment, through PayMongo or the offline simulation (PAYMENT_PROVIDER
-// in .env), and the record of every attempt. Registered before the cashier,
-// who asks it again before a sale or a payment is recorded against one.
-// ==========================================
 const qrPayments = registerQrPaymentRoutes(app, {
   db: db, getActorId: getActorId, publishChange: publishChange, isDateText: isDateText,
   CASHIER: CASHIER, DRIVER: DRIVER, port: port
 });
 
-// ==========================================
-// CASHIER MODULE -- in routes/cashier.js: the sales list, ringing up a sale, creating
-// and moving a delivery, the end-of-shift summary, payments on a sale
-// ==========================================
-// ==========================================
-// VOID REQUESTS -- in routes/void-requests.js: a cashier asks for a sale of the
-// same day to be voided, and a manager approves or declines it
-// ==========================================
 registerVoidRequestRoutes(app, {
   db: db, getActorId: getActorId, publishChange: publishChange, CASHIER: CASHIER
 });
@@ -462,36 +321,20 @@ registerCashierRoutes(app, {
   qrPayments: qrPayments
 });
 
-// ==========================================
-// DELIVERY PERSONNEL MODULE -- in routes/delivery.js: the deliveries list, a driver's
-// runs, cash collected at the door, the driver's summary
-// ==========================================
 registerDeliveryRoutes(app, {
   db: db, getActorId: getActorId, isDateText: isDateText, publishChange: publishChange,
   DELIVERY_CONTACT_SQL: DELIVERY_CONTACT_SQL, DELIVERY_PHONE_SQL: DELIVERY_PHONE_SQL,
   qrPayments: qrPayments
 });
 
-// ==========================================
-// INVENTORY MODULE -- in routes/inventory-clerk.js: the clerk's summary and material list,
-// selling units, stock adjustments, reorder points, purchase orders, returns
-// and damage reports, and the notifications every role reads
-// ==========================================
 registerInventoryRoutes(app, {
   db: db, getActorId: getActorId, writeAuditLog: writeAuditLog, fieldChanges: fieldChanges,
   DEFAULT_STORE_SETTINGS: DEFAULT_STORE_SETTINGS, CASHIER: CASHIER, DRIVER: DRIVER,
   phoneComplaint: phoneComplaint, cleanPhone: cleanPhone, publishChange: publishChange
 });
 
-// ==========================================
-// SHARED ROUTES -- in routes/shared.js: the live channel, My Account, records,
-// archives and the daily job. Last, because the daily job runs the sweeps of
-// the admin and manager route files.
-// ==========================================
 registerSharedRoutes(app, { adminModule: adminModule, managerModule: managerModule });
 
-// npm start runs this file and it listens on the port; on Vercel,
-// api/index.js loads it and Vercel hands it the requests.
 if (require.main === module) {
   app.listen(port, function () {
     console.log("Server running at http://localhost:" + port);

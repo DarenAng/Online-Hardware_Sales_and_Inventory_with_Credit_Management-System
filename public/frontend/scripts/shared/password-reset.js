@@ -1,14 +1,3 @@
-// password-reset.js -- "Forgot your password?" on the sign-in page
-// Loaded by: Login.html
-//
-// Three steps on a second card: the address the code goes to, then the code
-// from the mail (checked by the server before going on), then the new
-// password. The server answers the first step the same way whether or not the
-// address has an account, so this screen never says which it was either. Once
-// the new password is saved the person is signed in with it and taken to
-// their own screen.
-
-// the address the code was sent to, and the code once it is accepted
 let resetEmail = '';
 let resetCode = '';
 
@@ -27,7 +16,6 @@ function showResetAlert(message, tone) {
     box.hidden = !message;
 }
 
-// shows one of the three forms: 'request', 'code' or 'password'
 function showResetStep(step) {
     const request = document.getElementById('reset-request-form');
     const code = document.getElementById('reset-code-form');
@@ -45,7 +33,6 @@ function setResetLead(text) {
     if (lead) lead.textContent = text;
 }
 
-// from the link under the sign-in form; the address already typed there is carried over
 function openPasswordReset() {
     const typed = document.getElementById('login-email');
     const box = document.getElementById('reset-email');
@@ -62,7 +49,6 @@ function closePasswordReset() {
     if (email) email.focus();
 }
 
-// step 1 again, for a code that did not arrive or ran out
 function showResetRequest() {
     const code = document.getElementById('reset-code-form');
     const confirm = document.getElementById('reset-confirm-form');
@@ -76,7 +62,6 @@ function showResetRequest() {
     showResetAlert('');
 }
 
-// the code step, shown after a code is sent or when the code stops working
 function showResetCodeStep() {
     resetCode = '';
     showResetStep('code');
@@ -97,7 +82,6 @@ function setBusy(buttonId, busy, idleText, busyText) {
     button.textContent = busy ? busyText : idleText;
 }
 
-// step 1: send the code
 async function handleResetRequest(event) {
     event.preventDefault();
 
@@ -117,7 +101,6 @@ async function handleResetRequest(event) {
         const result = await response.json();
 
         if (!response.ok) {
-            // mail not set up is said in full, with who can help instead
             showResetAlert(result.error || 'The code could not be sent.');
             return;
         }
@@ -132,7 +115,6 @@ async function handleResetRequest(event) {
     }
 }
 
-// step 2: check the code before the new password is asked for
 async function handleResetVerify(event) {
     event.preventDefault();
 
@@ -172,7 +154,6 @@ async function handleResetVerify(event) {
     }
 }
 
-// step 3: save the new password, then go straight in
 async function handleResetConfirm(event) {
     event.preventDefault();
 
@@ -201,7 +182,6 @@ async function handleResetConfirm(event) {
 
         if (!response.ok) {
             if (response.status === 400 && String(result.error || '').indexOf('code') !== -1) {
-                // the code ran out in the meantime: back to the code step
                 form.reset();
                 showPasswordRules();
                 showResetCodeStep();
@@ -210,8 +190,7 @@ async function handleResetConfirm(event) {
             return;
         }
 
-        // signed in by the server: straight to this person's own screen
-        forgetLoadedPanels();   // a new sign-in starts with closed tables
+        forgetLoadedPanels();
         localStorage.setItem('currentUser', JSON.stringify(result.user));
         window.location.replace(landingPageFor(result.user));
     } catch (error) {

@@ -1,29 +1,13 @@
-/* ==========================================================================
-   manager.css -- styles only the Manager page uses
-   Loads after general-ui.css and responsive.css, so anything here wins.
-   The purchase order screens it shares with the inventory clerk are in
-   shared/responsive.css, under PURCHASE ORDERS.
-   ========================================================================== */
-
-/* ==========================================================================
-   THE FIGURES
-   ========================================================================== */
 .kpi-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 12px;
 }
-/* QR Payments: six small figures in one row on a desktop */
 .qr-kpis {
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     margin-bottom: 16px;
 }
 
-/* ==========================================================================
-   COUNTERS AND FILTERS
-   ========================================================================== */
-/* Policy Maintenance: the forms take the screen's width, the back of the
-   customer card stays beside them as they are typed in */
 .policy-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(320px, 40%);
@@ -41,9 +25,6 @@
     .policy-preview-card { position: static; }
 }
 
-/* ==========================================================================
-   TABS
-   ========================================================================== */
 .tab-header {
     display: flex;
     gap: 22px;
@@ -53,9 +34,6 @@
     -webkit-overflow-scrolling: touch;
 }
 
-/* ==========================================================================
-   THE REORDER FORMULA
-   ========================================================================== */
 .formula-preview {
     display: flex;
     flex-direction: column;
@@ -76,9 +54,6 @@
 }
 .formula-verdict { font-size: 14px; color: var(--steel); line-height: 1.55; }
 
-/* ==========================================================================
-   CREDIT
-   ========================================================================== */
 .history-split {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -95,17 +70,10 @@
     .history-split { grid-template-columns: 1fr; }
 }
 
-/* A debt that has aged past a month is not yet a problem and is no longer
-   just a fact, which is exactly what yellow means everywhere else here. */
 .text-warn { color: var(--signal-ink); font-weight: 600; }
 
-/* the preview on the credit card turns red when the answer is "they cannot
-   take anything", the same as it turns green when they can */
 .formula-preview.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
 
-/* ==========================================================================
-   TABBED SCREENS
-   ========================================================================== */
 .view-nav {
     display: flex;
     align-items: stretch;
@@ -130,7 +98,6 @@
     flex: none;
 }
 .view-nav-group[hidden] { display: none; }
-/* a hairline between the groups */
 .view-nav-group + .view-nav-group { border-left: 1px solid var(--line); }
 
 .view-nav-label {
@@ -142,7 +109,6 @@
 }
 .view-nav-tabs { display: flex; gap: 8px; }
 
-/* each view is a button: outlined at rest, tinted on hover, filled when open */
 .view-tab {
     display: inline-flex;
     align-items: center;
@@ -172,9 +138,6 @@
 }
 .view-tab:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-/* ==========================================================================
-   THE TAB BAR ON A PHONE -- it scrolls sideways; the groups keep their captions
-   ========================================================================== */
 @media (max-width: 640px) {
     .view-nav { padding: 0; }
     .view-nav-group { padding: 10px 12px; }
@@ -182,39 +145,22 @@
     .view-tab { font-size: 14.5px; padding: 7px 12px; }
 }
 
-/* ==========================================================================
-   UP TO 640px -- a phone
-   ========================================================================== */
 @media (max-width: 640px) {
-    /* the totals sit two to a row, so four of them take two rows, not four;
-       the cards and the figures are a little smaller to fit half the width */
     .kpi-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
 }
 
-/* ==========================================================================
-   UP TO 339px  --  a very narrow phone: the totals go back to one a row
-   ========================================================================== */
 @media (max-width: 339px) {
     .kpi-grid { grid-template-columns: 1fr; }
 }
 
-/* ==========================================================================
-   SALES SUMMARY -- a period, four figures, then the two breakdowns side by side
-   ========================================================================== */
 #report-summary .kpi-grid { margin-top: 16px; }
 @media (min-width: 900px) {
-    /* total sales, transactions, units sold and average sale in one row */
     #report-summary .kpi-grid { grid-template-columns: repeat(4, 1fr); }
 }
 
-/* Total Purchases: the four figures sit between the filters and the orders */
 #po-totals-kpis:not(:empty) { margin-bottom: 16px; }
 
-/* a smaller laptop: the month and supplier boxes are as wide as their longest
-   name, which pushed Show All Purchases onto a second line; the list that opens
-   still shows the whole name */
 @media screen and (min-width: 641px) and (max-width: 1439px) {
-    /* min-width 0: the toolbar's 150px minimum would otherwise win over the cap */
     #po-totals-month, #po-totals-supplier { min-width: 0; max-width: 128px; }
 }
 
@@ -223,8 +169,6 @@
 #report-summary > .card { margin-bottom: 16px; }
 #report-summary > .summary-card { margin-bottom: 0; }
 
-/* The two breakdowns share one card. A row of tabs on top picks which table
-   shows; the open tab is underlined in orange, like the tabs in a popup. */
 .summary-tabs {
     display: flex;
     gap: 24px;
@@ -235,7 +179,7 @@
     background: none;
     border: none;
     border-bottom: 2px solid transparent;
-    margin-bottom: -1px;            /* the underline sits on the grey line */
+    margin-bottom: -1px;
     padding: 10px 2px;
     cursor: pointer;
     font-family: var(--font-ui);
@@ -247,54 +191,31 @@
 .summary-tab.active { color: var(--go); border-bottom-color: var(--go); }
 .summary-tab:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-/* each table's own heading is for the printout only; on screen the tab names it */
 .summary-pane-title { display: none; }
 .summary-pane[hidden] { display: none; }
 
-/* ==========================================================================
-   STOCKS -- the counts over the overview are legend and filter
-   ========================================================================== */
 #stock-legend:empty { display: none; }
-/* the longest option would otherwise set the width and push Clear to a second line */
 #stock-overview .panel-toolbar select { max-width: 200px; }
 #stock-overview .panel-toolbar .search-wrap { flex-basis: 200px; }
 #stock-reorder .cell-due { font-weight: 600; }
 #reorder-table .badge, #stocks-table .badge { margin-left: 6px; }
-/* eight columns: on a 1280px screen the table is a few pixels wider than its
-   card, so its headings may wrap onto two lines */
 @media screen and (max-width: 1439px) {
     #reorder-table th { white-space: normal; }
 }
 
-/* Money owed is the only figure in the reports that is a problem rather than
-   a fact, so it is the only one that carries a colour. */
 #income-methods-table .cell-due,
 #unpaid-table .cell-due,
 #loyal-table .cell-due { font-weight: 600; }
 
-/* ==========================================================================
-   DELIVERY TRACKING
-   ========================================================================== */
-/* the balance still owed is the figure this screen is read for */
 #deliveries-table .cell-due { font-weight: 600; }
 
-/* ==========================================================================
-   MASTER RECORDS -- one table that changes shape; nothing here assumes a column count
-   ========================================================================== */
 #records-table th { text-transform: none; }
 
-/* ==========================================================================
-   ARCHIVES
-   ========================================================================== */
 #panel-archives .filter-row { margin-bottom: 16px; }
 
-/* ==========================================================================
-   ACCOUNT MANAGEMENT -- Create Account, as a popup over the screen
-   ========================================================================== */
 .create-box { max-width: 640px; }
 #newacct-modal .grid-2 { align-items: start; }
 
-/* what is wrong with a box, said under it */
 .field-error {
     display: block;
     margin-top: 5px;
@@ -306,19 +227,12 @@
 .form-control.is-bad { border-color: var(--stop); }
 .form-control.is-bad:focus { box-shadow: 0 0 0 3px var(--stop-dim); }
 
-/* ==========================================================================
-   ON PAPER -- the table is unpaged; the Sales Summary prints both tables
-   ========================================================================== */
-/* The Totals table at the foot of a printed report (printReport adds it just
-   before printing). It is never on the screen. */
 .print-totals { display: none; }
 
 @media print {
-    /* the printout shows both breakdowns, one under the other, each with its heading */
     .summary-pane[hidden] { display: block !important; }
     .summary-pane-title { display: block; font-size: 14px; margin: 16px 0 6px; }
 
-    /* the status cards come off the printout; their figures are in the Totals table */
     body.is-printing .kpi-grid { display: none !important; }
 
     body.is-printing .print-totals {
@@ -331,15 +245,9 @@
     body.is-printing .print-totals table { width: auto; min-width: 280px; }
     body.is-printing .print-totals td { padding: 4px 14px 4px 0; }
 
-    /* the views share a screen; Print on one sends that view alone
-       (printReport marks it) */
     body.is-printing .panel-view:not(.is-print-target) { display: none !important; }
 }
 
-/* ==========================================================================
-   EXPORT -- Spreadsheet and Print / PDF behind one button (manager.js
-   buildExportMenus); the menu opens under it
-   ========================================================================== */
 .export-menu { position: relative; display: inline-block; }
 .export-menu-list {
     position: absolute;
@@ -354,8 +262,6 @@
     box-shadow: var(--lift-high);
 }
 .export-menu-list[hidden] { display: none; }
-/* a button's own text is white (it sits on dark); in the white menu it is dark,
-   whether or not the pointer is over it */
 .export-menu-list .btn {
     display: block;
     width: 100%;
@@ -369,13 +275,10 @@
 .export-menu-list .btn:disabled { background: transparent; color: var(--steel-soft); }
 .export-menu .export-caret { margin-left: 6px; font-size: 0.75em; }
 
-/* a hint beside a field's name sits at the right end of the label row */
 .form-group label .label-hint,
 .form-group > .label-hint { float: right; margin-left: 8px; text-align: right; }
 .form-group > .label-hint { float: none; display: block; }
 
-/* a credit account's card is one fixed size on every tab (Account, Purchases,
-   Payments, Extension Requests), so switching tabs never moves its edges */
 @media (min-width: 641px) and (min-height: 561px) {
     #credit-modal .modal-box {
         height: min(590px, calc(100vh - 52px - 4vh));
@@ -383,13 +286,9 @@
     #credit-modal .modal-body { overflow-y: auto; }
 }
 
-/* Custom date puts From and To beside the Period box: the search box gives up
-   some width so the row still fits on a laptop screen */
 .panel-toolbar:has(.toolbar-date:not([hidden])) .search-wrap { flex: 1 1 150px; min-width: 140px; }
 .panel-toolbar:has(.toolbar-date:not([hidden])) .toolbar-date input { width: 150px; }
 
-/* Total Purchases: the Month box is typed in, with the months listed under it
-   (purchase-orders.js poMonthSuggest) */
 .toolbar-field .month-search { min-width: 190px; }
 .month-wrap .form-control { padding-right: 34px; }
 .month-wrap .suggest-clear[hidden] { display: none; }

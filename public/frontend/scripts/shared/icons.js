@@ -1,28 +1,4 @@
-// icons.js -- the Bootstrap Icons that are put in by script
-// Loaded by: every page, right after Bootstrap (icons from vendor/bootstrap-icons/)
-//
-// The sidebar and the sign-in fields have their icons written in the HTML.
-// Everything else is drawn by the page scripts after the page loads, so the
-// icons for those are added here, and added again whenever the page changes:
-//
-//   buttons          by the button's first words: "Save ..." gets a tick,
-//                    "Print ..." a printer (BUTTON_PHRASES and BUTTON_WORDS)
-//   the screen tabs  the same icon as the sidebar entry they copy
-//   the page title   the icon of the sidebar entry for the screen showing
-//   summary cards    by the card's label (KPI_ICONS)
-//
-// A button can choose its own icon or refuse one:
-//   <button data-icon="star">        <button data-no-icon>
-// data-no-icon on a container (a table, a form) refuses it for every button inside.
-//
-// The icons are empty <i> tags drawn by the icon font, so they add no text:
-// button.textContent and every label a script reads stay exactly as they were.
-
-// Everything is inside one function so its helper names stay private to this
-// file (no other script can see or clash with them). It is called once, at the
-// very bottom.
 function setUpIcons() {
-    // whole phrases first: "Sign in" and "Sign out" share a first word
     const BUTTON_PHRASES = [
         ['sign in', 'box-arrow-in-right'],
         ['sign out', 'box-arrow-right'],
@@ -60,10 +36,8 @@ function setUpIcons() {
         lock: 'lock', unlock: 'unlock'
     };
 
-    // words whose icon reads better after them: "Next ->"
     const TRAILING = ['next'];
 
-    // a summary card's label, matched by the words in it
     const KPI_ICONS = [
         [/refund/i, 'arrow-counterclockwise'],
         [/collect/i, 'cash-stack'],
@@ -95,8 +69,6 @@ function setUpIcons() {
         return BUTTON_WORDS[first] || null;
     }
 
-    // Put icon `name` first inside `element`, or change or remove the one
-    // already there. Only the icon this file added is ever touched.
     function setIcon(element, name, extraClass, atEnd) {
         let icon = element.querySelector(':scope > i.bi-auto');
         if (!name) {
@@ -115,8 +87,6 @@ function setUpIcons() {
         else element.insertBefore(icon, element.firstChild);
     }
 
-    // the icon a sidebar entry carries, found by the entry's words (a heading's
-    // caret is not part of its words)
     function sidebarIcon(label) {
         const wanted = label.replace(/\s+/g, ' ').trim().toLowerCase();
         const links = document.querySelectorAll('.sidebar-nav a');
@@ -133,7 +103,6 @@ function setUpIcons() {
     }
 
     function iconName(icon) {
-        // the name after "bi-" in the class list, skipping the "bi-auto" marker
         const match = icon.className.match(/\bbi-(?!auto\b)([a-z0-9-]+)/);
         return match ? match[1] : null;
     }
@@ -143,21 +112,17 @@ function setUpIcons() {
         for (let i = 0; i < buttons.length; i++) {
             const button = buttons[i];
             if (button.closest('[data-no-icon], .sidebar-nav, .sidebar-brand')) continue;
-            // a button that already shows a picture of its own keeps it
             if (button.querySelector('svg, img, i.bi:not(.bi-auto)')) continue;
             if (button.classList.contains('subnav-tab')) {
                 setIcon(button, sidebarIcon(button.textContent), 'tab-icon');
                 continue;
             }
-            // the button's first word (letters only), in lower case
             const first = (words(button).match(/^[a-z]+/) || [''])[0];
             const atEnd = TRAILING.indexOf(first) !== -1 && !button.hasAttribute('data-icon');
             setIcon(button, iconForButton(button), atEnd ? 'btn-icon btn-icon-end' : 'btn-icon', atEnd);
         }
     }
 
-    // The title is a sibling icon, not one inside it: the page scripts set the
-    // title with textContent, which would wipe an icon inside.
     function decorateTitles() {
         const titles = document.querySelectorAll('.topbar-title');
         for (let i = 0; i < titles.length; i++) {
@@ -186,7 +151,6 @@ function setUpIcons() {
         for (let i = 0; i < labels.length; i++) {
             const label = labels[i];
             const text = label.textContent;
-            // the first icon whose pattern matches the label
             let iconNameFound = null;
             for (let k = 0; k < KPI_ICONS.length; k++) {
                 if (KPI_ICONS[k][0].test(text)) {
@@ -204,9 +168,6 @@ function setUpIcons() {
         decorateCards();
     }
 
-    // Many changes arrive at once (a table of rows with buttons); one pass per
-    // frame covers them all. The pass's own changes cause one more pass, which
-    // finds nothing to do, so it never loops.
     let queued = false;
     function queue() {
         if (queued) return;

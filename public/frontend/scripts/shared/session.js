@@ -1,11 +1,3 @@
-// session.js -- session and sign in
-// Loaded by: every page
-
-// A refused sign-in is answered at the form, not by a corner card, and stays
-// until the next attempt.
-// The alert is crimson for a refusal; 'good' turns it green for the one kind
-// of news that lands here without anything having gone wrong -- a password
-// just changed, so the person is back at sign-in on purpose.
 function showLoginAlert(message, tone) {
     const box = document.getElementById('login-alert');
     if (!box) return;
@@ -24,8 +16,6 @@ function clearLoginAlert() {
     box.hidden = true;
 }
 
-// The server answers a wrong address and a wrong password with the same
-// sentence, so a domain one letter off a common one is pointed out here first.
 const COMMON_MAIL_DOMAINS = [
     'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com',
     'icloud.com', 'live.com', 'protonmail.com', 'yahoo.com.ph'
@@ -49,7 +39,6 @@ function editDistance(a, b) {
     return rows[a.length][b.length];
 }
 
-// the domain this address probably meant, or null
 function likelyMailDomain(email) {
     const at = String(email).lastIndexOf('@');
     if (at < 1) return null;
@@ -68,13 +57,11 @@ function likelyMailDomain(email) {
     return best ? best.domain : null;
 }
 
-// A screen that sends the browser to sign in has a sentence to say; a card
-// would be destroyed by the navigation, so it is parked in sessionStorage.
 function rememberSignOutReason(text, tone) {
     try {
         sessionStorage.setItem('signOutReason', String(text || ''));
         sessionStorage.setItem('signOutTone', String(tone || ''));
-    } catch (error) { /* private mode */ }
+    } catch (error) {  }
 }
 
 function showRememberedSignOutReason() {
@@ -85,7 +72,7 @@ function showRememberedSignOutReason() {
         tone = sessionStorage.getItem('signOutTone') || '';
         sessionStorage.removeItem('signOutReason');
         sessionStorage.removeItem('signOutTone');
-    } catch (error) { /* nothing stored */ }
+    } catch (error) {  }
 
     if (text) showLoginAlert(text, tone);
 }
@@ -103,14 +90,8 @@ async function handleLogin(event) {
         const result = await response.json();
 
         if (!response.ok) {
-            // A wrong password is also a 401, but on this form it never means an
-            // expired session, so it is answered here instead of via handleAuthFailure.
             const reason = String(result.error || 'That sign-in did not work').trim();
 
-            // a held account (423) says all it needs to; a wrong password gets
-            // the usual advice, plus the warning when the next one holds it.
-            // (reason.replace(/[.!]?$/, '.') ends the sentence with a full stop:
-            // a "." or "!" already at the end is swapped for ".")
             if (response.status === 423) {
                 showLoginAlert(reason.replace(/[.!]?$/, '.'));
             } else {
@@ -138,11 +119,9 @@ async function handleLogin(event) {
 
         clearLoginAlert();
 
-        forgetLoadedPanels();   // a new sign-in starts with closed tables
+        forgetLoadedPanels();
         localStorage.setItem('currentUser', JSON.stringify(result.user));
 
-        // replace, not assign: the sign-in page leaves the history, so the
-        // browser's Back button cannot return to it once signed in
         window.location.replace(landingPageFor(result.user));
     } catch (error) {
         notifyError('The server is not answering. Start it with npm start in the project folder, then try again.',
@@ -168,7 +147,6 @@ async function handlePasswordChange(event) {
         return;
     }
 
-    // the same rules the server checks (passwordComplaint in format.js)
     const complaint = passwordComplaint(newPassword);
     if (complaint) {
         notifyWarning(complaint, 'Password not saved');
@@ -184,8 +162,6 @@ async function handlePasswordChange(event) {
             return;
         }
 
-        // the server kept this screen signed in on a new session, so carry on
-        // straight to the dashboard
         currentUser.must_change_password = false;
         localStorage.setItem('currentUser', JSON.stringify(currentUser));
         window.location.replace(landingPageFor(currentUser));
@@ -194,7 +170,6 @@ async function handlePasswordChange(event) {
     }
 }
 
-// where a signed-in person belongs: their dashboard, or the password screen first
 function landingPageFor(user) {
     return user.must_change_password ? 'change-password.html' : getRolePage(user.role_name);
 }
@@ -211,7 +186,6 @@ function getRolePage(roleName) {
     return rolePages[roleName] || 'Login.html';
 }
 
-// The way out after the server has already closed the session.
 function signOutWithReason(reason, tone) {
     localStorage.removeItem('currentUser');
     rememberSignOutReason(reason, tone);
@@ -242,7 +216,6 @@ function initializeSession() {
             sendSignedInPersonOn(currentUser);
             return;
         }
-        // every way of signing out ends here, so nobody inherits loaded tables
         forgetLoadedPanels();
         showRememberedSignOutReason();
         return;
@@ -258,11 +231,6 @@ function initializeSession() {
         return;
     }
 
-    // The four staff dashboards. Another role's dashboard may be opened to use a
-    // screen the System Administrator granted there (Access Control): the page is
-    // then "visited", and shared/features.js shows only the granted screens, or
-    // sends the person back to their own dashboard when there are none. The
-    // administrator has a page of their own and no staff screens.
     const STAFF_PAGES = ['manager.html', 'inventory-dashboard.html', 'cashier-dashboard.html', 'delivery.html'];
     if (STAFF_PAGES.indexOf(pageName) !== -1) {
         const ownPage = getRolePage(currentUser.role_name).toLowerCase();
@@ -289,39 +257,24 @@ function initializeSession() {
     applyCurrentUserToPage(currentUser);
     applyAccessMarks(currentUser);
     startHeartbeat();
-    // a Cashier is never signed out for being idle (sessionExpiry in sessions.js)
     if (currentUser.role_name !== 'Cashier') startIdleWatch();
     holdAgainstBack();
 
     if (typeof startLiveSync === 'function') startLiveSync();
 }
 
-// ==========================================
-// THE BACK BUTTON, ONCE SIGNED IN
-//
-// Three layers, because browsers differ:
-//   1. signing in replaces the sign-in page in the history (handleLogin), so
-//      there is nothing behind the dashboard to go back to;
-//   2. a signed-in page pins itself: a Back press or swipe pops the pinned
-//      entry and the page pins itself again, staying put;
-//   3. the sign-in page itself sends anybody still signed in straight on,
-//      including a copy restored from the back-forward cache on a phone.
-// ==========================================
 function holdAgainstBack() {
     if (!window.history || typeof window.history.pushState !== 'function') return;
 
     try {
         window.history.pushState({ held: true }, '', window.location.href);
-    } catch (error) { return; }   // a file:// page, or a browser that refuses
+    } catch (error) { return; }
 
     window.addEventListener('popstate', function () {
-        try { window.history.pushState({ held: true }, '', window.location.href); } catch (error) { /* stay */ }
+        try { window.history.pushState({ held: true }, '', window.location.href); } catch (error) {  }
     });
 }
 
-// A person on the sign-in page who is still signed in belongs on their own
-// screen. The server is asked first, so a session that has already ended
-// leaves them here to sign in again rather than bouncing them twice.
 function sendSignedInPersonOn(currentUser) {
     apiGetMyAccount()
         .then(function (response) {
@@ -334,13 +287,10 @@ function sendSignedInPersonOn(currentUser) {
             showRememberedSignOutReason();
         })
         .catch(function () {
-            // the server is not there; the form is the right place to be
             showRememberedSignOutReason();
         });
 }
 
-// A page brought back from the back-forward cache (a phone's swipe-back does
-// this) runs no scripts on the way in, so the session is checked again.
 window.addEventListener('pageshow', function (event) {
     if (!event.persisted) return;
 
@@ -352,9 +302,6 @@ window.addEventListener('pageshow', function (event) {
     if (!onLoginPage && !currentUser) window.location.replace('Login.html');
 });
 
-// The staff directory shows who is signed in from when the server last heard
-// from each session; a page left open makes no requests, so this pings once
-// a minute while the tab is visible.
 const HEARTBEAT_MS = 60 * 1000;
 let heartbeatTimer = null;
 
@@ -364,13 +311,12 @@ function sendHeartbeat() {
     apiSendHeartbeat()
         .then(function (response) { return response.ok ? response.json() : null; })
         .then(function (body) {
-            // the server says how long a screen may sit unused (SESSION_IDLE_MINUTES)
             if (body && body.idleMinutes > 0) {
                 IDLE_LIMIT_MS = body.idleMinutes * 60 * 1000;
-                IDLE_WARNING_MS = Math.min(60 * 1000, IDLE_LIMIT_MS / 2);   // a minute before
+                IDLE_WARNING_MS = Math.min(60 * 1000, IDLE_LIMIT_MS / 2);
             }
         })
-        .catch(function () { /* the server is not there; nothing to say about it */ });
+        .catch(function () {  });
 }
 
 function startHeartbeat() {
@@ -384,36 +330,24 @@ function startHeartbeat() {
     });
 }
 
-// ==========================================
-// SIGNING OUT WHEN THE SCREEN IS NOT USED
-//
-// The mouse, the keyboard, the wheel and touch count as using the screen. The
-// time of the latest one is kept in localStorage, so every tab of the site
-// shares it: working in one tab keeps the others signed in. A minute before
-// the limit a card warns; at the limit the person is signed out and sent to
-// the sign-in page with the reason. The server enforces the same limit
-// (SESSION_IDLE_MINUTES in sessions.js), counting only asks sent while the
-// screen was in use: apiHeaders marks the others X-Background.
-// ==========================================
-let IDLE_LIMIT_MS = 30 * 60 * 1000;   // unused this long and the sign-in ends (30 until the server's heartbeat answer says otherwise)
-let IDLE_WARNING_MS = 60 * 1000;      // the card shows this long before that
+let IDLE_LIMIT_MS = 30 * 60 * 1000;
+let IDLE_WARNING_MS = 60 * 1000;
 
 const ACTIVITY_KEY = 'lastActivity';
-const ACTIVITY_SAVE_MS = 2000;            // write to localStorage at most this often
-const ACTIVE_LATELY_MS = 70 * 1000;       // a bit longer than the heartbeat gap
+const ACTIVITY_SAVE_MS = 2000;
+const ACTIVE_LATELY_MS = 70 * 1000;
 
-let lastActivityAt = Date.now();          // this tab's own copy; opening the page counts
+let lastActivityAt = Date.now();
 let lastActivitySavedAt = 0;
-let lastMouseSpot = '';                   // where the mouse was at its last move
+let lastMouseSpot = '';
 let idleTimer = null;
 let idleWarningShown = false;
 
-// the time of the latest activity in any tab (this tab's own copy if localStorage is blocked)
 function latestActivity() {
     let saved = 0;
     try {
         saved = Number(localStorage.getItem(ACTIVITY_KEY)) || 0;
-    } catch (error) { /* blocked: this tab's own copy is all there is */ }
+    } catch (error) {  }
 
     return Math.max(lastActivityAt, saved);
 }
@@ -427,21 +361,16 @@ function noteActivity(saveNow) {
 
     try {
         localStorage.setItem(ACTIVITY_KEY, String(now));
-    } catch (error) { /* blocked */ }
+    } catch (error) {  }
 }
 
-// used by apiHeaders: has anybody touched the site (in any tab) in the last minute or so?
 function userWasActiveLately() {
     return Date.now() - latestActivity() < ACTIVE_LATELY_MS;
 }
 
 function onUserActivity(event) {
-    // while the warning is up only its own button counts, so the card cannot
-    // be dismissed by a bump of the mouse
     if (idleWarningShown) return;
 
-    // A mousemove at the same spot is not a person: the browser fires one when
-    // the page moves under a still mouse (a table redrawn by a live update).
     if (event.type === 'mousemove') {
         const spot = event.screenX + ',' + event.screenY;
         if (spot === lastMouseSpot) return;
@@ -455,8 +384,6 @@ function startIdleWatch() {
 
     noteActivity(true);
 
-    // The scroll event is not used: the page scrolls by itself when a live
-    // update changes a table's height. A wheel turn or a finger drag is a person.
     const activityEvents = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart', 'touchmove'];
     for (let i = 0; i < activityEvents.length; i++) {
         document.addEventListener(activityEvents[i], onUserActivity, { capture: true, passive: true });
@@ -473,7 +400,7 @@ function checkIdle() {
     } else if (idleFor >= IDLE_LIMIT_MS - IDLE_WARNING_MS) {
         showIdleWarning(IDLE_LIMIT_MS - idleFor);
     } else if (idleWarningShown) {
-        hideIdleWarning();   // another tab was used meanwhile
+        hideIdleWarning();
     }
 }
 
@@ -484,7 +411,7 @@ function buildIdleWarning() {
         modal = document.createElement('div');
         modal.className = 'modal';
         modal.id = 'idle-modal';
-        modal.setAttribute('data-modal-locked', '');   // Escape does not close it
+        modal.setAttribute('data-modal-locked', '');
         modal.innerHTML = '\n' +
             '            <div class="modal-box ask-box">\n' +
             '                <div class="modal-head">\n' +
@@ -507,7 +434,6 @@ function buildIdleWarning() {
             '            </div>';
     }
 
-    // added last, so it sits above any other card that is open
     document.body.appendChild(modal);
     return modal;
 }
@@ -529,7 +455,6 @@ function hideIdleWarning() {
     closeModal('idle-modal');
 }
 
-// "Stay signed in": counts as use, and tells the server straight away
 function stayAfterWarning() {
     hideIdleWarning();
     noteActivity(true);
@@ -549,8 +474,6 @@ function signOutForInactivity() {
     window.location.replace('Login.html');
 }
 
-// Fallback spelling of a name before /api/me answers: first, middle initial,
-// last -- the same as staff.full_name.
 function staffName(user) {
     if (!user) return '';
     if (user.full_name) return user.full_name;
@@ -562,9 +485,6 @@ function staffName(user) {
     return spelled.trim() || user.email || '';
 }
 
-// Page-side half of access control: any element marked
-//   data-access="Manager,System Administrator"
-// is removed for other roles. It hides and never grants.
 function currentRole() {
     const user = getCurrentUser();
     return user ? String(user.role_name || '') : '';
@@ -572,7 +492,6 @@ function currentRole() {
 
 function hasRole() {
     const role = currentRole().toLowerCase();
-    // true when any of the role names given to hasRole is this person's role
     for (let i = 0; i < arguments.length; i++) {
         if (String(arguments[i]).trim().toLowerCase() === role) return true;
     }
@@ -587,7 +506,6 @@ function applyAccessMarks(currentUser) {
         const element = marked[i];
         if (element.closest('.sidebar-nav')) continue;
 
-        // data-access="Manager, Cashier" -> ['manager', 'cashier']
         const allowed = [];
         const parts = String(element.getAttribute('data-access') || '').split(',');
         for (let p = 0; p < parts.length; p++) {

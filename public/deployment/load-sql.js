@@ -1,19 +1,3 @@
-// ============================================================
-// load-sql.js -- run .sql files against a MySQL database, such as Aiven
-//
-// MySQL Workbench works too; this needs nothing but Node, reads the same
-// DB_* settings as the app, and speaks SSL to a cloud database the same way.
-//
-//   node public/deployment/load-sql.js --env .env.aiven public/database/1-RUN-FIRST-database.sql --yes
-//   node public/deployment/load-sql.js --env .env.aiven public/database/2-RUN-SECOND-stored-procedures.sql
-//   node public/deployment/load-sql.js --env .env.aiven --database hardware_db backups/hardware_db_backup_2026-10-09_0027.sql
-//
-//   --env FILE        the settings file to read (default .env)
-//   --database NAME   run the files inside this database (a backup file names
-//                     none; files 1 and 2 choose hardware_db themselves)
-//   --yes             needed for a file that drops a database (file 1 does)
-// ============================================================
-
 const fs = require("fs");
 const path = require("path");
 const dotenv = require("dotenv");
@@ -30,10 +14,10 @@ function readArguments(argv) {
   for (let i = 0; i < argv.length; i++) {
     const word = argv[i];
     if (word === "--env") {
-      i += 1;                       // the word after --env is the file name
+      i += 1;
       options.env = argv[i];
     } else if (word === "--database") {
-      i += 1;                       // the word after --database is the database name
+      i += 1;
       options.database = argv[i];
     } else if (word === "--yes") {
       options.yes = true;
@@ -44,7 +28,6 @@ function readArguments(argv) {
   return options;
 }
 
-// the same as sslOptions() in public/backend/database/connection.js
 function sslOptions() {
   let ca = process.env.DB_SSL_CA || "";
   if (!ca && process.env.DB_SSL_CA_FILE) {
@@ -68,7 +51,6 @@ async function main() {
   }
   dotenv.config({ path: envPath, override: true, quiet: true });
 
-  // read every file first, so a missing one stops us before anything runs
   const scripts = [];
   for (let fileIndex = 0; fileIndex < options.files.length; fileIndex++) {
     const file = options.files[fileIndex];
@@ -78,7 +60,6 @@ async function main() {
 
   for (let scriptIndex = 0; scriptIndex < scripts.length; scriptIndex++) {
     const script = scripts[scriptIndex];
-    // the words "drop database" with any white space between them
     if (/drop\s+database/i.test(script.sql) && !options.yes) {
       console.error(script.file + " drops a whole database and puts the demo data back.");
       console.error("Add --yes if that is what you want. Nothing was run.");

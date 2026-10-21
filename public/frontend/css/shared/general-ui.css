@@ -1,93 +1,53 @@
-/* ==========================================================================
-   GENERAL UI
-   Lucelyn Hardware - Sales & Inventory with Credit Management
-
-   Everything two or more pages share. Styles only one page uses live in
-   css/pages/<page>.css, the phone layout in css/shared/responsive.css. Load
-   order on every page (supplier-order.html stops after this file):
-       shared/general-ui.css  ->  shared/responsive.css  ->  pages/<page>.css
-
-   Colour meanings, held on every screen:
-     ORANGE  press this (buttons, the menu item you are on, the tab, the brand)
-     GREEN   fine, nothing to do (Paid, Delivered, In Stock, saved)
-     AMBER   look at this; nothing is broken yet
-     CRIMSON this stops something, or money is owed
-   Everything else is grey. Orange and crimson are separated by weight, not
-   hue, and colour is never the only carrier. Text clears 4.5:1, edges 3:1.
-
-   Two structural devices only: a 3px rule down the left edge for meaning,
-   and the hazard stripe on a purchase order and the new-material callout.
-   ========================================================================== */
-/* fonts are non-blocking; the fallback stacks paint straight away offline */
-
 :root {
-    /* ---- ink and ground: slightly cool greys, so the orange stays warm ---- */
-    --ink:         #14181d;   /* body text */
-    --chrome:      #1b1f24;   /* menu, table heads, popup heads */
+    --ink:         #14181d;
+    --chrome:      #1b1f24;
     --chrome-2:    #2b323a;
-    --steel:       #4d5661;   /* secondary text */
-    --steel-soft:  #616b78;   /* captions, placeholders, disabled */
-    --paper:       #edeef0;   /* the page */
-    --paper-2:     #e2e5e9;   /* pressed and hovered surfaces */
-    --surface:     #ffffff;   /* cards, rows, fields */
-    --line:        #d5d8dd;   /* every hairline in the system */
+    --steel:       #4d5661;
+    --steel-soft:  #616b78;
+    --paper:       #edeef0;
+    --paper-2:     #e2e5e9;
+    --surface:     #ffffff;
+    --line:        #d5d8dd;
 
-    /* ---- the four meanings; the ratio is written beside anything that was close ---- */
+    --brand:       #f04e23;
 
-    /* The sign over the door. Bright enough to be the shop's colour, so it
-       is kept for edges, marks and the 3px rule where 3:1 is the bar. */
-    --brand:       #f04e23;   /* 3.6:1 on white -- edges and marks only */
-
-    /* The same orange taken down until white text on it clears 4.5:1. This
-       is the one that fills a button. */
-    --go:          #d0400f;   /* white on it, 4.8:1 */
-    --go-hi:       #a83309;   /* pressed and hovered, 6.7:1 */
+    --go:          #d0400f;
+    --go-hi:       #a83309;
     --go-dim:      rgba(208, 64, 15, 0.10);
-    --go-ink:      #a83309;   /* orange as small text, 5.9:1 on --go-dim */
+    --go-ink:      #a83309;
 
-    /* nothing to do here; far enough from the orange to tell apart at badge size */
-    --ok:          #0e7a5f;   /* white on it, 5.3:1 */
+    --ok:          #0e7a5f;
     --ok-hi:       #0b6650;
     --ok-dim:      rgba(14, 122, 95, 0.10);
-    --ok-ink:      #0b6650;   /* 6.1:1 on --ok-dim */
+    --ok-ink:      #0b6650;
 
     --signal:      #f5b301;
     --signal-hi:   #d99e00;
     --signal-dim:  rgba(245, 179, 1, 0.16);
-    --signal-ink:  #6b4f00;   /* the readable version for small text */
+    --signal-ink:  #6b4f00;
 
-    /* Twice the depth of the orange, which is the whole point: the thing
-       that deletes is never the brightest thing on the screen. */
-    --stop:        #9e1b32;   /* white on it, 7.9:1 */
+    --stop:        #9e1b32;
     --stop-hi:     #7d1327;
     --stop-dim:    rgba(158, 27, 50, 0.09);
 
-    /* the rule under the menu brand and along the top of the bar; same on every role */
     --role-tint:   var(--brand);
 
-    /* The second structural device, mixed once here and used twice: on a
-       purchase order and on the not-on-record callout. */
     --hazard: repeating-linear-gradient(
         -45deg,
         var(--brand) 0 10px,
         var(--chrome) 10px 20px);
 
-    /* ---- shape ---- */
     --radius:      3px;
     --radius-lg:   4px;
-    --rule:        3px;       /* the meaning rule */
+    --rule:        3px;
     --sidebar-w:   252px;
 
-    /* only things that float above the page carry a shadow */
     --lift:        0 14px 34px rgba(20, 24, 29, 0.16);
     --lift-high:   0 24px 60px rgba(20, 24, 29, 0.32);
 
-    /* ---- type: one font, Archivo, everywhere. Figures use it too; the body
-       turns on its even-width digits so columns of numbers still line up ---- */
     --font-ui:     'Archivo', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     --font-figure: var(--font-ui);
 
-    /* ---- legacy token names, kept so nothing has to be chased down ---- */
     --primary: var(--chrome);
     --secondary: var(--chrome-2);
     --accent: var(--go);
@@ -99,7 +59,6 @@
     --border: var(--line);
     --danger: var(--stop);
     --danger-dim: var(--stop-dim);
-    /* --success is the green ("this went through"); the button colour is --go */
     --success: var(--ok);
     --graphite: var(--chrome);
     --graphite-2: var(--chrome-2);
@@ -115,8 +74,6 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* the scrollbar's room is kept even on a short page, so a screen does not
-   shift sideways when a table grows long enough to scroll */
 html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
 
 body {
@@ -130,9 +87,6 @@ body {
     text-rendering: optimizeLegibility;
 }
 
-/* ==========================================================================
-   TYPOGRAPHY -- one family, four sizes, three weights, sentence case
-   ========================================================================== */
 h1, h2, h3, h4 {
     font-family: var(--font-ui);
     font-weight: 600;
@@ -146,8 +100,6 @@ h2 { font-size: 28px; }
 h3 { font-size: 21.5px; }
 h4 { font-size: 18px; }
 
-/* A quiet marker for the section a card belongs to. It was a tracked-out
-   uppercase label; it says the same thing in half the ink this way. */
 .eyebrow {
     display: block;
     font-size: 13.5px;
@@ -165,9 +117,6 @@ h4 { font-size: 18px; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
 
-/* ==========================================================================
-   BUTTONS
-   ========================================================================== */
 .btn {
     font-family: var(--font-ui);
     font-size: 15.5px;
@@ -186,17 +135,11 @@ h4 { font-size: 18px; }
 .btn:hover  { background: var(--chrome-2); }
 .btn:active { transform: translateY(1px); }
 
-/* btn-accent and btn-success are deliberately identical: one orange to press */
 .btn-accent,
 .btn-success       { background: var(--go); }
 .btn-accent:hover,
 .btn-success:hover { background: var(--go-hi); }
 
-/* ==========================================================================
-   A BUTTON THAT CANNOT BE PRESSED
-   The selector matches Bootstrap's .btn.disabled weight so this file wins.
-   Flat grey reads as "not yet"; full colour at 40% reads as "loading".
-   ========================================================================== */
 .btn:disabled,
 .btn.disabled,
 .btn[aria-disabled="true"] {
@@ -208,7 +151,6 @@ h4 { font-size: 18px; }
     transform: none;
 }
 
-/* Yellow: a real choice, but not the one being recommended. */
 .btn-gold       { background: var(--signal); color: var(--ink); }
 .btn-gold:hover { background: var(--signal-hi); }
 
@@ -226,9 +168,6 @@ h4 { font-size: 18px; }
 
 .btn:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-/* ==========================================================================
-   FORMS -- field names are sentence case at a readable size
-   ========================================================================== */
 .form-group { margin-bottom: 15px; }
 .form-group label,
 .form-legend {
@@ -244,12 +183,6 @@ h4 { font-size: 18px; }
     margin-left: 4px;
 }
 
-/* Fields side by side share their label row, box row and note row, so a
-   label that wraps (a long hint) or a note under one box no longer pushes
-   the boxes beside it out of line. Each label sits on its own box.
-   The grid's row gap would fall between a field's own rows, so the space
-   between rows of fields moves onto the fields (--field-row-gap, the gap the
-   grid had) and the grid gives the last one back. */
 @supports (grid-template-rows: subgrid) and selector(:has(*)) {
     .grid-2:has(> .form-group) {
         --field-row-gap: 18px;
@@ -267,8 +200,6 @@ h4 { font-size: 18px; }
     .grid-2 > .form-group > :nth-child(n+3) { grid-row: 3; }
 }
 
-/* 16px is not a style choice: below it, iOS Safari zooms the whole page in
-   when a field takes focus and the person has to pinch their way back out. */
 .form-control {
     width: 100%;
     padding: 10px 12px;
@@ -290,8 +221,6 @@ h4 { font-size: 18px; }
 .form-control:focus-visible { outline: none; }
 select.form-control { cursor: pointer; }
 
-/* Every dropdown in the system carries the same arrow, so a box that opens a
-   list never looks like a box to type in. */
 select:not([multiple]):not([size]) {
     -webkit-appearance: none;
     appearance: none;
@@ -304,22 +233,13 @@ select:not([multiple]):not([size]) {
 }
 select:not([multiple]):not([size]):disabled { cursor: not-allowed; opacity: 0.7; }
 
-/* the mark beside a field that must be filled in */
 .req { color: var(--stop); font-weight: 700; margin-left: 2px; }
 textarea.form-control { min-height: 88px; resize: vertical; line-height: 1.55; }
 
-/* An amount typed into a box lines up the way it does in the tables: to the
-   right, every digit the same width, so 1,200.00 sits over 950.00 and a
-   figure is read by its column. The order's − / + quantity boxes are
-   .qty-input, not .form-control, and keep their centred figure. */
 input[type="number"].form-control {
     text-align: right;
     font-variant-numeric: tabular-nums;
 }
-/* the figure lines up on the right, but a hint in words ("Leave blank if not
-   from a sale") reads from the left like every other box, until a number is typed.
-   A money box (two decimals, an .amount-field, or a "0.00" hint) keeps its hint on the
-   right, where the amount will be. */
 input[type="number"].form-control:placeholder-shown:not([step="0.01"]):not(.amount-field):not([placeholder="0.00"]) { text-align: left; }
 input[type="number"][step="0.01"],
 input[type="number"].amount-field,
@@ -328,8 +248,6 @@ input[type="number"][step="0.01"]::placeholder,
 input[type="number"].amount-field::placeholder,
 input[type="number"][placeholder="0.00"]::placeholder { text-align: right; }
 
-/* No up / down arrows inside a number box, on any page: they step by 0.01 and
-   get in the way of typing an amount. A figure is typed. */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
     -webkit-appearance: none;
@@ -342,10 +260,6 @@ input[type="number"] {
 
 .inline-select { padding: 6px 9px; min-height: 34px; font-size: 15px; min-width: 132px; width: auto; }
 
-/* ==========================================================================
-   A PHONE NUMBER -- the prefix is printed, not typed; the digits are set in
-   the figure face so a 1 is the same width as a 7
-   ========================================================================== */
 .phone-field {
     display: flex;
     align-items: stretch;
@@ -366,8 +280,6 @@ input[type="number"] {
     color: var(--steel);
     user-select: none;
 }
-/* the inner box gives its own border and ring up to the wrapper, so the two
-   halves are lit as one control */
 .phone-field .form-control {
     border: none;
     border-radius: 0 var(--radius) var(--radius) 0;
@@ -382,8 +294,6 @@ input[type="number"] {
     box-shadow: 0 0 0 3px var(--go-dim);
 }
 
-/* ---------- the country beside the box (phone-picker.js) ----------
-   The list it opens is a layer at the foot of the page, above every card. */
 .phone-country {
     gap: 7px;
     cursor: pointer;
@@ -395,7 +305,6 @@ input[type="number"] {
     transition: background-color 0.15s;
 }
 .phone-country:hover { background: #e6e8eb; }
-/* the prefix when there is one country to choose from: printed, not pressed */
 .phone-country.is-fixed { cursor: default; }
 .phone-country.is-fixed:hover { background: inherit; }
 .phone-country:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
@@ -445,16 +354,12 @@ input[type="number"] {
 .phone-menu-code { font-family: var(--font-figure); color: var(--steel); flex: none; }
 .phone-menu-empty { justify-content: center; color: var(--steel-soft); cursor: default; }
 
-/* said while the box is being filled in, never while it is empty */
 .phone-field:has(.form-control.is-bad) { border-color: var(--signal-hi); }
 .phone-field:has(.form-control.is-bad):focus-within {
     border-color: var(--signal-hi);
     box-shadow: 0 0 0 3px var(--signal-dim);
 }
 
-/* ==========================================================================
-   A PASSWORD -- Show/Hide is a button inside the box, with aria-pressed
-   ========================================================================== */
 .password-field {
     display: flex;
     align-items: stretch;
@@ -492,7 +397,6 @@ input[type="number"] {
 .password-toggle:focus-visible { outline: 2px solid var(--signal); outline-offset: -3px; }
 .password-toggle[aria-pressed="true"] { color: var(--go-ink); }
 
-/* the one button for several boxes stands under them, on the right */
 .password-reveal {
     display: flex;
     justify-content: flex-end;
@@ -507,7 +411,6 @@ input[type="number"] {
 }
 .password-reveal .password-toggle:hover { background: var(--paper); }
 
-/* the checklist under a new-password box: a rule gets a tick and turns green once met */
 .password-rules {
     list-style: none;
     margin: 8px 0 0;
@@ -515,9 +418,9 @@ input[type="number"] {
     font-size: 13px;
     color: var(--steel-soft);
 }
-.password-rules li::before { content: "\25CB\00a0"; }            /* an empty circle */
+.password-rules li::before { content: "\25CB\00a0"; }
 .password-rules li.is-met { color: var(--ok-ink); }
-.password-rules li.is-met::before { content: "\2713\00a0"; }     /* a tick */
+.password-rules li.is-met::before { content: "\2713\00a0"; }
 
 .form-footer {
     display: flex;
@@ -527,25 +430,10 @@ input[type="number"] {
     border-top: 1px solid var(--line);
 }
 
-/* A form that stands on its own in a card is capped: a text box the width
-   of a wide monitor is a box nobody can read back. Grids inside it still
-   split into two. */
 .form-sheet { max-width: 820px; }
 
-/* The card wrapping a lone form hugs it -- on a wide monitor a full-width
-   card around an 820px form is a blank strip of nothing where the fields
-   stopped. The cap is the form's width plus the card's own side padding, so
-   the form keeps the 820px it was given. Cards holding a table or a list are
-   untouched: only a card whose form is a direct child shrinks to fit it. */
 .card:has(> .form-sheet) { max-width: calc(820px + 2 * 22px); }
 
-/* ==========================================================================
-   A LIST AND ITS FORM SIDE BY SIDE -- the whole screen fits without scrolling.
-   The list takes the room; the form keeps a narrow column (on the right, or
-   on the left with .form-left). Both cards run the same height, headings on
-   one line, the form's buttons level with the list's pager. A phone stacks
-   them, form first.
-   ========================================================================== */
 .pair-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) clamp(300px, 32%, 420px);
@@ -560,37 +448,26 @@ input[type="number"] {
 .pair-layout .panel-head { align-items: center; min-height: 48px; }
 .pair-layout .panel-head h3 { margin-bottom: 0; }
 
-/* the narrow column: paired fields stack, the buttons sit at the card's foot */
 .pair-form .grid-2 { grid-template-columns: 1fr; gap: 0; --field-row-gap: 0px; }
 .card.pair-form { display: flex; flex-direction: column; }
 .pair-form > form { flex: 1; display: flex; flex-direction: column; }
 .pair-form .form-footer { margin-top: auto; }
-/* a note in the narrow column is set a size down, so it does not run the form off the screen */
 .pair-form .detail-note { font-size: 13.5px; line-height: 1.45; padding: 9px 12px; }
 
-/* The list shares the screen with the form, so a list of six or seven
-   columns gets tight: its cells carry less padding and its headings may wrap. */
 @media screen and (min-width: 641px) {
     .pair-layout table th { padding: 11px 8px; white-space: normal; }
     .pair-layout table td { padding: 12px 8px; }
-    /* a long badge ("Awaiting inspection") goes onto two lines before the table scrolls */
     .pair-layout table .badge { white-space: normal; }
 }
 
-/* A laptop or smaller: the narrow column would leave the list about 430px,
-   too little for its columns, so the two stack, form first (as on a phone) */
 @media screen and (max-width: 1279px) {
     .pair-layout,
     .pair-layout.form-left { grid-template-columns: 1fr; }
     .pair-form { order: -1; }
     .pair-form .form-footer { margin-top: 20px; }
-    /* stacked, the form would stretch the whole width; keep it a readable size */
     .pair-layout .form-sheet { max-width: 820px; }
 }
 
-/* ==========================================================================
-   THE SHELL -- a menu that stays put, a bar that stays put, the workspace between
-   ========================================================================== */
 .wrapper { display: flex; min-height: 100vh; align-items: flex-start; }
 
 .sidebar {
@@ -614,8 +491,6 @@ input[type="number"] {
     border-radius: 999px;
 }
 
-/* The brand is also the way home, on every page. The rule under it is tinted
-   by the role, so the corner says which system this is. */
 .sidebar-brand {
     display: flex;
     align-items: center;
@@ -631,8 +506,6 @@ input[type="number"] {
 .sidebar-brand:active .brand-mark { transform: scale(0.94); }
 .sidebar-brand:focus-visible { outline: 2px solid var(--signal); outline-offset: -3px; }
 
-/* The one place the shop's own orange is allowed to be at full strength, on
-   a dark ground where it does not have to carry text of its own. */
 .brand-mark {
     width: 38px; height: 38px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
@@ -671,7 +544,6 @@ input[type="number"] {
     letter-spacing: -0.005em;
     transition: color 0.15s, background 0.15s;
 }
-/* the meaning rule again, in the shop's orange, because this is where you are */
 .sidebar-nav li a::before {
     content: '';
     position: absolute; left: 0; top: 6px; bottom: 6px;
@@ -699,13 +571,10 @@ input[type="number"] {
     color: rgba(255, 255, 255, 0.6);
 }
 
-/* once the strip carries a module's screens the menu stops carrying them;
-   the class is put on <body> by subnav.js only after a strip is built */
 body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-sub { display: none !important; }
 body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) .nav-caret { display: none; }
 body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { justify-content: flex-start; }
 
-/* a module that stays a dropdown keeps its caret; flex here outranks the block rule above */
 .sidebar-nav li[data-sidebar-dropdown] > .nav-parent {
     display: flex;
     justify-content: space-between;
@@ -715,13 +584,10 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
 .sidebar-nav li[data-sidebar-dropdown] .nav-caret { flex-shrink: 0; transition: transform 0.16s ease; }
 .sidebar-nav li[data-sidebar-dropdown] .nav-parent.is-open .nav-caret { transform: rotate(180deg); }
 
-/* The shade that appears behind the menu once it slides over the page. It is
-   inert on a desktop; responsive.css gives it a size. */
 .sidebar-shade {
     display: none;
     position: fixed;
     inset: 0;
-    /* above the top bar, which sticks at 500 */
     z-index: 900;
     background: rgba(20, 24, 29, 0.55);
     opacity: 0;
@@ -738,10 +604,6 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
     background: var(--paper);
 }
 
-/* Solid on purpose: rows scrolling under a translucent bar looked smudged.
-   Separated from the cards by a tinted top edge (inset shadow), a ground a
-   shade off, and a soft shadow, all drawn so the bar stays exactly 58px:
-   the strip below is sticky at top: 58px. */
 .topbar {
     position: sticky;
     top: 0;
@@ -764,7 +626,6 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
     color: var(--ink);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-/* a white chip on an off-white bar needs a darker hairline to have an edge */
 .topbar .bell,
 .topbar .account-chip { border-color: #c2c6cd; }
 
@@ -789,12 +650,6 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
 }
 .menu-toggle:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 
-/* ==========================================================================
-   THE SUBMODULE STRIP
-   One module's screens, built by subnav.js from the menu already in the page.
-   Set in caps because it is signage.
-   ========================================================================== */
-/* sits inside the card, under the card's heading, as a row of tabs */
 .subnav {
     display: flex;
     gap: 22px;
@@ -827,7 +682,6 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
 }
 .subnav-tab:hover { color: var(--ink); }
 
-/* the rule under the tab you are on */
 .subnav-tab::after {
     content: '';
     position: absolute; left: 0; right: 0; bottom: -1px;
@@ -842,9 +696,6 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
 
 .content-area { padding: 22px 20px 44px; }
 
-/* ==========================================================================
-   CARDS AND PANELS
-   ========================================================================== */
 .card {
     display: block;
     background: var(--surface);
@@ -865,9 +716,6 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
     border-bottom: 1px solid var(--line);
 }
 .panel-head h3 { margin-bottom: 4px; }
-/* The heading and its description take the room that is left and wrap inside
-   it, so the buttons keep the top-right corner. Without this a long
-   description pushed the buttons onto a line of their own, under it. */
 .panel-head > div:first-child { flex: 1 1 280px; min-width: 0; }
 .panel-sub {
     font-size: 14.5px;
@@ -878,7 +726,6 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
 }
 .panel-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-/* A count, not a label: how many rows are loaded, how much is owed. */
 .pill {
     font-family: var(--font-figure);
     font-size: 13px;
@@ -892,7 +739,6 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
     font-variant-numeric: tabular-nums;
 }
 
-/* A card that stands on its own, with its action at the bottom */
 .tile { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
 .tile .panel-sub { flex-grow: 1; }
 .tile h3 { margin-bottom: 0; }
@@ -908,10 +754,6 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
 }
 .search-input { padding-left: 36px; }
 
-/* ==========================================================================
-   TABLES -- figures are mono and right aligned, headings included;
-   alignTableColumns() in tables.js puts the col-* classes on the headers
-   ========================================================================== */
 .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 
 table { width: 100%; border-collapse: collapse; margin-top: 4px; }
@@ -930,7 +772,6 @@ table th {
 table th:first-child { border-top-left-radius: var(--radius); }
 table th:last-child  { border-top-right-radius: var(--radius); }
 
-/* every table reads at the size of the cashier's catalog */
 table td {
     padding: 12px 16px;
     font-size: 16.5px;
@@ -947,19 +788,14 @@ table th.col-id  { width: 1%; white-space: nowrap; }
 table td.cell-num { font-size: 15.5px; }
 table .badge { font-size: 13.5px; padding: 4px 10px; }
 
-/* a cell holding a button or a typed box keeps the height of a row of text */
 table td:has(> .btn),
 table td:has(> .form-control),
 table td:has(> input) { padding-top: 6px; padding-bottom: 6px; }
 table td .btn-sm { min-height: 34px; }
 
-/* a column a filter has made redundant (hideFilteredColumns in tables.js);
-   weighted to beat the phone layout in responsive.css */
 table thead tr th.col-hidden,
 table tbody tr td.col-hidden { display: none; }
 
-/* blank rows that top a short page up to a full one, so the table and the
-   pager under it never move (holdTableHeight in tables.js) */
 table tbody tr.row-filler,
 table tbody tr.row-filler:nth-child(even) { background: transparent; }
 table tbody tr.row-filler { height: 52.3px; }
@@ -988,10 +824,6 @@ table tbody tr.row-filler td { padding: 0; border-bottom: none; }
     font-size: 14.5px;
 }
 
-/* A smaller laptop or a tablet: the page is narrower than the tables were
-   drawn for, so the cells get less padding and a little less type, and a
-   heading may wrap. Without this the last column slid out of sight behind a
-   scroll bar. The phone has its own cards (responsive.css). */
 @media screen and (min-width: 641px) and (max-width: 1279px) {
     table th {
         padding: 11px 10px;
@@ -1004,7 +836,6 @@ table tbody tr.row-filler td { padding: 0; border-bottom: none; }
     }
 }
 
-/* A row you can open. The rule appears on the left, same as everywhere. */
 .row-clickable { cursor: pointer; position: relative; transition: background 0.14s; }
 .row-clickable td:first-child { position: relative; }
 .row-clickable td:first-child::before {
@@ -1018,18 +849,12 @@ table tbody tr.row-filler td { padding: 0; border-bottom: none; }
 .row-clickable:hover td:first-child::before { transform: scaleX(1); }
 .row-clickable:focus-visible { outline: 2px solid var(--signal); outline-offset: -2px; }
 
-/* The one piece of motion that is not answering a click: rows arriving after
-   a fetch, once, together. They settle downwards: a row starting below its
-   place pushed the grid's edge for a moment and flashed a scrollbar. */
 .row-reveal { animation: row-in 0.3s ease-out backwards; }
 @keyframes row-in {
     from { opacity: 0; transform: translateY(-5px); }
     to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ==========================================================================
-   EMPTY STATE -- says what to press
-   ========================================================================== */
 .empty-state { text-align: center; padding: 44px 20px 40px; }
 .empty-mark {
     width: 54px; height: 54px;
@@ -1048,7 +873,6 @@ table tbody tr.row-filler td { padding: 0; border-bottom: none; }
     margin: 0 auto 18px;
     line-height: 1.6;
 }
-/* a menu item named in a sentence; styled here so it does not fall through to Bootstrap */
 kbd {
     font-family: var(--font-ui);
     font-size: 0.94em;
@@ -1062,9 +886,6 @@ kbd {
     white-space: nowrap;
 }
 
-/* ==========================================================================
-   BADGES -- a badge reports; it is never the action orange
-   ========================================================================== */
 .badge {
     display: inline-flex;
     align-items: center;
@@ -1090,9 +911,6 @@ kbd {
 .badge-info    { background: rgba(29, 98, 176, 0.10); color: #1a4f94; border-color: rgba(29, 98, 176, 0.30); }
 .badge-neutral { background: rgba(20, 24, 29, 0.06); color: var(--steel); border-color: rgba(20, 24, 29, 0.14); }
 
-/* ==========================================================================
-   THE FIGURES -- the rule on the left says whether the number is fine
-   ========================================================================== */
 .kpi-card {
     background: var(--surface);
     border: 1px solid var(--line);
@@ -1113,19 +931,13 @@ kbd {
     line-height: 1.05;
     color: var(--ink);
     font-variant-numeric: tabular-nums;
-    /* a figure never breaks in half: the peso sign made the long ones a
-       character wider, and half a number on each line reads as two numbers */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 .kpi-note { font-size: 13.5px; color: var(--steel-soft); }
 
-/* ==========================================================================
-   COUNTERS AND FILTERS
-   ========================================================================== */
 .track-legend { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
-/* a figure's footnote inside a table cell: "incl. 450.00 penalty" */
 .cell-sub { display: block; font-size: 12px; color: var(--steel-soft); font-weight: 400; white-space: nowrap; }
 
 .track-chip {
@@ -1146,9 +958,6 @@ kbd {
 
 .filter-row { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
 
-/* ==========================================================================
-   TABS
-   ========================================================================== */
 .tab-btn {
     background: none; border: none; cursor: pointer;
     padding: 10px 2px;
@@ -1164,9 +973,6 @@ kbd {
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
-/* ==========================================================================
-   POPUPS
-   ========================================================================== */
 .modal {
     display: none; position: fixed; inset: 0; z-index: 2000;
     background: rgba(20, 24, 29, 0.62);
@@ -1175,16 +981,8 @@ kbd {
     overscroll-behavior: contain;
 }
 .modal.open { display: flex; align-items: flex-start; justify-content: center; }
-/* the wheel over an open card does not move the page behind it either */
 html:has(.modal.open) { overflow: hidden; }
 
-/* ==========================================================================
-   A CARD THAT HOLDS ITS SHAPE
-   The box is a column (head, tabs, body, foot) and only the body flexes; the
-   body has a floor on paged popups and a ceiling from the window; the box
-   hangs from a fixed distance below the top, so a change of height moves
-   the bottom edge only. Nothing inside can widen it.
-   ========================================================================== */
 .modal-box {
     background: var(--surface);
     border-radius: var(--radius-lg);
@@ -1268,8 +1066,6 @@ html:has(.modal.open) { overflow: hidden; }
     overflow: hidden;
 }
 
-/* a card never scrolls: what does not fit goes onto a second page (modals.js);
-   a pick list dropped down inside one shows no bar either */
 .modal,
 .modal *,
 .drawer,
@@ -1282,17 +1078,12 @@ html:has(.modal.open) { overflow: hidden; }
 .drawer::-webkit-scrollbar,
 .drawer *::-webkit-scrollbar { display: none; }
 
-/* a card kept to one page (data-modal-scroll, modals.js) scrolls instead,
-   with a bar so it is plain there is more below */
 .modal[data-modal-scroll] .modal-body {
     overflow-y: auto;
     scrollbar-width: thin;
 }
 .modal[data-modal-scroll] .modal-body::-webkit-scrollbar { display: block; width: 8px; }
 .modal[data-modal-scroll] .modal-body::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
-
-/* The pages: the wrapper is the body's height and one column wide; overflow
-   lays into further columns to the right and the wrapper slides sideways. */
 
 .modal-pages {
     column-count: 1;
@@ -1314,8 +1105,6 @@ html:has(.modal.open) { overflow: hidden; }
 .modal-pages .table-responsive { overflow: visible; }
 .modal-pages .detail-grid { overflow: clip; }
 
-/* the pager of a card that turns pages: its own bar under the content, laid
-   out like the pager under a table, never among the foot's actions */
 .modal-pager.pager {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     margin: 0;
@@ -1326,10 +1115,6 @@ html:has(.modal.open) { overflow: hidden; }
 .modal-pager .pager-controls { display: flex; gap: 8px; }
 .modal-pager .btn[disabled] { opacity: 0.4; cursor: default; }
 
-/* No locked height: every card grows to fit what it holds, so Previous and
-   Next only show up when the window itself is too short for the card.
-   The card's max-height (.modal-box) stops it at the window's edge, and the
-   body shrinks so a foot of buttons below it is never cut off. */
 .modal-tabs + .modal-body,
 .modal-steps + .modal-body {
     flex: 1 1 auto;
@@ -1343,10 +1128,8 @@ html:has(.modal.open) { overflow: hidden; }
     background: var(--paper);
     border-top: 1px solid var(--line);
 }
-/* a foot with nothing to press is not drawn: the x in the corner closes the card */
 .modal-foot[hidden], .modal-steps[hidden], .modal-top[hidden] { display: none; }
 
-/* a record shown whole on a wide card: three fields to a row */
 .detail-grid.detail-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 760px) {
     .detail-grid.detail-grid-3 { grid-template-columns: 1fr 1fr; }
@@ -1355,8 +1138,6 @@ html:has(.modal.open) { overflow: hidden; }
     .detail-grid.detail-grid-3 { grid-template-columns: 1fr; }
 }
 
-/* ---------- what a record says ----------
-   every row of the grid is the same height, so two pages line up cell for cell */
 .detail-grid {
     display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
     grid-auto-rows: minmax(60px, auto);
@@ -1377,22 +1158,18 @@ html:has(.modal.open) { overflow: hidden; }
     min-width: 0;
     overflow-wrap: anywhere;
 }
-/* a badge in a narrow cell wraps its words rather than the cell's edge */
 .detail-value .badge { white-space: normal; }
 
-/* a row the reader cannot change from here (My Account): light grey, greyed words */
 .detail-item.is-locked { background: var(--paper); cursor: not-allowed; }
 .detail-item.is-locked .detail-label,
 .detail-item.is-locked .detail-value { color: var(--steel-soft); }
 
-/* the email in My Account's Edit Details tab is shown, not typed in */
 #account-modal input[readonly] {
     background: var(--paper);
     color: var(--steel-soft);
     cursor: not-allowed;
 }
 
-/* whatever follows the facts stands clear of them */
 .detail-grid + form,
 .detail-grid + .history-split,
 .detail-grid + .refund-lines { margin-top: 16px; }
@@ -1409,7 +1186,6 @@ html:has(.modal.open) { overflow: hidden; }
     font-variant-numeric: tabular-nums;
 }
 
-/* the meaning rule inside a popup */
 .detail-note {
     margin-top: 12px;
     padding: 11px 13px;
@@ -1425,8 +1201,6 @@ html:has(.modal.open) { overflow: hidden; }
     background: var(--signal-dim);
     color: var(--signal-ink);
 }
-/* what a delivery still has to collect, at the top of its Payment part:
-   crimson when money is owed, green when nothing is (the words say it too) */
 .collect-banner {
     display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px;
     margin: 0 0 12px;
@@ -1461,23 +1235,17 @@ html:has(.modal.open) { overflow: hidden; }
     flex-wrap: wrap;
 }
 
-/* ---------- how far a delivery has got ---------- */
-/* The strip across the top of a card (options.top in detail-modal.js). It sits
-   above the tabs, so it stays in view whichever tab is open. */
 .modal-top {
     padding: 16px 22px;
     background: var(--surface);
     border-bottom: 1px solid var(--line);
 }
 
-/* Five steps joined by a line (deliveryStepper in shared/deliveries.js).
-   done = green tick, now = dark circle, nothing = grey outline with its number. */
 .dstep-row { display: flex; align-items: flex-start; gap: 18px; }
 .dstep-list { list-style: none; margin: 0; padding: 0; display: flex; flex: 1; min-width: 0; }
 .dstep-item { flex: 1; position: relative; padding-right: 12px; min-width: 0; }
 .dstep-item:last-child { padding-right: 0; }
 
-/* the circle with its number or tick */
 .dstep-dot {
     position: relative; z-index: 1;
     width: 26px; height: 26px;
@@ -1494,7 +1262,6 @@ html:has(.modal.open) { overflow: hidden; }
     box-shadow: 0 0 0 4px rgba(27, 31, 36, 0.12);
 }
 
-/* the line from this circle to the next; green once this step is done */
 .dstep-item::before {
     content: '';
     position: absolute;
@@ -1505,12 +1272,10 @@ html:has(.modal.open) { overflow: hidden; }
 .dstep-item:last-child::before { display: none; }
 .dstep-item.done::before { background: var(--ok); }
 
-/* the bold name and the short muted note under the circle */
 .dstep-text { display: block; margin-top: 8px; }
 .dstep-name { display: block; font-size: 14px; font-weight: 700; color: var(--ink); }
 .dstep-note { display: block; margin-top: 2px; font-size: 12.5px; line-height: 1.35; color: var(--steel); }
 
-/* the one line on the right */
 .dstep-summary {
     flex: none;
     max-width: 190px;
@@ -1523,7 +1288,6 @@ html:has(.modal.open) { overflow: hidden; }
 .dstep-summary.is-warn { color: var(--signal-ink); }
 .dstep-summary.is-fail { color: var(--stop); }
 
-/* the line under the steps for a Delayed or Failed delivery */
 .dstep-message {
     margin: 14px 0 0;
     padding: 10px 13px;
@@ -1535,9 +1299,6 @@ html:has(.modal.open) { overflow: hidden; }
 .dstep-message.is-warn { background: var(--signal-dim); color: var(--signal-ink); border-left-color: var(--signal); }
 .dstep-message.is-fail { background: var(--stop-dim);   color: var(--stop);       border-left-color: var(--stop); }
 
-/* a narrow card (a tablet): the steps stack, circle on the left, name and note
-   beside it, a vertical line between the circles, and the summary goes on top.
-   (A short window keeps the row instead: stacking would be too tall for it.) */
 @media (min-width: 641px) and (max-width: 900px) and (min-height: 561px) {
     .modal-top { padding: 14px 16px; }
     .dstep-row { flex-direction: column; align-items: stretch; gap: 12px; }
@@ -1551,9 +1312,6 @@ html:has(.modal.open) { overflow: hidden; }
     .dstep-note { margin-top: 0; }
 }
 
-/* A phone (375px wide), whatever its height: the steps stay in one row:
-   five small circles joined by a line, the name under each (it wraps to two
-   lines where it must), and no notes. The summary goes above the row. */
 @media (max-width: 640px) {
     .modal-top { padding: 12px 12px; }
     .dstep-row { flex-direction: column; align-items: stretch; gap: 10px; }
@@ -1561,7 +1319,6 @@ html:has(.modal.open) { overflow: hidden; }
 
     .dstep-item { padding-right: 0; text-align: center; }
     .dstep-dot { width: 22px; height: 22px; font-size: 12px; margin: 0 auto; }
-    /* the line runs from the edge of this circle to the edge of the next one */
     .dstep-item::before { top: 10px; left: calc(50% + 14px); right: calc(-50% + 14px); }
 
     .dstep-text { margin-top: 5px; }
@@ -1570,8 +1327,6 @@ html:has(.modal.open) { overflow: hidden; }
     .dstep-message { margin-top: 10px; padding: 8px 11px; font-size: 14px; }
 }
 
-/* A short, wide window (a phone on its side): one slim row, each circle with its name
-   beside it and no notes, so the tabs, the body and the foot buttons keep their room */
 @media (max-height: 560px) and (min-width: 641px) {
     .modal-top { padding: 4px 16px; }
     .dstep-row { align-items: center; gap: 12px; }
@@ -1581,34 +1336,21 @@ html:has(.modal.open) { overflow: hidden; }
     .dstep-text { margin-top: 0; }
     .dstep-name { font-size: 13px; white-space: nowrap; }
     .dstep-note { display: none; }
-    /* the line sits after the name and stretches to the next circle */
     .dstep-item::before { position: static; order: 3; flex: 1 1 6px; min-width: 6px; }
     .dstep-summary { max-width: 130px; font-size: 12.5px; line-height: 1.3; }
     .dstep-message { margin-top: 4px; padding: 3px 11px; font-size: 13.5px; line-height: 1.3; }
 }
 
-/* Whatever the shape, the strip gives way before the foot buttons do: it takes
-   at most a third of a tall narrow window and a fifth of a short one, and
-   scrolls inside itself past that */
 @media (max-width: 900px), (max-height: 560px) {
     .modal-top { max-height: 30vh; overflow-y: auto; }
-    /* the message line under the steps says what the summary would */
     .dstep.has-message .dstep-summary { display: none; }
 }
 @media (max-height: 560px) {
     .modal-top { max-height: 20vh; }
 }
 
-/* ---------- the question card ---------- */
 .ask-box { max-width: 460px; }
 
-/* ==========================================================================
-   THE WORKING CARD
-   A ring turning where the avatar sits, a list of steps that tick as the wait
-   goes on, and a bar sweeping under them. Amber while it works, green for the
-   beat before it leaves. Every state change is a transition, so even with
-   motion turned off the ticks still arrive and the card visibly advances.
-   ========================================================================== */
 .work-box .modal-head {
     border-bottom-color: var(--signal);
     transition: border-color 0.3s;
@@ -1624,7 +1366,6 @@ html:has(.modal.open) { overflow: hidden; }
 }
 @keyframes work-turn { to { transform: rotate(360deg); } }
 
-/* the ring becomes a green disc with a tick when the work is done */
 .work-spinner::after {
     content: '';
     position: absolute; left: 50%; top: 50%;
@@ -1643,7 +1384,6 @@ html:has(.modal.open) { overflow: hidden; }
 }
 .work-box.is-done .work-spinner::after { transform: translate(-50%, -62%) rotate(45deg) scale(1); }
 
-/* the steps: a grey dot waiting, an amber pulse working, a green tick done */
 .work-steps {
     list-style: none;
     margin: 14px 0 0;
@@ -1694,7 +1434,6 @@ html:has(.modal.open) { overflow: hidden; }
 }
 .work-steps li.is-done .work-step-mark::after { transform: translate(-50%, -60%) rotate(45deg) scale(1); }
 
-/* the active step's text carries a small three-dot pulse after it */
 .work-steps li.is-active .work-step-text::after {
     content: '\2026';
     display: inline-block; width: 1.1em; text-align: left;
@@ -1727,8 +1466,6 @@ html:has(.modal.open) { overflow: hidden; }
     width: 100%;
     background: var(--ok);
 }
-/* with motion off the ring is a still mark and the bar is simply full; the
-   ticks still arrive, as transitions, so the wait still visibly advances */
 @media (prefers-reduced-motion: reduce) {
     .work-spinner { border-color: var(--signal); border-top-color: rgba(255, 255, 255, 0.18); }
     .work-bar span { width: 100%; }
@@ -1744,12 +1481,8 @@ html:has(.modal.open) { overflow: hidden; }
 }
 .ask-error.show { display: block; }
 
-/* the sign-in email can be read but not changed, so its text is gray */
 #me-email { color: var(--steel); }
 
-/* ==========================================================================
-   THE ALERT BELL
-   ========================================================================== */
 .bell {
     position: relative;
     width: 40px; height: 40px;
@@ -1795,8 +1528,6 @@ html:has(.modal.open) { overflow: hidden; }
     background: var(--paper);
 }
 .notif-head .eyebrow { margin-bottom: 0; font-weight: 600; color: var(--ink); }
-/* The list takes the room the head and foot leave and scrolls inside it. A thin
-   scrollbar stays in view so it is plain there is more below. */
 .notif-list {
     flex: 1 1 auto;
     min-height: 0;
@@ -1813,7 +1544,6 @@ html:has(.modal.open) { overflow: hidden; }
     border-radius: 999px;
 }
 
-/* an alert says what happened, who caused it, and when */
 .notif-item {
     display: grid; gap: 3px;
     width: 100%; text-align: left;
@@ -1864,11 +1594,8 @@ html:has(.modal.open) { overflow: hidden; }
     color: var(--steel-soft);
 }
 
-/* one alert on its own, laid out like an opened mail */
 .notif-modal-box { max-width: 560px; }
 
-/* what the alert is for, over the subject: the one word that says which
-   part of the shop it came from, in the alert's own colour */
 .notif-modal-kind {
     display: block;
     margin-bottom: 3px;
@@ -1931,9 +1658,6 @@ html:has(.modal.open) { overflow: hidden; }
     .mail-when { align-items: flex-start; }
 }
 
-/* ==========================================================================
-   THE ACCOUNT MENU -- the chip in the top right corner, and the only way out
-   ========================================================================== */
 .account-menu { position: relative; }
 .account-chip {
     display: inline-flex; align-items: center; gap: 9px;
@@ -2004,14 +1728,6 @@ html:has(.modal.open) { overflow: hidden; }
 .account-action-mark { width: 16px; text-align: center; color: var(--steel-soft); }
 .account-action.is-logout .account-action-mark { color: var(--stop); }
 
-/* ==========================================================================
-   ALERT CARDS -- bottom right, clear of the bell and account menu; newest
-   nearest the corner
-   ========================================================================== */
-/* The padding keeps the cards' shadows inside the deck, which scrolls when
-   the cards are taller than a short screen.
-   z-index 2500 puts the cards above an open popup (.modal is 2000), so a
-   warning or error raised while a popup is open is not hidden behind it. */
 .toast-deck {
     position: fixed; bottom: 12px; right: 12px;
     z-index: 2500;
@@ -2026,7 +1742,7 @@ html:has(.modal.open) { overflow: hidden; }
 }
 .toast-card {
     pointer-events: auto;
-    flex-shrink: 0;   /* a card keeps its height; the deck scrolls instead */
+    flex-shrink: 0;
     width: 100%;
     display: grid;
     grid-template-columns: var(--rule) 26px 1fr auto;
@@ -2049,8 +1765,6 @@ html:has(.modal.open) { overflow: hidden; }
     from { opacity: 1; transform: translateX(0); }
     to   { opacity: 0; transform: translateX(22px); }
 }
-/* every part is placed by hand: leaving it to the grid put the close button
-   between the mark and the words */
 .toast-stripe { grid-column: 1; grid-row: 1 / span 2; align-self: stretch; background: var(--steel); }
 .toast-body   { grid-column: 3; grid-row: 1 / span 2; min-width: 0; }
 .toast-mark {
@@ -2091,18 +1805,11 @@ html:has(.modal.open) { overflow: hidden; }
 .toast-card.toast-info    .toast-stripe { background: var(--chrome); }
 .toast-card.toast-info    .toast-mark   { background: rgba(20, 24, 29, 0.07); color: var(--steel); }
 
-/* ==========================================================================
-   BOOTSTRAP COMPATIBILITY -- properties Bootstrap sets that this file
-   never does, put back once
-   ========================================================================== */
 .card { display: block; }
 .badge { font-weight: 600; }
 .modal-body { flex: 1 1 auto; }
 .btn { --bs-btn-padding-x: initial; }
 
-/* ==========================================================================
-   KEYBOARD AND MOTION
-   ========================================================================== */
 :where(a, button, input, select, textarea):focus-visible {
     outline: 2px solid var(--signal);
     outline-offset: 2px;
@@ -2112,17 +1819,11 @@ html:has(.modal.open) { overflow: hidden; }
     *, *::before, *::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
-        /* none at all, not a hair: with every property sliding for 0.01ms, a
-           height set from script reads back as the old one (tables.js) */
         transition-duration: 0s !important;
         scroll-behavior: auto !important;
     }
 }
 
-/* ==========================================================================
-   THE DATA PANEL -- toolbar, grid at a fixed height, pager
-   ========================================================================== */
-/* ---- the toolbar above a grid ---- */
 .panel-toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -2157,14 +1858,9 @@ html:has(.modal.open) { overflow: hidden; }
 .toolbar-field select:focus,
 .toolbar-field input:focus { border-color: var(--go); outline: none; }
 
-/* pushes Load Data to the right-hand end of the toolbar; the margin keeps it
-   there when a narrow card wraps the button onto a line of its own */
 .toolbar-spacer { flex: 1 1 auto; }
 .toolbar-spacer + .btn { margin-left: auto; }
 
-/* A smaller laptop or a tablet: the boxes are narrower and the gaps smaller,
-   so a search, three filters and two dates stay on one line instead of
-   leaving the last box alone on a second one. (A phone stacks them, below.) */
 @media screen and (min-width: 641px) and (max-width: 1279px) {
     .panel-toolbar { gap: 8px; }
     .panel-toolbar .search-wrap { flex: 1 1 140px; min-width: 140px; }
@@ -2177,11 +1873,6 @@ html:has(.modal.open) { overflow: hidden; }
     }
 }
 
-/* ---- the grid, at a height that does not move ----
-   a 44.5px heading plus 52.3px per row (a row carrying a badge); ten on
-   most screens, eight on the cashier's, twelve on the refund log, five in
-   the Sales Summary tables. A table whose rows run taller is held at its
-   tallest by holdTableHeight() in tables.js. */
 .grid-12 { min-height: 672px; }
 .grid-10 { min-height: 566px; }
 .grid-8  { min-height: 462px; }
@@ -2191,25 +1882,22 @@ html:has(.modal.open) { overflow: hidden; }
 .grid-8  > table,
 .grid-5  > table { margin-top: 0; }
 
-/* the closed and empty states fill the grid rather than sitting at the top */
 .grid-12 .empty-state,
 .grid-10 .empty-state,
 .grid-8 .empty-state,
 .grid-5 .empty-state { padding-top: 60px; }
 
-/* ---- the pager ---- */
 .pager {
     display: flex;
     align-items: center;
-    justify-content: flex-end;   /* Previous and Next sit on the right */
+    justify-content: flex-end;
     flex-wrap: wrap;
     gap: 12px;
     padding-top: 14px;
     margin-top: 4px;
     border-top: 1px solid var(--line);
-    min-height: 47px;   /* the height it has with Previous and Next in it */
+    min-height: 47px;
 }
-/* an empty pager (not loaded yet, loading, no match) keeps its room */
 .pager:empty { border-top-color: transparent; }
 
 .pager-info {
@@ -2230,14 +1918,9 @@ html:has(.modal.open) { overflow: hidden; }
     text-align: center;
 }
 
-/* the "that did not load" mark wears the colour that means it stopped */
 .empty-mark-bad { border-color: rgba(158, 27, 50, 0.4); }
 .empty-mark-bad svg { stroke: var(--stop); }
 
-/* ==========================================================================
-   PRESENCE -- a small dot beside the account-state badge, filled when the
-   person is at a screen right now
-   ========================================================================== */
 .presence {
     display: inline-flex;
     align-items: center;
@@ -2260,12 +1943,8 @@ html:has(.modal.open) { overflow: hidden; }
     box-shadow: 0 0 0 3px var(--ok-dim);
 }
 
-/* both facts in one cell, stacked, so the column stays one column */
 .status-stack { display: inline-flex; flex-direction: column; gap: 4px; align-items: flex-start; }
 
-/* ==========================================================================
-   THE SIDE DRAWER -- a record on its own, with everything that can be done to it
-   ========================================================================== */
 .drawer {
     position: fixed;
     top: 0; right: 0; bottom: 0;
@@ -2290,17 +1969,10 @@ html:has(.modal.open) { overflow: hidden; }
     .pager-controls { justify-content: space-between; }
     .pager-controls .btn { flex: 1; }
 
-    /* the fields sit two to a line (one alone takes the whole line),
-       and the buttons share a line of their own */
     .panel-toolbar .toolbar-field { flex: 1 1 calc(50% - 5px); min-width: 0; order: 2; }
-    /* the From and To dates come first so they always share a line;
-       the buttons come last */
     .panel-toolbar .toolbar-date { order: 1; }
     .panel-toolbar > .btn { order: 3; }
 
-    /* An iPhone draws a date box at its own width and ignores the width it is
-       given, so the box ran past the edge of the screen. Without its built-in
-       look it keeps to its width like any other box. */
     input[type="date"] {
         -webkit-appearance: none;
         appearance: none;
@@ -2308,7 +1980,6 @@ html:has(.modal.open) { overflow: hidden; }
         max-width: 100%;
         box-sizing: border-box;
     }
-    /* without the built-in look the iPhone centres the date; keep it on the left */
     input[type="date"]::-webkit-date-and-time-value { text-align: left; }
     .panel-toolbar .toolbar-field select,
     .panel-toolbar .toolbar-field input { width: 100%; min-width: 0; }
@@ -2317,8 +1988,6 @@ html:has(.modal.open) { overflow: hidden; }
     .panel-toolbar > .pill { align-self: center; }
 }
 
-/* The consequences of a dangerous action, one per line. Prose in a dialog
-   gets skimmed; three short lines get counted. */
 .ask-detail {
     list-style: none;
     margin: 12px 0 0;
@@ -2343,17 +2012,12 @@ html:has(.modal.open) { overflow: hidden; }
     background: var(--stop);
 }
 
-/* crimson is only for the cards that destroy something */
 .ask-detail.is-plain {
     background: var(--paper);
     border-left-color: var(--steel-soft);
 }
 .ask-detail.is-plain li::before { background: var(--steel-soft); }
 
-/* ==========================================================================
-   "Label: value" lines set as two columns, the value in the figure face,
-   for cards showing a record to be checked
-   ========================================================================== */
 .ask-detail li.ask-pair {
     display: grid;
     grid-template-columns: 116px 1fr;
@@ -2367,7 +2031,7 @@ html:has(.modal.open) { overflow: hidden; }
     font-weight: 500;
     color: var(--ink);
     overflow-wrap: anywhere;
-    user-select: all;          /* one click selects the whole value to copy */
+    user-select: all;
 }
 
 @media (max-width: 480px) {
@@ -2375,7 +2039,6 @@ html:has(.modal.open) { overflow: hidden; }
     .ask-pair-label { font-size: 13px; }
 }
 
-/* recorded metadata, as machine text: mono, small, scrolling in its own box */
 .audit-json {
     font-family: var(--font-figure);
     font-size: 12.5px;
@@ -2393,10 +2056,6 @@ html:has(.modal.open) { overflow: hidden; }
     word-break: break-word;
 }
 
-/* ==========================================================================
-   A FIGURE THAT LEADS SOMEWHERE -- KPI cards that are buttons
-   ========================================================================== */
-/* the hover does not move the card: the only motion is motion answering a click */
 button.kpi-card {
     width: 100%;
     text-align: left;
@@ -2426,9 +2085,6 @@ button.kpi-card.kpi-danger:hover { background: var(--stop-dim);   border-left-co
 button.kpi-card:hover .kpi-go,
 button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 
-/* ==========================================================================
-   THE REORDER FORMULA -- written out wherever its number is shown
-   ========================================================================== */
 .formula-note {
     font-family: var(--font-figure);
     font-size: 14px;
@@ -2441,10 +2097,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     margin: 0 0 14px;
 }
 
-/* ==========================================================================
-   ON PAPER -- the browser's print dialogue; controls come off, the open
-   panel stays, and tables get their full height
-   ========================================================================== */
 @media print {
     .sidebar, .sidebar-shade, .topbar, .subnav, .toast-deck,
     .no-print, .pager, .panel-toolbar, .tab-header,
@@ -2452,7 +2104,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 
     .main-content { margin-left: 0 !important; }
     .content-area { padding: 0 !important; }
-    /* the page ground is grey on screen; on paper it is paper */
     body, .main-content, .content-area { background: #fff; }
 
     .card {
@@ -2463,8 +2114,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
         page-break-inside: avoid;
     }
 
-    /* the fixed grid height exists to stop the page jumping while somebody
-       reads; on paper there is nothing to jump */
     .grid-12, .grid-10, .grid-8, .grid-5,
     .table-responsive { min-height: 0 !important; }
     table tbody tr.row-filler, .table-spacer { display: none; }
@@ -2482,18 +2131,12 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     tr { break-inside: avoid; page-break-inside: avoid; }
 
     .badge, .pill { border: 1px solid #999; color: #000 !important; }
-    /* rows just drawn for the printout are not caught at the start of their fade-in */
     .row-reveal { animation: none !important; opacity: 1 !important; }
     .kpi-card { border: 1px solid #ccc; break-inside: avoid; }
     .kpi-go { display: none; }
     .chart-svg, .chart-single, .chart-key { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 
-/* ==========================================================================
-   THE PRINTED CREDIT TERMS AND CUSTOMER CARD (shared/credit-terms.js)
-   Built into #credit-print only while a page is printing; on A4 it is the
-   only thing on the paper. Plain black on white, a page to each sheet.
-   ========================================================================== */
 .credit-print { display: none; }
 
 @media print {
@@ -2524,8 +2167,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
         border-bottom: 1px solid #000;
     }
 
-    /* the printout rules for tables above (grey heads, small type) are for reports;
-       these two lists of facts are plain, so they are set again here */
     .cp-facts { width: 100%; border-collapse: collapse; }
     .cp-facts tr, .cp-facts th, .cp-facts td {
         padding: 4px 8px 4px 0;
@@ -2546,7 +2187,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     .cp-sign { display: flex; gap: 40px; margin-top: 46px; break-inside: avoid; page-break-inside: avoid; }
     .cp-sign-box { flex: 1; }
     .cp-sign-box p { margin: 3px 0 0; font-size: 11px; text-align: center; }
-    /* the same height on both sides (room for two lines), so the Date lines sit level */
     .cp-sign-box .cp-sign-label { min-height: 28px; }
     .cp-sign-box .cp-sign-name { min-height: 16px; font-weight: 700; font-size: 12px; }
     .cp-sign-line { height: 34px; border-bottom: 1px solid #000; }
@@ -2555,10 +2195,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     .cp-foot { margin: 24px 0 0; font-size: 10.5px; color: #333; text-align: right; }
 }
 
-/* ==========================================================================
-   TYPABLE FILTERS (shared/typable-select.js) -- a toolbar dropdown becomes a
-   box to type in, with its list under it; the real <select> stays, out of sight
-   ========================================================================== */
 .typable-wrap { display: flex; }
 .typable-wrap[hidden] { display: none; }
 .typable-native {
@@ -2588,12 +2224,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     .typable-list { max-width: 100%; width: auto; right: 0; }
 }
 
-/* ==========================================================================
-   THE PHYSICAL CUSTOMER CARD (shared/credit-terms.js) -- ID-1 size, 85.6 x 54 mm,
-   drawn in mm so the print is true size. The same card is the preview on the
-   Policy Maintenance pages (scaled up there) and is measured out of sight
-   (.cc-measure) before printing, to fit the back's text to the card.
-   ========================================================================== */
 .cc-card {
     --cc-ink: #14181d;
     --cc-band: #1b1f24;
@@ -2612,7 +2242,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 }
 .cc-card * { box-sizing: border-box; }
 
-/* the front: a dark band with the store, the cardholder below */
 .cc-front-band {
     display: flex; align-items: center; gap: 2.4mm;
     padding: 3mm 3.6mm;
@@ -2637,7 +2266,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .cc-front-facts strong { font-size: 7pt; white-space: nowrap; }
 .cc-front-foot { padding: 1.4mm 3.6mm; font-size: 5pt; color: #5b636d; border-top: 0.2mm solid #d9dde2; }
 
-/* the back: the three policies in two columns, the signature at the foot */
 .cc-back-head {
     display: flex; justify-content: space-between; align-items: baseline; gap: 2mm;
     padding: 1.3mm 2.6mm;
@@ -2666,28 +2294,19 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .cc-sign-line { flex: 1; height: 3.4mm; border-bottom: 0.25mm solid var(--cc-ink); }
 .cc-return { margin-top: 0.8mm; font-size: 4.5pt; color: #5b636d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* measured on screen, out of sight, before it goes to the paper */
 .cc-measure { position: fixed; left: -10000px; top: 0; visibility: hidden; }
 
-/* the preview: the card scaled to the width of its column (manager.js previewCardBack) */
 .card-preview { position: relative; width: 100%; }
 .card-preview .cc-card { transform-origin: top left; box-shadow: 0 0 0 1px var(--line); }
 .card-preview .cc-policy.is-editing { outline: 0.3mm dashed var(--cc-accent); outline-offset: 0.4mm; }
 
 @media print {
-    /* the printed sheet: the front and the back side by side, sharing the fold,
-       with a dotted line to cut along */
-    /* the page has no margin (so the browser prints no date or address), so the
-       card keeps its distance from the paper's edge here */
     .cc-sheet { padding-top: 16mm; }
     .cc-pair { display: flex; justify-content: center; }
     .cc-pair .cc-card { border-radius: 0; outline: 0.3mm dashed #000; }
     .cc-pair .cc-front { border-right: 0.2mm dotted #999; }
 }
 
-/* ==========================================================================
-   CREDIT -- purchase history and payment history side by side
-   ========================================================================== */
 .history-head {
     display: flex;
     justify-content: space-between;
@@ -2707,26 +2326,17 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     font-variant-numeric: tabular-nums;
 }
 
-/* A table in a popup is paged, never scrolled sideways: the cells wrap
-   instead, and Previous and Next under it reach every row. */
 .paged-table { overflow: visible; }
 .paged-table .mini-table { table-layout: auto; }
 .paged-table .mini-table th { white-space: normal; }
 .paged-table .mini-table td { overflow-wrap: anywhere; }
-/* a date or a figure is never broken across lines */
 .paged-table .mini-table td:first-child,
 .paged-table .mini-table td.cell-num,
 .paged-table .mini-table th.col-num { white-space: nowrap; }
 
-/* two tables side by side need more room than one form */
 .modal-box.modal-wide { max-width: 820px; }
-/* a record with a table beside its facts (a purchase order and its materials) */
 .modal-box.modal-xl { max-width: min(1140px, calc(100vw - 32px)); }
 
-/* Every record popup (#detail-modal: a sale, a product, an order, a record)
-   is one width, wide, whatever the record holds. Its height fits the record,
-   up to the window's height (.modal-box max-height); only a record taller
-   than the window turns pages. A phone keeps its sheet (responsive.css). */
 @media (min-width: 641px) and (min-height: 561px) {
     #detail-modal .modal-box,
     #detail-modal .modal-box.modal-wide,
@@ -2746,12 +2356,9 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .paged-pager .pager-page { min-width: 76px; }
 .paged-pager .btn-sm { min-width: 82px; }
 
-/* the heading's words then its caret; the caret keeps the right-hand edge */
 .sidebar-nav li[data-sidebar-dropdown] > .nav-parent { justify-content: flex-start; }
 .sidebar-nav li[data-sidebar-dropdown] .nav-caret { margin-left: auto; }
 
-/* The caret is part of the heading (helpers.js sidebarHeading): the whole row
-   folds or unfolds the list, so there is no hairline splitting it in two. */
 .sidebar-nav li[data-sidebar-dropdown] .nav-caret {
     display: inline-flex; align-items: center; justify-content: center;
     margin-left: auto;
@@ -2763,18 +2370,12 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .sidebar-nav li[data-sidebar-dropdown] .nav-parent.is-open .nav-caret { transform: none; }
 .sidebar-nav li[data-sidebar-dropdown] .nav-parent.is-open .nav-caret > span { transform: rotate(180deg); }
 
-/* a heading is lit whenever one of the screens beneath it is the open one,
-   folded or not, so a folded list still says where you are */
 .sidebar-nav li[data-sidebar-dropdown]:has(> .nav-sub a.active) > .nav-parent {
     color: var(--surface);
     background: rgba(240, 78, 35, 0.20);
 }
 .sidebar-nav li[data-sidebar-dropdown]:has(> .nav-sub a.active) > .nav-parent::before { transform: scaleY(1); }
 
-/* ==========================================================================
-   LIVE SYNC -- a stale table says so in its own footer (see live-sync.js)
-   ========================================================================== */
-/* a table nobody is reading refreshes itself; the count flashes */
 .pill.is-fresh {
     animation: pill-fresh 2.2s ease-out;
 }
@@ -2784,7 +2385,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     100% { background: var(--signal-dim); border-color: rgba(245, 179, 1, 0.45); color: var(--signal-ink); }
 }
 
-/* a table somebody IS reading is not redrawn under them; it says so and waits */
 .stale-note {
     display: flex;
     align-items: center;
@@ -2811,14 +2411,7 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     .stale-note .btn { margin-left: 0; width: 100%; }
 }
 
-/* ==========================================================================
-   THE SALES INVOICE -- shared by the cashier and the administrator's preview;
-   set in the figure face at receipt widths, as it comes off the printer
-   ========================================================================== */
 .receipt-box { max-width: 420px; }
-/* The receipt's "Text size" setting sets the font size on .receipt-paper
-   (applyReceiptPaper in format.js). Every size below is in em, so it grows
-   and shrinks with that setting; 1em is the size picked (Normal = 12px). */
 .receipt-paper {
     box-sizing: border-box;
     margin: 0 auto;
@@ -2837,7 +2430,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     letter-spacing: 0.02em;
     text-transform: uppercase;
 }
-/* the proprietor, under the registered name */
 .rc-prop {
     display: block;
     font-size: 1em;
@@ -2845,7 +2437,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     letter-spacing: 0.02em;
     color: var(--ink);
 }
-/* the registered address and TIN, small but present */
 .rc-addr {
     display: block;
     font-size: 0.92em;
@@ -2876,7 +2467,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 
 .rc-rule { border-top: 1px dashed var(--steel-soft); margin: 11px 0; }
 
-/* font-size 1em: the print rule "table { font-size: 11px }" must not shrink the item lines */
 .rc-items { width: 100%; margin: 0; font-size: 1em; }
 .rc-items td { border: none; padding: 4px 0; font-size: 1.04em; vertical-align: top; }
 .rc-qty { color: var(--steel-soft); font-size: 0.88em; }
@@ -2886,7 +2476,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .rc-totals span:last-child { font-variant-numeric: tabular-nums; }
 .rc-due { font-weight: 700; font-size: 1.25em !important; padding: 5px 0 !important; }
 
-/* THE TAX BLOCK -- set apart from the money above it; same tabular figures */
 .rc-tax div {
     display: flex;
     justify-content: space-between;
@@ -2907,9 +2496,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     margin-top: 8px;
 }
 
-/* THE BANK ACCOUNT -- printed when a sale leaves a balance to be paid by transfer;
-   the same block carries the details of a cheque or a bank transfer taken
-   (payment-details.js) */
 .rc-bank-head {
     margin: 0 0 3px;
     text-align: center;
@@ -2922,8 +2508,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .rc-bank span:first-child { color: var(--steel-soft); }
 .rc-bank span:last-child { text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 
-/* THE BANK AND ACCOUNT OF A CHEQUE OR A TRANSFER -- the boxes the cashier (or the
-   driver) fills in under the payment method (payment-details.js) */
 .pay-details {
     margin: 0 0 14px;
     padding: 11px 14px 2px;
@@ -2933,7 +2517,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     background: var(--paper);
 }
 .pay-details[hidden] { display: none; }
-/* what is wrong with a box, under it, and its red edge (payment-details.js pdMark) */
 .pay-details .field-error {
     display: block;
     margin-top: 4px;
@@ -2960,10 +2543,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     margin-top: 8px;
 }
 
-/* ==========================================================================
-   THE TYPED PICKER -- customers, refunded products, materials and units.
-   The list overlays the fields below rather than pushing them down.
-   ========================================================================== */
 .suggest-wrap { position: relative; }
 
 .suggest-wrap .form-control { padding-right: 34px; }
@@ -3020,19 +2599,12 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 
 .suggest-name { font-size: 14.5px; font-weight: 600; color: var(--ink); line-height: 1.3; }
 
-/* Why the suggestion is worth taking: a regular is a regular, and an account
-   that already owes money is the one fact wanted before the sale. */
 .suggest-note {
     font-size: 12.5px;
     color: var(--steel-soft);
     font-variant-numeric: tabular-nums;
 }
 
-/* ==========================================================================
-   THE MATERIAL BOX READS AS A DROPDOWN -- the caret says the list can be
-   read down without a name being guessed at first, and the head line says
-   whose list it is.
-   ========================================================================== */
 .mat-caret {
     position: absolute;
     top: 50%;
@@ -3055,16 +2627,12 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .mat-caret:hover { color: var(--ink); background: var(--go-dim); }
 .mat-caret span { display: block; transition: transform 120ms ease; }
 
-/* The caret follows the list itself, so it cannot end up pointing at a list
-   that is not there. Each rule stands alone: a browser without :has() drops
-   only those two and still has the aria one. */
 .mat-wrap .form-control[aria-expanded="true"] + .mat-caret span { transform: rotate(180deg); }
 .mat-wrap:has(.suggest-list:not([hidden])) .mat-caret span { transform: rotate(180deg); }
 .mat-wrap:has(.suggest-list[hidden]) .mat-caret span { transform: none; }
 
 .mat-wrap .suggest-list { max-height: 300px; }
 
-/* the list that did not arrive: the row is the way to ask for it again */
 .suggest-item.is-retry .suggest-name { color: var(--stop); }
 
 .suggest-head {
@@ -3078,10 +2646,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     cursor: default;
 }
 
-/* ==========================================================================
-   WHAT WAS CHOSEN -- the strip IS the choice: no strip means nothing is
-   selected. Same shape as the credit strip.
-   ========================================================================== */
 .pick-strip {
     margin-top: 8px;
     padding: 10px 12px;
@@ -3123,7 +2687,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     font-variant-numeric: tabular-nums;
 }
 
-/* a suggestion carrying a figure: the price sits on the right in the figure face */
 .suggest-line {
     display: flex;
     align-items: baseline;
@@ -3139,8 +2702,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     white-space: nowrap;
 }
 
-/* Says which of the two states the field is in, before the form is sent
-   rather than as a refusal after it. */
 .pick-verdict {
     margin: 6px 0 0;
     font-size: 13px;
@@ -3151,10 +2712,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .pick-verdict.is-stop { color: var(--stop); font-weight: 500; }
 .pick-verdict.is-new  { color: var(--signal-ink); font-weight: 500; }
 
-/* ==========================================================================
-   THE MATERIAL THAT IS NOT ON RECORD YET -- the last row of the list is
-   the way out of it, and looks unlike a suggestion on purpose
-   ========================================================================== */
 .suggest-item.is-make {
     flex-direction: row;
     align-items: center;
@@ -3183,8 +2740,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 }
 .suggest-item.is-make .make-quoted { color: var(--ink); }
 
-/* the form that opens under the box. Drawn like the new-supplier card on the
-   purchase order: an addition to the records wears the orange rule on its left */
 .make-card {
     margin-top: 12px;
     border: 1px solid var(--line);
@@ -3209,30 +2764,16 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     gap: 12px;
 }
 .make-card .form-group { margin-bottom: 0; }
-/* its suggestion boxes have no caret or clear button to leave room for. The
-   list is only as wide as its box, so it stays inside the card at any width:
-   long words wrap and the count drops under the name */
 .make-card .suggest-wrap .form-control { padding-right: 12px; }
 .make-card .suggest-line { flex-wrap: wrap; gap: 0 12px; }
 .make-card .suggest-name { min-width: 0; overflow-wrap: anywhere; }
 
-/* ==========================================================================
-   THE DETAIL POPUP -- an odd last fact spans the row rather than leave a grey
-   hole; buttons for the record sit in the foot beside Close
-   ========================================================================== */
 .detail-grid > .detail-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
 
-/* A ROOMY CARD -- modals.js adds .modal-roomy when a card is too tall for the
-   window. The card gets wider and its facts sit three to a row, so it is
-   shorter and usually needs no Previous / Next. Not on a phone: there the
-   card is already as wide as the screen. */
 @media (min-width: 761px) {
     .modal-box.modal-roomy { max-width: min(1140px, calc(100vw - 32px)); }
     .modal-roomy .detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    /* a form row of three or more fields goes three to a row as well
-       (a row of two stays two, so no empty column is left beside it) */
     .modal-roomy .grid-2:has(> :nth-child(3)) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    /* the last row is filled, so no grey hole is left at its end */
     .modal-roomy .detail-grid > .detail-item:last-child:nth-child(odd) { grid-column: auto; }
     .modal-roomy .detail-grid > .detail-item:last-child:nth-child(3n+1) { grid-column: 1 / -1; }
     .modal-roomy .detail-grid > .detail-item:last-child:nth-child(3n+2) { grid-column: span 2; }
@@ -3240,8 +2781,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 
 .detail-foot-actions { display: flex; gap: 9px; flex-wrap: wrap; }
 
-/* My Account: the foot carries the open tab's Save button; on Credentials it
-   has none, and shows only when the pager needs it */
 [data-account-foot][hidden] { display: none; }
 #account-foot:not(:has(> :not([hidden]))) { display: none; }
 
@@ -3254,30 +2793,17 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     color: var(--steel-soft);
 }
 
-/* ==========================================================================
-   TABBED SCREENS -- one menu entry opens the screen; the bar across its top
-   picks the view (.panel-view), optionally grouped under small captions.
-   One view shows at a time (manager.js, delivery-personnel.js).
-   ========================================================================== */
 .panel-view[hidden] { display: none; }
 .panel-view.card { margin-bottom: 0; }
 
-/* ==========================================================================
-   ICONS -- Bootstrap Icons, kept in vendor/bootstrap-icons/ (no internet needed)
-   The sidebar and the sign-in fields carry theirs in the HTML; the buttons,
-   tabs, page titles and summary cards get theirs from shared/icons.js.
-   ========================================================================== */
 .bi { line-height: 1; }
 
-/* the menu: one fixed-width column, so every label starts on the same line */
 .sidebar-nav .nav-icon {
     display: inline-block;
     width: 1.25em;
     margin-right: 10px;
     font-size: 17px;
     text-align: center;
-    /* a flex item, so vertical-align does nothing: this lifts the glyph onto
-       the middle of the capitals beside it */
     position: relative;
     top: -0.05em;
     opacity: 0.75;
@@ -3287,18 +2813,12 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .sidebar-nav li a:hover .nav-icon,
 .sidebar-nav li a.active .nav-icon { opacity: 1; }
 .sidebar-nav li a.active .nav-icon { color: var(--brand); }
-/* every entry is a row (icon, words, caret), so a long name wraps beside its
-   icon rather than under it; the words follow the icon and the caret keeps the
-   right-hand edge. The dropdown headings' gap would push their words further
-   in than a plain entry's, so the icon's own margin does the spacing. */
 .sidebar-nav li a { display: flex; align-items: center; }
 .sidebar-nav .nav-parent,
 .sidebar-nav li[data-sidebar-dropdown] > .nav-parent { justify-content: flex-start; gap: 0; }
 .sidebar-nav .nav-parent .nav-caret { margin-left: auto; padding-left: 10px; }
 .sidebar-nav .nav-icon { flex: none; }
 
-/* buttons and the screen tabs: the icon leads the words, its middle on the
-   middle of their capitals */
 .btn-icon,
 .tab-icon {
     margin-right: 0.45em;
@@ -3308,7 +2828,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .password-toggle .btn-icon { margin-right: 0.3em; }
 .btn-icon-end { margin-right: 0; margin-left: 0.45em; }
 
-/* the page title: the screen's sidebar icon, in the shop's orange */
 .title-icon {
     flex: none;
     font-size: 21px;
@@ -3318,15 +2837,12 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 }
 .title-icon[hidden] { display: none; }
 
-/* summary cards */
 .kpi-icon {
     margin-right: 0.4em;
     color: var(--go);
     vertical-align: -0.03em;
 }
 
-/* a field with an icon at its left: the box is drawn by the wrapper, the same
-   way .password-field draws one around a password and its Show button */
 .icon-field {
     display: flex;
     align-items: stretch;
@@ -3357,10 +2873,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .icon-field:focus-within .field-icon,
 .password-field:focus-within .field-icon { color: var(--go); }
 
-/* A browser that fills in a saved email or password tints the <input> alone,
-   which left the icon and Show/Hide in white strips outside a blue box. The
-   input keeps the field's own white, so the icon, the words and the button
-   read as one box. */
 .icon-field .form-control:-webkit-autofill,
 .password-field .form-control:-webkit-autofill {
     -webkit-box-shadow: 0 0 0 1000px var(--surface) inset;
@@ -3370,9 +2882,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     filter: none;
 }
 
-/* ==========================================================================
-   THE BANNER -- a strip above the screens (the clerk's stock warning, the manager's no-price alert), with the meaning rule on its left
-   ========================================================================== */
 .banner {
     display: flex; align-items: center; justify-content: space-between;
     gap: 14px; flex-wrap: wrap;
@@ -3401,15 +2910,11 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     .banner .btn { width: 100%; }
 }
 
-/* ==========================================================================
-   SORTING BY A COLUMN HEADER -- data-panel.js marks the headers that sort
-   (th-sortable) and which way the one in use goes (aria-sort)
-   ========================================================================== */
 table th.th-sortable { cursor: pointer; user-select: none; }
 table th.th-sortable:hover,
 table th.th-sortable:focus-visible { background: color-mix(in srgb, var(--chrome) 82%, #ffffff); outline: none; }
 table th.th-sortable::after {
-    content: "\2195";               /* up-down arrow: sortable, not in use */
+    content: "\2195";
     display: inline-block;
     margin-left: 6px;
     opacity: 0.45;
@@ -3418,13 +2923,8 @@ table th.th-sortable::after {
 table th.th-sortable[aria-sort="ascending"]::after  { content: "\25B2"; opacity: 1; }
 table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity: 1; }
 
-/* a toolbar box put away (the From and To beside a Period box until Custom date) */
 .toolbar-field[hidden] { display: none !important; }
 
-/* ---------- Pay by QR (scripts/shared/qr-pay.js): the counter and the driver at the door ---------- */
-/* PAY BY QR -- the code turned to face the customer: the amount above it large
-   enough to read across the counter, the code on white with a quiet margin (a
-   scanner needs one), and one line saying what is happening. */
 .qr-box { max-width: 440px; }
 .qr-box .modal-body { text-align: center; }
 .qr-amount {
@@ -3443,7 +2943,6 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
     background: #fff;
     line-height: 0;
 }
-/* drawn square and crisp: a blurred edge between modules is what fails to scan */
 .qr-frame img {
     display: block;
     width: 240px;
@@ -3460,25 +2959,15 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
 .qr-clock { margin: 0 0 12px; font-size: 13.5px; color: var(--steel); }
 .qr-clock strong { font-family: var(--font-figure); font-variant-numeric: tabular-nums; color: var(--ink); }
 .qr-clock.is-ending strong { color: var(--stop-hi); }
-/* a failed or expired code: the code is greyed so nobody scans it again */
 .qr-box.is-over .qr-frame img { opacity: 0.25; filter: grayscale(1); }
-/* a short screen: a smaller code (still well above what a phone needs) keeps
-   the whole card on one page */
 @media (max-height: 760px) {
     .qr-amount { font-size: 22px; margin-bottom: 6px; }
     .qr-frame { padding: 8px; }
     .qr-frame img { width: 170px; height: 170px; }
     .qr-ask { font-size: 13.5px; }
 }
-/* the buttons wrap rather than squeeze on a narrow screen */
 .qr-foot { flex-wrap: wrap; }
 
-/* ---------- the preview box, the source strip and the items table: the clerk's
-   Stock Adjustment and the cashier's Issue a Refund ---------- */
-/* ==========================================================================
-   WHAT THIS WILL DO TO THE SHELF -- the material, then "40 pcs -> 45 pcs (+5)":
-   green when the shelf goes up, amber when it goes down, red when it cannot be done
-   ========================================================================== */
 .adjust-preview {
     margin: 14px 0 0;
     padding: 10px 13px;
@@ -3501,10 +2990,6 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
 .adjust-preview.is-stop .preview-figures strong { color: var(--stop-hi); }
 .preview-note   { display: block; margin-top: 4px; font-size: 13px; color: var(--signal-ink); }
 
-/* ==========================================================================
-   AN ORDER OR A RETURN ON THE ADJUSTMENT FORM
-   ========================================================================== */
-/* which one is being worked, and the way back to a single material */
 .adjust-source {
     display: flex;
     align-items: flex-start;
@@ -3523,7 +3008,6 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
 .adjust-source-sub { font-size: 13px; color: var(--steel); }
 .adjust-source .btn { flex-shrink: 0; white-space: nowrap; }
 
-/* the items: a few rows show, the rest scroll inside the table */
 .adjust-lines { margin-bottom: 14px; }
 .adjust-lines[hidden] { display: none; }
 .adjust-lines-head { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--steel); }
@@ -3537,7 +3021,6 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
 .adjust-lines-table thead th { position: sticky; top: 0; z-index: 1; }
 .adjust-lines-table .cell-sub { display: block; font-size: 12px; color: var(--steel-soft); }
 .adjust-line-qty { width: 100px; margin-left: auto; text-align: right; }
-/* under or over the order, as the clerk types what arrived */
 .adjust-line-note { display: block; font-size: 12px; font-weight: 600; }
 .adjust-line-note:empty { display: none; }
 .adjust-line-note.is-under { color: var(--signal-ink); }
@@ -3549,7 +3032,6 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
     .adjust-line-qty { width: 80px; }
 }
 
-/* ---------- a cashier's request to void a sale, on the sale's record ---------- */
 .void-request-box {
     margin: 0 0 14px;
     padding: 10px 13px;
@@ -3563,11 +3045,6 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
 .void-request-reason { margin-top: 2px; color: var(--ink); overflow-wrap: anywhere; }
 .void-request-hint { margin-top: 4px; font-size: 13px; color: var(--steel); }
 
-/* ==========================================================================
-   SCREENS FROM ANOTHER DASHBOARD (shared/features.js)
-   A dashboard opened for a screen granted from it keeps its menu out of sight
-   until the granted screens are known, so its own screens never flash past.
-   ========================================================================== */
 html.is-visiting:not(.visit-ready) .sidebar-nav { visibility: hidden; }
 .sidebar-nav .nav-host {
     margin-left: auto;

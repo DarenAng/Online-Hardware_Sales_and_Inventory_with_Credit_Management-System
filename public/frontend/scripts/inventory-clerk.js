@@ -1,23 +1,6 @@
-// ============================================================
-// inventory-clerk.js -- the Inventory Clerk dashboard
-// Loaded by: inventory-dashboard.html
-//
-// What is in this file, from top to bottom:
-//   - switching screens (showInventoryPanel and the show... functions)
-//   - the material list (with its filters) and the low-stock banner
-//   - stock adjustment: pick a material, an accepted purchase order or an open
-//     returned item from Reference, see a preview, save
-//   - adjustment history and reorder points
-//   - returns and damage reports: inspect, return to stock or write off
-//   - the material archive
-//   - popups: one material, one adjustment, one return
-//   - the page start-up code at the very bottom ("INVENTORY PAGE BOOT")
-// (Purchase orders are in shared/purchase-orders.js.)
-// ============================================================
 let invProducts = [];
 let invLoaded = false;
 
-// what is chosen on the adjustment form; typed text that matches nothing is not a choice
 let adjustMaterial = null;
 let adjustSuggestHighlight = -1;
 
@@ -31,10 +14,8 @@ function showInventoryPanel(panelId, title, event) {
         const panel = allPanels[i];
         panel.style.display = panel.id === panelId ? 'block' : 'none';
     }
-    // a screen opened from another (the order form, from Purchase Orders) lights its menu entry
     const opened = document.getElementById(panelId);
     const litId = (opened && opened.getAttribute('data-panel-of')) || panelId;
-    // a link naming a view (Records: Suppliers, Products...) lights only for that view
     const view = opened ? opened.dataset.view : undefined;
     const panelLinks = document.querySelectorAll('[data-panel-link]');
     for (let i = 0; i < panelLinks.length; i++) {
@@ -49,22 +30,15 @@ function showInventoryPanel(panelId, title, event) {
     leaveScreenFurniture();
 }
 
-// Opening a screen never unfolds the Inventory Management list: only the
-// heading's caret does (shared/helpers.js sidebarHeading); the heading lights
-// up on its own while a screen beneath it is the open one.
-
 function showInventoryHome(event) {
     showInventoryPanel('panel-inventory', 'Inventory Management', event);
 
-    // the material list keeps whatever it had loaded; the banner is one small query
     loadStockBanner();
 }
 
-// Opening a screen fills the dropdowns it needs and nothing else.
 function showAdjust(event) {
     showInventoryPanel('panel-adjust', 'Stock Adjustment', event);
 
-    // the Reference list holds the materials too, so it waits for them
     if (invLoaded) renderAttentionList();
     else attentionMessage('Loading...');
     ensureInventoryLoaded(true).then(afterMaterialsLoaded);
@@ -80,7 +54,6 @@ function showReorder(event) { showInventoryPanel('panel-reorder', 'Reorder Point
 function showReturns(event) { showInventoryPanel('panel-returns', 'Returned Items', event); }
 function showInventoryArchive(event) { showInventoryPanel('panel-archive', 'Archive', event); }
 
-// ---------- the material list ----------
 async function ensureInventoryLoaded(force) {
     if (invLoaded && !force) return true;
     try {
@@ -93,8 +66,6 @@ async function ensureInventoryLoaded(force) {
     }
 }
 
-// The material list starts closed like every other table; typing into the
-// search box is itself a request to load it.
 function buildMaterialsPanel() {
     createDataPanel({
         key: 'clerk-materials',
@@ -117,8 +88,6 @@ function buildMaterialsPanel() {
             return invProducts;
         },
 
-        // this load replaces invProducts, so the Stock Adjustment list and the
-        // Material filter are redrawn from it
         onLoaded: function () {
             fillMaterialNameFilter();
             if (adjustScreenOpen()) afterMaterialsLoaded(true);
@@ -138,14 +107,10 @@ function buildMaterialsPanel() {
             return true;
         },
 
-        // a product with no price yet (just added, waiting for the manager) is
-        // always on the top row, whatever the search, the filter or the page
         sort: function (rows) {
             return unpricedFirst(rows);
         },
 
-        // the catalogue: what it is, who supplies it and what it sells for.
-        // Reorder points have their own screen, so they are not repeated here.
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openMaterialDetail(' + p.product_id + ')" title="Open this material">' +
@@ -163,9 +128,6 @@ function buildMaterialsPanel() {
     });
 }
 
-// ---------- the Material List filters ----------
-// Supplier and Category come from Records; Material from the material list.
-// Each keeps what is picked when its choices are filled again.
 function setFilterOptions(selectId, firstLabel, choices) {
     const select = document.getElementById(selectId);
     if (!select) return;
@@ -194,7 +156,6 @@ async function fillMaterialFilters() {
         setFilterOptions('inv-supplier', 'Every supplier', named(lists[0]));
         setFilterOptions('inv-category', 'Every category', named(lists[1]));
     } catch (error) {
-        // not fatal: the list still searches by supplier and category
     }
 
     if (await ensureInventoryLoaded(false)) fillMaterialNameFilter();
@@ -209,7 +170,6 @@ function fillMaterialNameFilter() {
     setFilterOptions('inv-material', 'Every material', choices);
 }
 
-// The material in invProducts with this id, or undefined when there is none.
 function findProductById(productId) {
     for (let i = 0; i < invProducts.length; i++) {
         if (invProducts[i].product_id === productId) return invProducts[i];
@@ -217,8 +177,6 @@ function findProductById(productId) {
     return undefined;
 }
 
-// Puts the names in a list into one string, each one made safe for HTML,
-// with the separator between them.
 function joinEscaped(names, separator) {
     let text = '';
     for (let i = 0; i < names.length; i++) {
@@ -228,7 +186,6 @@ function joinEscaped(names, separator) {
     return text;
 }
 
-// "Stanley · Hand Tools": brand then category, whichever are on file
 function materialKindText(p) {
     const parts = [];
     if (p.brand_name) parts.push(p.brand_name);
@@ -247,16 +204,10 @@ async function loadInventoryAll(event) {
     loadStockBanner();
 }
 
-// ---------- adding a new product ----------
-// The Add New Product button on the Material List. The clerk names the product
-// and says what it is. The price is the manager's: the product starts with
-// "No price", the manager is told, and the till cannot sell it until it is
-// priced. The first stock comes in by a delivery or a stock adjustment.
 const PRODUCT_NAME_MAX = 150;
 const BRAND_NAME_MAX = 100;
 const REORDER_POINT_MAX = 100000;
 
-// <option>s for a list of records ({ id, name }), with a first line that has no value
 function recordOptions(rows, firstLine) {
     let html = '<option value="">' + escapeHtml(firstLine) + '</option>';
     for (let i = 0; i < rows.length; i++) {
@@ -286,7 +237,6 @@ async function openAddProduct() {
         return;
     }
 
-    // only the manager adds a category or a unit (Records), so there is nothing to pick without them
     if (categories.length === 0 || units.length === 0) {
         notifyWarning('There is no category or unit on file yet. Ask the manager to add them under Records first.',
             'Cannot add a product yet');
@@ -355,7 +305,6 @@ async function openAddProduct() {
     if (nameBox) nameBox.focus();
 }
 
-// Says what is wrong with the form, as { message, field }, or null when it can be sent
 function checkNewProduct(form) {
     const name = form.elements.productName.value.trim();
     if (name === '') return { message: 'Type the product\'s name.', field: form.elements.productName };
@@ -383,7 +332,6 @@ function checkNewProduct(form) {
     return null;
 }
 
-// the material already on the list with this name (any capitals), or undefined
 function findProductByName(name) {
     const wanted = name.trim().toLowerCase();
     for (let i = 0; i < invProducts.length; i++) {
@@ -405,7 +353,6 @@ async function saveNewProduct(event) {
 
     const name = form.elements.productName.value.trim().replace(/\s+/g, ' ');
 
-    // the list may already be loaded: no need to ask the server about a name that is on it
     const same = findProductByName(name);
     if (same) {
         notifyWarning('"' + same.product_name + '" is already on the material list. Nothing was added.',
@@ -434,7 +381,6 @@ async function saveNewProduct(event) {
             return;
         }
 
-        // the name was already on file: the server added nothing, and says so
         if (!result.created) {
             notifyWarning(result.message, 'Already on file');
             form.elements.productName.focus();
@@ -451,12 +397,10 @@ async function saveNewProduct(event) {
     }
 }
 
-// Reads the material list again with the new product searched for, so its row is the one on screen
 async function showNewProductRow(name) {
     const panel = getDataPanel('clerk-materials');
     if (!panel) return;
 
-    // the search text and the filters must not hide it
     const search = document.getElementById('inv-search');
     if (search) search.value = name;
     const filterBoxes = { status: 'inv-status', supplier: 'inv-supplier', material: 'inv-material', category: 'inv-category' };
@@ -467,10 +411,9 @@ async function showNewProductRow(name) {
     }
     panel.query = searchText(name);
     await panel.open();
-    fillMaterialFilters();         // the new product's supplier, category and name
+    fillMaterialFilters();
 }
 
-// ---------- the low stock banner ----------
 async function loadStockBanner() {
     const box = document.getElementById('stock-banner');
     if (!box) return;
@@ -498,20 +441,14 @@ async function loadStockBanner() {
     }
 }
 
-// ---------- the Reference list (Stock Adjustment) ----------
-// The server marks every material Out of Stock, Low Stock or In Stock. It is
-// the same rule that counts the banner above, so the materials are sorted by
-// that mark: the ones that need stock come first.
 function isShort(p) {
     return p.stock_status === 'Out of Stock' || p.stock_status === 'Low Stock';
 }
 
-// how far under its reorder point a material is
 function shortBy(p) {
     return (Number(p.reorder_point) || 0) - (Number(p.quantity_in_stock) || 0);
 }
 
-// out of stock first, then low; inside each, the one furthest under its point first
 function compareShort(a, b) {
     const aRank = a.stock_status === 'Out of Stock' ? 0 : 1;
     const bRank = b.stock_status === 'Out of Stock' ? 0 : 1;
@@ -520,7 +457,6 @@ function compareShort(a, b) {
     return String(a.product_name).localeCompare(String(b.product_name));
 }
 
-// one line of words where the list goes ("Loading...", "Everything is above...")
 function attentionMessage(text) {
     const list = document.getElementById('attention-list');
     const more = document.getElementById('attention-more');
@@ -528,14 +464,11 @@ function attentionMessage(text) {
     if (more) { more.hidden = true; more.innerHTML = ''; }
 }
 
-// whether the Stock Adjustment screen is the one showing
 function adjustScreenOpen() {
     const panel = document.getElementById('panel-adjust');
     return Boolean(panel) && panel.style.display === 'block';
 }
 
-// Once the materials are in: draw the list, and bring the material picked in the
-// form up to date. Says so when they could not be loaded.
 function afterMaterialsLoaded(loaded) {
     if (!loaded) {
         attentionMessage('The materials could not be loaded.');
@@ -546,9 +479,6 @@ function afterMaterialsLoaded(loaded) {
     renderAttentionList();
 }
 
-// The picked material is a copy from an earlier load; swap in the fresh one so the
-// strip and the preview's "before" figure are current. The unit box is left alone,
-// because the clerk may be in the middle of typing it.
 function refreshPickedMaterial() {
     if (!adjustMaterial) return;
 
@@ -560,9 +490,6 @@ function refreshPickedMaterial() {
     renderAdjustPreview();
 }
 
-// Somebody else moved stock (a sale, a return, another clerk): while this screen is
-// open, read the materials, orders and returns again so the list, the strip and
-// the banner stay true.
 async function refreshAdjustScreen() {
     if (!adjustScreenOpen()) return;
 
@@ -573,12 +500,8 @@ async function refreshAdjustScreen() {
     loadStockBanner();
 }
 
-// ---------- the Reference list's purchase orders and returned items ----------
-// Accepted purchase orders (the supplier said yes; the goods are on their way)
-// and returned items still Open. A failed load leaves that part of the list
-// empty and says so; the materials still show.
 let referencePos = [];
-let referenceReturns = [];        // open returned items, grouped (see groupOpenReturns)
+let referenceReturns = [];
 let referenceProblem = '';
 let referenceSearch = '';
 let referenceType = 'all';
@@ -617,8 +540,6 @@ async function loadReferenceRecords() {
     dropStaleAdjustSource();
 }
 
-// Open returned items filed together are one return: the same sale, the same
-// purchase order, or one report filed at the same moment by the same person.
 function returnGroupKey(r) {
     if (r.sale_id) return r.report_type + '|sale|' + r.sale_id;
     if (r.po_id) return r.report_type + '|po|' + r.po_id;
@@ -656,7 +577,6 @@ function findReferencePo(poId) {
     return undefined;
 }
 
-// "Refunded · Sale #45", "Missing · PO #12", or "Damaged · Report #31"
 function returnGroupTitle(group) {
     let from;
     if (group.saleId) from = 'Sale #' + group.saleId;
@@ -683,13 +603,11 @@ function onReferenceType(value) {
     renderAttentionList();
 }
 
-// Previous and Next under the list, like the pager under every table
 function turnReferencePage(step) {
     referencePage += step;
     renderAttentionList();
 }
 
-// one clickable row of the Reference list
 function referenceRowHtml(onclick, label, name, kind, badgeClass, badgeText, note, picked) {
     return '<li>' +
         '<button type="button" class="attention-row' + (picked ? ' is-picked' : '') + '" ' +
@@ -711,9 +629,8 @@ function renderAttentionList() {
     if (!list || !more) return;
 
     const query = referenceSearch;
-    const rows = [];        // every row that matches, in order; one page of them is drawn
+    const rows = [];
 
-    // accepted purchase orders
     if (referenceType === 'all' || referenceType === 'po') {
         for (let i = 0; i < referencePos.length; i++) {
             const po = referencePos[i];
@@ -730,7 +647,6 @@ function renderAttentionList() {
         }
     }
 
-    // open returned items
     if (referenceType === 'all' || referenceType === 'return') {
         for (let i = 0; i < referenceReturns.length; i++) {
             const group = referenceReturns[i];
@@ -748,7 +664,6 @@ function renderAttentionList() {
         }
     }
 
-    // every material, out of stock first, then low, then the rest by name
     if (referenceType === 'all' || referenceType === 'material') {
         const materials = [];
         for (let i = 0; i < invProducts.length; i++) {
@@ -796,7 +711,6 @@ function renderAttentionList() {
         return;
     }
 
-    // eight rows a page, so the list fits its card without scrolling
     const pages = Math.max(1, Math.ceil(rows.length / REFERENCE_PAGE_SIZE));
     referencePage = Math.min(Math.max(1, referencePage), pages);
     const start = (referencePage - 1) * REFERENCE_PAGE_SIZE;
@@ -818,12 +732,9 @@ function renderAttentionList() {
     }
 }
 
-// A material from the list: back to a single material, the same pick as
-// choosing it from the suggestion list, for adding stock
 function adjustFromList(productId) {
     const form = document.getElementById('adjust-form');
 
-    // a quantity and reason typed for another material do not belong to this one
     if (form && (adjustSource || (adjustMaterial && adjustMaterial.product_id !== productId))) {
         form.elements.quantity.value = '';
         form.elements.reason.value = '';
@@ -833,30 +744,23 @@ function adjustFromList(productId) {
     const type = document.getElementById('adjust-type');
     if (type) type.value = 'Add';
 
-    pickAdjustMaterial(productId);       // this also redraws the strip and the preview
+    pickAdjustMaterial(productId);
     renderAttentionList();
     focusAdjustForm('adjust-qty');
 }
 
-// brings the form into view and puts the cursor in one of its boxes
 function focusAdjustForm(fieldId) {
     const qty = document.getElementById(fieldId);
     const card = document.querySelector('#panel-adjust .pair-form');
 
     if (card && qty && window.matchMedia('(max-width: 1279px)').matches) {
-        // stacked layout: the form is above the list, so bring it into view;
-        // preventScroll because that scroll is already taking us there
         card.scrollIntoView({ behavior: 'smooth', block: 'start' });
         qty.focus({ preventScroll: true });
     } else if (qty) {
-        // side by side: a plain focus scrolls the box into view on a short screen
         qty.focus();
     }
 }
 
-// ---------- the material box (Stock Adjustment) ----------
-// what a typed query finds, best first: the name starts with it, then a word
-// in the name does, then the brand or category; six at most
 function findMaterials(query) {
     const starts = [];
     const words = [];
@@ -874,7 +778,6 @@ function findMaterials(query) {
     return starts.concat(words, other).slice(0, 6);
 }
 
-// the dropdown's rows; a row calls pickFn with its product id
 function materialSuggestHtml(found, idPrefix, pickFn) {
     let html = '';
     for (let i = 0; i < found.length; i++) {
@@ -884,7 +787,6 @@ function materialSuggestHtml(found, idPrefix, pickFn) {
         if (p.category_name) meta.push(escapeHtml(p.category_name));
         if (p.brand_name) meta.push(escapeHtml(p.brand_name));
 
-        // stock on hand is the figure about to change
         html += '<li class="suggest-item" role="option" id="' + idPrefix + i + '" ' +
             'onmousedown="event.preventDefault()" ' +
             'onclick="' + pickFn + '(' + p.product_id + ')">' +
@@ -916,9 +818,6 @@ async function loadSupplierOptions() {
     }
 }
 
-// Stock adjustment: two typed boxes. The material box shares the till's
-// picker rule (text that matches nothing is not a choice); the unit box
-// suggests what the shop already uses and accepts a new word.
 function adjustMaterialBox() { return document.getElementById('adjust-material'); }
 function adjustUnitBox() { return document.getElementById('adjust-unit'); }
 
@@ -927,7 +826,6 @@ function adjustProductIdBox() {
     return form ? form.elements.productId : null;
 }
 
-// ---------- the material ----------
 async function onAdjustMaterialInput(value) {
     const text = String(value || '').trim();
     const clear = document.getElementById('adjust-material-clear');
@@ -936,7 +834,6 @@ async function onAdjustMaterialInput(value) {
 
     if (!invLoaded && text !== '') await ensureInventoryLoaded(false);
 
-    // typing on after a choice unmakes it
     if (adjustMaterial && String(adjustMaterial.product_name).trim() !== text) {
         setAdjustMaterial(null);
     }
@@ -959,7 +856,6 @@ function renderAdjustSuggestions(text) {
         if (box) box.setAttribute('aria-expanded', 'false');
     };
 
-    // one letter is enough here: it matches the start of a word, so the list stays short
     if (query === '' || invProducts.length === 0) { hide(); return; }
 
     if (adjustMaterial && String(adjustMaterial.product_name).trim().toLowerCase() === query) {
@@ -1040,14 +936,12 @@ function clearAdjustMaterial() {
     if (box) box.focus();
 }
 
-// one place decides what is chosen so the field, strip, unit box and preview agree
 function setAdjustMaterial(product) {
     adjustMaterial = product || null;
 
     const idBox = adjustProductIdBox();
     if (idBox) idBox.value = product ? String(product.product_id) : '';
 
-    // the material's own unit; it is not typed
     const unitBox = adjustUnitBox();
     if (unitBox) unitBox.value = product ? (product.unit_name || '') : '';
 
@@ -1088,7 +982,6 @@ function renderAdjustMaterialVerdict(insist) {
 
     const typed = adjustMaterialBox() ? adjustMaterialBox().value.trim() : '';
 
-    // quiet while the list is open; red only when nothing matches or the form was sent without a choice
     const list = document.getElementById('adjust-suggest');
     const listOpen = list && !list.hidden;
 
@@ -1105,8 +998,6 @@ function renderAdjustMaterialVerdict(insist) {
     }
 }
 
-// A quantity as typed, whole or fractional: 2.5 kilogram is 2.5, not 2. Three
-// decimals is the width of the column it lands in; NaN when nothing readable.
 function readQuantity(value) {
     const text = String(value === undefined || value === null ? '' : value).trim();
     if (text === '') return NaN;
@@ -1114,21 +1005,15 @@ function readQuantity(value) {
     return Number.isFinite(number) ? Math.round(number * 1000) / 1000 : NaN;
 }
 
-// Add and Remove move the shelf, so a quantity of nothing is not an adjustment
-// (fractions are fine). Returns the words to show, or '' when the quantity is fine.
 function adjustQuantityProblem(type, quantity) {
     return quantity <= 0 ? 'Add and Remove need a quantity greater than zero.' : '';
 }
 
-// ---------- what this will do ----------
-// A strip: the material, then "40 pcs -> 45 pcs (+5)". A Remove that would
-// take the shelf below zero is caught here.
 function renderAdjustPreview() {
     const box = document.getElementById('adjust-preview');
     const form = document.getElementById('adjust-form');
     if (!box || !form) return;
 
-    // an order or a return shows its figures line by line in its own table
     if (adjustSource) {
         renderSourcePreview(box);
         return;
@@ -1144,7 +1029,6 @@ function renderAdjustPreview() {
 
     const type = form.elements.adjustmentType.value;
 
-    // the same rule, in the same words, as the server and sp_adjust_stock
     const quantityProblem = adjustQuantityProblem(type, quantity);
     if (quantityProblem) {
         box.className = 'adjust-preview is-stop';
@@ -1156,7 +1040,7 @@ function renderAdjustPreview() {
     const unit = adjustMaterial.unit_name || '';
 
     let after = type === 'Remove' ? before - quantity : before + quantity;
-    after = Math.round(after * 1000) / 1000;      // 2.3 + 0.1 reads 2.4, not 2.4000000000000004
+    after = Math.round(after * 1000) / 1000;
 
     if (after < 0) {
         box.className = 'adjust-preview is-stop';
@@ -1165,13 +1049,11 @@ function renderAdjustPreview() {
         return;
     }
 
-    // the difference from what is on hand: +5, a real minus sign for -3, or none
     const change = Math.round((after - before) * 1000) / 1000;
     let changeText = 'no change';
     if (change > 0) changeText = '+' + change;
     else if (change < 0) changeText = '−' + Math.abs(change);
 
-    // green when the shelf goes up, amber when it goes down; red is kept for what cannot be done
     let tone = '';
     if (change > 0) tone = ' is-good';
     else if (change < 0) tone = ' is-down';
@@ -1188,7 +1070,6 @@ function renderAdjustPreview() {
             ', so the manager is told.</span>' : '');
 }
 
-// ---------- the log ----------
 function buildAdjustmentsPanel() {
     createDataPanel({
         key: 'clerk-adjustments',
@@ -1217,7 +1098,6 @@ function buildAdjustmentsPanel() {
         },
 
         renderRow: function (a, index) {
-            // the unit the entry recorded, not the material's unit today
             const unit = a.unit_name ? ' ' + escapeHtml(a.unit_name) : '';
 
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -1257,7 +1137,6 @@ async function handleAdjustStock(event) {
     if (adjustSource && adjustSource.kind === 'po') { await applyPoAdjustment(); return; }
     if (adjustSource && adjustSource.kind === 'return') { await applyReturnAdjustment(); return; }
 
-    // the check is on what was chosen, not what is typed
     if (!adjustMaterial || !form.elements.productId.value) {
         notifyWarning('Type a few letters of the material and choose it from the list. ' +
             'An adjustment moves a real figure, so it has to name one.', 'No material chosen');
@@ -1271,7 +1150,6 @@ async function handleAdjustStock(event) {
         productId: parseInt(form.elements.productId.value, 10),
         adjustmentType: form.elements.adjustmentType.value === 'Remove' ? 'Remove' : 'Add',
         quantity: readQuantity(form.elements.quantity.value),
-        // the material's own unit: an adjustment never changes it
         unitName: adjustMaterial.unit_name || '',
         reason: form.elements.reason.value.trim()
     };
@@ -1293,7 +1171,6 @@ async function handleAdjustStock(event) {
         return;
     }
 
-    // what the preview already says in red (a Remove below zero) is not sent
     if (data.adjustmentType === 'Remove' && data.quantity > (Number(adjustMaterial.quantity_in_stock) || 0)) {
         notifyWarning('Only ' + adjustMaterial.quantity_in_stock + ' ' + (adjustMaterial.unit_name || '') +
             ' on hand.', 'Quantity not allowed');
@@ -1310,7 +1187,6 @@ async function handleAdjustStock(event) {
         form.elements.quantity.value = '';
         form.elements.reason.value = '';
 
-        // form.reset() would clear the material too; only the stale stock figure must go
         invLoaded = false;
         afterMaterialsLoaded(await ensureInventoryLoaded(true));
 
@@ -1324,7 +1200,6 @@ async function handleAdjustStock(event) {
     }
 }
 
-// every screen that shows stock reads it again
 async function afterStockMoved() {
     await loadAdjustments();
     const keys = ['clerk-materials', 'clerk-reorder', 'clerk-returns'];
@@ -1333,25 +1208,20 @@ async function afterStockMoved() {
         if (panel && panel.state === 'ready') await panel.refresh();
     }
     if (typeof refreshPurchaseOrders === 'function') {
-        try { await refreshPurchaseOrders(); } catch (error) { /* the list reads again when opened */ }
+        try { await refreshPurchaseOrders(); } catch (error) {  }
     }
     await loadStockBanner();
     await loadNotifications();
 }
 
-// ---------- Stock Adjustment from a purchase order or a returned item ----------
-// adjustSource: null for a single material; { kind: 'po', po, items } for an
-// accepted purchase order; { kind: 'return', group } for an open return.
 let adjustSource = null;
-let adjustSourceLoading = 0;      // which pick is loading, so a slower earlier one is dropped
+let adjustSourceLoading = 0;
 
 function setAdjustSource(source) {
     adjustSource = source || null;
     renderAdjustForm();
 }
 
-// shows the fields the pick needs: a material has the material box and its
-// figures; an order or a return shows its items in a table instead
 function renderAdjustForm() {
     const kind = adjustSource ? adjustSource.kind : 'material';
     const show = function (id, on) {
@@ -1362,7 +1232,6 @@ function renderAdjustForm() {
     show('adjust-material-field', kind === 'material');
     show('adjust-unit-field', kind === 'material');
     show('adjust-qty-field', kind === 'material');
-    // an order is always added to stock, so it has no type to choose
     show('adjust-type-field', kind !== 'po');
 
     renderAdjustTypeOptions(kind);
@@ -1379,7 +1248,6 @@ function renderAdjustForm() {
     }
 }
 
-// a material: Add or Remove; a returned item: Add to stock or Discard Item
 function renderAdjustTypeOptions(kind) {
     const select = document.getElementById('adjust-type');
     if (!select) return;
@@ -1402,7 +1270,6 @@ function renderAdjustTypeOptions(kind) {
     select.value = kept ? before : 'Add';
 }
 
-// the strip on top of the form: which order or return is being worked, and a way out
 function renderAdjustSource() {
     const box = document.getElementById('adjust-source');
     if (!box) return;
@@ -1431,7 +1298,6 @@ function renderAdjustSource() {
         '</div>';
 }
 
-// Clear: empties the form and stays on the screen, back to a single material
 function clearAdjustForm() {
     const form = document.getElementById('adjust-form');
     if (form) {
@@ -1454,9 +1320,6 @@ function clearAdjustForm() {
     renderAttentionList();
 }
 
-// ---------- leaving Stock Adjustment with work on the form ----------
-// A purchase order or returned item picked, or a quantity or remarks typed,
-// is work that leaving the screen would lose, so leaving asks first.
 let adjustLeaveConfirmed = false;
 
 function adjustFormHasWork() {
@@ -1467,12 +1330,9 @@ function adjustFormHasWork() {
     return form.elements.quantity.value.trim() !== '' || form.elements.reason.value.trim() !== '';
 }
 
-// what counts as going to another screen: the menu (not the caret that only
-// folds a heading), the banner's button, and an alert's Go to
 function leavesAdjustScreen(target) {
     if (!target || target.closest('#panel-adjust')) return null;
     const menuLink = target.closest('.sidebar a');
-    // Stock Adjustment's own menu entry stays on this screen
     if (menuLink && menuLink.dataset.panelLink === 'panel-adjust') return null;
     if (menuLink && !target.closest('.nav-caret')) return menuLink;
     const other = target.closest('#stock-banner .btn, [onclick^="goToNotification"]');
@@ -1484,7 +1344,6 @@ async function guardAdjustLeave(event) {
     const leaving = leavesAdjustScreen(event.target);
     if (!leaving) return;
 
-    // hold the click until the clerk says what to do
     event.preventDefault();
     event.stopImmediatePropagation();
 
@@ -1501,10 +1360,6 @@ async function guardAdjustLeave(event) {
     try { leaving.click(); } finally { adjustLeaveConfirmed = false; }
 }
 
-// The items of the order or return: material, unit and quantity, in a table
-// that scrolls on its own once it is longer than a few rows. An order's
-// quantities are filled in from the order and can be changed to what arrived;
-// a return's are what was filed.
 function renderAdjustLines() {
     const box = document.getElementById('adjust-lines');
     if (!box) return;
@@ -1565,28 +1420,20 @@ function renderAdjustLines() {
         '</div>';
 }
 
-// where a returned item's goods stand now, for its line in the table
 function returnLineWent(r) {
     if (r.report_type === 'Missing') return 'never arrived';
     if (!r.disposition) return 'awaiting inspection';
     return r.disposition === 'Return to Stock' ? 'already back on the shelf' : 'already written off';
 }
 
-// What one returned item does to the shelf for the choice made. The goods end
-// where the choice says: back on the shelf (Add) or not (Discard).
-//   change: what this form moves itself with an adjustment (+ or -), 0 for none
-//   verdict: sent to the inspection when the goods still wait for one
 function returnLinePlan(r, choice) {
     const quantity = Number(r.quantity) || 0;
     const add = choice === 'Add';
 
-    // a refund the counter took back: the inspection itself moves the stock
     if (r.report_type !== 'Missing' && !r.disposition) {
         return { verdict: add ? 'Return to Stock' : 'Write-Off', change: 0 };
     }
-    // goods a delivery never brought: Add means they have come in since
     if (r.report_type === 'Missing') return { verdict: null, change: add ? quantity : 0 };
-    // decided when it was filed: only a change of mind moves anything
     if (r.disposition === 'Return to Stock') return { verdict: null, change: add ? 0 : -quantity };
     return { verdict: null, change: add ? quantity : 0 };
 }
@@ -1637,8 +1484,6 @@ function renderSourcePreview(box) {
         '<span class="preview-note">The report' + (items.length === 1 ? ' is' : 's are') + ' then closed.</span>';
 }
 
-// One order line against what was ordered: kind is '' (as ordered), 'under',
-// 'over' or 'bad' (not a whole number of 0 or more); text says so for the line.
 function poLineState(line) {
     const quantity = line.quantity;
     if (!Number.isInteger(quantity) || quantity < 0) return { kind: 'bad', text: 'Type a whole number, 0 or more.' };
@@ -1649,7 +1494,6 @@ function poLineState(line) {
     return { kind: '', text: '' };
 }
 
-// what each line of the order says arrived, in the material's own unit
 function poAdjustLines() {
     const lines = [];
     if (!adjustSource || adjustSource.kind !== 'po') return lines;
@@ -1660,7 +1504,6 @@ function poAdjustLines() {
     return lines;
 }
 
-// An accepted purchase order from Reference: its items fill the form
 async function adjustFromPo(poId) {
     const po = findReferencePo(poId);
     if (!po) return;
@@ -1674,7 +1517,7 @@ async function adjustFromPo(poId) {
 
     try {
         const items = await apiGetPurchaseOrderItems(poId);
-        if (ticket !== adjustSourceLoading) return;       // another pick came after this one
+        if (ticket !== adjustSourceLoading) return;
         setAdjustSource({ kind: 'po', po: po, items: items });
         focusAdjustForm('adjust-line-qty-0');
     } catch (error) {
@@ -1684,7 +1527,6 @@ async function adjustFromPo(poId) {
     }
 }
 
-// An open returned item from Reference: its items fill the form
 function adjustFromReturn(key) {
     const group = findReturnGroup(key);
     if (!group) return;
@@ -1703,8 +1545,6 @@ function adjustFromReturn(key) {
     focusAdjustForm('adjust-type');
 }
 
-// after the lists are read again: an order received or a return closed by
-// someone else is no longer on the form
 function dropStaleAdjustSource() {
     if (!adjustSource || adjustSource.loading) return;
 
@@ -1724,8 +1564,6 @@ function dropStaleAdjustSource() {
     }
 }
 
-// Receiving the order: the quantities on the form go onto the shelf, at the
-// cost on the order, and the order is marked Received
 async function applyPoAdjustment() {
     if (!adjustSource || adjustSource.loading) return;
     const po = adjustSource.po;
@@ -1784,9 +1622,6 @@ async function applyPoAdjustment() {
     }
 }
 
-// Closing a return: each item goes back on the shelf or is discarded, then
-// its report is closed. Items are sent one at a time; one that is refused
-// stops the rest and says which.
 async function applyReturnAdjustment() {
     if (!adjustSource) return;
     const group = adjustSource.group;
@@ -1847,8 +1682,6 @@ async function applyReturnAdjustment() {
         notifySuccess(done + ' of ' + count + (count === 1 ? ' item' : ' items') +
             (choice === 'Add' ? ' added to stock.' : ' discarded.'), 'Return closed');
     }
-    // all closed: back to a single material, before the lists are read again
-    // (a source missing from them would be reported as closed by someone else)
     if (done === count) {
         if (form) form.elements.reason.value = '';
         setAdjustSource(null);
@@ -1861,8 +1694,6 @@ async function applyReturnAdjustment() {
     await afterStockMoved();
 }
 
-// ---------- reorder point settings ----------
-// read only: the manager sets the points
 function buildReorderPanel() {
     createDataPanel({
         key: 'clerk-reorder',
@@ -1889,8 +1720,6 @@ function buildReorderPanel() {
             return filters.status === 'all' || p.stock_status === filters.status;
         },
 
-        // the stock level against the point: a bar, the point itself, and what
-        // an order would take to get back to comfortable
         renderRow: function (p, index) {
             return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
             '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
@@ -1904,16 +1733,12 @@ function buildReorderPanel() {
     });
 }
 
-// what an order would take to get back to twice the reorder point; the server
-// sends it, and the same rule works it out if a row arrives without it
 function suggestedOrderOf(p) {
     const sent = Number(p.suggested_order);
     if (Number.isFinite(sent) && p.suggested_order !== null && p.suggested_order !== undefined) return sent;
     return Math.max(0, (Number(p.reorder_point) || 0) * 2 - (Number(p.quantity_in_stock) || 0));
 }
 
-// On hand as a bar. The full bar is twice the reorder point (the level an
-// order brings it back to); the tick marks the point itself.
 function stockLevelBar(p) {
     const onHand = Number(p.quantity_in_stock) || 0;
     const point = Number(p.reorder_point) || 0;
@@ -1939,8 +1764,6 @@ async function loadReorderTable() {
     if (panel && panel.state !== 'closed') await panel.refresh();
 }
 
-// The clerk raises a purchase order; the manager confirms it; once confirmed,
-// the clerk counts the delivery in. Screens live in shared/purchase-orders.js.
 function buildClerkPurchaseOrderPanel() {
     configurePurchaseOrders({
         key: 'clerk-po',
@@ -1952,7 +1775,6 @@ function buildClerkPurchaseOrderPanel() {
         historyTitle: 'Purchase Orders',
         gateText: 'Press Load Data for every order raised, or filter to the ones still ' +
                   'waiting to be confirmed or delivered.',
-        // a delivery counted in moves stock
         afterChange: async function () {
             const keys = ['clerk-materials', 'clerk-reorder'];
             for (let i = 0; i < keys.length; i++) {
@@ -1964,7 +1786,6 @@ function buildClerkPurchaseOrderPanel() {
     buildPurchaseOrderPanel();
 }
 
-// ---------- returns, damage and refunds ----------
 function buildReturnsPanel() {
     createDataPanel({
         key: 'clerk-returns',
@@ -2010,13 +1831,10 @@ function buildReturnsPanel() {
     });
 }
 
-// a refund from the counter the clerk has not looked at yet (goods that never
-// arrived have nothing to inspect)
 function returnAwaiting(row) {
     return row.status === 'Open' && !row.disposition && row.report_type !== 'Missing';
 }
 
-// older records have no disposition; read it back off the restocked flag
 function returnWentTo(row) {
     if (row.report_type === 'Missing') return 'Missing';
     if (row.disposition) return row.disposition;
@@ -2041,7 +1859,6 @@ async function loadReturns() {
     if (panel && panel.state !== 'closed') await panel.refresh();
 }
 
-// ---------- archive ----------
 function buildInventoryArchivePanel() {
     createDataPanel({
         key: 'clerk-archive',
@@ -2064,7 +1881,6 @@ function buildInventoryArchivePanel() {
             return prefixMatch([p.product_name, p.category_name], query);
         },
 
-        // a row opens a card with the material and the button that restores it
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openArchivedMaterial(' + p.product_id + ')" title="Open this material">' +
@@ -2077,7 +1893,6 @@ function buildInventoryArchivePanel() {
     });
 }
 
-// the card for an archived material; its foot holds the Restore button
 function openArchivedMaterial(productId) {
     const panel = getDataPanel('clerk-archive');
     const p = panel ? panel.find(productId) : null;
@@ -2098,9 +1913,6 @@ function openArchivedMaterial(productId) {
         initialsOf(p.product_name), [{ label: 'Archived Material', body: body }], foot);
 }
 
-// ---------- records: suppliers, products, categories and units ----------
-// Categories and units are added here, by the inventory clerk alone (the server
-// refuses any other role). Suppliers are the manager's to add.
 let clerkRecordType = 'supplier';
 
 const CLERK_RECORD_COLUMNS = {
@@ -2114,7 +1926,6 @@ const CLERK_RECORD_TITLES = {
     supplier: 'Suppliers', product: 'Products', category: 'Categories', unit: 'Units'
 };
 
-// the columns that hold a figure: right-aligned, and sortable by size
 const CLERK_RECORD_NUMERIC = ['product_count', 'price', 'quantity_in_stock', 'total_stock'];
 
 function showClerkRecords(event) { showClerkRecordType(clerkRecordType, event); }
@@ -2137,7 +1948,6 @@ function showClerkRecordType(type, event) {
     const panel = getDataPanel('clerk-records');
     if (!panel || !changed) return;
 
-    // a table already open loads the new kind at once; a closed one stays closed
     if (panel.state === 'ready') panel.open();
     else panel.reset();
 }
@@ -2158,11 +1968,10 @@ function writeClerkRecordHeaders() {
     const panel = getDataPanel('clerk-records');
     if (panel) {
         panel.config.columns = columns.length;
-        panel.resetHeaderSort();   // the headers changed: forget the sort, mark the new ones
+        panel.resetHeaderSort();
     }
 }
 
-// every kind of record reads A to Z by name
 function sortClerkRecordRows(rows) {
     return rows.sort(function (a, b) {
         return String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true });
@@ -2172,7 +1981,7 @@ function sortClerkRecordRows(rows) {
 function buildClerkRecordsPanel() {
     createDataPanel({
         key: 'clerk-records',
-        remember: false,   // which kind of record it holds is not kept, so it opens closed
+        remember: false,
         tableId: 'records-table',
         columns: 5,
         pagerId: 'records-pager',
@@ -2186,7 +1995,6 @@ function buildClerkRecordsPanel() {
             return apiGetRecords(clerkRecordType);
         },
         match: function (row, query) {
-            // every value in the record (a plain object from the server)
             const values = [];
             for (const name in row) values.push(row[name]);
             return prefixMatch(values, query);
@@ -2195,7 +2003,6 @@ function buildClerkRecordsPanel() {
             return sortClerkRecordRows(rows);
         },
 
-        // a row opens a card with the whole record
         renderRow: function (row, index) {
             let cells = '';
             const columns = CLERK_RECORD_COLUMNS[clerkRecordType];
@@ -2221,13 +2028,11 @@ function buildClerkRecordsPanel() {
     });
 }
 
-// ---------- adding a category or a unit (the clerk's alone) ----------
 const CLERK_RECORD_ADDABLE = {
     category: { title: 'Add Category', label: 'Category name', max: 50 },
     unit:     { title: 'Add Unit', label: 'Unit name', max: 20 }
 };
 
-// the Add button names the kind on screen, and goes for suppliers and products
 function syncClerkRecordAddButton() {
     const button = document.getElementById('clerk-records-add');
     if (!button) return;
@@ -2271,7 +2076,6 @@ async function addClerkRecord() {
     }
 }
 
-// the fields a record's card shows, in order
 const CLERK_RECORD_FIELDS = {
     supplier: [['contact_person', 'Contact Person'], ['contact_number', 'Contact Number'], ['email', 'Email'],
                ['address', 'Address'], ['product_count', 'Products']],
@@ -2306,12 +2110,9 @@ async function openClerkRecord(index) {
         detailField('Name', escapeHtml(row.name)) +
         fields + '</div>';
 
-    // the plural title made singular: "Categories" becomes "Category", "Suppliers" becomes "Supplier"
     const kind = CLERK_RECORD_TITLES[type].replace(/ies$/, 'y').replace(/s$/, '');
     const pages = [{ label: 'Details', body: body }];
 
-    // a supplier lists the products registered to it, a category the products
-    // filed under it and a unit the products counted in it, on a page of their own
     if (type === 'supplier' || type === 'category' || type === 'unit') {
         const field = { supplier: 'supplier_name', category: 'category_name', unit: 'unit_name' }[type];
         try {
@@ -2320,7 +2121,6 @@ async function openClerkRecord(index) {
             for (let i = 0; i < allProducts.length; i++) {
                 const p = allProducts[i];
                 if (p[field] !== row.name) continue;
-                // a supplier's page names each product's category in place of the supplier
                 const third = type === 'supplier' ? p.category_name : p.supplier_name;
                 rows.push([
                     escapeHtml(p.name),
@@ -2376,7 +2176,6 @@ async function restoreMaterial(productId) {
 
     if (!yes) return;
 
-    // the button stays off while the request is out, so it cannot be sent twice
     const button = document.getElementById('restore-material-button');
     if (button) button.disabled = true;
 
@@ -2393,7 +2192,6 @@ async function restoreMaterial(productId) {
         closeModal('detail-modal');
         invLoaded = false;
 
-        // the material list and the reorder list read it again, as after archiving
         const keys = ['clerk-materials', 'clerk-archive', 'clerk-reorder'];
         for (let i = 0; i < keys.length; i++) {
             const panel = getDataPanel(keys[i]);
@@ -2407,18 +2205,15 @@ async function restoreMaterial(productId) {
     }
 }
 
-// ---------- popups ----------
 function openMaterialDetail(productId) {
     const p = findProductById(productId);
     if (!p) return;
 
     const unit = escapeHtml(p.unit_name || '');
 
-    // first page: who supplies it and how to reach them, then what it is
     let supplierBlock;
     if (p.supplier_name) {
         const phone = p.contact_number
-            // /[^\d+]/g matches every character that is not a digit or a plus sign (so only digits and + stay in the phone link)
             ? '<a href="tel:' + escapeHtml(String(p.contact_number).replace(/[^\d+]/g, '')) + '">' +
               escapeHtml(p.contact_number) + '</a>'
             : '<span class="muted">Not set</span>';
@@ -2474,7 +2269,6 @@ function openMaterialDetail(productId) {
         ]);
 }
 
-// the panel holds the rows, so the panel is what it asks
 function openAdjustmentDetail(adjustmentId) {
     const panel = getDataPanel('clerk-adjustments');
     const a = panel ? panel.find(adjustmentId) : null;
@@ -2493,7 +2287,6 @@ function openAdjustmentDetail(adjustmentId) {
         detailField('Change', (a.quantity_change > 0 ? '+' : '') + a.quantity_change + unit) +
         detailField('After', a.quantity_after + unit) +
         '</div>' +
-        // the entry keeps saying what it counted even if the unit changed since
         (a.current_unit && a.unit_name &&
          String(a.current_unit).toLowerCase() !== String(a.unit_name).toLowerCase()
             ? '<p class="detail-note detail-warn">This material is counted in ' +
@@ -2501,7 +2294,6 @@ function openAdjustmentDetail(adjustmentId) {
               escapeHtml(a.unit_name) + ', and says so.</p>'
             : '');
 
-    // who and when, then the reason under the figures: one page, no tabs
     const why = '<div class="detail-grid">' +
         detailField('Adjusted By', escapeHtml(a.adjusted_by)) +
         detailField('When', escapeHtml(a.created_at)) +
@@ -2527,17 +2319,12 @@ function openReturnDetail(returnId) {
         detailField('Type', statusBadge(r.report_type)) +
         detailField('Material', escapeHtml(r.product_name)) +
         detailField(missing ? 'Quantity Missing' : 'Quantity', r.quantity + ' ' + escapeHtml(r.unit_name || '')) +
-        // goods that never arrived have no sale and no refund
         (missing ? detailField('Purchase Order', '#' + r.po_id) : detailField('Refund Amount', peso(r.refund_amount))) +
         detailField('Status', statusBadge(r.status)) +
         '</div>';
 
     const awaiting = returnAwaiting(r);
 
-    // read only: goods are added to stock or discarded on Stock Adjustment
-    // (Reference, Returned Items), which closes the report
-
-    // what the Inspected field says when nobody has inspected the goods
     let notInspected;
     if (awaiting) {
         notInspected = 'Not yet';
@@ -2567,12 +2354,8 @@ function openReturnDetail(returnId) {
         ]);
 }
 
-// ==========================================
-// INVENTORY PAGE BOOT
-// ==========================================
 if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html')) {
     document.addEventListener('DOMContentLoaded', function () {
-        // six panels built closed; only the low-stock banner queries
         buildMaterialsPanel();
         buildAdjustmentsPanel();
         buildReorderPanel();
@@ -2583,7 +2366,6 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         writeClerkRecordHeaders();
         syncClerkRecordAddButton();
 
-        // the schedule follows what the administrator switched on for this role
         configureDeliverySchedule({
             showPanel: function (panelId, title) {
                 return showInventoryPanel(panelId, title);
@@ -2596,7 +2378,6 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
             }
         });
 
-        // Go to, on an opened alert: the screen that alert is about
         const stockAlert = { label: 'Reorder Point', panelId: 'panel-reorder',
                              open: function () { return showReorder(); }, key: 'clerk-reorder', searchId: 'reorder-search' };
         const returnsAlert = { label: 'Returned Items', panelId: 'panel-returns',
@@ -2612,7 +2393,6 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
                                   open: function () { return showAdjustmentHistory(); }, key: 'clerk-adjustments' }
         });
 
-        // the Stock Adjustment screen follows stock moved by other people (live-sync.js)
         onLiveChange(['inventory', 'sales', 'returns'], refreshAdjustScreen);
 
         showInventoryHome();
@@ -2621,18 +2401,14 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         loadNotifications();
     });
 
-    // going to another screen with work on the Stock Adjustment form asks first;
-    // capture, so the menu's own handler waits for the answer
     document.addEventListener('click', guardAdjustLeave, true);
 
-    // so does closing or reloading the page
     window.addEventListener('beforeunload', function (event) {
         if (!adjustFormHasWork()) return;
         event.preventDefault();
         event.returnValue = '';
     });
 
-    // a click anywhere else closes whichever suggestion list is open
     document.addEventListener('click', function (event) {
         if (event.target.closest('.suggest-wrap')) return;
         hideAdjustSuggestions();

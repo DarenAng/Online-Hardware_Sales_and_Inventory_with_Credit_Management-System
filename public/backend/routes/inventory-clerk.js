@@ -1,18 +1,3 @@
-// ============================================================
-// inventory-clerk.js -- Inventory module (inventory clerk)
-// Loaded by: server.js only (from the routes folder). Never sent to a browser.
-//
-// What is in this file:
-//   - the clerk's dashboard numbers and the material (product) list
-//   - selling units (e.g. nails kept by the kilo but also sold by the sack)
-//   - new materials, stock adjustments and reorder points
-//   - purchase orders: raised and received here, confirmed by the manager
-//   - returns, damage reports and refunds
-//   - notifications, which every dashboard reads
-//
-// server.js passes in the database and its helpers ("deps"). The access
-// rules in access-control.js have already checked the user's role.
-// ============================================================
 const crypto = require("crypto");
 const mailer = require("../services/mailer");
 const inventoryClerkProcedures = require("../database/procedures/inventory-clerk-procedures");
@@ -23,8 +8,6 @@ const supplierOrderLink = mailer.supplierOrderLink;
 const qrPng = mailer.qrPng;
 const purchaseOrderPdf = require("../services/purchase-order-pdf").purchaseOrderPdf;
 
-// Gives back the first value that is not null/undefined.
-// Used because the browser may send "unitCost" or "unit_cost".
 function firstGiven(a, b) {
   if (a !== null && a !== undefined) {
     return a;
@@ -32,7 +15,6 @@ function firstGiven(a, b) {
   return b;
 }
 
-// Trims text and cuts it to "max" characters. Empty text becomes null.
 function shortText(value, max) {
   const text = String(value || "").trim().slice(0, max);
   if (text === "") {
@@ -41,20 +23,14 @@ function shortText(value, max) {
   return text;
 }
 
-// A name as typed, without case or extra spaces: " Liter " and "liter" are one.
 function looseName(value) {
   return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-// The same with a plural ending taken off: "liters", "boxes", "batteries" and
-// "pieces" read as liter, box, battery and piece.
 function singularName(value) {
   const name = looseName(value);
-  // ends with a consonant + "ies" (batteries -> battery)
   if (/[^aeiou]ies$/.test(name)) return name.slice(0, -3) + "y";
-  // ends with s, x, z, ch or sh + "es" (boxes -> box)
   if (/(s|x|z|ch|sh)es$/.test(name)) return name.slice(0, -2);
-  // ends with a single "s" that does not follow another "s" (liters -> liter)
   if (/[^s]s$/.test(name)) return name.slice(0, -1);
   return name;
 }
@@ -71,11 +47,6 @@ function registerInventoryRoutes(app, deps) {
   const cleanPhone = deps.cleanPhone;
   const publishChange = deps.publishChange;
 
-  // ==========================================
-  // INVENTORY MODULE
-  // ==========================================
-
-  // headline numbers for the clerk dashboard
   app.get("/api/inventory/summary", async function (request, response) {
     try {
       const stockRowsResult = await db.query(
@@ -179,12 +150,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // SELLING UNITS -- the sizes a material also sells in. Stock stays in the
-  // product's own unit; a row here says one "sack" is 25 of it, at its own
-  // price. The clerk keeps the list; the till offers it beside the unit.
-  // ==========================================
-  // the JSON_ARRAYAGG column above arrives parsed or as text depending on the driver
   function sellingUnitsOf(value) {
     let list = value;
     if (typeof list === "string") {
@@ -207,13 +172,11 @@ function registerInventoryRoutes(app, deps) {
         price: price
       };
 
-      // skip broken rows (no name, or a size of zero)
       if (cleaned.unit_name !== "" && cleaned.units_per > 0) {
         units.push(cleaned);
       }
     }
 
-    // smallest size first
     units.sort(function (a, b) {
       return a.units_per - b.units_per;
     });
@@ -238,9 +201,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // Adding a size: the name is trimmed and kept as typed, units_per says how
-  // many of the product's own unit it holds, and a blank price means the
-  // product's price times units_per. The same name again replaces the row.
   app.post("/api/inventory/products/:productId/units", async function (request, response) {
     const productId = Number(request.params.productId);
     const body = request.body || {};
@@ -260,8 +220,6 @@ function registerInventoryRoutes(app, deps) {
     if (price !== null && (!Number.isFinite(price) || price < 0)) {
       return response.status(400).json({ error: "The price has to be a figure, or left empty." });
     }
-    // a size priced at 0 would sell for nothing, so 0 is treated like an empty box:
-    // the price is worked out from the product's own price
     if (price === 0) price = null;
 
     try {
@@ -273,7 +231,6 @@ function registerInventoryRoutes(app, deps) {
       if (products.length === 0) return response.status(404).json({ error: "That material was not found." });
       const product = products[0];
 
-      // the manager prices products; a size price on a product with no price would be ahead of it
       if (price !== null && !(Number(product.price) > 0)) {
         return response.status(400).json({
           error: product.product_name + " has no price yet. Set the product's price first (the manager does that), " +
@@ -293,7 +250,6 @@ function registerInventoryRoutes(app, deps) {
         "ON DUPLICATE KEY UPDATE units_per = VALUES(units_per), price = VALUES(price)",
         [productId, unitName, unitsPer, price]);
 
-      // the price of one of this size (worked out from the unit price when none was given)
       let each = price;
       if (price === null) {
         each = Math.round(Number(product.price) * unitsPer * 100) / 100;
@@ -312,8 +268,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // Sales already written in a size keep their own copy of it (sale_items.sold_unit),
-  // so taking a size off the list changes nothing that has been sold.
   app.delete("/api/inventory/products/:productId/units/:unitId", async function (request, response) {
     const productId = Number(request.params.productId);
     const unitId = Number(request.params.unitId);
@@ -342,11 +296,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // Suppliers, categories and units are added by the manager only (Records on
-  // the manager's page). A name typed here is matched to the one on file and
-  // swapped for it, so "liters" or "PAINTS" files under "liter" or "Paint"
-  // rather than a second copy; a name with no match is refused with what to do.
-  // Gives back { error } or { category(name), unit(name) }, which return the name on file.
   async function namesOnFile(categoryNames, unitNames) {
     const categories = await matchOnFile(
       "SELECT category_name AS name FROM categories", categoryNames);
@@ -365,13 +314,11 @@ function registerInventoryRoutes(app, deps) {
   }
 
   async function matchOnFile(sql, typedNames) {
-    // the names that were typed, trimmed, with the blanks left out
     const typed = [];
     for (let i = 0; i < typedNames.length; i++) {
       const text = String(typedNames[i] || "").trim();
       if (text !== "") typed.push(text);
     }
-    // what was typed (in loose form) -> the name on file, one { key, name } for each
     const matches = [];
     if (typed.length === 0) return { onFile: function (value) { return value; } };
 
@@ -379,7 +326,6 @@ function registerInventoryRoutes(app, deps) {
     const rows = rowsResult[0];
     for (let i = 0; i < typed.length; i++) {
       const value = typed[i];
-      // the same spelling first, so "Liter" never loses to a "Liters" also on file
       let same = null;
       for (let r = 0; r < rows.length; r++) {
         if (looseName(rows[r].name) === looseName(value)) {
@@ -412,12 +358,6 @@ function registerInventoryRoutes(app, deps) {
     };
   }
 
-  // Adding a product from the Material List: its category and unit must already
-  // be on file; a new brand is created alongside it. It starts with no price
-  // (price 0 means "no price set"): the clerk counts, the manager prices, so
-  // the price is not read from the request. The manager is told, and the till
-  // will not sell it until it has a price. An existing name returns the
-  // existing material, and the answer says so (created: false).
   app.post("/api/materials", async function (request, response) {
     const body = request.body || {};
     const name = String(body.name || "").trim().replace(/\s+/g, " ");
@@ -442,7 +382,6 @@ function registerInventoryRoutes(app, deps) {
       return response.status(400).json({ error: "Pick the unit the product is counted in." });
     }
 
-    // the reorder point is optional; left blank, the procedure's own default stays
     let reorderPoint = null;
     if (body.reorderPoint !== undefined && body.reorderPoint !== null && String(body.reorderPoint).trim() !== "") {
       reorderPoint = Number(body.reorderPoint);
@@ -462,9 +401,6 @@ function registerInventoryRoutes(app, deps) {
         }
       }
 
-      // Two clerks adding the same new name together would both find it missing and make
-      // two records, so adding takes turns: a named MySQL lock, held on its own connection
-      // while the procedure runs (the same way migrations.js makes copies take turns).
       let output;
       const lockConnection = await db.getConnection();
       try {
@@ -491,8 +427,6 @@ function registerInventoryRoutes(app, deps) {
 
       const productId = output.product_id;
 
-      // the name was already on file: say so, and say where it is (the
-      // procedure also finds a product that was put away in the Archive)
       if (output.status_code === 200) {
         const sameResult = await db.query(
           "SELECT product_name, is_archived FROM products WHERE product_id = ?", [productId]);
@@ -506,7 +440,6 @@ function registerInventoryRoutes(app, deps) {
         return response.json({ message: message, productId: productId, created: false, archived: Boolean(same && same.is_archived) });
       }
 
-      // the product is already saved: a failure here keeps the default reorder point and the add still stands
       if (reorderPoint !== null) {
         try {
           await db.query("UPDATE products SET reorder_point = ? WHERE product_id = ?", [reorderPoint, productId]);
@@ -515,7 +448,6 @@ function registerInventoryRoutes(app, deps) {
         }
       }
 
-      // the manager is told, in the bell, so the price gets set
       try {
         const clerkResult = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [getActorId(request)]);
         let clerkName = "the inventory clerk";
@@ -532,7 +464,6 @@ function registerInventoryRoutes(app, deps) {
         console.error("The product was added, but telling the manager failed:", error.message);
       }
 
-      // the inventory scope goes out by itself on this address (scopeOf in live-changes.js)
       publishChange("notifications", "new product " + productId, request.headers["x-client-id"] || null);
 
       response.json({
@@ -546,11 +477,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // STOCK ADJUSTMENT
-  // Units: a unit typed on an adjustment is added; the same clerk can rename
-  // one, and renaming onto an existing name merges.
-  // How a material is delivered: a "box" of 20 of its unit. Blank clears it.
-  // Orders and deliveries are then counted in that pack; stock stays in the unit.
   app.put("/api/inventory/products/:productId/pack", async function (request, response) {
     const productId = Number(request.params.productId);
     const body = request.body || {};
@@ -570,12 +496,11 @@ function registerInventoryRoutes(app, deps) {
       if (rows.length === 0) return response.status(404).json({ error: "Product not found" });
       const before = rows[0];
 
-      // with no pack name, the pack is removed (both saved as null)
       let packName = null;
       let packSize = null;
       if (name) {
         packName = name;
-        packSize = Math.round(size * 1000) / 1000;   // keep 3 decimals at most
+        packSize = Math.round(size * 1000) / 1000;
       }
 
       let beforeSize = null;
@@ -671,9 +596,6 @@ function registerInventoryRoutes(app, deps) {
       return response.status(400).json({ error: "Product, type, quantity and reason are all required" });
     }
 
-    // Add and Remove move the shelf, so 0 is not an adjustment (fractions are
-    // fine: 0.5 kg). A recount may find the shelf empty, so it may be 0.
-    // The same words are in sp_adjust_stock and in the Stock Adjustment form.
     if (!Number.isFinite(Number(quantity))) {
       return response.status(400).json({ error: "The quantity must be a number." });
     }
@@ -685,7 +607,6 @@ function registerInventoryRoutes(app, deps) {
       return response.status(400).json({ error: "Add and Remove need a quantity greater than zero." });
     }
 
-    // capped at the column width; empty means "keep what this material is counted in"
     let unit = "";
     if (typeof unitName === "string") {
       unit = unitName.trim().slice(0, 20);
@@ -707,7 +628,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // PURCHASE ORDERS
   app.get("/api/purchase-orders", async function (request, response) {
     try {
       const rowsResult = await db.query(
@@ -744,12 +664,6 @@ function registerInventoryRoutes(app, deps) {
 
   app.get("/api/purchase-orders/:poId/items", async function (request, response) {
     try {
-      // Receiving corrects an order's lines to what arrived. A received order
-      // is read back as it was ordered (the copy sp_receive_purchase_order
-      // kept), each line carrying what arrived beside it in received_quantity.
-      // The unit cost is the one it was received at; a line where nothing
-      // arrived has none left, so its cost is null. An order received before
-      // the copy was kept falls through to the lines as received.
       const orderedResult = await db.query(
         "SELECT o.product_id, o.quantity, " +
         "(SELECT i.unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
@@ -798,13 +712,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The delivery Report on one received order: every material that came in
-  // under or over what was ordered, by how much, who counted it in and when,
-  // and the clerk's remarks. Worked out from the lines as they were ordered
-  // (purchase_order_ordered_items) against the lines as received
-  // (purchase_order_items). Read by the manager's order card as well as the
-  // clerk's. lines is empty when the delivery matched the order, or when the
-  // order was received before the ordered lines were kept.
   app.get("/api/purchase-orders/:poId/reports", async function (request, response) {
     const poId = Number(request.params.poId);
     try {
@@ -837,7 +744,6 @@ function registerInventoryRoutes(app, deps) {
         [poId]
       );
       const ordered = orderedResult[0];
-      // an order received before the ordered lines were kept has nothing to compare
       if (ordered.length === 0) return response.json(report);
 
       const receivedResult = await db.query(
@@ -857,7 +763,6 @@ function registerInventoryRoutes(app, deps) {
       }
       const wasOrdered = {};
 
-      // the ordered lines, in their order, then anything that came without being ordered
       for (let i = 0; i < ordered.length; i++) {
         const line = ordered[i];
         wasOrdered[line.product_id] = true;
@@ -888,12 +793,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The clerk's Reference card: a received order, each line with what was
-  // ordered beside what arrived. Receiving corrects the order's own lines to
-  // what arrived; the lines as they were ordered are the copy
-  // sp_receive_purchase_order kept in purchase_order_ordered_items. An order
-  // received before that copy was kept has none: "kept" is then false and
-  // every line's ordered figure is null.
   app.get("/api/purchase-orders/:poId/reference", async function (request, response) {
     const poId = Number(request.params.poId);
     try {
@@ -917,7 +816,6 @@ function registerInventoryRoutes(app, deps) {
         return response.status(400).json({ error: "Purchase order #" + poId + " has not been received yet." });
       }
 
-      // what was ordered (the copy) and what arrived (the corrected lines)
       const orderedResult = await db.query(
         "SELECT o.product_id, o.quantity, o.pack_name, o.pack_size, o.pack_count, " +
         "p.product_name, u.unit_name " +
@@ -939,8 +837,6 @@ function registerInventoryRoutes(app, deps) {
       );
       const received = receivedResult[0];
 
-      // one line per material: the ordered lines first, in their order, then
-      // anything that arrived without being ordered
       const lines = [];
       for (let i = 0; i < ordered.length; i++) {
         lines.push({
@@ -976,9 +872,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The order as a document: the order, its lines and the shop, the way the
-  // printed sheet, the PDF and the supplier's page all read it. Null when
-  // there is no such order.
   async function readOrderDocument(poId) {
     const ordersResult = await db.query(
       "SELECT po.po_id, po.status, po.order_date, po.confirmed_at, " +
@@ -1027,18 +920,12 @@ function registerInventoryRoutes(app, deps) {
     return { order: orders[0], items: items, shop: settings[0] || DEFAULT_STORE_SETTINGS };
   }
 
-  // An approved order gets its supplier code when the manager approves it; an
-  // order approved before codes existed gets one the first time it is printed
-  // or sent. Never replaced, so every printed copy keeps working.
   async function ensureSupplierCode(poId) {
     await db.query(
       "UPDATE purchase_orders SET supplier_code = ? WHERE po_id = ? AND supplier_code IS NULL",
       [crypto.randomBytes(32).toString("base64url"), poId]);
   }
 
-  // The supplier's link and its QR code (a PNG Buffer) for an approved order
-  // waiting for its delivery; null otherwise, or with no web address to give.
-  // The link goes to HARDWARE_SITE_URL, else to the address the request came in on.
   async function supplierAnswerLink(request, order) {
     if (order.status !== "Pending") return null;
     let code = order.supplier_code;
@@ -1053,9 +940,6 @@ function registerInventoryRoutes(app, deps) {
     return { link: link, qr: await qrPng(link) };
   }
 
-  // The order as a printable document, assembled in one request. An approved
-  // order carries the supplier's link and its QR code (a data URL) for the
-  // printed sheet; the code itself is not handed out.
   app.get("/api/purchase-orders/:poId/document", async function (request, response) {
     try {
       const document = await readOrderDocument(request.params.poId);
@@ -1075,8 +959,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // Raising an order: the supplier arrives as a name and a line may name a new
-  // material. The procedure creates whatever is new inside the order's transaction.
   app.post("/api/purchase-orders", async function (request, response) {
     const supplierId = request.body.supplierId;
     const supplierName = request.body.supplierName;
@@ -1094,9 +976,6 @@ function registerInventoryRoutes(app, deps) {
       });
     }
 
-    // the supplier's number is a Philippine mobile, stored as +639XXXXXXXXX;
-    // letters, symbols and short or foreign numbers are refused. Blank is allowed.
-    // only digits, spaces, dashes, brackets and a leading + belong in a number
     if (!/^\+?[\d\s\-()]*$/.test(String(contactNumber || "").trim())) {
       return response.status(400).json({
         error: "The contact number can only hold digits: 09XX XXX XXXX, or +63 9XX XXX XXXX."
@@ -1107,7 +986,6 @@ function registerInventoryRoutes(app, deps) {
       return response.status(400).json({ error: phoneProblem });
     }
 
-    // only the fields the procedure reads, trimmed to their column widths
     const lines = [];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -1119,7 +997,6 @@ function registerInventoryRoutes(app, deps) {
         brand_name: shortText(item.brandName || item.brand_name, 100),
         category_name: shortText(item.categoryName || item.category_name, 50),
         unit_name: shortText(item.unitName || item.unit_name, 20),
-        // the pack the line was ordered in, if it was; the procedure drops a half-given one
         pack_name: shortText(item.packName || item.pack_name, 20),
         pack_size: Number(firstGiven(item.packSize, item.pack_size)) || null,
         pack_count: Number(firstGiven(item.packCount, item.pack_count)) || null,
@@ -1128,7 +1005,6 @@ function registerInventoryRoutes(app, deps) {
     }
 
     try {
-      // the supplier is one on file: a new company is the manager's to add
       if (!Number(supplierId)) {
         const knownResult = await db.query(
           "SELECT supplier_id FROM suppliers WHERE LOWER(supplier_name) = LOWER(?)", [company]);
@@ -1141,7 +1017,6 @@ function registerInventoryRoutes(app, deps) {
         }
       }
 
-      // a line naming a new material needs a category and a unit already on file
       const newLines = [];
       const newCategories = [];
       const newUnits = [];
@@ -1175,10 +1050,6 @@ function registerInventoryRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      // A material typed in as new that turns out to be on file already (the
-      // same name) is used as it is, so it may sit with no supplier or with
-      // another one. Ordering it from this company registers it to this
-      // company, as a brand-new material already is.
       const orderSupplier = Number(output.supplier_id_out) || Number(supplierId) || null;
       if (orderSupplier) {
         for (let i = 0; i < newLines.length; i++) {
@@ -1203,10 +1074,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The manager's decision on an order the clerk raised. Approved, it waits
-  // for its delivery (Pending) and gets the supplier code its printed copy
-  // carries; the clerk is told to print it and send it to the supplier
-  // (sp_decide_purchase_order). Declined, it is Cancelled with the reason kept.
   app.post("/api/purchase-orders/:poId/decide", async function (request, response) {
     const body = request.body || {};
     const approve = body.approve === true;
@@ -1214,7 +1081,6 @@ function registerInventoryRoutes(app, deps) {
     if (typeof body.note === "string") {
       note = body.note.trim().slice(0, 255);
     }
-    // a declined order carries the manager's remarks: why it was declined
     if (!approve && note === "") {
       return response.status(400).json({ error: "Write the remarks: why the purchase order is declined." });
     }
@@ -1244,11 +1110,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The clerk emails an approved order to its supplier: the printed order as
-  // a PDF, with the link and QR code the supplier accepts or declines it
-  // with. Printing it and handing it over is the other way; both carry the
-  // same link. A supplier with no address, mail not set up, or a refusal from
-  // the mail server each come back as a sentence saying to print it instead.
   app.post("/api/purchase-orders/:poId/send", async function (request, response) {
     const poId = Number(request.params.poId);
 
@@ -1313,9 +1174,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The clerk printed an approved order and handed it to the supplier: the
-  // order is marked as sent, so it reads Pending Supplier Confirmation until
-  // the supplier accepts or declines it from the link on the order.
   app.post("/api/purchase-orders/:poId/mark-sent", async function (request, response) {
     const poId = Number(request.params.poId);
     try {
@@ -1354,12 +1212,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // THE SUPPLIER'S PAGE (supplier-order.html) -- no account, only the link's code
-  // ==========================================
-  // The code is 32 random bytes, so it cannot be guessed; the access rules in
-  // access-control.js lets these three routes through without a session for that reason.
-  // Gives back the order's document for a code, or null for an unknown one.
   async function orderForCode(code) {
     const rowsResult = await db.query(
       "SELECT po_id FROM purchase_orders WHERE supplier_code = ?", [String(code)]);
@@ -1370,12 +1222,9 @@ function registerInventoryRoutes(app, deps) {
 
   const UNKNOWN_LINK = "This link is not valid. Check it against the printed order, or contact the shop.";
 
-  // what the supplier may see: the order, the lines and the shop, not the
-  // shop's notes on it
   function supplierView(document) {
     const order = document.order;
 
-    // the order lines, with only the fields the supplier page needs
     const viewItems = [];
     for (let i = 0; i < document.items.length; i++) {
       const item = document.items[i];
@@ -1401,7 +1250,6 @@ function registerInventoryRoutes(app, deps) {
         supplier_note: order.supplier_note,
         supplier_ship_date: order.supplier_ship_date,
         discount: order.discount,
-        // only a placed order waiting for its delivery, answered once
         can_respond: order.status === "Pending" && !order.supplier_response
       },
       items: viewItems,
@@ -1438,14 +1286,8 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The supplier's answer from the link on the order. Accepting, they say the
-  // date it ships and may correct a price that does not match what they sell:
-  // the corrected price goes on the line and the shop's own is kept beside it
-  // (original_unit_cost). Declining, they say why. Answered once; the manager
-  // and the clerk are told either way.
-  const PRICE_CEILING = 100000000;   // unit_cost is DECIMAL(10,2)
+  const PRICE_CEILING = 100000000;
 
-  // today (plus some days) on the server's calendar, as YYYY-MM-DD
   function calendarDay(offsetDays) {
     const day = new Date();
     day.setDate(day.getDate() + offsetDays);
@@ -1457,7 +1299,6 @@ function registerInventoryRoutes(app, deps) {
            String(day.getDate()).padStart(2, "0");
   }
 
-  // "Mon, Oct 12, 2026"
   function dayText(isoDate) {
     return new Date(isoDate + "T00:00:00").toLocaleDateString("en-PH",
       { weekday: "short", month: "short", day: "numeric", year: "numeric" });
@@ -1477,13 +1318,10 @@ function registerInventoryRoutes(app, deps) {
       return response.status(400).json({ error: "Say why the order cannot be filled, so the shop can act on it." });
     }
 
-    // a real calendar day, from tomorrow to a year out (2026-02-31 is refused:
-    // it does not come back from Date as itself)
     let shipDate = null;
     if (accept) {
       shipDate = String(body.shipDate || "").trim();
       const parsed = new Date(shipDate + "T00:00:00");
-      // the date must be written like 2026-10-14, and be a day that really exists
       const real = /^\d{4}-\d{2}-\d{2}$/.test(shipDate) && !Number.isNaN(parsed.getTime()) &&
                    isoDay(parsed) === shipDate;
       if (!real) {
@@ -1507,7 +1345,6 @@ function registerInventoryRoutes(app, deps) {
       const order = document.order;
       const number = "PO-" + String(order.po_id).padStart(6, "0");
 
-      // each corrected price, checked against this order's own lines
       const changes = [];
       for (let i = 0; i < asked.length; i++) {
         const entry = asked[i];
@@ -1546,8 +1383,6 @@ function registerInventoryRoutes(app, deps) {
         after += (change.price - Number(change.item.unit_cost)) * Number(change.item.quantity);
       }
 
-      // a discount off the whole order, as a percentage or a peso amount; it
-      // goes on the order's invoice discount, which receiving carries through
       let discount = 0;
       const offered = accept && body.discount ? body.discount : null;
       if (offered && offered.value !== undefined && offered.value !== null && String(offered.value).trim() !== "") {
@@ -1565,12 +1400,9 @@ function registerInventoryRoutes(app, deps) {
         }
       }
 
-      // the answer and the prices land together or not at all
       connection = await db.getConnection();
       await connection.beginTransaction();
 
-      // answered once, and only while the order waits for its delivery; the
-      // WHERE makes two presses at once count as one
       const queryResult = await connection.query(
         "UPDATE purchase_orders " +
         "SET supplier_response = ?, supplier_responded_at = NOW(), supplier_note = ?, supplier_ship_date = ?, " +
@@ -1604,7 +1436,6 @@ function registerInventoryRoutes(app, deps) {
       connection.release();
       connection = null;
 
-      // the manager and the clerk are told at once, on the bell
       let title = order.supplier_name + " accepted purchase order #" + order.po_id;
       let message = order.supplier_name + " accepted " + number + " and will ship it on " + dayText(shipDate) + ".";
       if (changes.length > 0) {
@@ -1651,7 +1482,6 @@ function registerInventoryRoutes(app, deps) {
         { po_id: order.po_id, supplier: order.supplier_name, accepted: accept, ship_date: shipDate, discount: discount,
           prices: auditPrices });
 
-      // the bell and the order list update without a reload
       if (publishChange) {
         publishChange("notifications", "supplier answered " + number, null);
         publishChange("inventory", "supplier answered " + number, null);
@@ -1668,7 +1498,6 @@ function registerInventoryRoutes(app, deps) {
         try {
           await connection.rollback();
         } catch (ignored) {
-          // nothing more can be done if the rollback itself fails
         }
         connection.release();
       }
@@ -1677,9 +1506,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // Receiving, by the clerk once the manager has confirmed the order: the
-  // body carries the count sheet, including anything never ordered. An empty
-  // body receives the order exactly as written.
   app.post("/api/purchase-orders/:poId/receive", async function (request, response) {
     let received;
     if (Array.isArray(request.body && request.body.received)) {
@@ -1688,7 +1514,6 @@ function registerInventoryRoutes(app, deps) {
       received = [];
     }
 
-    // what was actually counted in, line by line
     const sheet = [];
     for (let i = 0; i < received.length; i++) {
       const line = received[i];
@@ -1703,12 +1528,10 @@ function registerInventoryRoutes(app, deps) {
       });
     }
 
-    // the supplier's discount off the invoice, if any (never below 0)
     const body = request.body || {};
     const discount = Math.max(0, Number(body.discount) || 0);
 
     try {
-      // an order is referred (received) only once the supplier has accepted it
       const stateResult = await db.query(
         "SELECT status, supplier_response FROM purchase_orders WHERE po_id = ?", [Number(request.params.poId)]);
       const state = stateResult[0][0];
@@ -1727,7 +1550,6 @@ function registerInventoryRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      // the clerk's remarks on the delivery, for the order's Report
       const remarks = shortText(body.remarks, 255);
       if (remarks) {
         await db.query("UPDATE purchase_orders SET delivery_remarks = ? WHERE po_id = ?",
@@ -1741,11 +1563,8 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // RETURNS, DAMAGE AND REFUND REPORTS
   app.get("/api/returns", async function (request, response) {
     try {
-      // goods missing from a supplier delivery are the stockroom business;
-      // the counter list (the cashier) does not carry them
       let hideMissing = "";
       if (request.actor && request.actor.roleName === CASHIER) {
         hideMissing = "WHERE r.report_type <> 'Missing'";
@@ -1775,26 +1594,13 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // Filing a return: a reason is compulsory. So is a disposition,
-  // except on a refund from the counter, which the clerk inspects before it
-  // is decided: a cashier never says where the goods go, whatever is sent.
-  // A driver's refund at the customer's door is treated the same way.
-  // restock is still accepted from older callers and mapped across.
   const RETURN_DISPOSITIONS = ["Return to Stock", "Write-Off"];
   const LONGEST_RETURN_REASON = 255;
 
-  // A driver's figures may be off by rounding: a quantity is kept to three
-  // decimals and an amount to cents, so these small margins are let through.
   const QUANTITY_SLACK = 0.0005;
   const AMOUNT_SLACK = 0.01;
 
-  // A refund on a sale is checked against the sale: the item is on it, that
-  // many are left to refund, and no more than was charged for them. Gives back
-  // the sentence to show when something is wrong, or "" when it is fine.
-  // These checks give a friendly message; sp_file_return_report checks the
-  // same again under a lock, and that is the one that cannot be raced.
   async function refundProblem(saleId, productId, quantity, refundAmount) {
-    // what the sale holds of this product, and what has already come back
     const linesResult = await db.query(
       "SELECT COALESCE(SUM(quantity), 0) AS sold, COALESCE(SUM(subtotal), 0) AS worth " +
       "FROM sale_items WHERE sale_id = ? AND product_id = ?",
@@ -1807,7 +1613,6 @@ function registerInventoryRoutes(app, deps) {
       [saleId, productId]
     );
     const taken = takenResult[0];
-    // the lines add up to total_amount; the customer paid final_amount, after the discount
     const salesResult = await db.query(
       "SELECT total_amount, final_amount FROM sales WHERE sale_id = ?", [saleId]);
     const sales = salesResult[0];
@@ -1834,7 +1639,6 @@ function registerInventoryRoutes(app, deps) {
                        : "Only " + left + " of that item can still be refunded.";
     }
 
-    // never more than the customer was charged for those pieces (after the discount)
     const mostToRefund = Number(lines[0].worth) * afterDiscount * qty / sold;
     if (!(Number(refundAmount) > 0) || Number(refundAmount) > mostToRefund + AMOUNT_SLACK) {
       return "The refund must be more than zero and no more than " + mostToRefund.toFixed(2) + ", " +
@@ -1857,7 +1661,6 @@ function registerInventoryRoutes(app, deps) {
       return response.status(400).json({ error: "Product, type and quantity are all required" });
     }
 
-    // goods missing from a delivery are filed by the clerk, from Make a Report
     if (reportType === "Missing") {
       return response.status(400).json({ error: "Goods missing from a delivery are filed from the Make a Report screen." });
     }
@@ -1873,9 +1676,6 @@ function registerInventoryRoutes(app, deps) {
       return response.status(400).json({ error: "The reason is at most " + LONGEST_RETURN_REASON + " characters." });
     }
 
-    // A refund amount, when one is sent, is a real number of zero or more. A
-    // negative one would add money back onto the customer's bill. The
-    // procedure checks the same again.
     if (refundAmount !== undefined && refundAmount !== null && refundAmount !== "") {
       const amountSent = Number(refundAmount);
       if (!Number.isFinite(amountSent) || amountSent < 0) {
@@ -1883,16 +1683,12 @@ function registerInventoryRoutes(app, deps) {
       }
     }
 
-    // A refund is money going back against a sale, so it has to name the sale.
     if (reportType === "Refunded" && !saleId) {
       return response.status(400).json({ error: "A refund must be filed against a sale." });
     }
 
     const isDriver = request.actor && request.actor.roleName === DRIVER;
 
-    // A driver refunds at the customer's door, and only on a delivery they
-    // took. Nothing a driver sends is trusted: the sale, the item, how many
-    // and how much are all checked against the sale itself.
     if (isDriver) {
       if (reportType !== "Refunded" || !saleId) {
         return response.status(400).json({ error: "A driver can only refund an item on a sale they are delivering." });
@@ -1909,7 +1705,6 @@ function registerInventoryRoutes(app, deps) {
         if (deliveries.length === 0) {
           return response.status(403).json({ error: "You can only refund items on a delivery you took." });
         }
-        // the goods have to have reached the customer
         if (!["Out for Delivery", "Delivered"].includes(deliveries[0].status)) {
           return response.status(409).json({ error: "Refund items once the delivery is out with the customer." });
         }
@@ -1919,12 +1714,6 @@ function registerInventoryRoutes(app, deps) {
       }
     }
 
-    // A refund on a sale comes off what the customer owes, so whoever files it
-    // (driver or cashier) has it checked against the sale: the item is on it,
-    // that many are left to refund, and no more than was charged for them.
-    // These checks give a friendly message; sp_file_return_report checks the
-    // same again under a lock, and that is the one that cannot be raced.
-    // (A refund with no sale named is refused above.)
     if (reportType === "Refunded" && saleId) {
       try {
         const problem = await refundProblem(saleId, productId, quantity, refundAmount);
@@ -1937,7 +1726,6 @@ function registerInventoryRoutes(app, deps) {
       }
     }
 
-    // a refund brought back at the counter or from the door waits for the clerk
     const fromCounter = request.actor &&
       (request.actor.roleName === CASHIER || request.actor.roleName === DRIVER);
     let where;
@@ -1951,7 +1739,6 @@ function registerInventoryRoutes(app, deps) {
       where = null;
     }
 
-    // the procedure lets a Refunded report wait for inspection; anything else needs the words
     if (!where && !(reportType === "Refunded")) {
       return response.status(400).json({
         error: "Say where the goods go: Return to Stock, or Write-Off."
@@ -1987,7 +1774,6 @@ function registerInventoryRoutes(app, deps) {
         }
       );
 
-      // offBalance: how much of the refund came off what the customer owes
       response.json({ message: output.message, reportId: output.report_id, disposition: where,
                       awaitingInspection: where === null, offBalance: Number(output.off_balance) || 0 });
     } catch (error) {
@@ -1996,12 +1782,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // Make a Report: one report for several items at once. The body has the
-  // type, the reason, the sale (a refund) or the purchase order (goods missing
-  // from a delivery), and the list of items, each with its own quantity (and
-  // refund). The procedure files them all in one transaction: if one item is
-  // refused, nothing is filed. The clerk files any type; the cashier only a
-  // refund of several items of one sale, which waits for the clerk's inspection.
   const REPORT_TYPES = ["Return", "Damaged", "Refunded", "Missing"];
   const MOST_REPORT_ITEMS = 50;
 
@@ -2028,7 +1808,6 @@ function registerInventoryRoutes(app, deps) {
       return response.status(400).json({ error: "The reason is at most " + LONGEST_RETURN_REASON + " characters." });
     }
 
-    // the items: each material once, with a quantity above zero
     const sent = Array.isArray(body.items) ? body.items : [];
     if (sent.length === 0) {
       return response.status(400).json({ error: "Add at least one item to the report." });
@@ -2057,7 +1836,6 @@ function registerInventoryRoutes(app, deps) {
       if (!Number.isFinite(refund) || refund < 0) {
         return response.status(400).json({ error: "The refund amount must be a number, zero or more." });
       }
-      // a refund amount goes only with a refund or a plain return
       if (reportType !== "Refunded" && reportType !== "Return") {
         refund = 0;
       }
@@ -2067,12 +1845,8 @@ function registerInventoryRoutes(app, deps) {
       seen.push(productId);
       items.push({ product_id: productId, quantity: quantity, refund_amount: refund });
     }
-    // always filed in the same order, so two reports at once lock the shelf rows
-    // in the same order and cannot wait on each other
     items.sort(function (a, b) { return a.product_id - b.product_id; });
 
-    // goods missing from a delivery name their purchase order; a refund names
-    // its sale; the others may name a sale or leave it out
     let poId = null;
     let saleId = null;
     if (reportType === "Missing") {
@@ -2090,12 +1864,8 @@ function registerInventoryRoutes(app, deps) {
       return response.status(400).json({ error: "A refund must be filed against a sale." });
     }
 
-    // where the goods go. "Put back on the shelf: no" means they cannot be
-    // sold, so they are written off. A refund the clerk does not decide waits
-    // for inspection (no word). Missing goods have nowhere to go.
     let where = null;
     if (isCashier) {
-      // goods refunded at the counter wait for the clerk, as with one item
       where = null;
     } else if (reportType !== "Missing") {
       if (RETURN_DISPOSITIONS.includes(body.disposition)) {
@@ -2108,7 +1878,6 @@ function registerInventoryRoutes(app, deps) {
     }
 
     try {
-      // a refund is checked against its sale, item by item, for a friendly message
       if (reportType === "Refunded") {
         for (let i = 0; i < items.length; i++) {
           const item = items[i];
@@ -2159,9 +1928,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The clerk's verdict on a refund from the counter: Return to Stock if it
-  // can be sold again, Write-Off if not, with a note. A report that was
-  // decided at filing is simply closed.
   app.post("/api/returns/:reportId/resolve", async function (request, response) {
     const body = request.body || {};
     let verdict = null;
@@ -2198,7 +1964,6 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // NOTIFICATIONS -- which alerts you see is decided by the role on your session
   app.get("/api/notifications", async function (request, response) {
     const roleId = request.actor.roleId;
 

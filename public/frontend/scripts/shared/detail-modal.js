@@ -1,9 +1,6 @@
-// detail-modal.js -- paged detail popup; tabs and arrow keys move between pages
-// Loaded by: all five dashboards
 let detailPages = [];
 let detailIndex = 0;
 
-// locked: optional; true greys the row out (a fact the reader cannot change here)
 function detailField(label, value, locked) {
     const lockedClass = locked ? ' is-locked' : '';
     const lockedTitle = locked ? ' title="Cannot be changed here"' : '';
@@ -12,10 +9,8 @@ function detailField(label, value, locked) {
            '</span><span class="detail-value">' + value + '</span></div>';
 }
 
-// second name kept because both the directory and my-credentials ask for it
 const detailRow = detailField;
 
-// numeric: column positions holding figures, right aligned heading and all
 function detailTable(headers, rows, numeric) {
     if (rows.length === 0) return '<p class="detail-empty">Nothing to show here.</p>';
 
@@ -44,20 +39,12 @@ function detailTable(headers, rows, numeric) {
         '</tbody></table></div>';
 }
 
-// footActions: optional HTML for buttons in the popup's foot, so what can be
-// done with the record stays in view whichever page is open. The foot is
-// hidden when there are none: the x in the corner closes the card.
-// options.wide: a wide card, for a record shown on one page;
-// wide: 'xl' is wider still, for a record with a table beside its facts;
-// options.top: optional HTML shown across the top of the card, above the tabs,
-// so it stays in view whichever page is open (the delivery's progress steps)
 function openDetailModal(title, subtitle, initials, pages, footActions, options) {
     detailPages = pages;
     detailIndex = 0;
 
     const settings = options || {};
     const modal = document.getElementById('detail-modal');
-    // scroll: the record stays on one page and scrolls rather than turn pages
     if (modal) modal.toggleAttribute('data-modal-scroll', Boolean(settings.scroll));
     const box = modal ? modal.querySelector('.modal-box') : null;
     if (box) {
@@ -67,7 +54,6 @@ function openDetailModal(title, subtitle, initials, pages, footActions, options)
     const steps = document.getElementById('detail-steps');
     if (steps) steps.hidden = pages.length < 2;
 
-    // the strip above the tabs: filled when there is something for it, empty and hidden otherwise
     const top = document.getElementById('detail-top');
     if (top) {
         top.innerHTML = settings.top || '';
@@ -132,7 +118,6 @@ document.addEventListener('keydown', function (event) {
 });
 
 function prettyLabel(key) {
-    // underscores become spaces, and the first letter of every word becomes a capital
     return String(key).replace(/_/g, ' ').replace(/\b\w/g, function (c) {
         return c.toUpperCase();
     });
@@ -145,7 +130,6 @@ function fieldValue(key, value) {
     return escapeHtml(value);
 }
 
-// "Juan Dela Cruz" -> "JD" (the first letter of the first two words)
 function initialsOf(text) {
     const words = String(text).trim().split(/\s+/);
     let initials = '';
@@ -157,9 +141,6 @@ function initialsOf(text) {
     return initials.toUpperCase();
 }
 
-// A table inside a popup, paged with Previous and Next rather than scrolled.
-// The rows are kept under a name so the buttons can redraw the same box;
-// six rows is what a popup shows without growing past the screen.
 const PAGED_TABLE_ROWS = 6;
 const pagedTables = {};
 
@@ -172,7 +153,6 @@ function pagedTable(id, headers, rows, numeric, options) {
         page: 1,
         pageSize: settings.pageSize || PAGED_TABLE_ROWS,
         empty: settings.empty || 'Nothing to show here.',
-        // optional: a function(index) giving the attributes for that row's <tr>, e.g. a click handler
         rowAttrs: typeof settings.rowAttrs === 'function' ? settings.rowAttrs : null
     };
     return '<div class="paged-table" id="paged-' + id + '">' + pagedTableBody(id) + '</div>';
@@ -211,7 +191,6 @@ function pagedTableBody(id) {
         headHtml +
         '</tr></thead><tbody>' +
         bodyHtml +
-        // the last page is topped up so Previous and Next stay put (tables.js)
         (pages > 1 ? fillerRows(t.pageSize - slice.length, t.headers.length) : '') +
         '</tbody></table>';
 
@@ -234,7 +213,6 @@ function pagedTableGo(id, delta) {
     const mount = document.getElementById('paged-' + id);
     if (!t || !mount) return;
 
-    // the page being left is measured first, so the next is held to it
     holdTableHeight(mount.querySelector('table'));
     t.page += delta;
     mount.innerHTML = pagedTableBody(id);

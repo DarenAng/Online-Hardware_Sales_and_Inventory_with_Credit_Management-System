@@ -1,27 +1,11 @@
--- ==========================================================================
--- 2-RUN-SECOND-stored-procedures.sql
--- Lucelyn Hardware - Sales & Inventory with Credit Management
---
--- The 3 views and the 37 stored procedures. Runs after 1-RUN-FIRST because
--- the tables must exist. Safe to re-run at any time: it drops and recreates
--- the views and procedures and touches no row. If the server starts with
--- "PROCEDURE does not exist", this file is what fixes it.
---
---   mysql -u root -p < public/database/2-RUN-SECOND-stored-procedures.sql
--- ==========================================================================
-
 USE hardware_db;
 
 DELIMITER //
 
--- ==========================================
--- 0. VIEWS -- here rather than file 1 because this is the file safe to re-run
--- ==========================================
 DROP VIEW IF EXISTS vw_customer_credit //
 DROP VIEW IF EXISTS vw_customer_credit_facts //
 DROP VIEW IF EXISTS vw_archives //
 
--- Balances are derived from the sales, so they live here and cannot go stale.
 CREATE VIEW vw_customer_credit_facts AS
 
 SELECT
@@ -34,7 +18,6 @@ SELECT
     cc.notes AS credit_notes,
     cc.updated_at AS credit_updated_at,
 
-    -- the late-payment rate: the manager's word on this account, else the shop's
     cc.penalty_rate AS penalty_rate_override,
     COALESCE(cc.penalty_rate, (SELECT penalty_rate FROM store_settings WHERE setting_id = 1), 3.00)
         AS penalty_rate,
@@ -44,30 +27,24 @@ SELECT
               WHERE s.customer_id = c.customer_id
                 AND s.is_archived = FALSE), 0.00) AS total_purchase,
 
-    -- billed, with any late penalty on it, minus paid on any sale not yet marked Paid
     COALESCE((SELECT SUM(s.amount_due - s.amount_paid)
               FROM sales s
               WHERE s.customer_id = c.customer_id
                 AND s.is_archived = FALSE
                 AND s.payment_status <> 'Paid'), 0.00) AS current_credit,
 
-    -- how much of that is late-payment penalty rather than goods
-    -- (a penalty is shown only up to the balance left on its sale: after a
-    -- payment or a refund the balance can be smaller than the penalty charged)
     COALESCE((SELECT SUM(LEAST(s.penalty_amount, GREATEST(s.amount_due - s.amount_paid, 0)))
               FROM sales s
               WHERE s.customer_id = c.customer_id
                 AND s.is_archived = FALSE
                 AND s.payment_status <> 'Paid'), 0.00) AS penalties_owed,
 
-    -- sales that have passed their 30-day due date still owing
     (SELECT COUNT(*) FROM sales s
      WHERE s.customer_id = c.customer_id
        AND s.is_archived = FALSE
        AND s.payment_status <> 'Paid'
        AND DATE(s.sale_date) < DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS overdue_sales,
 
-    -- never negative: an account over its limit has nothing available
     GREATEST(COALESCE(cc.credit_limit, 0.00) -
              COALESCE((SELECT SUM(s.amount_due - s.amount_paid)
                        FROM sales s
@@ -80,7 +57,6 @@ SELECT
        AND s.is_archived = FALSE
        AND s.payment_status <> 'Paid') AS open_sales,
 
-    -- how long the oldest unpaid sale has been sitting there
     (SELECT DATEDIFF(CURDATE(), DATE(MIN(s.sale_date)))
      FROM sales s
      WHERE s.customer_id = c.customer_id
@@ -96,24 +72,10 @@ SELECT
 FROM customers c
 LEFT JOIN customer_credits cc ON cc.customer_id = c.customer_id //
 
--- ==========================================
--- WHAT "STANDING" MEANS
---
---   HOLD   over the credit limit, oldest unpaid sale over 90 days, or a
---          manager put the account on hold
---   WATCH  oldest unpaid sale over 30 days, balance 75% or more of the
---          limit, or a manager flagged the account
---   GOOD   none of the above
---
--- The manager's word (customer_credits.standing) only makes it stricter;
--- Good means "let the figures decide". The thresholds are written twice
--- (tier and reason) in the same order, so the two cannot disagree.
--- ==========================================
 CREATE VIEW vw_customer_credit AS
 SELECT
     f.*,
 
-    -- the tier the figures alone would give, before the manager's word
     CASE
         WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN 'Hold'
         WHEN f.oldest_debt_days > 90                                   THEN 'Hold'
@@ -122,7 +84,6 @@ SELECT
         ELSE 'Good'
     END AS computed_standing,
 
-    -- the tier in force: the stricter of the figures and the manager's word
     CASE
         WHEN f.manual_standing = 'Hold'                                THEN 'Hold'
         WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN 'Hold'
@@ -133,7 +94,6 @@ SELECT
         ELSE 'Good'
     END AS standing,
 
-    -- why, in words, for the screen that shows the badge
     CASE
         WHEN f.manual_standing = 'Hold' THEN
             CONCAT('Put on hold by a manager',
@@ -155,7 +115,6 @@ SELECT
 
 FROM vw_customer_credit_facts f //
 
--- one row per archived record, whatever module it came from
 CREATE VIEW vw_archives AS
 SELECT 'Staff' AS module, s.staff_id AS record_id,
        s.full_name AS record_name,
@@ -225,14 +184,9 @@ DROP PROCEDURE IF EXISTS sp_set_sale_reference //
 DROP PROCEDURE IF EXISTS sp_create_qr_payment //
 DROP PROCEDURE IF EXISTS sp_set_qr_payment_result //
 DROP PROCEDURE IF EXISTS sp_link_qr_payment_to_sale //
--- procedures an earlier version of this file created and later dropped from it;
--- a database made then still holds them, so they are removed here
 DROP PROCEDURE IF EXISTS sp_set_system_permission //
 DROP PROCEDURE IF EXISTS sp_save_connected_system //
 DROP PROCEDURE IF EXISTS sp_upgrade_add_column //
--- ==========================================
--- 1. PASSWORD RESET
--- ==========================================
 CREATE PROCEDURE sp_reset_user_password (
     IN p_staff_id INT,
     IN p_new_password VARCHAR(255),
@@ -244,10 +198,8 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_reset_user_password failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -274,9 +226,6 @@ PROC_BODY: BEGIN
     SET p_message = 'Password reset. The user must change it on next login.';
 END //
 
--- ==========================================
--- 2. CREATE STAFF + LOGIN ACCOUNT
--- ==========================================
 CREATE PROCEDURE sp_create_staff_account (
     IN p_first_name VARCHAR(100),
     IN p_middle_name VARCHAR(100),
@@ -295,12 +244,10 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_staff_id = NULL;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_create_staff_account failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -339,9 +286,6 @@ PROC_BODY: BEGIN
     SET p_message = 'Account created successfully.';
 END //
 
--- ==========================================
--- 3. UPDATE STAFF + LOGIN ACCOUNT
--- ==========================================
 CREATE PROCEDURE sp_update_staff_account (
     IN p_staff_id INT,
     IN p_first_name VARCHAR(100),
@@ -361,11 +305,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_update_staff_account failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -383,7 +325,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- email must be unique across every other account
     SELECT COUNT(*) INTO v_email_count
     FROM users
     WHERE email = p_email AND staff_id <> p_staff_id;
@@ -417,9 +358,6 @@ PROC_BODY: BEGIN
     SET p_message = 'Account updated successfully.';
 END //
 
--- ==========================================
--- 4. ACTIVATE / DEACTIVATE STAFF
--- ==========================================
 CREATE PROCEDURE sp_set_staff_status (
     IN p_staff_id INT,
     IN p_is_active BOOLEAN,
@@ -435,11 +373,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_set_staff_status failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -454,14 +390,7 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    -- block locking yourself out of the system
     IF p_is_active = FALSE AND v_role_id = 1 THEN
-        -- Every administrator's row is locked first, in one statement, so
-        -- two administrators deactivating each other take their turn rather
-        -- than each holding one row and waiting for the other's. The second
-        -- waits here and then counts what the first left behind; the count
-        -- is a locking read too, because a plain read after the wait would
-        -- still see the snapshot from before it.
         SELECT COUNT(*) INTO v_admin_total
         FROM staff
         WHERE role_id = 1
@@ -480,10 +409,6 @@ PROC_BODY: BEGIN
         END IF;
     END IF;
 
-    -- Deactivating is not archiving: the account stays in the Staff Directory
-    -- as Deactivated, and deactivated_at starts its 30 days. It goes to the
-    -- archive by hand (sp_archive_record) or by the daily sweep after 30 days
-    -- (sp_sweep_archives). A second deactivation does not restart the count.
     IF p_is_active = FALSE THEN
         UPDATE staff
         SET is_active = FALSE, deactivated_at = COALESCE(deactivated_at, NOW())
@@ -499,9 +424,6 @@ PROC_BODY: BEGIN
     SET p_status_code = 200;
     SET p_message = 'Account status updated.';
 END //
--- ==========================================
--- 5. CREATE A LOGIN FOR EXISTING STAFF
--- ==========================================
 CREATE PROCEDURE sp_create_login_for_staff (
     IN p_staff_id INT,
     IN p_email VARCHAR(100),
@@ -516,10 +438,8 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_create_login_for_staff failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -556,9 +476,6 @@ PROC_BODY: BEGIN
     SET p_status_code = 201;
     SET p_message = 'Login account created.';
 END //
--- ==========================================
--- 5. SALES TRANSACTION (AUTOMATIC INVENTORY DEDUCTION)
--- ==========================================
 CREATE PROCEDURE sp_raise_stock_alert (
     IN p_product_id INT,
     IN p_actor_staff_id INT
@@ -572,9 +489,6 @@ PROC_BODY: BEGIN
     DECLARE v_message TEXT;
     DECLARE v_open INT DEFAULT 0;
 
-    -- A failed alert is swallowed on purpose so it never undoes the sale or
-    -- the stock change that raised it. The real error is still kept in
-    -- @err_no / @err_text (first statement, before anything clears it).
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
@@ -586,7 +500,6 @@ PROC_BODY: BEGIN
     LEFT JOIN inventory i ON i.product_id = p.product_id
     WHERE p.product_id = p_product_id AND p.is_archived = FALSE;
 
-    -- stock is healthy again, so retire anything still warning about it
     IF v_name IS NOT NULL AND v_stock > v_point THEN
         UPDATE notifications
         SET is_read = TRUE
@@ -609,7 +522,6 @@ PROC_BODY: BEGIN
         SET v_message = CONCAT('Stock is ', v_stock, ', reorder point is ', v_point, '. Raise a purchase order.');
     END IF;
 
-    -- a product that has gone from empty to merely low stops saying "out of stock"
     UPDATE notifications
     SET is_read = TRUE
     WHERE product_id = p_product_id
@@ -617,7 +529,6 @@ PROC_BODY: BEGIN
       AND notif_type <> v_type
       AND is_read = FALSE;
 
-    -- do not repeat an alert nobody has read yet
     SELECT COUNT(*) INTO v_open
     FROM notifications
     WHERE product_id = p_product_id AND notif_type = v_type AND is_read = FALSE;
@@ -626,7 +537,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- the clerk who has to reorder it, and the manager who signs it off
     INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id)
     VALUES (3, v_type, v_title, v_message, p_product_id, p_actor_staff_id);
 
@@ -634,27 +544,16 @@ PROC_BODY: BEGIN
     VALUES (2, v_type, v_title, v_message, p_product_id, p_actor_staff_id);
 END //
 
--- ==========================================
 CREATE PROCEDURE sp_create_sale_transaction (
     IN p_customer_id INT,
-    -- the name of a buyer with no account; ignored when p_customer_id is given
     IN p_walk_in_name VARCHAR(150),
     IN p_cashier_staff_id INT,
     IN p_discount DECIMAL(10,2),
     IN p_amount_paid DECIMAL(12,2),
     IN p_payment_method VARCHAR(30),
-    -- [{product_id, quantity, unit}]: quantity is in the unit named, and unit
-    -- is NULL (or the product's own) for a plain line, or one of the sizes in
-    -- product_units ("sack" for nails kept by the kilo)
     IN p_items_json JSON,
-    -- how a down payment on a Credit sale was actually tendered
     IN p_down_payment_method VARCHAR(30),
-    -- optional: the paid QR payment the money taken now came in on. The row is
-    -- locked, checked and tied to this sale inside the sale's own transaction.
     IN p_qr_payment_id INT,
-    -- optional: the bank and account behind a cheque or a bank transfer taken
-    -- now, as JSON {"bank","branch","accountName","accountNumber","chequeDate"}.
-    -- A bank transfer paid by QR needs none (the QR payment holds them).
     IN p_pay_details JSON,
     OUT p_sale_id INT,
     OUT p_status_code INT,
@@ -667,9 +566,7 @@ PROC_BODY: BEGIN
     DECLARE v_quantity DECIMAL(12,3);
     DECLARE v_unit_price DECIMAL(10,2);
     DECLARE v_stock DECIMAL(12,3);
-    -- what the whole basket asks of this material, not just the line in hand
     DECLARE v_needed DECIMAL(12,3);
-    -- the size the line was sold in, and what it comes to on the shelf
     DECLARE v_unit VARCHAR(20);
     DECLARE v_base_unit VARCHAR(20);
     DECLARE v_units_per DECIMAL(12,3);
@@ -693,7 +590,6 @@ PROC_BODY: BEGIN
     DECLARE v_payment_status VARCHAR(10) DEFAULT 'Paid';
     DECLARE v_walk_in_name VARCHAR(150) DEFAULT NULL;
 
-    -- the QR payment row, as found under its lock
     DECLARE v_qr_found INT DEFAULT 0;
     DECLARE v_qr_status VARCHAR(12) DEFAULT NULL;
     DECLARE v_qr_sale INT DEFAULT NULL;
@@ -701,13 +597,9 @@ PROC_BODY: BEGIN
     DECLARE v_qr_wallet VARCHAR(20) DEFAULT NULL;
     DECLARE v_qr_method VARCHAR(30) DEFAULT NULL;
 
-    -- how the money taken now arrived, and the credit_payments row it made
     DECLARE v_taken_method VARCHAR(30) DEFAULT NULL;
     DECLARE v_payment_row INT DEFAULT NULL;
 
-    -- Posted prices include VAT, so it is extracted from the total; VAT is
-    -- rounded first so the lines add back exactly. The registration and rate
-    -- are copied onto the sale so a later change does not rewrite invoices.
     DECLARE v_registration VARCHAR(10) DEFAULT 'VAT';
     DECLARE v_vat_rate DECIMAL(5,2) DEFAULT 12.00;
     DECLARE v_vat_amount DECIMAL(12,2) DEFAULT 0.00;
@@ -715,13 +607,11 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
         SET p_sale_id = NULL;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_create_sale_transaction failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -736,7 +626,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a negative discount would raise the bill above the item prices
     IF v_discount < 0 THEN
         SET p_status_code = 400;
         SET p_message = 'Discount cannot be negative.';
@@ -749,20 +638,16 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Credit accepts a down payment and puts the rest on account; COD takes nothing at
-    -- the register.
     SET v_on_credit = (p_payment_method = 'Credit');
     SET v_on_account = (p_payment_method IN ('Credit', 'COD'));
     SET v_down_method = IFNULL(NULLIF(TRIM(IFNULL(p_down_payment_method, '')), ''), 'Cash');
 
-    -- a sale belongs to an account or to a name, never both; blank collapses to NULL
     IF p_customer_id IS NULL THEN
         SET v_walk_in_name = NULLIF(TRIM(IFNULL(p_walk_in_name, '')), '');
     ELSE
         SET v_walk_in_name = NULL;
     END IF;
 
-    -- what the whole basket asks of each shelf, one row per material
     DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
     CREATE TEMPORARY TABLE tmp_sale_needed (
         product_id INT PRIMARY KEY,
@@ -773,7 +658,6 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    -- PASS 1: validate every line and build the total
     WHILE v_i < v_item_count DO
         SET v_product_id = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].product_id'))), 'null');
         SET v_quantity   = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].quantity'))), 'null');
@@ -787,7 +671,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- reset first, otherwise a missing row keeps the value from the last loop
         SET v_unit_price = NULL;
         SET v_stock = NULL;
         SET v_base_unit = NULL;
@@ -807,8 +690,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- A line sold by the sack is priced by the sack and comes off the
-        -- shelf by the kilo; a size the product is not kept in is refused.
         SET v_units_per = 1;
         IF v_unit IS NOT NULL AND LOWER(v_unit) <> LOWER(IFNULL(v_base_unit, '')) THEN
             SET v_units_per = NULL;
@@ -828,9 +709,6 @@ PROC_BODY: BEGIN
             SET v_unit_price = IFNULL(v_pack_price, ROUND(v_unit_price * v_units_per, 2));
         END IF;
 
-        -- a product the manager has not priced yet (or a size that works out to
-        -- nothing) cannot be sold: the till greys it out and the route checks too,
-        -- but the price is read here, inside the sale's own transaction
         IF v_unit_price IS NULL OR v_unit_price <= 0 THEN
             ROLLBACK;
             SET p_status_code = 400;
@@ -839,9 +717,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- every line naming this material is added up in the product's own
-        -- unit, so one material on two lines cannot be sold twice against
-        -- the same shelf; the tally is checked once the lines are all read
         SET v_base_quantity = ROUND(v_quantity * v_units_per, 3);
         INSERT INTO tmp_sale_needed (product_id, product_name, unit_name, needed)
         VALUES (v_product_id, v_product_name, v_base_unit, v_base_quantity)
@@ -851,8 +726,6 @@ PROC_BODY: BEGIN
         SET v_i = v_i + 1;
     END WHILE;
 
-    -- The shelf rows are read FOR UPDATE inside the transaction, so two sales
-    -- of the last sack at the same moment cannot both pass this check.
     SELECT COUNT(*) INTO v_stock
     FROM inventory
     WHERE product_id IN (SELECT product_id FROM tmp_sale_needed)
@@ -866,9 +739,6 @@ PROC_BODY: BEGIN
     WHERE IFNULL(i.quantity_in_stock, 0) < t.needed
     ORDER BY t.product_id
     LIMIT 1
-    -- A plain read here would see the snapshot taken by the first read of
-    -- this transaction (the products in PASS 1), which can be older than the
-    -- stock another sale has just committed. FOR UPDATE reads the latest.
     FOR UPDATE;
 
     IF v_product_id IS NOT NULL THEN
@@ -893,7 +763,6 @@ PROC_BODY: BEGIN
 
     IF v_on_account THEN
         IF v_on_credit THEN
-            -- a down payment cannot exceed the bill: there is no change on a sale going on account
             IF v_amount_paid < 0 THEN
                 SET v_amount_paid = 0.00;
             END IF;
@@ -901,21 +770,11 @@ PROC_BODY: BEGIN
                 SET v_amount_paid = v_final_amount;
             END IF;
         ELSE
-            -- COD: nothing is tendered at the register
             SET v_amount_paid = 0.00;
         END IF;
 
-        -- what actually goes on the account is the part that was not paid;
-        -- on COD that is the whole bill, so it faces the same hold and limit
         SET v_new_exposure = v_final_amount - v_amount_paid;
 
-        -- The account is locked before the limit is checked, in the same
-        -- transaction as the shelf rows above, so two Credit sales for the
-        -- same customer take their turn: the second waits here until the
-        -- first has committed or rolled back. The limit and the balance are
-        -- then read FOR UPDATE as well, because a plain read in this
-        -- transaction would still see the snapshot taken before the wait
-        -- and miss the sale that just went on account.
         SELECT c.customer_id, COALESCE(cc.credit_limit, 0.00)
         INTO v_locked_customer_id, v_credit_limit
         FROM customers c
@@ -923,7 +782,6 @@ PROC_BODY: BEGIN
         WHERE c.customer_id = p_customer_id
         FOR UPDATE;
 
-        -- the same sum as vw_customer_credit.current_credit, read locked
         SELECT COALESCE(SUM(s.amount_due - s.amount_paid), 0.00)
         INTO v_current_credit
         FROM sales s
@@ -932,14 +790,11 @@ PROC_BODY: BEGIN
           AND s.payment_status <> 'Paid'
         FOR UPDATE;
 
-        -- the tier is still the view's word: a manager's hold or an aged
-        -- debt, neither of which another sale in flight can change
         SELECT standing
         INTO v_standing
         FROM vw_customer_credit
         WHERE customer_id = p_customer_id;
 
-        -- checked before the limit: "on hold" is a more useful refusal than "300 over"
         IF v_standing = 'Hold' AND v_new_exposure > 0 THEN
             ROLLBACK;
             SET p_status_code = 403;
@@ -975,7 +830,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- paid, part paid, or wholly on account; COD is always unpaid until delivery
         IF NOT v_on_credit THEN
             SET v_payment_status = 'Unpaid';
         ELSEIF v_amount_paid >= v_final_amount THEN
@@ -996,11 +850,6 @@ PROC_BODY: BEGIN
         SET v_payment_status = 'Paid';
     END IF;
 
-    -- Paid by QR code: the QR payment row is locked and checked here, in the
-    -- same transaction that records the sale, so one payment can never pay for
-    -- two sales, even when two copies of the server get both requests at once.
-    -- The money taken now is v_amount_paid: the whole tender on a plain sale,
-    -- the down payment on a Credit sale, nothing on COD.
     IF p_qr_payment_id IS NOT NULL THEN
         IF v_on_credit THEN
             SET v_qr_method = v_down_method;
@@ -1057,10 +906,6 @@ PROC_BODY: BEGIN
         END IF;
     END IF;
 
-    -- How the money taken now arrived: the sale's own method, or on a Credit
-    -- sale the down payment's; nothing is taken on COD or on credit with none down.
-    -- A cheque is never recorded without its account, bank and date, and a bank
-    -- transfer needs either a paid QR payment or the details typed.
     IF v_on_credit THEN
         IF v_amount_paid > 0 THEN
             SET v_taken_method = v_down_method;
@@ -1084,7 +929,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- no settings row means mid-install, so the defaults stand
     SELECT registration_type, vat_rate
     INTO v_registration, v_vat_rate
     FROM store_settings
@@ -1097,13 +941,11 @@ PROC_BODY: BEGIN
         SET v_vat_amount = ROUND(v_final_amount * v_vat_rate / (100 + v_vat_rate), 2);
         SET v_vatable_sale = v_final_amount - v_vat_amount;
     ELSE
-        -- a non-VAT shop charges no VAT at all
         SET v_vat_rate = 0.00;
         SET v_vat_amount = 0.00;
         SET v_vatable_sale = 0.00;
     END IF;
 
-    -- final_amount and change_given are generated columns, so they are not inserted
     INSERT INTO sales (
         customer_id, walk_in_name, cashier_staff_id, total_amount, discount, amount_paid,
         payment_method, payment_status,
@@ -1116,7 +958,6 @@ PROC_BODY: BEGIN
 
     SET p_sale_id = LAST_INSERT_ID();
 
-    -- PASS 2: write the lines and deduct stock
     SET v_i = 0;
     WHILE v_i < v_item_count DO
         SET v_product_id = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].product_id'))), 'null');
@@ -1130,7 +971,6 @@ PROC_BODY: BEGIN
         LEFT JOIN units u ON u.unit_id = p.unit_id
         WHERE p.product_id = v_product_id;
 
-        -- the same size lookup as pass 1; checked there, so it cannot fail here
         SET v_units_per = 1;
         IF v_unit IS NOT NULL AND LOWER(v_unit) <> LOWER(IFNULL(v_base_unit, '')) THEN
             SET v_pack_price = NULL;
@@ -1144,8 +984,6 @@ PROC_BODY: BEGIN
         END IF;
         SET v_base_quantity = ROUND(v_quantity * v_units_per, 3);
 
-        -- quantity is what left the shelf; sold_unit and sold_quantity say what
-        -- the customer was charged for. subtotal is generated, so it is not inserted.
         INSERT INTO sale_items (sale_id, product_id, quantity, sold_unit, sold_quantity, unit_price)
         VALUES (p_sale_id, v_product_id, v_base_quantity, v_unit,
                 IF(v_unit IS NULL, NULL, v_quantity), v_unit_price);
@@ -1157,7 +995,6 @@ PROC_BODY: BEGIN
         SET v_i = v_i + 1;
     END WHILE;
 
-    -- a down payment is a payment and belongs in the payment history
     IF v_on_credit AND v_amount_paid > 0 THEN
         INSERT INTO credit_payments (customer_id, sale_id, amount, payment_method,
                                      reference_no, received_by_staff_id)
@@ -1166,9 +1003,6 @@ PROC_BODY: BEGIN
         SET v_payment_row = LAST_INSERT_ID();
     END IF;
 
-    -- the bank and account behind a cheque or a bank transfer, in the same
-    -- transaction as the money: from the paid QR payment for a bank transfer,
-    -- otherwise from the details sent
     IF v_taken_method = 'Bank Transfer' AND p_qr_payment_id IS NOT NULL THEN
         INSERT INTO payment_details (sale_id, payment_id, method, account_name, account_number,
                                      bank_name, qr_payment_id, created_by_staff_id)
@@ -1187,8 +1021,6 @@ PROC_BODY: BEGIN
                 p_cashier_staff_id);
     END IF;
 
-    -- the QR payment is tied to this sale in the same transaction, so it is
-    -- either recorded here or not used at all
     IF p_qr_payment_id IS NOT NULL THEN
         UPDATE qr_payments SET sale_id = p_sale_id, error_message = NULL
         WHERE qr_payment_id = p_qr_payment_id;
@@ -1209,7 +1041,6 @@ PROC_BODY: BEGIN
     COMMIT;
     DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
 
-    -- selling is the commonest way stock falls, so warn on every line sold
     SET v_i = 0;
     WHILE v_i < v_item_count DO
         SET v_product_id = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].product_id'))), 'null');
@@ -1221,9 +1052,6 @@ PROC_BODY: BEGIN
     SET p_message = 'Sale transaction completed successfully.';
 END //
 
--- ==========================================
--- 7. ARCHIVE A RECORD (manager module)
--- ==========================================
 CREATE PROCEDURE sp_archive_record (
     IN p_module VARCHAR(20),
     IN p_record_id INT,
@@ -1243,11 +1071,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_archive_record failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -1259,7 +1085,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- only a deactivated account is archived; an active one is deactivated first
         SELECT COUNT(*) INTO v_found FROM staff WHERE staff_id = p_record_id AND is_active = TRUE;
         IF v_found > 0 THEN
             SET p_status_code = 409;
@@ -1280,7 +1105,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- a material with stock on hand is still on a shelf; sell or write it off first
         SELECT COALESCE(quantity_in_stock, 0) INTO v_stock
         FROM inventory WHERE product_id = p_record_id;
         IF v_stock > 0 THEN
@@ -1290,7 +1114,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- and one that is on its way from a supplier is not discontinued
         SELECT COUNT(*) INTO v_found
         FROM purchase_order_items poi
         JOIN purchase_orders po ON po.po_id = poi.po_id
@@ -1306,11 +1129,6 @@ PROC_BODY: BEGIN
         WHERE product_id = p_record_id;
 
     ELSEIF p_module = 'Sales' THEN
-        -- Archiving a sale is voiding it: same day only, goods not out for
-        -- delivery, and the stock goes back on the shelf with a movement in the log.
-        -- The sale is locked before any check is made. Two managers voiding the
-        -- same sale at once would otherwise both pass "still active" and both
-        -- put its stock back on the shelf.
         START TRANSACTION;
 
         SET v_sale_day = NULL;
@@ -1332,8 +1150,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- read locked, so a driver moving it to Out for Delivery at this moment
-        -- is waited for instead of missed
         SELECT COUNT(*) INTO v_found FROM deliveries
         WHERE sale_id = p_record_id AND is_archived = FALSE
           AND status IN ('Out for Delivery', 'Delivered')
@@ -1345,13 +1161,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- A refund or return report, or a payment taken after the sale was rung
-        -- up, means money or goods have moved since. Voiding would put the whole
-        -- stock back and leave that money pointing at a cancelled sale.
-        -- A Credit sale's down payment is written in the same transaction as the
-        -- sale, so it is always the FIRST payment row of that sale. It is not a
-        -- later payment, so it is not counted (or no Credit sale with money down
-        -- could ever be voided); any other row is.
         SELECT COUNT(*) INTO v_found FROM returned_items WHERE sale_id = p_record_id;
         IF v_found = 0 THEN
             SELECT COUNT(*) INTO v_found FROM credit_payments WHERE sale_id = p_record_id;
@@ -1373,8 +1182,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- every line goes back on the shelf, and the log says why; the shelf rows
-        -- are locked first so the "before" figure in the log is the true one
         SELECT COUNT(*) INTO v_found
         FROM inventory
         WHERE product_id IN (SELECT product_id FROM sale_items WHERE sale_id = p_record_id)
@@ -1396,7 +1203,6 @@ PROC_BODY: BEGIN
         JOIN sale_items si ON si.product_id = i.product_id AND si.sale_id = p_record_id
         SET i.quantity_in_stock = i.quantity_in_stock + si.quantity;
 
-        -- a delivery made for it and not yet on the road is cancelled with it
         UPDATE deliveries
         SET is_archived = TRUE, archived_at = NOW(), archived_by_staff_id = p_staff_id
         WHERE sale_id = p_record_id AND is_archived = FALSE;
@@ -1408,8 +1214,6 @@ PROC_BODY: BEGIN
         COMMIT;
 
     ELSEIF p_module = 'Delivery' THEN
-        -- a delivery is archived once closed (Delivered and paid, or Failed); the
-        -- sweep does it after ninety days, a manager may do it sooner
         SELECT COUNT(*) INTO v_found FROM deliveries WHERE delivery_id = p_record_id AND is_archived = FALSE;
         IF v_found = 0 THEN
             SET p_status_code = 404;
@@ -1449,9 +1253,6 @@ PROC_BODY: BEGIN
     SET p_message = 'Record archived.';
 END //
 
--- ==========================================
--- 8. RESTORE AN ARCHIVED RECORD
--- ==========================================
 CREATE PROCEDURE sp_restore_archive (
     IN p_module VARCHAR(20),
     IN p_record_id INT,
@@ -1464,11 +1265,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_restore_archive failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -1497,9 +1296,6 @@ PROC_BODY: BEGIN
         WHERE product_id = p_record_id;
 
     ELSEIF p_module = 'Sales' THEN
-        -- The sale and its shelf rows are locked before the stock is checked, so
-        -- two restores of the same sale (or a restore and a new sale of the same
-        -- goods) cannot both see enough stock and both take it off.
         START TRANSACTION;
 
         SELECT COUNT(*) INTO v_found FROM sales
@@ -1512,13 +1308,11 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- the shelf rows for these goods, locked in one go
         SELECT COUNT(*) INTO v_found
         FROM inventory
         WHERE product_id IN (SELECT product_id FROM sale_items WHERE sale_id = p_record_id)
         FOR UPDATE;
 
-        -- un-voiding takes the goods off the shelf again, and cannot if they were since sold
         SELECT COUNT(*) INTO v_found
         FROM sale_items si JOIN inventory i ON i.product_id = si.product_id
         WHERE si.sale_id = p_record_id AND i.quantity_in_stock < si.quantity;
@@ -1576,21 +1370,13 @@ PROC_BODY: BEGIN
     SET p_message = 'Record restored.';
 END //
 
--- ==========================================
--- 9. RECORD A CREDIT / COD PAYMENT
--- ==========================================
 CREATE PROCEDURE sp_record_credit_payment (
     IN p_sale_id INT,
     IN p_amount DECIMAL(12,2),
     IN p_payment_method VARCHAR(30),
     IN p_reference_no VARCHAR(60),
     IN p_staff_id INT,
-    -- optional: the paid QR payment this money came in on; locked, checked and
-    -- tied to the sale inside this transaction
     IN p_qr_payment_id INT,
-    -- optional: the bank and account behind a cheque or a bank transfer, as JSON
-    -- {"bank","branch","accountName","accountNumber","chequeDate"}; a bank
-    -- transfer paid by QR needs none (the QR payment holds them)
     IN p_pay_details JSON,
     OUT p_status_code INT,
     OUT p_message VARCHAR(255)
@@ -1603,7 +1389,6 @@ PROC_BODY: BEGIN
     DECLARE v_method VARCHAR(30);
     DECLARE v_voided BOOLEAN DEFAULT FALSE;
 
-    -- the QR payment row, as found under its lock
     DECLARE v_qr_found INT DEFAULT 0;
     DECLARE v_qr_status VARCHAR(12) DEFAULT NULL;
     DECLARE v_qr_sale INT DEFAULT NULL;
@@ -1613,11 +1398,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_record_credit_payment failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -1627,8 +1410,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a cheque is never recorded without its account, bank and date, and a bank
-    -- transfer needs either a paid QR payment or the details typed
     IF p_payment_method = 'Cheque' AND p_pay_details IS NULL THEN
         SET p_status_code = 400;
         SET p_message = 'A cheque needs its account name, account number, bank, branch and date.';
@@ -1640,23 +1421,14 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- sp_archive_record lets a sale be voided when its only payment is the
-    -- down payment taken at the counter, recognised by this exact reference.
-    -- A later payment typed with it would hide real money from that rule.
     IF LOWER(TRIM(IFNULL(p_reference_no, ''))) = 'down payment at counter' THEN
         SET p_status_code = 400;
         SET p_message = 'That reference is kept for the down payment taken at the counter; use another.';
         LEAVE PROC_BODY;
     END IF;
 
-    -- The sale row is read FOR UPDATE inside the transaction, so two payments
-    -- on the same order at the same moment cannot both pass the balance check.
     START TRANSACTION;
 
-    -- amount_due: the sale plus any late penalty charged on it
-    -- amount_paid: everything taken so far. It is read from the sale itself,
-    -- not added up from credit_payments, because a cash sale's money is only
-    -- recorded on the sale.
     SET v_customer_id = NULL;
     SELECT customer_id, amount_due, amount_paid, payment_status, is_archived, payment_method
     INTO v_customer_id, v_final, v_paid, v_status, v_voided, v_method
@@ -1670,7 +1442,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a voided sale was cancelled; money taken on it would belong to nothing
     IF v_voided THEN
         ROLLBACK;
         SET p_status_code = 409;
@@ -1678,7 +1449,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- only an order paid later (Credit or COD) is paid in more than one go
     IF v_method NOT IN ('Credit', 'COD') THEN
         ROLLBACK;
         SET p_status_code = 409;
@@ -1700,9 +1470,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Paid by QR code: the QR payment row is locked and checked here, in the
-    -- same transaction as the payment, so one QR payment can never be counted
-    -- twice, even when two copies of the server get both requests at once.
     IF p_qr_payment_id IS NOT NULL THEN
         SELECT COUNT(*), MAX(status), MAX(sale_id), MAX(amount), MAX(wallet)
           INTO v_qr_found, v_qr_status, v_qr_sale, v_qr_amount, v_qr_wallet
@@ -1752,9 +1519,6 @@ PROC_BODY: BEGIN
     VALUES (v_customer_id, p_sale_id, p_amount, p_payment_method, p_reference_no, p_staff_id);
     SET v_payment_row = LAST_INSERT_ID();
 
-    -- the bank and account behind a cheque or a bank transfer, in the same
-    -- transaction as the money: from the paid QR payment for a bank transfer,
-    -- otherwise from the details sent
     IF p_payment_method = 'Bank Transfer' AND p_qr_payment_id IS NOT NULL THEN
         INSERT INTO payment_details (sale_id, payment_id, method, account_name, account_number,
                                      bank_name, qr_payment_id, created_by_staff_id)
@@ -1773,7 +1537,6 @@ PROC_BODY: BEGIN
                 p_staff_id);
     END IF;
 
-    -- tied to the sale in the same transaction: recorded here or not used at all
     IF p_qr_payment_id IS NOT NULL THEN
         UPDATE qr_payments SET sale_id = p_sale_id, error_message = NULL
         WHERE qr_payment_id = p_qr_payment_id;
@@ -1797,19 +1560,10 @@ PROC_BODY: BEGIN
     SET p_message = 'Payment recorded.';
 END //
 
--- ==========================================
--- 10. RAISE A LOW STOCK ALERT
--- called by the stock procedures below, warns the clerk and the manager
-
--- ==========================================
--- 11. STOCK ADJUSTMENT
--- ==========================================
 CREATE PROCEDURE sp_adjust_stock (
     IN p_product_id INT,
     IN p_adjustment_type VARCHAR(10),
     IN p_quantity DECIMAL(12,3),
-    -- What the figure is counted in. A unit that does not exist yet is created;
-    -- NULL or empty keeps the material's current unit.
     IN p_unit_name VARCHAR(20),
     IN p_reason VARCHAR(255),
     IN p_staff_id INT,
@@ -1827,11 +1581,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_adjust_stock failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -1841,8 +1593,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Add and Remove move the shelf, so a quantity of nothing is not an
-    -- adjustment; a recount may find the shelf empty, so it may be 0
     IF p_quantity IS NULL THEN
         SET p_status_code = 400;
         SET p_message = 'A quantity is required.';
@@ -1861,10 +1611,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- The transaction is opened before the shelf row is read FOR UPDATE.
-    -- Under autocommit a lock taken outside one is let go the moment the
-    -- SELECT ends, so two adjustments of the same material could both read
-    -- the same figure and the second would write over the first.
     START TRANSACTION;
 
     SET v_before = NULL;
@@ -1900,7 +1646,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- what the material is counted in today, before anything is changed
     SELECT u.unit_name INTO v_current_unit
     FROM products p
     LEFT JOIN units u ON u.unit_id = p.unit_id
@@ -1908,10 +1653,6 @@ PROC_BODY: BEGIN
 
     SET v_unit = NULLIF(TRIM(IFNULL(p_unit_name, '')), '');
 
-    -- A different unit renames the stock without converting it (40 pcs would
-    -- become 40 kilograms), so it is only allowed on a recount, where the
-    -- figure is a fresh count in the new unit. A material that also sells in
-    -- other sizes keeps its unit, or those sizes would no longer add up.
     IF v_unit IS NOT NULL AND v_current_unit IS NOT NULL
        AND LOWER(v_unit) <> LOWER(v_current_unit) THEN
         IF p_adjustment_type <> 'Recount' THEN
@@ -1934,7 +1675,6 @@ PROC_BODY: BEGIN
         SET v_unit = v_current_unit;
     END IF;
 
-    -- a unit typed for the first time joins the list; matched case-insensitively
     IF v_unit IS NOT NULL THEN
         SELECT unit_id INTO v_unit_id
         FROM units WHERE LOWER(unit_name) = LOWER(v_unit) LIMIT 1;
@@ -1943,7 +1683,6 @@ PROC_BODY: BEGIN
             INSERT INTO units (unit_name) VALUES (v_unit);
             SET v_unit_id = LAST_INSERT_ID();
         ELSE
-            -- keep the spelling the list already agreed on
             SELECT unit_name INTO v_unit FROM units WHERE unit_id = v_unit_id;
         END IF;
 
@@ -1976,9 +1715,6 @@ PROC_BODY: BEGIN
                                      ' rather than ', v_current_unit, '.'), ''));
 END //
 
--- ==========================================
--- 12. REORDER POINT SETTINGS
--- ==========================================
 CREATE PROCEDURE sp_set_reorder_point (
     IN p_product_id INT,
     IN p_reorder_point INT,
@@ -1991,10 +1727,8 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_set_reorder_point failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -2024,13 +1758,6 @@ PROC_BODY: BEGIN
     SET p_message = 'Reorder point saved.';
 END //
 
--- ==========================================
--- 13. A SUPPLIER, FOUND OR MADE
---
--- The name is the input, not the id: a name on file is matched (trimmed,
--- case-insensitive) and reused, anything else joins the list. No transaction
--- control here: sp_create_purchase_order owns the transaction.
--- ==========================================
 CREATE PROCEDURE sp_ensure_supplier (
     IN p_supplier_name VARCHAR(100),
     IN p_contact_person VARCHAR(100),
@@ -2046,10 +1773,8 @@ BEGIN
     SET p_was_created = FALSE;
     SET v_name = TRIM(IFNULL(p_supplier_name, ''));
 
-    -- an id that is already good is the end of it
     IF p_supplier_id IS NOT NULL AND p_supplier_id > 0 THEN
         IF EXISTS (SELECT 1 FROM suppliers WHERE supplier_id = p_supplier_id) THEN
-            -- details typed alongside a known company fill in blanks, never overwrite
             UPDATE suppliers
             SET contact_person = COALESCE(NULLIF(contact_person, ''), NULLIF(TRIM(IFNULL(p_contact_person, '')), '')),
                 contact_number = COALESCE(NULLIF(contact_number, ''), NULLIF(TRIM(IFNULL(p_contact_number, '')), '')),
@@ -2085,14 +1810,6 @@ BEGIN
     END IF;
 END //
 
--- ==========================================
--- 14. A MATERIAL, FOUND OR MADE
---
--- A name matching a material already on file returns it (archived ones
--- included, so a returning material keeps its history); a new name creates
--- it with its unit, category and brand, and an inventory row at zero. No
--- transaction control here: the caller owns it.
--- ==========================================
 CREATE PROCEDURE sp_ensure_material (
     IN p_product_name VARCHAR(150),
     IN p_brand_name VARCHAR(100),
@@ -2135,7 +1852,6 @@ BEGIN
     END IF;
 
     IF p_product_id IS NULL AND v_name <> '' THEN
-        -- the words the clerk typed join the shop's lists rather than being refused
         IF v_brand <> '' THEN
             SELECT brand_id INTO v_brand_id FROM brands WHERE LOWER(brand_name) = LOWER(v_brand) LIMIT 1;
             IF v_brand_id IS NULL THEN
@@ -2176,10 +1892,6 @@ BEGIN
     END IF;
 END //
 
--- ==========================================
--- 15. ADD A MATERIAL ON ITS OWN -- same rules as 14, its own transaction,
--- and says whether it made a new one or found the existing one
--- ==========================================
 CREATE PROCEDURE sp_create_material (
     IN p_product_name VARCHAR(150),
     IN p_brand_name VARCHAR(100),
@@ -2197,12 +1909,10 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_product_id = NULL;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_create_material failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -2234,22 +1944,6 @@ PROC_BODY: BEGIN
         CONCAT(TRIM(p_product_name), ' is already on the material list, so that one was used.'));
 END //
 
--- ==========================================
--- 16. CREATE A PURCHASE ORDER -- raised by the clerk, For Approval until the
--- manager confirms it (sp_decide_purchase_order)
---
--- The supplier arrives as a name and a line as a product id or a name with
--- the facts to open a record; anything new is created inside the order's
--- transaction. Every line needs a quantity and either an id or a name:
---
---   { "product_id": 12, "quantity": 40, "unit_cost": 25.00 }
---   { "new_name": "Roofing nail 3in", "unit_name": "kilogram",
---     "category_name": "Fasteners", "brand_name": "Vista",
---     "price": 180.00, "quantity": 20, "unit_cost": 120.00 }
---
--- Every JSON read is wrapped in NULLIF(..., 'null') because JSON_UNQUOTE
--- turns a JSON null into the string "null", which raises under strict mode.
--- ==========================================
 CREATE PROCEDURE sp_create_purchase_order (
     IN p_supplier_id INT,
     IN p_supplier_name VARCHAR(100),
@@ -2285,12 +1979,10 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_po_id = NULL;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_create_purchase_order failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -2341,7 +2033,6 @@ PROC_BODY: BEGIN
         SET v_category   = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].category_name'))), 'null');
         SET v_unit       = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].unit_name'))), 'null');
         SET v_price      = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].price'))), 'null');
-        -- the pack the line was ordered in, when it was; quantity is already in the unit
         SET v_pack_name  = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].pack_name'))), 'null');
         SET v_pack_size  = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].pack_size'))), 'null');
         SET v_pack_count = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].pack_count'))), 'null');
@@ -2395,7 +2086,6 @@ PROC_BODY: BEGIN
     VALUES (p_staff_id, 'PURCHASE_ORDER', 'CREATE',
             CONCAT('PO #', p_po_id, ' raised with ', v_count, ' line(s), for the manager to confirm'));
 
-    -- the manager is told: an order is waiting to be confirmed before it goes to the supplier
     INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)
     VALUES (2, 'Purchase Order', CONCAT('Purchase order #', p_po_id, ' waits for your confirmation'),
             CONCAT(v_count, ' line(s) to ', COALESCE(NULLIF(TRIM(p_supplier_name), ''), CONCAT('supplier #', v_supplier)),
@@ -2409,13 +2099,6 @@ PROC_BODY: BEGIN
            CONCAT(', and ', p_new_materials, ' new material(s) added to the list.'), '.'));
 END //
 
--- ==========================================
--- 16b. CONFIRM OR DECLINE A PURCHASE ORDER -- the manager's decision on an
--- order the clerk raised. Confirmed, it is Pending: sent to the supplier and
--- waiting for the delivery. Declined, it is Cancelled, with the reason kept.
--- The row is read FOR UPDATE inside the transaction, so two decisions at the
--- same moment cannot both see it as For Approval.
--- ==========================================
 CREATE PROCEDURE sp_decide_purchase_order (
     IN p_po_id INT,
     IN p_approve BOOLEAN,
@@ -2431,11 +2114,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_decide_purchase_order failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -2454,7 +2135,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a decision already made stands
     IF v_status <> 'For Approval' THEN
         ROLLBACK;
         SET p_status_code = 409;
@@ -2476,7 +2156,6 @@ PROC_BODY: BEGIN
             CONCAT('PO #', p_po_id, ' to ', v_supplier, ' ', IF(p_approve, 'confirmed', 'declined'),
                    IF(p_note IS NULL OR TRIM(p_note) = '', '', CONCAT(': ', TRIM(p_note)))));
 
-    -- the clerk is told either way: send it and count the delivery in, or it is off
     INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)
     VALUES (3, 'Purchase Order',
             CONCAT('Purchase order #', p_po_id, IF(p_approve, ' confirmed', ' declined')),
@@ -2495,18 +2174,6 @@ PROC_BODY: BEGIN
         CONCAT('Purchase order #', p_po_id, ' declined. The clerk has been told.'));
 END //
 
--- ==========================================
--- 17. RECEIVE A PURCHASE ORDER
---
--- p_received_json is the count sheet, what actually came off the lorry, with
--- the supplier's prices from the invoice (the order itself carries none):
---   { "product_id": 12, "quantity": 38, "unit_cost": 25.00 }  a short line
---   { "new_name": "Anchor bolt M12", "unit_name": "pcs",
---     "quantity": 24, "unit_cost": 30.00 }                    never ordered
--- A line missing from the sheet is received in full; a quantity of zero did
--- not arrive. The order's own lines are corrected to match what arrived; a
--- copy of them as they were ordered goes to purchase_order_ordered_items first.
--- ==========================================
 CREATE PROCEDURE sp_receive_purchase_order (
     IN p_po_id INT,
     IN p_received_json JSON,
@@ -2543,11 +2210,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_receive_purchase_order failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -2578,14 +2243,10 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    -- ---- 0. the order as it was ordered, before the sheet corrects it ----
-    -- the clerk's Reference card compares this with what arrived
     INSERT INTO purchase_order_ordered_items (po_id, product_id, quantity, pack_name, pack_size, pack_count)
     SELECT po_id, product_id, quantity, pack_name, pack_size, pack_count
     FROM purchase_order_items WHERE po_id = p_po_id;
 
-    -- ---- 1. anything on the sheet that was never on the order ----
-    -- done first, so an extra material becomes a line and is stocked by the same loop
     SET v_count = IFNULL(JSON_LENGTH(p_received_json), 0);
 
     WHILE v_i < v_count DO
@@ -2617,7 +2278,6 @@ PROC_BODY: BEGIN
                                '" added while receiving purchase order #', p_po_id));
             END IF;
 
-            -- an archived material on a lorry again belongs back on the working list
             UPDATE products
             SET is_archived = FALSE, archived_at = NULL, archived_by_staff_id = NULL
             WHERE product_id = v_json_id AND is_archived = TRUE;
@@ -2627,8 +2287,6 @@ PROC_BODY: BEGIN
 
             IF EXISTS (SELECT 1 FROM purchase_order_items
                        WHERE po_id = p_po_id AND product_id = v_json_id) THEN
-                -- the order already has this line; the sheet corrects it, packs and
-                -- all, and puts the supplier's price on it
                 UPDATE purchase_order_items
                 SET quantity = IFNULL(v_json_qty, quantity),
                     unit_cost = IFNULL(v_cost, unit_cost),
@@ -2645,7 +2303,6 @@ PROC_BODY: BEGIN
         SET v_i = v_i + 1;
     END WHILE;
 
-    -- ---- 2. everything the order now says, onto the shelf ----
     OPEN cur;
     read_loop: LOOP
         FETCH cur INTO v_product_id, v_ordered;
@@ -2669,7 +2326,6 @@ PROC_BODY: BEGIN
                 (v_product_id, 'Add', v_before, v_arrived, v_before + v_arrived,
                  CONCAT('Received on purchase order #', p_po_id), p_staff_id);
 
-            -- goods arriving is exactly when a low stock warning should go away
             CALL sp_raise_stock_alert(v_product_id, p_staff_id);
 
             SET p_lines = p_lines + 1;
@@ -2679,7 +2335,6 @@ PROC_BODY: BEGIN
     END LOOP;
     CLOSE cur;
 
-    -- a line that did not arrive is not left on the order pretending it did
     DELETE FROM purchase_order_items WHERE po_id = p_po_id AND quantity <= 0;
 
     UPDATE purchase_orders
@@ -2701,14 +2356,6 @@ PROC_BODY: BEGIN
         IF(v_short > 0, CONCAT('. ', v_short, ' line(s) did not arrive'), ''), '.');
 END //
 
--- ==========================================
--- 18. FILE A DAMAGE, REFUND, RETURN, OR MISSING-GOODS REPORT
--- ==========================================
--- A Missing report is about a supplier's delivery that came up short: it
--- names the purchase order, is checked against what that order lists for the
--- product, and never moves the shelf (the goods never arrived). It has no
--- disposition, no sale and no refund, and stays Open until the clerk closes
--- it with sp_resolve_return_report (the supplier made it good).
 CREATE PROCEDURE sp_file_return_report (
     IN p_product_id INT,
     IN p_sale_id INT,
@@ -2716,19 +2363,11 @@ CREATE PROCEDURE sp_file_return_report (
     IN p_quantity DECIMAL(12,3),
     IN p_reason TEXT,
     IN p_refund_amount DECIMAL(12,2),
-    -- Where the goods go, in words; restocked is derived from it. A Refunded
-    -- report may leave it NULL: the goods wait for the clerk to inspect them
-    -- (sp_resolve_return_report), and nothing moves on the shelf until then.
     IN p_disposition VARCHAR(20),
-    -- the purchase order a Missing report is about (ignored for the others)
     IN p_po_id INT,
-    -- TRUE when sp_file_return_reports has already started the transaction:
-    -- this procedure then leaves START TRANSACTION, COMMIT and the manager's
-    -- notification to it, so a report of several items is all or nothing
     IN p_inside_batch BOOLEAN,
     IN p_staff_id INT,
     OUT p_report_id INT,
-    -- how much of a refund came off what the customer owes on the sale
     OUT p_off_balance DECIMAL(12,2),
     OUT p_status_code INT,
     OUT p_message VARCHAR(255)
@@ -2757,13 +2396,11 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_report_id = NULL;
         SET p_off_balance = 0.00;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_file_return_report failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -2782,8 +2419,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Goods that never arrived have no sale, no refund and no shelf to go to;
-    -- every other type has no purchase order.
     SET v_missing = (p_report_type = 'Missing');
     IF v_missing THEN
         SET p_sale_id = NULL;
@@ -2798,22 +2433,18 @@ PROC_BODY: BEGIN
         SET p_po_id = NULL;
     END IF;
 
-    -- A refund is money going back against a sale, so it must name the sale.
-    -- Without one, nothing checks the amount against what was charged.
     IF p_report_type = 'Refunded' AND p_sale_id IS NULL THEN
         SET p_status_code = 400;
         SET p_message = 'A refund must be filed against a sale.';
         LEAVE PROC_BODY;
     END IF;
 
-    -- a negative refund would put money back on the customer's bill
     IF p_refund_amount IS NOT NULL AND p_refund_amount < 0 THEN
         SET p_status_code = 400;
         SET p_message = 'The refund amount cannot be negative.';
         LEAVE PROC_BODY;
     END IF;
 
-    -- every report keeps its reason
     IF p_reason IS NULL OR TRIM(p_reason) = '' THEN
         SET p_status_code = 400;
         SET p_message = 'A reason is required for every report.';
@@ -2822,19 +2453,14 @@ PROC_BODY: BEGIN
 
     SET v_where = NULLIF(TRIM(IFNULL(p_disposition, '')), '');
 
-    -- a refund taken back at the counter is the clerk's to judge; anything
-    -- else (damage found in the stockroom) is filed by the person who judged it
     SET v_awaiting = (v_where IS NULL AND p_report_type = 'Refunded');
 
-    -- (goods that never arrived have nowhere to go)
     IF NOT v_awaiting AND NOT v_missing AND (v_where IS NULL OR v_where NOT IN ('Return to Stock', 'Write-Off')) THEN
         SET p_status_code = 400;
         SET p_message = 'Say where the goods go: Return to Stock, or Write-Off.';
         LEAVE PROC_BODY;
     END IF;
 
-    -- one decision, one flag; restocked is no longer set separately (and
-    -- false, not null, while the goods wait to be inspected)
     SET v_restock = IFNULL(v_where = 'Return to Stock', FALSE);
 
     SET v_name = NULL;
@@ -2846,19 +2472,10 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Everything below happens in one transaction (or the batch's own).
     IF NOT p_inside_batch THEN
         START TRANSACTION;
     END IF;
 
-    -- Missing goods are checked against the purchase order, and this is the
-    -- real guard. The order row is locked first, before the shelf row below,
-    -- so two reports at the same moment take turns and lock in the same order.
-    -- Only an approved order still waiting for its delivery can have goods
-    -- missing: receiving corrects the order's lines to what arrived, so after
-    -- that there is nothing left to compare. The quantity cannot be more than
-    -- the order lists for the product, counting what earlier Missing reports
-    -- already said.
     IF v_missing THEN
         SET v_po_status = NULL;
         SELECT status INTO v_po_status FROM purchase_orders WHERE po_id = p_po_id FOR UPDATE;
@@ -2904,19 +2521,11 @@ PROC_BODY: BEGIN
         END IF;
     END IF;
 
-    -- The shelf row is read FOR UPDATE inside the transaction, the same as in
-    -- sp_adjust_stock: a report and an adjustment on the same material at the
-    -- same moment cannot both read the old figure and write over each other.
     SET v_before = 0;
     SELECT COALESCE(quantity_in_stock, 0) INTO v_before
     FROM inventory WHERE product_id = p_product_id
     FOR UPDATE;
 
-    -- A refund on a sale is checked against the sale, and this is the real
-    -- guard (the route only words the same refusals nicely). The sale row is
-    -- locked FOR UPDATE first and the figures are read after the lock, so two
-    -- refunds of the same line at the same moment take turns: the second one
-    -- sees the first one's report and is refused if nothing is left to refund.
     IF p_report_type = 'Refunded' AND p_sale_id IS NOT NULL THEN
         SET v_due = NULL;
         SELECT amount_due, amount_paid, final_amount, is_archived
@@ -2931,8 +2540,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- a voided sale was cancelled and its stock put back; refunding it
-        -- would pay out money that was never taken
         IF v_voided THEN
             ROLLBACK;
             SET p_status_code = 409;
@@ -2940,7 +2547,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- what the sale holds of this product, and what has already come back
         SELECT COALESCE(SUM(quantity), 0) INTO v_sold
         FROM sale_items WHERE sale_id = p_sale_id AND product_id = p_product_id;
 
@@ -2966,11 +2572,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- Refunds on one sale never add up to more than the customer was
-        -- charged (final_amount, after the discount). That also means the cash
-        -- handed back can never be more than was paid: cash back only starts
-        -- once the balance is gone, and then it is at most final_amount minus
-        -- what came off the balance, which is at most what the customer paid.
         SELECT COALESCE(SUM(refund_amount), 0) INTO v_refunded_before
         FROM returned_items
         WHERE sale_id = p_sale_id AND report_type = 'Refunded';
@@ -2986,10 +2587,6 @@ PROC_BODY: BEGIN
         SET v_on_sale = TRUE;
     END IF;
 
-    -- Return to Stock always adds. Write-Off subtracts only when the goods were
-    -- still counted as stock (a customer's return was deducted when sold).
-    -- Awaiting inspection moves nothing: the clerk's verdict does that.
-    -- Missing goods never reached the shelf, so nothing moves.
     IF v_missing OR v_awaiting THEN
         SET v_change = 0;
     ELSEIF v_restock THEN
@@ -3007,16 +2604,10 @@ PROC_BODY: BEGIN
 
     SET p_report_id = LAST_INSERT_ID();
 
-    -- A refund on a sale comes off what the customer owes, up to the balance.
-    -- Anything over that is cash handed back, so the bill never falls below
-    -- what has been paid. The sale row is already locked (above), so a payment
-    -- at the same moment cannot be counted twice.
     IF v_on_sale AND IFNULL(p_refund_amount, 0) > 0 THEN
         SET v_off = LEAST(p_refund_amount, GREATEST(v_due - v_paid, 0.00));
 
         IF v_off > 0 THEN
-            -- amount_due is worked out from refunded_amount by the table;
-            -- the status turns Paid when nothing is left to collect
             UPDATE sales
             SET refunded_amount = refunded_amount + v_off,
                 payment_status = IF(v_paid >= v_due - v_off, 'Paid', payment_status)
@@ -3038,8 +2629,6 @@ PROC_BODY: BEGIN
                     ' - ', LEFT(TRIM(p_reason), 120)), p_staff_id);
     END IF;
 
-    -- the manager is told once per report; a report of several items is told
-    -- by sp_file_return_reports, once for all of them
     IF NOT p_inside_batch THEN
         IF v_missing THEN
             INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id)
@@ -3058,7 +2647,6 @@ PROC_BODY: BEGIN
         END IF;
     END IF;
 
-    -- the clerk is asked to look at what came back
     IF v_awaiting THEN
         INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id)
         VALUES (3, 'Refund Report', CONCAT('Inspect ', v_name, ' returned at the counter'),
@@ -3085,7 +2673,6 @@ PROC_BODY: BEGIN
         CONCAT(p_report_type, ' report filed. The goods are set aside for the stockroom to inspect.'),
         IF(v_missing, 'Missing-goods report filed.', CONCAT(p_report_type, ' report filed.')));
 
-    -- say where the money went when the refund was on a sale
     IF v_on_sale THEN
         IF v_off > 0 THEN
             SET p_message = CONCAT(p_message, ' ', FORMAT(v_off, 2), ' came off what the customer owes.');
@@ -3096,16 +2683,6 @@ PROC_BODY: BEGIN
     END IF;
 END //
 
--- ==========================================
--- 18b. FILE ONE REPORT FOR SEVERAL ITEMS AT ONCE
--- ==========================================
--- The Make a Report screen lists the items first and files them together:
--- one type, one reason, one sale or purchase order, each item with its own
--- quantity (and refund). Every item goes through sp_file_return_report, in
--- one transaction: if any item is refused, nothing is filed. The manager is
--- told once for the whole report.
---   p_items: [ { "product_id": 12, "quantity": 2, "refund_amount": 0 }, ... ]
--- p_report_ids: the new report numbers, comma separated, in the order listed.
 CREATE PROCEDURE sp_file_return_reports (
     IN p_items JSON,
     IN p_sale_id INT,
@@ -3140,13 +2717,11 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_report_ids = NULL;
         SET p_off_balance = 0.00;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_file_return_reports failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -3172,7 +2747,6 @@ PROC_BODY: BEGIN
                                    v_report, v_off, v_code, v_text);
 
         IF v_code <> 201 THEN
-            -- one refused item undoes the ones before it; say which one
             ROLLBACK;
             SET v_name = NULL;
             SELECT product_name INTO v_name FROM products WHERE product_id = v_product;
@@ -3198,7 +2772,6 @@ PROC_BODY: BEGIN
         SET v_i = v_i + 1;
     END WHILE;
 
-    -- one alert to the manager for the whole report
     IF p_report_type = 'Missing' THEN
         SET v_notif = 'Purchase Order';
         SET v_title = CONCAT('Missing from delivery: purchase order #', p_po_id);
@@ -3229,13 +2802,6 @@ PROC_BODY: BEGIN
     END IF;
 END //
 
--- ==========================================
--- 19. RESOLVE A REPORT
--- ==========================================
--- A report the cashier filed waits here with no disposition. The clerk looks
--- at the goods and says: Return to Stock (sellable; the shelf goes up) or
--- Write-Off (not sellable; nothing moves, the sale already took it off).
--- A report filed with its disposition already decided is simply closed.
 CREATE PROCEDURE sp_resolve_return_report (
     IN p_report_id INT,
     IN p_disposition VARCHAR(20),
@@ -3258,17 +2824,12 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_resolve_return_report failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
-    -- The report is locked before anyone reads its status. Two people (or one
-    -- double-click) resolving the same report would otherwise both see it Open
-    -- and both put the stock back on the shelf.
     START TRANSACTION;
 
     SET v_status = NULL;
@@ -3295,9 +2856,6 @@ PROC_BODY: BEGIN
 
     SET v_verdict = NULLIF(TRIM(IFNULL(p_disposition, '')), '');
 
-    -- already decided at filing: closing it is all there is to do. A report of
-    -- goods missing from a delivery has no goods to inspect: it is closed when
-    -- the supplier has made it good, and the shelf is not touched.
     IF v_where IS NOT NULL OR v_type = 'Missing' THEN
         UPDATE returned_items
         SET status = 'Resolved',
@@ -3327,8 +2885,6 @@ PROC_BODY: BEGIN
     FROM inventory WHERE product_id = v_product_id
     FOR UPDATE;
 
-    -- sellable goes back on the shelf; not sellable moves nothing when the
-    -- sale already took it off, and comes off the count when nothing did
     IF v_verdict = 'Return to Stock' THEN
         SET v_change = v_quantity;
     ELSEIF v_sale_id IS NULL THEN
@@ -3363,7 +2919,6 @@ PROC_BODY: BEGIN
             CONCAT('Report #', p_report_id, ' (', v_name, ' x', v_quantity, '): ', v_verdict,
                    IF(p_note IS NULL OR TRIM(p_note) = '', '', CONCAT(' - ', LEFT(TRIM(p_note), 120)))));
 
-    -- the manager hears the verdict; so does the counter that took the goods back
     INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id)
     VALUES (2, 'Refund Report',
             CONCAT(v_name, IF(v_verdict = 'Return to Stock', ' inspected: back on the shelf', ' inspected: written off')),
@@ -3390,23 +2945,15 @@ PROC_BODY: BEGIN
         CONCAT(v_name, ' is written off. It does not go back on the shelf.'));
 END //
 
--- ==========================================
--- 20. CREATE A DELIVERY FOR A SALE
--- ==========================================
 CREATE PROCEDURE sp_create_delivery (
     IN p_sale_id INT,
     IN p_address TEXT,
-    -- a slot rather than a day
     IN p_scheduled_date DATETIME,
     IN p_remarks TEXT,
-    -- who the driver is looking for, as written at the counter; falls back to the customer record
     IN p_contact_name VARCHAR(150),
     IN p_contact_phone VARCHAR(30),
-    -- defaults to today when the caller does not say
     IN p_created_date DATE,
     IN p_staff_id INT,
-    -- optional: the driver the cashier picked at the counter; NULL leaves the
-    -- delivery open for any driver to take
     IN p_driver_staff_id INT,
     OUT p_delivery_id INT,
     OUT p_status_code INT,
@@ -3422,12 +2969,10 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_delivery_id = NULL;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_create_delivery failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -3439,9 +2984,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- The sale is locked before anyone checks whether it already has a
-    -- delivery. Two clicks (or two cashiers) on the same sale at once would
-    -- otherwise both see none and both make one.
     START TRANSACTION;
 
     SELECT is_archived INTO v_voided FROM sales WHERE sale_id = p_sale_id FOR UPDATE;
@@ -3453,7 +2995,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a voided sale put its goods back on the shelf; nothing is left to deliver
     IF v_voided THEN
         ROLLBACK;
         SET p_status_code = 409;
@@ -3470,7 +3011,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a driver, if one was picked, must be an active delivery staff member
     IF p_driver_staff_id IS NOT NULL THEN
         SELECT COUNT(*) INTO v_driver_ok
         FROM staff st
@@ -3490,7 +3030,6 @@ PROC_BODY: BEGIN
     SET v_contact_name  = NULLIF(TRIM(IFNULL(p_contact_name, '')), '');
     SET v_contact_phone = NULLIF(TRIM(IFNULL(p_contact_phone, '')), '');
 
-    -- nothing typed means the sale already knows: the account customer or the walk-in name
     IF v_contact_name IS NULL THEN
         SELECT COALESCE(NULLIF(c.full_name, ''),
                         NULLIF(TRIM(IFNULL(s.walk_in_name, '')), ''))
@@ -3528,9 +3067,6 @@ PROC_BODY: BEGIN
     SET p_message = CONCAT('Delivery #', p_delivery_id, ' created.');
 END //
 
--- ==========================================
--- 21. UPDATE A DELIVERY STATUS
--- ==========================================
 CREATE PROCEDURE sp_update_delivery_status (
     IN p_delivery_id INT,
     IN p_status VARCHAR(20),
@@ -3546,11 +3082,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_update_delivery_status failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -3560,9 +3094,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- The delivery row is locked before its status is read. Two updates at
-    -- once (a double-tap, or the driver and a manager) would otherwise both
-    -- read the same current status and both be allowed to step from it.
     START TRANSACTION;
 
     SET v_current = NULL;
@@ -3584,9 +3115,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Roles: 1 Administrator, 2 Manager, 3 Inventory Clerk, 4 Cashier, 5 Delivery Personnel
-
-    -- a delivered order is closed; a mistake means a new record with a reason
     IF v_current = 'Delivered' THEN
         ROLLBACK;
         SET p_status_code = 409;
@@ -3595,7 +3123,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- Only the person standing at the customer's door can say the goods arrived.
     IF p_status = 'Delivered' AND p_role_id <> 5 THEN
         ROLLBACK;
         SET p_status_code = 403;
@@ -3603,7 +3130,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- every other move belongs to the driver, with the manager able to step in
     IF p_role_id NOT IN (2, 5) THEN
         ROLLBACK;
         SET p_status_code = 403;
@@ -3611,8 +3137,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- A run moves forward one stage at a time. Delayed and Failed only
-    -- happen once it is Out for Delivery; a Delayed run goes back out or fails.
     SET v_allowed =
         CASE v_current
             WHEN 'Pending'          THEN p_status IN ('In Transit')
@@ -3646,14 +3170,6 @@ PROC_BODY: BEGIN
     SET p_message = CONCAT('Delivery #', p_delivery_id, ' marked ', p_status, '.');
 END //
 
--- ==========================================
--- 22. SET A CREDIT LIMIT, STANDING AND LATE-PAYMENT RATE
---
--- Lowering a limit below what is already owed is allowed; the message says so.
--- p_penalty_rate NULL means this account pays the shop's rate like everyone
--- else; a number, 1 to 3 percent a month, is the manager's word for this
--- account alone.
--- ==========================================
 CREATE PROCEDURE sp_set_credit_limit (
     IN p_customer_id INT,
     IN p_credit_limit DECIMAL(12,2),
@@ -3672,11 +3188,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_set_credit_limit failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -3715,7 +3229,6 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    -- a customer may have no credit row yet
     INSERT INTO customer_credits (customer_id, credit_limit, standing, penalty_rate, notes, updated_by_staff_id)
     VALUES (p_customer_id, p_credit_limit, p_standing, p_penalty_rate,
             NULLIF(TRIM(IFNULL(p_notes, '')), ''), p_staff_id)
@@ -3748,9 +3261,6 @@ PROC_BODY: BEGIN
     END IF;
 END //
 
--- ==========================================
--- 23. ASK FOR A HIGHER LIMIT -- one pending request per customer at a time
--- ==========================================
 CREATE PROCEDURE sp_request_credit_extension (
     IN p_customer_id INT,
     IN p_requested_limit DECIMAL(12,2),
@@ -3767,20 +3277,15 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_request_id = NULL;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_request_credit_extension failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
     SET p_request_id = NULL;
 
-    -- The customer row is read FOR UPDATE inside the transaction, so two
-    -- requests for the same customer at the same moment (a double-submit)
-    -- cannot both pass the "one pending request" check below.
     START TRANSACTION;
 
     SET v_name = NULL;
@@ -3825,7 +3330,6 @@ PROC_BODY: BEGIN
 
     SET p_request_id = LAST_INSERT_ID();
 
-    -- the manager needs to know without being told in person
     INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)
     VALUES (2, 'Credit Request',
             CONCAT('Credit extension asked for: ', v_name),
@@ -3843,10 +3347,6 @@ PROC_BODY: BEGIN
     SET p_message = CONCAT('Request raised for ', v_name, '. A manager will decide it.');
 END //
 
--- ==========================================
--- 24. DECIDE A CREDIT EXTENSION -- approving raises the limit in the same
--- transaction; declining records why
--- ==========================================
 CREATE PROCEDURE sp_decide_credit_request (
     IN p_request_id INT,
     IN p_approve BOOLEAN,
@@ -3863,18 +3363,12 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_decide_credit_request failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
-    -- The request row is read FOR UPDATE inside the transaction, so two
-    -- decisions on the same request at the same moment (two managers, or a
-    -- double-click) cannot both see it as Pending: the second waits, then
-    -- reads the first one's status and is turned away below.
     START TRANSACTION;
 
     SET v_status = NULL;
@@ -3890,7 +3384,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a decision already made stands
     IF v_status <> 'Pending' THEN
         ROLLBACK;
         SET p_status_code = 409;
@@ -3932,15 +3425,6 @@ PROC_BODY: BEGIN
         CONCAT('The request for ', v_name, ' was declined. Their limit is unchanged.'));
 END //
 
--- ==========================================
--- 25. OPEN AN ACCOUNT FROM THE COUNTER
---
--- Creates the record with a zero limit and Good standing; only a manager
--- moves the limit. The same name and phone hands back the existing account
--- rather than refusing. The name comes as first, middle (optional) and last;
--- the address comes as one line (what every screen reads) and in parts
--- (house and street, barangay, town or city, province, landmark).
--- ==========================================
 CREATE PROCEDURE sp_create_customer (
     IN p_first_name VARCHAR(100),
     IN p_middle_name VARCHAR(100),
@@ -3967,12 +3451,10 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_customer_id = NULL;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_create_customer failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -3989,7 +3471,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- one-word names are ordinary: the surname takes an empty string
     IF v_last IS NULL THEN
         SET v_last = '';
     END IF;
@@ -4008,7 +3489,6 @@ PROC_BODY: BEGIN
         SET p_customer_id = v_existing;
         SET p_status_code = 200;
 
-        -- the name as the customer record already spells it
         SELECT CONCAT(full_name, ' already has an account. This sale was attached to it.')
         INTO p_message
         FROM customers WHERE customer_id = v_existing;
@@ -4030,7 +3510,6 @@ PROC_BODY: BEGIN
 
     SET p_customer_id = LAST_INSERT_ID();
 
-    -- zero limit, Good standing: a known customer who buys for cash
     INSERT INTO customer_credits (customer_id, credit_limit, standing, updated_by_staff_id)
     VALUES (p_customer_id, 0.00, 'Good', p_staff_id);
 
@@ -4048,12 +3527,6 @@ PROC_BODY: BEGIN
     FROM customers WHERE customer_id = p_customer_id;
 END //
 
--- ==========================================
--- 26. WHO THE SHOP IS, AND HOW IT IS REGISTERED
---
--- A procedure rather than a plain UPDATE so the audit entry records what it
--- moved from. Sales already rung up carry their own registration and rate.
--- ==========================================
 CREATE PROCEDURE sp_update_store_settings (
     IN p_store_name VARCHAR(150),
     IN p_proprietor VARCHAR(150),
@@ -4077,11 +3550,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_update_store_settings failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -4115,7 +3586,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a VAT shop with a zero rate would print a VAT block full of zeroes
     IF v_type = 'VAT' AND (v_rate <= 0 OR v_rate > 100) THEN
         SET p_status_code = 400;
         SET p_message = 'A VAT-registered shop needs a rate above zero. The Philippine rate is 12.';
@@ -4163,13 +3633,6 @@ PROC_BODY: BEGIN
         'Saved. Invoices now print NON-VAT REG TIN and no VAT breakdown.');
 END //
 
--- ==========================================
--- 27. FIX A UNIT'S NAME
---
--- Renaming onto a name that already exists is a merge: products move to the
--- surviving unit and the duplicate is deleted. The adjustment log keeps the
--- unit text as it was filed.
--- ==========================================
 CREATE PROCEDURE sp_rename_unit (
     IN p_unit_id INT,
     IN p_new_name VARCHAR(20),
@@ -4186,11 +3649,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_rename_unit failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -4237,7 +3698,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a merge
     SELECT COUNT(*) INTO v_moved FROM products WHERE unit_id = p_unit_id;
 
     UPDATE products SET unit_id = v_clash_id WHERE unit_id = p_unit_id;
@@ -4257,14 +3717,6 @@ PROC_BODY: BEGIN
                            v_new, '.');
 END //
 
--- ==========================================
--- 28. THE SHOP'S LATE-PAYMENT RATE -- the manager's policy for every account
---
--- 1 to 3 percent a month of the goods still unpaid, for every month (or
--- part of one) a credit sale is past its 30-day due date; the default is 3.
--- Months already charged keep the rate they were charged at; the new rate
--- applies from the next month the sweep charges.
--- ==========================================
 CREATE PROCEDURE sp_set_penalty_policy (
     IN p_penalty_rate DECIMAL(5,2),
     IN p_staff_id INT,
@@ -4276,11 +3728,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_set_penalty_policy failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -4313,23 +3763,6 @@ PROC_BODY: BEGIN
                            FORMAT(p_penalty_rate, 2), '% of what is still unpaid on it, every month it stays overdue.');
 END //
 
--- ==========================================
--- 29. THE LATE-PAYMENT SWEEP -- called by the server at startup and every hour
---
--- Every Credit sale past its 30-day due date (the same thirty
--- vw_customer_credit ages an account by) with goods still unpaid is
--- charged the account's rate, 1 to 3 percent a month, of the goods still
--- unpaid (final_amount less what has been paid), once for every month or
--- part of one it has been overdue: the first the day after the due date,
--- the next thirty days later, and so on. penalty_months is how many have
--- been charged, so a sale is never charged the same month twice, and the
--- rate, the total and the day of the last charge are kept on the sale so
--- every charge can be read back whatever the policy becomes.
---
--- Payments come off the goods first, so a sale whose goods are paid but
--- whose penalty is not stops growing. The manager and the cashier are told
--- about each charge.
--- ==========================================
 CREATE PROCEDURE sp_apply_late_penalties (
     OUT p_applied INT,
     OUT p_total DECIMAL(12,2)
@@ -4364,13 +3797,11 @@ BEGIN
           AND s.payment_status <> 'Paid'
           AND s.final_amount - s.refunded_amount - s.amount_paid > 0
           AND DATE(s.sale_date) < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-          -- a month or part of one past due that has not been charged yet
           AND CEILING(DATEDIFF(CURDATE(), DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) / 30) > s.penalty_months;
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_applied = -1;
@@ -4387,7 +3818,6 @@ BEGIN
         FETCH cur INTO v_sale_id, v_customer_id, v_name, v_unpaid, v_balance, v_rate, v_days, v_months_charged;
         IF v_done = 1 THEN LEAVE read_loop; END IF;
 
-        -- day 1 past due is month 1; day 31 is month 2
         SET v_months_due = CEILING(v_days / 30);
         SET v_months_new = v_months_due - v_months_charged;
         SET v_penalty = ROUND(v_unpaid * v_rate / 100 * v_months_new, 2);
@@ -4407,7 +3837,6 @@ BEGIN
                            ' = ', FORMAT(v_penalty, 2), ' penalty; month ', v_months_due, ' overdue, ',
                            v_days, IF(v_days = 1, ' day', ' days'), ' past due'));
 
-            -- the manager, who sets the rate, and the cashier, who takes the payment
             INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)
             VALUES (2, 'Late Penalty',
                     CONCAT('Late penalty of ', FORMAT(v_penalty, 2), ' on sale #', v_sale_id),
@@ -4431,18 +3860,6 @@ BEGIN
     COMMIT;
 END //
 
--- ==========================================
--- 30. THE ARCHIVE SWEEP -- called by the server at startup and once a day
---
---   MATERIALS   nothing on the shelf and not sold, moved or ordered in 180 days
---   STAFF       an account deactivated for 30 days (deactivated_at)
---
--- Deliveries, sales and credit are never archived: only customers, products,
--- units, categories, suppliers and staff accounts can be. p_deliveries stays
--- in the call so the server's reader does not change; it is always 0.
--- Nothing else is archived automatically. Each run that put something away
--- writes one audit line with no staff id, so the screen shows "System".
--- ==========================================
 CREATE PROCEDURE sp_sweep_archives (
     OUT p_deliveries INT,
     OUT p_materials INT
@@ -4452,7 +3869,6 @@ BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_deliveries = -1;
@@ -4479,7 +3895,6 @@ BEGIN
                       WHERE poi.product_id = p.product_id AND po.status = 'Pending');
     SET p_materials = ROW_COUNT();
 
-    -- a staff account deactivated for 30 days goes to the archive
     UPDATE staff
     SET archived_at = NOW(), archived_by_staff_id = NULL
     WHERE is_active = FALSE AND archived_at IS NULL
@@ -4503,15 +3918,6 @@ BEGIN
     COMMIT;
 END //
 
--- ==========================================
--- 31. WHERE A BANK TRANSFER GOES -- the administrator's, from Receipt Maintenance
---
--- The bank, the name on the account and its number are set together or
--- cleared together: half an account sends a customer's money nowhere anyone
--- can find it. The till shows them whenever Bank Transfer is chosen, and the
--- invoice prints them. The number is kept as typed (spaces and dashes as the
--- bank prints it); the server checks it is made of digits.
--- ==========================================
 CREATE PROCEDURE sp_update_store_bank_details (
     IN p_bank_name VARCHAR(100),
     IN p_account_name VARCHAR(150),
@@ -4530,11 +3936,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_update_store_bank_details failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -4563,7 +3967,6 @@ PROC_BODY: BEGIN
         bank_account_number = v_number,
         updated_by_staff_id = p_staff_id;
 
-    -- only the last four digits go on the trail; the whole number is on the settings row
     INSERT INTO audit_logs (staff_id, action, action_type, details)
     VALUES (p_staff_id, 'STORE_BANK_DETAILS_UPDATED', 'UPDATE',
             IF(v_filled = 0,
@@ -4583,14 +3986,6 @@ PROC_BODY: BEGIN
         CONCAT('Bank transfers now go to ', v_bank, '. The till and the invoice show the account.'));
 END //
 
--- ==========================================
--- 32. THE REFERENCE ON A SALE -- the cheque number, or the bank's or the
--- e-wallet's reference, taken at checkout
---
--- Written once the sale exists. A reference already on a sale is never
--- overwritten: it is what the money is traced by, and a second one typed
--- later would lose the first. Sending the same one again is not an error.
--- ==========================================
 CREATE PROCEDURE sp_set_sale_reference (
     IN p_sale_id INT,
     IN p_reference_no VARCHAR(60),
@@ -4606,11 +4001,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_set_sale_reference failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -4624,7 +4017,6 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    -- read FOR UPDATE, so two saves at the same moment cannot both find it empty
     SELECT COUNT(*), MAX(NULLIF(TRIM(reference_no), '')), MAX(payment_method)
       INTO v_found, v_existing, v_method
     FROM sales WHERE sale_id = p_sale_id
@@ -4662,11 +4054,6 @@ PROC_BODY: BEGIN
     SET p_message = CONCAT('Reference ', v_reference, ' saved on the sale.');
 END //
 
--- ==========================================
--- 33. A QR PAYMENT IS MADE -- the row for one GCash or Maya code, written as
--- soon as the provider has made the payment, so every attempt is on record
--- whatever happens to it next. p_seconds is how long it can be paid.
--- ==========================================
 CREATE PROCEDURE sp_create_qr_payment (
     IN p_provider VARCHAR(10),
     IN p_mode VARCHAR(10),
@@ -4677,8 +4064,6 @@ CREATE PROCEDURE sp_create_qr_payment (
     IN p_seconds INT,
     IN p_staff_id INT,
     IN p_note VARCHAR(150),
-    -- a Bank Transfer's bank (PayMongo's code and the name shown) and the
-    -- customer's account; NULL for an e-wallet
     IN p_bank_code VARCHAR(20),
     IN p_bank_name VARCHAR(80),
     IN p_account_name VARCHAR(100),
@@ -4690,11 +4075,9 @@ CREATE PROCEDURE sp_create_qr_payment (
 PROC_BODY: BEGIN
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_create_qr_payment failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -4749,16 +4132,6 @@ PROC_BODY: BEGIN
     SET p_message = 'QR code ready.';
 END //
 
--- ==========================================
--- 34. WHAT BECAME OF A QR PAYMENT -- paid, failed, expired or cancelled.
---
--- A pending row closes once. The one change after that is to paid: money
--- that arrived after the code was closed (the customer paid as it ran out)
--- is still money the shop holds, so the row says paid and carries the note
--- the caller gives. A paid row stays paid; only its note can change (a sale
--- that could not be saved after the money came in). p_changed says whether
--- anything was written, so the caller announces only real changes.
--- ==========================================
 CREATE PROCEDURE sp_set_qr_payment_result (
     IN p_qr_payment_id INT,
     IN p_status VARCHAR(12),
@@ -4778,12 +4151,10 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_changed = FALSE;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_set_qr_payment_result failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -4797,8 +4168,6 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    -- read FOR UPDATE, so the till's check and PayMongo's webhook arriving at
-    -- the same moment cannot both close it
     SELECT COUNT(*), MAX(status), MAX(error_message), MAX(wallet), MAX(amount)
       INTO v_found, v_status, v_error, v_wallet, v_amount
     FROM qr_payments WHERE qr_payment_id = p_qr_payment_id
@@ -4821,7 +4190,6 @@ PROC_BODY: BEGIN
         WHERE qr_payment_id = p_qr_payment_id;
         SET p_changed = TRUE;
     ELSEIF v_status = p_status THEN
-        -- the same ending again: only a new note is written
         IF p_error_message IS NOT NULL AND NOT (v_error <=> p_error_message) THEN
             UPDATE qr_payments
             SET error_message = p_error_message,
@@ -4850,11 +4218,6 @@ PROC_BODY: BEGIN
     SET p_message = CONCAT('The QR payment is ', p_status, '.');
 END //
 
--- ==========================================
--- 35. A PAID QR PAYMENT IS RECORDED ON A SALE -- once, and only once.
--- The row is locked and checked again here (paid, on no sale yet), so two
--- sales sent at the same moment cannot both take one payment.
--- ==========================================
 CREATE PROCEDURE sp_link_qr_payment_to_sale (
     IN p_qr_payment_id INT,
     IN p_sale_id INT,
@@ -4870,11 +4233,9 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_link_qr_payment_to_sale failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -4914,7 +4275,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- a note left by an earlier try that could not be saved no longer applies
     UPDATE qr_payments SET sale_id = p_sale_id, error_message = NULL
     WHERE qr_payment_id = p_qr_payment_id;
 
