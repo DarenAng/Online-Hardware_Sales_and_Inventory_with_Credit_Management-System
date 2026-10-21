@@ -31,14 +31,14 @@ Open MySQL Workbench, or a terminal with the `mysql` command, and run these two
 files in order:
 
 ```
-public/database/1-RUN-FIRST-database.sql
-public/database/2-RUN-SECOND-stored-procedures.sql
+public/database/database.sql
+public/database/stored-procedures.sql
 ```
 
-The names give the order. `1-RUN-FIRST-database.sql` drops and rebuilds
+Run `database.sql` first: it drops and rebuilds
 `hardware_db`, creates the 35 tables, loads the demo data, and then six months
 of mock trading on top of it (see *Mock data* below).
-`2-RUN-SECOND-stored-procedures.sql` loads the 3 views and the 37 stored
+Then `stored-procedures.sql`: it loads the 3 views and the 37 stored
 procedures; the tables have to exist before it will run.
 
 Run them in MySQL Workbench or the `mysql` command line. Those two honour the
@@ -48,24 +48,24 @@ load.
 From a terminal it looks like this:
 
 ```
-mysql -u root -p < public/database/1-RUN-FIRST-database.sql
-mysql -u root -p < public/database/2-RUN-SECOND-stored-procedures.sql
+mysql -u root -p < public/database/database.sql
+mysql -u root -p < public/database/stored-procedures.sql
 ```
 
 That is the whole of it. There is no third file and no upgrade step.
 
 ### Already have a `hardware_db` with real data in it?
 
-Do not run file 1; its first statement is `DROP DATABASE`, and everything in
+Do not run `database.sql`; its first statement is `DROP DATABASE`, and everything in
 there goes. Take a backup first — the System Administrator's **Backup &
-Recovery** screen writes one into `backups/` — then run file 1 and restore what
+Recovery** screen writes one into `backups/` — then run `database.sql` and restore what
 you need from the backup.
 
-File 2 is the safe one. It only drops and recreates procedures and touches no
+`stored-procedures.sql` is the safe one. It only drops and recreates procedures and touches no
 table and no row, so it can be re-run on its own at any time. **Re-run it** if
 your database was created before `staff.middle_name` existed: the server
 renames the column for you at startup, but the stored procedures still expect
-the old name until file 2 is loaded again.
+the old name until `stored-procedures.sql` is loaded again.
 
 There are two automatic upgrades, and both happen on `npm start`. The first:
 `staff`'s old `middle_initial VARCHAR(5)` column is renamed to
@@ -82,14 +82,14 @@ Two more arrive the same way. `store_settings` gains `bank_name`,
 `bank_account_name` and `bank_account_number` (see *Bank transfers* below),
 and the `password_resets` table is created for "Forgot your password?". Both
 are added on `npm start`, and the server then finds fewer procedures than it
-expects (31 of 33) and **loads file 2 by itself**, so restarting the server is
-all an existing database needs. Running file 2 by hand does the same.
+expects (31 of 33) and **loads `stored-procedures.sql` by itself**, so restarting the server is
+all an existing database needs. Running `stored-procedures.sql` by hand does the same.
 
 One more, for customers: `customers` gains `middle_name`, the address in parts
 (`address_street`, `address_barangay`, `address_city`, `address_province`,
 `address_landmark`) and a generated `full_name`, and `sp_create_customer` takes
 them (see *Customers: names, phone and address* below). They are added on
-`npm start`, and the server finds the old `sp_create_customer` and loads file 2
+`npm start`, and the server finds the old `sp_create_customer` and loads `stored-procedures.sql`
 by itself. Every customer already on record keeps working: no middle name, and
 only the one-line `address` they were saved with.
 
@@ -105,7 +105,7 @@ update, restart `npm start` and redeploy Vercel at the same time.
 
 Earlier versions of the project shipped `upgrade.sql` through `upgrade_v8.sql`
 and `fix_patch.sql` for stepping an existing database forward one version at a
-time. Every change they made is now inside `1-RUN-FIRST-database.sql`, so they
+time. Every change they made is now inside `database.sql`, so they
 did nothing on a machine that ran the schema fresh. They have been removed; git
 history still has them.
 
@@ -209,7 +209,7 @@ Server running at http://localhost:3000
 ```
 
 A warning about missing procedures means step 3 did not finish. Run
-`2-RUN-SECOND-stored-procedures.sql` again in Workbench or the `mysql` CLI.
+`stored-procedures.sql` again in Workbench or the `mysql` CLI.
 
 ## Demo logins
 
@@ -229,7 +229,7 @@ and pick a new password: at least 8 characters with an uppercase letter, a lower
 ### Mock data
 
 The demo data above is a handful of rows so every screen has something to
-show. Section 8 of `1-RUN-FIRST-database.sql` then loads six months of
+show. Section 8 of `database.sql` then loads six months of
 trading for a hardware shop in Nasugbu, Batangas, so the system can be tested
 and evaluated against something that looks like a shop rather than against
 tables with three rows in them: twenty-six more customers with credit accounts in every standing, four more
@@ -353,7 +353,7 @@ material up in the product's own unit before checking the shelf, so a sack
 and a loose kilo of the same nails cannot between them sell what is not
 there. The quantity columns take three decimal places, and the server adds
 the sizes table and the sale-line columns on a database from before at
-startup; **re-run file 2 afterwards**, because the sale procedure that
+startup; **re-run `stored-procedures.sql` afterwards**, because the sale procedure that
 reads them comes from there. Removing a size later changes nothing already
 sold: each sale line keeps its own copy.
 
@@ -1012,9 +1012,9 @@ written to at all. Every form answers with its own failure — *Unable to create
 the account*, *Unable to complete the sale* — and every one of those names the
 wrong cause. The form is fine.
 
-It happens for one ordinary reason: **`1-RUN-FIRST-database.sql` was run and
-`2-RUN-SECOND-stored-procedures.sql` was not.** File 1 rebuilds the tables and
-the demo data. The procedures only exist because of file 2. Anybody resetting
+It happens for one ordinary reason: **`database.sql` was run and
+`stored-procedures.sql` was not.** `database.sql` rebuilds the tables and
+the demo data. The procedures only exist because of `stored-procedures.sql`. Anybody resetting
 their database has done exactly half the job at that point, and the missing half
 is invisible.
 
@@ -1024,14 +1024,14 @@ Three things now make that state announce itself:
   warning line it used to print, which scrolled off the top of the terminal
   twenty requests before anybody went looking.
 - **Writes are refused with the actual fix.** A `503` naming
-  `2-RUN-SECOND-stored-procedures.sql`, instead of each form blaming itself.
+  `stored-procedures.sql`, instead of each form blaming itself.
   Reading still works, so the screens stay usable, and signing in still works,
   because locking somebody out of the screen that explains the problem is the
   wrong way round. The **Backup & Recovery** screen leads with it in red.
 - **The rolling backup stops deleting things.** See below — this is the part
   that could have cost real data.
 
-Run file 2 and **reload the page — no restart needed.** The server re-checks
+Run `stored-procedures.sql` and **reload the page — no restart needed.** The server re-checks
 whenever the count is short, so writes start working again within seconds. It
 touches no table and no row.
 
@@ -1840,8 +1840,8 @@ public/
 
   database/
     0-READ-ME-FIRST.md                    how to run the SQL files
-    1-RUN-FIRST-database.sql              the tables and the demo data
-    2-RUN-SECOND-stored-procedures.sql    the views and stored procedures
+    database.sql                          the tables and the demo data (run first)
+    stored-procedures.sql                 the views and stored procedures (run second)
     3-, 4-, 5-...                         upgrade files for a database that already holds data
 
   deployment/

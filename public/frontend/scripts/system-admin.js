@@ -1936,7 +1936,7 @@ function renderAutoBackupCard(auto, procedures) {
         card.className = 'card auto-backup is-bad';
         state.textContent = 'Read this';
         text.textContent = 'Only ' + procedures.loaded + ' of ' + procedures.expected + ' stored procedures are loaded, ' +
-            'so backups cannot run. Run 2-RUN-SECOND-stored-procedures.sql, then reload.';
+            'so backups cannot run. Run stored-procedures.sql, then reload.';
         return;
     }
 
