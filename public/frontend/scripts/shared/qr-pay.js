@@ -2,8 +2,8 @@
 // Loaded by: the cashier's page and the driver's page, after payment-details.js
 //
 // The Pay by QR card, and the waiting for the customer to pay it. Used for a
-// sale and a payment on a balance at the counter, and for a COD delivery paid at
-// the door. The card's markup is put on the page here, so both pages share one.
+// sale and a payment on a balance at the counter, and for a delivery's balance paid
+// at the door. The card's markup is put on the page here, so both pages share one.
 //
 // The customer scans a code instead of typing a reference. The
 // code is made on the server (routes/qr-payments.js) through PayMongo or

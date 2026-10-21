@@ -119,15 +119,7 @@ function deliveryStepper(d) {
 function collectBanner(d) {
     if (d.balance_due === undefined || d.balance_due === null) return '';
 
-    // a sale on account is paid at the counter, so the driver collects nothing
-    if (d.payment_method === 'Credit') {
-        let owed = '';
-        if (Number(d.balance_due) > 0) owed = peso(d.balance_due) + ' is owed on account. ';
-        return '<div class="collect-banner is-account"><span class="collect-label">Payment</span>' +
-            '<strong class="collect-figure">On account (due in 30 days)</strong>' +
-            '<span class="collect-note">' + owed + 'Nothing is collected at the door; it is paid at the counter.</span></div>';
-    }
-
+    // whatever is still owed, a credit sale's balance included, is collected at the door
     if (Number(d.balance_due) > 0) {
         // what the sale comes to now, with any penalty and refund in it
         let total = d.final_amount;
@@ -219,10 +211,10 @@ function showDeliveryRecord(d, canUpdate) {
             // Payment card, and recording the payment marks the delivery Delivered.
             // With nothing to collect it reads Mark As Delivered and only asks first.
             // (the Collect Payment at the Door screen, switched on and off for the role;
-            // a sale on account is paid at the counter, not at the door)
+            // any sale with a balance, a credit sale included)
             const mine = typeof isMine === 'function' && isMine(d);
             const collectOn = typeof holdsFeature !== 'function' || holdsFeature('delivery-collect');
-            if (s === 'Delivered' && isDriver && mine && collectOn && d.payment_method !== 'Credit' && Number(d.balance_due) > 0) {
+            if (s === 'Delivered' && isDriver && mine && collectOn && Number(d.balance_due) > 0) {
                 footActions += '<button type="button" class="btn btn-success" ' +
                     'onclick="proceedToPayment(' + d.delivery_id + ')">Proceed Payment</button>';
             } else if (s === 'Delivered' && isDriver) {

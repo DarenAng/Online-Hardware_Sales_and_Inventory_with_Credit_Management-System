@@ -1436,8 +1436,6 @@ html:has(.modal.open) { overflow: hidden; }
     border-radius: 0 var(--radius) var(--radius) 0;
 }
 .collect-banner.is-paid { border-left-color: var(--ok); background: var(--ok-dim); }
-.collect-banner.is-account { border-left-color: var(--signal); background: var(--signal-dim); }
-.collect-banner.is-account .collect-figure { color: var(--signal-ink); font-size: 17px; }
 .collect-label { font-size: 13.5px; font-weight: 600; color: var(--steel); }
 .collect-figure {
     font-family: var(--font-figure);

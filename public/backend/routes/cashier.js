@@ -57,6 +57,33 @@ const TRANSFER_BY_QR_ONLY =
   "A bank transfer is taken through PayMongo: use Pay by QR, and the customer approves " +
   "it in their bank. Nothing was recorded.";
 
+// The first sale line asking for a fraction of something counted, as the words
+// to refuse it with; null when every line is fine. A line in the product's own
+// unit (unit empty, or the same name) may be a fraction only when that unit is
+// measured (kilogram, meter); a line in a size (a sack, a box) is always whole.
+// products: rows of product_id, product_name, unit_name for the lines' products.
+function wholeNumberProblem(items, products) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i] || {};
+    const quantity = Number(item.quantity);
+    // a missing, unreadable or non-positive amount is the procedure's to refuse
+    if (!Number.isFinite(quantity) || quantity <= 0 || Number.isInteger(quantity)) continue;
+
+    const product = products.find(function (row) { return row.product_id === Number(item.product_id); });
+    if (!product) continue;
+
+    const ownUnit = String(product.unit_name || "");
+    const lineUnit = typeof item.unit === "string" ? item.unit.trim() : "";
+    const inOwnUnit = lineUnit === "" || lineUnit.toLowerCase() === ownUnit.toLowerCase();
+    if (inOwnUnit && helpers.isMeasuredUnit(ownUnit)) continue;
+
+    const unitName = inOwnUnit ? (ownUnit || "pieces") : lineUnit;
+    return product.product_name + " is sold in whole " + unitName + ", so " + quantity +
+           " cannot be sold. Change the amount to a whole number. Nothing was recorded.";
+  }
+  return null;
+}
+
 function registerCashierRoutes(app, deps) {
   const db = deps.db;
   const getActorId = deps.getActorId;
@@ -252,16 +279,27 @@ function registerCashierRoutes(app, deps) {
     if (ids.length > 0) {
       try {
         const marks = ids.map(function () { return "?"; }).join(", ");
-        const unpricedResult = await db.query(
-          "SELECT product_name FROM products WHERE product_id IN (" + marks + ") " +
-          "AND (price IS NULL OR price <= 0) ORDER BY product_name", ids);
-        const unpriced = unpricedResult[0];
+        const productResult = await db.query(
+          "SELECT p.product_id, p.product_name, p.price, u.unit_name FROM products p " +
+          "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+          "WHERE p.product_id IN (" + marks + ") ORDER BY p.product_name", ids);
+        const products = productResult[0];
+
+        const unpriced = products.filter(function (row) { return !(Number(row.price) > 0); });
         if (unpriced.length > 0) {
           const names = unpriced.map(function (row) { return row.product_name; }).join(", ");
           return response.status(400).json({
             error: names + (unpriced.length === 1 ? " has" : " have") +
                    " no price yet, so it cannot be sold. Ask the manager to set the price."
           });
+        }
+
+        // Counted goods (pcs, bag, box) and sizes (a sack of nails) are sold in
+        // whole numbers; only a product's own measured unit takes a fraction
+        // (2.5 kg). The till rounds this down already; this is the same rule here.
+        const fractionProblem = wholeNumberProblem(items, products);
+        if (fractionProblem) {
+          return response.status(400).json({ error: fractionProblem });
         }
       } catch (error) {
         console.error("Checking the item prices failed:", error.message);

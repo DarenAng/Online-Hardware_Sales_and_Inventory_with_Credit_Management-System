@@ -257,12 +257,9 @@ function registerDeliveryRoutes(app, deps) {
       if (Number(rows[0].delivery_staff_id) !== Number(request.actor.staffId)) {
         return response.status(403).json({ error: "Take this delivery before collecting on it." });
       }
-      // a sale on account is paid at the counter by its due date, not at the door
-      if (rows[0].payment_method !== "COD") {
-        return response.status(409).json({
-          error: "This sale is on account, so it is paid at the counter, not at the door."
-        });
-      }
+      // Whatever the sale still owes (a Credit sale with nothing or part paid at
+      // the counter, an old COD sale) can be collected at the door; the procedure
+      // below refuses more than is owed, and a sale already paid in full.
 
       const saleId = rows[0].sale_id;
 

@@ -128,8 +128,18 @@ function addressPartsProblem(parts, whose, streetRequired) {
   return null;
 }
 
+// Measured units can be sold by the fraction (2.5 kg of nails); anything else
+// is counted and sold in whole numbers. The same list as MEASURED_UNITS in
+// shared/format.js, which the screens use.
+const MEASURED_UNITS = ["kilogram", "kg", "gram", "meter", "metre", "liter", "litre", "foot", "gallon"];
+
+function isMeasuredUnit(unit) {
+  return MEASURED_UNITS.includes(String(unit || "").trim().toLowerCase());
+}
+
 module.exports = {
   searchPrefix: searchPrefix,
+  isMeasuredUnit: isMeasuredUnit,
   wordStartSearch: wordStartSearch,
   isDateText: isDateText,
   tidy: tidy,

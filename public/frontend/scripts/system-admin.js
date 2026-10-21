@@ -2767,8 +2767,9 @@ function onRegistrationChange(value) {
     renderStorePreview();
 }
 
-// The bank account is required: the till shows it whenever Bank Transfer is
-// chosen. The same rule as the server's (admin.js bankDetailsFrom).
+// The bank account: all three boxes, or none (the boxes are hidden now, and an
+// empty set keeps whatever is stored). The same rule as the server's
+// (admin.js bankDetailsFrom).
 const BANK_FIELDS = ['bankName', 'bankAccountName', 'bankAccountNumber'];
 
 // Philippine bank accounts run from 10 digits (BPI, Landbank) to 13 (Metrobank)
@@ -2793,10 +2794,13 @@ function bankComplaint(form) {
     for (let i = 0; i < BANK_FIELDS.length; i++) {
         values.push(form.elements[BANK_FIELDS[i]].value.trim());
     }
+    let filled = 0;
     for (let i = 0; i < values.length; i++) {
-        if (values[i] === '') {
-            return 'The bank, the account name and the account number are all required.';
-        }
+        if (values[i] !== '') filled += 1;
+    }
+    if (filled === 0) return null;
+    if (filled < values.length) {
+        return 'The bank, the account name and the account number are all required.';
     }
     return bankNumberComplaint(values[2]);
 }
