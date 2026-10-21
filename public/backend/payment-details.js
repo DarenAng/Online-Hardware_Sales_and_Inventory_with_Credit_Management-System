@@ -4,10 +4,7 @@ const isDateText = helpers.isDateText;
 
 const PAYMONGO_BANKS = [
   { code: "bpi",       name: "BPI",       type: "dob",    minimum: 1 },
-  { code: "ubp",       name: "UnionBank", type: "dob",    minimum: 1 },
-  { code: "bdo",       name: "BDO",       type: "brankas", minimum: 100 },
-  { code: "landbank",  name: "Landbank",  type: "brankas", minimum: 1 },
-  { code: "metrobank", name: "Metrobank", type: "brankas", minimum: 1 }
+  { code: "ubp",       name: "UnionBank", type: "dob",    minimum: 1 }
 ];
 
 function findBank(code) {
