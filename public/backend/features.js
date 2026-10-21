@@ -202,7 +202,10 @@ const FEATURES = [
   { key: "delivery-collect", name: "Collect Payment at the Door", module: "Deliveries",
     description: "Take cash, GCash, PayMaya, cheque or bank transfer from the customer on a delivery the driver took. It goes on the sale at once, and the cashier and manager are told.",
     available: [DRIVER], defaults: [DRIVER],
-    routes: [["POST", /^\/api\/delivery\/\d+\/payment$/]] },
+    // GCash, PayMaya and a bank transfer are paid by a QR code the driver shows
+    routes: [["POST", /^\/api\/delivery\/\d+\/payment$/],
+             ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
+             ["POST", /^\/api\/qr-payments\/\d+\/cancel$/]] },
   { key: "delivery-refunds", name: "Refund at the Door", module: "Deliveries",
     description: "Record a refund for an item the customer turns away at the door; the stockroom inspects it before it can be sold again.",
     available: [DRIVER], defaults: [DRIVER],

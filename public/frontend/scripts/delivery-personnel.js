@@ -116,12 +116,8 @@ function ownerTag(d) {
 }
 
 // What the driver has to collect on a delivery, as a figure in the list; crimson
-// when money is owed, a plain "Paid" when it is not, "On account" for a credit sale
-// (that is paid at the counter, not at the door)
+// when money is owed (a credit sale's balance too), a plain "Paid" when it is not
 function collectCell(d) {
-    if (d.payment_method === 'Credit') {
-        return '<td class="cell-num"><span class="muted">On account</span></td>';
-    }
     if (Number(d.balance_due) > 0) {
         return '<td class="cell-num cell-due">' + peso(d.balance_due) + '</td>';
     }

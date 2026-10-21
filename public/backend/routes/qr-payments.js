@@ -301,8 +301,8 @@ function registerQrPaymentRoutes(app, deps) {
     try {
       // a payment on a balance is checked against the sale before the
       // customer is asked to pay anything
-      // a driver only takes money at the door: a payment on a COD sale whose
-      // delivery they took
+      // a driver only takes money at the door: a payment on a sale whose
+      // delivery they took (what it still owes is checked below)
       if (request.actor.roleName === DRIVER) {
         if (purpose !== "credit_payment" || !saleId) {
           return response.status(403).json({ error: "A driver makes a QR code only for a delivery being paid at the door." });
@@ -310,7 +310,7 @@ function registerQrPaymentRoutes(app, deps) {
         const ownResult = await db.query(
           "SELECT 1 FROM deliveries d JOIN sales s ON s.sale_id = d.sale_id\n" +
             "           WHERE d.sale_id = ? AND d.delivery_staff_id = ? AND d.is_archived = FALSE\n" +
-            "             AND s.payment_method = 'COD' LIMIT 1",
+            "             AND s.is_archived = FALSE LIMIT 1",
           [saleId, request.actor.staffId]);
         if (ownResult[0].length === 0) {
           return response.status(403).json({ error: "Take this delivery before collecting on it." });

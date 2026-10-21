@@ -133,7 +133,7 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/cashier\/summary$/,               [CASHIER]],
 
   // --- GCash or Maya paid by QR code (routes/qr-payments.js): wherever
-  // money is taken, a sale, a balance, or a COD delivery at the door. A
+  // money is taken, a sale, a balance, or a balance collected at the door. A
   // cashier's or a driver's codes are their own. ---
   ["POST",  /^\/api\/qr-payments$/,                    [CASHIER, MANAGER, DRIVER]],
   ["GET",   /^\/api\/qr-payments\/\d+$/,               [CASHIER, MANAGER, DRIVER]],
