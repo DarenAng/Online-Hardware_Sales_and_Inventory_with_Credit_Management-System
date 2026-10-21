@@ -2337,7 +2337,7 @@ function registerAdminRoutes(app, deps) {
       return " WARNING: that backup did not carry the stored procedures -- this " +
         "database now has " + total + " of " + EXPECTED_PROCEDURES + " and nothing can be " +
         "saved until they are put back. Run " +
-        "public/database/2-RUN-SECOND-stored-procedures.sql. Your data is intact.";
+        "public/database/stored-procedures.sql. Your data is intact.";
     } catch (error) {
       console.error("Bringing the database up to date after a restore failed:", error.message);
       return " WARNING: the data is restored, but bringing the database up to date with this " +
