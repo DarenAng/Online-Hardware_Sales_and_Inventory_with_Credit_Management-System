@@ -1,13 +1,3 @@
-// ============================================================
-// purchase-order-pdf.js -- a purchase order as a PDF file
-// Loaded by: routes/inventory-clerk.js. Never sent to a browser.
-//
-// The same sheet the order's page prints (shared/purchase-orders.js
-// renderPurchaseOrderDocument): the shop and the order number at the head,
-// who it is for and where it goes, every line, the total, the note to quote
-// the number, and the three signatures. It is attached to the mail a supplier
-// is sent, and the supplier's page downloads it.
-// ============================================================
 const PDFDocument = require("pdfkit");
 
 const INK = "#14181d";
@@ -19,27 +9,23 @@ const GO = "#d0400f";
 const SIGNAL = "#f5b301";
 const SIGNAL_DIM = "#fdf3d6";
 
-// PDF's built-in fonts carry Latin-1 and a few marks; anything else becomes "?"
 function pdfText(value) {
   return String(value === null || value === undefined ? "" : value)
     .replace(/₱/g, "PHP ")
     .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF–—‘’“”•…]/g, "?");
 }
 
-// 1234.5 -> "PHP 1,234.50"
 function peso(value) {
   return "PHP " + Number(value || 0).toLocaleString("en-PH",
     { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-// 5 -> "5",  2.500 -> "2.5"
 function quantityText(value) {
   const number = Number(value || 0);
   if (Number.isInteger(number)) return String(number);
   return number.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }
 
-// "2 box (40 kilogram)" for a line ordered in packs; "40 kilogram" otherwise
 function lineQuantity(item) {
   const unit = item.unit_name || "units";
   if (item.pack_name && Number(item.pack_size) > 0 && Number(item.pack_count) > 0) {
@@ -48,7 +34,6 @@ function lineQuantity(item) {
   return quantityText(item.quantity) + " " + unit;
 }
 
-// the order's stage, in the same words the screens use
 function statusWords(order) {
   if (order.status === "For Approval") return "Pending Manager Approval";
   if (order.status === "Cancelled") return "Declined - Manager";
@@ -61,10 +46,6 @@ function statusWords(order) {
   return order.status || "";
 }
 
-// Resolves with the PDF as a Buffer.
-// "details" is { order, items, shop } as GET /api/purchase-orders/:id/document
-// gives them, and for an approved order { link, qr }: the supplier's page and
-// its QR code as a PNG Buffer, printed so the supplier can accept or decline
 function purchaseOrderPdf(details) {
   const order = details.order;
   const items = details.items || [];
@@ -96,7 +77,6 @@ function purchaseOrderPdf(details) {
   const number = "PO-" + String(order.po_id).padStart(6, "0");
   const raised = String(order.order_date || "").slice(0, 10);
 
-  // ---------- the hazard stripe along the top edge ----------
   doc.save();
   doc.rect(0, 0, doc.page.width, 8).clip();
   doc.rect(0, 0, doc.page.width, 8).fill(CHROME);
@@ -105,7 +85,6 @@ function purchaseOrderPdf(details) {
   }
   doc.restore();
 
-  // ---------- the head: the shop on the left, the order on the right ----------
   let y = 40;
   doc.font("Helvetica-Bold").fontSize(20).fillColor(INK).text(pdfText(shopName), left, y, { width: width * 0.6 });
   doc.font("Helvetica").fontSize(9.5).fillColor(STEEL);
@@ -127,7 +106,6 @@ function purchaseOrderPdf(details) {
   doc.moveTo(left, y).lineTo(right, y).lineWidth(1.2).strokeColor(INK).stroke();
   y += 18;
 
-  // ---------- who it is for and where it goes ----------
   const half = (width - 24) / 2;
   const party = function (x, label, name, lines) {
     doc.font("Helvetica-Bold").fontSize(8.5).fillColor(STEEL)
@@ -147,8 +125,6 @@ function purchaseOrderPdf(details) {
     [shop.address, order.raised_by ? "Raised by " + order.raised_by : null]);
   y = Math.max(supplierBottom, shopPartyBottom) + 20;
 
-  // ---------- the lines ----------
-  // No | Material | Category | Quantity | Unit price | Amount
   const columns = [
     { title: "NO", width: 28, align: "left" },
     { title: "MATERIAL", width: 0, align: "left" },
@@ -157,7 +133,6 @@ function purchaseOrderPdf(details) {
     { title: "UNIT PRICE", width: 82, align: "right" },
     { title: "AMOUNT", width: 84, align: "right" }
   ];
-  // the material column takes the width the other columns leave
   let otherWidths = 0;
   for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
     otherWidths += columns[columnIndex].width;
@@ -186,7 +161,6 @@ function purchaseOrderPdf(details) {
     units += Number(item.quantity || 0);
     total += Number(item.line_cost || 0);
 
-    // [main text, the smaller line under it] for each cell
     const cells = [
       [String(index + 1), null],
       [item.product_name, item.brand_name || null],
@@ -196,7 +170,6 @@ function purchaseOrderPdf(details) {
       [peso(item.line_cost), null]
     ];
 
-    // how tall the row is: the tallest cell, with its smaller line
     let height = 0;
     for (let position = 0; position < cells.length; position++) {
       const cell = cells[position];
@@ -240,13 +213,11 @@ function purchaseOrderPdf(details) {
     y += 28;
   }
 
-  // ---------- the total ----------
   if (y + 40 > bottom()) {
     doc.addPage();
     y = doc.page.margins.top;
   }
   doc.moveTo(left, y).lineTo(right, y).lineWidth(1.6).strokeColor(CHROME).stroke();
-  // the width of the three right-hand columns (quantity, unit price and amount)
   let figures = 0;
   for (let columnIndex = 3; columnIndex < columns.length; columnIndex++) {
     figures += columns[columnIndex].width;
@@ -261,7 +232,6 @@ function purchaseOrderPdf(details) {
     .text(peso(total), right - columns[5].width - 60, y + 8, { width: columns[5].width + 60 - pad, align: "right" });
   y = Math.max(labelBottom, doc.y) + 18;
 
-  // ---------- the note to quote the number ----------
   const note = "Please quote " + number + " on the delivery receipt and the invoice. Goods are counted on arrival " +
                "and anything short or damaged is recorded against this order." +
                (shop.invoice_note ? "\n" + shop.invoice_note : "");
@@ -276,7 +246,6 @@ function purchaseOrderPdf(details) {
   doc.fillColor(INK).text(pdfText(note), left + 18, y + 11, { width: width - 32 });
   y += noteHeight + 18;
 
-  // ---------- the supplier's answer: the QR code and the link it holds ----------
   if (details.link && details.qr) {
     const boxHeight = 112;
     if (y + boxHeight > bottom()) {
@@ -299,7 +268,6 @@ function purchaseOrderPdf(details) {
   }
   y += 40;
 
-  // ---------- the three signatures ----------
   if (y + 50 > bottom()) {
     doc.addPage();
     y = doc.page.margins.top + 30;
@@ -318,11 +286,9 @@ function purchaseOrderPdf(details) {
     doc.font("Helvetica").fontSize(8.5).fillColor(STEEL).text(pdfText(sign[1]), x, doc.y + 1, { width: signWidth });
   }
 
-  // ---------- page numbers in the foot of every page ----------
   const range = doc.bufferedPageRange();
   for (let page = range.start; page < range.start + range.count; page++) {
     doc.switchToPage(page);
-    // writing inside the bottom margin would start a new page; lift it while the foot is written
     const margin = doc.page.margins.bottom;
     doc.page.margins.bottom = 0;
     doc.font("Helvetica").fontSize(7.5).fillColor(STEEL)

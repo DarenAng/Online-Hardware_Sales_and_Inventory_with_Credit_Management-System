@@ -1,29 +1,9 @@
-// ============================================================
-// admin.js -- Admin module (System Administration)
-// Loaded by: server.js only (from the routes folder). Never sent to a browser.
-//
-// What is in this file:
-//   - staff accounts: create (in 2 steps: review, then confirm), edit,
-//     activate/deactivate, reset password (a manager given the Account
-//     Management screen may create cashier, clerk and driver accounts)
-//   - sign-in holds: the list of held accounts and lifting one (the
-//     administrator, or a manager given the Account Management screen)
-//   - the audit trail (who did what, and when)
-//   - backup and recovery: writing a .sql backup file, restoring one,
-//     the daily automatic backup, and the daily archive sweep
-//   - Access Control: which screens each role can open
-//   - the store settings (name, address, TIN, VAT, bank details) and the
-//     receipt's layout
-//
-// server.js passes in the database and its helpers ("deps"). The access
-// rules in access-control.js have already checked the user's role.
-// ============================================================
 const path = require("path");
 const fs = require("fs");
-const fsp = require("fs/promises");   // the same as fs, but works with "await"
+const fsp = require("fs/promises");
 const crypto = require("crypto");
 const zlib = require("zlib");
-const express = require("express");   // only for the restore upload's own JSON limit
+const express = require("express");
 const mailer = require("../services/mailer");
 const splitSqlStatements = require("../services/sql-script").splitSqlStatements;
 const adminProcedures = require("../database/procedures/admin-procedures");
@@ -32,7 +12,6 @@ const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
 const firstPasswordMessage = mailer.firstPasswordMessage;
 
-// the text added to an audit entry to say whether the password was emailed
 function emailedText(emailed, yesText) {
   if (emailed) {
     return yesText;
@@ -83,19 +62,12 @@ function registerAdminRoutes(app, deps) {
   const receiptLayoutFrom = deps.receiptLayoutFrom;
   const ROLES_MANAGED_BY_MANAGER = deps.ROLES_MANAGED_BY_MANAGER;
 
-  // the first name, middle name and last name, checked in that order; the
-  // sentence about the first bad one, or null when all three are letters only
   function staffNameProblem(firstName, middleName, lastName) {
     return nameComplaint("First name", firstName) ||
            nameComplaint("Middle name", middleName) ||
            nameComplaint("Last name", lastName);
   }
 
-  // ==========================================
-  // LOOKUPS
-  // ==========================================
-  // The administrator gets every role; a manager (allowed in by the Account
-  // Management screen) only the roles a manager may create.
   app.get("/api/roles", async function (request, response) {
     try {
       const rowsResult = await db.query("SELECT role_id, role_name FROM roles ORDER BY role_id");
@@ -117,15 +89,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // (GET /api/products was removed; GET /api/inventory/products replaces it)
-
-  // ==========================================
-  // STAFF ACCOUNTS
-  // ==========================================
-
-  // Handing over a new password: by mail when it works, otherwise back to the
-  // administrator's screen to be read out, with the reason. A password is
-  // NEVER written to the audit trail on either path.
   async function deliverFirstPassword(details) {
     const email = details.email;
     const name = details.name;
@@ -156,7 +119,6 @@ function registerAdminRoutes(app, deps) {
 
       return { emailed: true };
     } catch (error) {
-      // the reason is passed on: "Username and Password not accepted" is the diagnosis
       console.error("Sending the first password failed:", error.message);
       return {
         emailed: false,
@@ -173,17 +135,8 @@ function registerAdminRoutes(app, deps) {
     return (rows[0] && rows[0].role_name) || "staff";
   }
 
-  // Drafts: creating an account is two requests with a person reading the
-  // details in between. The draft is kept in account_drafts (any copy of the
-  // server may answer the second request), held to one administrator, so what
-  // was confirmed on screen is what is written. Drafts expire on their own.
-  //
-  // The draft holds the new account's first password, so the row is sealed:
-  // it is filed under the SHA-256 of its id and encrypted with a key made from
-  // the id. Only the administrator's screen holds the id, so the table alone
-  // gives away nothing.
-  const DRAFT_LIFE_MS = 10 * 60 * 1000; // long enough to read a card, short enough to forget
-  const DRAFT_MAX = 200;                // one runaway client cannot grow this without limit
+  const DRAFT_LIFE_MS = 10 * 60 * 1000;
+  const DRAFT_MAX = 200;
 
   function draftHash(draftId) {
     return crypto.createHash("sha256").update("draft-id:" + draftId).digest("hex");
@@ -213,10 +166,8 @@ function registerAdminRoutes(app, deps) {
   }
 
   async function newAccountDraft(staffId, kind, details, password) {
-    // swept here rather than on a timer: the table only grows when it is being used
     await removeExpiredDrafts();
 
-    // still too many? remove the ones that expire first
     const countedResult = await db.query("SELECT COUNT(*) AS total FROM account_drafts");
     const counted = countedResult[0];
     const extra = Number(counted[0].total) - DRAFT_MAX + 1;
@@ -233,9 +184,6 @@ function registerAdminRoutes(app, deps) {
     return { draftId: draftId, expiresInSeconds: Math.round(DRAFT_LIFE_MS / 1000) };
   }
 
-  // Reads a draft and removes it: a draft is good for one confirmation, so a
-  // double-clicked button is not a second account (only the request whose
-  // DELETE removed the row goes on).
   async function takeAccountDraft(draftId, staffId, kind) {
     const expired = { error: "That review has expired. Fill the form in again." };
     const id = String(draftId || "");
@@ -272,9 +220,6 @@ function registerAdminRoutes(app, deps) {
     };
   }
 
-  // The staff a manager sees under Account Management: cashier, clerk and
-  // driver accounts only, with just what the Staff Accounts table and card
-  // show. No other role, no failed-attempt count, no presence.
   async function sendManagedStaff(response) {
     try {
       let marks = "";
@@ -319,10 +264,6 @@ function registerAdminRoutes(app, deps) {
     }
   }
 
-  // Every staff member, including anyone with no login, with presence. The
-  // filters are applied here so a large directory need not travel in full.
-  // The administrator sees everyone; a manager (allowed in by the Account
-  // Management screen) is handed to sendManagedStaff above.
   app.get("/api/users", async function (request, response) {
     if (request.actor.roleName !== ADMIN) {
       return sendManagedStaff(response);
@@ -331,8 +272,6 @@ function registerAdminRoutes(app, deps) {
     const status = String(request.query.status || "all").toLowerCase();
     const search = String(request.query.search || "").trim();
 
-    // status=archived is the Archived Accounts screen; every other status is the
-    // Staff Directory, which never lists an archived account
     const where = [];
     const params = [];
 
@@ -344,7 +283,6 @@ function registerAdminRoutes(app, deps) {
       else if (status === "inactive") where.push("s.is_active = FALSE");
     }
 
-    // a word starts with the text, not contains; see wordStartSearch
     if (search !== "") {
       where.push(wordStartSearch(["s.full_name", "u.email", "r.role_name"], search, params));
     }
@@ -364,11 +302,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // The accounts on a sign-in hold right now, soonest to end first. This must
-  // stay above "/api/users/:staffId" or Express would read "held" as an id.
-  // The administrator sees every account. The manager's screen no longer asks
-  // for this (it reads GET /api/users), so access-control.js lets only the
-  // administrator in; the role filter below is kept as a second guard.
   app.get("/api/users/held", async function (request, response) {
     try {
       const rowsResult = await db.query(
@@ -404,8 +337,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // Is this address already signing in to an account? Every role counts,
-  // active or archived. staffId leaves out the account being edited.
   app.get("/api/users/email-check", async function (request, response) {
     const email = String(request.query.email || "").trim().toLowerCase();
     const staffId = Number(request.query.staffId) || 0;
@@ -428,13 +359,10 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // Is this phone number already on a staff account? Every role counts,
-  // active or archived. staffId leaves out the account being edited.
   app.get("/api/users/phone-check", async function (request, response) {
     try {
       const owner = await findPhoneOwner(request.query.phone, request.query.staffId);
       if (!owner) return response.json({ taken: false });
-      // another person's name is the administrator's to see; a manager is only told whose role
       if (request.actor.roleName !== ADMIN) {
         return response.json({ taken: true, roleName: owner.role_name });
       }
@@ -460,16 +388,12 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // the sentence for a phone number another staff member has: the administrator is
-  // told who, a manager only the role
   function phoneTaken(request, owner) {
     if (request.actor.roleName === ADMIN) return phoneTakenMessage(owner);
     return "That phone number is already used by another staff account (" + owner.role_name + "). " +
            "Each staff account needs its own phone number.";
   }
 
-  // Step 1 of 2: check everything, make the password, hand the account back to
-  // be read. Nothing is in the database when this returns.
   app.post("/api/users/draft", async function (request, response) {
     const firstName = request.body.firstName;
     const middleName = request.body.middleName;
@@ -483,11 +407,9 @@ function registerAdminRoutes(app, deps) {
       return response.status(400).json({ error: "Name, phone, role and email are required" });
     }
 
-    // names are letters only: no numbers, no symbols
     const createNameProblem = staffNameProblem(firstName, middleName, lastName);
     if (createNameProblem) return response.status(400).json({ error: createNameProblem });
 
-    // the email is where the password goes, so an address that cannot receive one is refused
     const address = String(email).trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
       return response.status(400).json({ error: "That email address does not look right" });
@@ -496,8 +418,6 @@ function registerAdminRoutes(app, deps) {
     const phoneProblem = phoneComplaint(phone);
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
-    // digits only, above zero: "2abc" and "0x1" are not role ids
-    // (matches a text of nothing but digits)
     if (!/^\d+$/.test(String(roleId).trim()) || !Number.isSafeInteger(roleIdNumber) || roleIdNumber < 1) {
       return response.status(400).json({ error: "The selected role does not exist." });
     }
@@ -510,14 +430,12 @@ function registerAdminRoutes(app, deps) {
         return response.status(400).json({ error: "The selected role does not exist." });
       }
 
-      // checked here against the real role, never taken from the screen
       if (request.actor.roleName !== ADMIN && !ROLES_MANAGED_BY_MANAGER.includes(roles[0].role_name)) {
         return response.status(403).json({
           error: "You can only create a cashier, an inventory clerk or a delivery driver account."
         });
       }
 
-      // the procedure checks this too; checking here keeps the answer in front of the form
       const takenResult = await db.query(
         "SELECT r.role_name FROM users u " +
         "JOIN staff s ON s.staff_id = u.staff_id " +
@@ -531,7 +449,6 @@ function registerAdminRoutes(app, deps) {
         });
       }
 
-      // each staff member has their own phone number
       const phoneOwner = await findPhoneOwner(phone, 0);
       if (phoneOwner) {
         return response.status(409).json({ error: phoneTaken(request, phoneOwner) });
@@ -550,16 +467,12 @@ function registerAdminRoutes(app, deps) {
       const password = generatePassword();
       const draft = await newAccountDraft(request.actor.staffId, "staff", details, password);
 
-      // the name as the directory will spell it (same as staff.full_name),
-      // e.g. "Juan D. Cruz"
       let fullName = details.firstName;
       if (details.middleName) {
         fullName += " " + details.middleName[0].toUpperCase() + ".";
       }
       fullName += " " + details.lastName;
 
-      // the answer: the draft id and every field of "details". The password is not
-      // in it: it is read out only after Confirm, and only when the mail did not go.
       const answer = Object.assign({
         draftId: draft.draftId,
         expiresInSeconds: draft.expiresInSeconds,
@@ -574,7 +487,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // Step 2 of 2: create it from the draft and send the password.
   app.post("/api/users", async function (request, response) {
     const draftResult = await takeAccountDraft(request.body.draftId, request.actor.staffId, "staff");
 
@@ -583,7 +495,6 @@ function registerAdminRoutes(app, deps) {
     const draft = draftResult.draft;
     const details = draft.details;
 
-    // the draft was checked when it was made; checking again costs nothing
     if (request.actor.roleName !== ADMIN && !ROLES_MANAGED_BY_MANAGER.includes(details.roleName)) {
       return response.status(403).json({
         error: "You can only create a cashier, an inventory clerk or a delivery driver account."
@@ -591,7 +502,6 @@ function registerAdminRoutes(app, deps) {
     }
 
     try {
-      // the draft may be minutes old: someone else could have taken the number since
       const phoneOwner = await findPhoneOwner(details.phone, 0);
       if (phoneOwner) {
         return response.status(409).json({ error: phoneTaken(request, phoneOwner) });
@@ -606,7 +516,6 @@ function registerAdminRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      // read back so the mail greets the person by the name the directory shows
       const createdResult = await db.query(
         "SELECT full_name FROM staff WHERE staff_id = ?", [output.staff_id]);
       const created = createdResult[0];
@@ -622,7 +531,6 @@ function registerAdminRoutes(app, deps) {
         password: draft.password
       });
 
-      // whether the mail went is in the trail; the password never is
       await writeAuditLog(
         request,
         "CREATE_ACCOUNT",
@@ -638,7 +546,7 @@ function registerAdminRoutes(app, deps) {
         name: name,
         email: details.email,
         emailed: delivery.emailed,
-        password: delivery.password,   // absent when the mail went; see above
+        password: delivery.password,
         reason: delivery.reason
       });
     } catch (error) {
@@ -659,7 +567,6 @@ function registerAdminRoutes(app, deps) {
       return response.status(400).json({ error: "Name and role are required" });
     }
 
-    // names are letters only: no numbers, no symbols
     const editNameProblem = staffNameProblem(firstName, middleName, lastName);
     if (editNameProblem) return response.status(400).json({ error: editNameProblem });
 
@@ -685,7 +592,6 @@ function registerAdminRoutes(app, deps) {
         }
       }
 
-      // read before writing, so the audit entry can say what changed
       const existingResult = await db.query(
         "SELECT s.first_name, s.middle_name, s.last_name, s.phone, " +
         "s.role_id, u.email " +
@@ -696,9 +602,6 @@ function registerAdminRoutes(app, deps) {
       const existing = existingResult[0];
       const before = existing[0] || null;
 
-      // A phone number may be left empty, but a new one must be free. A number
-      // that is not being changed is not checked, so an older record that
-      // already shares one can still be saved.
       const oldPhone = before ? before.phone : null;
       if (cleanPhone(phone) !== oldPhone) {
         const phoneOwner = await findPhoneOwner(phone, request.params.staffId);
@@ -716,10 +619,6 @@ function registerAdminRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      // A session carries the role and the sign-in email, so a change to
-      // either ends the person's sessions and they sign in again as who they
-      // now are. A corrected name or phone number is not a reason to sign
-      // anyone out.
       let roleChanged = false;
       let emailChanged = false;
       if (before) {
@@ -795,8 +694,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // A login for somebody who already has a staff record: the same two steps
-  // and the same review card; only the address is asked for.
   app.post("/api/users/:staffId/account/draft", notOwnAccount, async function (request, response) {
     const email = request.body.email;
     const staffId = Number(request.params.staffId);
@@ -849,7 +746,6 @@ function registerAdminRoutes(app, deps) {
       const password = generatePassword();
       const draft = await newAccountDraft(request.actor.staffId, "login", details, password);
 
-      // the answer: the draft id, the password, and every field of "details"
       const answer = Object.assign({
         draftId: draft.draftId,
         expiresInSeconds: draft.expiresInSeconds,
@@ -872,7 +768,6 @@ function registerAdminRoutes(app, deps) {
     const draft = draftResult.draft;
     const details = draft.details;
 
-    // a draft cannot be confirmed against a different person by changing the URL
     if (details.staffId !== Number(request.params.staffId)) {
       return response.status(409).json({
         error: "That review was prepared for a different staff record."
@@ -918,11 +813,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // Resetting a password is the same machinery as the first one: the server
-  // makes it, mails it, and every session the person holds is ended. Shared
-  // with the manager's Staff Passwords screen (manager.js), which passes the
-  // roles it may touch and who it is, so the two can never drift apart.
-  // Resolves to { status, body } for the route to send.
   async function resetStaffPassword(request, staffId, options) {
     const settings = options || {};
     const by = settings.by || "the administrator";
@@ -937,12 +827,10 @@ function registerAdminRoutes(app, deps) {
 
     if (rows.length === 0) return { status: 404, body: { error: "Staff record not found" } };
 
-    // a deactivated account cannot sign in, so it is given no new password
     if (!rows[0].is_active) {
       return { status: 409, body: { error: "This account is deactivated. Activate it before resetting its password." } };
     }
 
-    // checked here, against the row about to be reset, and never taken from the screen
     if (settings.roles && settings.roles.indexOf(rows[0].role_name) === -1) {
       return { status: 403, body: { error: settings.refusal || "You cannot reset this account's password." } };
     }
@@ -962,7 +850,6 @@ function registerAdminRoutes(app, deps) {
     await endSessionsForStaff(Number(staffId), null,
       "Your password was reset by " + by + ". Sign in with the one that was sent to you.");
 
-    // a reset is also the way to release a held account
     const releasedResult = await db.query(
       "UPDATE users SET failed_attempts = 0, held_until = NULL " +
       "WHERE staff_id = ? AND (failed_attempts > 0 OR held_until IS NOT NULL)",
@@ -1010,10 +897,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // Lift a sign-in hold (too many wrong passwords) without touching the
-  // password: the person signs in again with the one they already have, and
-  // gets a full set of tries. The administrator may lift any hold; a manager
-  // (given the Account Management screen) only on a cashier, clerk or driver.
   app.post("/api/users/:staffId/release-hold", notOwnAccount, async function (request, response) {
     const staffId = Number(request.params.staffId);
     try {
@@ -1029,7 +912,6 @@ function registerAdminRoutes(app, deps) {
         return response.status(404).json({ error: "This staff member has no login account." });
       }
 
-      // checked here against the account's real role, never taken from the screen
       const byAdmin = request.actor.roleName === ADMIN;
       if (!byAdmin && !ROLES_MANAGED_BY_MANAGER.includes(rows[0].role_name)) {
         return response.status(403).json({
@@ -1037,12 +919,10 @@ function registerAdminRoutes(app, deps) {
         });
       }
 
-      // a deactivated account is not offered to a manager, so it is not lifted for one either
       if (!byAdmin && !rows[0].is_active) {
         return response.status(409).json({ error: "This account is deactivated, so there is no hold to lift." });
       }
 
-      // only a hold that is still running is lifted
       const releasedResult = await db.query(
         "UPDATE users SET failed_attempts = 0, held_until = NULL " +
         "WHERE staff_id = ? AND held_until IS NOT NULL AND held_until > NOW()",
@@ -1052,7 +932,6 @@ function registerAdminRoutes(app, deps) {
         return response.status(409).json({ error: "This account is not on hold, so there is nothing to lift." });
       }
 
-      // the trail says who lifted it
       let by = "the administrator";
       if (!byAdmin) {
         const whoResult = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [request.actor.staffId]);
@@ -1071,10 +950,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // AUDIT LOGS -- newest first, filtered by kind, date range and free text
-  // ==========================================
-  // the WHERE clause both the table and the export use, from the query string
   function auditLogFilter(query) {
     const role = String(query.role || "all").trim();
     const search = String(query.search || "").trim();
@@ -1084,13 +959,11 @@ function registerAdminRoutes(app, deps) {
     const where = [];
     const params = [];
 
-    // the role the person held when the entry was written, the same one the Role column shows
     if (role !== "" && role !== "all") {
       where.push("COALESCE(l.role_name, r.role_name, 'System') = ?");
       params.push(role);
     }
 
-    // a date is inclusive of the whole day
     if (/^\d{4}-\d{2}-\d{2}$/.test(from)) {
       where.push("l.created_at >= ?");
       params.push(from + " 00:00:00");
@@ -1142,10 +1015,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // AUDIT EXPORT -- the trail, filtered exactly as the screen has it, as an
-  // Excel workbook or a PDF. Up to EXPORT_LIMIT rows, newest first.
-  // ==========================================
   const EXPORT_LIMIT = 10000;
   const AUDIT_TYPE_LABELS = {
     CREATE: "Create", UPDATE: "Update", DELETE: "Delete", VOID: "Void", RESTORE: "Restore",
@@ -1153,7 +1022,6 @@ function registerAdminRoutes(app, deps) {
     SECURITY: "Security", PAYMENT: "Payment", ACCESS: "Access", OTHER: "Other"
   };
 
-  // the filters as one line under the title, e.g. "From 2026-09-01 to 2026-09-30, Manager entries only"
   function exportFilterText(chosen, search) {
     const parts = [];
     if (chosen.from) parts.push("from " + chosen.from);
@@ -1218,10 +1086,7 @@ function registerAdminRoutes(app, deps) {
     response.end();
   }
 
-  // PDF's built-in fonts carry Latin-1 and a few marks; anything else becomes "?"
   function pdfText(value) {
-    // first pattern: every peso sign. Second pattern: any character that is not a tab,
-    // new line, ordinary keyboard character, Latin-1 letter or one of the listed marks.
     return String(value)
       .replace(/₱/g, "PHP ")
       .replace(/[^\x09\x0A\x0D\x20-\x7E\xA0-\xFF–—‘’“”•…]/g, "?");
@@ -1273,7 +1138,6 @@ function registerAdminRoutes(app, deps) {
         values.push(pdfText(rowValues[index]));
       }
 
-      // the row is as tall as its tallest cell
       let tallest = doc.heightOfString(values[0], { width: widths[0] - padding * 2 });
       for (let index = 1; index < values.length; index++) {
         const cellHeight = doc.heightOfString(values[index], { width: widths[index] - padding * 2 });
@@ -1302,7 +1166,6 @@ function registerAdminRoutes(app, deps) {
       doc.moveDown().fillColor("#4d5661").text("No entries match these filters.");
     }
 
-    // page numbers along the foot
     const range = doc.bufferedPageRange();
     for (let index = 0; index < range.count; index += 1) {
       doc.switchToPage(range.start + index);
@@ -1364,51 +1227,17 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // BACKUP & RECOVERY
-  //
-  // A backup is a complete .sql file (schema, rows, views, procedures) named
-  // after the moment it was taken. It opens and runs in MySQL Workbench.
-  //
-  // Where the files are kept (HARDWARE_BACKUP_STORE in .env):
-  //   folder    the backups/ folder on this PC (or HARDWARE_BACKUP_DIR). The default on a PC.
-  //   database  the backup_files table, gzipped. The default on Vercel, whose
-  //             disk is wiped between requests. Download a copy now and then:
-  //             a backup kept inside the database it backs up is lost with it.
-  // ==========================================
-  // HARDWARE_BACKUP_DIR in .env can point the backups to another folder
   const BACKUP_DIR = process.env.HARDWARE_BACKUP_DIR || path.join(__dirname, "..", "..", "..", "backups");
   const BACKUP_PREFIX = "hardware_db_backup_";
   const BACKUP_STORE_KIND = String(process.env.HARDWARE_BACKUP_STORE || (IS_VERCEL ? "database" : "folder"))
     .trim().toLowerCase() === "database" ? "database" : "folder";
 
-  // Two kinds, told apart by name: one somebody pressed the button for, and an
-  // automatic one (the daily backup, and the copy taken just before a restore)
-  // with its own prefix. Both kinds are deleted once they are older than
-  // KEEP_DAYS days (see removeOldBackups).
   const AUTO_PREFIX = "hardware_db_auto_";
 
-  // What a backup file name looks like, for example:
-  //   hardware_db_backup_2026-09-18_1101.sql     (made by hand)
-  //   hardware_db_auto_2026-09-18_1101-2.sql     (automatic, 2nd one that minute)
   const BACKUP_NAME =
     /^hardware_db_(backup|auto)_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
-  // the same, for the automatic kind only
   const AUTO_NAME = /^hardware_db_auto_\d{4}-\d{2}-\d{2}_\d{4}(-\d+)?\.sql$/;
 
-  // The two stores answer the same calls:
-  //   names()            every backup's file name
-  //   list()             [{ name, bytes, createdAt }]
-  //   exists(name)       true or false
-  //   writer(name)       { write(text), finish() -> bytes, abandon() }
-  //   readText(name)     the file's text, or null when it is gone
-  //   remove(name)       true, or false when it was already gone
-  //   readSwitch() / writeSwitch(enabled)   the daily backup's on/off switch
-  //   readError() / writeError(message)     why the last daily backup failed
-
-  // the on/off switch lives in a small file beside the backups, so a server
-  // restart does not quietly turn the backup back on for someone who switched
-  // it off. Missing or unreadable means on, the safe default.
   const AUTO_SWITCH_FILE = path.join(BACKUP_DIR, "auto-backup.json");
 
   const folderStore = {
@@ -1440,7 +1269,6 @@ function registerAdminRoutes(app, deps) {
       const out = fs.createWriteStream(fullPath, { encoding: "utf8" });
       const close = function () { return new Promise(function (resolve) { return out.end(resolve); }); };
       return {
-        // "await write(...)" waits until the text is in the file
         write: function (text) {
           return new Promise(function (resolve, reject) {
             out.write(text, function (error) {
@@ -1474,7 +1302,7 @@ function registerAdminRoutes(app, deps) {
         await fsp.unlink(path.join(BACKUP_DIR, name));
         return true;
       } catch (error) {
-        if (error.code === "ENOENT") return false;   // already gone
+        if (error.code === "ENOENT") return false;
         throw error;
       }
     },
@@ -1490,7 +1318,6 @@ function registerAdminRoutes(app, deps) {
       await fsp.writeFile(AUTO_SWITCH_FILE,
         JSON.stringify({ enabled: enabled, changedAt: new Date().toISOString() }, null, 2) + "\n");
     },
-    // one server, so its memory is enough
     readError: async function () {
       return autoBackup.lastError;
     },
@@ -1539,8 +1366,6 @@ function registerAdminRoutes(app, deps) {
       const rows = rowsResult[0];
       return rows.length > 0;
     },
-    // gathered in memory and saved gzipped in one row: a shop's backup is a
-    // few hundred kilobytes of text and squeezes to a tenth of that
     writer: async function (name) {
       const parts = [];
       return {
@@ -1574,7 +1399,6 @@ function registerAdminRoutes(app, deps) {
     writeSwitch: async function (enabled) {
       await writeFlag("auto_backup_enabled", enabled ? "1" : "0");
     },
-    // many copies of the server, so the one that ran the job writes it down
     readError: async function () {
       return await readFlag("auto_backup_error");
     },
@@ -1585,37 +1409,28 @@ function registerAdminRoutes(app, deps) {
 
   const backupStore = BACKUP_STORE_KIND === "database" ? databaseStore : folderStore;
 
-  // 5 -> "05"
   function twoDigits(number) {
     return String(number).padStart(2, "0");
   }
 
-  // e.g. "hardware_db_backup_2026-09-18_1101.sql"
   function backupFileName(when, prefix) {
     const date = when.getFullYear() + "-" + twoDigits(when.getMonth() + 1) + "-" + twoDigits(when.getDate());
     const time = twoDigits(when.getHours()) + twoDigits(when.getMinutes());
     return (prefix || BACKUP_PREFIX) + date + "_" + time + ".sql";
   }
 
-  // a file name that is not taken yet (adds -2, -3, ... when needed)
   async function freeBackupName(when, prefix) {
     const base = backupFileName(when, prefix);
     let name = base;
     let counter = 2;
 
     while (await backupStore.exists(name)) {
-      // matches ".sql" at the very end of the name
       name = base.replace(/\.sql$/, "-" + counter + ".sql");
       counter += 1;
     }
     return name;
   }
 
-  // Generated columns cannot be written back; read from the catalogue so a
-  // new one never breaks a restore. Only STORED and VIRTUAL generated
-  // columns: MySQL 8 also marks every DEFAULT CURRENT_TIMESTAMP column
-  // "DEFAULT_GENERATED", and those hold real dates (sale_date, payment_date)
-  // that a restore must bring back.
   async function generatedColumnsOf(table) {
     const rowsResult = await db.query(
       "SELECT COLUMN_NAME FROM information_schema.COLUMNS " +
@@ -1631,7 +1446,6 @@ function registerAdminRoutes(app, deps) {
     return names;
   }
 
-  // a table's columns in their order, read from the catalogue
   async function columnsOf(table) {
     const rowsResult = await db.query(
       "SELECT COLUMN_NAME FROM information_schema.COLUMNS " +
@@ -1655,7 +1469,6 @@ function registerAdminRoutes(app, deps) {
       [DB_NAME]
     );
     const rows = rowsResult[0];
-    // the server's own tables (sign-ins, the backups themselves) are not shop data
     const names = [];
     for (let i = 0; i < rows.length; i++) {
       if (!SERVER_TABLES.includes(rows[i].TABLE_NAME)) names.push(rows[i].TABLE_NAME);
@@ -1663,7 +1476,6 @@ function registerAdminRoutes(app, deps) {
     return names;
   }
 
-  // in the order they can be created: a view that names another view goes after it
   async function listViews() {
     const rowsResult = await db.query(
       "SELECT TABLE_NAME, VIEW_DEFINITION FROM information_schema.VIEWS " +
@@ -1672,7 +1484,6 @@ function registerAdminRoutes(app, deps) {
     );
     const rows = rowsResult[0];
 
-    // the views still to be placed in order
     const pending = [];
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
@@ -1685,7 +1496,6 @@ function registerAdminRoutes(app, deps) {
     const ordered = [];
 
     while (pending.length > 0) {
-      // find a view that does not use any other view that is still pending
       let chosen = 0;
       for (let i = 0; i < pending.length; i++) {
         let usesPending = false;
@@ -1702,7 +1512,6 @@ function registerAdminRoutes(app, deps) {
         }
       }
 
-      // take it out of "pending" and put it next in the order
       ordered.push(pending[chosen].name);
       pending.splice(chosen, 1);
     }
@@ -1725,19 +1534,10 @@ function registerAdminRoutes(app, deps) {
     return names;
   }
 
-  // A DEFINER names a MySQL account that may not exist on another computer,
-  // so it is removed. Example: "DEFINER=`root`@`localhost` " -> ""
-  // A procedure made in ANSI mode (Aiven) has DEFINER="root"@"localhost" instead.
   function stripDefiner(sql) {
-    // matches DEFINER=`user`@`host` or DEFINER="user"@"host", and any spaces after it
     return String(sql).replace(/DEFINER\s*=\s*(`[^`]*`|"[^"]*")@(`[^`]*`|"[^"]*")\s*/gi, "");
   }
 
-  // MySQL on Aiven runs in ANSI mode, and in that mode SHOW CREATE TABLE writes
-  // names in "double quotes" instead of `backticks`. A restore then reads
-  // "audit_logs" as text and stops with a syntax error. So the backup turns
-  // ANSI and ANSI_QUOTES off on its own connection, and MySQL writes backticks,
-  // which every MySQL reads. Returns the mode it replaced, to be put back.
   async function turnOffAnsiQuotes(connection) {
     const rowsResult = await connection.query("SELECT @@SESSION.sql_mode AS mode");
     const oldMode = rowsResult[0][0].mode;
@@ -1752,7 +1552,6 @@ function registerAdminRoutes(app, deps) {
     return oldMode;
   }
 
-  // Writes the whole database to one .sql file. Pass AUTO_PREFIX for a rotating one.
   async function writeBackupFile(prefix) {
     const now = new Date();
     const name = await freeBackupName(now, prefix);
@@ -1761,8 +1560,6 @@ function registerAdminRoutes(app, deps) {
     const views = await listViews();
     const procedures = await listProcedures();
 
-    // "out" writes into the file bit by bit (see the two stores above).
-    // write(text) adds text to the file, and "await write(...)" waits until it is written.
     const out = await backupStore.writer(name);
     function write(text) {
       return out.write(text);
@@ -1770,7 +1567,6 @@ function registerAdminRoutes(app, deps) {
 
     let rowTotal = 0;
 
-    // the SHOW CREATE statements run on this one connection, with backticks on
     const showConnection = await db.getConnection();
     let oldMode = null;
 
@@ -1806,7 +1602,6 @@ function registerAdminRoutes(app, deps) {
         await write("DROP TABLE IF EXISTS " + sqlName(table) + ";\n");
         await write(stripDefiner(created["Create Table"]) + ";\n\n");
 
-        // the columns to save (generated columns are skipped: MySQL makes them itself)
         const skip = await generatedColumnsOf(table);
         const allColumns = await columnsOf(table);
         const columns = [];
@@ -1819,8 +1614,6 @@ function registerAdminRoutes(app, deps) {
         }
         const columnList = quotedColumns.join(", ");
 
-        // The rows are streamed from MySQL and written 100 at a time, so a large
-        // table never sits in memory whole: INSERT INTO t (a, b) VALUES (1, 2), ...;
         let count = 0;
         let batch = [];
         const flush = async function () {
@@ -1873,10 +1666,6 @@ function registerAdminRoutes(app, deps) {
           const createdRowsResult = await showConnection.query("SHOW CREATE PROCEDURE " + sqlName(procedure));
           const createdRows = createdRowsResult[0];
           const created = createdRows[0];
-          // A procedure keeps the sql_mode it was made in, so one made on Aiven
-          // still comes back as CREATE PROCEDURE "sp_name"(...; its name is put
-          // in backticks here (the body is kept as it was written).
-          // matches CREATE PROCEDURE followed by the name in double quotes
           const definition = stripDefiner(created["Create Procedure"])
             .replace(/^CREATE\s+PROCEDURE\s+"[^"]*"/i, "CREATE PROCEDURE " + sqlName(procedure));
           await write("DROP PROCEDURE IF EXISTS " + sqlName(procedure) + " //\n");
@@ -1891,14 +1680,12 @@ function registerAdminRoutes(app, deps) {
       await out.abandon();
       throw error;
     } finally {
-      // the connection goes back to the pool with the mode it came with
       if (oldMode !== null) {
         await showConnection.query("SET SESSION sql_mode = ?", [oldMode]).catch(function () {});
       }
       showConnection.release();
     }
 
-    // close the file (or save the row) and wait until it is done
     const bytes = await out.finish();
 
     return {
@@ -1912,17 +1699,6 @@ function registerAdminRoutes(app, deps) {
     };
   }
 
-  // splitSqlStatements (in ../sql-script.js) turns the text of a .sql file
-  // into separate statements, the way MySQL Workbench does.
-
-  // Runs a backup file back into the database on one connection. It cannot be
-  // all-or-nothing: a dump is mostly DROP TABLE and CREATE TABLE, and MySQL
-  // commits each of those on its own, so a file that fails halfway leaves the
-  // tables it had reached rebuilt and the rest as they were. The routes below
-  // therefore take a full backup first, and name it in their reply, so a
-  // restore that went wrong is undone from the same screen. A restore raises
-  // restoreInProgress and the backup timer stands down while it is up, so a
-  // half-restored database is never dumped by the automatic backup.
   let restoreInProgress = false;
 
   async function runSqlScript(sql) {
@@ -1932,10 +1708,6 @@ function registerAdminRoutes(app, deps) {
       throw new Error("That file contains no SQL statements.");
     }
 
-    // Backups taken on Aiven before turnOffAnsiQuotes (above) was added have
-    // their names in "double quotes": CREATE TABLE "audit_logs" ( "log_id" ...
-    // Those files are read with ANSI_QUOTES on, so they still restore.
-    // matches CREATE TABLE followed by a name in double quotes
     const usesDoubleQuotes = /CREATE TABLE\s+"/i.test(sql);
 
     const connection = await db.getConnection();
@@ -1949,22 +1721,14 @@ function registerAdminRoutes(app, deps) {
 
       for (let j = 0; j < statements.length; j++) {
         const statement = statements[j];
-        // skip "USE some_database" so the file cannot switch to another database
-        // matches a statement that starts with the word USE, in any letter case
         if (/^use[\s`]/i.test(statement)) continue;
-        // the server's own tables (sessions, live changes, the backups themselves) are not shop
-        // data, so a file never rewrites them; and mysqldump's GTID lines are refused by Aiven
         if (touchesServerTable(statement) || isGtidLine(statement)) continue;
-        // a dump from MySQL Workbench or mysqldump names the MySQL account that made it
-        // (DEFINER=`root`@`localhost`), which may not exist here, so it is taken out
         if (/^create\s/i.test(statement)) {
           await connection.query(stripDefiner(statement));
         } else {
           await connection.query(statement);
         }
 
-        // the file's own SET SQL_MODE line would turn ANSI_QUOTES off again
-        // matches a statement that starts with SET SQL_MODE or SET SESSION SQL_MODE
         if (usesDoubleQuotes && /^set\s+(session\s+)?sql_mode\s*=/i.test(statement)) {
           await connection.query("SET SESSION sql_mode = CONCAT(@@SESSION.sql_mode, ',ANSI_QUOTES')");
         }
@@ -1974,40 +1738,19 @@ function registerAdminRoutes(app, deps) {
       return statements.length;
     } finally {
       restoreInProgress = false;
-      // The file sets the time zone, the character set, the key checks and may leave tables
-      // locked on this connection. It is closed, not handed back to the pool (a failed run
-      // would pass those settings on); the pool opens a fresh one, on the shop's time zone.
       connection.destroy();
     }
   }
 
-  // true when a statement of the file writes to one of the server's own tables
-  // Example: "INSERT INTO `user_sessions` VALUES (...)" or "DROP TABLE IF EXISTS live_changes"
   function touchesServerTable(statement) {
-    // the words that start such a statement, then an optional database name, then the table name
     const found = /^(?:drop\s+table\s+(?:if\s+exists\s+)?|create\s+table\s+(?:if\s+not\s+exists\s+)?|insert\s+(?:ignore\s+)?into\s+|replace\s+(?:into\s+)?|lock\s+tables\s+|alter\s+table\s+|truncate\s+(?:table\s+)?|delete\s+from\s+)(?:[`"]?\w+[`"]?\.)?[`"]?(\w+)/i.exec(statement);
     return found !== null && SERVER_TABLES.includes(found[1].toLowerCase());
   }
 
-  // mysqldump's "SET @@SESSION.SQL_LOG_BIN" and "SET @@GLOBAL.GTID_PURGED" lines
   function isGtidLine(statement) {
     return /^set\s+@@(session\.sql_log_bin|global\.gtid_purged)/i.test(statement);
   }
 
-  // ==========================================
-  // THE DAILY BACKUP
-  //
-  // One full backup a day, at BACKUP_HOUR (2 in the morning unless .env says
-  // otherwise), not after every transaction: dumping the whole database on
-  // every sale made a busy till lag. On a PC a check runs every few minutes
-  // and writes the day's file once the hour has come; a server that was asleep
-  // or restarted catches up on its next check. On Vercel nothing runs between
-  // requests, so the daily job (/api/cron/daily, at the hour vercel.json sets)
-  // calls runDailyBackup instead. After each daily backup, every backup older
-  // than KEEP_DAYS days (automatic or manual) is deleted; the newest one is
-  // always kept. There can be at most MANUAL_LIMIT manual backups.
-  // The hour is the shop's clock (HARDWARE_TIME_ZONE, Asia/Manila on Vercel).
-  // ==========================================
   function settingNumber(name, fallback, low, high) {
     const value = Number(process.env[name]);
     if (!Number.isInteger(value) || value < low || value > high) return fallback;
@@ -2016,10 +1759,9 @@ function registerAdminRoutes(app, deps) {
   const AUTO_HOUR = settingNumber("BACKUP_HOUR", 2, 0, 23);
   const KEEP_DAYS = settingNumber("BACKUP_KEEP_DAYS", 30, 1, 365);
   const MANUAL_LIMIT = settingNumber("BACKUP_MANUAL_LIMIT", 20, 1, 200);
-  const AUTO_CHECK_MS = 10 * 60 * 1000;     // how often the day's backup is looked for
-  const AUTO_FIRST_CHECK_MS = 60 * 1000;    // a minute after start, so starting stays quick
+  const AUTO_CHECK_MS = 10 * 60 * 1000;
+  const AUTO_FIRST_CHECK_MS = 60 * 1000;
 
-  // the backup files, by kind, oldest first (the stamp is year-first)
   async function backupNames() {
     const all = await backupStore.names();
     const automatic = [];
@@ -2033,16 +1775,10 @@ function registerAdminRoutes(app, deps) {
     return { automatic: automatic, manual: manual };
   }
 
-  // the moment a backup was taken, read from its name, so the two kinds sort
-  // together: "hardware_db_auto_2026-09-18_1101.sql" gives "2026-09-18_1101.sql"
   function backupStamp(name) {
-    // matches the start of the name: "hardware_db_backup_" or "hardware_db_auto_"
     return name.replace(/^hardware_db_(backup|auto)_/, "");
   }
 
-  // Deletes every backup, automatic or manual, taken more than KEEP_DAYS days
-  // ago. The newest backup is always kept, so a system whose daily backup
-  // stopped for a month still has one to restore from.
   async function removeOldBackups() {
     const storedNames = await backupStore.names();
     const names = [];
@@ -2051,11 +1787,9 @@ function registerAdminRoutes(app, deps) {
     }
     if (names.length === 0) return 0;
 
-    // oldest first; the stamp is year-first, so text order is time order
     names.sort(function (left, right) { return backupStamp(left).localeCompare(backupStamp(right)); });
     const newest = names[names.length - 1];
 
-    // the first day that is still kept, e.g. "2026-09-14" when today is 2026-10-14
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - KEEP_DAYS);
     const keepFrom = cutoff.getFullYear() + "-" + twoDigits(cutoff.getMonth() + 1) + "-" + twoDigits(cutoff.getDate());
@@ -2065,7 +1799,7 @@ function registerAdminRoutes(app, deps) {
       const name = names[i];
       if (name === newest) continue;
       if (backupStamp(name).slice(0, 10) < keepFrom) {
-        await backupStore.remove(name);   // already gone is fine
+        await backupStore.remove(name);
         removed += 1;
       }
     }
@@ -2073,24 +1807,19 @@ function registerAdminRoutes(app, deps) {
     return removed;
   }
 
-  // A rotation is only safe if what it rolls over is known good. If the
-  // database is missing procedures the backup is still written and nothing
-  // is deleted, so the last good file is never rotated away.
   async function safeToRotate() {
     return !(await proceduresAreMissing());
   }
 
-  // the state the Backup & Recovery screen reads, from the server not a constant
   const autoBackup = {
-    enabled: true,         // the switch, read from the store at startup
-    running: false,        // a dump is in flight right now
+    enabled: true,
+    running: false,
     lastFileName: null,
     lastAt: null,
     lastError: null,
     failures: 0
   };
 
-  // "2026-09-18" for today on the server's clock
   function todayStamp() {
     const now = new Date();
     return now.getFullYear() + "-" + twoDigits(now.getMonth() + 1) + "-" + twoDigits(now.getDate());
@@ -2099,7 +1828,6 @@ function registerAdminRoutes(app, deps) {
   async function runAutoBackup() {
     if (!autoBackup.enabled || autoBackup.running) return "off or already running";
 
-    // a dump taken halfway through a restore is a dump of neither database
     if (restoreInProgress) return "a restore is running";
 
     autoBackup.running = true;
@@ -2120,9 +1848,8 @@ function registerAdminRoutes(app, deps) {
       autoBackup.lastError = error.message;
       try {
         await backupStore.writeError(error.message);
-      } catch (ignored) { /* the database is the thing that is broken */ }
+      } catch (ignored) {  }
 
-      // said once when it starts failing, not on every check
       if (autoBackup.failures === 1) {
         console.error("The daily backup failed:", error.message);
         try {
@@ -2131,7 +1858,7 @@ function registerAdminRoutes(app, deps) {
             "BACKUP_FAILED",
             "The daily backup failed: " + error.message
           );
-        } catch (ignored) { /* the database is the thing that is broken */ }
+        } catch (ignored) {  }
       }
       throw error;
     } finally {
@@ -2139,7 +1866,6 @@ function registerAdminRoutes(app, deps) {
     }
   }
 
-  // true when today's automatic backup is already saved
   async function todayIsBackedUp() {
     const today = AUTO_PREFIX + todayStamp();
     const names = (await backupNames()).automatic;
@@ -2149,7 +1875,6 @@ function registerAdminRoutes(app, deps) {
     return false;
   }
 
-  // writes today's backup once the hour has come, if today has none yet
   async function dailyBackupCheck() {
     if (!autoBackup.enabled || autoBackup.running) return;
     if (new Date().getHours() < AUTO_HOUR) return;
@@ -2157,19 +1882,15 @@ function registerAdminRoutes(app, deps) {
     try {
       if (await todayIsBackedUp()) return;
     } catch (error) {
-      return;     // the folder cannot be read; the next check tries again
+      return;
     }
 
-    // a failed attempt waits for the next check rather than retrying at once
     try {
       await runAutoBackup();
     } catch (error) {
-      // already recorded on autoBackup and in the audit trail
     }
   }
 
-  // The daily job's part (Vercel): the switch is read fresh, because another
-  // copy of the server may have changed it, and the hour is the job's own.
   async function runDailyBackup() {
     autoBackup.enabled = await backupStore.readSwitch();
     if (!autoBackup.enabled) return "switched off";
@@ -2180,11 +1901,10 @@ function registerAdminRoutes(app, deps) {
   async function startAutoBackup() {
     autoBackup.enabled = await backupStore.readSwitch();
 
-    // the screen names the last automatic file even before today's is written
     try {
       const names = (await backupNames()).automatic;
       if (names.length > 0) autoBackup.lastFileName = names[names.length - 1];
-    } catch (error) { /* an empty or missing folder */ }
+    } catch (error) {  }
 
     if (!autoBackup.enabled) {
       console.log("The daily backup is switched off. Turn it on from the Backup & Recovery screen.");
@@ -2199,13 +1919,10 @@ function registerAdminRoutes(app, deps) {
     if (typeof timer.unref === "function") timer.unref();
   }
 
-  // The archive sweep: once at startup and once a day. The rules are in
-  // sp_sweep_archives beside the manual ones in sp_archive_record; here it is
-  // only announced on the live channel.
   const ARCHIVE_SWEEP_MS = 24 * 60 * 60 * 1000;
 
   async function runArchiveSweep() {
-    if (await proceduresAreMissing()) return;   // nothing can be written anyway
+    if (await proceduresAreMissing()) return;
 
     try {
       const output = await adminProcedures.sweepArchives();
@@ -2216,8 +1933,6 @@ function registerAdminRoutes(app, deps) {
         console.error("Archive sweep failed inside the database (" + output.err_no + "): " + output.err_text);
         return;
       }
-      // staff accounts deactivated for 30 days are archived by the same run;
-      // the directory and the archive are read again (once a day, so cheap)
       publishChange("staff", "sweep", null);
       publishChange("archives", "sweep", null);
 
@@ -2240,13 +1955,11 @@ function registerAdminRoutes(app, deps) {
     if (typeof timer.unref === "function") timer.unref();
   }
 
-  // Screens by role: read as a whole, written one cell at a time.
   app.get("/api/features", async function (request, response) {
     try {
       const roleRowsResult = await db.query("SELECT role_id, role_name FROM roles ORDER BY role_id");
       const roleRows = roleRowsResult[0];
 
-      // the roles that appear as columns in the Access Control table
       const roles = [];
       for (let i = 0; i < roleRows.length; i++) {
         const row = roleRows[i];
@@ -2255,7 +1968,6 @@ function registerAdminRoutes(app, deps) {
         }
       }
 
-      // perRole[role name][screen key] = what that role has for that screen
       const perRole = {};
       for (let j = 0; j < roles.length; j++) {
         const role = roles[j];
@@ -2267,7 +1979,6 @@ function registerAdminRoutes(app, deps) {
         }
       }
 
-      // one row per screen, with one cell per role
       const featureRows = [];
       for (let j = 0; j < FEATURES.length; j++) {
         const feature = FEATURES[j];
@@ -2303,7 +2014,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // what one role has for one screen (from the list featuresOf gives back)
   async function roleFeature(roleName, featureKey) {
     const list = await featuresOf(roleName);
     for (let i = 0; i < list.length; i++) {
@@ -2315,8 +2025,6 @@ function registerAdminRoutes(app, deps) {
     return undefined;
   }
 
-  // Setting a cell back to the role's default removes the override row rather
-  // than writing one that agrees with the page.
   app.put("/api/features/:featureKey/roles/:roleId", async function (request, response) {
     const feature = findFeature(request.params.featureKey);
     const roleId = Number(request.params.roleId);
@@ -2366,7 +2074,6 @@ function registerAdminRoutes(app, deps) {
       }
       forgetFeatureOverrides();
 
-      // "again" when the screen goes back to how the role has it by default
       let message;
       if (wanted && byDefault) {
         message = feature.name + " is now on the " + role.role_name + " menu again.";
@@ -2400,13 +2107,10 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // The list, the daily backup's state and the limits. The folder's path on
-  // the server is not sent: it is no business of a browser's.
   app.get("/api/backups", requireRole(ADMIN), async function (request, response) {
     try {
       const names = await backupNames();
 
-      // one entry per backup file in the store
       const files = [];
       const stored = await backupStore.list();
       for (let i = 0; i < stored.length; i++) {
@@ -2415,19 +2119,14 @@ function registerAdminRoutes(app, deps) {
           fileName: file.name,
           bytes: file.bytes,
           createdAt: file.createdAt,
-          // so a row can say which kind it is
           automatic: AUTO_NAME.test(file.name)
         });
       }
 
-      // newest first
       files.sort(function (left, right) {
         return right.createdAt.localeCompare(left.createdAt);
       });
 
-      // Who made each backup, read from the audit log. A manual backup is
-      // logged as BACKUP with its file name first; the copy taken just before
-      // a restore is named at the end of the RESTORE entry ("... before it is <file>").
       const madeBy = {};
       try {
         const logsResult = await db.query(
@@ -2444,7 +2143,6 @@ function registerAdminRoutes(app, deps) {
           if (log.action === "BACKUP") {
             fileName = details.split(" ")[0];
           } else {
-            // matches the words "before it is" and takes the file name after them
             const found = /before it is (\S+)/.exec(details);
             if (found) fileName = found[1];
           }
@@ -2454,7 +2152,6 @@ function registerAdminRoutes(app, deps) {
         console.error("Reading who made the backups failed:", error.message);
       }
 
-      // the daily backup is made by the system itself, not by a person
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         if (madeBy[file.fileName]) {
@@ -2462,12 +2159,10 @@ function registerAdminRoutes(app, deps) {
         } else if (file.automatic) {
           file.madeBy = "System (daily backup)";
         } else {
-          file.madeBy = null;   // made before this was recorded
+          file.madeBy = null;
         }
       }
 
-      // Read from the store rather than this copy's memory: on Vercel the
-      // daily job ran on another copy of the server.
       autoBackup.enabled = await backupStore.readSwitch();
       let lastAuto = null;
       for (let i = 0; i < files.length; i++) {
@@ -2478,8 +2173,6 @@ function registerAdminRoutes(app, deps) {
       }
       const lastError = await backupStore.readError();
 
-      // null when this copy of the server has not counted them yet (a fresh
-      // start on Vercel, or just after a restore), so count them now
       let proceduresLoaded = proceduresLoadedCount();
       if (proceduresLoaded === null) proceduresLoaded = await countProcedures();
 
@@ -2494,7 +2187,6 @@ function registerAdminRoutes(app, deps) {
           lastAt: lastAuto ? lastAuto.createdAt : autoBackup.lastAt,
           lastError: lastError,
           failures: lastError ? Math.max(autoBackup.failures, 1) : 0,
-          // where the files are kept: "folder" (this PC) or "database" (Vercel)
           store: BACKUP_STORE_KIND
         },
         limits: {
@@ -2502,7 +2194,6 @@ function registerAdminRoutes(app, deps) {
           manual: MANUAL_LIMIT,
           manualCount: names.manual.length
         },
-        // so the screen can say the one thing that stops every write
         procedures: {
           loaded: proceduresLoaded,
           expected: EXPECTED_PROCEDURES
@@ -2514,8 +2205,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // The switch. Off stops the daily backup (nothing new is written, nothing
-  // old is deleted); on writes today's at the next check if the hour has passed.
   app.put("/api/backups/auto", requireRole(ADMIN), async function (request, response) {
     const enabled = request.body && request.body.enabled;
     if (typeof enabled !== "boolean") {
@@ -2529,7 +2218,6 @@ function registerAdminRoutes(app, deps) {
       if (enabled) {
         await writeAuditLog(request, "AUTO_BACKUP_ON",
           "Daily backup switched on (at " + twoDigits(AUTO_HOUR) + ":00, deleting backups older than " + KEEP_DAYS + " days)");
-        // on Vercel the daily job does it; a copy of the server may stop once this answer is sent
         if (!IS_VERCEL) dailyBackupCheck();
         response.json({
           message: "The daily backup is on. It runs every day at " + twoDigits(AUTO_HOUR) + ":00.",
@@ -2548,16 +2236,10 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // Run Backup Now may not be pressed again and again: one backup at a time,
-  // then a rest of BACKUP_COOLDOWN_MS before the next. (The page covers the
-  // screen with a loading card while one runs; this stops anyone sending the
-  // request directly.)
   const BACKUP_COOLDOWN_MS = 5000;
   let manualBackupRunning = false;
   let lastManualBackupAt = 0;
 
-  // Run Backup Now. Backups taken by hand are kept until deleted, so there is
-  // a limit to them: at the limit, an old one has to be deleted first.
   app.post("/api/backups", requireRole(ADMIN), async function (request, response) {
     if (manualBackupRunning) {
       return response.status(429).json({ error: "A backup is already being saved. Wait for it to finish." });
@@ -2584,14 +2266,12 @@ function registerAdminRoutes(app, deps) {
       await writeAuditLog(request, "BACKUP",
         summary.fileName + " (" + summary.tableCount + " tables, " + summary.rowCount + " rows)");
 
-      // the message plus every field of "summary" (fileName, bytes, ...)
       const answer = Object.assign({ message: "Backup saved as " + summary.fileName + "." }, summary);
       response.json(answer);
     } catch (error) {
       console.error("Backup failed:", error.message);
       response.status(500).json({ error: "Unable to create the backup: " + error.message });
     } finally {
-      // the five seconds start once this backup has finished
       manualBackupRunning = false;
       lastManualBackupAt = Date.now();
     }
@@ -2625,8 +2305,6 @@ function registerAdminRoutes(app, deps) {
     if (!BACKUP_NAME.test(name)) {
       return response.status(400).json({ error: "That is not a backup file name." });
     }
-    // only a backup made by hand can be deleted; the system removes its own
-    // once they are older than KEEP_DAYS days
     if (AUTO_NAME.test(name)) {
       return response.status(403).json({
         error: "That backup was made by the system, so it cannot be deleted. " +
@@ -2646,23 +2324,13 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // A backup taken without procedures restores without error and leaves the
-  // system unable to save, so the count is taken AFTER the restore and reported
-  // with the success. A backup made before the tables or the procedures were last
-  // changed brings the old ones back (a column the server reads is missing, an old
-  // procedure is in place), and every call would then fail until the next start-up;
-  // so the same start-up work (the migrations, then file 2 if anything is missing
-  // or old) is run now, straight after the restore.
-  // Returns "" when all is well.
   async function restoreShortfall() {
-    // a backup can bring old screen switches back, so what was remembered is dropped
-    // first: it stays dropped even if the migration below fails
     forgetFeatureOverrides();
 
     try {
-      forgetProcedureCount();                  // force a fresh count
+      forgetProcedureCount();
       await migrateOneAtATime(runSqlScript);
-      forgetFeatureOverrides();                // and again: the migration renames old screen keys
+      forgetFeatureOverrides();
       const total = await countProcedures();
       if (total >= EXPECTED_PROCEDURES) return "";
 
@@ -2691,7 +2359,6 @@ function registerAdminRoutes(app, deps) {
         return response.status(404).json({ error: "That backup is no longer saved." });
       }
 
-      // the database as it is now, kept beside the others in case this has to be undone
       safety = await writeBackupFile(AUTO_PREFIX);
       const count = await runSqlScript(text);
       await writeAuditLog(request, "RESTORE", "Restored from " + name + "; the database before it is " + safety.fileName);
@@ -2705,9 +2372,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // The one route that takes a big body: the .sql file the administrator picked.
-  // server.js leaves it alone (see smallJson there) and it is read here, after the role check, with a
-  // 50 MB limit instead of the default 100 kb.
   app.post("/api/restore", requireRole(ADMIN), express.json({ limit: "50mb" }), async function (request, response) {
     const sql = request.body && request.body.sql;
 
@@ -2731,8 +2395,6 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // A restore that stopped partway may have rebuilt some tables and not
-  // others; the copy taken just before it is the way back.
   function restoreUndoNote(safety) {
     if (safety) {
       return " The database may be part-way restored. To put it back as it was, restore " + safety.fileName + ".";
@@ -2754,7 +2416,6 @@ function registerAdminRoutes(app, deps) {
       );
       const rows = rowsResult[0];
 
-      // a database mid-install has no row yet; the defaults keep the till printing
       const settings = Object.assign({}, rows[0] || DEFAULT_STORE_SETTINGS);
       settings.receipt_layout = receiptLayoutFrom(settings.receipt_layout);
       response.json(settings);
@@ -2764,10 +2425,7 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // The account a bank transfer is sent to: all three boxes, or none (then the
-  // stored account is left as it is).
   function bankDetailsFrom(body) {
-    // trims the text, turns many spaces into one, and cuts it to "max" characters
     function tidy(value, max) {
       return String(value || "").trim().replace(/\s+/g, " ").slice(0, max);
     }
@@ -2778,23 +2436,17 @@ function registerAdminRoutes(app, deps) {
       bank_account_number: tidy(body.bankAccountNumber, 50)
     };
 
-    // how many of the three boxes were filled in
     let filled = 0;
     if (bank.bank_name !== "") filled += 1;
     if (bank.bank_account_name !== "") filled += 1;
     if (bank.bank_account_number !== "") filled += 1;
 
-    // none of the three: the screen no longer shows the boxes, so whatever is
-    // stored is kept as it is (bank: null means "leave it alone")
     if (filled === 0) {
       return { bank: null };
     }
     if (filled < 3) {
       return { error: "The bank, the account name and the account number are all required." };
     }
-    // groups of digits with one space or one dash between them, 10 to 16 digits
-    // in all (Philippine banks use 10 to 13); the same rule as the admin page's
-    // the pattern matches every character that is not a digit, so only digits are counted
     const digitCount = bank.bank_account_number.replace(/\D/g, "").length;
     if (!/^[0-9]+([ -][0-9]+)*$/.test(bank.bank_account_number) || digitCount < 10 || digitCount > 16) {
       return { error: "An account number is 10 to 16 digits, with one space or dash where the bank prints one. " +
@@ -2812,15 +2464,12 @@ function registerAdminRoutes(app, deps) {
     const vatRate = request.body.vatRate;
     const invoiceNote = request.body.invoiceNote;
 
-    // refused with the reason: this is printed at the head of every invoice
     const tinProblem = tinComplaint(tin);
     if (tinProblem) return response.status(400).json({ error: tinProblem });
 
-    // checked before anything is saved, so a bad account number leaves the rest unsaved too
     const bankCheck = bankDetailsFrom(request.body);
     if (bankCheck.error) return response.status(400).json({ error: bankCheck.error });
 
-    // the layout as sent, or as it stands when a screen sends none
     const sentLayout = request.body.receiptLayout;
     if (sentLayout !== undefined && (typeof sentLayout !== "object" || sentLayout === null)) {
       return response.status(400).json({ error: "The receipt layout was not understood." });
@@ -2832,7 +2481,6 @@ function registerAdminRoutes(app, deps) {
     const storedTin = cleanTin(tin);
 
     try {
-      // read first, so the trail can say what stood before
       const existingResult = await db.query(
         "SELECT store_name, proprietor, address, tin, registration_type, vat_rate, invoice_note, " +
         "bank_name, bank_account_name, bank_account_number, receipt_layout " +
@@ -2857,9 +2505,7 @@ function registerAdminRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      // the bank account only when it moved; the procedure writes its own entry on the trail
       let bankMessage = "";
-      // did any of the three bank fields change?
       let bankChanged = false;
       const bankKeys = ["bank_name", "bank_account_name", "bank_account_number"];
       for (let i = 0; bankCheck.bank && i < bankKeys.length; i++) {
@@ -2882,7 +2528,6 @@ function registerAdminRoutes(app, deps) {
         bankMessage = " " + bankOutput.message;
       }
 
-      // the receipt's layout, cleaned by the same rules the reader uses
       let layoutBefore = null;
       let layoutAfter = null;
       if (sentLayout) {
@@ -2920,7 +2565,6 @@ function registerAdminRoutes(app, deps) {
 
   return {
     startAutoBackup: startAutoBackup, startArchiveSweep: startArchiveSweep, runSqlScript: runSqlScript, resetStaffPassword: resetStaffPassword,
-    // the daily job on Vercel (routes/shared.js, /api/cron/daily)
     runArchiveSweep: runArchiveSweep, runDailyBackup: runDailyBackup, removeExpiredDrafts: removeExpiredDrafts
   };
 }

@@ -1,42 +1,15 @@
-// ============================================================
-// qr-provider-sim.js -- a SIMULATED payment provider, fully offline
-// Loaded by: routes/qr-payments.js only, when PAYMENT_PROVIDER=sim. Never sent to a browser.
-//
-// The same four things as qr-provider-paymongo.js (see there), so the rest of
-// the app cannot tell them apart:
-//   createPayment({ amount, wallet, bank, description, returnUrl }) -> { providerIntentId, payUrl, status }
-//   getStatus(providerIntentId) -> { status, providerPaymentId, errorMessage }
-//   cancel(providerIntentId)
-//   name, mode, problem
-// and one more, registerRoutes(app), for the page the QR code opens:
-//   GET  /pay-sim/:token    the simulated pay page, with Pay and Fail buttons
-//   POST /pay-sim/:token    what the customer pressed
-//
-// No PayMongo, no GCash, no Maya, no internet and no money: the page says
-// SIMULATION in plain words and carries none of their names' logos. It is for
-// a demo when the internet is down, and for the tests. The payments live in
-// the qr_sim_intents table, so the pay page works whichever copy of the
-// server answers it (Vercel runs many) and survives a restart.
-// ============================================================
-
 const crypto = require("crypto");
 const express = require("express");
 
-// Where the codes are kept. qr-payments.js hands over the database through
-// registerRoutes(app, db), and they go in qr_sim_intents. Without one (the
-// UI test stub, which runs no MySQL) they are kept in memory instead.
 let db = null;
-const memory = {};   // intent id -> intent
+const memory = {};
 
-// a day is far longer than any code lasts; a server left running for weeks
-// should not keep every one
 const FORGET_AFTER_MS = 24 * 60 * 60 * 1000;
 
 function randomId(prefix) {
   return prefix + "_sim_" + crypto.randomBytes(8).toString("hex");
 }
 
-// a row of qr_sim_intents in the shape the code below reads
 function intentFrom(row) {
   if (!row) return null;
   return {
@@ -80,7 +53,6 @@ const store = {
        String(intent.description).slice(0, 255), intent.returnUrl, intent.status, intent.createdAt]);
   },
 
-  // by "id" or by "token" (the secret in the pay page's address)
   find: async function (field, value) {
     const wanted = String(value || "");
     if (!db) {
@@ -96,7 +68,6 @@ const store = {
     return intentFrom(rows[0]);
   },
 
-  // only a code still waiting can be settled, and only once: true if this one was
   settle: async function (id, status, paymentId, errorMessage) {
     if (!db) {
       const key = String(id || "");
@@ -141,7 +112,6 @@ async function createPayment(options) {
   };
   await store.add(intent);
 
-  // the page lives on this app, at the same address the customer returns to
   const origin = new URL(returnUrl).origin;
   return { providerIntentId: intent.id, payUrl: origin + "/pay-sim/" + intent.token, status: "pending" };
 }
@@ -158,14 +128,12 @@ async function getStatus(providerIntentId) {
   return { status: intent.status, providerPaymentId: intent.paymentId, errorMessage: intent.errorMessage };
 }
 
-// a cancelled or timed-out code can no longer be paid on its page
 async function cancel(providerIntentId) {
   return await store.settle(providerIntentId, "expired", null, "The code was closed before it was paid.");
 }
 
 function escapeHtml(text) {
   const replacements = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-  // each of & < > " ' is swapped for its safe html form
   return String(text).replace(/[&<>"']/g, function (c) {
     return replacements[c];
   });
@@ -173,7 +141,6 @@ function escapeHtml(text) {
 
 const WALLET_WORDS = { GCash: "GCash", PayMaya: "Maya", "Bank Transfer": "bank transfer" };
 
-// a phone-sized page with nothing to load from elsewhere
 function page(title, body) {
   return "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n" +
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" +
@@ -213,7 +180,6 @@ function registerRoutes(app, database) {
         "<p class=\"muted\">You can return to the cashier.</p>"));
     }
 
-    // a bank transfer names the bank whose online banking this stands in for
     let who = "Simulated " + wallet + " payment to Lucelyn Hardware";
     if (intent.wallet === "Bank Transfer" && intent.bankName) {
       who = "Simulated online banking: " + intent.bankName + " transfer to Lucelyn Hardware";
@@ -229,12 +195,10 @@ function registerRoutes(app, database) {
       "<button class=\"fail\" type=\"submit\">Fail</button></form>"));
   });
 
-  // a plain form post, so the page works on any phone without scripts
   app.post("/pay-sim/:token", express.urlencoded({ extended: false, limit: "1kb" }), async function (request, response) {
     const intent = await store.find("token", request.params.token);
     if (!intent) return response.status(404).send(page("Unknown code", "<h2>This code is not known</h2>"));
 
-    // only a code still waiting can be paid or failed, and only once
     const result = request.body && request.body.result;
     if (intent.status === "pending" && (result === "paid" || result === "failed")) {
       let paymentId = null;
@@ -247,7 +211,6 @@ function registerRoutes(app, database) {
       await store.settle(intent.id, result, paymentId, errorMessage);
     }
 
-    // the same as PayMongo: back to the shop's return page once done
     const back = new URL(intent.returnUrl);
     back.searchParams.set("payment_intent_id", intent.id);
     response.redirect(303, back.toString());

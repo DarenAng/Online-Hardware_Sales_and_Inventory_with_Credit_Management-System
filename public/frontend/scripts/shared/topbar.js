@@ -1,5 +1,3 @@
-// topbar.js -- the bell and account chip, built once for every module
-// Loaded by: all five dashboards
 function buildTopbarCorner() {
     const topbar = document.querySelector('.topbar');
     if (!topbar || topbar.querySelector('.account-menu')) return;
@@ -20,7 +18,6 @@ function buildTopbarCorner() {
         bell.className = 'bell';
         bell.setAttribute('aria-label', 'Notifications');
         bell.setAttribute('onclick', 'toggleNotifications(event)');
-        // a drawn bell: the circled-dot glyph reads as a record button
         bell.innerHTML = '<span class="bell-icon" aria-hidden="true">' +
             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
             'stroke-linecap="round" stroke-linejoin="round">' +
@@ -81,7 +78,6 @@ function buildTopbarCorner() {
         if (!main.contains(drop)) main.appendChild(drop);
     }
 
-    // pressing a line behind the bell opens the alert as its own card
     if (!document.getElementById('notif-modal')) {
         const modal = document.createElement('div');
         modal.className = 'modal';

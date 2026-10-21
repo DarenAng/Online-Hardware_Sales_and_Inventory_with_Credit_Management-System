@@ -1,16 +1,4 @@
-// format.js -- formatting
-// Loaded by: all five dashboards
-//
-// Small helpers used on every page:
-//   peso(1234.5)          -> "₱1,234.50"
-//   qtyText(2.5, 'kg')    -> "2.5 kg"
-//   statusBadge('Paid')   -> a green badge
-//   whenText(stamp)       -> "4 Sep 2026, 16:45 · 5 min ago"
-//   phone helpers         -> check and format +63 mobile numbers
-//
-// Money is always printed with the peso sign as a text prefix; sheetCell in
-// manager.js strips it again for the spreadsheet export.
-const CURRENCY_SIGN = '\u20B1';       // the peso sign
+const CURRENCY_SIGN = '\u20B1';
 
 function peso(value) {
     const number = Number(value || 0);
@@ -21,21 +9,15 @@ function peso(value) {
     return CURRENCY_SIGN + text;
 }
 
-// A product with a price of 0 has no price set yet: the clerk added it and
-// the manager has not priced it. The till cannot sell it.
 function isUnpriced(product) {
     return !(Number(product.price) > 0);
 }
 
-// The price cell's text: the price, or a "No price" badge when it has none
 function priceOrBadge(product) {
     if (isUnpriced(product)) return '<span class="badge badge-warning">No price</span>';
     return peso(product.price);
 }
 
-// The rows with no price first, whatever order they came in; inside each
-// group the order is kept. Used by the product lists so a product waiting for
-// a price is always on the top row.
 function unpricedFirst(rows) {
     const without = [];
     const priced = [];
@@ -46,8 +28,6 @@ function unpricedFirst(rows) {
     return without.concat(priced);
 }
 
-// Measured units (kg, m) accept decimals and step by a half; anything not
-// listed here is counted and steps by one.
 const MEASURED_UNITS = {
     kilogram: { short: 'kg', step: 0.5 },
     kg:       { short: 'kg', step: 0.5 },
@@ -75,13 +55,12 @@ function qtyText(value, unit) {
     if (Number.isInteger(number)) {
         figure = String(number);
     } else {
-        // at most 3 decimals, and no zeros at the end: 2.500 -> "2.5"
         figure = String(Number(number.toFixed(3))).replace(/\.?0+$/, '');
     }
 
     let name = String(unit || '').trim();
     if (measure) {
-        name = measure.short;   // "kilogram" -> "kg"
+        name = measure.short;
     }
 
     if (name) {
@@ -90,8 +69,6 @@ function qtyText(value, unit) {
     return figure;
 }
 
-// label: what to print instead of the stored value (a purchase order says
-// "Pending Manager Approval" where the database says For Approval)
 function statusBadge(text, label) {
     const good = ['Paid', 'Delivered', 'In Stock', 'Active', 'Received'];
     const bad = ['Unpaid', 'Failed', 'Out of Stock', 'Inactive', 'Cancelled'];
@@ -105,15 +82,12 @@ function statusBadge(text, label) {
     return '<span class="badge ' + tone + '">' + escapeHtml(label || statusWord(text)) + '</span>';
 }
 
-// how a stored status is said on screen; the stored value is unchanged
 const STATUS_WORDS = { 'For Approval': 'Pending Manager Approval', 'Missing': 'Missing from delivery' };
 
 function statusWord(text) {
     return STATUS_WORDS[text] || text;
 }
 
-// The reference to show for a payment: none for cash (cash has no reference
-// number), and none for the note the till stores on a down payment.
 const DOWN_PAYMENT_NOTE = 'Down payment at counter';
 
 function paymentReference(method, reference) {
@@ -132,7 +106,6 @@ function setPill(id, text) {
     if (pill) pill.textContent = text;
 }
 
-// "4 Sep 2026, 16:45" plus how long ago that was
 function whenText(stamp) {
     if (!stamp) return 'Time not recorded';
 
@@ -159,8 +132,6 @@ function whenText(stamp) {
     return shown;
 }
 
-// Adds up one field of every row.
-// Example: sumOf([{ amount: 5 }, { amount: 7 }], 'amount') -> 12
 function sumOf(rows, field) {
     let total = 0;
     for (let i = 0; i < rows.length; i++) {
@@ -169,8 +140,6 @@ function sumOf(rows, field) {
     return total;
 }
 
-// Counts the pieces in a list of sold items. A measured item (like 2.5 kg of
-// nails) counts as 1 piece; anything else counts its quantity.
 function pieceCount(items) {
     let pieces = 0;
     for (let i = 0; i < items.length; i++) {
@@ -184,28 +153,20 @@ function pieceCount(items) {
     return pieces;
 }
 
-// Phone numbers are stored as + country code + digits (+639171234567). The
-// box is a fixed +63 beside a digits-only field holding the ten national
-// digits (9XX XXX XXXX); a number pasted whole (09XX..., +63 9XX...) is
-// reduced to those ten. The same rule is enforced again in validation.js.
-
-// E.164 limits
 const PHONE_MAX_DIGITS = 15;
 const PHONE_MIN_DIGITS = 7;
 
 const PH_CODE = '63';
 const PH_NATIONAL_DIGITS = 10;
 
-// Keeps only the digits of a phone number, and turns a leading 0 into 63.
-// Example: "0917 123 4567" -> "639171234567"
 function phoneDigitsAll(value) {
     let text = '';
     if (value !== null && value !== undefined) {
         text = String(value);
     }
-    text = text.replace(/\D/g, '');                                  // remove everything that is not a digit
-    text = text.replace(/^0+/, PH_CODE);                             // 0917... -> 63917...
-    text = text.replace(new RegExp('^' + PH_CODE + '0+'), PH_CODE);  // 630917... -> 63917...
+    text = text.replace(/\D/g, '');
+    text = text.replace(/^0+/, PH_CODE);
+    text = text.replace(new RegExp('^' + PH_CODE + '0+'), PH_CODE);
     return text;
 }
 
@@ -213,10 +174,7 @@ function phoneDigits(value) {
     return phoneDigitsAll(value).slice(0, PHONE_MAX_DIGITS);
 }
 
-// Takes a phone box or a string; returns every digit with the code in front,
-// and the code on its own.
 function phoneParts(boxOrValue) {
-    // nodeType 1 means it is an HTML element (the input box itself)
     const isBox = Boolean(boxOrValue && boxOrValue.nodeType === 1);
     if (isBox) {
         setupPhoneField(boxOrValue);
@@ -234,35 +192,27 @@ function phoneParts(boxOrValue) {
     return { code: '', digits: digits };
 }
 
-// the digits inside +63: no trunk 0
 function phoneNationalDigits(value) {
     let text = '';
     if (value !== null && value !== undefined) {
         text = String(value);
     }
-    text = text.replace(/\D/g, '');    // only digits
-    text = text.replace(/^0+/, '');    // no 0 at the start
+    text = text.replace(/\D/g, '');
+    text = text.replace(/^0+/, '');
     return text;
 }
 
-// every phone box is a +63 box; phoneParts reads the code from here
 function setupPhoneField(input) {
     if (!input || input.dataset.dialCode === PH_CODE) return;
     input.dataset.dialCode = PH_CODE;
     input.dataset.country = 'PH';
 }
 
-// oninput on every phone box; rewrites rather than blocks so paste works too.
-// Whatever was typed or pasted ends up as at most ten national digits: the
-// +63 or 0063 in front of a whole number goes, then a trunk 0, then anything
-// past the tenth digit. A number pasted under another code is kept as typed
-// and marked, so the complaint below can say why it is refused.
 function onPhoneInput(input) {
     if (!input) return;
     setupPhoneField(input);
 
     const raw = String(input.value);
-    // does it start with a country code, written "+..." or "00..."?
     const withCode = /^\s*(\+|00)\s*\d/.test(raw);
     let digits = raw.replace(/\D/g, '');
 
@@ -270,13 +220,12 @@ function onPhoneInput(input) {
         digits = raw.replace(/^\s*(\+|00)/, '').replace(/\D/g, '');
         const philippine = digits.indexOf(PH_CODE) === 0;
         if (philippine) {
-            digits = digits.slice(PH_CODE.length);   // remove the 63
+            digits = digits.slice(PH_CODE.length);
             input.dataset.foreign = '';
         } else {
-            input.dataset.foreign = '1';             // another country: marked as foreign
+            input.dataset.foreign = '1';
         }
     } else {
-        // 639171234567 pasted without its +: the 63 is the code, not the number
         if (digits.length > PH_NATIONAL_DIGITS && digits.indexOf(PH_CODE) === 0) {
             digits = digits.slice(PH_CODE.length);
         }
@@ -298,7 +247,6 @@ function onPhoneInput(input) {
         cleaned !== '' && phoneComplaint(input) !== null);
 }
 
-// The sentence said about a bad number, or null. Returned, not shown.
 function phoneComplaint(boxOrValue) {
     if (boxOrValue && boxOrValue.nodeType === 1 && boxOrValue.dataset.foreign === '1' &&
         String(boxOrValue.value).trim() !== '') {
@@ -309,7 +257,7 @@ function phoneComplaint(boxOrValue) {
     const code = parts.code;
     const digits = parts.digits;
 
-    if (digits === '') return null;                 // optional, and left empty
+    if (digits === '') return null;
 
     if (code !== PH_CODE) {
         return 'Only Philippine numbers are accepted: 09XX XXX XXXX, or +63 9XX XXX XXXX.';
@@ -326,7 +274,6 @@ function phoneComplaint(boxOrValue) {
     return null;
 }
 
-// what goes to the server: +639171234567, or nothing
 function phoneToStore(boxOrValue) {
     const digits = phoneParts(boxOrValue).digits.slice(0, PHONE_MAX_DIGITS);
     if (digits === '') {
@@ -335,14 +282,13 @@ function phoneToStore(boxOrValue) {
     return '+' + digits;
 }
 
-// a stored number put back into a box: +639171234567 shows as 9171234567
 function phoneFill(input, stored) {
     if (!input) return;
     setupPhoneField(input);
 
     const digits = phoneDigits(stored);
     if (digits.indexOf(PH_CODE) === 0) {
-        input.value = digits.slice(PH_CODE.length);   // the box already shows +63
+        input.value = digits.slice(PH_CODE.length);
     } else {
         input.value = digits;
     }
@@ -354,7 +300,6 @@ function phoneToInput(stored) {
     return phoneDigits(stored);
 }
 
-// +63 917 123 4567 for Philippine mobiles; any other number as stored
 function phoneForDisplay(stored) {
     const digits = phoneDigits(stored);
     if (digits === '') return '';
@@ -366,9 +311,6 @@ function phoneForDisplay(stored) {
     return '+' + digits;
 }
 
-// What a sale is owed against: the bill plus any late-payment penalty charged
-// on it (sales.amount_due). A row from before the penalty columns existed
-// carries only final_amount, and reads the same as it always did.
 function saleAmountDue(sale) {
     if (!sale) return 0;
     let due = sale.final_amount;
@@ -378,34 +320,21 @@ function saleAmountDue(sale) {
     return Number(due) || 0;
 }
 
-// The part of a sale's balance that is penalty. A payment or a refund can
-// leave less owing than the penalty that was charged, and a balance never
-// shows more penalty than it holds.
 function penaltyInBalance(sale) {
     const penalty = Number(sale.penalty_amount) || 0;
     const balance = Math.max(Number(sale.balance_due) || 0, 0);
     return Math.min(penalty, balance);
 }
 
-// "3%" or "2.5%": a penalty rate as it is spoken (per month)
 function penaltyRateWord(rate) {
     const n = Number(rate);
     if (!Number.isFinite(n)) return '3%';
     if (Number.isInteger(n)) {
         return String(n) + '%';
     }
-    // 2.50 -> "2.5": remove zeros at the end, then a "." left at the end
     return n.toFixed(2).replace(/0+$/, '').replace(/\.$/, '') + '%';
 }
 
-
-// ==========================================
-// THE SALES INVOICE
-// One builder for the till's invoice and Receipt Maintenance's preview, so
-// the two cannot drift apart. Every word and switch on it comes from the
-// settings row (store_settings.receipt_layout), which the server fills with
-// its defaults: nothing about the layout is decided here.
-// ==========================================
 function receiptLayoutOf(shop) {
     const layout = (shop && shop.receipt_layout) || {};
     return {
@@ -419,12 +348,10 @@ function receiptLayoutOf(shop) {
     };
 }
 
-// a switch that was never saved counts as on
 function receiptShows(layout, name) {
     return layout.show[name] !== false;
 }
 
-// the paper: a fixed width in millimetres, on screen and on the printer
 function applyReceiptPaper(element, shop) {
     if (!element) return;
     const layout = receiptLayoutOf(shop);
@@ -433,7 +360,6 @@ function applyReceiptPaper(element, shop) {
     element.dataset.paperWidth = String(layout.paperWidth);
 }
 
-// the printer is told the roll's width, so nothing is scaled or cut
 function setReceiptPageSize(shop) {
     const layout = receiptLayoutOf(shop);
     let style = document.getElementById('receipt-page-size');
@@ -445,10 +371,6 @@ function setReceiptPageSize(shop) {
     style.textContent = '@media print { @page { size: ' + layout.paperWidth + 'mm auto; margin: 3mm; } }';
 }
 
-// The head: the registered name, the proprietor, the address, the TIN with
-// its registration, any lines the shop added, the title and the number.
-// title is optional: a page that is not a sales invoice (the payment receipt)
-// puts its own words where the shop's invoice title would go.
 function receiptHeadHtml(shop, taxRegistration, receiptNo, title) {
     const store = shop || {};
     const layout = receiptLayoutOf(store);
@@ -477,18 +399,11 @@ function receiptHeadHtml(shop, taxRegistration, receiptNo, title) {
     return html;
 }
 
-// The whole invoice. "parts" is what the sale says:
-//   { registration, receiptNo, title (optional, instead of the shop's invoice title),
-//     meta: [{ key: 'date'|'cashier'|'customer'|'payment'|'reference', label, value }],
-//     itemsHtml (left out when there are no items, as on a payment receipt), itemCount,
-//     totals: [{ label, value, due }], taxHtml, paid: true/false, balanceText }
 function receiptHtml(shop, parts) {
     const store = shop || {};
     const layout = receiptLayoutOf(store);
     const metaSwitch = { cashier: 'cashier', customer: 'customer', payment: 'payment', reference: 'reference' };
 
-    // the details rows that have a value (or are kept blank, like the Customer
-    // of a sale on no record) and are switched on
     const allMeta = parts.meta || [];
     const meta = [];
     for (let i = 0; i < allMeta.length; i++) {
@@ -510,7 +425,6 @@ function receiptHtml(shop, parts) {
         html += '<div class="rc-meta">' + metaHtml + '</div>';
     }
 
-    // the totals lines
     const totals = parts.totals || [];
     let totalsHtml = '';
     for (let i = 0; i < totals.length; i++) {
@@ -537,12 +451,8 @@ function receiptHtml(shop, parts) {
     html += '<div class="rc-rule"></div>' +
         '<p class="rc-foot">' + escapeHtml(parts.paid ? layout.paidLabel : (parts.balanceText || '')) + '</p>';
 
-    // the bank and account of a cheque or a bank transfer taken (payment-details.js)
     if (parts.detailsHtml) html += parts.detailsHtml;
 
-    // The invoice note is the shop's note for a sales invoice; a receipt of another kind
-    // (a Credit Settlement payment) leaves it out with parts.noInvoiceNote, and
-    // says its own closing words in parts.footerLines instead of the invoice's.
     if (store.invoice_note && receiptShows(layout, 'note') && !parts.noInvoiceNote) {
         html += '<p class="rc-note">' + escapeHtml(store.invoice_note) + '</p>';
     }
@@ -553,24 +463,15 @@ function receiptHtml(shop, parts) {
     return html;
 }
 
-// ==========================================
-// PASSWORD RULES
-// The same list as PASSWORD_RULES in validation.js, which has the last word.
-// Every box that sets a password has a checklist under it:
-//   <ul class="password-rules" data-rules-for="the-box-id"></ul>
-// ==========================================
 const PASSWORD_RULES = [
-    // each rule: the words shown, and a test that says whether the password follows it
     { need: 'at least 8 characters', ok: function (password) { return password.length >= 8; } },
     { need: 'an uppercase letter', ok: function (password) { return /[A-Z]/.test(password); } },
     { need: 'a lowercase letter', ok: function (password) { return /[a-z]/.test(password); } },
     { need: 'a number', ok: function (password) { return /[0-9]/.test(password); } },
-    // anything that is not a letter, a digit or a space
     { need: 'a symbol such as ! ? - + . $ %', ok: function (password) { return /[^A-Za-z0-9\s]/.test(password); } },
     { need: 'no spaces', ok: function (password) { return !/\s/.test(password); } }
 ];
 
-// null when the password follows every rule, otherwise the one sentence to show
 function passwordComplaint(password) {
     const text = String(password || '');
     if (text === '') return 'Type a password.';
@@ -586,7 +487,6 @@ function passwordComplaint(password) {
     return 'A password needs ' + missing.join(', ') + '.';
 }
 
-// draws every checklist on the page; a rule that is met gets a tick and turns green
 function showPasswordRules() {
     const lists = document.querySelectorAll('ul[data-rules-for]');
     for (let i = 0; i < lists.length; i++) {
@@ -605,7 +505,6 @@ function showPasswordRules() {
     }
 }
 
-// the checklist follows the box as it is typed in
 document.addEventListener('input', function (event) {
     if (event.target && event.target.id &&
         document.querySelector('ul[data-rules-for="' + event.target.id + '"]')) {

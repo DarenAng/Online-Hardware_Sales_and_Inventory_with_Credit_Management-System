@@ -2,10 +2,6 @@ DROP DATABASE IF EXISTS hardware_db;
 CREATE DATABASE hardware_db;
 USE hardware_db;
 
--- MySQL Workbench's "safe update mode" refuses an UPDATE whose WHERE names no
--- key column (error 1175). The mock data below touches a few rows by name, so
--- the mode is switched off for this session only; it is a client-side guard
--- and has no effect on the database itself.
 SET SQL_SAFE_UPDATES = 0;
 
 CREATE TABLE roles (
@@ -40,7 +36,6 @@ CREATE TABLE users (
     email VARCHAR(100) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
-    -- wrong passwords in a row; at the limit the account is held until held_until
     failed_attempts INT NOT NULL DEFAULT 0,
     held_until TIMESTAMP NULL,
     last_login TIMESTAMP NULL,
@@ -48,9 +43,6 @@ CREATE TABLE users (
     FOREIGN KEY (staff_id) REFERENCES staff(staff_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
--- "Forgot your password?": one row per six-digit code emailed. Only the
--- scrypt hash of the code is kept. A code lasts 15 minutes and five wrong
--- tries; used_at is set when it is used, or when a newer code retires it.
 CREATE TABLE password_resets (
     reset_id INT AUTO_INCREMENT PRIMARY KEY,
     user_id INT NOT NULL,
@@ -85,9 +77,7 @@ CREATE TABLE audit_logs (
 CREATE TABLE role_feature_permissions (
     permission_id INT AUTO_INCREMENT PRIMARY KEY,
     role_id INT NOT NULL,
-    -- the screen's key in the catalogue: lower case, letters, digits, hyphens
     feature_key VARCHAR(40) NOT NULL,
-    -- TRUE grants a screen not held by default; FALSE takes away one that is
     is_granted BOOLEAN NOT NULL DEFAULT TRUE,
     note VARCHAR(255) NULL,
     granted_by_staff_id INT NULL,
@@ -97,7 +87,6 @@ CREATE TABLE role_feature_permissions (
     FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (granted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
--- 2. ENTITIES
 CREATE TABLE categories (
     category_id INT AUTO_INCREMENT PRIMARY KEY,
     category_name VARCHAR(50) NOT NULL UNIQUE,
@@ -131,10 +120,6 @@ CREATE TABLE suppliers (
     archived_by_staff_id INT NULL
 );
 
--- address is the whole address as one line (what every screen and receipt reads);
--- the address_ columns are the same address in parts, as the Add Customer card
--- asks for it. A customer added before the parts existed has only the line.
--- full_name puts the middle name in as an initial, like staff.full_name.
 CREATE TABLE customers (
     customer_id INT AUTO_INCREMENT PRIMARY KEY,
     first_name VARCHAR(100) NOT NULL,
@@ -159,13 +144,6 @@ CREATE TABLE customers (
     ) VIRTUAL
 );
 
--- credit_limit and standing are decisions; balances are derived in a view.
---   Good   sell on account as normal
---   Watch  still allowed, but every screen says to look at this account
---   Hold   no new credit at all until a manager lifts it
--- penalty_rate is the manager's word on one account, 1 to 3 percent a month:
--- NULL means the shop's late-payment rate (store_settings.penalty_rate)
--- applies as it does to everyone.
 CREATE TABLE customer_credits (
     credit_id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NOT NULL UNIQUE,
@@ -179,8 +157,6 @@ CREATE TABLE customer_credits (
     FOREIGN KEY (updated_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
--- Raised at the counter, decided by a manager. previous_limit is recorded so
--- an approval read later cannot be mistaken for a bigger jump than was asked.
 CREATE TABLE credit_requests (
     request_id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NOT NULL,
@@ -201,7 +177,7 @@ CREATE TABLE credit_requests (
 
 CREATE TABLE credit_payments (
     payment_id INT AUTO_INCREMENT PRIMARY KEY,
-    customer_id INT NULL, -- NULL allows a later payment on a walk-in sale
+    customer_id INT NULL,
     sale_id INT NULL,
     amount DECIMAL(12,2) NOT NULL,
     payment_method ENUM('Cash','Cheque','GCash','PayMaya','PayPal','Bank Transfer') NOT NULL DEFAULT 'Cash',
@@ -212,7 +188,6 @@ CREATE TABLE credit_payments (
     FOREIGN KEY (received_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
--- 3. PRODUCTS & INVENTORY
 CREATE TABLE products (
     product_id INT AUTO_INCREMENT PRIMARY KEY,
     product_name VARCHAR(150) NOT NULL,
@@ -220,15 +195,10 @@ CREATE TABLE products (
     category_id INT,
     unit_id INT,
     price DECIMAL(10,2) NOT NULL,
-    -- the typed reorder point; a Dynamic product falls back to it without enough history
     reorder_point INT NOT NULL DEFAULT 10,
-    --     ROP = (average daily sales x lead time) + safety stock
     lead_time_days INT NOT NULL DEFAULT 7,
     safety_stock INT NOT NULL DEFAULT 0,
-    -- per product: a slow item would only get a reorder point of zero from the formula
     reorder_mode ENUM('Manual','Dynamic') NOT NULL DEFAULT 'Manual',
-    -- how the supplier delivers it: a "box" of 20 of the unit above. Orders and
-    -- deliveries are counted in packs; stock stays in the unit. Set by the clerk.
     pack_name VARCHAR(20) NULL,
     pack_size DECIMAL(12,3) NULL,
     status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
@@ -246,11 +216,9 @@ CREATE TABLE products (
 CREATE TABLE inventory (
     inventory_id INT AUTO_INCREMENT PRIMARY KEY,
     product_id INT NOT NULL UNIQUE,
-    -- a fraction: nails by the kilo, wire by the metre
     quantity_in_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE,
-    -- the shelf can never hold less than nothing
     CONSTRAINT chk_inventory_stock_not_negative CHECK (quantity_in_stock >= 0)
 );
 CREATE TABLE product_units (
@@ -264,12 +232,6 @@ CREATE TABLE product_units (
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
--- ==========================================
--- 4. PROCUREMENT & RETURNS
--- ==========================================
--- The clerk raises an order (For Approval); the manager confirms it (Pending,
--- sent to the supplier) or declines it (Cancelled); a delivery counted in
--- against it makes it Received.
 CREATE TABLE purchase_orders (
     po_id INT AUTO_INCREMENT PRIMARY KEY,
     supplier_id INT NOT NULL,
@@ -279,16 +241,9 @@ CREATE TABLE purchase_orders (
     confirmed_by_staff_id INT NULL,
     confirmed_at TIMESTAMP NULL,
     decision_note VARCHAR(255) NULL,
-    -- when the delivery was counted in (sp_receive_purchase_order)
     received_at TIMESTAMP NULL,
-    -- the clerk's remarks on the delivery, shown on the order's Report
     delivery_remarks VARCHAR(255) NULL,
-    -- the supplier prices the order: unit costs go on the lines and any
-    -- discount goes here when the delivery is counted in, not when it is raised
     discount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-    -- the supplier's answer to the approved order: the printed order carries
-    -- a link and QR code with this code (made when the manager approves it),
-    -- kept as it is so every reprint carries the same working link
     supplier_code VARCHAR(64) NULL,
     supplier_sent_at TIMESTAMP NULL,
     supplier_response ENUM('Accepted', 'Declined') NULL,
@@ -307,8 +262,6 @@ CREATE TABLE purchase_order_items (
     quantity INT NOT NULL,
     unit_cost DECIMAL(10,2) NOT NULL,
     line_cost DECIMAL(12,2) AS (quantity * unit_cost) STORED,
-    -- how the line was ordered when it was ordered in packs: 20 box of 20 kg
-    -- is quantity 400; the pack is kept so the printed order says "20 box"
     pack_name VARCHAR(20) NULL,
     pack_size DECIMAL(12,3) NULL,
     pack_count DECIMAL(12,3) NULL,
@@ -316,9 +269,6 @@ CREATE TABLE purchase_order_items (
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
--- Receiving corrects the order's lines to what arrived, so the lines as they
--- were ordered are copied here first (sp_receive_purchase_order). The clerk's
--- Reference card on Stock Adjustment puts the two side by side.
 CREATE TABLE purchase_order_ordered_items (
     ordered_item_id INT AUTO_INCREMENT PRIMARY KEY,
     po_id INT NOT NULL,
@@ -331,7 +281,6 @@ CREATE TABLE purchase_order_ordered_items (
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
--- every stock movement leaves a trail
 CREATE TABLE stock_adjustments (
     adjustment_id INT AUTO_INCREMENT PRIMARY KEY,
     product_id INT NOT NULL,
@@ -339,8 +288,6 @@ CREATE TABLE stock_adjustments (
     quantity_before DECIMAL(12,3) NOT NULL,
     quantity_change DECIMAL(12,3) NOT NULL,
     quantity_after DECIMAL(12,3) NOT NULL,
-    -- What the figure was counted in, as text at the time it was filed, so
-    -- renaming a unit next year does not rewrite last year's entries.
     unit_name VARCHAR(20) NULL,
     reason VARCHAR(255) NOT NULL,
     adjusted_by_staff_id INT NULL,
@@ -349,7 +296,6 @@ CREATE TABLE stock_adjustments (
     FOREIGN KEY (adjusted_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
--- one row per role that needs to see it; created_by_staff_id NULL means the system raised it
 CREATE TABLE notifications (
     notification_id INT AUTO_INCREMENT PRIMARY KEY,
     target_role_id INT NULL,
@@ -368,36 +314,18 @@ CREATE TABLE notifications (
 CREATE TABLE store_settings (
     setting_id INT PRIMARY KEY DEFAULT 1,
     store_name VARCHAR(150) NOT NULL DEFAULT 'Lucelyn Hardware',
-    -- the owner, printed under the registered name as "Prop." on every invoice
     proprietor VARCHAR(150) NULL,
     address VARCHAR(255) NOT NULL DEFAULT 'Set your address in System Administration',
     tin VARCHAR(30) NOT NULL DEFAULT '000-000-000-00000',
     registration_type ENUM('VAT','NON-VAT') NOT NULL DEFAULT 'VAT',
-    -- a rate written into source code is a rate nobody can change when it moves
     vat_rate DECIMAL(5,2) NOT NULL DEFAULT 12.00,
-    -- the line under the barcode: a returns policy, a thank you, anything
     invoice_note VARCHAR(255) NULL,
-    -- the late-payment penalty: this much of the goods still unpaid is added
-    -- to a credit sale for every month (or part of one) it is past its 30-day
-    -- due date. The rate is 1 to 3 percent a month; the default is 3. A
-    -- manager can set another rate for the shop, or for one account
-    -- (customer_credits.penalty_rate).
     penalty_rate DECIMAL(5,2) NOT NULL DEFAULT 3.00,
-    -- the account a customer sends a bank transfer to, shown at the till and
-    -- printed on the invoice: all three are set together or none is
     bank_name VARCHAR(100) NULL,
     bank_account_name VARCHAR(150) NULL,
     bank_account_number VARCHAR(50) NULL,
-    -- the receipt's layout as JSON: paper width, text size, title, the paid
-    -- stamp, the shop's own header and footer lines, and what is shown. Set in
-    -- Receipt Maintenance; the server fills it with its defaults on first start.
     receipt_layout TEXT NULL,
-    -- the terms and conditions printed with a customer's credit account, one
-    -- term to a line, in the manager's words. NULL means the default text
-    -- the server holds (DEFAULT_CREDIT_TERMS in store-settings.js).
     credit_terms TEXT NULL,
-    -- the customer data terms and the refund policy, printed on the back of
-    -- the customer card. NULL means the default text in store-settings.js.
     data_terms TEXT NULL,
     refund_policy TEXT NULL,
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -410,7 +338,6 @@ CREATE TABLE store_settings (
 CREATE TABLE sales (
     sale_id INT AUTO_INCREMENT PRIMARY KEY,
     customer_id INT NULL,
-    -- the name of somebody without a credit account; NULL means nobody asked
     walk_in_name VARCHAR(150) NULL,
     cashier_staff_id INT NOT NULL,
     total_amount DECIMAL(12,2) NOT NULL,
@@ -418,20 +345,10 @@ CREATE TABLE sales (
     final_amount DECIMAL(12,2) AS (total_amount - discount) STORED,
     amount_paid DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     change_given DECIMAL(12,2) AS (GREATEST(amount_paid - (total_amount - discount), 0)) STORED,
-    -- The late-payment penalty, charged by sp_apply_late_penalties for each
-    -- month a Credit sale is past its due date still owing: the rate it was
-    -- last charged at, how many months have been charged, what they add up
-    -- to, and when the last one was. amount_due is the bill with the
-    -- penalty on it, less any refund, and is what every balance is measured
-    -- against; final_amount stays the sale itself, for the sales figures.
     penalty_rate DECIMAL(5,2) NULL,
     penalty_months INT NOT NULL DEFAULT 0,
     penalty_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     penalty_applied_at TIMESTAMP NULL,
-    -- The part of the refunds filed on this sale that came off what the
-    -- customer owes (sp_file_return_report). A refund bigger than the balance
-    -- is only taken off up to the balance; the rest is cash handed back, so
-    -- amount_due never falls below amount_paid.
     refunded_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     amount_due DECIMAL(12,2) AS (total_amount - discount + penalty_amount - refunded_amount) STORED,
     payment_method ENUM('Cash','Cheque','GCash','PayMaya','PayPal','Bank Transfer','COD','Credit') NOT NULL,
@@ -451,14 +368,10 @@ CREATE TABLE sales (
     archived_by_staff_id INT NULL,
     FOREIGN KEY (customer_id) REFERENCES customers(customer_id) ON DELETE RESTRICT ON UPDATE CASCADE,
     FOREIGN KEY (cashier_staff_id) REFERENCES staff(staff_id) ON DELETE RESTRICT ON UPDATE CASCADE,
-    -- a negative discount would raise the bill, a negative payment would lower what was paid
     CONSTRAINT chk_sales_discount_not_negative CHECK (discount >= 0),
     CONSTRAINT chk_sales_amount_paid_not_negative CHECK (amount_paid >= 0)
 );
 
--- A cashier asks for a sale of the same day to be voided; a manager approves
--- (the sale is voided through sp_archive_record) or declines it, with a note.
--- One request waits per sale at a time (the server checks it).
 CREATE TABLE void_requests (
     request_id INT AUTO_INCREMENT PRIMARY KEY,
     sale_id INT NOT NULL,
@@ -480,15 +393,9 @@ CREATE TABLE sale_items (
     sale_item_id INT AUTO_INCREMENT PRIMARY KEY,
     sale_id INT NOT NULL,
     product_id INT NOT NULL,
-    -- 2.500 for two and a half kilos of nails, always in the product's own
-    -- unit so stock comes off it directly; see inventory.quantity_in_stock
     quantity DECIMAL(12,3) NOT NULL,
-    -- What the customer was charged for, when it was not the product's own
-    -- unit: 2 sacks of nails is sold_quantity 2, sold_unit 'sack', with
-    -- quantity holding the 50 kilos that left the shelf. NULL on a plain line.
     sold_unit VARCHAR(20) NULL,
     sold_quantity DECIMAL(12,3) NULL,
-    -- the price of one sold unit (one sack, or one kilo on a plain line)
     unit_price DECIMAL(10,2) NOT NULL,
     subtotal DECIMAL(12,2) AS (ROUND(COALESCE(sold_quantity, quantity) * unit_price, 2)) STORED,
     FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE CASCADE ON UPDATE CASCADE,
@@ -500,12 +407,8 @@ CREATE TABLE deliveries (
     sale_id INT NOT NULL,
     delivery_staff_id INT NULL,
     delivery_address TEXT NOT NULL,
-    -- who the driver is looking for, as written at the counter; wins over the customer row
     contact_name VARCHAR(150) NULL,
     contact_phone VARCHAR(30) NULL,
-    -- the address as the cashier typed it, in parts. delivery_address above is
-    -- the whole address as one line, built from these when the delivery is made;
-    -- every screen reads that line, and an older delivery has only it.
     address_street VARCHAR(150) NULL,
     address_barangay VARCHAR(100) NULL,
     address_city VARCHAR(100) NULL,
@@ -513,12 +416,8 @@ CREATE TABLE deliveries (
     address_landmark VARCHAR(150) NULL,
     status ENUM('Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed') NOT NULL DEFAULT 'Pending',
     remarks TEXT,
-    -- the cashier's note written when the delivery was made; remarks above is
-    -- overwritten by the driver's or manager's latest status note
     cashier_remarks TEXT NULL,
-    -- the day it was written up, kept apart from the day it is meant to arrive
     created_date DATE NULL,
-    -- "Tuesday 2pm", not "Tuesday": the hour matters when moving a delivery
     scheduled_date DATETIME NULL,
     delivered_at TIMESTAMP NULL,
     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
@@ -527,32 +426,23 @@ CREATE TABLE deliveries (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (sale_id) REFERENCES sales(sale_id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (delivery_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
-    -- a Delivered row without a timestamp would report under the wrong day
     CONSTRAINT chk_delivered_has_timestamp
         CHECK (status <> 'Delivered' OR delivered_at IS NOT NULL)
 );
 
--- disposition says in words where the goods go; restocked is derived from
--- it so the two cannot disagree. reason is NOT NULL on purpose.
 CREATE TABLE returned_items (
     return_id INT AUTO_INCREMENT PRIMARY KEY,
     product_id INT NOT NULL,
     sale_id INT NULL,
-    -- Missing: goods a supplier's delivery did not bring. It names the
-    -- purchase order here, and never moves the shelf: the goods never came.
     po_id INT NULL,
     report_type ENUM('Return', 'Damaged', 'Refunded', 'Missing') NOT NULL DEFAULT 'Return',
     quantity DECIMAL(12,3) NOT NULL,
     reason TEXT NOT NULL,
-    -- Where the goods go. NULL is a refund the cashier took back that the
-    -- clerk has not inspected yet: nothing has moved on the shelf, and the
-    -- clerk's verdict (sellable or not) fills it in and closes the report.
     disposition ENUM('Return to Stock', 'Write-Off') NULL,
     refund_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     restocked BOOLEAN NOT NULL DEFAULT FALSE,
     status ENUM('Open', 'Resolved') NOT NULL DEFAULT 'Open',
     reported_by_staff_id INT NULL,
-    -- the clerk's inspection: who looked, when, and what they found
     inspected_by_staff_id INT NULL,
     inspected_at TIMESTAMP NULL,
     inspection_note VARCHAR(255) NULL,
@@ -562,31 +452,17 @@ CREATE TABLE returned_items (
     FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE RESTRICT ON UPDATE CASCADE,
     FOREIGN KEY (reported_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
     FOREIGN KEY (inspected_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
-    -- a negative refund would be money taken from the customer
     CONSTRAINT chk_returned_items_refund_not_negative CHECK (refund_amount >= 0)
 );
 
--- Every GCash, Maya or bank-transfer payment attempt made by QR code, whatever became of it,
--- so the shop can see which went through and which did not. A row starts
--- pending and is closed once: paid, failed, expired (not paid in time) or
--- cancelled (by the cashier). sale_id is filled when the money is recorded
--- on a sale (a new one, or a payment on a balance); a paid row with no sale
--- is money the shop holds without a record, and error_message says so.
--- Written only through sp_create_qr_payment, sp_set_qr_payment_result and
--- sp_link_qr_payment_to_sale.
 CREATE TABLE qr_payments (
     qr_payment_id INT AUTO_INCREMENT PRIMARY KEY,
-    -- who took the money: PayMongo, or the offline simulation; test or real money
     provider ENUM('paymongo','sim') NOT NULL,
     mode ENUM('test','live') NOT NULL,
     provider_intent_id VARCHAR(80) NOT NULL,
-    -- the provider's own number for the payment: the reference on the invoice
     provider_payment_id VARCHAR(80) NULL,
     amount DECIMAL(12,2) NOT NULL,
-    -- the way it is paid: an e-wallet, or "Bank Transfer" (the customer's online banking)
     wallet ENUM('GCash','PayMaya','Bank Transfer') NOT NULL,
-    -- a Bank Transfer's bank (PayMongo's bank code and the name shown) and the
-    -- customer's account, as the cashier typed them; NULL for an e-wallet
     bank_code VARCHAR(20) NULL,
     bank_name VARCHAR(80) NULL,
     account_name VARCHAR(100) NULL,
@@ -597,7 +473,6 @@ CREATE TABLE qr_payments (
     sale_id INT NULL,
     created_by_staff_id INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    -- after this a pending code is closed as expired
     expires_at TIMESTAMP NULL,
     paid_at TIMESTAMP NULL,
     closed_at TIMESTAMP NULL,
@@ -608,19 +483,6 @@ CREATE TABLE qr_payments (
     FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
--- The bank and account behind a cheque or a bank transfer, one row for each
--- payment that has them. A sale paid in full has no credit_payments row, so a
--- row belongs to the sale (sale_id) and, when the money was a payment on an
--- account (the down payment on a Credit sale, a payment on a balance, money
--- collected at the door), to that credit_payments row too (payment_id; NULL
--- for the sale's own payment). Written inside sp_create_sale_transaction and
--- sp_record_credit_payment, in the same transaction as the money.
---   Cheque:        account_name and account_number as printed on the cheque,
---                  the bank and its branch, and the date written on it (the
---                  cheque number itself is the payment's reference)
---   Bank Transfer: the customer's bank, account name and number; branch and
---                  cheque_date stay NULL. qr_payment_id is the PayMongo-verified
---                  payment (NULL for money a driver took at the door).
 CREATE TABLE payment_details (
     detail_id INT AUTO_INCREMENT PRIMARY KEY,
     sale_id INT NOT NULL,
@@ -641,16 +503,6 @@ CREATE TABLE payment_details (
     FOREIGN KEY (created_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
--- ------------------------------------------------------------
--- The server's own tables, so any copy of it can answer any request (Vercel
--- runs many). Not shop data: a backup leaves them out and a restore leaves
--- them be. The server also creates them itself on start-up if they are
--- missing. Times are milliseconds since 1970, free of any time zone.
--- ------------------------------------------------------------
-
--- who is signed in; token_hash is the SHA-256 of the cookie, never the cookie.
--- A session somebody else ended keeps its row a day with the reason, so the
--- screen left behind is told why.
 CREATE TABLE user_sessions (
     token_hash CHAR(64) PRIMARY KEY,
     staff_id INT NOT NULL,
@@ -667,7 +519,6 @@ CREATE TABLE user_sessions (
     INDEX idx_user_sessions_expires (expires_at)
 );
 
--- the live-update log: change_id is the version every screen asks after
 CREATE TABLE live_changes (
     change_id BIGINT AUTO_INCREMENT PRIMARY KEY,
     scope VARCHAR(30) NOT NULL,
@@ -676,8 +527,6 @@ CREATE TABLE live_changes (
     created_at BIGINT NOT NULL
 );
 
--- a new account waiting for the administrator's second look; sealed with a
--- key only the administrator's screen holds, gone after ten minutes
 CREATE TABLE account_drafts (
     draft_hash CHAR(64) PRIMARY KEY,
     staff_id INT NOT NULL,
@@ -686,7 +535,6 @@ CREATE TABLE account_drafts (
     expires_at BIGINT NOT NULL
 );
 
--- backups when there is no disk to keep them on (HARDWARE_BACKUP_STORE=database)
 CREATE TABLE backup_files (
     file_name VARCHAR(100) PRIMARY KEY,
     bytes INT NOT NULL,
@@ -694,20 +542,17 @@ CREATE TABLE backup_files (
     content LONGBLOB NOT NULL
 );
 
--- small switches, such as the daily backup's on/off
 CREATE TABLE app_flags (
     flag_key VARCHAR(50) PRIMARY KEY,
     flag_value VARCHAR(255) NULL,
     updated_at BIGINT NOT NULL
 );
 
--- the offline payment simulator's codes (PAYMENT_PROVIDER=sim)
 CREATE TABLE qr_sim_intents (
     intent_id VARCHAR(40) PRIMARY KEY,
     token VARCHAR(40) NOT NULL UNIQUE,
     amount DECIMAL(12,2) NOT NULL,
     wallet VARCHAR(20) NOT NULL,
-    -- the bank a Bank Transfer is paid through (the pay page names it)
     bank_name VARCHAR(80) NULL,
     description VARCHAR(255) NULL,
     return_url VARCHAR(500) NOT NULL,
@@ -731,8 +576,6 @@ INSERT INTO staff (staff_id, first_name, middle_name, last_name, phone, role_id,
 (5, 'Delivery', 'Dela Cruz', 'User',    '+639170000005', 5, TRUE);
 UPDATE staff SET created_at = '2026-01-05 08:00:00' WHERE staff_id BETWEEN 1 AND 5;
 
--- Every seeded account, the administrator's too, must pick a new password at
--- the first sign-in; "admin123" is public in this file.
 INSERT INTO users (staff_id, email, password, must_change_password) VALUES
 (1, 'admin@hardware.com', 'admin123', TRUE),
 (2, 'manager@hardware.com', 'manager123', TRUE),
@@ -761,14 +604,12 @@ INSERT INTO customers (first_name, last_name, phone, address) VALUES
 ('Rosa', 'Villamor', '0917-555-1212', 'Caloocan City, Metro Manila'),
 ('Mark', 'Aguilar', '0918-444-3131', 'Taguig City, Metro Manila');
 
--- one of each standing, so the credit screen has something to show
 INSERT INTO customer_credits (customer_id, credit_limit, standing, notes, updated_by_staff_id) VALUES
 (1, 50000.00, 'Good',  NULL, NULL),
 (2, 20000.00, 'Watch', 'Two sales past 30 days. Chase before extending further.', 2),
 (3, 30000.00, 'Good',  NULL, NULL),
 (4, 15000.00, 'Hold',  'Cheque bounced in August. No new credit until it clears.', 2);
 
--- two products start on the dynamic reorder point so the Stocks screen has something to show
 INSERT INTO products (product_name, brand_id, category_id, unit_id, price,
                       reorder_point, lead_time_days, safety_stock, reorder_mode,
                       status, supplier_id, is_archived) VALUES
@@ -795,7 +636,6 @@ INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_cost) VALUES
 (2, 2, 50, 300.00), (3, 6, 80, 210.00), (3, 7, 30, 480.00),
 (4, 4, 20, 150.00), (4, 5, 60, 85.00);
 
--- final_amount and change_given are generated, so they are not listed here
 INSERT INTO sales (customer_id, cashier_staff_id, total_amount, discount, amount_paid, payment_method, payment_status, reference_no, sale_date) VALUES
 (1, 4, 8950.00,  0.00,   9000.00, 'Cash',          'Paid',    NULL,          '2026-08-20 09:15:00'),
 (2, 4, 1500.00,  0.00,   0.00,    'Credit',        'Unpaid',  NULL,          '2026-08-21 10:05:00'),
@@ -808,7 +648,6 @@ INSERT INTO sales (customer_id, cashier_staff_id, total_amount, discount, amount
 (NULL, 4, 360.00, 0.00,  400.00,  'Cash',          'Paid',    NULL,          '2026-08-31 17:45:00'),
 (4, 4, 1860.00,  0.00,   1860.00, 'Bank Transfer', 'Paid',    'BT-9930',     '2026-09-01 09:30:00');
 
--- subtotal is generated, so it is not listed here
 INSERT INTO sale_items (sale_id, product_id, quantity, unit_price) VALUES
 (1, 1, 1, 8500.00), (1, 2, 1, 450.00),
 (2, 4, 2, 750.00),
@@ -833,7 +672,6 @@ INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, status, re
 (8, 5, 'Pasig City, Metro Manila',   'Delivered',        'COD collected in full',                   '2026-08-30', '2026-08-30 15:05:00'),
 (10, 5,'Taguig City, Metro Manila',  'Delayed',          'Heavy rain, rescheduled',                 '2026-09-03', NULL);
 
--- archived by hand; the sweep would do it after ninety days
 INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, status, remarks, scheduled_date, delivered_at, is_archived, archived_at, archived_by_staff_id) VALUES
 (3, 5, 'Quezon City, Metro Manila', 'Delivered', 'Old route, closed out', '2026-08-25', '2026-08-25 16:20:00', TRUE, '2026-08-26 08:00:00', 2);
 
@@ -860,15 +698,6 @@ INSERT INTO notifications (target_role_id, notif_type, title, message, product_i
 (5, 'Delivery',     'Delivery #3 created',          'Sale #4 needs delivering to Caloocan City, Metro Manila.', NULL, 4, FALSE, '2026-08-28 09:20:00'),
 (2, 'Purchase Order','Purchase order #3 raised',    '2 line(s) ordered, awaiting delivery.',                    NULL, 3, TRUE,  '2026-08-29 08:05:00');
 
--- ==========================================
--- 8. MOCK DATA
---
--- Six months of trading for a hardware shop in Nasugbu, Batangas, generated
--- by a script with a fixed seed so it is the same on every machine. The
--- credit customers hold one account of each standing, worked out by the rules
--- in vw_customer_credit. Ids continue from the demo data above. Every row
--- is the work of one of the five accounts; there are no other staff.
--- ==========================================
 INSERT INTO customers (first_name, last_name, phone, address, created_at) VALUES
 ('Maria Luisa', 'Santos', '0966-602-8036', 'Brgy. Wawa, Nasugbu, Batangas', '2026-02-10 12:55:52'),
 ('Ernesto', 'Ramos', '0925-784-6117', 'Brgy. Bucana, Nasugbu, Batangas', '2026-04-15 16:15:29'),
@@ -956,7 +785,6 @@ INSERT INTO products (product_name, brand_id, category_id, unit_id, price, reord
 ('Extension Cord 5m', 11, 4, 1, 380.00, 8, 7, 3, 'Manual', 'Active', 5, FALSE, '2026-02-03 09:10:21'),
 ('Deformed Bar 10mm x 6m', NULL, 5, 1, 245.00, 100, 7, 40, 'Dynamic', 'Active', 3, FALSE, '2026-02-15 13:15:39'),
 ('Hollow Block 4"', NULL, 5, 1, 14.00, 500, 5, 200, 'Dynamic', 'Active', 3, FALSE, '2026-01-26 15:50:34'),
--- Sand and gravel are archived: six months of sales lines still point at them.
 ('Sand Washed', NULL, 5, 8, 180.00, 30, 5, 10, 'Manual', 'Inactive', 3, TRUE, '2026-02-20 10:15:13'),
 ('Gravel 3/4"', NULL, 5, 8, 210.00, 30, 5, 10, 'Manual', 'Inactive', 3, TRUE, '2026-01-31 09:20:43'),
 ('Plywood 1/2" 4x8', NULL, 5, 13, 780.00, 20, 7, 8, 'Manual', 'Active', 3, FALSE, '2026-01-29 11:25:42'),
@@ -1022,8 +850,6 @@ INSERT INTO inventory (product_id, quantity_in_stock) VALUES
 (50, 0),
 (51, 0);
 
--- The sizes some products also sell in. Stock stays in the product's own
--- unit; the till offers these beside it.
 INSERT INTO product_units (product_id, unit_name, units_per, price)
 SELECT p.product_id, v.unit_name, v.units_per, v.price
 FROM (

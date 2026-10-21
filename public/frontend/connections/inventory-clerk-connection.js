@@ -1,47 +1,31 @@
-// ============================================================
-// inventory-clerk-connection.js -- talking to the server (Inventory Clerk only)
-// Loaded by: inventory-dashboard.html
-//
-// "get" functions give back the data; "send" functions give back the
-// server's Response (see shared-connection.js for how to use them).
-// ============================================================
-
-// GET /api/inventory/summary -- the numbers at the top of the dashboard
 function apiGetInventorySummary() {
     return getJson('/api/inventory/summary');
 }
 
-// GET /api/inventory/products?archived=true -- the material archive
 function apiGetArchivedProducts() {
     return getJson('/api/inventory/products?archived=true');
 }
 
-// GET /api/inventory/adjustments -- the adjustment history
 function apiGetStockAdjustments() {
     return getJson('/api/inventory/adjustments');
 }
 
-// POST /api/materials -- add a new product; it starts with no price (the manager sets that)
 function apiAddProduct(data) {
     return sendJson('/api/materials', 'POST', data);
 }
 
-// POST /api/inventory/adjust -- correct a stock figure
 function apiAdjustStock(data) {
     return sendJson('/api/inventory/adjust', 'POST', data);
 }
 
-// GET /api/purchase-orders/:id/reference -- a received order: what was ordered beside what arrived
 function apiGetPurchaseOrderReference(poId) {
     return getJson('/api/purchase-orders/' + poId + '/reference');
 }
 
-// POST /api/returns/batch -- file one report for several items (or goods missing from a delivery)
 function apiFileReportItems(data) {
     return sendJson('/api/returns/batch', 'POST', data);
 }
 
-// POST /api/returns/:id/resolve -- after inspecting: back to stock, or write off
 function apiResolveReturn(reportId, disposition, note) {
     return sendJson('/api/returns/' + reportId + '/resolve', 'POST', {
         disposition: disposition,
@@ -49,17 +33,14 @@ function apiResolveReturn(reportId, disposition, note) {
     });
 }
 
-// POST /api/archives/archive -- put a material away
 function apiArchiveMaterial(productId) {
     return sendJson('/api/archives/archive', 'POST', { module: 'Inventory', recordId: productId });
 }
 
-// POST /api/archives/restore -- bring a material back
 function apiRestoreMaterial(productId) {
     return sendJson('/api/archives/restore', 'POST', { module: 'Inventory', recordId: productId });
 }
 
-// PUT /api/inventory/products/:id/pack -- how a material is delivered (e.g. a box of 20)
 function apiSaveDeliveryPack(productId, packName, packSize) {
     return sendJson('/api/inventory/products/' + productId + '/pack', 'PUT', {
         packName: packName,
@@ -67,9 +48,7 @@ function apiSaveDeliveryPack(productId, packName, packSize) {
     });
 }
 
-// POST /api/inventory/products/:id/units -- a size it also sells in (e.g. a sack)
 function apiAddSellingUnit(productId, unitName, unitsPer, price) {
-    // an empty price box means "work the price out from the unit price"
     let priceValue = null;
     if (price !== '') {
         priceValue = Number(price);
@@ -81,7 +60,6 @@ function apiAddSellingUnit(productId, unitName, unitsPer, price) {
     });
 }
 
-// DELETE /api/inventory/products/:id/units/:unitId
 function apiRemoveSellingUnit(productId, unitId) {
     return fetch('/api/inventory/products/' + productId + '/units/' + unitId, {
         method: 'DELETE',
@@ -89,7 +67,6 @@ function apiRemoveSellingUnit(productId, unitId) {
     });
 }
 
-// POST /api/categories or /api/units -- the inventory clerk adds one (theirs alone)
 function apiAddCategoryOrUnit(kind, name) {
     const path = { category: '/api/categories', unit: '/api/units' }[kind];
     return sendJson(path, 'POST', { name: name });

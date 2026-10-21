@@ -1,18 +1,3 @@
-// recover-password.js -- the last resort, run on the server's own computer
-//
-//     npm run recover-password -- someone@example.com
-//
-// For when nobody can get in: the administrator is locked out, mail is not
-// set up so "Forgot your password?" cannot send a code, and there is no
-// manager to reset it either. It sets a temporary password on the one
-// account named, prints it once, and makes it one that has to be changed on
-// the next sign-in. The sign-in hold is released and the audit trail says it
-// happened, and from where.
-//
-// It needs what the server needs: the .env at the project root, so only
-// someone who can already read the database password can run it. Nothing is
-// sent anywhere and the password is not written down; copy it from the screen.
-
 const os = require("os");
 const passwords = require("../services/passwords");
 const hashPassword = passwords.hashPassword;
@@ -21,7 +6,6 @@ const generatePassword = passwords.generatePassword;
 async function main() {
   const email = String(process.argv[2] || "").trim();
 
-  // a simple check for "something@something.something"
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     console.error("Name the account to recover, by the email it signs in with:");
     console.error("");
@@ -30,7 +14,6 @@ async function main() {
     return;
   }
 
-  // the same MySQL connection the server uses (database/connection.js)
   const db = require("../database/connection").db;
 
   try {
@@ -53,8 +36,6 @@ async function main() {
     const user = rows[0];
     const password = generatePassword();
 
-    // the same procedure the administrator's reset uses: the password is
-    // temporary, and has to be changed on the next sign-in
     await db.query("CALL sp_reset_user_password(?, ?, @status_code, @message)",
       [user.staff_id, await hashPassword(password)]);
     const outputRowsResult = await db.query("SELECT @status_code AS status_code, @message AS message");

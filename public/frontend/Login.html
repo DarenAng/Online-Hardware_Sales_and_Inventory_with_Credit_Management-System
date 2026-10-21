@@ -15,8 +15,6 @@
 </head>
 
 <body class="login-body login-split">
-    <!-- THE LEFT PANEL: who we are and what the system does. Shown on a laptop
-         or larger; on a phone only the card is left, with its own small brand. -->
     <aside class="login-side">
         <div class="side-inner">
             <span class="brand-mark">LH</span>
@@ -41,8 +39,6 @@
         </div>
     </aside>
 
-    <!-- THE RIGHT PANEL: the sign-in card, and the forgot-password card that
-         takes its place (only one of the two shows at a time) -->
     <div class="login-pane">
         <main class="login-card" id="sign-in-card">
             <div class="login-brand">
@@ -55,13 +51,6 @@
 
             <h2>Sign in</h2>
             <form onsubmit="handleLogin(event)">
-                <!-- A refused sign-in is answered here, beside the two boxes it is
-                     about, rather than in a card in the corner of the screen.
-                     role="alert" so a screen reader announces it the moment it is
-                     filled in, and aria-describedby ties it to the password box so
-                     it is read out again when the cursor lands back there. It stays
-                     until the next attempt: nothing on this screen is competing
-                     with it for the space. -->
                 <p class="login-alert" id="login-alert" role="alert" hidden></p>
 
                 <div class="form-group">
@@ -91,9 +80,6 @@
             </p>
         </main>
 
-        <!-- FORGOT YOUR PASSWORD? -- the second card: the email address, then the
-             six-digit code from the mail, then the new password. Drawn by
-             shared/password-reset.js; only one of the two cards shows at a time. -->
         <main class="login-card" id="reset-card" hidden>
             <div class="login-brand">
                 <span class="brand-mark">LH</span>
@@ -109,7 +95,6 @@
 
             <p class="login-alert" id="reset-alert" role="alert" hidden></p>
 
-            <!-- step 1: where to send the code -->
             <form id="reset-request-form" onsubmit="handleResetRequest(event)">
                 <div class="form-group">
                     <label for="reset-email">Email address</label>
@@ -122,7 +107,6 @@
                 <button type="submit" class="btn btn-accent login-submit" id="reset-request-btn">Send Code</button>
             </form>
 
-            <!-- step 2: the code from the mail, checked before anything else -->
             <form id="reset-code-form" onsubmit="handleResetVerify(event)" hidden>
                 <div class="form-group">
                     <label for="reset-code">Code from the email <span class="label-hint">six digits</span></label>
@@ -133,7 +117,6 @@
                 <button type="submit" class="btn btn-accent login-submit" id="reset-verify-btn">Verify Code</button>
             </form>
 
-            <!-- step 3: the new password, once the code is accepted -->
             <form id="reset-confirm-form" onsubmit="handleResetConfirm(event)" hidden>
                 <div class="form-group">
                     <label for="reset-new-password">New password </label>

@@ -1,47 +1,7 @@
-// data-panel.js -- lazy data panels and pagination
-// Loaded by: all five dashboards
-//
-// A table starts closed (search bar + Load Data button), loads on demand and
-// pages ten rows at a time. Usage:
-//
-//   const panel = createDataPanel({
-//       key: 'admin-users',            // unique, used by the inline handlers
-//       tableId: 'accounts-table',
-//       columns: 5,                    // colspan for message rows
-//       pagerId: 'accounts-pager',
-//       countPillId: 'accounts-count', // optional
-//       load: async function () { return [...]; },  // returns every row, once
-//       match: function (row, query) { return true; },   // optional free-text search
-//       filter: function (row, filters) { return true; },// optional dropdown filters
-//       sort: function (rows, filters) { return rows; }, // optional; runs after a header sort
-//       sortKeys: ['name', 'qty', null],  // optional; one per column: a row field or
-//                                         // function (row) {...}; null = not sortable.
-//                                         // Pressing a header sorts by it, again reverses it.
-//                                         // Left out, every column sorts by the text its
-//                                         // cell shows (headers that are empty or say
-//                                         // Action(s), or carry class "no-sort", do not).
-//                                         // false turns header sorting off.
-//       renderRow: function (row, index) { return '<tr>...</tr>'; },
-//       gate: { title, text, button },  // what the closed state says
-//       empty: { title, text },        // optional; a loaded table with no rows
-//       loadOnFilter: false,           // optional; see dataPanelFilter
-//       loadOnSearch: false,           // optional; typing in the search box does not load a closed table
-//       inputs: ['sales-from'],        // optional; ids of other boxes that decide what load() reads
-//       remember: false                // optional; do not load this table again after a reload
-//   });
-//   panel.open(); panel.reset(); panel.search('pedro');
-//   panel.setFilter('status', 'inactive'); panel.refresh();
-//
-// Every state change fires a 'datapanel:change' event on the document with
-// the key, so Print/Export buttons can follow the table.
-
 const DATA_PANEL_ROWS_PER_PAGE = 10;
 
-// pages drawn out of sight when the rows arrive, to find the tallest one
 const DATA_PANEL_PAGES_MEASURED = 20;
 
-// every panel on the page: key -> panel, for the inline handlers
-// (the keys are fixed names such as 'mgr-sales', set in each page's script)
 const dataPanels = {};
 
 function createDataPanel(config) {
@@ -49,22 +9,18 @@ function createDataPanel(config) {
         key: config.key,
         config: config,
         pageSize: config.pageSize || DATA_PANEL_ROWS_PER_PAGE,
-        state: 'closed',      // closed | loading | ready | error
-        rows: [],             // everything load() returned
-        visible: [],          // what survives the search and the filters
+        state: 'closed',
+        rows: [],
+        visible: [],
         page: 1,
         query: '',
         filters: Object.assign({}, config.filters || {}),
-        headerSort: null      // { column, descending } once a header is pressed
+        headerSort: null
     };
 
-    // copy the functions below (body, open, render, ...) onto this panel,
-    // so we can call panel.open(), panel.render() and so on.
-    // Inside those functions, "this" means the panel they were called on.
     Object.assign(panel, dataPanelMethods);
     dataPanels[config.key] = panel;
 
-    // no sortKeys given: every column sorts by what its cell shows
     if (config.sortKeys === undefined || config.sortKeys === null) {
         config.autoSortKeys = true;
     }
@@ -74,9 +30,6 @@ function createDataPanel(config) {
     return panel;
 }
 
-// ---------- sorting by pressing a column header ----------
-// One listener on the table head, so headers drawn again later (Records
-// changes its columns) still sort.
 function wireHeaderSort(panel) {
     const table = document.getElementById(panel.config.tableId);
     const head = table ? table.querySelector('thead') : null;
@@ -99,7 +52,6 @@ function wireHeaderSort(panel) {
     markSortableHeaders(panel);
 }
 
-// marks the headers that sort, and which one is in use and which way
 function markSortableHeaders(panel) {
     const table = document.getElementById(panel.config.tableId);
     if (panel.config.autoSortKeys && table) panel.config.sortKeys = autoSortKeys(panel, table);
@@ -126,10 +78,6 @@ function markSortableHeaders(panel) {
     }
 }
 
-// ---------- sorting a table that names no sortKeys ----------
-// Each column sorts by the text its cell shows: the row is drawn once with the
-// panel's own renderRow and the cell's text is read back, as a number, a date
-// or words. Columns with no header, or an Action(s) header, do not sort.
 function autoSortKeys(panel, table) {
     const heads = table.querySelectorAll('thead th');
     const keys = [];
@@ -153,8 +101,6 @@ function autoSortKey(panel, column) {
     };
 }
 
-// the sort value of every cell in a row, worked out once per row each time
-// the table is sorted (apply starts a fresh cache, so changed rows re-read)
 let autoSortTemplate = null;
 
 function autoSortCells(panel, row) {
@@ -183,8 +129,6 @@ function autoSortCells(panel, row) {
     return values;
 }
 
-// "₱1,234.50" and "12 pcs" sort as numbers, "4 Sep 2026, 16:45" as a date,
-// anything else as words; a dash or "None" is empty and stays last
 function autoSortValue(text) {
     const shown = String(text || '').replace(/\s+/g, ' ').trim();
     if (shown === '' || /^(-|\u2014|\u2013|none|n\/a|not set)$/i.test(shown)) return '';
@@ -203,13 +147,11 @@ function autoSortValue(text) {
     return shown.toLowerCase();
 }
 
-// the value a row is sorted by in one column
 function headerSortValue(key, row) {
     if (typeof key === 'function') return key(row);
     return row[key];
 }
 
-// numbers by size, words A to Z (with numbers inside them in order); empty last
 function compareSortValues(a, b) {
     const aEmpty = a === null || a === undefined || a === '';
     const bEmpty = b === null || b === undefined || b === '';
@@ -235,7 +177,6 @@ const dataPanelMethods = {
         return this.config.pagerId ? document.getElementById(this.config.pagerId) : null;
     },
 
-    // ---------- states ----------
     renderClosed: function () {
         const tbody = this.body();
         if (!tbody) return;
@@ -262,7 +203,6 @@ const dataPanelMethods = {
                 '</div>' +
                 '<h4>' + escapeHtml(gate.title || 'Nothing loaded yet') + '</h4>' +
                 '<p>' + (gate.text || 'Search above, or press the button to read this from the database.') + '</p>' +
-                // button: false when the screen has one Load Data of its own above the tables
                 (gate.button === false ? '' :
                 '<button type="button" class="btn btn-accent" ' +
                         'onclick="dataPanelOpen(\'' + this.key + '\')">' +
@@ -319,8 +259,6 @@ const dataPanelMethods = {
         this.setCount('0 results');
         this.clearPager();
 
-        // no search and no filter narrowed it: the table is simply empty,
-        // and telling the reader to widen filters they never set is wrong
         let narrowed = false;
         for (const name in this.filters) {
             if (this.filters[name] !== undefined && this.filters[name] !== '' &&
@@ -378,8 +316,6 @@ const dataPanelMethods = {
         return this.config.pageSize || DATA_PANEL_ROWS_PER_PAGE;
     },
 
-    // every state ends here, so this is where the table is held at the
-    // height of its fullest page, once the listeners have touched the rows
     announce: function () {
         if (typeof CustomEvent === 'function') {
             document.dispatchEvent(new CustomEvent('datapanel:change', {
@@ -391,16 +327,12 @@ const dataPanelMethods = {
             holdTableHeight(document.getElementById(this.config.tableId));
         }
 
-        // a table that is showing rows is written down as loaded
         if (this.state === 'ready') this.remember();
     },
 
-    // A load asked for during a load is remembered and run when the current one
-    // lands, and every load carries a ticket so a late answer is thrown away
-    // rather than drawn over newer rows.
     open: async function () {
         if (this.state === 'loading') {
-            this.reloadWanted = true;   // whoever asked gets their answer below
+            this.reloadWanted = true;
             return;
         }
 
@@ -426,7 +358,7 @@ const dataPanelMethods = {
             }
         } catch (error) {
             if (ticket !== this.loadTicket) return;
-            this.failedStatus = (error && error.status) || 0;   // 401 or 403: not allowed
+            this.failedStatus = (error && error.status) || 0;
             this.renderError(error && error.handled ? error.message : null);
         } finally {
             if (ticket === this.loadTicket && this.reloadWanted) {
@@ -443,7 +375,6 @@ const dataPanelMethods = {
         this.goTo(page);
     },
 
-    // closes the table on purpose, so it is not loaded again after a reload
     reset: function () {
         this.query = '';
         this.filters = Object.assign({}, this.config.filters || {});
@@ -451,14 +382,10 @@ const dataPanelMethods = {
         this.renderClosed();
     },
 
-    // ---------- staying loaded ----------
-    // The search box above this table (its oninput names the panel's key)
     searchBox: function () {
         return document.querySelector('[oninput*="dataPanelSearchInput(\'' + this.key + '\'"]');
     },
 
-    // Writes down that this table is loaded: the search text, the filters and
-    // the boxes named in config.inputs, so they can be put back (see recall)
     remember: function () {
         if (this.config.remember === false) return;
 
@@ -489,8 +416,6 @@ const dataPanelMethods = {
         writeLoadedPanels(all);
     },
 
-    // Puts the saved search, filters and boxes back, before the table loads
-    // (load() can read these boxes)
     prepare: function (saved) {
         this.query = searchText(saved.text);
         Object.assign(this.filters, saved.filters || {});
@@ -501,14 +426,11 @@ const dataPanelMethods = {
         this.putBoxesBack(saved, false);
     },
 
-    // After the load: a box filled from the rows has its options only now
     finish: function (saved) {
         this.putBoxesBack(saved, true);
         if (this.state === 'ready') this.apply();
     },
 
-    // Sets the filter dropdowns and the other boxes to what was saved. Once the
-    // load is over, a filter whose choice is no longer in its dropdown goes back to its default.
     putBoxesBack: function (saved, loaded) {
         const filters = saved.filters || {};
 
@@ -522,7 +444,6 @@ const dataPanelMethods = {
                 const first = (this.config.filters || {})[name];
                 this.filters[name] = first === undefined ? 'all' : first;
             }
-            // a dropdown that hides its own column: the column follows the value put back
             if (select.dataset && select.dataset.filterTable && typeof syncFilteredColumns === 'function') {
                 syncFilteredColumns(select.dataset.filterTable);
             }
@@ -534,13 +455,9 @@ const dataPanelMethods = {
         }
     },
 
-    // ---------- searching and filtering ----------
-    // Typing on a closed table also loads it, unless loadOnSearch is false
-    // (the typed text is kept and applied when the table is loaded).
     search: async function (text) {
         this.query = searchText(text);
 
-        // the load that is running applies the newest query when it lands
         if (this.state === 'loading') return;
 
         if (this.state === 'closed' || this.state === 'error') {
@@ -565,7 +482,6 @@ const dataPanelMethods = {
         const match = this.config.match;
         const filter = this.config.filter;
 
-        // keep the rows that pass the filters and the search
         this.visible = [];
         for (let i = 0; i < this.rows.length; i++) {
             const row = this.rows[i];
@@ -573,7 +489,6 @@ const dataPanelMethods = {
             if (query === '' || !match || match(row, query)) this.visible.push(row);
         }
 
-        // a pressed header sorts first; the empty ones stay last either way
         if (this.headerSort && this.config.sortKeys) {
             const key = this.config.sortKeys[this.headerSort.column];
             const descending = this.headerSort.descending;
@@ -595,8 +510,6 @@ const dataPanelMethods = {
             }
         }
 
-        // sort is applied to the filtered copy; loaded rows keep server order.
-        // A table that sorts by its cells keeps the header's order once one is pressed.
         const headerSorted = this.headerSort && this.config.autoSortKeys;
         if (typeof this.config.sort === 'function' && !headerSorted) {
             const sorted = this.config.sort(this.visible.slice(), this.filters);
@@ -609,7 +522,6 @@ const dataPanelMethods = {
         this.render();
     },
 
-    // a header was pressed: sort by it, or turn the order round when it already sorts
     sortByColumn: function (column) {
         const keys = this.config.sortKeys;
         if (!keys || !keys[column]) return;
@@ -625,13 +537,11 @@ const dataPanelMethods = {
         }
     },
 
-    // the columns changed (Records): forget the sort and mark the new headers
     resetHeaderSort: function () {
         this.headerSort = null;
         markSortableHeaders(this);
     },
 
-    // ---------- drawing ----------
     render: function () {
         const tbody = this.body();
         if (!tbody) return;
@@ -650,18 +560,14 @@ const dataPanelMethods = {
         this.announce();
     },
 
-    // puts one page's rows in the table and returns them
     drawRows: function (page) {
         const start = (page - 1) * this.pageSize;
         const slice = this.visible.slice(start, start + this.pageSize);
 
-        // build the HTML of every row on this page
         let html = '';
         for (let index = 0; index < slice.length; index++) {
             html += this.config.renderRow(slice[index], start + index);
         }
-        // a short page is topped up to a full one so the pager does not move
-        // (holdTableHeight in tables.js); not while printing every row
         if (this.pageSize === this.basePageSize() && slice.length < this.pageSize) {
             html += fillerRows(this.pageSize - slice.length, this.config.columns);
         }
@@ -669,9 +575,6 @@ const dataPanelMethods = {
         return slice;
     },
 
-    // A later page can hold longer rows that wrap. Each page is drawn and
-    // measured before the browser paints, then the page being read is drawn
-    // back, so page one already takes the room the tallest page needs.
     measurePages: function () {
         const table = document.getElementById(this.config.tableId);
         if (!table || !table.getClientRects().length || this.pageSize !== this.basePageSize()) return;
@@ -695,7 +598,6 @@ const dataPanelMethods = {
         const total = this.visible.length;
         const pages = Math.max(1, Math.ceil(total / this.pageSize));
 
-        // one page says nothing: there is nothing to turn
         if (pages === 1) {
             this.clearPager();
             return;
@@ -728,7 +630,6 @@ const dataPanelMethods = {
         if (pill) pill.textContent = text;
     },
 
-    // ---------- moving between pages ----------
     goTo: function (page) {
         const pages = Math.max(1, Math.ceil(this.visible.length / this.pageSize));
         this.page = Math.min(Math.max(1, page), pages);
@@ -749,7 +650,6 @@ const dataPanelMethods = {
         this.goTo(this.page - 1);
     },
 
-    // the loaded row whose id matches, or null
     find: function (id, idField) {
         const key = idField || this.config.idField || 'id';
         for (let i = 0; i < this.rows.length; i++) {
@@ -759,37 +659,24 @@ const dataPanelMethods = {
     }
 };
 
-// ---------- loaded tables stay loaded ----------
-// A table that was loaded is loaded again after a reload, or after a visit to
-// another page of the app, in the same browser tab. sessionStorage keeps, for
-// each page and each panel key, the search text, the filters and the boxes
-// named in config.inputs. A table that was never loaded is never saved, so it
-// is never loaded by itself. Signing out forgets everything
-// (forgetLoadedPanels in helpers.js). Storage can be blocked, so every
-// access is wrapped and the page works the same without it.
-
-// the file name of this page, such as "manager.html"
 function thisPageName() {
     return window.location.pathname.split('/').pop().toLowerCase();
 }
 
-// everything remembered, as { "manager.html": { "mgr-credit": { text, filters, inputs } } }
 function readLoadedPanels() {
     try {
         const all = JSON.parse(sessionStorage.getItem(LOADED_PANELS_KEY) || '{}');
         if (all && typeof all === 'object') return all;
-    } catch (error) { /* blocked, or not readable */ }
+    } catch (error) {  }
     return {};
 }
 
 function writeLoadedPanels(all) {
     try {
         sessionStorage.setItem(LOADED_PANELS_KEY, JSON.stringify(all));
-    } catch (error) { /* blocked: the table just starts closed next time */ }
+    } catch (error) {  }
 }
 
-// Sets a box to a value. A dropdown without that choice is left alone.
-// True when the box now holds the value.
 function setBoxValue(box, value) {
     if (!box) return false;
 
@@ -807,14 +694,11 @@ function setBoxValue(box, value) {
     return true;
 }
 
-// True when the menu has hidden this table's screen (switched off for the
-// role by Access Control), so it is not loaded for nothing.
 function screenIsHidden(panel) {
     const table = document.getElementById(panel.config.tableId);
     const screen = table ? table.closest('[data-panel]') : null;
     if (!screen) return false;
 
-    // a screen with several views (Reports, Stocks) hides a view by hiding its tab
     const view = table.closest('.panel-view');
     const tab = view ? screen.querySelector('[data-view-tab="' + view.id + '"]') : null;
     if (tab && tab.hidden) return true;
@@ -828,9 +712,7 @@ function screenIsHidden(panel) {
     return Boolean((item && item.hidden) || (heading && heading.hidden));
 }
 
-// Loads again every table of this page that was loaded before.
 async function restoreLoadedPanels() {
-    // only for somebody signed in; session.js sends everyone else to the sign-in page
     if (typeof getCurrentUser !== 'function' || !getCurrentUser()) return;
 
     const saved = readLoadedPanels()[thisPageName()] || {};
@@ -840,7 +722,6 @@ async function restoreLoadedPanels() {
         const panel = getDataPanel(key);
         if (!panel || panel.config.remember === false) continue;
 
-        // a screen switched off since: forget it instead of asking the server
         if (screenIsHidden(panel)) {
             panel.forget();
             continue;
@@ -849,15 +730,12 @@ async function restoreLoadedPanels() {
         panels.push(panel);
     }
 
-    // One at a time. A table whose load also fills another one is no longer
-    // closed by that one's turn, so it is not read a second time.
     for (let i = 0; i < panels.length; i++) {
         const panel = panels[i];
         if (panel.state !== 'closed') continue;
 
         await panel.open();
 
-        // not allowed any more: forget it, so it does not complain on every reload
         if (panel.state === 'error' && (panel.failedStatus === 401 || panel.failedStatus === 403)) {
             panel.forget();
         } else {
@@ -866,16 +744,12 @@ async function restoreLoadedPanels() {
     }
 }
 
-// The page builds its tables in its own DOMContentLoaded handler, and
-// features.js hides the screens that are switched off in a timer after it.
-// A timer inside a timer runs after both, so the tables exist and the menu is settled.
 document.addEventListener('DOMContentLoaded', function () {
     setTimeout(function () {
         setTimeout(restoreLoadedPanels, 0);
     }, 0);
 });
 
-// ---------- the handlers the generated buttons call ----------
 function dataPanelOpen(key) {
     const p = getDataPanel(key);
     if (p) p.open();
@@ -891,10 +765,8 @@ function dataPanelPrev(key) {
     if (p) p.prev();
 }
 
-// Search runs as the text is typed, a moment after the last key so a word
-// typed quickly is one search. Enter searches at once; Escape empties the box.
 const SEARCH_TYPING_DELAY_MS = 220;
-const searchTimers = {};   // panel key -> the timer waiting to run its search
+const searchTimers = {};
 
 function dataPanelSearchInput(key, event) {
     const box = event && event.target;
@@ -925,22 +797,15 @@ function dataPanelSearchKey(key, event) {
     dataPanelSearch(key, event.target ? event.target.value : '');
 }
 
-// runs the search now
 function dataPanelSearch(key, text) {
     const panel = getDataPanel(key);
     if (panel) panel.search(text);
 }
 
-// Every search box in the system follows one rule: what is typed has to begin
-// a word. One letter is enough, so "c" finds Carl and Mark Cole but not Lace
-// or KC, and "ad" finds Adhesive and Wood Adhesive but not Shade or Thread.
-
-// lower-cased and trimmed; '' when nothing is typed
 function searchText(text) {
     return String(text || '').trim().toLowerCase();
 }
 
-// true when the query begins the value or any word inside it
 function startsAWord(value, query) {
     if (value === null || value === undefined) return false;
     const text = String(value).trim().toLowerCase();
@@ -953,7 +818,6 @@ function startsAWord(value, query) {
     return false;
 }
 
-// The query arrives already lower-cased and trimmed.
 function prefixMatch(fields, query) {
     if (!query) return true;
     for (let i = 0; i < fields.length; i++) {
@@ -962,9 +826,6 @@ function prefixMatch(fields, query) {
     return false;
 }
 
-// On an open table this narrows what has arrived. On a closed table it loads
-// the table by default; a panel with loadOnFilter: false only remembers the
-// value until Load Data or the search box asks (the staff directory).
 function dataPanelFilter(key, name, value) {
     const panel = getDataPanel(key);
     if (!panel) return;

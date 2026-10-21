@@ -24,11 +24,7 @@
                     <span class="brand-sub">Sales &amp; Inventory</span>
                 </span>
             </a>
-            <!-- data-feature names the screen an item opens; shared/features.js hides
-                 the ones switched off for this role and mirrors the counts -->
             <ul class="sidebar-nav">
-                <!-- A folding heading does two things (shared/helpers.js sidebarHeading): its
-                     words open the module's first screen, its caret alone folds the list -->
                 <li data-sidebar-dropdown>
                     <a href="#pos" onclick="sidebarHeading(event, 'pos-nav', 'pos-dropdown', showRegister)" class="nav-parent" id="pos-nav"><i class="bi bi-shop nav-icon" aria-hidden="true"></i>
                         Point of Sale <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
@@ -41,14 +37,12 @@
                 </li>
                 <li data-feature="credit"><a href="#" data-panel-link="panel-customers" onclick="showCustomers(event)"><i class="bi bi-person-vcard nav-icon" aria-hidden="true"></i>Customers Record</a></li>
                 <li data-feature="sales-report"><a href="#" data-panel-link="panel-salesreport" onclick="showSalesReport(event)"><i class="bi bi-bar-chart nav-icon" aria-hidden="true"></i>Sales Report</a></li>
-                <!-- drawn by shared/delivery-schedule.js; hidden until features.js hears the role has it -->
                 <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
                     Delivery Schedule</a></li>
 
             </ul>
         </aside>
 
-        <!-- the shade behind the menu once it slides over the page -->
         <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
 
         <main class="main-content">
@@ -63,7 +57,6 @@
 
             <div class="content-area">
 
-                <!-- DEFAULT: THE REGISTER -->
                 <div id="panel-pos" data-panel>
                     <div class="pos-layout">
                         <div class="card pos-catalog">
@@ -73,7 +66,6 @@
                                 </div>
                             </div>
 
-                            <!-- one letter or more, matched at the start of a word ("ad" finds Adhesive, not Shade) -->
                             <div class="panel-toolbar">
                                 <div class="search-wrap">
                                     <input type="search" class="form-control search-input" id="catalog-search"
@@ -91,17 +83,11 @@
                             <div id="catalog-grid" class="catalog-scroll"></div>
                         </div>
 
-                        <!-- THE ORDER: its lines and what they come to, and nothing else. The
-                             customer, the payment and the delivery are asked for in the
-                             Payment window (#checkout-modal, below), opened by Proceed to
-                             Payment. -->
                         <div class="order-summary" id="order-summary">
                             <div class="panel-head">
                                 <div>
                                     <h3>Order</h3>
                                 </div>
-                                <!-- a payment against a customer's unpaid balance, taken here
-                                     instead of in Customers Record; held with debt-payments -->
                                 <div class="panel-actions">
                                     <button type="button" class="btn btn-sm" id="credit-payment-btn"
                                             data-feature="debt-payments" onclick="openCreditPaymentPicker()">Credit Payment</button>
@@ -121,10 +107,6 @@
                     </div>
                 </div>
 
-
-                <!-- ============================================================
-                     CUSTOMERS & CREDIT
-                     ============================================================ -->
                 <div class="card" id="panel-customers" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -142,7 +124,6 @@
                                    placeholder="Search by customer or phone"
                                    oninput="dataPanelSearchInput('cash-credit', event)" onkeydown="dataPanelSearchKey('cash-credit', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
-                        <!-- due date is the oldest unpaid sale plus the 30-day term -->
                         <div class="toolbar-field">
                             <label for="customers-due">Due</label>
                             <select id="customers-due"
@@ -168,9 +149,6 @@
                     <div class="pager is-single" id="customers-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     DELIVERIES -- tracking only; deliveries are created at the till. Starts empty.
-                     ============================================================ -->
                 <div class="card" id="panel-delivery" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -211,9 +189,7 @@
                     <div class="pager is-single" id="cdel-pager"></div>
                 </div>
 
-                <!-- REFUNDS -->
                 <div id="panel-refund" data-panel style="display: none;">
-                    <!-- the form on the left, the list beside it: both on one screen -->
                     <div class="pair-layout form-left">
                         <div class="card pair-form">
                             <div class="panel-head">
@@ -222,17 +198,10 @@
                                 </div>
                             </div>
                             <form id="refund-form" class="form-sheet" onsubmit="handleIssueRefund(event)" autocomplete="off">
-                                <!-- the sale picked from Sales in the Past 3 Days (renderRefundSource) -->
                                 <div class="adjust-source" id="refund-source" hidden></div>
-                                <!-- a sale of several items: each with how many came back, like the
-                                     clerk's Stock Adjustment for a purchase order (renderRefundLines) -->
                                 <div class="adjust-lines" id="refund-lines" hidden></div>
 
-                                <!-- ONE ITEM -- typed by hand, or filled in from a sale of one item.
-                                     Hidden while a sale of several items is on the form. -->
                                 <div id="refund-single">
-                                <!-- WHAT CAME BACK -- unlike the customer box, a name matching nothing is
-                                     not accepted: no strip under the box means nothing is chosen -->
                                 <div class="form-group">
                                     <label for="refund-product">Product</label>
                                     <div class="suggest-wrap">
@@ -281,7 +250,6 @@
                                     <input type="text" name="reason" id="return-reason" class="form-control"
                                            maxlength="255" placeholder="Wrong item" required>
                                 </div>
-                                <!-- what a sale of several items will refund, as it is typed -->
                                 <div class="adjust-preview" id="refund-preview"></div>
                                 <div class="form-footer">
                                     <button type="submit" class="btn btn-success">Issue Refund</button>
@@ -319,7 +287,6 @@
                     </div>
                 </div>
 
-                <!-- SALES REPORT -->
                 <div class="card" id="panel-salesreport" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -372,17 +339,6 @@
         </main>
     </div>
 
-    <!-- ============================================================
-         PAYMENT -- opened by Proceed to Payment under the order. Everything the
-         sale still needs is asked for here: who the customer is (empty is a
-         walk-in; a name has to be picked from the list), how it is paid, the
-         reference, and a delivery. Complete Sale, Pay by QR and Make a
-         Delivery are in its foot. The form keeps the ids and names it had
-         beside the order, so handleCheckout and the QR and delivery code read
-         it as before. Locked, like the delivery form: a stray click or Escape
-         must not throw away what was typed. data-modal-scroll keeps it to one
-         page that scrolls (modals.js) rather than turning pages.
-         ============================================================ -->
     <div class="modal" id="checkout-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box checkout-box">
             <div class="modal-head">
@@ -397,13 +353,9 @@
             </div>
 
             <div class="modal-body">
-                <!-- the amount due, and what happens to it: change, what is short, what goes on account -->
                 <div class="cart-totals pay-totals" id="pay-totals"></div>
 
                 <form id="checkout-form" onsubmit="handleCheckout(event)" autocomplete="off">
-                    <!-- THE CUSTOMER -- empty is a walk-in. A name has to be a customer picked
-                         from the list; a name nobody has gets an Add Customer button, which
-                         opens the Customers Record form and puts the new account on the sale. -->
                     <div class="form-group">
                         <label for="customer-name">Customer</label>
                         <div class="suggest-wrap">
@@ -442,7 +394,6 @@
                         <input type="number" id="pay-amount" name="amountPaid" class="form-control amount-field" min="0" step="0.01" placeholder="0.00" oninput="renderCart()">
                     </div>
 
-                    <!-- PART PAYMENT -- what is handed over is taken now; the rest goes on account -->
                     <div id="downpayment-field" style="display: none;">
                         <div class="grid-2">
                             <div class="form-group">
@@ -470,23 +421,14 @@
                         <p class="credit-verdict" id="credit-verdict"></p>
                     </div>
 
-                    <!-- THE BANK AND ACCOUNT -- a cheque's account name, account number, bank, branch
-                         and date, or the customer's bank, account name and number for a bank transfer.
-                         Built by buildPaymentDetailsBox (payment-details.js) and shown by
-                         renderSalePaymentExtras for the method taken now (the sale's, or the part payment's) -->
                     <div id="sale-details-box"></div>
 
-                    <!-- THE PAYMENT REFERENCE -- the cheque number (required), optional for an
-                         e-wallet, and not on the screen at all for cash, cash on delivery, a bank
-                         transfer (PayMongo's own payment number is its reference) or a credit sale
-                         with nothing paid now (renderSalePaymentExtras) -->
                     <div class="form-group" id="sale-reference-field" hidden>
                         <label for="sale-reference">Reference <span class="label-hint" id="sale-reference-hint">required</span></label>
                         <input type="text" id="sale-reference" name="referenceNo" class="form-control"
                                maxlength="60" autocomplete="off" placeholder="e.g. cheque 001234">
                     </div>
 
-                    <!-- the delivery is filled in beside the order and written the moment the sale exists -->
                     <div class="delivery-attached" id="delivery-attached" hidden></div>
                 </form>
             </div>
@@ -495,8 +437,6 @@
                 <button type="button" class="btn btn-ghost" onclick="closeCheckoutModal()">Back to the Order</button>
                 <button type="button" class="btn btn-ghost" id="make-delivery-btn"
                         onclick="openDeliveryForm()">Make a Delivery</button>
-                <!-- GCash, PayMaya or Bank Transfer: the customer scans a QR code, the only
-                     way to finish for those, so Complete Sale is hidden (renderCartFigures) -->
                 <button type="button" class="btn" id="qr-pay-btn" data-icon="qr-code"
                         onclick="payByQr()" hidden>Pay by QR</button>
                 <button type="submit" form="checkout-form" class="btn btn-success" id="checkout-btn">Complete Sale</button>
@@ -504,11 +444,6 @@
         </div>
     </div>
 
-    <!-- ============================================================
-         CREDIT PAYMENT -- from the register: pick a customer who owes, and the
-         usual flow follows (their card on the Unpaid Sales tab, the payment
-         form, Pay by QR). Held with debt-payments.
-         ============================================================ -->
     <div class="modal" id="credit-pay-modal">
         <div class="modal-box">
             <div class="modal-head">
@@ -529,7 +464,6 @@
                            placeholder="Type a name or phone, or pick from the list"
                            oninput="renderCreditPayList()">
                 </div>
-                <!-- data-no-icon: each row is a customer name, so "Mark Aguilar" must not get the "Mark ..." icon -->
                 <div id="credit-pay-list" class="credit-pay-list" data-no-icon></div>
             </div>
 
@@ -539,10 +473,6 @@
         </div>
     </div>
 
-    <!-- ============================================================
-         ASK FOR A HIGHER LIMIT -- one form: the new limit and why. The reason
-         is required (the server refuses a blank one too). Locked.
-         ============================================================ -->
     <div class="modal" id="limit-modal" data-modal-locked>
         <div class="modal-box">
             <div class="modal-head">
@@ -579,14 +509,6 @@
         </div>
     </div>
 
-    <!-- ============================================================
-         MAKE A DELIVERY -- the delivery's date is the sale's own date, set by the server
-         ============================================================ -->
-    <!-- data-modal-locked: neither a backdrop click nor Escape closes this form,
-         which would throw away typed details; the two buttons are the ways out.
-         data-modal-scroll: the form is long, so it scrolls instead of turning pages.
-         The address is asked for in parts; the server joins them into the one line that
-         the driver's card, the schedule and the receipt show. -->
     <div class="modal" id="delivery-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
             <div class="modal-head">
@@ -604,9 +526,6 @@
                 <form id="make-delivery-form" onsubmit="saveDeliveryForm(event)" autocomplete="off" novalidate>
                     <h4 class="detail-subhead delivery-first-head">Who receives it</h4>
                     <div class="grid-2">
-                        <!-- THE RECIPIENT IS A CUSTOMER ON RECORD, picked the way the Payment card picks one.
-                             A name nobody has gets an Add Customer button. A pick fills the contact number
-                             and the address below from the customer's record, and the sale takes the same customer. -->
                         <div class="form-group">
                             <label for="dl-name">Recipient name <span class="req-mark" aria-hidden="true">*</span></label>
                             <div class="suggest-wrap">
@@ -623,7 +542,6 @@
                                         hidden>&times;</button>
                                 <ul class="suggest-list" id="dl-customer-suggest" role="listbox" hidden></ul>
                             </div>
-                            <!-- one box, so the notes under the field share the grid's third row -->
                             <div class="dl-name-notes">
                                 <p class="customer-verdict" id="dl-customer-verdict"></p>
                                 <button type="button" class="btn btn-sm customer-add-btn" id="dl-customer-add-btn"
@@ -690,7 +608,6 @@
                         </div>
                         <div class="form-group">
                             <label for="dl-driver">Driver <span class="req-mark" aria-hidden="true">*</span></label>
-                            <!-- the driver has to be picked from the list; the hidden id is set only by a pick -->
                             <div class="suggest-wrap">
                                 <input type="text" id="dl-driver" class="form-control" autocomplete="off"
                                        role="combobox" aria-expanded="false"
@@ -727,11 +644,6 @@
         </div>
     </div>
 
-    <!-- ============================================================
-         ADD CUSTOMER -- the one place an account is opened. Locked like the
-         other forms that hold typed data. It sits after the delivery card so it
-         opens above it (Add Customer from the delivery form).
-         ============================================================ -->
     <div class="modal" id="add-customer-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
             <div class="modal-head">
@@ -827,7 +739,6 @@
         </div>
     </div>
 
-    <!-- PAGED DETAIL POPUP -->
     <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
         <div class="modal-box">
             <div class="modal-head">
@@ -853,14 +764,6 @@
         </div>
     </div>
 
-
-    <!-- ============================================================
-         CREDIT SETTLEMENT -- money against one sale's balance. Locked like the
-         delivery form: a typed amount is not thrown away by a stray click.
-         data-modal-scroll keeps it to one page, at one width, so choosing a
-         QR method does not widen it or turn it into pages (modals.js); a short
-         screen scrolls it instead.
-         ============================================================ -->
     <div class="modal" id="payment-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
             <div class="modal-head">
@@ -902,7 +805,6 @@
                         <button type="button" class="btn btn-sm" onclick="fillPayment(0.5)">50%</button>
                         <button type="button" class="btn btn-sm" onclick="fillPayment(1)">100%</button>
                     </div>
-                    <!-- the cheque's or the transfer's bank and account (payment-details.js) -->
                     <div id="payment-details-box" style="margin-top: 14px;"></div>
                     <p class="credit-verdict" id="payment-verdict"></p>
                 </form>
@@ -917,9 +819,6 @@
         </div>
     </div>
 
-    <!-- ONE CUSTOMER, FOR THE COUNTER -- the account on one tab, the unpaid sales
-         (each with Pay) on the next, purchases beside payments on the last (each
-         paged with Previous and Next), and the way to ask for more room -->
     <div class="modal" id="customer-modal" onclick="closeModalOnBackdrop(event, 'customer-modal')">
         <div class="modal-box modal-wide">
             <div class="modal-head">
@@ -936,11 +835,8 @@
             <div class="modal-tabs">
                 <button type="button" class="modal-tab active" id="customer-tab-account"
                         onclick="showCustomerTab('account')">Account</button>
-                <!-- each sale still owing, with the button that takes money against it;
-                     shown only when there is a balance and the role holds debt-payments -->
                 <button type="button" class="modal-tab" id="customer-tab-unpaid"
                         onclick="showCustomerTab('unpaid')" hidden>Unpaid Sales</button>
-                <!-- purchases and payments are a tab each, with filters over what is loaded -->
                 <button type="button" class="modal-tab" id="customer-tab-history"
                         onclick="showCustomerTab('history')">Purchase History</button>
                 <button type="button" class="modal-tab" id="customer-tab-payments"
@@ -1009,10 +905,6 @@
         </div>
     </div>
 
-    <!-- SALES INVOICE, and the receipt of a Credit Settlement payment (it is on the page after the
-         customer's card, so it opens on top of that card) -- data-modal-scroll: a long invoice
-         scrolls inside the card instead of being cut into pages (modals.js), and prints whole
-         (css/pages/cashier-dashboard.css) -->
     <div class="modal" id="receipt-modal" data-modal-scroll onclick="closeModalOnBackdrop(event, 'receipt-modal')">
         <div class="modal-box receipt-box">
             <div class="modal-head no-print">
@@ -1031,7 +923,6 @@
             </div>
 
             <div class="modal-foot no-print">
-                <!-- opened from Sales Report: a sale of today can be asked to be voided (a manager decides) -->
                 <button type="button" class="btn btn-danger" id="receipt-void-btn" data-icon="slash-circle"
                         onclick="requestVoidSale()" hidden>Request Void</button>
                 <button type="button" class="btn btn-accent" id="receipt-print-btn" onclick="printReceipt()">Print Invoice</button>

@@ -1,41 +1,12 @@
-// ============================================================
-// manager.js -- the Manager dashboard
-// Loaded by: manager.html
-//
-// What is in this file, from top to bottom:
-//   - switching screens (showManagerPanel and the show... functions), and the
-//     views inside Reports and Stocks, each opened from its own menu entry
-//     (showPanelView)
-//   - the Sales Summary: the period, the figures, the two tables
-//   - saving tables as spreadsheets, and printing them (one Export menu each)
-//   - reports, stocks, stock movements, the selling price and the reorder policy
-//   - credit: customer limits and extension requests
-//   - deliveries, records (suppliers, customers, products...), archives
-//   - the Account Management screen: creating cashier, clerk and driver accounts,
-//     the list of those accounts, and lifting a hold after wrong passwords (only
-//     on the menu when the administrator switches it on)
-//   - the popups that show one sale, delivery, customer, ... in full
-//   - the page start-up code at the very bottom ("MANAGER PAGE BOOT")
-// ============================================================
-
 let recordType = 'supplier';
 let incomeRange = { name: 'monthly', from: null, to: null };
 let incomeData = null;
 
-// the view showing on each tabbed screen; opening the screen again goes back to it
 let reportView = 'report-summary';
 let stockView = 'stock-overview';
 
-// eight rows keeps a report card above the fold on a 1366x768 laptop, so the
-// Reports screen never scrolls; the pager turns the rest
 const REPORT_ROWS_PER_PAGE = 8;
 
-// ==========================================
-// PANEL SWITCHING
-// ==========================================
-// Opening a screen never unfolds a list in the menu: only pressing its
-// heading does (shared/helpers.js sidebarHeading). The heading over a folded
-// list lights up on its own when a screen beneath it is the open one.
 function showManagerPanel(panelId, title, event) {
     if (event) event.preventDefault();
 
@@ -54,10 +25,6 @@ function showManagerPanel(panelId, title, event) {
     leaveScreenFurniture();
 }
 
-// A link that names a view inside a screen (an income table) is marked only
-// when the screen is showing that view. A panel with data-panel-of (an
-// order's document, Total Purchases) marks the screen it belongs to.
-// A view with data-view-of (QR Payments) lights the entry of the view it is a tab of.
 function markPanelLinks(panelId) {
     const panel = document.getElementById(panelId);
     let view = panel ? panel.dataset.view : undefined;
@@ -74,26 +41,17 @@ function markPanelLinks(panelId) {
     }
 }
 
-// ==========================================
-// TABBED SCREENS -- Reports and Stocks
-// ==========================================
-// Each view (.panel-view) of these screens has its own entry in the menu.
-// The screen keeps a tab bar that is never drawn: its tabs carry the
-// data-feature marks shared/features.js hides, and a view whose tab is
-// hidden is never shown.
 function viewOffered(panel, viewId) {
     const tab = panel.querySelector('[data-view-tab="' + viewId + '"]');
     return Boolean(tab) && !tab.hidden;
 }
 
-// shows viewId, or the first view still offered; returns the one shown
 function showPanelView(panelId, viewId, title, event) {
     const panel = document.getElementById(panelId);
     if (!panel) return null;
 
     const views = panel.querySelectorAll(':scope > .panel-view');
 
-    // the view asked for if it is offered, else the first view offered, else the first view
     let view = null;
     for (let i = 0; i < views.length; i++) {
         if (views[i].id === viewId && viewOffered(panel, views[i].id)) {
@@ -129,8 +87,6 @@ function showPanelView(panelId, viewId, title, event) {
     return view.id;
 }
 
-// After the role's switches are applied: a group with no tabs left goes, and a
-// screen showing a view that was just switched off moves to one still offered.
 function syncViewNavs() {
     const tabbedPanels = document.querySelectorAll('.tabbed-panel');
     for (let p = 0; p < tabbedPanels.length; p++) {
@@ -140,7 +96,6 @@ function syncViewNavs() {
         for (let g = 0; g < groups.length; g++) {
             const group = groups[g];
             const tabs = group.querySelectorAll('[data-view-tab]');
-            // the group goes when it has tabs and every one of them is hidden
             let allHidden = true;
             for (let t = 0; t < tabs.length; t++) {
                 if (!tabs[t].hidden) allHidden = false;
@@ -156,8 +111,6 @@ function syncViewNavs() {
     }
 }
 
-// Reports is the first screen. The page opens on the Sales Summary; the menu
-// entry and the brand corner go back to whichever report was last open.
 function showReports(event) { showReport(reportView, event); }
 
 function showReport(reportId, event) {
@@ -165,7 +118,6 @@ function showReport(reportId, event) {
     if (shown) reportView = shown;
 }
 
-// Stocks: the whole inventory, the reorder alerts and the stock movements
 function showStocks(event) { showStockView(stockView, event); }
 
 function showStockView(viewId, event) {
@@ -183,17 +135,12 @@ function showCreditRequests(event) { showManagerPanel('panel-credit-requests', '
 function showRecords(event)       { showRecordType(recordType, event); }
 function showPurchasing(event)    { showPurchaseOrderHistory(event); }
 function showArchives(event)      { showManagerPanel('panel-archives', 'Archives', event); }
-// everything staff have filed: a screen of its own, apart from Reports
 function showActivityLog(event)   { showManagerPanel('panel-activity', 'Activity Log', event); }
-// Sales Transactions
 function showSalesTransactions(event) {
     showReport('report-sales', event);
     alertWaitingVoidRequests();
 }
 
-// Policy Maintenance. Credit Maintenance: the shop's late-payment rate and the
-// credit policy. Customer Data Terms and Refund Policy: their wording. Each page
-// shows the back of the customer card beside it. Read again each time a page opens.
 async function showCreditMaintenance(event) {
     showManagerPanel('panel-credit-maintenance', 'Credit Maintenance', event);
     const rateRead = await loadPenaltyPolicy();
@@ -211,13 +158,10 @@ async function showRefundPolicy(event) {
     await loadPolicies();
 }
 
-// Account Management: the staff list is not read here; Load Data on the screen reads it
 function showAccountManagement(event) {
     showManagerPanel('panel-accounts', 'Account Management', event);
 }
 
-// Sales Summary. The date picker is a Period box; Custom date shows two dates,
-// From and To, beside it. A period counts back from today.
 const INCOME_RANGES = [
     ['daily', 'Today', 0],
     ['weekly', 'Last 7 days', 6],
@@ -227,16 +171,12 @@ const INCOME_RANGES = [
     ['annual', 'Last 12 months', 364]
 ];
 
-// The calendar day this browser is having, as the date inputs write it.
-// toISOString() answers in UTC, which is yesterday for the first eight hours
-// of every day here.
 function localIsoDay(daysBack) {
     const now = new Date();
     now.setDate(now.getDate() - (daysBack || 0));
     return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 }
 
-// Income and sales are only ever behind us: the pickers stop at today
 function limitDatesToToday(ids) {
     const today = localIsoDay();
     for (let i = 0; i < ids.length; i++) {
@@ -245,7 +185,6 @@ function limitDatesToToday(ids) {
     }
 }
 
-// The Period box: the named periods, then Custom date (the two dates beside it)
 function renderIncomeRanges() {
     const select = document.getElementById('income-period');
     if (!select) return;
@@ -262,7 +201,6 @@ function renderIncomeRanges() {
     showPeriodDates('income', incomeRange.name === 'custom');
 }
 
-// the two date boxes show the range in use
 function fillIncomeDates() {
     const from = document.getElementById('income-from');
     const to = document.getElementById('income-to');
@@ -287,8 +225,6 @@ async function pickIncomeRange(name) {
     await incomeRangeChanged();
 }
 
-// the Period box changed: a named period applies at once; Custom date shows the
-// two dates and waits for them
 function incomePeriodPicked(value) {
     if (value === 'custom') {
         showPeriodDates('income', true);
@@ -299,14 +235,6 @@ function incomePeriodPicked(value) {
     pickIncomeRange(value);
 }
 
-// ==========================================
-// THE PERIOD BOX ON EVERY DATE FILTER
-// ==========================================
-// Every report with dates has one Period box: All time, the named periods, and
-// Custom date. Custom date shows From and To beside the box; any other choice
-// hides them and fills them in itself, so whatever reads the two dates (the
-// server's sales list, the QR list, a table's own filter) reads the period.
-// The Sales Summary has its own box (above), without All time.
 const PERIOD_CHOICES = [
     ['all', 'All time', null],
     ['daily', 'Today', 0],
@@ -317,7 +245,6 @@ const PERIOD_CHOICES = [
     ['annual', 'Last 12 months', 364]
 ];
 
-// what each report does once its dates have changed
 const PERIOD_APPLY = {
     sales: function () { reloadSales(); },
     unpaid: function () { dateFilterChanged('mgr-unpaid', 'unpaid'); },
@@ -325,7 +252,6 @@ const PERIOD_APPLY = {
     all: function () { dateFilterChanged('mgr-all', 'all'); }
 };
 
-// shows or hides the From and To boxes beside a Period box
 function showPeriodDates(prefix, show) {
     const ids = [prefix + '-from', prefix + '-to'];
     for (let i = 0; i < ids.length; i++) {
@@ -335,7 +261,6 @@ function showPeriodDates(prefix, show) {
     }
 }
 
-// the From and To a named period stands for ('' and '' for All time)
 function periodDates(value) {
     for (let i = 0; i < PERIOD_CHOICES.length; i++) {
         if (PERIOD_CHOICES[i][0] !== value) continue;
@@ -345,7 +270,6 @@ function periodDates(value) {
     return null;
 }
 
-// fills every Period box (data-period-for) with the choices, on All time
 function buildPeriodBoxes() {
     const boxes = document.querySelectorAll('select[data-period-for]');
     for (let b = 0; b < boxes.length; b++) {
@@ -360,8 +284,6 @@ function buildPeriodBoxes() {
     syncPeriodBoxes();
 }
 
-// A Period box changed: Custom date shows the dates and waits for them; any
-// other period fills them in and the report follows at once.
 function periodPicked(prefix) {
     const select = document.getElementById(prefix + '-period');
     if (!select) return;
@@ -382,9 +304,6 @@ function periodPicked(prefix) {
     if (PERIOD_APPLY[prefix]) PERIOD_APPLY[prefix]();
 }
 
-// A table put back after a reload brings its dates back but not its Period
-// box: dates that are not the period shown make the box read Custom date, with
-// the dates beside it. Runs whenever a table changes.
 function syncPeriodBoxes() {
     const boxes = document.querySelectorAll('select[data-period-for]');
     for (let b = 0; b < boxes.length; b++) {
@@ -401,7 +320,6 @@ function syncPeriodBoxes() {
     }
 }
 
-// a date typed or picked: once both are there and in order, the range is custom
 async function incomeDatesPicked() {
     const from = document.getElementById('income-from');
     const to = document.getElementById('income-to');
@@ -413,7 +331,6 @@ async function incomeDatesPicked() {
         return;
     }
 
-    // no sales have happened tomorrow; a future date is a typo, not a request
     const today = localIsoDay();
     if (from.value > today || to.value > today) {
         notifyWarning('The summary only covers days up to today. Pick dates on or before ' +
@@ -427,7 +344,6 @@ async function incomeDatesPicked() {
     await incomeRangeChanged();
 }
 
-// the period, for every cashier; the screen, the Spreadsheet and Print all use this
 function incomeQuery() {
     if (incomeRange.name === 'custom') {
         return '?from=' + encodeURIComponent(incomeRange.from) + '&to=' + encodeURIComponent(incomeRange.to);
@@ -435,10 +351,8 @@ function incomeQuery() {
     return '?range=' + encodeURIComponent(incomeRange.name);
 }
 
-// the figures are on screen (a table can be loaded without them)
 let incomeSummaryShown = false;
 
-// set when a sale or payment changed since incomeData was read
 let incomeStale = false;
 
 async function fetchIncome() {
@@ -446,13 +360,10 @@ async function fetchIncome() {
     incomeStale = false;
 }
 
-// Load Data: the figures and both tables for the chosen period
 async function loadIncome() {
     await refreshIncome(true);
 }
 
-// A new period refreshes only what is already loaded. With nothing loaded
-// yet it loads everything, as Load Data does.
 async function incomeRangeChanged() {
     let anyOpen = incomeSummaryShown;
     for (let i = 0; i < INCOME_PANEL_KEYS.length; i++) {
@@ -478,8 +389,6 @@ async function refreshIncome(all) {
     }
 }
 
-// Before Load Data the two cards are already there, so the table under them
-// does not jump when the figures arrive.
 function renderIncome() {
     const data = incomeData;
     const totals = data ? data.totals : null;
@@ -488,7 +397,6 @@ function renderIncome() {
         incomeSummaryShown = true;
         const note = document.getElementById('income-range-note');
         if (note) {
-            // a custom range is already named by its dates
             const dates = data.range.from + ' to ' + data.range.to;
             note.textContent = data.range.label === dates ? dates : data.range.label + ': ' + dates;
         }
@@ -514,11 +422,6 @@ function renderIncome() {
     }
 }
 
-// Every table can leave the page as a spreadsheet of every filtered row, or
-// through the browser's print dialogue with the table unpaged. Both sit in one
-// Export menu (buildExportMenus); each is dead until the table holds rows and
-// follows it via 'datapanel:change'. The server lays the workbook out (spreadsheet.js), so
-// every column is as wide as what it holds.
 function canExportReports() {
     const user = getCurrentUser();
     return Boolean(user && user.role_name === 'Manager');
@@ -533,8 +436,6 @@ function applyExportPermissions() {
     }
 }
 
-// Spreadsheet and Print / PDF go behind one Export button with a menu under it.
-// The two buttons keep their own handlers and data-print-for; they only move.
 function buildExportMenus() {
     const boxes = document.querySelectorAll('.panel-actions');
     for (let b = 0; b < boxes.length; b++) {
@@ -592,7 +493,6 @@ function closeExportMenus() {
     }
 }
 
-// "a, b" -> ['a', 'b']: split on commas, trim each, leave out empty ones
 function printKeys(keys) {
     const parts = String(keys || '').split(',');
     const result = [];
@@ -608,7 +508,6 @@ function panelHasRows(key) {
     return Boolean(panel && panel.state === 'ready' && panel.visible.length > 0);
 }
 
-// called whenever any table changes shape
 function syncExportButtons() {
     const printButtons = document.querySelectorAll('[data-print-for]');
     for (let b = 0; b < printButtons.length; b++) {
@@ -631,7 +530,6 @@ function syncExportButtons() {
         }
     }
 
-    // an Export button is live while anything in its menu is
     const menus = document.querySelectorAll('.export-menu');
     for (let m = 0; m < menus.length; m++) {
         const toggle = menus[m].querySelector('.export-toggle');
@@ -645,7 +543,6 @@ function syncExportButtons() {
     }
 }
 
-// the income breakdown as one file, for the period on the screen
 function exportIncomeSpreadsheet() {
     if (!canExportReports()) {
         notifyWarning('Only a manager can take a report off this screen.', 'Not allowed');
@@ -663,8 +560,6 @@ function exportIncomeSpreadsheet() {
     notifyInfo('The Excel file is being saved to your downloads folder.', 'Exporting the Sales Summary');
 }
 
-// ---------- a spreadsheet of what the table shows ----------
-// rows are read back as drawn, so the file and the page cannot disagree
 function panelSheet(key) {
     const panel = getDataPanel(key);
     if (!panel || panel.state !== 'ready' || panel.visible.length === 0) return null;
@@ -672,7 +567,6 @@ function panelSheet(key) {
     const table = document.getElementById(panel.config.tableId);
     if (!table) return null;
 
-    // keep[i] says whether column i is saved; a column with no name holds buttons
     const heads = table.querySelectorAll('thead th');
     const keep = [];
     const headers = [];
@@ -684,8 +578,6 @@ function panelSheet(key) {
         }
     }
 
-    // draw every row (not just this page) into a hidden table, then read the cells back;
-    // a column whose cells read as pesos is saved as money
     let rowsHtml = '';
     for (let index = 0; index < panel.visible.length; index++) {
         rowsHtml += panel.config.renderRow(panel.visible[index], index);
@@ -694,7 +586,7 @@ function panelSheet(key) {
     scratch.innerHTML = '<tbody>' + rowsHtml + '</tbody>';
 
     const rows = [];
-    const money = [];   // the column numbers that hold money, each listed once
+    const money = [];
     const trs = scratch.querySelectorAll('tbody tr');
     for (let r = 0; r < trs.length; r++) {
         const tr = trs[r];
@@ -721,15 +613,13 @@ function panelSheet(key) {
     return { name: String(name).trim(), headers: headers, rows: rows, money: money };
 }
 
-// money and count cells go in as numbers; anything with words as it reads
 function sheetCell(td) {
     const text = td.textContent.replace(/\s+/g, ' ').trim();
     if (td.classList.contains('cell-num') || td.classList.contains('cell-id')) {
-        // "#12" -> "12",  "-₱1,234.50" -> "-1234.50"
-        let bare = text.replace(/^#/, '');       // remove a leading #
-        bare = bare.replace(/^(-?)\u20B1/, '$1'); // remove the peso sign, keep a minus sign
-        bare = bare.replace(/,/g, '');          // remove the commas
-        if (/^-?\d+(\.\d+)?$/.test(bare)) return Number(bare);   // it is a plain number
+        let bare = text.replace(/^#/, '');
+        bare = bare.replace(/^(-?)\u20B1/, '$1');
+        bare = bare.replace(/,/g, '');
+        if (/^-?\d+(\.\d+)?$/.test(bare)) return Number(bare);
     }
     return text;
 }
@@ -783,16 +673,8 @@ async function exportPanelSpreadsheet(keys, title) {
     }
 }
 
-// ---------- paper ----------
-// the browser's own print dialogue; the named tables are unpaged while it is open
 let printRestore = null;
 
-// The status cards over a table stay off the printout. Their figures are read
-// back here as label/value rows, to go in a Totals table at the bottom of the
-// report instead.
-
-// The Deliveries printout holds only the rows the filters leave; the Totals
-// table counts those rows in each of these fulfilment states, in this order.
 const PRINT_DELIVERY_STATES = ['Pending Payment', 'Completed', 'Out for Delivery',
                                'In Transit', 'Pending', 'Delayed', 'Failed'];
 
@@ -808,7 +690,6 @@ function printTotalRows(container, panel) {
         }
     }
 
-    // the Deliveries printout counts the printed rows in each fulfilment state
     if (panel && panel.key === 'mgr-deliveries' && panel.state === 'ready') {
         let total = 0;
         for (let s = 0; s < PRINT_DELIVERY_STATES.length; s++) {
@@ -816,7 +697,7 @@ function printTotalRows(container, panel) {
             for (let i = 0; i < panel.visible.length; i++) {
                 if (panel.visible[i].fulfilment_state === PRINT_DELIVERY_STATES[s]) count++;
             }
-            if (count === 0) continue;   // nothing of this kind is printed
+            if (count === 0) continue;
             total += count;
             rows.push([PRINT_DELIVERY_STATES[s], String(count)]);
         }
@@ -828,7 +709,6 @@ function printTotalRows(container, panel) {
     return rows;
 }
 
-// puts the Totals table at the bottom of the report; its CSS shows it on paper only
 function addPrintTotals(container, panel) {
     const rows = printTotalRows(container, panel);
     if (rows.length === 0) return null;
@@ -846,10 +726,7 @@ function addPrintTotals(container, panel) {
 }
 
 function printReport(keys) {
-    // a credit page still on the paper is put back first
     if (typeof finishCreditPrint === 'function') finishCreditPrint();
-    // a print still waiting to be put back (a second press) is finished first,
-    // or its Totals table would be added twice
     if (printRestore) printRestore();
 
     if (!canExportReports()) {
@@ -874,7 +751,6 @@ function printReport(keys) {
         return;
     }
 
-    // remember each table's page size and page, to put them back after printing
     const saved = [];
     for (let i = 0; i < panels.length; i++) {
         saved.push({ panel: panels[i], pageSize: panels[i].pageSize, page: panels[i].page });
@@ -887,7 +763,6 @@ function printReport(keys) {
         panel.render();
     }
 
-    // the views of a tabbed screen share it; the one asked for is the one printed
     const targets = [];
     for (let i = 0; i < panels.length; i++) {
         const table = document.getElementById(panels[i].config.tableId);
@@ -898,10 +773,8 @@ function printReport(keys) {
         targets[i].classList.add('is-print-target');
     }
 
-    // the whole report each table belongs to (two tables of one report share it);
-    // its status cards are hidden by the print CSS and listed as Totals at its foot
     const reports = [];
-    const reportPanels = [];   // the first panel of each report, for its chip counts
+    const reportPanels = [];
     for (let i = 0; i < panels.length; i++) {
         const table = document.getElementById(panels[i].config.tableId);
         const report = table ? table.closest('.panel-view, [data-panel]') : null;
@@ -918,7 +791,6 @@ function printReport(keys) {
 
     document.body.classList.add('is-printing');
 
-    // afterprint is the reliable signal; the timer covers a browser that never sends it
     printRestore = function () {
         if (!printRestore) return;
         printRestore = null;
@@ -950,10 +822,8 @@ function printReport(keys) {
     }, 1500);
 }
 
-// The Sales Summary's table, read from the one period
 const INCOME_PANEL_KEYS = ['mgr-income-methods'];
 
-// The one Load Data above fills the figures and the table for the period.
 async function incomeRows(field) {
     if (!incomeData || incomeStale) await fetchIncome();
     return incomeData[field];
@@ -968,10 +838,6 @@ const INCOME_GATE = {
 function buildIncomePanels() {
     renderIncome();
 
-    // A payment taken at the counter or by a driver at the door changes what was
-    // collected. The table below reads again through the usual live path
-    // (PANEL_SCOPES in shared/live-sync.js: quietly when nobody is reading or
-    // typing, otherwise a Refresh note); this only says the held figures are old.
     if (typeof onLiveChange === 'function') {
         onLiveChange(['sales', 'credit'], function () {
             incomeStale = true;
@@ -980,7 +846,7 @@ function buildIncomePanels() {
 
     createDataPanel({
         key: 'mgr-income-methods',
-        remember: false,   // the period and cashier above are not kept, so it opens closed
+        remember: false,
         tableId: 'income-methods-table',
         columns: 5,
         pageSize: 5,
@@ -990,7 +856,6 @@ function buildIncomePanels() {
         load: function () {
             return incomeRows('methods');
         },
-        // the two figures above follow the table when it is read again
         onLoaded: function () {
             if (incomeSummaryShown) renderIncome();
         },
@@ -1006,7 +871,6 @@ function buildIncomePanels() {
 
 }
 
-// Receivables and Repeat Customers come from one route, fetched once and shared
 let reportsCache = null;
 
 async function reportsOverview(force) {
@@ -1015,9 +879,6 @@ async function reportsOverview(force) {
     return reportsCache;
 }
 
-// The general report: everything staff have filed, newest first, with who
-// filed it. The server names each kind by a short code; this says it the way
-// the shop does, and a code it does not know is shown spaced out, not dropped.
 const ACTIVITY_KINDS = {
     SALE: 'Sale',
     PAYMENT: 'Credit payment',
@@ -1043,7 +904,6 @@ function activityKind(code) {
     return words ? words.charAt(0).toUpperCase() + words.slice(1) : 'Entry';
 }
 
-// a compact stamp for a row: "4 Sep, 16:45"
 function activityWhen(stamp) {
     const when = new Date(String(stamp || '').replace(' ', 'T'));
     if (isNaN(when.getTime())) return String(stamp || '').slice(0, 16);
@@ -1126,8 +986,6 @@ function buildReportPanels() {
                 (filters.method === 'all' || row.payment_method === filters.method) &&
                 dateInRange(row.sale_date, filters.from, filters.to);
         },
-        // the methods are a fixed list (every way a sale can be paid); the
-        // statuses are the ones the loaded sales have
         onLoaded: function (rows) {
             const statuses = [];
             for (let i = 0; i < rows.length; i++) {
@@ -1187,9 +1045,6 @@ function buildReportPanels() {
 
 }
 
-// ---------- From and To on a report ----------
-// The day part of a stamp ("2026-09-04 16:45:00" -> "2026-09-04") falls inside
-// the two dates; an empty date leaves that end open.
 function dateInRange(stamp, from, to) {
     const day = String(stamp || '').slice(0, 10);
     if (from && day < from) return false;
@@ -1197,8 +1052,6 @@ function dateInRange(stamp, from, to) {
     return true;
 }
 
-// A From or To box changed on a report: the table keeps only those days.
-// prefix names the boxes (prefix-from, prefix-to).
 function dateFilterChanged(key, prefix) {
     const fromBox = document.getElementById(prefix + '-from');
     const toBox = document.getElementById(prefix + '-to');
@@ -1223,7 +1076,6 @@ function dateFilterChanged(key, prefix) {
     }
 }
 
-// Repeat Customers: with a balance, or without one
 function repeatCustomerMatches(row, filters) {
     const owes = (Number(row.balance_due) || 0) > 0;
     if (filters.balance === 'owing' && !owes) return false;
@@ -1231,11 +1083,6 @@ function repeatCustomerMatches(row, filters) {
     return true;
 }
 
-// A dropdown filled from the loaded rows: one option per value they hold,
-// sorted, keeping the one already picked when it is still there.
-// Receivables: the payment method is asked only with Every status or Partial.
-// An Unpaid sale has had nothing paid on it, so the method box goes, and its
-// choice goes back to Every method.
 function showUnpaidMethodField(status) {
     const offered = status === 'all' || status === 'Partial';
     const field = document.getElementById('unpaid-method-field');
@@ -1259,7 +1106,6 @@ function fillFilterOptions(id, values, allLabel) {
     if (!select) return;
     const picked = select.value;
 
-    // each value once (in the order first seen), as text, then sorted
     const unique = [];
     for (let i = 0; i < values.length; i++) {
         const value = values[i];
@@ -1282,13 +1128,11 @@ function fillFilterOptions(id, values, allLabel) {
     if (select.dataset.filterTable) syncFilteredColumns(select.dataset.filterTable);
 }
 
-// the same, with how many rows hold each value: "Staff (3)"
 function fillCountedOptions(id, values, allLabel) {
     const select = document.getElementById(id);
     if (!select) return;
     const picked = select.value;
 
-    // each value (as text) once, with how many rows hold it: { value, count }
     const options = [];
     for (let i = 0; i < values.length; i++) {
         const value = values[i];
@@ -1323,7 +1167,6 @@ function fillCountedOptions(id, values, allLabel) {
     if (select.dataset.filterTable) syncFilteredColumns(select.dataset.filterTable);
 }
 
-// Sales. Both filters go back to the server, where the figures are computed.
 const SALE_STATUS_TONE = {
     'Paid': 'badge-success',
     'Partially Paid': 'badge-warning',
@@ -1331,8 +1174,6 @@ const SALE_STATUS_TONE = {
     'Voided': 'badge-neutral'
 };
 
-// A sales date after today is a typo, not a filter: it is emptied with a
-// warning and the list loads without it. True when something was dropped.
 function dropFutureSalesDates() {
     const today = localIsoDay();
     let dropped = false;
@@ -1353,7 +1194,6 @@ function dropFutureSalesDates() {
     return dropped;
 }
 
-// adds "key=value" to the list when the box has a real choice in it
 function addSalesFilter(parts, id, key) {
     const field = document.getElementById(id);
     if (field && field.value && field.value !== 'all') {
@@ -1388,7 +1228,6 @@ function buildSalesPanel() {
         columns: 6,
         pagerId: 'sales-pager',
         idField: 'sale_id',
-        // the boxes that load() reads, put back with the table after a reload
         inputs: ['sales-method', 'sales-status', 'sales-period', 'sales-from', 'sales-to'],
         sortKeys: ['sale_id', 'sale_date', 'customer_name', 'payment_group', 'transaction_status',
                    function (row) { return Number(row.final_amount); }],
@@ -1422,12 +1261,8 @@ function buildSalesPanel() {
     });
 }
 
-// Stocks: one fetch behind Reorder Alerts and the Stocks Overview.
 let stocksCache = null;
 
-// Load Data on either stock screen reads /api/stocks afresh: a button that
-// says Load Data fetches. The copy kept here is for the price and reorder
-// dialogs, which look a product up by id; it is dropped after every save.
 async function stockRows() {
     stocksCache = await apiGetStocks();
     return stocksCache;
@@ -1508,8 +1343,6 @@ function buildStockPanels() {
     });
 }
 
-// Stock Movements: the stock side of the activity log -- what staff filed that
-// moved or will move goods on the shelf
 const STOCK_MOVE_KINDS = ['STOCK_ADJUST', 'DAMAGE', 'MISSING', 'RETURN', 'PURCHASE_ORDER', 'PO_CONFIRMED', 'PO_DECLINED', 'PO_RECEIVED'];
 
 function buildStockMovesPanel() {
@@ -1551,10 +1384,6 @@ function buildStockMovesPanel() {
     });
 }
 
-// ==========================================
-// THE PRICE -- asked for in a card, read back, then saved
-// ==========================================
-// finds the product with this id in the stocks kept from the last load, or undefined
 function findCachedStock(productId) {
     const list = stocksCache || [];
     for (let i = 0; i < list.length; i++) {
@@ -1563,20 +1392,10 @@ function findCachedStock(productId) {
     return undefined;
 }
 
-// ==========================================
-// THE NO-PRICE ALERT -- "3 products have no price set", on the screens it is about
-// ==========================================
-// A product the clerk adds has price 0. The strip says how many, and its button
-// opens Records > Products with those products on the top rows. It shows on the
-// Stocks screens and on Records > Products only (placePriceAlert), not across
-// every screen. It reads the
-// count again whenever the inventory moves (the live channel), after a price is
-// saved here, and when the screens the administrator switched on are applied.
 async function loadPriceBanner() {
     const box = document.getElementById('price-banner');
     if (!box) return;
 
-    // the switches are not known yet, or this one is off: no strip, and no request that would be refused
     if (heldFeatureKeys === null || !holdsFeature('price-alert')) {
         box.innerHTML = '';
         return;
@@ -1587,7 +1406,7 @@ async function loadPriceBanner() {
         const result = await apiGetUnpricedCount();
         count = Number(result.unpriced) || 0;
     } catch (error) {
-        return;   // the strip stays as it was; the next change reads it again
+        return;
     }
 
     if (count === 0) {
@@ -1597,7 +1416,6 @@ async function loadPriceBanner() {
 
     const words = count === 1 ? '1 product has no price set' : count + ' products have no price set';
     let button = '';
-    // Records > Products is where the price is set
     if (holdsFeature('records')) {
         button = '<button type="button" class="btn btn-sm" onclick="openUnpricedProducts()">Set prices</button>';
     }
@@ -1607,8 +1425,6 @@ async function loadPriceBanner() {
         ' a price.</span>' + button + '</div>';
 }
 
-// Records > Products, read afresh with nothing in the search; products without a
-// price come first on their own (see the records table's sort).
 function openUnpricedProducts() {
     showRecordType('product');
 
@@ -1622,8 +1438,6 @@ function openUnpricedProducts() {
     panel.open();
 }
 
-// The strip belongs to the screens about stock and products: it moves to the top
-// of the Stocks screen or of Records when Products is showing, and hides elsewhere.
 function placePriceAlert() {
     const alert = document.getElementById('price-alert');
     if (!alert) return;
@@ -1634,7 +1448,6 @@ function placePriceAlert() {
     if (stocks && stocks.style.display !== 'none') home = stocks;
     else if (records && records.style.display !== 'none' && recordType === 'product') home = records;
 
-    // switched off for the role stays hidden (features.js would otherwise show it again)
     const switchedOff = heldFeatureKeys !== null && !holdsFeature('price-alert');
     if (!home || switchedOff) {
         alert.hidden = true;
@@ -1644,7 +1457,6 @@ function placePriceAlert() {
     alert.hidden = false;
 }
 
-// reloads the stock tables and the product records that are showing, after a save
 async function refreshStockPanels() {
     const keys = ['mgr-reorder', 'mgr-stocks', 'mgr-records'];
     for (let i = 0; i < keys.length; i++) {
@@ -1653,8 +1465,6 @@ async function refreshStockPanels() {
     }
 }
 
-// The price is set on the product, in Records > Products. index is the row
-// in that table; the row carries id, name, price, unit_name and quantity_in_stock.
 async function changeProductPrice(index) {
     const panel = getDataPanel('mgr-records');
     const row = panel ? panel.visible[index] : null;
@@ -1694,8 +1504,6 @@ async function changePrice(product) {
             const number = Number(typed);
             if (typed === '' || !Number.isFinite(number)) return 'Type the price as a figure, like 450 or 78.50.';
             if (number < 0) return 'A price cannot be below zero.';
-            // the typed text is checked, not the float: 19.99 * 100 is 1998.9999999999998
-            // (matches digits, then optionally a dot and one or two more digits)
             if (!/^\d+(\.\d{1,2})?$/.test(typed)) return 'Two decimal places at most.';
             if (noPrice && number === 0) return 'Type the figure it should sell at; zero means no price.';
             if (number === current) return 'That is the price it already sells at.';
@@ -1710,7 +1518,6 @@ async function changePrice(product) {
     const share = current > 0 ? Math.abs(next - current) / current : null;
     const onHand = Number(product.quantity_in_stock) || 0;
 
-    // " (up 12%)" or " (down 12%)", left out when the old price was zero
     let change = '';
     if (share !== null) {
         change = ' (' + (up ? 'up' : 'down') + ' ' + Math.round(share * 100) + '%)';
@@ -1724,7 +1531,6 @@ async function changePrice(product) {
             title: noPrice ? 'Set the price?' : (up ? 'Raise the price?' : 'Lower the price?'),
             eyebrow: 'Products',
             confirmLabel: 'Set the price',
-            // a big jump is more often a slipped decimal than a decision
             tone: share !== null && share >= 0.5 ? 'danger' : undefined,
             detail: [
                 'The till sells at ' + peso(next) + ' from the next sale on.',
@@ -1755,9 +1561,6 @@ async function changePrice(product) {
     }
 }
 
-// ==========================================
-// THE REORDER POINT -- one figure, typed for each product
-// ==========================================
 async function changeReorderPoint(productId) {
     const product = findCachedStock(productId);
     if (!product) return;
@@ -1797,17 +1600,13 @@ async function changeReorderPoint(productId) {
     }
 }
 
-
-// Purchase orders: the history, the printed order and the confirm / decline
-// card come from shared/purchase-orders.js. The manager checks and decides;
-// the clerk raises the order and counts the delivery in.
 function buildManagerPurchaseOrderPanel() {
     configurePurchaseOrders({
         key: 'mgr-po',
-        canCreate: false,          // the clerk raises an order
-        canDecide: true,           // the manager confirms or declines it
-        canReceive: false,         // the clerk counts the delivery in
-        showLines: false,          // the manager's table has no Lines column
+        canCreate: false,
+        canDecide: true,
+        canReceive: false,
+        showLines: false,
         showPanel: function (panelId, title) {
             showManagerPanel(panelId, title);
         },
@@ -1819,19 +1618,14 @@ function buildManagerPurchaseOrderPanel() {
     buildPurchaseTotalsPanel();
 }
 
-// Credit management: a limit and a standing are edited together, with what
-// the customer owes printed above them.
 const STANDING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
 const STANDING_WORD = { Good: 'Good', Watch: 'Watch', Hold: 'On hold' };
 
-// the shop's late-payment policy, read once the credit screen is built and
-// again after every save; what the strip above the credit records shows
 let penaltyPolicy = null;
 
 let creditCustomer = null;
 let creditRequest = null;
 
-// reason is the view's standing_reason: the first rule that fired
 function standingBadge(standing, reason) {
     return '<span class="badge ' + (STANDING_TONE[standing] || 'badge-neutral') + '"' +
            (reason ? ' title="' + escapeHtml(reason) + '"' : '') + '>' +
@@ -1967,7 +1761,6 @@ function buildCreditPanels() {
     });
 
     loadPenaltyPolicy();
-    // another manager's change, or the hourly sweep charging something
     if (typeof onLiveChange === 'function') {
         onLiveChange(['credit'], function () {
             loadPenaltyPolicy();
@@ -1975,24 +1768,15 @@ function buildCreditPanels() {
     }
 }
 
-// ---------- the late-payment policy ----------
-// 1 to 3 percent a month of the goods still unpaid, for every month a credit
-// sale is past its 30-day due date; the default is 3. The manager may set
-// another rate for the shop on the Credit Maintenance screen; an account can
-// be given its own rate on its credit terms.
-// answers true when the rate was read, false when it could not be
 async function loadPenaltyPolicy() {
     try {
         penaltyPolicy = await apiGetPenaltyPolicy();
     } catch (error) {
-        return false;   // the screen keeps whatever it last showed
+        return false;
     }
     return true;
 }
 
-// Puts the saved rate in the box, with its worked example. When the rate could not be
-// read (rateRead is false) the box stays empty and Save is off: saving a guessed 3 would
-// replace the real rate.
 function fillPenaltyForm(rateRead) {
     const form = document.getElementById('penalty-form');
     if (!form) return;
@@ -2017,7 +1801,6 @@ function fillPenaltyForm(rateRead) {
     previewPenaltyPolicy();
 }
 
-// the rate as a worked example, so 3 reads as pesos a month before it is saved
 function previewPenaltyPolicy() {
     const form = document.getElementById('penalty-form');
     const preview = document.getElementById('penalty-preview');
@@ -2068,12 +1851,8 @@ async function savePenaltyPolicy(event) {
     }
 }
 
-// ---------- the policies and the back of the customer card ----------
-// Three texts, one line to a term: the credit policy, the customer data terms
-// and the refund policy. All three print on the back of the customer card;
-// the credit policy also prints on the credit terms page.
 const POLICY_KINDS = ['credit', 'data-terms', 'refund'];
-let policyData = null;      // what /api/policies answered: { policies, store }
+let policyData = null;
 
 async function loadPolicies() {
     try {
@@ -2090,16 +1869,12 @@ async function loadPolicies() {
     previewCardBack();
 }
 
-// the text of a policy as it stands: what is typed in its box, else what was read
 function policyTextNow(kind) {
     const form = document.getElementById('policy-form-' + kind);
     if (form) return form.elements.text.value;
     return policyData && policyData.policies[kind] ? policyData.policies[kind].text : '';
 }
 
-// Draws the back of the card beside each policy page, with what is typed now,
-// scaled to the width of its column, and says when the text has to shrink too
-// far to be read on a card that size.
 function previewCardBack() {
     if (!policyData) return;
     const policies = {};
@@ -2114,7 +1889,6 @@ function previewCardBack() {
         box.innerHTML = customerCardBackHtml(policyData.store, policies, kind);
         const card = box.querySelector('.cc-card');
 
-        // a page out of sight has no width to measure; it is drawn again when opened
         if (box.clientWidth === 0) continue;
         const size = fitCustomerCard(card);
         const scale = box.clientWidth / card.offsetWidth;
@@ -2135,12 +1909,7 @@ function previewCardBack() {
 
 window.addEventListener('resize', function () { previewCardBack(); });
 
-// ---------- unsaved changes on the Policy Maintenance pages ----------
-// A rate or a policy typed and not saved is not lost by a stray click: leaving
-// the page (the menu, the brand corner, an alert's "go to", My Account or Log
-// out) asks first whether to discard the changes or keep editing. Closing or
-// reloading the tab gets the browser's own warning.
-let penaltyRateRead = false;   // the box holds the saved rate (fillPenaltyForm)
+let penaltyRateRead = false;
 
 function policyChangesUnsaved() {
     const rateForm = document.getElementById('penalty-form');
@@ -2163,7 +1932,6 @@ function policyChangesUnsaved() {
     return '';
 }
 
-// puts every box back to what is saved
 function discardPolicyChanges() {
     if (penaltyRateRead) fillPenaltyForm(true);
     if (policyData) {
@@ -2176,7 +1944,6 @@ function discardPolicyChanges() {
     }
 }
 
-// what counts as leaving the page
 const POLICY_LEAVE_SELECTOR = '.sidebar a, .sidebar button, .account-action, #notif-modal .modal-foot .btn';
 let policyLeaveAllowed = false;
 
@@ -2242,7 +2009,7 @@ async function savePolicyText(event, kind) {
         }
 
         notifySuccess(result.message, CARD_POLICY_TITLES[kind] + ' saved');
-        await loadPolicies();   // an emptied box comes back as the default wording
+        await loadPolicies();
     } catch (error) {
         notifyOffline();
     }
@@ -2253,7 +2020,6 @@ async function reloadCreditRequests() {
     if (panel) await panel.open();
 }
 
-// ---------- one account ----------
 async function openCreditAccount(customerId) {
     try {
         const data = await apiGetCreditCustomer(customerId);
@@ -2307,7 +2073,6 @@ async function openCreditAccount(customerId) {
     }
 }
 
-// 'account', or one table of the history: 'purchases', 'payments' or 'requests'
 let creditTab = 'account';
 
 function showCreditTab(tab) {
@@ -2324,7 +2089,6 @@ function showCreditTab(tab) {
     if (history) loadCreditHistory();
 }
 
-// ---------- what they bought, beside what they paid ----------
 let creditHistory = null;
 
 async function loadCreditHistory() {
@@ -2343,8 +2107,6 @@ async function loadCreditHistory() {
     }
 }
 
-// one table to a tab (Purchases, Payments, Extension Requests), each paged with
-// Previous and Next rather than scrolled
 function renderCreditHistory(data) {
     const box = document.getElementById('credit-history');
     if (!box) return;
@@ -2410,7 +2172,6 @@ function renderCreditHistory(data) {
     }
 }
 
-// ---------- deciding an extension ----------
 function openCreditRequest(requestId) {
     const panel = getDataPanel('mgr-requests');
     creditRequest = panel ? panel.find(requestId, 'request_id') : null;
@@ -2450,8 +2211,6 @@ function openCreditRequest(requestId) {
     note.value = r.decision_note || '';
     note.disabled = decided;
 
-    // a decision already made stands; the reason is what an audit keeps
-    // a decided request has nothing left to press: the x closes it
     const actions = document.getElementById('decide-actions');
     actions.hidden = decided;
     actions.innerHTML = decided ? ''
@@ -2468,7 +2227,6 @@ async function decideCreditRequest(approve) {
     const r = creditRequest;
     const note = document.getElementById('decide-note').value.trim();
 
-    // declining says why or it does not happen
     if (!approve && note === '') {
         notifyWarning('Say why, so whoever raised it knows what to tell the customer.',
             'A declined request needs a reason');
@@ -2527,9 +2285,6 @@ async function decideCreditRequest(approve) {
     }
 }
 
-// ==========================================
-// DELIVERIES
-// ==========================================
 const FULFILMENT_TONE = {
     'Completed': 'badge-success',
     'Pending Payment': 'badge-warning',
@@ -2585,8 +2340,6 @@ function buildDeliveryPanel() {
     });
 }
 
-// The Driver box: "All drivers", "Unassigned", then each driver found in the
-// deliveries. The names come from the loaded rows, so it fills when they arrive.
 function renderDriverOptions(rows) {
     const select = document.getElementById('deliveries-driver');
     if (!select) return;
@@ -2599,9 +2352,6 @@ function renderDriverOptions(rows) {
         }
     }
 
-    // rebuilding the options must not lose the driver already chosen, even if
-    // none of the loaded deliveries is theirs any more: the box has to show
-    // the filter that is applied
     const panel = getDataPanel('mgr-deliveries');
     const chosen = panel ? panel.filters.driver : 'all';
     if (chosen !== 'all' && chosen !== 'Unassigned' && names.indexOf(chosen) === -1) {
@@ -2619,9 +2369,6 @@ function renderDriverOptions(rows) {
     select.value = chosen;
 }
 
-// ==========================================
-// RECORDS
-// ==========================================
 const RECORD_COLUMNS = {
     supplier: [['name', 'Supplier'], ['contact_person', 'Contact'], ['contact_number', 'Number'], ['email', 'Email'], ['product_count', 'Products']],
     customer: [['name', 'Customer'], ['phone', 'Phone'], ['purchase_count', 'Purchases'], ['credit_limit', 'Credit Limit'], ['current_credit', 'Balance']],
@@ -2636,18 +2383,13 @@ const RECORD_TITLES = {
     category: 'Categories', unit: 'Units'
 };
 
-// the module name the archive routes know each kind of record by
 const RECORD_ARCHIVE_MODULE = {
     supplier: 'Supplier', customer: 'Customer', product: 'Inventory',
     category: 'Category', unit: 'Unit'
 };
 
-// the kinds of record the manager edits here (categories and units are the clerk's)
-// a product is edited by the inventory clerk only (the manager sets its price
-// and archives it), and a customer by the cashier only (the manager reads it)
 const RECORD_EDITABLE = ['supplier'];
 
-// the kind of record is a screen in the strip
 function showRecordType(type, event) {
     if (!RECORD_COLUMNS[type]) type = 'supplier';
     const changed = type !== recordType;
@@ -2658,7 +2400,6 @@ function showRecordType(type, event) {
     const title = document.getElementById('records-title');
     if (title) title.textContent = RECORD_TITLES[type];
 
-
     const card = document.getElementById('panel-records');
     if (card) card.dataset.view = type;
     markPanelLinks('panel-records');
@@ -2666,7 +2407,6 @@ function showRecordType(type, event) {
     writeRecordHeaders();
     syncRecordAddButton();
 
-    // the search box names what it searches
     const search = document.getElementById('records-search');
     if (search) search.placeholder = 'Search ' + RECORD_TITLES[type];
     placePriceAlert();
@@ -2675,7 +2415,6 @@ function showRecordType(type, event) {
     if (!panel || !changed) return;
     panel.resetHeaderSort();
 
-    // a table already open loads the new kind at once; a closed one stays closed
     if (panel.state === 'ready') panel.open();
     else panel.reset();
 }
@@ -2709,7 +2448,7 @@ function writeRecordHeaders() {
 function buildRecordsPanel() {
     createDataPanel({
         key: 'mgr-records',
-        remember: false,   // which kind of record it holds is not kept, so it opens closed
+        remember: false,
         tableId: 'records-table',
         columns: 5,
         pagerId: 'records-pager',
@@ -2718,12 +2457,11 @@ function buildRecordsPanel() {
             text: 'Pick a kind of record above, then press Load Data.',
             button: 'Load Data'
         },
-        sortKeys: [],      // filled for the kind of record (writeRecordHeaders)
+        sortKeys: [],
         load: function () {
             return apiGetRecords(recordType);
         },
         match: function (row, query) {
-            // every value in the row
             const values = [];
             for (const field in row) {
                 values.push(row[field]);
@@ -2731,7 +2469,6 @@ function buildRecordsPanel() {
             return prefixMatch(values, query);
         },
         sort: function (rows) {
-            // a product with no price yet is always on the top row, whatever the header sort
             if (recordType === 'product') return unpricedFirst(rows);
             return rows;
         },
@@ -2758,7 +2495,6 @@ function buildRecordsPanel() {
                 if (position === 0) {
                     style = 'cell-name';
                 } else if (RECORD_NUMERIC.indexOf(column[0]) !== -1) {
-                    // a figure (count, quantity or money) sits on the right
                     style = 'cell-num';
                 } else {
                     style = '';
@@ -2773,17 +2509,13 @@ function buildRecordsPanel() {
     });
 }
 
-// the columns that hold a figure, and so can be sorted by size
 const RECORD_NUMERIC = ['product_count', 'purchase_count', 'credit_limit', 'current_credit',
                         'price', 'quantity_in_stock', 'total_stock'];
 
-// ---------- adding a supplier (the manager's alone) ----------
-// Categories and units are added by the inventory clerk, from the clerk's Records.
 const RECORD_ADDABLE = {
     supplier: { title: 'Add Supplier', label: 'Company name', max: 100 }
 };
 
-// the Add button names the kind on screen, and goes for the kinds kept elsewhere
 function syncRecordAddButton() {
     const button = document.getElementById('records-add-btn');
     if (!button) return;
@@ -2866,11 +2598,6 @@ async function saveAddRecord(event) {
     }
 }
 
-// ==========================================
-// ARCHIVES -- customers, products, units, categories, suppliers and users
-// (staff accounts). Sales, deliveries and credit are never archived.
-// ==========================================
-// the kind of data each archived record is, in plain words
 const ARCHIVE_TYPE_NAMES = {
     Customer: 'Customer', Inventory: 'Product', Unit: 'Unit',
     Category: 'Category', Supplier: 'Supplier', Staff: 'User'
@@ -2921,7 +2648,6 @@ function buildArchivePanel() {
     });
 }
 
-// restoring puts a record back into circulation, so the row opens it first
 function openArchiveEntry(index) {
     const panel = getDataPanel('mgr-archives');
     const entry = panel ? panel.visible[index] : null;
@@ -2972,7 +2698,6 @@ async function restoreArchive(module, recordId) {
         notifySuccess('The record is back in circulation.', 'Record restored');
         closeModal('detail-modal');
 
-        // every list the record comes back to reads it again, not only the archive
         let keys = ['mgr-archives'];
         if (module === 'Inventory') {
             keys = keys.concat(['mgr-stocks', 'mgr-reorder', 'mgr-stock-moves', 'mgr-records', 'mgr-po']);
@@ -2985,18 +2710,12 @@ async function restoreArchive(module, recordId) {
             const panel = getDataPanel(keys[i]);
             if (panel && panel.state === 'ready') await panel.refresh();
         }
-        // a restored product with no price counts again
         if (module === 'Inventory') loadPriceBanner();
     } catch (error) {
         notifyOffline();
     }
 }
 
-// ==========================================
-// POPUP BUILDERS, ONE PER MODULE
-// ==========================================
-// how a QR payment reads in a sale's Payments: "GCash", "Maya", or
-// "Bank Transfer · BPI" when the customer paid through their bank
 const SALE_QR_WALLETS = { GCash: 'GCash', PayMaya: 'Maya', 'Bank Transfer': 'Bank Transfer' };
 
 function saleQrWallet(q) {
@@ -3005,9 +2724,6 @@ function saleQrWallet(q) {
     return way;
 }
 
-// A sale opened from a report (Sales Transactions, Receivables) is only read,
-// except for a cashier's request to void it: then the request is shown on top,
-// the manager is alerted, and Approve Void / Decline are offered.
 async function openSaleDetail(saleId) {
     try {
         const data = await apiGetSale(saleId);
@@ -3087,15 +2803,6 @@ async function openSaleDetail(saleId) {
         }
         const items = detailTable(['Product', 'Qty', 'Unit Price', 'Subtotal'], itemRows, [1, 2, 3]);
 
-        // Every sale is paid somehow, so every sale lists its payments:
-        //  - the payments recorded against it (a credit sale's down payment and
-        //    every payment after, one row each);
-        //  - the GCash, Maya or bank-transfer codes paid by QR, once each (a QR
-        //    payment already on the list by its reference is not repeated; one
-        //    that paid a down payment gives that row its reference);
-        //  - what the till took when the sale was rung up and paid there (a cash
-        //    sale, a cheque), which is kept on the sale itself: whatever was kept
-        //    (handed over less the change) that the rows above do not account for.
         const paidList = [];
         const references = {};
         let listed = 0;
@@ -3116,7 +2823,6 @@ async function openSaleDetail(saleId) {
             const q = qrPaid[i];
             if (q.status !== 'paid' || (q.provider_payment_id && references[q.provider_payment_id])) continue;
             const amount = Number(q.amount) || 0;
-            // a QR payment that was the down payment: that row carries its reference
             let downRow = null;
             for (let r = 0; r < paidList.length; r++) {
                 if (paidList[r].downPayment && !paidList[r].reference &&
@@ -3134,7 +2840,6 @@ async function openSaleDetail(saleId) {
             unlisted -= amount;
         }
 
-        // paid at the till when it was rung up, and not on the list yet
         if (unlisted > 0.005 && s.payment_method !== 'Credit') {
             paidList.push({ when: String(s.sale_date || ''), amount: unlisted, method: s.payment_method,
                             reference: paymentReference(s.payment_method, s.reference_no),
@@ -3163,7 +2868,6 @@ async function openSaleDetail(saleId) {
             { label: 'Payments (' + paidList.length + ')', body: payments }
         ];
 
-        // a cheque's or a bank transfer's bank and account
         const detailItems = paymentDetailItems(data);
         if (detailItems.length > 0) {
             let detailsBody = '';
@@ -3223,7 +2927,6 @@ async function openSaleDetail(saleId) {
     }
 }
 
-// Approve Void (the sale is voided) or Decline (a note for the cashier is required)
 async function decideVoidRequest(requestId, saleId, approve) {
     let note = '';
     if (approve) {
@@ -3261,7 +2964,6 @@ async function decideVoidRequest(requestId, saleId, approve) {
     }
 }
 
-// Opening Sales Transactions: the void requests still waiting are said at once
 async function alertWaitingVoidRequests() {
     let rows;
     try { rows = await apiGetVoidRequests(); } catch (error) { return; }
@@ -3286,7 +2988,6 @@ function openStockDetail(productId) {
         detailField('Suggested Order', p.suggested_order + ' ' + escapeHtml(p.unit_name || '')) +
         '</div>';
 
-    // the reorder point is typed; what sold recently is shown beside it
     const reorder = '<div class="detail-grid">' +
         detailField('Reorder Point', p.reorder_point + ' ' + escapeHtml(p.unit_name || '')) +
         detailField('On Hand', p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '')) +
@@ -3323,7 +3024,6 @@ function openStockDetail(productId) {
 
 function openDeliveryDetail(deliveryId) {
     const panel = getDataPanel('mgr-deliveries');
-    // the manager reads a delivery; the driver moves it along
     showDeliveryRecord(panel ? panel.find(deliveryId, 'delivery_id') : null, false);
 }
 
@@ -3335,7 +3035,6 @@ async function openRecordDetail(index) {
     const type = recordType;
     let fields = '';
     for (const key in row) {
-        // the ids behind the names are for the edit form, not for reading
         if (key === 'id' || key === 'name' || /_id$/.test(key)) continue;
         fields += detailField(prettyLabel(key), fieldValue(key, row[key]));
     }
@@ -3349,9 +3048,6 @@ async function openRecordDetail(index) {
             : '');
     const pages = [{ label: 'Details', body: body }];
 
-    // a category lists the products filed under it, a unit the products
-    // counted in it, and a supplier the products registered to it, on a page
-    // of their own
     if (type === 'category' || type === 'unit' || type === 'supplier') {
         const field = { category: 'category_name', unit: 'unit_name', supplier: 'supplier_name' }[type];
         let productsBody;
@@ -3361,7 +3057,6 @@ async function openRecordDetail(index) {
             for (let i = 0; i < allProducts.length; i++) {
                 const p = allProducts[i];
                 if (p[field] !== row.name) continue;
-                // a supplier's own page names each product's category in place of the supplier
                 const third = type === 'supplier' ? p.category_name : p.supplier_name;
                 productRows.push([
                     escapeHtml(p.name),
@@ -3384,7 +3079,6 @@ async function openRecordDetail(index) {
         }
     }
 
-    // the buttons: edit (suppliers), the price (products), archive (all)
     let foot = '';
     if (RECORD_ARCHIVE_MODULE[type]) {
         foot += '<button type="button" class="btn btn-danger" onclick="archiveRecord(' + index + ')">Archive</button>';
@@ -3401,7 +3095,6 @@ async function openRecordDetail(index) {
         pages, foot || null, { wide: true });
 }
 
-// ---------- archiving a record ----------
 async function archiveRecord(index) {
     const panel = getDataPanel('mgr-records');
     const row = panel ? panel.visible[index] : null;
@@ -3421,7 +3114,7 @@ async function archiveRecord(index) {
     if (!yes) return;
 
     const result = await apiArchiveRecord(module, row.id);
-    if (!result) return;   // refused: the reason is on the screen
+    if (!result) return;
 
     closeModal('detail-modal');
     notifySuccess(row.name + ' is archived. It can be restored from Archives.', 'Record archived');
@@ -3436,11 +3129,8 @@ async function archiveRecord(index) {
     if (module === 'Inventory') loadPriceBanner();
 }
 
-// ---------- editing a supplier ----------
-let editRecord = null;   // { type, row }
+let editRecord = null;
 
-// one box: [field name, label, value, options]; options.kind is 'text',
-// 'phone', 'email' or 'select' (with options.choices [[id, name], ...])
 function editFieldHtml(name, label, value, options) {
     const settings = options || {};
     const id = 'edit-' + name;
@@ -3466,7 +3156,6 @@ function editFieldHtml(name, label, value, options) {
     return '<div class="form-group"><label for="' + id + '">' + escapeHtml(label) + required + '</label>' + box + '</div>';
 }
 
-// [[id, name], ...] from a records list
 function recordChoices(rows) {
     const choices = [];
     for (let i = 0; i < rows.length; i++) choices.push([rows[i].id, rows[i].name]);
@@ -3493,7 +3182,6 @@ async function openEditRecord(index) {
     document.getElementById('record-edit-title').textContent = 'Edit ' + prettyLabel(type);
     document.getElementById('record-edit-avatar').textContent = initialsOf(row.name);
 
-    // the phone boxes take the stored number through their own filler
     const form = document.getElementById('record-edit-form');
     if (type === 'supplier') phoneFill(form.elements.contactNumber, row.contact_number || '');
 
@@ -3524,7 +3212,7 @@ async function saveEditRecord(event) {
     button.disabled = true;
     try {
         const result = await apiEditRecord(type, editRecord.row.id, data);
-        if (!result) return;   // refused: the reason is on the screen
+        if (!result) return;
         notifySuccess(result.message, 'Saved');
         closeModal('record-edit-modal');
         editRecord = null;
@@ -3536,7 +3224,6 @@ async function saveEditRecord(event) {
     }
 }
 
-// reached from the Repeat Customers report, which only knows a customer id
 async function openCustomerDetail(customerId) {
     try {
         const rows = await apiGetRecords('customer');
@@ -3570,22 +3257,12 @@ async function openCustomerDetail(customerId) {
     }
 }
 
-// ==========================================
-// ACCOUNT MANAGEMENT -- creating a cashier, clerk or driver account
-// ==========================================
-// Three steps, the same two the administrator's Create Account has: the form,
-// then the review (the server makes the first password and keeps a draft),
-// then Confirm. The server only offers, and only creates, cashier, clerk and
-// driver accounts, so nothing here decides which roles a manager may create.
-let accountReview = null;     // the server's review: draft id, password and the details
-let accountBusy = false;      // a request is running; buttons ignore a second press
+let accountReview = null;
+let accountBusy = false;
 
-// matches words made only of letters and accent marks, with single spaces between the words
 const ACCOUNT_NAME_LETTERS = /^[\p{L}\p{M}]+( [\p{L}\p{M}]+)*$/u;
-// matches name@domain.tld
 const ACCOUNT_EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
 
-// the boxes that cannot be left empty, and what to call them
 const ACCOUNT_REQUIRED = [
     ['firstName', 'First name'],
     ['lastName', 'Last name'],
@@ -3607,13 +3284,11 @@ function openCreateAccount() {
     }, 60);
 }
 
-// the form emptied, so the next person does not find a half-typed account
 function clearAccountForm() {
     const form = document.getElementById('newacct-form');
     form.reset();
     accountReview = null;
 
-    // reset() does not clear the phone box's own state, nor the red lines under the boxes
     phoneFill(form.elements.phone, '');
     const names = ['firstName', 'middleName', 'lastName', 'phone', 'email'];
     for (let i = 0; i < names.length; i++) {
@@ -3621,7 +3296,6 @@ function clearAccountForm() {
     }
 }
 
-// the roles the server allows this manager to create, as the Role box's choices
 async function loadAccountRoles() {
     const select = document.getElementById('newacct-role');
     select.innerHTML = '<option value="">Loading...</option>';
@@ -3646,7 +3320,6 @@ async function loadAccountRoles() {
     }
 }
 
-// which half of the card shows: 'form' or 'review'
 function showAccountStep(step) {
     const reviewing = step === 'review';
     document.getElementById('newacct-form').hidden = reviewing;
@@ -3670,15 +3343,10 @@ function backToAccountForm() {
     showAccountStep('form');
 }
 
-// ---------- the boxes ----------
-
-// the line under a box, and its red edge; an empty text puts both away
 function setAccountError(input, text) {
     if (!input) return;
     const box = document.getElementById(input.id + '-error');
 
-    // a badly written phone number keeps its red edge (format.js put it there);
-    // only a well written one that is taken gets it from here
     const badlyWritten = input.name === 'phone' && input.value !== '' && phoneComplaint(input) !== null;
     input.classList.toggle('is-bad', Boolean(text) || badlyWritten);
     if (box) {
@@ -3687,24 +3355,21 @@ function setAccountError(input, text) {
     }
 }
 
-// names are letters only: numbers and symbols are taken out as they are typed or pasted
 function onAccountNameInput(input) {
     const typed = input.value;
-    const cleaned = typed.replace(/[^\p{L}\p{M} ]/gu, '');   // keep letters, accents and spaces
+    const cleaned = typed.replace(/[^\p{L}\p{M} ]/gu, '');
 
     if (cleaned === typed) {
         setAccountError(input, '');
         return;
     }
 
-    // keep the cursor where it was, less the characters taken out
     const cursor = Math.max(0, input.selectionStart - (typed.length - cleaned.length));
     input.value = cleaned;
     input.setSelectionRange(cursor, cursor);
     setAccountError(input, 'Letters only. Numbers and symbols cannot be typed here.');
 }
 
-// spaces cannot be part of an address, so they never get into the box
 function onAccountEmailInput(input) {
     const cleaned = input.value.replace(/\s+/g, '');
     if (cleaned !== input.value) input.value = cleaned;
@@ -3718,9 +3383,6 @@ function accountEmailComplaint(value) {
     return null;
 }
 
-// Asked when the box is left: does another account already sign in with this
-// address? Every role counts. The server asks again, so this is only for
-// saying it early. Gives back true when the address may be used.
 async function checkAccountEmailFree(input) {
     const email = input.value.trim();
     if (email === '') {
@@ -3737,7 +3399,6 @@ async function checkAccountEmailFree(input) {
     try {
         const answer = await apiCheckEmail(email);
 
-        // typed something else while the answer was coming: that address gets its own check
         if (input.value.trim() !== email) return true;
 
         if (answer && answer.taken) {
@@ -3745,18 +3406,14 @@ async function checkAccountEmailFree(input) {
             return false;
         }
     } catch (error) {
-        // offline: the server says so on Review
     }
     setAccountError(input, '');
     return true;
 }
 
-// Asked when the box is left: does another staff member already have this
-// number? Gives back true when the number may be used.
 async function checkAccountPhoneFree(input) {
-    const phone = phoneToStore(input);   // like +639171234567, the way it is stored
+    const phone = phoneToStore(input);
 
-    // an empty or badly written number is not a clash; Review says what is wrong with it
     if (phone === '' || phoneComplaint(input) !== null) {
         setAccountError(input, '');
         return true;
@@ -3765,7 +3422,6 @@ async function checkAccountPhoneFree(input) {
     try {
         const answer = await apiCheckPhone(phone);
 
-        // typed something else while the answer was coming: that number gets its own check
         if (phoneToStore(input) !== phone) return true;
 
         if (answer && answer.taken) {
@@ -3773,13 +3429,11 @@ async function checkAccountPhoneFree(input) {
             return false;
         }
     } catch (error) {
-        // offline: the server says so on Review
     }
     setAccountError(input, '');
     return true;
 }
 
-// ---------- step 1 to 2: Review ----------
 async function reviewNewAccount(event) {
     event.preventDefault();
     if (accountBusy) return;
@@ -3819,7 +3473,6 @@ async function reviewNewAccount(event) {
         return;
     }
 
-    // switched off while the requests run, so a double click sends one request
     const button = document.getElementById('newacct-review-btn');
     accountBusy = true;
     button.disabled = true;
@@ -3843,7 +3496,7 @@ async function reviewNewAccount(event) {
             email: form.elements.email.value.trim().toLowerCase(),
             roleId: parseInt(form.elements.roleId.value, 10)
         });
-        if (!review) return;   // refused: the server's reason is already on the screen
+        if (!review) return;
 
         accountReview = review;
         showAccountReview(review);
@@ -3857,8 +3510,6 @@ async function reviewNewAccount(event) {
     }
 }
 
-// the details the server will create, and how the first password reaches them
-// (the password itself is not shown until the account exists and the mail failed)
 function showAccountReview(review) {
     let sentText = 'Mail is not set up, so the password will be shown after you confirm';
     if (review.willEmail) {
@@ -3880,12 +3531,10 @@ function showAccountReview(review) {
         'audit trail in your name. This review is held for ' + minutes + (minutes === 1 ? ' minute.' : ' minutes.') + '</p>';
 }
 
-// ---------- step 2 to done: Confirm ----------
 async function confirmNewAccount() {
     if (!accountReview || accountBusy) return;
     const review = accountReview;
 
-    // switched off while the request runs, so a double click sends one request
     const button = document.getElementById('newacct-confirm-btn');
     const back = document.getElementById('newacct-back');
     accountBusy = true;
@@ -3897,7 +3546,6 @@ async function confirmNewAccount() {
         const result = await apiCreateAccount(review.draftId);
 
         if (!result) {
-            // refused: the server's reason is on the screen and the draft is used up, so start the form again
             accountReview = null;
             showAccountStep('form');
             return;
@@ -3907,7 +3555,6 @@ async function confirmNewAccount() {
         clearAccountForm();
         closeModal('newacct-modal');
 
-        // a list that is already loaded shows the new account (one not loaded stays closed)
         const staffPanel = getDataPanel('mgr-staff');
         if (staffPanel && staffPanel.state === 'ready') staffPanel.refresh();
 
@@ -3922,7 +3569,6 @@ async function confirmNewAccount() {
     }
 }
 
-// Emailed is a corner card; not emailed keeps the password on screen in a dialog.
 async function reportFirstPassword(result) {
     if (result.emailed) {
         notifySuccess('The first password was emailed to ' + result.email + '. ' +
@@ -3949,10 +3595,6 @@ async function reportFirstPassword(result) {
         });
 }
 
-// ---------- staff accounts ----------
-// The server lists only cashier, clerk and driver accounts, and refuses a
-// lift on anyone else, so nothing here decides who may be seen or released.
-// The table is read only when Load Data is pressed.
 function buildStaffAccountsPanel() {
     createDataPanel({
         key: 'mgr-staff',
@@ -3962,9 +3604,9 @@ function buildStaffAccountsPanel() {
         pagerId: 'staff-pager',
         idField: 'staff_id',
         filters: { status: 'all' },
-        remember: false,       // a reload of the page closes it again
-        loadOnFilter: false,   // picking a status before Load Data reads nothing
-        loadOnSearch: false,   // nor does typing in the search box
+        remember: false,
+        loadOnFilter: false,
+        loadOnSearch: false,
         gate: {
             title: 'The staff accounts are not loaded',
             text: 'Press Load Data to list the cashier, inventory clerk and driver accounts.',
@@ -3988,7 +3630,6 @@ function buildStaffAccountsPanel() {
             return true;
         },
         onLoaded: function () {
-            // Refresh is for a list that is already showing
             document.getElementById('staff-refresh').style.display = '';
         },
         renderRow: function (row, index) {
@@ -4008,9 +3649,6 @@ function minutesText(minutes) {
     return minutes + (minutes === 1 ? ' minute' : ' minutes');
 }
 
-// what to say about an account: 'inactive', 'nologin' (no way to sign in yet),
-// 'hold' (locked out after wrong passwords), 'newpass' (still on the password
-// it was given) or 'active'
 function staffAccountState(account) {
     if (!account.is_active) return 'inactive';
     if (!account.has_login) return 'nologin';
@@ -4041,8 +3679,6 @@ function staffStatusBadge(account) {
     return '<span class="badge ' + tone + '">' + escapeHtml(text) + '</span>';
 }
 
-// A row opens a card with the account. One on a hold also gets the button
-// that lifts it; pressing "Lift hold" is the confirmation, so there is no second question.
 function openStaffAccount(staffId) {
     const panel = getDataPanel('mgr-staff');
     const account = panel ? panel.find(staffId) : null;
@@ -4061,7 +3697,6 @@ function openStaffAccount(staffId) {
         detailField('Last Sign-in', account.last_login ? escapeHtml(whenText(account.last_login)) : '<span class="muted">Never</span>');
     body += '</div>';
 
-    // only a deactivated account can be archived (one left deactivated 30 days is archived by itself)
     let foot = '';
     if (!account.is_active) {
         foot += '<button type="button" class="btn btn-danger" onclick="archiveStaffAccount(' + account.staff_id + ')">' +
@@ -4081,8 +3716,6 @@ function openStaffAccount(staffId) {
         initialsOf(account.full_name), [{ label: 'Account', body: body }], foot || null);
 }
 
-// A deactivated cashier, clerk or driver account goes to Archives and leaves
-// this list. Restored from Archives.
 async function archiveStaffAccount(staffId) {
     const panel = getDataPanel('mgr-staff');
     const account = panel ? panel.find(staffId) : null;
@@ -4115,7 +3748,6 @@ async function archiveStaffAccount(staffId) {
 }
 
 async function liftHeldAccount(staffId) {
-    // switched off while the request runs, so a double click sends one request
     const button = document.getElementById('lift-hold-button');
     if (button) button.disabled = true;
 
@@ -4129,8 +3761,6 @@ async function liftHeldAccount(staffId) {
             notifySuccess(result.message, 'Hold lifted');
         }
 
-        // the card closes and the list is read again either way:
-        // the hold may have ended or been lifted already
         closeModal('detail-modal');
         const panel = getDataPanel('mgr-staff');
         if (panel) await panel.refresh();
@@ -4140,11 +3770,6 @@ async function liftHeldAccount(staffId) {
     }
 }
 
-// ==========================================
-// NO AUTOFILL -- the browser's own suggestions do not drop into the boxes
-// ==========================================
-// Every box on the page, and every one a popup draws later, has autocomplete
-// off. Password boxes keep theirs, so a password manager still works.
 function stopAutofill(root) {
     const boxes = root.querySelectorAll ? root.querySelectorAll('input:not([type="password"]), textarea, form') : [];
     for (let i = 0; i < boxes.length; i++) {
@@ -4166,9 +3791,6 @@ if (typeof MutationObserver === 'function') {
     }).observe(document.documentElement, { childList: true, subtree: true });
 }
 
-// ==========================================
-// MANAGER PAGE BOOT
-// ==========================================
 if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
     document.addEventListener('DOMContentLoaded', function () {
         buildIncomePanels();
@@ -4183,7 +3805,6 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
         buildArchivePanel();
         buildStaffAccountsPanel();
 
-        // the schedule follows what the administrator switched on for managers
         configureDeliverySchedule({
             showPanel: function (panelId, title) {
                 showManagerPanel(panelId, title);
@@ -4201,7 +3822,6 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
             }
         });
 
-        // Go to, on an opened alert: the screen that alert is about
         const stockAlert = {
             label: 'Reorder Alerts', panelId: 'panel-stocks',
             open: function () {
@@ -4235,8 +3855,6 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
                 },
                 key: 'mgr-stock-moves'
             },
-            // a product the clerk added: Records > Products, read afresh with the search cleared
-            // (openUnpricedProducts), where products with no price are on the top rows
             'New Product':      {
                 label: 'Products', panelId: 'panel-records',
                 open: function () {
@@ -4257,7 +3875,6 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
                 },
                 key: 'mgr-requests'
             },
-            // a cashier asks to void a sale: Sales Transactions, where the sale is decided
             'Void Request':     {
                 label: 'Sales Transactions', panelId: 'panel-reports',
                 open: function () {
@@ -4288,7 +3905,6 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
         document.addEventListener('datapanel:change', syncPeriodBoxes);
         syncExportButtons();
 
-        // the no-price strip follows products added, priced or put away by anybody (live-sync.js)
         onLiveChange(['inventory', 'archives'], loadPriceBanner);
         loadPriceBanner();
 

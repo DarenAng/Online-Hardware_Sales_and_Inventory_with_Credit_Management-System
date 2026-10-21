@@ -1,28 +1,11 @@
-// typable-select.js -- every filter dropdown can be typed in
-// Loaded by: all five dashboards
-//
-// A <select> in a toolbar filter (.toolbar-field) gets a text box in front of
-// it, like the Month box on Total Purchases: press it for the whole list, or
-// type and the list narrows to the choices with a word starting with what was
-// typed ("cr" finds "Credit approved" and "Credit payment"). Enter, a click or
-// the arrow keys pick one; Escape puts the box back; the x returns to the first
-// choice ("Every ...").
-//
-// The <select> stays in the page, out of sight, and still holds the value: a
-// pick sets it and fires its change event, so every filter's own onchange (and
-// tables.js) runs as before. Code that sets select.value, or fills the options
-// again, is followed by the box. A <select> marked data-no-typing is left alone.
-
 const TYPABLE_SELECTOR = '.toolbar-field select:not([multiple]):not([data-no-typing])';
 
 let typableCount = 0;
 
-// the words of a choice, for matching what is typed
 function typableWords(text) {
     return String(text || '').toLowerCase().split(/[\s()\-\/,.]+/).filter(Boolean);
 }
 
-// every typed word starts one of the choice's words
 function typableMatches(label, typed) {
     const typedWords = typableWords(typed);
     if (typedWords.length === 0) return true;
@@ -89,22 +72,19 @@ function makeTypable(select) {
     select.tabIndex = -1;
     select.setAttribute('aria-hidden', 'true');
 
-    // the label now names the box
     if (select.id) {
         const label = document.querySelector('label[for="' + select.id + '"]');
         if (label) label.htmlFor = boxId;
     }
 
-    let shown = [];      // the options in the list now
-    let active = -1;     // the one the arrow keys are on
+    let shown = [];
+    let active = -1;
 
     function currentLabel() {
         const option = select.options[select.selectedIndex];
         return option ? option.textContent.trim() : '';
     }
 
-    // the box shows the choice in force (not while its list is open and being
-    // typed in), and the x shows off the first choice
     function sync() {
         if (document.activeElement !== box || list.hidden) box.value = currentLabel();
         clear.hidden = select.selectedIndex <= 0 || select.disabled;
@@ -135,7 +115,6 @@ function makeTypable(select) {
         }
     }
 
-    // openAll: the whole list, with the choice in force in view
     function suggest(openAll) {
         const typed = openAll || box.value.trim() === currentLabel() ? '' : box.value;
         shown = [];
@@ -162,7 +141,6 @@ function makeTypable(select) {
             name.className = 'suggest-name';
             name.textContent = shown[i].textContent.trim();
             item.appendChild(name);
-            // mousedown, so the pick lands before the box loses focus and closes the list
             item.addEventListener('mousedown', function (event) {
                 event.preventDefault();
                 pick(shown[i]);
@@ -179,7 +157,6 @@ function makeTypable(select) {
         } else {
             list.scrollTop = 0;
         }
-        // typed text: the first match is ready for Enter
         if (!openAll && typed.trim() !== '' && shown.length > 0) setActive(0);
     }
 
@@ -196,7 +173,6 @@ function makeTypable(select) {
         box.select();
         suggest(true);
     });
-    // pressed again after a pick: the whole list, with the text ready to type over
     box.addEventListener('click', function () {
         if (!list.hidden) return;
         box.select();
@@ -227,7 +203,6 @@ function makeTypable(select) {
             hide();
         }
     });
-    // leaving the box: typed text that names a choice exactly picks it; anything else is put back
     box.addEventListener('blur', function () {
         const typed = box.value.trim().toLowerCase();
         hide();
@@ -250,7 +225,6 @@ function makeTypable(select) {
         if (select.options.length > 0) pick(select.options[0]);
     });
 
-    // the select is still the one the page's code talks to: follow it
     select.addEventListener('change', sync);
     const valueOf = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
     const indexOf = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
@@ -279,7 +253,6 @@ function makeTypableIn(root) {
     for (let i = 0; i < selects.length; i++) makeTypable(selects[i]);
 }
 
-// the toolbars in the page, and any drawn later (the delivery schedule's)
 document.addEventListener('DOMContentLoaded', function () {
     makeTypableIn(document.body);
     new MutationObserver(function (changes) {

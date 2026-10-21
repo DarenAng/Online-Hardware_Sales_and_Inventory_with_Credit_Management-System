@@ -1,26 +1,5 @@
--- ==========================================================================
--- 3-ADD-qr-payments.sql
--- Lucelyn Hardware - adds QR payments (GCash, Maya and bank transfers, through PayMongo) to a
--- database that already holds real data.
---
--- Only for an existing hardware_db made before QR payments. A database built
--- from the current 1-RUN-FIRST-database.sql already has this table, and running
--- this file there changes nothing. It adds one table and touches no row.
--- A qr_payments table made before bank transfers (no bank columns) is brought
--- up to date by the server when it starts, which also adds payment_details.
---
---   mysql -u root -p < public/database/3-ADD-qr-payments.sql
---   mysql -u root -p < public/database/2-RUN-SECOND-stored-procedures.sql
---
--- File 2 brings the three procedures the table is written through
--- (sp_create_qr_payment, sp_set_qr_payment_result, sp_link_qr_payment_to_sale).
--- Restarting the server does the same: it loads file 2 by itself when the
--- database has fewer procedures than the code expects.
--- ==========================================================================
-
 USE hardware_db;
 
--- the same table as in 1-RUN-FIRST-database.sql; see the notes there
 CREATE TABLE IF NOT EXISTS qr_payments (
     qr_payment_id INT AUTO_INCREMENT PRIMARY KEY,
     provider ENUM('paymongo','sim') NOT NULL,

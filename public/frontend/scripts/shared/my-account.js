@@ -1,6 +1,3 @@
-// my-account.js -- my credentials: details, edit form, password form
-// Loaded by: all five dashboards
-// The server only ever applies these to the signed-in account.
 let myAccount = null;
 
 function buildAccountModal() {
@@ -126,18 +123,14 @@ function buildAccountModal() {
         '            </div>\n' +
         '        </div>';
     document.body.appendChild(modal);
-    showPasswordRules();   // draws the checklist under the new-password box
+    showPasswordRules();
 }
 
-// The server refuses PUT /api/me for System Administrator (notOwnDetailsIfAdmin
-// in routes/shared.js), so the Edit Details tab is not offered to that role.
 function canEditOwnDetails() {
     const me = getCurrentUser();
     return !me || me.role_name !== 'System Administrator';
 }
 
-// A standard user does not change their own password (notOwnCredentials in
-// routes/shared.js); the administrator keeps it.
 function canChangeOwnPassword() {
     const me = getCurrentUser();
     return Boolean(me) && me.role_name === 'System Administrator';
@@ -153,7 +146,6 @@ function showAccountTab(tab) {
     const passwordTab = document.getElementById('account-tab-password');
     if (passwordTab) passwordTab.style.display = canChangeOwnPassword() ? '' : 'none';
 
-    // Save Changes / Change Password in the foot follow the open tab
     const footGroups = document.querySelectorAll('[data-account-foot]');
     for (let i = 0; i < footGroups.length; i++) {
         footGroups[i].hidden = footGroups[i].dataset.accountFoot !== tab;
@@ -166,7 +158,7 @@ function showAccountTab(tab) {
         const button = document.getElementById('account-tab-' + name);
         if (panel) {
             if (name !== tab) {
-                panel.style.display = 'none';        // not the chosen tab: hide it
+                panel.style.display = 'none';
             } else if (name === 'view') {
                 panel.style.display = 'grid';
             } else {
@@ -214,11 +206,8 @@ function renderMyAccount() {
     document.getElementById('account-avatar').textContent =
         ((me.first_name || '?')[0] + (me.last_name || '')[0] || '').toUpperCase();
 
-    // Rows the user cannot change from the Edit Details tab are greyed out.
-    // Staff ID, Full Name (made from the three names), the email, the role and
-    // the status are never editable here; the administrator cannot edit any row.
     const locked = true;
-    const editableRowsLocked = !canEditOwnDetails();   // the rows the user can edit are locked only for the administrator
+    const editableRowsLocked = !canEditOwnDetails();
 
     document.getElementById('account-view').innerHTML =
         detailRow('Staff ID', '#' + escapeHtml(me.staff_id), locked) +
@@ -255,7 +244,6 @@ async function handleSaveMyProfile(event) {
         return;
     }
 
-    // the email is shown for checking and never sent
     const data = {
         firstName: form.elements.firstName.value.trim(),
         middleName: form.elements.middleName.value.trim(),
@@ -268,7 +256,6 @@ async function handleSaveMyProfile(event) {
         return;
     }
 
-    // the phone number is required, and must be a Philippine number
     if (data.phone === '') {
         notifyWarning('A phone number is required.', 'Nothing was saved');
         return;
@@ -315,7 +302,6 @@ async function handleChangeMyPassword(event) {
         notifyWarning(complaint, 'Password not changed');
         return;
     }
-    // the server refuses this too; this saves the round trip
     if (newPassword === currentPassword) {
         notifyWarning('The new password must be different from your current password.', 'Password not changed');
         return;
@@ -331,10 +317,9 @@ async function handleChangeMyPassword(event) {
         }
 
         form.reset();
-        showPasswordRules();   // the checklist starts again
+        showPasswordRules();
         closeModal('account-modal');
 
-        // every other session on the old password is over; this one carries on
         notifySuccess('Your password was changed. Any other device signed in with the old one was signed out.',
             'Password changed');
     } catch (error) {

@@ -1,12 +1,3 @@
-/* ==========================================================================
-   system.css -- styles only the System Administrator page uses
-   Loads after general-ui.css and responsive.css, so anything here wins.
-   ========================================================================== */
-
-/* ==========================================================================
-   THE WORKING CARD
-   ========================================================================== */
-/* ---------- my own credentials ---------- */
 .cred-note {
     margin: 0 0 16px;
     padding: 11px 13px;
@@ -17,9 +8,6 @@
     color: var(--steel);
 }
 
-/* ==========================================================================
-   THE SIDE DRAWER
-   ========================================================================== */
 .drawer-shade {
     position: fixed; inset: 0;
     background: rgba(20, 24, 29, 0.42);
@@ -66,8 +54,6 @@
 }
 .drawer-foot .btn { flex: 1 1 auto; }
 
-/* A backup is named after the moment it was taken. The day reads as a date
-   and the time reads as a figure, because that is what each one is. */
 .backup-day {
     font-size: 16px;
     font-weight: 600;
@@ -80,49 +66,34 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* AUDIT LOGS -- every row is one line, so every page of ten is the same
-   height and Previous / Next stay in the same place. A long detail ends in
-   "..."; clicking the row opens the whole entry. (A phone shows cards instead.) */
 @media (min-width: 641px) {
     #logs-table {
-        table-layout: fixed;   /* the columns keep the widths below */
-        min-width: 960px;      /* a narrow screen scrolls sideways rather than squeezing */
+        table-layout: fixed;
+        min-width: 960px;
     }
     #logs-table td {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
     }
-    /* a little less padding, so the Detail column gets more room */
     #logs-table th,
     #logs-table td { padding-left: 10px; padding-right: 10px; }
-    #logs-table th:nth-child(1) { width: 150px; }   /* Timestamp */
-    #logs-table th:nth-child(2) { width: 160px; }   /* User */
-    #logs-table th:nth-child(3) { width: 180px; }   /* Role */
-    #logs-table th:nth-child(4) { width: 120px; }   /* IP Address */
-    #logs-table th:nth-child(5) { width: 130px; }   /* Action Type */
-    /* Detail takes the rest of the width */
+    #logs-table th:nth-child(1) { width: 150px; }
+    #logs-table th:nth-child(2) { width: 160px; }
+    #logs-table th:nth-child(3) { width: 180px; }
+    #logs-table th:nth-child(4) { width: 120px; }
+    #logs-table th:nth-child(5) { width: 130px; }
 }
 
-/* On a phone an audit card shows only the name, the date and time, the
-   action type and the detail; Role and IP Address are in the full entry
-   that opens when the card is tapped. */
 @media (max-width: 640px) {
     #logs-table td:nth-child(3),   /* Role */
-    #logs-table td:nth-child(4) {  /* IP Address */
+    #logs-table td:nth-child(4) {
         display: none;
     }
 }
 
-/* the safe tile and the destructive one should not look alike */
 #panel-maintenance .tile .btn { margin-top: 2px; }
 
-/* ==========================================================================
-   IS THIS SYSTEM BACKING ITSELF UP? -- green for fine, crimson for broken,
-   grey for switched off
-   ========================================================================== */
-/* Bootstrap's .card is a flex column; this one is a row, with the state
-   word beside the heading rather than above it. */
 .auto-backup {
     display: flex;
     flex-direction: row;
@@ -134,7 +105,6 @@
 .auto-backup h3 { margin-bottom: 2px; }
 .auto-backup .panel-sub { margin-bottom: 0; text-align: justify; hyphens: auto; }
 
-/* the switch sits at the far end of the card, level with the title */
 .auto-backup-toggle { flex: none; align-self: flex-start; min-width: 96px; }
 
 .auto-backup-state {
@@ -171,14 +141,9 @@
     .auto-backup-toggle { align-self: stretch; }
 }
 
-/* ==========================================================================
-   THE STAFF DIRECTORY -- the middle name takes the same box as the others
-   ========================================================================== */
-/* Create Account, as a popup over the directory */
 .create-box { max-width: 640px; }
 #create-modal .grid-2 { align-items: start; }
 
-/* what is wrong with a box, said under it */
 .field-error {
     display: block;
     margin-top: 5px;
@@ -190,22 +155,11 @@
 .form-control.is-bad { border-color: var(--stop); }
 .form-control.is-bad:focus { box-shadow: 0 0 0 3px var(--stop-dim); }
 
-/* Deactivate is the last button in the row and the only red one on the
-   screen: it is where a person stops being able to sign in. */
 #modal-status-btn { min-width: 168px; }
 
-/* ==========================================================================
-   ACCESS CONTROL -- the role is picked in the toolbar, its screens are a list
-   of switches below. Each row reads left to right: the screen and what it
-   does, the state it is in (amber or crimson when it differs from the role's
-   default), the switch, then a Default mark when the role has it by default.
-   The save bar stays at the foot of the screen while the list scrolls.
-   ========================================================================== */
 .access-screens { min-width: 0; }
 .feature-strip[hidden] { display: none; }
 
-/* a group per module, each screen a row of the same four columns -- name,
-   state, checkbox, default mark -- so every checkbox sits on one line */
 .feature-line { display: flex; flex-direction: column; gap: 18px; }
 .feature-group {
     display: flex; flex-direction: column;
@@ -252,7 +206,6 @@
     cursor: pointer;
 }
 
-/* "Default": the role has this screen when nobody has changed anything */
 .feature-default {
     justify-self: start;
     padding: 1px 7px;
@@ -280,7 +233,6 @@
 .feature-state.is-revoked { background: var(--stop-dim); color: var(--stop); }
 .feature-state[hidden], .feature-row[hidden], .feature-group[hidden] { display: none; }
 
-/* the save bar: what is waiting, Discard and Confirm Configuration */
 .access-savebar {
     position: sticky;
     bottom: 0;
@@ -299,7 +251,6 @@
 .access-savebar-note { margin-right: auto; font-size: 13.5px; color: var(--steel); }
 .access-savebar-note.has-changes { color: var(--signal-ink); font-weight: 600; }
 
-/* the confirmation card: the role, then the screens changed for it */
 .ask-config { display: flex; flex-direction: column; gap: 12px; text-align: left; }
 .ask-config-role { display: flex; flex-direction: column; gap: 4px; }
 .ask-config-line { color: var(--ink); }
@@ -312,7 +263,6 @@
 #panel-features .panel-toolbar { margin-bottom: 16px; }
 #features-no-match[hidden] { display: none; }
 
-/* on a phone the state word drops under the name so the row fits */
 @media (max-width: 640px) {
     .feature-row { grid-template-columns: minmax(0, 1fr) 40px; row-gap: 4px; }
     .feature-row .feature-desc { display: none; }
@@ -325,20 +275,11 @@
     .access-savebar-note { flex-basis: 100%; }
 }
 
-/* ==========================================================================
-   ON A PHONE
-   ========================================================================== */
 @media (max-width: 640px) {
-    /* the whole footer of the user popup is destructive-adjacent; each
-       button gets its own line so none of them is pressed by accident */
     #user-modal .modal-foot .btn { width: 100%; }
     #modal-status-btn { min-width: 0; }
 }
 
-/* ==========================================================================
-   RECEIPT MAINTENANCE -- the form on the left, a printed-looking preview
-   on the right, both on one screen
-   ========================================================================== */
 .store-layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 400px;
@@ -350,19 +291,16 @@
 .store-layout .form-sheet { max-width: none; }
 
 .store-preview-card {
-    /* below the sticky top bar (its height is measured into --topbar-h by system-admin.js) */
     position: sticky; top: calc(var(--topbar-h, 62px) + 16px);
     display: flex; flex-direction: column;
-    max-height: calc(100vh - var(--topbar-h, 62px) - 32px);    /* the receipt can be taller than the screen: its stage scrolls */
+    max-height: calc(100vh - var(--topbar-h, 62px) - 32px);
 }
 
-/* the bank account a transfer is sent to: its three boxes read as one thing */
 .store-bank .is-bad { border-color: var(--stop); }
 .store-bank-note { margin: 0 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--steel); }
 .store-bank-note:empty { display: none; }
 .store-bank-note.is-stop { color: var(--stop); }
 
-/* the form's parts, one framed section each */
 .store-section {
     margin: 0 0 16px;
     padding: 12px 14px 4px;
@@ -394,7 +332,6 @@
 }
 .store-checks input { width: 18px; height: 18px; accent-color: var(--go); }
 
-/* one header or footer line: the words, then move up, move down, remove */
 .line-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
 .line-list:empty { display: none; }
 .line-row { display: flex; gap: 6px; align-items: center; }
@@ -402,8 +339,6 @@
 .line-row .btn { flex: none; min-width: 36px; min-height: 38px; padding: 4px 8px; }
 .line-row .line-remove { color: var(--stop); }
 
-/* The paper is the roll's real width (set by format.js applyReceiptPaper),
-   so what is seen here is what the printer gets. */
 .store-preview-stage {
     display: flex;
     justify-content: center;
@@ -417,15 +352,13 @@
 }
 .store-preview {
     flex: none;
-    max-width: 100%;      /* a phone narrower than the roll shrinks it; print keeps the width */
+    max-width: 100%;
     box-sizing: border-box;
     padding: 4mm 3mm;
     background: var(--surface);
     box-shadow: 0 1px 4px rgba(20, 24, 29, 0.18);
 }
 
-/* the part of the receipt the box being changed draws: a wash that fades.
-   Screen only; with reduced motion it stays steady until the script takes it off. */
 @media screen {
     .store-preview .rc-flash,
     .store-preview.rc-flash {
@@ -436,7 +369,6 @@
     0%, 35% { background-color: rgba(245, 179, 1, 0.45); box-shadow: 0 0 0 3px rgba(245, 179, 1, 0.45); }
     100%    { background-color: rgba(245, 179, 1, 0);    box-shadow: 0 0 0 3px rgba(245, 179, 1, 0); }
 }
-/* the whole paper (width, text size) fades back to its own white and shadow */
 .store-preview.rc-flash { animation-name: rc-flash-paper; }
 @keyframes rc-flash-paper {
     0%, 35% { background-color: rgba(245, 179, 1, 0.45); box-shadow: 0 0 0 3px rgba(245, 179, 1, 0.45); }
@@ -451,7 +383,6 @@
     }
 }
 
-/* only the preview reaches the paper when Print Test is pressed */
 @media print {
     body.printing-receipt .wrapper > *:not(.main-content),
     body.printing-receipt .topbar,
@@ -479,7 +410,6 @@
     .store-preview-card { position: static; max-height: none; }
 }
 
-/* the TIN box says whether it is happy as it is filled in, like the phone box */
 #store-tin {
     font-family: var(--font-figure);
     letter-spacing: 0.04em;
@@ -491,8 +421,6 @@
     box-shadow: 0 0 0 3px var(--signal-dim);
 }
 
-/* what the server refused, said next to the boxes rather than only as a card
-   in the corner that has gone by the time the form is read again */
 .store-verdict {
     margin: 4px 0 0;
     padding: 9px 12px;
@@ -505,10 +433,6 @@
 .store-verdict:empty { display: none; }
 .store-verdict.is-stop { border-left-color: var(--stop); background: var(--stop-dim); }
 
-/* ==========================================================================
-   EXPORT -- Excel and PDF behind one button on the audit trail; the menu
-   opens under it (system-admin.js toggleLogExportMenu)
-   ========================================================================== */
 .export-menu { position: relative; display: inline-block; }
 .export-menu-list {
     position: absolute;

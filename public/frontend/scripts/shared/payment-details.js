@@ -1,23 +1,3 @@
-// payment-details.js -- the bank and account behind a cheque or a bank transfer
-// Loaded by: cashier-dashboard.html (the Payment card and the Credit Settlement card), delivery.html (Receive Payment)
-//
-// A cheque is taken with the account name and account number printed on it,
-// the bank and the date written on it. A bank transfer is taken with the
-// customer's bank, account name and account number. Each box keeps out what
-// cannot belong in it as it is typed (letters in an account number) and says
-// what is wrong under itself.
-//
-//   buildPaymentDetailsBox(boxId, prefix, transferByList)  puts the boxes in the page, once
-//   showPaymentDetails(prefix, method)     shows the boxes the method needs
-//   readChequeDetails(prefix)              what was typed for a cheque, checked
-//   readTransferDetails(prefix)            what was typed for a bank transfer, checked
-//   clearPaymentDetails(prefix)            empties every box
-//   paymentDetailsReceiptHtml(rows)        the block printed on a receipt
-//
-// The same rules as payment-details.js in the backend, which checks them again.
-
-// The banks a customer can pay from through PayMongo's online banking, and the
-// smallest payment each takes. The server has the same list (PAYMONGO_BANKS).
 const PAYMONGO_BANKS = [
     { code: 'bpi',       name: 'BPI',       minimum: 1 },
     { code: 'ubp',       name: 'UnionBank', minimum: 1 },
@@ -33,14 +13,11 @@ function paymongoBank(code) {
     return null;
 }
 
-// "2026-10-20" for a day, in this computer's own time zone
 function pdDayText(date) {
     return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' +
         String(date.getDate()).padStart(2, '0');
 }
 
-// the earliest and latest date a cheque may carry: no earlier than today,
-// and more than a year ahead is a typing mistake
 function pdChequeLimits() {
     const now = new Date();
     return {
@@ -49,7 +26,6 @@ function pdChequeLimits() {
     };
 }
 
-// true when the text is a real calendar day ("2026-02-30" is not)
 function pdIsRealDay(text) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
     const year = Number(text.slice(0, 4));
@@ -69,16 +45,11 @@ function pdChequeDateProblem(text) {
     return null;
 }
 
-// ---------- the boxes ----------
-// a box with its label and, under it, the line that says what is wrong with it
 function pdField(id, label, extra) {
     return '<div class="form-group"><label for="' + id + '">' + label + '</label>' + extra +
         '<span class="field-error" id="' + id + '-error" hidden></span></div>';
 }
 
-// kind: 'name' (letters, spaces and . , ' -), 'digits' (an account number) or
-// 'bank' (letters, digits, spaces and . & -); what does not belong is kept out
-// as it is typed
 function pdInput(id, maxLength, placeholder, kind) {
     return '<input type="text" id="' + id + '" class="form-control" maxlength="' + maxLength + '" ' +
         'autocomplete="off" placeholder="' + placeholder + '"' +
@@ -92,8 +63,6 @@ const PD_KEEP = {
     bank: { strip: /[^A-Za-z0-9\u00C0-\u024F .&-]/g, words: 'Letters and digits only.' }
 };
 
-// As a box is typed in: what does not belong is taken out, and the box says so.
-// On leaving it (done): a figure too short is said too.
 function pdLiveCheck(box, kind, done) {
     const rule = PD_KEEP[kind];
     if (!box || !rule) return;
@@ -114,7 +83,6 @@ function pdLiveCheck(box, kind, done) {
     pdMark(box.id, problem);
 }
 
-// shows (or, with no text, clears) the line under a box and its red edge
 function pdMark(id, text) {
     const box = document.getElementById(id);
     const line = document.getElementById(id + '-error');
@@ -125,16 +93,11 @@ function pdMark(id, text) {
     }
 }
 
-// the answer of a check, with the box it is about marked
 function pdProblem(text, id) {
     pdMark(id, text);
     return { problem: text, field: id };
 }
 
-// Puts the cheque boxes and the bank-transfer boxes into the element boxId. Both
-// are hidden until showPaymentDetails() asks for one. transferByList is true where
-// the customer's bank is picked from the banks PayMongo supports (the till), and
-// false where it is typed (the driver, who only writes down what the customer shows).
 function buildPaymentDetailsBox(boxId, prefix, transferByList) {
     const box = document.getElementById(boxId);
     if (!box) return;
@@ -186,16 +149,12 @@ function buildPaymentDetailsBox(boxId, prefix, transferByList) {
             (transferNote ? '<p class="pay-details-note">' + transferNote + '</p>' : '') +
         '</div>';
 
-    // a cheque date outside what a bank takes cannot be picked
     const limits = pdChequeLimits();
     const dateBox = document.getElementById(prefix + '-cheque-date');
     dateBox.min = limits.earliest;
     dateBox.max = limits.latest;
 }
 
-// Shows the boxes the method needs and hides the others. Whatever was typed in
-// a box that goes away is emptied, so a cheque's account is never sent with a
-// payment that was changed to something else.
 function showPaymentDetails(prefix, method) {
     const cheque = document.getElementById(prefix + '-cheque');
     const transfer = document.getElementById(prefix + '-transfer');
@@ -220,14 +179,12 @@ function pdTidy(text) {
     return String(text || '').trim().replace(/\s+/g, ' ');
 }
 
-// the account number as digits only, or null when it is not a believable one
 function pdAccountDigits(text) {
     const digits = String(text || '').replace(/[\s-]/g, '');
     if (!/^\d{6,20}$/.test(digits)) return null;
     return digits;
 }
 
-// null when the account name is fine, otherwise the sentence to show
 function pdAccountNameProblem(name, whose) {
     if (name === '') return 'Enter the account name' + whose + '.';
     if (name.length < 2) return 'The account name is too short.';
@@ -235,8 +192,6 @@ function pdAccountNameProblem(name, whose) {
     return null;
 }
 
-// Gives back { problem, field, details }. problem is null when all is well;
-// otherwise field is the id of the box to put the cursor in.
 function readChequeDetails(prefix) {
     const name = pdTidy(pdValue(prefix + '-cheque-name'));
     const nameProblem = pdAccountNameProblem(name, ' on the cheque');
@@ -265,8 +220,6 @@ function readChequeDetails(prefix) {
     };
 }
 
-// For a bank transfer. At the till the bank is picked from PayMongo's list, so
-// the answer carries bankCode too; for the driver the bank is typed.
 function readTransferDetails(prefix) {
     const bankBox = document.getElementById(prefix + '-transfer-bank');
     let bank = '';
@@ -300,7 +253,6 @@ function readTransferDetails(prefix) {
     };
 }
 
-// Empties the boxes; kind is 'cheque' or 'transfer' for one set, nothing for both.
 function clearPaymentDetails(prefix, kind) {
     const ids = ['-cheque-name', '-cheque-number', '-cheque-bank', '-cheque-date',
                  '-transfer-bank', '-transfer-name', '-transfer-number'];
@@ -312,11 +264,6 @@ function clearPaymentDetails(prefix, kind) {
     }
 }
 
-// ---------- showing what was recorded ----------
-// A saved detail row, as the server sends it: { method, account_name,
-// account_number, bank_name, branch, cheque_date }.
-
-// "Cheque 001234 · BDO, Nasugbu · dated 2026-10-20 · Juan Dela Cruz, account 0123456789"
 function paymentDetailsSummary(detail, reference) {
     const parts = [];
     if (detail.method === 'Cheque') {
@@ -331,14 +278,11 @@ function paymentDetailsSummary(detail, reference) {
     return parts.join(' · ');
 }
 
-// "****6789": only the last four digits, for what is printed on paper
 function maskedAccountNumber(number) {
     const text = String(number || '');
     return '****' + text.slice(-4);
 }
 
-// the lines of one detail as [label, value] pairs, for a receipt or a card.
-// masked is true on a printed receipt: the account number shows its last four digits only.
 function paymentDetailsRows(detail, reference, masked) {
     const number = masked ? maskedAccountNumber(detail.account_number) : detail.account_number;
     const rows = [];
@@ -358,11 +302,6 @@ function paymentDetailsRows(detail, reference, masked) {
     return rows;
 }
 
-// The details saved on a sale (GET /api/sales/:id), each with the reference it
-// was taken under and a heading, ready for a receipt or a card. data has
-// sale, payments and paymentDetails. A detail with a payment_id belongs to that
-// payment on the account; one without it to the sale's own payment. The
-// reference of a down payment at the counter is the one kept on the sale.
 function paymentDetailItems(data) {
     const items = [];
     const list = data.paymentDetails || [];
@@ -386,7 +325,6 @@ function paymentDetailItems(data) {
     return items;
 }
 
-// the details of a sale as lines on a card; empty when it had none
 function paymentDetailsCardHtml(data) {
     const items = paymentDetailItems(data);
     if (items.length === 0) return '';
@@ -398,9 +336,6 @@ function paymentDetailsCardHtml(data) {
     return html;
 }
 
-// One block on a receipt for each detail. items is a list of
-// { detail, reference, label } (label is the heading, such as "Cheque" or "Cheque payment of 2,000.00").
-// masked is true for a printed receipt (the account number is cut to its last four digits).
 function paymentDetailsReceiptHtml(items, masked) {
     if (!items || items.length === 0) return '';
 

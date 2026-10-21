@@ -1,28 +1,6 @@
-// credit-terms.js -- the printed Credit Terms and Conditions page and the Customer Card
-// Loaded by: manager.html, cashier-dashboard.html
-//
-// Two prints, both on A4 through the browser's own print dialogue ("Save as
-// PDF" is in that dialogue):
-//   printCreditTerms(customerId)  the terms page alone
-//   printCustomerCard(customerId) the physical customer card (front and back,
-//                                 true size, to cut out), on one page
-//
-// The back of the card carries the three policies the manager keeps in Policy
-// Maintenance (credit policy, customer data terms, refund policy).
-// customerCardBackHtml draws it for the print and for the preview beside those
-// pages; fitCustomerCard shrinks its text until it fits the card.
-//
-// The page is built here from what the server reads out of the account
-// (GET /api/credit/terms/:id and /api/credit/card/:id): the store's details,
-// the customer, the credit limit, the days to pay and the late-payment rate.
-// Nothing on the page is typed in by hand but the wording of the terms, which
-// the manager writes (Credit Terms Wording). It is put on the page for the
-// moment of printing and taken off again afterwards.
-
-// the style tag that sets the paper size while a page is printing
 const CREDIT_PRINT_PAGE_STYLE_ID = 'credit-print-page-style';
 
-let creditPrintRestore = null;      // set while a page is on the paper; calling it puts the screen back
+let creditPrintRestore = null;
 
 function printDate(stamp) {
     const when = new Date(stamp);
@@ -30,7 +8,6 @@ function printDate(stamp) {
     return when.toLocaleDateString('en-PH', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-// "2026-10-01 10:00:00" -> "1 October 2026", or a dash when there is none
 function printDay(stamp) {
     if (!stamp) return 'Not set';
     const when = new Date(String(stamp).replace(' ', 'T'));
@@ -38,8 +15,6 @@ function printDay(stamp) {
     return escapeHtml(when.toLocaleDateString('en-PH', { day: 'numeric', month: 'long', year: 'numeric' }));
 }
 
-// the store at the head of each page: name, owner, address, TIN, and the
-// contact lines the administrator put in the receipt's header
 function creditPrintHead(data) {
     const store = data.store;
     let lines = '';
@@ -53,7 +28,6 @@ function creditPrintHead(data) {
     return '<div class="cp-head"><h1>' + escapeHtml(store.name) + '</h1>' + lines + '</div>';
 }
 
-// one row of a two-column list of facts
 function creditPrintRow(label, valueHtml, isNumber) {
     return '<tr><th>' + escapeHtml(label) + '</th><td' + (isNumber ? ' class="cell-num"' : '') + '>' +
         valueHtml + '</td></tr>';
@@ -65,13 +39,10 @@ function creditPrintFoot(data) {
     return '<p class="cp-foot">' + escapeHtml(text) + '</p>';
 }
 
-// The terms page: the store, the customer, the account's figures, the terms
-// and the signature lines.
 function creditTermsPage(data) {
     const c = data.customer;
     const t = data.terms;
 
-    // the rate says whose it is when the manager gave this account its own
     let rateText = penaltyRateWord(t.penalty_rate) + ' a month of the unpaid balance, for every month or part of a month a purchase stays unpaid after its due date';
     if (t.penalty_rate_is_own) rateText += ' (the rate set for this account)';
 
@@ -117,16 +88,12 @@ function creditTermsPage(data) {
         '</section>';
 }
 
-// ---------- the physical customer card ----------
-// ID-1 size, the size of a bank card: 85.6 x 54 mm. Drawn in mm, so the print is
-// true size; the preview scales it up.
 const CARD_POLICY_TITLES = {
     credit: 'Credit Policy',
     'data-terms': 'Customer Data Terms',
     refund: 'Refund Policy'
 };
 
-// the filled-in lines of a policy's text
 function cardPolicyLines(text) {
     const kept = [];
     const lines = String(text || '').split(/\r?\n/);
@@ -145,7 +112,6 @@ function cardInitials(name) {
     return initials || 'LH';
 }
 
-// the store's address and contact lines, as one line for the small print
 function cardStoreContact(store) {
     const parts = [];
     if (store.address) parts.push(store.address);
@@ -154,9 +120,6 @@ function cardStoreContact(store) {
     return parts.join(' \u00b7 ');
 }
 
-// The back: the three policies, the cardholder's signature and where to return
-// a lost card. policies is { credit: [lines], 'data-terms': [lines], refund: [lines] };
-// editing names the policy being written, which the preview marks.
 function customerCardBackHtml(store, policies, editing) {
     let body = '';
     const kinds = ['credit', 'data-terms', 'refund'];
@@ -182,7 +145,6 @@ function customerCardBackHtml(store, policies, editing) {
     '</div>';
 }
 
-// The front: the store, the cardholder and the account's limit
 function customerCardFrontHtml(data) {
     const store = data.store;
     const c = data.customer;
@@ -206,8 +168,6 @@ function customerCardFrontHtml(data) {
     '</div>';
 }
 
-// Shrinks the back's text until it fits the card, from 6.5pt down to 3pt.
-// Answers the size used (in pt). The card must be laid out (on screen) to measure.
 function fitCustomerCard(card) {
     const body = card ? card.querySelector('.cc-back-body') : null;
     if (!body) return null;
@@ -220,11 +180,8 @@ function fitCustomerCard(card) {
     return size;
 }
 
-// below this the back is too small to read on a card that size
 const CARD_SMALLEST_READABLE_PT = 4.5;
 
-// The sheet with the card on it: front and back side by side at true size,
-// fitted on screen out of sight first (a print-only element cannot be measured)
 function customerCardSheet(data) {
     const policies = {
         credit: data.terms.lines,
@@ -239,24 +196,16 @@ function customerCardSheet(data) {
     const back = measure.innerHTML;
     measure.remove();
 
-    // the card alone: no store heading, instructions or printed-by line
     return '<section class="cp-page cc-sheet">' +
         '<div class="cc-pair">' + customerCardFrontHtml(data) + back + '</div>' +
         '</section>';
 }
 
-// Puts the pages on the paper: the rest of the screen is hidden while the
-// print dialogue is open (css/shared/general-ui.css, body.printing-credit).
-// Any other print on a page that has these (the invoice, a report, a purchase
-// order) calls this first, so a credit page left on the paper cannot hide it.
 function finishCreditPrint() {
     if (creditPrintRestore) creditPrintRestore();
 }
 
-// pageMargin: the paper's margin (16mm when left out). The card prints with
-// none, so the browser has no room for its own date, title and address lines.
 function printCreditSheets(html, pageMargin) {
-    // a print still waiting to be put back (a second press) is finished first
     finishCreditPrint();
 
     const sheet = document.createElement('div');
@@ -265,7 +214,6 @@ function printCreditSheets(html, pageMargin) {
     sheet.innerHTML = html;
     document.body.appendChild(sheet);
 
-    // A4 with an even margin; added now and removed after, like the receipt's paper size
     const style = document.createElement('style');
     style.id = CREDIT_PRINT_PAGE_STYLE_ID;
     style.textContent = '@media print { @page { size: A4; margin: ' + (pageMargin || '16mm') + '; } }';
@@ -281,7 +229,6 @@ function printCreditSheets(html, pageMargin) {
         style.remove();
     };
 
-    // afterprint puts the screen back; the timer covers a browser that never sends it
     window.addEventListener('afterprint', function once() {
         window.removeEventListener('afterprint', once);
         if (creditPrintRestore) creditPrintRestore();
@@ -293,10 +240,6 @@ function printCreditSheets(html, pageMargin) {
     }, 1500);
 }
 
-// Says why a read failed, once. A 401 or 403 has already been explained by
-// handleAuthFailure (the sign-in page, or a "Not allowed" message), so nothing
-// more is said; any other answer from the server is an error; no answer at all
-// is the connection.
 function explainReadFailure(error, message, title) {
     if (error && (error.status === 401 || error.status === 403)) return;
     if (error && error.status) {
@@ -326,7 +269,6 @@ async function printCreditTerms(customerId) {
     printCreditSheets(creditTermsPage(data));
 }
 
-// the card alone, on one page
 async function printCustomerCard(customerId) {
     if (typeof holdsFeature === 'function' && !holdsFeature('customer-card-print')) {
         notifyWarning('Printing a customer card is switched off for your role.', 'Not allowed');

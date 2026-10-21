@@ -1,52 +1,5 @@
--- ==========================================================================
--- 4-MIGRATION-refunds-lower-balance.sql
--- Lucelyn Hardware - a refund now comes off what the customer owes.
---
--- Before: a refund only wrote a row in returned_items; the sale still owed
--- the same amount. After: a refund filed on a sale lowers its balance, up to
--- what is still owed. Whatever is more than the balance is cash handed back,
--- so the amount owed never goes below zero. A sale that was paid in full
--- keeps its status; a sale whose balance reaches zero turns Paid. Refunds on
--- one sale never add up to more than the customer was charged (after the
--- discount), and a line cannot be refunded more times than it was sold.
---
--- What this file changes (it never drops a table or the database, and no
--- row is deleted):
---   1. adds sales.refunded_amount (0.00 on every sale that exists today)
---   2. makes sales.amount_due = total - discount + penalty - refunded_amount
---   3. re-creates sp_file_return_report (raises refunded_amount, checks the
---      refund against the sale under a lock, and has a new OUT parameter,
---      p_off_balance) and sp_apply_late_penalties (a penalty is charged on
---      the goods still unpaid after refunds)
---   4. re-creates the two credit views, which show a penalty only up to the
---      balance still owed on its sale
---
--- Needs the late-payment penalty columns (sales.penalty_amount,
--- penalty_applied_at and amount_due). Every database made from
--- 1-RUN-FIRST-database.sql has them, and the server adds them to an older one
--- when it starts. On a database that has not got them yet, steps 1 and 2 say
--- so and skip, and the file stops before it drops anything: start the server
--- once, then run this file again.
---
--- Safe to run more than once: each step checks first. Refunds filed before
--- this change are not touched; they were already settled in cash.
---
--- How to run it (local MySQL; the server also does steps 1 and 2 by itself
--- when it starts, and loads file 2 again when it finds the older procedures):
---   mysql -u root -p < public/database/4-MIGRATION-refunds-lower-balance.sql
---
--- On Aiven run this same file, with the USE line below changed to the Aiven
--- database name (it is "defaultdb" unless you made another).
---
--- File 2 holds the same procedures and views; run it after any later change
--- to them. It now holds a newer sp_file_return_report (two more parameters,
--- for Missing reports; see 5-MIGRATION-missing-delivery-reports.sql), so on a
--- database that already has that, run file 2 again after this file.
--- ==========================================================================
-
 USE hardware_db;
 
--- 1. the new column, placed before amount_due, which is worked out from it
 SET @has_due = (SELECT COUNT(*) FROM information_schema.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales'
                   AND COLUMN_NAME = 'amount_due');
@@ -62,7 +15,6 @@ PREPARE step FROM @step;
 EXECUTE step;
 DEALLOCATE PREPARE step;
 
--- 2. amount_due takes the refunds off
 SET @has_column = (SELECT COUNT(*) FROM information_schema.COLUMNS
                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'sales'
                      AND COLUMN_NAME = 'refunded_amount');
@@ -79,11 +31,8 @@ PREPARE step FROM @step;
 EXECUTE step;
 DEALLOCATE PREPARE step;
 
--- Stops here, with "Unknown column", before anything is dropped, when the
--- columns above are not there (see the note at the top).
 SELECT refunded_amount, amount_due FROM sales LIMIT 0;
 
--- 3 and 4. the procedures and views (the same text as in 2-RUN-SECOND-stored-procedures.sql)
 DELIMITER //
 
 DROP PROCEDURE IF EXISTS sp_file_return_report //
@@ -94,13 +43,9 @@ CREATE PROCEDURE sp_file_return_report (
     IN p_quantity DECIMAL(12,3),
     IN p_reason TEXT,
     IN p_refund_amount DECIMAL(12,2),
-    -- Where the goods go, in words; restocked is derived from it. A Refunded
-    -- report may leave it NULL: the goods wait for the clerk to inspect them
-    -- (sp_resolve_return_report), and nothing moves on the shelf until then.
     IN p_disposition VARCHAR(20),
     IN p_staff_id INT,
     OUT p_report_id INT,
-    -- how much of a refund came off what the customer owes on the sale
     OUT p_off_balance DECIMAL(12,2),
     OUT p_status_code INT,
     OUT p_message VARCHAR(255)
@@ -125,13 +70,11 @@ PROC_BODY: BEGIN
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_report_id = NULL;
         SET p_off_balance = 0.00;
         SET p_status_code = 500;
-        -- the server logs this and sends the browser a plain sentence instead
         SET p_message = CONCAT('sp_file_return_report failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
@@ -150,22 +93,18 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- A refund is money going back against a sale, so it must name the sale.
-    -- Without one, nothing checks the amount against what was charged.
     IF p_report_type = 'Refunded' AND p_sale_id IS NULL THEN
         SET p_status_code = 400;
         SET p_message = 'A refund must be filed against a sale.';
         LEAVE PROC_BODY;
     END IF;
 
-    -- a negative refund would put money back on the customer's bill
     IF p_refund_amount IS NOT NULL AND p_refund_amount < 0 THEN
         SET p_status_code = 400;
         SET p_message = 'The refund amount cannot be negative.';
         LEAVE PROC_BODY;
     END IF;
 
-    -- every report keeps its reason
     IF p_reason IS NULL OR TRIM(p_reason) = '' THEN
         SET p_status_code = 400;
         SET p_message = 'A reason is required for every report.';
@@ -174,8 +113,6 @@ PROC_BODY: BEGIN
 
     SET v_where = NULLIF(TRIM(IFNULL(p_disposition, '')), '');
 
-    -- a refund taken back at the counter is the clerk's to judge; anything
-    -- else (damage found in the stockroom) is filed by the person who judged it
     SET v_awaiting = (v_where IS NULL AND p_report_type = 'Refunded');
 
     IF NOT v_awaiting AND (v_where IS NULL OR v_where NOT IN ('Return to Stock', 'Write-Off')) THEN
@@ -184,8 +121,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- one decision, one flag; restocked is no longer set separately (and
-    -- false, not null, while the goods wait to be inspected)
     SET v_restock = IFNULL(v_where = 'Return to Stock', FALSE);
 
     SET v_name = NULL;
@@ -197,9 +132,6 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    -- The shelf row is read FOR UPDATE inside the transaction, the same as in
-    -- sp_adjust_stock: a report and an adjustment on the same material at the
-    -- same moment cannot both read the old figure and write over each other.
     START TRANSACTION;
 
     SET v_before = 0;
@@ -207,11 +139,6 @@ PROC_BODY: BEGIN
     FROM inventory WHERE product_id = p_product_id
     FOR UPDATE;
 
-    -- A refund on a sale is checked against the sale, and this is the real
-    -- guard (the route only words the same refusals nicely). The sale row is
-    -- locked FOR UPDATE first and the figures are read after the lock, so two
-    -- refunds of the same line at the same moment take turns: the second one
-    -- sees the first one's report and is refused if nothing is left to refund.
     IF p_report_type = 'Refunded' AND p_sale_id IS NOT NULL THEN
         SET v_due = NULL;
         SELECT amount_due, amount_paid, final_amount, is_archived
@@ -226,8 +153,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- a voided sale was cancelled and its stock put back; refunding it
-        -- would pay out money that was never taken
         IF v_voided THEN
             ROLLBACK;
             SET p_status_code = 409;
@@ -235,7 +160,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- what the sale holds of this product, and what has already come back
         SELECT COALESCE(SUM(quantity), 0) INTO v_sold
         FROM sale_items WHERE sale_id = p_sale_id AND product_id = p_product_id;
 
@@ -261,11 +185,6 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        -- Refunds on one sale never add up to more than the customer was
-        -- charged (final_amount, after the discount). That also means the cash
-        -- handed back can never be more than was paid: cash back only starts
-        -- once the balance is gone, and then it is at most final_amount minus
-        -- what came off the balance, which is at most what the customer paid.
         SELECT COALESCE(SUM(refund_amount), 0) INTO v_refunded_before
         FROM returned_items
         WHERE sale_id = p_sale_id AND report_type = 'Refunded';
@@ -281,9 +200,6 @@ PROC_BODY: BEGIN
         SET v_on_sale = TRUE;
     END IF;
 
-    -- Return to Stock always adds. Write-Off subtracts only when the goods were
-    -- still counted as stock (a customer's return was deducted when sold).
-    -- Awaiting inspection moves nothing: the clerk's verdict does that.
     IF v_awaiting THEN
         SET v_change = 0;
     ELSEIF v_restock THEN
@@ -301,16 +217,10 @@ PROC_BODY: BEGIN
 
     SET p_report_id = LAST_INSERT_ID();
 
-    -- A refund on a sale comes off what the customer owes, up to the balance.
-    -- Anything over that is cash handed back, so the bill never falls below
-    -- what has been paid. The sale row is already locked (above), so a payment
-    -- at the same moment cannot be counted twice.
     IF v_on_sale AND IFNULL(p_refund_amount, 0) > 0 THEN
         SET v_off = LEAST(p_refund_amount, GREATEST(v_due - v_paid, 0.00));
 
         IF v_off > 0 THEN
-            -- amount_due is worked out from refunded_amount by the table;
-            -- the status turns Paid when nothing is left to collect
             UPDATE sales
             SET refunded_amount = refunded_amount + v_off,
                 payment_status = IF(v_paid >= v_due - v_off, 'Paid', payment_status)
@@ -340,7 +250,6 @@ PROC_BODY: BEGIN
                    ': ', LEFT(TRIM(p_reason), 110)),
             p_product_id, p_staff_id);
 
-    -- the clerk is asked to look at what came back
     IF v_awaiting THEN
         INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id)
         VALUES (3, 'Refund Report', CONCAT('Inspect ', v_name, ' returned at the counter'),
@@ -364,7 +273,6 @@ PROC_BODY: BEGIN
         CONCAT(p_report_type, ' report filed. The goods are set aside for the stockroom to inspect.'),
         CONCAT(p_report_type, ' report filed.'));
 
-    -- say where the money went when the refund was on a sale
     IF v_on_sale THEN
         IF v_off > 0 THEN
             SET p_message = CONCAT(p_message, ' ', FORMAT(v_off, 2), ' came off what the customer owes.');
@@ -410,13 +318,11 @@ BEGIN
           AND s.payment_status <> 'Paid'
           AND s.final_amount - s.refunded_amount - s.amount_paid > 0
           AND DATE(s.sale_date) < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-          -- a month or part of one past due that has not been charged yet
           AND CEILING(DATEDIFF(CURDATE(), DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) / 30) > s.penalty_months;
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
-        -- first, before anything clears it: the real error, for the server log
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
         ROLLBACK;
         SET p_applied = -1;
@@ -433,7 +339,6 @@ BEGIN
         FETCH cur INTO v_sale_id, v_customer_id, v_name, v_unpaid, v_balance, v_rate, v_days, v_months_charged;
         IF v_done = 1 THEN LEAVE read_loop; END IF;
 
-        -- day 1 past due is month 1; day 31 is month 2
         SET v_months_due = CEILING(v_days / 30);
         SET v_months_new = v_months_due - v_months_charged;
         SET v_penalty = ROUND(v_unpaid * v_rate / 100 * v_months_new, 2);
@@ -453,7 +358,6 @@ BEGIN
                            ' = ', FORMAT(v_penalty, 2), ' penalty; month ', v_months_due, ' overdue, ',
                            v_days, IF(v_days = 1, ' day', ' days'), ' past due'));
 
-            -- the manager, who sets the rate, and the cashier, who takes the payment
             INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)
             VALUES (2, 'Late Penalty',
                     CONCAT('Late penalty of ', FORMAT(v_penalty, 2), ' on sale #', v_sale_id),
@@ -492,7 +396,6 @@ SELECT
     cc.notes AS credit_notes,
     cc.updated_at AS credit_updated_at,
 
-    -- the late-payment rate: the manager's word on this account, else the shop's
     cc.penalty_rate AS penalty_rate_override,
     COALESCE(cc.penalty_rate, (SELECT penalty_rate FROM store_settings WHERE setting_id = 1), 3.00)
         AS penalty_rate,
@@ -502,30 +405,24 @@ SELECT
               WHERE s.customer_id = c.customer_id
                 AND s.is_archived = FALSE), 0.00) AS total_purchase,
 
-    -- billed, with any late penalty on it, minus paid on any sale not yet marked Paid
     COALESCE((SELECT SUM(s.amount_due - s.amount_paid)
               FROM sales s
               WHERE s.customer_id = c.customer_id
                 AND s.is_archived = FALSE
                 AND s.payment_status <> 'Paid'), 0.00) AS current_credit,
 
-    -- how much of that is late-payment penalty rather than goods
-    -- (a penalty is shown only up to the balance left on its sale: after a
-    -- payment or a refund the balance can be smaller than the penalty charged)
     COALESCE((SELECT SUM(LEAST(s.penalty_amount, GREATEST(s.amount_due - s.amount_paid, 0)))
               FROM sales s
               WHERE s.customer_id = c.customer_id
                 AND s.is_archived = FALSE
                 AND s.payment_status <> 'Paid'), 0.00) AS penalties_owed,
 
-    -- sales that have passed their 30-day due date still owing
     (SELECT COUNT(*) FROM sales s
      WHERE s.customer_id = c.customer_id
        AND s.is_archived = FALSE
        AND s.payment_status <> 'Paid'
        AND DATE(s.sale_date) < DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS overdue_sales,
 
-    -- never negative: an account over its limit has nothing available
     GREATEST(COALESCE(cc.credit_limit, 0.00) -
              COALESCE((SELECT SUM(s.amount_due - s.amount_paid)
                        FROM sales s
@@ -538,7 +435,6 @@ SELECT
        AND s.is_archived = FALSE
        AND s.payment_status <> 'Paid') AS open_sales,
 
-    -- how long the oldest unpaid sale has been sitting there
     (SELECT DATEDIFF(CURDATE(), DATE(MIN(s.sale_date)))
      FROM sales s
      WHERE s.customer_id = c.customer_id
@@ -554,24 +450,10 @@ SELECT
 FROM customers c
 LEFT JOIN customer_credits cc ON cc.customer_id = c.customer_id //
 
--- ==========================================
--- WHAT "STANDING" MEANS
---
---   HOLD   over the credit limit, oldest unpaid sale over 90 days, or a
---          manager put the account on hold
---   WATCH  oldest unpaid sale over 30 days, balance 75% or more of the
---          limit, or a manager flagged the account
---   GOOD   none of the above
---
--- The manager's word (customer_credits.standing) only makes it stricter;
--- Good means "let the figures decide". The thresholds are written twice
--- (tier and reason) in the same order, so the two cannot disagree.
--- ==========================================
 CREATE VIEW vw_customer_credit AS
 SELECT
     f.*,
 
-    -- the tier the figures alone would give, before the manager's word
     CASE
         WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN 'Hold'
         WHEN f.oldest_debt_days > 90                                   THEN 'Hold'
@@ -580,7 +462,6 @@ SELECT
         ELSE 'Good'
     END AS computed_standing,
 
-    -- the tier in force: the stricter of the figures and the manager's word
     CASE
         WHEN f.manual_standing = 'Hold'                                THEN 'Hold'
         WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN 'Hold'
@@ -591,7 +472,6 @@ SELECT
         ELSE 'Good'
     END AS standing,
 
-    -- why, in words, for the screen that shows the badge
     CASE
         WHEN f.manual_standing = 'Hold' THEN
             CONCAT('Put on hold by a manager',

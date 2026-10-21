@@ -1,30 +1,15 @@
-// supplier-order.js -- the page a supplier opens from the QR code or link on
-// the purchase order (printed, or emailed by the clerk)
-// Loaded by: supplier-order.html only. Nobody signs in here: the code in the
-// address (?code=...) is the supplier's permission, and the server checks it
-// on every call (GET /api/supplier-order/:code, .../pdf, POST .../respond).
-//
-// One column, read top to bottom, every action a real button:
-//   1. The order      each line has an Edit price button for a price that
-//                     does not match what the supplier sells it for
-//   2. Your answer    two big buttons: Accept order, Decline order
-//   3. The details    accepting: the day it ships and a note; declining: why
-//   and one big Send button at the end, with what will be sent written above it.
-// Once answered, the page turns into the receipt of what was said.
-
 function startSupplierOrderPage() {
     const main = document.getElementById('so-main');
     const code = new URLSearchParams(window.location.search).get('code') || '';
-    let view = null;            // { order, items, shop } as the server last gave it
+    let view = null;
 
-    // what the supplier has said so far, before it is sent
     const draft = {
-        decision: '',           // '', 'accept' or 'decline'
-        prices: {},             // line id -> the supplier's price, once saved
-        editing: {},            // line id -> true while its price box is open
-        discount: '',           // off the whole order, as typed
-        discountType: 'amount', // 'amount' (pesos) or 'percent'
-        shipDate: '',           // YYYY-MM-DD
+        decision: '',
+        prices: {},
+        editing: {},
+        discount: '',
+        discountType: 'amount',
+        shipDate: '',
         note: '',
         reason: ''
     };
@@ -46,7 +31,6 @@ function startSupplierOrderPage() {
         return number.toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
     }
 
-    // "2 box (40 kilogram)" for a line ordered in packs; "40 kilogram" otherwise
     function lineQuantity(item) {
         const unit = item.unit_name || 'units';
         if (item.pack_name && Number(item.pack_size) > 0 && Number(item.pack_count) > 0) {
@@ -58,7 +42,6 @@ function startSupplierOrderPage() {
 
     function has(object, key) { return Object.prototype.hasOwnProperty.call(object, key); }
 
-    // the order line with this id (the id may be a number or a string), or null
     function findItem(id) {
         for (let i = 0; i < view.items.length; i++) {
             if (String(view.items[i].id) === String(id)) return view.items[i];
@@ -66,7 +49,6 @@ function startSupplierOrderPage() {
         return null;
     }
 
-    // ---------- days ----------
     function isoDay(day) {
         return day.getFullYear() + '-' + String(day.getMonth() + 1).padStart(2, '0') + '-' +
                String(day.getDate()).padStart(2, '0');
@@ -80,7 +62,6 @@ function startSupplierOrderPage() {
 
     function asDay(iso) { return new Date(String(iso).slice(0, 10) + 'T00:00:00'); }
 
-    // "Monday, Oct 12"
     function dayText(iso, withYear) {
         if (!iso) return '';
         const options = { weekday: 'long', month: 'short', day: 'numeric' };
@@ -88,7 +69,6 @@ function startSupplierOrderPage() {
         return asDay(iso).toLocaleDateString('en-PH', options);
     }
 
-    // "today", "tomorrow", "in 4 days"
     function daysAway(iso) {
         const days = Math.round((asDay(iso) - asDay(dayFromNow(0))) / 86400000);
         if (days === 0) return 'today';
@@ -104,8 +84,6 @@ function startSupplierOrderPage() {
             ', ' + when.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
     }
 
-    // ---------- prices ----------
-    // the supplier's price for a line, or null when they keep the shop's
     function priceFor(item) {
         if (!has(draft.prices, item.id)) return null;
         const typed = parseFloat(draft.prices[item.id]);
@@ -118,8 +96,6 @@ function startSupplierOrderPage() {
         return price !== null && !Number.isNaN(price) && price !== Number(item.unit_cost);
     }
 
-    // the discount off the whole order in pesos, from what is typed; 0 when
-    // nothing (or nothing usable) is typed -- discountProblem() says why
     function discountAmount(goods) {
         const value = parseFloat(draft.discount);
         if (!Number.isFinite(value) || value <= 0) return 0;
@@ -175,7 +151,6 @@ function startSupplierOrderPage() {
             (percent !== null ? ' · ' + percent + '%' : '') + '</span>';
     }
 
-    // ---------- the page ----------
     function showProblem(title, text) {
         main.innerHTML = '<section class="so-panel so-closed"><i class="bi bi-link-45deg" aria-hidden="true"></i>' +
             '<h1>' + escapeHtml(title) + '</h1><p>' + escapeHtml(text) + '</p></section>';
@@ -190,7 +165,6 @@ function startSupplierOrderPage() {
         document.title = order.number + ' · ' + (shop.store_name || 'Lucelyn Hardware');
     }
 
-    // three stops: sent, the supplier's answer, the delivery
     function trackHtml(order) {
         let stage = 1;
         if (order.supplier_response === 'Accepted') stage = 2;
@@ -217,7 +191,6 @@ function startSupplierOrderPage() {
         else renderReceipt(message);
     }
 
-    // ---- open: read the order, answer it ----
     function renderQuote() {
         const order = view.order;
         const pdf = '/api/supplier-order/' + encodeURIComponent(code) + '/pdf';
@@ -230,7 +203,6 @@ function startSupplierOrderPage() {
         main.innerHTML =
             '<section class="so-hero">' + trackHtml(order) + '</section>' +
 
-            // 1. the order, with a price button on every line
             '<section class="so-panel">' +
                 '<header class="so-step"><span class="so-num">1</span><div><h2>Check the order</h2>' +
                     '<p>Price not what you sell it for? Press <strong>Edit price</strong> on that line.</p>' +
@@ -238,7 +210,6 @@ function startSupplierOrderPage() {
                 '<ol class="so-lines" id="so-lines">' +
                     linesHtml +
                 '</ol>' +
-                // a discount off the whole order: a percentage or a peso amount
                 '<div class="so-discount">' +
                     '<label class="so-label" for="so-discount">Discount <span>optional</span></label>' +
                     '<div class="so-discount-row">' +
@@ -258,7 +229,6 @@ function startSupplierOrderPage() {
                     '<i class="bi bi-file-earmark-pdf" aria-hidden="true"></i>Open the printable order (PDF)</a>' +
             '</section>' +
 
-            // 2. the decision, as two big buttons
             '<section class="so-panel">' +
                 '<header class="so-step"><span class="so-num">2</span><div><h2>Your answer</h2>' +
                     '<p>Choose one.</p></div></header>' +
@@ -274,7 +244,6 @@ function startSupplierOrderPage() {
                 '</div>' +
             '</section>' +
 
-            // 3a. accepting: when it ships, and a note
             '<section class="so-panel" id="so-accept-part" hidden>' +
                 '<header class="so-step"><span class="so-num">3</span><div><h2>When will it ship?</h2>' +
                     '<p>The day the goods leave you for our store.</p></div></header>' +
@@ -287,7 +256,6 @@ function startSupplierOrderPage() {
                     'placeholder="Two sacks arrive a day after the rest">' + escapeHtml(draft.note) + '</textarea>' +
             '</section>' +
 
-            // 3b. declining: why
             '<section class="so-panel" id="so-decline-part" hidden>' +
                 '<header class="so-step"><span class="so-num">3</span><div><h2>Why can you not fill it?</h2>' +
                     '<p>Tell the shop why, so they can order elsewhere.</p></div></header>' +
@@ -296,7 +264,6 @@ function startSupplierOrderPage() {
                     escapeHtml(draft.reason) + '</textarea>' +
             '</section>' +
 
-            // what will be sent, and the one button that sends it
             '<section class="so-send" id="so-send-part" hidden>' +
                 '<div class="so-summary" id="so-summary"></div>' +
                 '<p class="so-error" id="so-error" role="alert"></p>' +
@@ -338,7 +305,6 @@ function startSupplierOrderPage() {
         '</li>';
     }
 
-    // ---------- keeping the page in step with what is typed ----------
     function refreshAll() {
         refreshLines();
         refreshDiscount();
@@ -441,8 +407,6 @@ function startSupplierOrderPage() {
         }
     }
 
-    // only a day after today: the calendar does not offer an earlier one, and
-    // a day typed in by hand is checked here as well
     function dateProblem() {
         if (!draft.shipDate) return null;
         if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.shipDate)) return 'That is not a date.';
@@ -470,12 +434,10 @@ function startSupplierOrderPage() {
             return;
         }
         box.className = 'so-when is-set';
-        // the words in one span, so the box's gap sits after the icon only
         box.innerHTML = '<i class="bi bi-truck" aria-hidden="true"></i><span>Ships <strong>' +
             escapeHtml(dayText(draft.shipDate, true)) + '</strong>, ' + escapeHtml(daysAway(draft.shipDate)) + '</span>';
     }
 
-    // what will be sent, written out above the Send button
     function refreshSummary() {
         const box = document.getElementById('so-summary');
         if (!box || !draft.decision) return;
@@ -516,7 +478,6 @@ function startSupplierOrderPage() {
         row.querySelector('.so-money').classList.toggle('is-bad', Boolean(text));
     }
 
-    // Save keeps the typed price; the same as ours keeps ours
     function savePrice(id) {
         const item = findItem(id);
         const input = document.getElementById('so-price-' + id);
@@ -547,7 +508,6 @@ function startSupplierOrderPage() {
                 const id = edit.dataset.edit;
                 const item = findItem(id);
                 const input = document.getElementById('so-price-' + id);
-                // opens on the price in force: theirs if saved before, else ours
                 input.value = has(draft.prices, id) ? Number(draft.prices[id]).toFixed(2) : Number(item.unit_cost).toFixed(2);
                 draft.editing[id] = true;
                 lineError(id, '');
@@ -563,7 +523,6 @@ function startSupplierOrderPage() {
             }
         });
 
-        // Enter in a price box saves it; Escape cancels
         lines.addEventListener('keydown', function (event) {
             const input = event.target.closest('[data-price]');
             if (!input) return;
@@ -628,7 +587,6 @@ function startSupplierOrderPage() {
         document.getElementById('so-send').addEventListener('click', send);
     }
 
-    // ---------- sending ----------
     function problemWithDraft() {
         if (draft.decision === 'decline') {
             if (draft.reason.trim().length < 5) return { text: 'Type why you cannot fill the order.', focus: 'so-why' };
@@ -717,7 +675,6 @@ function startSupplierOrderPage() {
             '<p class="so-flash ' + (tone || '') + '">' + escapeHtml(text) + '</p>');
     }
 
-    // ---- answered, or closed: the receipt of what was said ----
     function renderReceipt(message) {
         const order = view.order;
         let mark = 'bi-check-lg';
@@ -805,7 +762,6 @@ function startSupplierOrderPage() {
     }
 
     async function load() {
-        // the code is 43 url-safe characters; anything else was cut or mistyped
         if (!/^[A-Za-z0-9_-]{43}$/.test(code)) {
             showProblem('This link is not complete',
                 'Scan the QR code on the purchase order again, or contact the shop.');
@@ -831,9 +787,6 @@ function startSupplierOrderPage() {
 
 startSupplierOrderPage();
 
-// The mouse wheel over a number box being typed in would change the amount by
-// a step; the box lets go of the cursor instead, so the page scrolls and the
-// figure stays as typed.
 document.addEventListener('wheel', function (event) {
     const box = event.target;
     if (box && box.matches && box.matches('input[type="number"]') && document.activeElement === box) box.blur();

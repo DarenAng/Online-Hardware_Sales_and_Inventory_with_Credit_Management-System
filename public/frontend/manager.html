@@ -24,16 +24,7 @@
                     <span class="brand-sub">Sales &amp; Inventory</span>
                 </span>
             </a>
-            <!-- data-feature names the screen an item opens; shared/features.js hides
-                 the ones switched off for this role and mirrors the counts.
-                 A folding heading does two things (shared/helpers.js sidebarHeading):
-                 its words open the module's first screen, and its caret alone folds
-                 and unfolds the list beneath -->
             <ul class="sidebar-nav">
-                <!-- Reports and Stocks fold open to every report they hold, grouped in
-                     the order the shop reads them; each entry opens one view of the screen
-                     (manager.js showPanelView). An entry goes when its screen is switched
-                     off for the role, and the heading goes with its last entry. -->
                 <li data-sidebar-dropdown>
                     <a href="#reports" onclick="sidebarHeading(event, 'reports-nav', 'reports-dropdown', showReports)" class="nav-parent" id="reports-nav"><i class="bi bi-bar-chart-line nav-icon" aria-hidden="true"></i>
                         Reports <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
@@ -41,7 +32,6 @@
                     <ul id="reports-dropdown" class="nav-sub" style="display: none;">
                         <li data-feature="income"><a href="#" data-panel-link="panel-reports" data-panel-view="report-summary"
                                onclick="showReport('report-summary', event)"><i class="bi bi-graph-up nav-icon" aria-hidden="true"></i>Sales Summary</a></li>
-                        <!-- QR Payments is the second tab of Sales Transactions -->
                         <li data-feature="sales"><a href="#" data-panel-link="panel-reports" data-panel-view="report-sales"
                                onclick="showSalesTransactions(event)"><i class="bi bi-receipt-cutoff nav-icon" aria-hidden="true"></i>Sales Transactions</a></li>
                         <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-reports" data-panel-view="report-purchases"
@@ -66,8 +56,6 @@
                     </ul>
                 </li>
 
-                <!-- the clerk raises an order on the clerk's page; here the manager confirms
-                     it, and counts the delivery in, from the order's card -->
                 <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-po-history" onclick="showPurchasing(event)"><i class="bi bi-cart3 nav-icon" aria-hidden="true"></i>Purchase Orders</a></li>
 
                 <li data-sidebar-dropdown>
@@ -81,9 +69,6 @@
                     </ul>
                 </li>
 
-                <!-- The schedule is drawn by shared/delivery-schedule.js; the manager holds
-                     it by role, so its item starts shown here. Both are to read only: the
-                     driver moves a delivery along, the manager no longer does -->
                 <li data-sidebar-dropdown>
                     <a href="#deliveries" onclick="sidebarHeading(event, 'deliveries-nav', 'deliveries-dropdown', showDeliveries)" class="nav-parent" id="deliveries-nav"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>
                         Delivery History <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
@@ -113,8 +98,6 @@
                                onclick="showRecordType('unit', event)"><i class="bi bi-rulers nav-icon" aria-hidden="true"></i>Units</a></li>
                     </ul>
                 </li>
-                <!-- the policies printed for customers: credit, their data, refunds;
-                     each page previews the back of the customer card -->
                 <li data-sidebar-dropdown>
                     <a href="#policy" onclick="sidebarHeading(event, 'policy-nav', 'policy-dropdown', showCreditMaintenance)" class="nav-parent" id="policy-nav"><i class="bi bi-journal-text nav-icon" aria-hidden="true"></i>
                         Policy Maintenance <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
@@ -129,14 +112,11 @@
                     </ul>
                 </li>
                 <li data-feature="archives"><a href="#" data-panel-link="panel-archives" onclick="showArchives(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archives</a></li>
-                <!-- everything staff have filed: its own screen, apart from Reports -->
                 <li data-feature="reports"><a href="#" data-panel-link="panel-activity" onclick="showActivityLog(event)"><i class="bi bi-clock-history nav-icon" aria-hidden="true"></i>Activity Log</a></li>
-                <!-- held by grant only (the administrator switches it on), so it starts hidden -->
                 <li data-feature="account-management" hidden><a href="#" data-panel-link="panel-accounts" onclick="showAccountManagement(event)"><i class="bi bi-person-gear nav-icon" aria-hidden="true"></i>Account Management</a></li>
             </ul>
         </aside>
 
-        <!-- the shade behind the menu once it slides over the page -->
         <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true"></div>
 
         <main class="main-content">
@@ -150,23 +130,10 @@
             </header>
 
             <div class="content-area">
-                <!-- NO-PRICE ALERT -- products the clerk added that have no selling price yet; filled by
-                     loadPriceBanner (manager.js), left empty when every product is priced. It belongs
-                     to the screens it is about: placePriceAlert moves it onto Stocks and Records >
-                     Products, and hides it everywhere else.
-                     Switched on and off by itself in Access Control (price-alert) -->
                 <div id="price-alert" class="no-print" data-feature="price-alert" hidden>
                     <div id="price-banner"></div>
                 </div>
 
-                <!-- ============================================================
-                     REPORTS -- the first screen. The tab bar across the top groups the
-                     reports: Sales (the summary for a period, and every transaction),
-                     Customers (who owes, who comes back) and Purchases (the purchase
-                     orders of a month). The Activity Log is a screen of its own. One
-                     view shows at a time; nothing loads until asked.
-                     data-feature on a tab hides it for a role (shared/features.js)
-                     ============================================================ -->
                 <div id="panel-reports" class="tabbed-panel" data-panel data-view="report-summary">
                     <nav class="view-nav no-print" aria-label="Reports" hidden>
                         <div class="view-nav-group">
@@ -196,7 +163,6 @@
                         </div>
                     </nav>
 
-                    <!-- SALES SUMMARY: one period drives the figures and the table -->
                     <section class="panel-view" id="report-summary">
                         <div class="card">
                             <div class="panel-head">
@@ -215,12 +181,9 @@
                                 </div>
                             </div>
 
-                            <!-- THE DATE PICKER: a period applies at once; Custom date shows From and
-                                 To beside it (manager.js) -->
                             <div class="panel-toolbar summary-toolbar no-print">
                                 <div class="toolbar-field">
                                     <label for="income-period">Period</label>
-                                    <!-- filled by manager.js renderIncomeRanges -->
                                     <select id="income-period" onchange="incomePeriodPicked(this.value)"></select>
                                 </div>
                                 <div class="toolbar-field toolbar-date" hidden>
@@ -239,7 +202,6 @@
 
                         </div>
 
-                        <!-- the breakdown by payment method for the same period -->
                         <div class="card summary-card">
                             <div class="summary-pane" id="summary-methods">
                                 <h3>By Payment Method</h3>
@@ -256,7 +218,6 @@
                         </div>
                     </section>
 
-                    <!-- SALES TRANSACTIONS -->
                     <section class="panel-view card" id="report-sales" hidden>
                         <div class="panel-head">
                             <div>
@@ -301,7 +262,6 @@
 
                             <div class="toolbar-field">
                                 <label for="sales-period">Period</label>
-                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
                                 <select id="sales-period" data-period-for="sales" onchange="periodPicked('sales')"></select>
                             </div>
                             <div class="toolbar-field toolbar-date" hidden>
@@ -327,7 +287,6 @@
                         <div class="pager is-single" id="sales-pager"></div>
                     </section>
 
-                    <!-- RECEIVABLES -->
                     <section class="panel-view card" id="report-unpaid" hidden>
                         <div class="panel-head">
                             <div>
@@ -354,8 +313,6 @@
                                     <option value="all">Every status</option>
                                 </select>
                             </div>
-                            <!-- every way a sale can be paid; offered with Every status or Partial
-                                 only: an Unpaid sale has had nothing paid on it (unpaidStatusPicked) -->
                             <div class="toolbar-field" id="unpaid-method-field">
                                 <label for="unpaid-method">Payment method</label>
                                 <select id="unpaid-method" data-filter-table="unpaid-table" data-hides-column="3" onchange="dataPanelFilter('mgr-unpaid', 'method', this.value)">
@@ -371,7 +328,6 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="unpaid-period">Period</label>
-                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
                                 <select id="unpaid-period" data-period-for="unpaid" onchange="periodPicked('unpaid')"></select>
                             </div>
                             <div class="toolbar-field toolbar-date" hidden>
@@ -396,7 +352,6 @@
                         <div class="pager is-single" id="unpaid-pager"></div>
                     </section>
 
-                    <!-- REPEAT CUSTOMERS -->
                     <section class="panel-view card" id="report-loyal" hidden>
                         <div class="panel-head">
                             <div>
@@ -439,11 +394,6 @@
                         <div class="pager is-single" id="loyal-pager"></div>
                     </section>
 
-
-                    <!-- ============================================================
-                         TOTAL PURCHASES: every purchase order in a month, filtered by date,
-                         supplier and status (shared/purchase-orders.js)
-                         ============================================================ -->
                     <section class="panel-view card" id="report-purchases" hidden>
                         <div class="panel-head">
                             <div>
@@ -459,8 +409,6 @@
                         </div>
     
                         <div class="panel-toolbar no-print">
-                            <!-- the period first; the box beside it picks which month or year
-                                 (purchaseTotalsPeriod), and All Time needs neither -->
                             <div class="toolbar-field">
                                 <label for="po-totals-period">Period</label>
                                 <select id="po-totals-period" onchange="purchaseTotalsPeriod(this.value)">
@@ -472,8 +420,6 @@
                             </div>
                             <div class="toolbar-field" id="po-totals-month-field">
                                 <label for="po-totals-month">Month</label>
-                                <!-- type to search, then pick: every month from January 2025 to December
-                                     of this year (renderPurchaseTotalsMonths) -->
                                 <div class="suggest-wrap month-wrap">
                                     <input type="text" id="po-totals-month" class="form-control month-search"
                                            role="combobox" aria-autocomplete="list" aria-controls="po-totals-month-list"
@@ -488,7 +434,6 @@
                             </div>
                             <div class="toolbar-field" id="po-totals-year-field" hidden>
                                 <label for="po-totals-year">Year</label>
-                                <!-- every year from 2025 to this one (renderPurchaseTotalsYears) -->
                                 <select id="po-totals-year" onchange="purchaseTotalsYear(this.value)"></select>
                             </div>
                             <div class="toolbar-field toolbar-date" id="po-totals-from-field" hidden>
@@ -524,12 +469,6 @@
                     </section>
                 </div>
 
-                <!-- ============================================================
-                     STOCKS -- every stock report behind one entry: the whole inventory
-                     (a row opens the product, where the reorder point is changed; the
-                     price is set on the product in Records), the reorder to-do list, and
-                     the stock movements staff filed
-                     ============================================================ -->
                 <div id="panel-stocks" class="tabbed-panel" data-panel data-view="stock-overview" style="display: none;">
                     <nav class="view-nav no-print" aria-label="Stocks" hidden>
                         <div class="view-nav-group">
@@ -550,7 +489,6 @@
                         </div>
                     </nav>
 
-                    <!-- STOCKS OVERVIEW -->
                     <section class="panel-view card" id="stock-overview">
                         <div class="panel-head">
                             <div>
@@ -582,7 +520,6 @@
                                 </select>
                             </div>
 
-                            <!-- quantity has its own filter; status only says whether a product is under its reorder point -->
                             <div class="toolbar-spacer"></div>
                         </div>
 
@@ -597,7 +534,6 @@
                         <div class="pager is-single" id="stocks-pager"></div>
                     </section>
 
-                    <!-- REORDER ALERTS -->
                     <section class="panel-view card" id="stock-reorder" hidden>
                         <div class="panel-head">
                             <div>
@@ -642,8 +578,6 @@
                         <div class="pager is-single" id="reorder-pager"></div>
                     </section>
 
-                    <!-- STOCK MOVEMENTS: the stock reports staff filed (damage, returns,
-                         adjustments, purchase orders), read from the activity log -->
                     <section class="panel-view card" id="stock-moves" hidden>
                         <div class="panel-head">
                             <div>
@@ -681,7 +615,6 @@
                             </div>
                             <div class="toolbar-field">
                                 <label for="stock-moves-period">Period</label>
-                                <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
                                 <select id="stock-moves-period" data-period-for="stock-moves" onchange="periodPicked('stock-moves')"></select>
                             </div>
                             <div class="toolbar-field toolbar-date" hidden>
@@ -707,11 +640,6 @@
                     </section>
                 </div>
 
-                <!-- ============================================================
-                     PURCHASE ORDERS -- the clerk raises an order on the clerk's page;
-                     here the manager confirms or declines it. The counts above the
-                     table are also filters; orders waiting for you sort first
-                     ============================================================ -->
                 <div class="card" id="panel-po-history" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -760,17 +688,10 @@
                     <div class="pager is-single" id="po-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     THE ORDER AS A DOCUMENT -- data-panel-of keeps the tab strip on Order History
-                     ============================================================ -->
                 <div id="panel-po-doc" data-panel data-panel-of="panel-po-history" style="display: none;">
                     <div id="po-doc"></div>
                 </div>
 
-
-                <!-- ============================================================
-                     CUSTOMER CREDIT -- the shop's credit records
-                     ============================================================ -->
                 <div class="card" id="panel-credit" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -817,9 +738,6 @@
                     <div class="pager is-single" id="credit-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     EXTENSION REQUESTS -- raised at the counter, decided here
-                     ============================================================ -->
                 <div class="card" id="panel-credit-requests" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -859,11 +777,6 @@
                     <div class="pager is-single" id="requests-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     POLICY MAINTENANCE -- three pages, each with the back of the customer
-                     card beside it: Credit Maintenance (the late-payment rate and the
-                     credit policy), Customer Data Terms and Refund Policy
-                     ============================================================ -->
                 <div id="panel-credit-maintenance" data-panel style="display: none;">
                     <div class="policy-layout">
                     <div class="policy-main">
@@ -908,7 +821,6 @@
                             </form>
                         </div>
                     </div>
-                    <!-- the back of the customer card as it prints, with what is typed here -->
                     <div class="card policy-preview-card">
                         <div class="panel-head">
                             <div>
@@ -940,7 +852,6 @@
                             </form>
                         </div>
                     </div>
-                    <!-- the back of the customer card as it prints, with what is typed here -->
                     <div class="card policy-preview-card">
                         <div class="panel-head">
                             <div>
@@ -972,7 +883,6 @@
                             </form>
                         </div>
                     </div>
-                    <!-- the back of the customer card as it prints, with what is typed here -->
                     <div class="card policy-preview-card">
                         <div class="panel-head">
                             <div>
@@ -985,9 +895,6 @@
                     </div>
                 </div>
 
-                <!-- ============================================================
-                     DELIVERY HISTORY -- to read only
-                     ============================================================ -->
                 <div class="card" id="panel-deliveries" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -1009,7 +916,6 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="deliveries-driver">Driver</label>
-                            <!-- the drivers are filled in by manager.js once the deliveries have loaded -->
                             <select id="deliveries-driver"
                                     onchange="dataPanelFilter('mgr-deliveries', 'driver', this.value)">
                                 <option value="all">All drivers</option>
@@ -1045,16 +951,12 @@
                     <div class="pager is-single" id="deliveries-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     RECORDS
-                     ============================================================ -->
                 <div class="card" id="panel-records" data-panel data-view="supplier" style="display: none;">
                     <div class="panel-head">
                         <div>
                             <h3 id="records-title">Suppliers</h3>
                         </div>
                         <div class="panel-actions no-print">
-                            <!-- suppliers and customers are added here; categories and units by the inventory clerk -->
                             <button type="button" class="btn btn-success" id="records-add-btn" onclick="openAddRecord()">Add Supplier</button>
                         </div>
                     </div>
@@ -1077,10 +979,6 @@
                     <div class="pager is-single" id="records-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     ACTIVITY LOG -- everything staff have filed, newest first, with
-                     who filed it. A screen of its own, apart from Reports.
-                     ============================================================ -->
                 <div class="card" id="panel-activity" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -1103,14 +1001,12 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="all-kind">Report</label>
-                            <!-- filled from the loaded rows (manager.js) -->
                             <select id="all-kind" data-filter-table="all-table" data-hides-column="4" onchange="dataPanelFilter('mgr-all', 'kind', this.value)">
                                 <option value="all">Every report</option>
                             </select>
                         </div>
                         <div class="toolbar-field">
                             <label for="all-period">Period</label>
-                            <!-- filled by manager.js buildPeriodBoxes; Custom date shows From and To -->
                             <select id="all-period" data-period-for="all" onchange="periodPicked('all')"></select>
                         </div>
                         <div class="toolbar-field toolbar-date" hidden>
@@ -1141,9 +1037,6 @@
                     <div class="pager is-single" id="all-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     ARCHIVES
-                     ============================================================ -->
                 <div class="card" id="panel-archives" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -1161,7 +1054,6 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="archives-type">Type</label>
-                            <!-- filled from the loaded rows, with how many each holds (manager.js) -->
                             <select id="archives-type" data-filter-table="archives-table" data-hides-column="1" onchange="dataPanelFilter('mgr-archives', 'type', this.value)">
                                 <option value="all">Every type</option>
                             </select>
@@ -1180,13 +1072,6 @@
                     <div class="pager is-single" id="archives-pager"></div>
                 </div>
 
-                <!-- ============================================================
-                     ACCOUNT MANAGEMENT -- list the cashier, clerk and driver accounts,
-                     create new ones, and lift the sign-in hold of accounts locked out
-                     after too many wrong passwords. Only on the menu when the
-                     administrator has switched it on; the server only creates, lists
-                     and lifts cashier, clerk and driver accounts.
-                     ============================================================ -->
                 <div class="card" id="panel-accounts" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
@@ -1213,7 +1098,6 @@
                             </select>
                         </div>
                         <div class="toolbar-spacer"></div>
-                        <!-- shown once the list is loaded (manager.js) -->
                         <button type="button" class="btn btn-sm" id="staff-refresh" style="display: none;" onclick="dataPanelOpen('mgr-staff')">Refresh</button>
                     </div>
 
@@ -1232,7 +1116,6 @@
         </main>
     </div>
 
-    <!-- PAGED DETAIL POPUP -->
     <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
         <div class="modal-box">
             <div class="modal-head">
@@ -1258,7 +1141,6 @@
         </div>
     </div>
 
-    <!-- ONE CREDIT ACCOUNT -- read only: the facts and the history, one fixed size -->
     <div class="modal" id="credit-modal" onclick="closeModalOnBackdrop(event, 'credit-modal')">
         <div class="modal-box modal-wide">
             <div class="modal-head">
@@ -1288,7 +1170,6 @@
                     <div class="detail-grid" id="credit-facts"></div>
                 </div>
 
-                <!-- the history, one table to a tab (renderCreditHistory) -->
                 <div id="credit-history-tab" style="display: none;">
                     <div id="credit-history"></div>
                 </div>
@@ -1296,7 +1177,6 @@
         </div>
     </div>
 
-    <!-- ADDING A SUPPLIER -- the manager's alone (categories and units are the clerk's) -->
     <div class="modal" id="record-add-modal" onclick="closeModalOnBackdrop(event, 'record-add-modal')">
         <div class="modal-box">
             <div class="modal-head">
@@ -1316,7 +1196,6 @@
                         <label for="record-add-name" id="record-add-name-label">Company name <span class="req">*</span></label>
                         <input type="text" id="record-add-name" name="name" class="form-control" maxlength="100" required>
                     </div>
-                    <!-- the rest is for a supplier only -->
                     <div id="record-add-supplier">
                         <div class="grid-2">
                             <div class="form-group">
@@ -1352,8 +1231,6 @@
         </div>
     </div>
 
-    <!-- EDITING A RECORD -- a supplier, a customer or a product; the fields are drawn by
-         manager.js openEditRecord for the kind of record. Locked like the other forms that hold typed data. -->
     <div class="modal" id="record-edit-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box">
             <div class="modal-head">
@@ -1380,8 +1257,6 @@
         </div>
     </div>
 
-    <!-- CREATE ACCOUNT -- the manager's version: fill in the form, read the review (the
-         details and the first password), then confirm. Locked like the other forms that hold typed data. -->
     <div class="modal" id="newacct-modal" data-modal-locked data-modal-scroll>
         <div class="modal-box create-box">
             <div class="modal-head">
@@ -1396,7 +1271,6 @@
             </div>
 
             <div class="modal-body">
-                <!-- step 1: the form -->
                 <form id="newacct-form" onsubmit="reviewNewAccount(event)" novalidate autocomplete="off">
                     <div class="grid-2">
                         <div class="form-group">
@@ -1440,7 +1314,6 @@
                     </div>
                 </form>
 
-                <!-- step 2: the review, filled in by showAccountReview -->
                 <div id="newacct-review" hidden></div>
             </div>
 
@@ -1453,7 +1326,6 @@
         </div>
     </div>
 
-    <!-- DECIDING AN EXTENSION -->
     <div class="modal" id="decide-modal" onclick="closeModalOnBackdrop(event, 'decide-modal')">
         <div class="modal-box">
             <div class="modal-head">

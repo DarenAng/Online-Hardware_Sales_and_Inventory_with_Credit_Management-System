@@ -1,15 +1,6 @@
-// notifications.js -- the bell and its popup cards
-// Loaded by: all five dashboards
-// Every unseen alert pops up once as its own card, three at a time; opening
-// one marks it read. "Once" means once in this browser tab since signing in:
-// the ids are kept in sessionStorage, so a reload does not pop them again.
 let invNotifications = [];
-const poppedNotifications = readPoppedAlerts();   // a list of alert ids, each once
+const poppedNotifications = readPoppedAlerts();
 
-// Alerts that have not had their card yet. The next one comes forward as soon
-// as there is room, so a long list never covers the screen. When more than
-// POP_MOST_QUEUED arrive together (the first sign-in of the day), only the
-// first three get a card and one summary card stands for the rest.
 const POP_CARDS_AT_ONCE = 3;
 const POP_MOST_QUEUED = 6;
 const POP_RECHECK_MS = 700;
@@ -30,7 +21,6 @@ const NOTIF_TONE = {
     'Void Request':     'danger'
 };
 
-// heading shown over the subject line when an alert is opened
 const NOTIF_ABOUT = {
     'Out of Stock':     ['Stock alert',       'A material has run out and cannot be sold until it is restocked.'],
     'Low Stock':        ['Stock alert',       'A material has fallen to its reorder point.'],
@@ -45,16 +35,6 @@ const NOTIF_ABOUT = {
     'Void Request':     ['Void request',      'A cashier asked for a sale of today to be voided, or a manager decided such a request.']
 };
 
-// ---------- Go to: the screen an alert is about ----------
-// Each page says where each kind of alert leads on it:
-//   configureNotificationTargets({
-//       'Purchase Order': { label: 'Purchase Orders', panelId: 'panel-po-history',
-//                           open: function () { showPurchaseOrderHistory(); }, key: 'clerk-po' },
-//       'Low Stock':      { ..., key: 'clerk-reorder', searchId: 'reorder-search' }
-//   });
-// panelId is the menu entry behind it: switched off for the role, no button.
-// key is the list to load there; with searchId, an alert about a material
-// searches the list for it.
 let notifTargets = {};
 
 function configureNotificationTargets(map) {
@@ -76,7 +56,6 @@ function notifTargetFor(n) {
     return target;
 }
 
-// the loaded alert with this id, or undefined when there is none
 function findNotificationById(id) {
     for (let i = 0; i < invNotifications.length; i++) {
         if (String(invNotifications[i].notification_id) === String(id)) {
@@ -110,9 +89,8 @@ function openNotifications() {
     if (!drop) return;
 
     clearCards();
-    popQueue = [];   // the list is open: the alerts are in front of the reader already
+    popQueue = [];
 
-    // flex, not block: the list inside shrinks to the room left and scrolls (see .notif-drop)
     drop.style.display = 'flex';
     closeAccountMenu();
     loadNotifications();
@@ -195,29 +173,26 @@ async function loadNotifications() {
     popNewNotifications(unread);
 }
 
-// the ids of the alerts that already had a card, from this tab's storage
 function readPoppedAlerts() {
     try {
         const ids = JSON.parse(sessionStorage.getItem(POPPED_ALERTS_KEY) || '[]');
         if (Array.isArray(ids)) {
-            // each id once
             const once = [];
             for (let i = 0; i < ids.length; i++) {
                 if (once.indexOf(ids[i]) === -1) once.push(ids[i]);
             }
             return once;
         }
-    } catch (error) { /* blocked, or not readable */ }
+    } catch (error) {  }
     return [];
 }
 
 function writePoppedAlerts() {
     try {
         sessionStorage.setItem(POPPED_ALERTS_KEY, JSON.stringify(poppedNotifications));
-    } catch (error) { /* blocked: they may pop again after a reload */ }
+    } catch (error) {  }
 }
 
-// every unseen alert gets a card, once; they queue up and come forward three at a time
 function popNewNotifications(unread) {
     const fresh = [];
     for (let i = 0; i < unread.length; i++) {
@@ -233,7 +208,6 @@ function popNewNotifications(unread) {
     writePoppedAlerts();
 
     if (fresh.length > POP_MOST_QUEUED) {
-        // the first three, then one card for all the others
         popQueue = popQueue.concat(fresh.slice(0, POP_CARDS_AT_ONCE));
         popQueue.push({ more: fresh.length - POP_CARDS_AT_ONCE });
     } else {
@@ -242,22 +216,17 @@ function popNewNotifications(unread) {
     showQueuedCards();
 }
 
-// Shows queued alerts while there is room for them. When the deck is full it
-// looks again in a moment, until the queue is empty.
 function showQueuedCards() {
     clearTimeout(popTimer);
     popTimer = null;
 
     while (popQueue.length > 0) {
-        // asked each time round: the first card builds the deck
         const deck = document.getElementById('toast-deck');
         const onScreen = deck ? deck.querySelectorAll('.toast-card:not(.is-leaving)').length : 0;
         if (onScreen >= POP_CARDS_AT_ONCE) break;
 
-        // an alert read in the meantime (from the bell, say) no longer needs its card
         const queued = popQueue.shift();
 
-        // the summary card for alerts that did not get one of their own
         if (queued.more) {
             showCard({
                 tone: 'warning',
@@ -270,7 +239,7 @@ function showQueuedCards() {
             continue;
         }
 
-        let n;   // the loaded alert with this id, if it is still there
+        let n;
         for (let i = 0; i < invNotifications.length; i++) {
             if (invNotifications[i].notification_id === queued.notification_id) {
                 n = invNotifications[i];
@@ -294,7 +263,6 @@ function showQueuedCards() {
     if (popQueue.length > 0) popTimer = setTimeout(showQueuedCards, POP_RECHECK_MS);
 }
 
-// One alert, laid out like a mail: subject, sender and time, then the message.
 function openNotification(id) {
     const n = findNotificationById(id);
     if (!n) return;
@@ -334,8 +302,6 @@ function openNotification(id) {
     avatar.className = 'avatar avatar-' + tone;
 
     const text = String(n.message || '').trim() || 'No further detail was given.';
-    // every line of the message becomes its own <p> paragraph
-    // (the text is split at a blank line or at any line break)
     const lines = text.split(/\n{2,}|\r?\n/);
     let paragraphs = '';
     for (let i = 0; i < lines.length; i++) {
@@ -361,7 +327,6 @@ function openNotification(id) {
             : '');
 
     const target = notifTargetFor(n);
-    // the x in the corner closes it; the foot only carries where to go
     foot.innerHTML = target
         ? '<button type="button" class="btn btn-accent" onclick="goToNotification(' +
           Number(n.notification_id) + ')">Go to ' + escapeHtml(target.label) + ' &rarr;</button>'

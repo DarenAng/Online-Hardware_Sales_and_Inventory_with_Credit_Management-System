@@ -1,9 +1,3 @@
-// ============================================================
-// features.js -- screens by role: which screens exist, and which roles hold them
-// Loaded by: server.js (handed on to routes/admin.js) and access-control.js.
-// Never sent to a browser.
-// ============================================================
-
 const db = require("./database/connection").db;
 const IS_VERCEL = require("./database/connection").IS_VERCEL;
 const roles = require("./roles");
@@ -13,21 +7,7 @@ const CLERK = roles.CLERK;
 const CASHIER = roles.CASHIER;
 const DRIVER = roles.DRIVER;
 
-// ==========================================
-// SCREENS BY ROLE
-//
-// Every entry is one screen: the roles whose page can draw it, the roles that
-// hold it by role, and the routes it is made of. The administrator grants or
-// revokes a screen per role; an override is one row in role_feature_permissions.
-//
-// Enforcement in the access hook:
-//   revoked  a route is refused when every screen using it is off for the role
-//   granted  a route the role table would refuse is allowed when the role
-//            holds a screen needing it BY GRANT (not by default)
-// Read from the database and cached in memory between writes.
-// ==========================================
 const FEATURES = [
-  // --- selling and the counter ---
   { key: "pos", name: "New Transaction", module: "Point of Sale",
     description: "The register: ring a sale up, take the payment, create the delivery.",
     available: [CASHIER], defaults: [CASHIER],
@@ -37,7 +17,6 @@ const FEATURES = [
   { key: "refunds", name: "Refunds", module: "Point of Sale",
     description: "Take a sold item back and refund it at the counter; the stockroom inspects it before it can be sold again.",
     available: [CASHIER], defaults: [CASHIER],
-    // the screen's "Sales in the Past 3 Days" list and a receipt's items
     routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/],
              ["GET", /^\/api\/sales$/], ["GET", /^\/api\/sales\/\d+$/]] },
   { key: "sales-report", name: "Sales Report", module: "Point of Sale",
@@ -49,7 +28,6 @@ const FEATURES = [
     available: [CASHIER], defaults: [CASHIER],
     routes: [["GET", /^\/api\/cashier\/summary$/]] },
 
-  // --- credit ---
   { key: "credit", name: "Customer Credit", module: "Credit",
     description: "Every credit account and its credit rating; the cashier's copy adds and edits customers and files extension requests, the manager's reads them and decides limits.",
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
@@ -64,7 +42,6 @@ const FEATURES = [
     routes: [["GET", /^\/api\/credit\/open-sales$/], ["POST", /^\/api\/sales\/\d+\/payment$/],
              ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
              ["POST", /^\/api\/qr-payments\/\d+\/cancel$/]] },
-  // the three printed pieces of a credit account; each button is switched on its own
   { key: "credit-terms-print", name: "Print Credit Terms", module: "Credit",
     description: "Print the Credit Terms and Conditions page for a customer: the store, the customer, the credit limit, the due days and the late-payment rate, the terms and the signature lines. Offered on a credit sale's invoice and on the customer's card.",
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
@@ -73,7 +50,6 @@ const FEATURES = [
     description: "Print a customer's physical card, true size to cut out (front: the store, the customer and the credit limit; back: the credit policy, customer data terms and refund policy), with the Credit Terms and Conditions page after it.",
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
     routes: [["GET", /^\/api\/credit\/card\/\d+$/]] },
-  // Policy Maintenance: the wording of the three policies, each switched on its own
   { key: "credit-terms-text", name: "Credit Policy", module: "Policy Maintenance",
     description: "Write the credit policy printed with every credit account and on the back of the customer card (the wording only; the figures come from the account). It is a part of the Credit Maintenance screen, so that screen is needed as well.",
     available: [MANAGER], defaults: [MANAGER],
@@ -86,9 +62,6 @@ const FEATURES = [
     description: "Write the store's refund policy, printed on the back of the customer card.",
     available: [MANAGER], defaults: [MANAGER],
     routes: [["GET", /^\/api\/policies$/], ["PUT", /^\/api\/policies\/refund$/]] },
-  // the manager's maintenance page for credit: the shop's late-payment rate (changing it is
-  // this screen's alone; reading it is also part of Customer Credit) and, when Credit Terms
-  // Wording is held too, the wording of the terms
   { key: "credit-maintenance", name: "Credit Maintenance", module: "Policy Maintenance",
     description: "Set the late-payment rate the shop charges every credit account, 1 to 3 percent a month, and write the credit policy, on one page under Policy Maintenance.",
     available: [MANAGER], defaults: [MANAGER],
@@ -98,7 +71,6 @@ const FEATURES = [
     available: [MANAGER], defaults: [MANAGER],
     routes: [["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests\/\d+\/decide$/]] },
 
-  // --- the manager's reporting ---
   { key: "income", name: "Income", module: "Reports",
     description: "Collected, billed, outstanding and discounts over any period.",
     available: [MANAGER], defaults: [MANAGER],
@@ -106,7 +78,6 @@ const FEATURES = [
   { key: "reports", name: "Reports", module: "Reports",
     description: "Everything staff have filed, plus payment methods, receivables, repeat customers and staff performance.",
     available: [MANAGER], defaults: [MANAGER],
-    // the day's tally is the manager's side of the cashier's end-of-shift card
     routes: [["GET", /^\/api\/reports\/activity$/], ["GET", /^\/api\/reports\/overview$/],
              ["GET", /^\/api\/reports\/daily-tally$/]] },
   { key: "sales", name: "Sales", module: "Reports",
@@ -117,7 +88,6 @@ const FEATURES = [
              ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
              ["POST", /^\/api\/qr-payments\/\d+\/cancel$/]] },
 
-  // --- stock ---
   { key: "material-list", name: "Material List", module: "Inventory",
     description: "Everything on the shelf, with what is in stock, the sizes each material sells in, and the pack it is delivered in.",
     available: [CLERK], defaults: [CLERK],
@@ -125,8 +95,6 @@ const FEATURES = [
              ["POST", /^\/api\/inventory\/products\/\d+\/units$/],
              ["DELETE", /^\/api\/inventory\/products\/\d+\/units\/\d+$/],
              ["PUT", /^\/api\/inventory\/products\/\d+\/pack$/]] },
-  // the Add New Product button on the Material List: a product with a name, a
-  // category and a unit, and no price (the manager sets that). It tells the manager.
   { key: "product-add", name: "Add New Product", module: "Inventory",
     description: "Open a record for a product the shop has never stocked, from the Material List. It starts with no price and no stock; the manager is told and sets the price, and until then the till cannot sell it.",
     available: [CLERK], defaults: [CLERK],
@@ -134,11 +102,8 @@ const FEATURES = [
   { key: "stock-adjustment", name: "Stock Adjustment", module: "Inventory",
     description: "Correct a stock figure by hand, and check a delivery against its purchase order.",
     available: [CLERK], defaults: [CLERK],
-    // the two purchase order reads are for the delivery check; Purchase Orders holds them too
     routes: [["POST", /^\/api\/inventory\/adjust$/],
              ["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/]] },
-  // the Reference button on Stock Adjustment and on a received entry in
-  // Adjustment History; switched on and off by itself, apart from those screens
   { key: "po-reference", name: "Purchase Order Reference", module: "Inventory",
     description: "See a received purchase order with what was ordered beside what arrived, to check the right goods came in. Read only.",
     available: [CLERK], defaults: [CLERK],
@@ -148,7 +113,6 @@ const FEATURES = [
     available: [CLERK], defaults: [CLERK],
     routes: [["GET", /^\/api\/inventory\/adjustments$/]] },
   { key: "reorder-points", name: "Reorder Point", module: "Inventory",
-    // read only: the clerk sees each point; the manager sets them (Reorder Alerts)
     description: "See each material's reorder point: the stock level that puts it on the reorder list.",
     available: [CLERK], defaults: [CLERK],
     routes: [] },
@@ -160,8 +124,6 @@ const FEATURES = [
     description: "The whole inventory to read, sort and print, and where a product's selling price is set.",
     available: [MANAGER], defaults: [MANAGER],
     routes: [["GET", /^\/api\/stocks$/], ["PUT", /^\/api\/stocks\/\d+\/price$/]] },
-  // the strip across the manager's screens: how many products have no price yet, and a
-  // button to the Stocks Overview where the price is set (that button also needs stock-reports)
   { key: "price-alert", name: "No-Price Alert", module: "Inventory",
     description: "An alert across the screens when products have no selling price yet, with a button to the Stocks Overview where the price is set.",
     available: [MANAGER], defaults: [MANAGER],
@@ -173,7 +135,6 @@ const FEATURES = [
   { key: "damage-report", name: "Make a Report", module: "Inventory",
     description: "Report damaged goods and take them off the shelf, or goods missing from a delivery.",
     available: [CLERK], defaults: [CLERK],
-    // the two purchase order reads are for picking the order the missing goods were on
     routes: [["POST", /^\/api\/returns$/], ["POST", /^\/api\/returns\/batch$/],
              ["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/]] },
   { key: "purchase-orders", name: "Purchase Orders", module: "Inventory",
@@ -185,7 +146,6 @@ const FEATURES = [
              ["POST", /^\/api\/purchase-orders\/\d+\/decide$/],
              ["POST", /^\/api\/purchase-orders\/\d+\/receive$/]] },
 
-  // --- deliveries ---
   { key: "deliveries", name: "Delivery History", module: "Deliveries",
     description: "Every delivery created and where it has got to. The manager's copy is to read only.",
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
@@ -197,12 +157,9 @@ const FEATURES = [
     routes: [["GET", /^\/api\/delivery\/list$/], ["GET", /^\/api\/deliveries\/\d+\/items$/],
              ["PATCH", /^\/api\/deliveries\/\d+\/status$/],
              ["POST", /^\/api\/delivery\/\d+\/claim$/]] },
-  // the Proceed to Payment button on a delivery's card; the payment goes on the sale,
-  // to the cashier's and manager's screens and their alerts (routes/delivery.js)
   { key: "delivery-collect", name: "Collect Payment at the Door", module: "Deliveries",
     description: "Take cash, GCash, PayMaya, cheque or bank transfer from the customer on a delivery the driver took. It goes on the sale at once, and the cashier and manager are told.",
     available: [DRIVER], defaults: [DRIVER],
-    // GCash, PayMaya and a bank transfer are paid by a QR code the driver shows
     routes: [["POST", /^\/api\/delivery\/\d+\/payment$/],
              ["POST", /^\/api\/qr-payments$/], ["GET", /^\/api\/qr-payments\/\d+$/],
              ["POST", /^\/api\/qr-payments\/\d+\/cancel$/]] },
@@ -214,13 +171,11 @@ const FEATURES = [
     description: "The driver's deliveries and collections over a period.",
     available: [DRIVER], defaults: [DRIVER],
     routes: [["GET", /^\/api\/delivery\/summary$/]] },
-  // drawn by script (shared/delivery-schedule.js), so every page can draw it
   { key: "delivery-schedule", name: "Delivery Schedule", module: "Deliveries",
     description: "Deliveries still to go out, by the day they are due: overdue, today, tomorrow, later.",
     available: [MANAGER, CASHIER, CLERK, DRIVER], defaults: [MANAGER],
     routes: [["GET", /^\/api\/deliveries$/], ["GET", /^\/api\/deliveries\/\d+\/items$/]] },
 
-  // --- records ---
   { key: "records", name: "Records", module: "Records",
     description: "Suppliers, customers, products, categories and units. The manager edits suppliers, reads customers (only the cashier edits a customer), prices products and archives records (only the clerk edits a product); the clerk alone adds categories and units.",
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
@@ -232,9 +187,6 @@ const FEATURES = [
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
     routes: [["GET", /^\/api\/archives$/], ["POST", /^\/api\/archives\/archive$/], ["POST", /^\/api\/archives\/restore$/]] },
 
-  // --- staff accounts ---
-  // Off for everyone until the administrator switches it on for managers.
-  // routes/admin.js still refuses an account or a hold on an administrator or a manager.
   { key: "account-management", name: "Account Management", module: "Staff",
     description: "See the cashier, inventory clerk and driver accounts, create new ones, and let the ones locked out after too many wrong passwords sign in again. Never an administrator or manager account.",
     available: [MANAGER], defaults: [],
@@ -244,18 +196,10 @@ const FEATURES = [
              ["POST", /^\/api\/users\/\d+\/release-hold$/]] }
 ];
 
-const FEATURE_ROLES = [MANAGER, CLERK, CASHIER, DRIVER];   // the matrix's columns
+const FEATURE_ROLES = [MANAGER, CLERK, CASHIER, DRIVER];
 
-// the roles whose accounts a manager may create and lift a sign-in hold on
-// (the administrator may do both for any role)
 const ROLES_MANAGED_BY_MANAGER = [CASHIER, CLERK, DRIVER];
 
-// "available" is the list of dashboards whose page draws the screen (its
-// host pages). Any screen can be granted to any role: a role granted a screen
-// its own dashboard does not draw opens it on a host page, which then shows
-// only the screens that role holds (shared/features.js, "visiting").
-
-// finds a screen by its key, e.g. findFeature("pos"); null when there is none
 function findFeature(key) {
   const wanted = String(key || "").toLowerCase();
   for (let featureIndex = 0; featureIndex < FEATURES.length; featureIndex++) {
@@ -267,7 +211,6 @@ function findFeature(key) {
   return null;
 }
 
-// every screen that uses this route (method + address)
 function featuresCovering(method, pathname) {
   const found = [];
   for (let featureIndex = 0; featureIndex < FEATURES.length; featureIndex++) {
@@ -278,17 +221,13 @@ function featuresCovering(method, pathname) {
       const routePattern = route[1];
       if (routeMethod === method && routePattern.test(pathname)) {
         found.push(feature);
-        break;   // this feature is counted once; go to the next feature
+        break;
       }
     }
   }
   return found;
 }
 
-// the overrides, cached between writes:
-// role name -> { feature key: { granted, note, grantedBy, grantedAt, updatedAt } }
-// On Vercel a write on one copy of the server cannot clear another copy's
-// cache, so there it is only trusted for a few seconds.
 let featureOverrides = null;
 let featureOverridesAt = 0;
 const FEATURE_CACHE_MS = IS_VERCEL ? 10 * 1000 : Infinity;
@@ -320,7 +259,6 @@ async function loadFeatureOverrides() {
       };
     }
   } catch (error) {
-    // the table may not exist yet; then there are simply no overrides
   }
 
   featureOverrides = byRole;
@@ -332,7 +270,6 @@ function forgetFeatureOverrides() {
   featureOverrides = null;
 }
 
-// what one role holds: the defaults with the overrides applied
 async function featuresOf(roleName) {
   const allOverrides = await loadFeatureOverrides();
   let overrides = {};
@@ -344,10 +281,8 @@ async function featuresOf(roleName) {
   for (let featureIndex = 0; featureIndex < FEATURES.length; featureIndex++) {
     const feature = FEATURES[featureIndex];
 
-    // does the role have this screen when nobody has changed anything?
     const byDefault = roleName === ADMIN || feature.defaults.includes(roleName);
 
-    // has the administrator switched it on or off for this role?
     let override = null;
     if (Object.prototype.hasOwnProperty.call(overrides, feature.key)) {
       override = overrides[feature.key];
@@ -357,7 +292,7 @@ async function featuresOf(roleName) {
       key: feature.key,
       name: feature.name,
       module: feature.module,
-      hosts: feature.available,   // the roles whose dashboard page draws this screen
+      hosts: feature.available,
       held: byDefault,
       byDefault: byDefault,
       overridden: false,
@@ -379,8 +314,6 @@ async function featuresOf(roleName) {
   return result;
 }
 
-// Everything held, and the part held by grant rather than by role. Each is
-// an object with a true for every screen key it holds: { pos: true, ... }
 async function heldFeatures(roleName) {
   const held = {};
   const granted = {};

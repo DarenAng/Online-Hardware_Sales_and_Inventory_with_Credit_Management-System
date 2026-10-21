@@ -1,20 +1,3 @@
-// ============================================================
-// manager.js -- Manager module
-// Loaded by: server.js only (from the routes folder). Never sent to a browser.
-//
-// What is in this file:
-//   - reports: income, overview, daily tally, and CSV (Excel) exports
-//   - the manager's dashboard numbers
-//   - credit management: limits, extension requests, the late-payment rate
-//     (the cashier reads some of the same routes)
-//   - stocks: the reorder point and the selling price
-//   - Staff Passwords: reset a staff password when the administrator is away
-//   - the daily "late-payment penalty" sweep
-//
-// server.js passes in the database and its helpers ("deps"). The access
-// rules in access-control.js have already checked the user's role.
-// ============================================================
-
 const managerProcedures = require("../database/procedures/manager-procedures");
 const helpers = require("../helpers");
 const tidy = helpers.tidy;
@@ -46,12 +29,6 @@ function registerManagerRoutes(app, deps) {
   const phoneComplaint = deps.phoneComplaint;
   const sendWorkbook = require("../services/spreadsheet").sendWorkbook;
 
-  // ==========================================
-  // MANAGER MODULE
-  // ==========================================
-
-  // Date ranges are counted back from today rather than snapped to calendar
-  // boundaries: "this month" on the third would read as a collapse.
   const REPORT_RANGES = {
     daily:     { days: 1,   label: "Today" },
     weekly:    { days: 7,   label: "Last 7 days" },
@@ -62,22 +39,16 @@ function registerManagerRoutes(app, deps) {
     all:       { days: null, label: "All time" }
   };
 
-  // The calendar day this machine is having: toISOString() answers in UTC,
-  // which disagreed with CURDATE() for the first eight hours of every day.
   function isoDay(date) {
     const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
     return local.toISOString().slice(0, 10);
   }
 
-  // { from, to, label, bucket }; a custom pair always wins over a named range.
-  // A custom pair that reaches past today is refused (error.status 400): no
-  // sale has happened tomorrow, so the figures would only mislead.
   function resolveRange(query) {
     const from = String(query.from || "");
     const to = String(query.to || "");
 
     if (isDateText(from) && isDateText(to)) {
-      // if the dates were typed the wrong way round, swap them
       let start = from;
       let end = to;
       if (from > to) {
@@ -116,7 +87,6 @@ function registerManagerRoutes(app, deps) {
     };
   }
 
-  // the bucket follows the span: 365 columns is a smear, 2 is nothing
   function bucketFor(from, to) {
     const days = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
     if (days <= 62) return "day";
@@ -130,10 +100,6 @@ function registerManagerRoutes(app, deps) {
     month: "DATE_FORMAT(s.sale_date, '%Y-%m-01')"
   };
 
-  // The income breakdown: billed, collected (the headline), outstanding and
-  // discounts. One function behind both the screen and the export.
-  // The optional cashier filter: a staff id from the query (?cashier=3), or
-  // null for every cashier. Anything that is not a whole number above 0 is ignored.
   function cashierFromQuery(query) {
     const id = Number(query.cashier);
     if (Number.isInteger(id) && id > 0) return id;
@@ -144,7 +110,6 @@ function registerManagerRoutes(app, deps) {
     const bucket = BUCKET_SQL[range.bucket] || BUCKET_SQL.day;
     const window = [range.from + " 00:00:00", range.to + " 23:59:59"];
 
-    // with a cashier chosen, every query below only counts that cashier's sales
     let cashierSql = "";
     if (cashierId !== null) {
       cashierSql = " AND s.cashier_staff_id = ?";
@@ -237,7 +202,6 @@ function registerManagerRoutes(app, deps) {
       );
       const cashiers = cashiersResult[0];
 
-      // everyone who has rung up a sale, for the Cashier dropdown (whatever the period)
       const cashierChoicesResult = await db.query(
         "SELECT DISTINCT st.staff_id, st.full_name " +
         "FROM sales s " +
@@ -247,7 +211,6 @@ function registerManagerRoutes(app, deps) {
       );
       const cashierChoices = cashierChoicesResult[0];
 
-      // the chosen cashier's name, so the screen, print and export can say who it is for
       let cashier = null;
       if (cashierId !== null) {
         cashier = { staff_id: cashierId, name: "Staff #" + cashierId };
@@ -259,7 +222,6 @@ function registerManagerRoutes(app, deps) {
 
       const saleCount = Number(totals.sale_count) || 0;
 
-      // average bill per sale (0 when there were no sales, to avoid dividing by 0)
       let averageSale = 0;
       if (saleCount > 0) {
         averageSale = Number(totals.billed) / saleCount;
@@ -306,14 +268,10 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // A period of one day (Today, or a custom pair with the same date twice) has
-  // nothing to break down by day, so the by-day sheet is left out of its file.
   function isSingleDay(range) {
     return range.from === range.to;
   }
 
-  // Exports are Excel workbooks (spreadsheet.js). The access table is what
-  // stops a cashier exporting.
   const EXPORTS = {
     "payment-methods": {
       title: "payment-methods",
@@ -380,7 +338,6 @@ function registerManagerRoutes(app, deps) {
       }
     },
 
-    // the whole income screen in one file
     "income-breakdown": {
       title: "income-breakdown",
       headers: [],
@@ -389,7 +346,6 @@ function registerManagerRoutes(app, deps) {
         rows.push(["Income breakdown", data.range.label, data.range.from + " to " + data.range.to,
                    data.cashier ? "Cashier: " + data.cashier.name : "All cashiers"]);
 
-        // one section = an empty line, the section name, its headers, then its rows
         function addSection(name, headers, body) {
           rows.push([]);
           rows.push([name]);
@@ -400,7 +356,6 @@ function registerManagerRoutes(app, deps) {
           }
         }
 
-        // .slice(3) skips the Range/From/To lines, which are already in the first line
         addSection("Summary", ["Figure", "Value"], EXPORTS["income-summary"].rows(data).slice(3));
         if (!isSingleDay(data.range)) {
           addSection("Over time", EXPORTS["income-series"].headers, EXPORTS["income-series"].rows(data));
@@ -411,8 +366,6 @@ function registerManagerRoutes(app, deps) {
     }
   };
 
-  // The income export as a workbook: the whole Sales Summary is a sheet per
-  // table; a single table is one sheet. Money columns are kept as numbers.
   const EXPORT_MONEY = {
     "payment-methods": [2, 3, 4],
     "top-products": [3],
@@ -442,7 +395,6 @@ function registerManagerRoutes(app, deps) {
         money: EXPORT_MONEY["payment-methods"] }
     ];
 
-    // the by-day sheet goes last, and only when the period has more than one day
     if (!isSingleDay(range)) {
       sheets.push({ name: "By Day", title: "Sales by Day", subtitle: subtitle,
         headers: EXPORTS["income-series"].headers, rows: EXPORTS["income-series"].rows(data),
@@ -451,9 +403,6 @@ function registerManagerRoutes(app, deps) {
     return sheets;
   }
 
-  // A table on a report screen, saved as a workbook. The browser sends the
-  // rows exactly as it drew them, so the file and the screen cannot disagree;
-  // this only lays them out. Sizes are capped so nothing runaway reaches it.
   app.post("/api/reports/spreadsheet", async function (request, response) {
     const body = request.body || {};
     const sheets = Array.isArray(body.sheets) ? body.sheets.slice(0, 10) : [];
@@ -461,7 +410,6 @@ function registerManagerRoutes(app, deps) {
       return response.status(400).json({ error: "There is no table to save." });
     }
 
-    // tidy every sheet: cut the names and sizes down, and turn every cell into a number or text
     const cleaned = [];
     for (let i = 0; i < sheets.length; i++) {
       const sheet = sheets[i];
@@ -522,11 +470,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // SUPPLIERS, CATEGORIES AND UNITS -- the manager's alone to add. The
-  // stockroom picks from what is on file; a name it types that is not on file
-  // is refused there (inventory-clerk.js).
-  // ==========================================
   function tidyName(value, max) {
     return String(value || "").trim().replace(/\s+/g, " ").slice(0, max);
   }
@@ -536,7 +479,6 @@ function registerManagerRoutes(app, deps) {
     const name = tidyName(body.name, 100);
     const email = String(body.email || "").trim().slice(0, 100);
     if (name === "") return response.status(400).json({ error: "The supplier needs a company name." });
-    // the email must look like name@site.ext, with no spaces
     if (email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return response.status(400).json({ error: "That email address does not look right." });
     }
@@ -563,7 +505,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // categories and units are one name each, unique whatever the capitals
   function addNamedRecord(table, column, label, max) {
     return async function (request, response) {
       const name = tidyName((request.body || {}).name, max);
@@ -624,8 +565,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // The daily tally for a cashier or clerk: one day on the screen. A manager
-  // sees the whole shop's day. canExport is a convenience, not the control.
   app.get("/api/reports/daily-tally", async function (request, response) {
     let day = null;
     if (isDateText(request.query.date)) {
@@ -634,7 +573,6 @@ function registerManagerRoutes(app, deps) {
     const actor = request.actor;
     const wholeShop = actor.roleName === MANAGER;
 
-    // the manager sees the whole shop; anyone else sees only their own sales
     let scope = "";
     let params = [day];
     if (!wholeShop) {
@@ -689,8 +627,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // Dashboard headline numbers. Gross sales is what was billed and total income
-  // what was collected; the difference is the outstanding balance.
   app.get("/api/manager/summary", async function (request, response) {
     try {
       const salesRowsResult = await db.query(
@@ -700,7 +636,6 @@ function registerManagerRoutes(app, deps) {
       );
       const salesRows = salesRowsResult[0];
       const sales = salesRows[0];
-      // the tile opens Reorder Alerts, so it counts what that screen lists
       const stockRowsResult = await db.query(
         "SELECT COUNT(*) AS product_count FROM products p WHERE p.is_archived = FALSE"
       );
@@ -729,8 +664,6 @@ function registerManagerRoutes(app, deps) {
 
       const income = incomeRows[0];
 
-      // owed is the goods and the late penalties together; penalties is the
-      // penalty part alone, so billed - collected + penalties = owed
       const creditsRowsResult = await db.query(
         "SELECT COUNT(*) AS open_accounts, " +
         "COALESCE(SUM(GREATEST(amount_due - amount_paid, 0)), 0) AS owed, " +
@@ -761,17 +694,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // REPORTS: payment method mix, receivables, loyal customers
-  // Everything staff have filed, newest first, with who filed it: sales rung
-  // up, credit payments taken, damage, refund and return reports, stock
-  // adjustments, deliveries, purchase orders raised and the manager's decisions
-  // on them, credit requests and their decisions, and credit limits set. Each
-  // comes from its own table, so the report is complete on a database that
-  // was seeded rather than lived in, and it reads the same rows the other
-  // screens do.
-  // a quantity without trailing zeros: 2.500 reads 2.5, 40.000 reads 40. The
-  // CHARACTER SET keeps the text in the tables' own collation: a bare CAST
-  // takes the connection's, and the UNION below refuses to mix the two.
   function qty(column) {
     return "IF(" + column + " = FLOOR(" + column + "), CAST(FLOOR(" + column + ") AS CHAR CHARACTER SET utf8mb4), " +
       "TRIM(TRAILING '0' FROM CAST(" + column + " AS CHAR CHARACTER SET utf8mb4)))";
@@ -830,7 +752,6 @@ function registerManagerRoutes(app, deps) {
       "FROM purchase_orders po JOIN suppliers sup ON sup.supplier_id = po.supplier_id " +
       "WHERE po.confirmed_at IS NOT NULL " +
       "UNION ALL " +
-      // the clerk counting a delivery in against its order
       "SELECT 'PO_RECEIVED', al.created_at, al.staff_id, al.log_id, al.details " +
       "FROM audit_logs al WHERE al.action = 'PO_RECEIVED' " +
       "UNION ALL " +
@@ -920,13 +841,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // CREDIT MANAGEMENT
-  //
-  // Every balance is derived in vw_customer_credit from the sales themselves;
-  // nothing about a balance is stored, so nothing can go stale.
-  // ==========================================
-
   app.get("/api/credit/customers", async function (request, response) {
     const standing = String(request.query.standing || "all");
     const search = String(request.query.search || "").trim();
@@ -944,7 +858,6 @@ function registerManagerRoutes(app, deps) {
     if (request.query.overLimit === "true") where.push("v.current_credit > v.credit_limit");
 
     if (search !== "") {
-      // the name is also searched as first and last name only, so "Maria Santos" finds "Maria S. Santos"
       where.push(wordStartSearch(["v.customer_name", "v.phone",
         "(SELECT CONCAT(cu.first_name, ' ', cu.last_name) FROM customers cu WHERE cu.customer_id = v.customer_id)"],
         search, params));
@@ -973,11 +886,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // Every sale still carrying a balance, oldest first: the counter's list of
-  // what can be paid off. The due date is the sale plus the thirty-day term
-  // that vw_customer_credit ages an account by; a Credit sale past it carries
-  // the late penalty, and the balance is measured against the bill with the
-  // penalty on it (amount_due).
   app.get("/api/credit/open-sales", async function (request, response) {
     try {
       const rowsResult = await db.query(
@@ -1037,9 +945,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // penaltyRate: blank or null means the shop's late-payment rate applies to
-  // this account; a number, 1 to 3 percent a month, is the manager's rate for
-  // this account alone
   app.put("/api/credit/customers/:customerId/limit", requireRole(MANAGER), async function (request, response) {
     const creditLimit = request.body.creditLimit;
     const standing = request.body.standing;
@@ -1083,7 +988,6 @@ function registerManagerRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
-      // the values before the change (for the audit trail)
       let customerName = "Customer";
       let oldValues = null;
       if (before[0]) {
@@ -1119,15 +1023,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // THE LATE-PAYMENT POLICY
-  //
-  // 1 to 3 percent a month of the goods still unpaid, for every month (or
-  // part of one) a credit sale is past its 30-day due date; the default is
-  // 3. The manager may set another rate for the shop here, or for one
-  // account on its credit terms. The charge itself is made by
-  // sp_apply_late_penalties, run at startup and every hour.
-  // ==========================================
   app.get("/api/credit/policy", async function (request, response) {
     try {
       const rowsResult = await db.query(
@@ -1187,22 +1082,8 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // THE PRINTED CREDIT TERMS AND CUSTOMER CARD
-  //
-  // One page of terms and conditions for a customer's credit account, and a
-  // customer card that comes before it. Every figure is read from the account
-  // itself (the limit, the late-payment rate) or from the system's fixed rule
-  // (a credit sale falls due thirty days after it is made, the same thirty the
-  // credit views age an account by); the wording is the manager's, or the default.
-  // The system charges no interest, only the late-payment penalty, so no
-  // interest rate is printed.
-  // ==========================================
   const CREDIT_DUE_DAYS = 30;
 
-  // The three policies the manager maintains (Policy Maintenance), each one
-  // line to a term: where it is kept, its default wording and what the audit
-  // trail calls a change to it.
   const POLICIES = {
     credit: { column: "credit_terms", fallback: DEFAULT_CREDIT_TERMS, name: "Credit policy",
               action: "UPDATE_CREDIT_TERMS" },
@@ -1212,8 +1093,6 @@ function registerManagerRoutes(app, deps) {
               action: "UPDATE_REFUND_POLICY" }
   };
 
-  // Every policy's text in force: the manager's own wording, else the default.
-  // A database from before a column was added reads as the default.
   async function policyTexts() {
     const rowsResult = await db.query("SELECT * FROM store_settings WHERE setting_id = 1");
     const row = rowsResult[0][0] || {};
@@ -1230,12 +1109,10 @@ function registerManagerRoutes(app, deps) {
     return texts;
   }
 
-  // The credit terms text in force (the credit policy)
   async function creditTermsText() {
     return (await policyTexts()).credit;
   }
 
-  // every filled-in line of a text, in order
   function linesOf(text) {
     const kept = [];
     const lines = String(text || "").split(/\r?\n/);
@@ -1246,7 +1123,6 @@ function registerManagerRoutes(app, deps) {
     return kept;
   }
 
-  // everything the two printed pages need, for one customer
   async function creditPrintData(customerId, actorId) {
     const customerResult = await db.query("SELECT * FROM vw_customer_credit WHERE customer_id = ?", [customerId]);
     const customer = customerResult[0][0];
@@ -1255,8 +1131,6 @@ function registerManagerRoutes(app, deps) {
     const storeResult = await db.query(
       "SELECT store_name, proprietor, address, tin, receipt_layout FROM store_settings WHERE setting_id = 1");
     const store = storeResult[0][0] || {};
-    // the shop has no contact column; whatever the administrator put in the
-    // receipt's header lines (a phone number, a branch) is the contact
     const layout = receiptLayoutFrom(store.receipt_layout);
 
     const staffResult = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [actorId]);
@@ -1294,7 +1168,6 @@ function registerManagerRoutes(app, deps) {
         penalty_rate_is_own: ownRate,
         lines: linesOf(terms.text)
       },
-      // the back of the customer card
       policies: {
         data_terms: linesOf(policies["data-terms"].text),
         refund_policy: linesOf(policies.refund.text)
@@ -1326,9 +1199,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // Policy Maintenance: the manager reads every policy's wording (with the
-  // store's name and contact lines, for the preview of the card's back) and
-  // writes one at a time. An empty text puts that policy's default back.
   app.get("/api/policies", requireRole(MANAGER), async function (request, response) {
     try {
       const texts = await policyTexts();
@@ -1365,14 +1235,10 @@ function registerManagerRoutes(app, deps) {
       }
     }
 
-    // nothing typed puts the default back
     let saved = null;
     if (lines.length > 0) saved = lines.join("\n");
 
     try {
-      // only the wording is written: updated_at and updated_by_staff_id are what
-      // the rate and the store settings show as "last changed", so they stay as
-      // they were (updated_at = updated_at stops its automatic refresh)
       const rowResult = await db.query("SELECT setting_id FROM store_settings WHERE setting_id = 1");
       if (rowResult[0].length === 0) {
         return response.status(409).json({ error: "The store settings are not set up yet, so there is nowhere to keep the policy. The administrator fills them in first." });
@@ -1447,8 +1313,6 @@ function registerManagerRoutes(app, deps) {
       return response.status(400).json({ error: "A customer and a requested limit are required" });
     }
 
-    // A manager reading the request later does not have the customer in front
-    // of them, so it always says why: the reason is never blank.
     const why = typeof reason === "string" ? reason.trim().replace(/\s+/g, " ") : "";
     if (why === "") {
       return response.status(400).json({ error: "A reason is required." });
@@ -1481,7 +1345,6 @@ function registerManagerRoutes(app, deps) {
     const approve = request.body.approve === true;
     const note = request.body.note;
 
-    // declining says why or it does not happen
     if (!approve && (typeof note !== "string" || note.trim() === "")) {
       return response.status(400).json({
         error: "Say why the request was declined, so whoever asked knows what to tell the customer."
@@ -1517,7 +1380,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // One customer in full: what they bought beside what they have paid.
   app.get("/api/customers/:customerId/history", async function (request, response) {
     const customerId = request.params.customerId;
 
@@ -1593,14 +1455,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // Open an account from Customers Record (the Add Customer form). The
-  // procedure sets the limit to zero and the standing to Good; moving the limit
-  // is manager-only. The name comes as first, middle (optional) and last; the
-  // phone number is required; the address comes in parts (house and street,
-  // barangay, town or city, province, landmark) and is also kept as the one
-  // line every other screen reads. A name already on record (any case, extra
-  // spaces ignored) is refused with 409 -- the till no longer opens accounts by
-  // typing a name, so this is the one place an account starts.
   app.post("/api/customers", async function (request, response) {
     const first = tidy(request.body.firstName).slice(0, 100);
     const middle = tidy(request.body.middleName).slice(0, 100);
@@ -1614,7 +1468,6 @@ function registerManagerRoutes(app, deps) {
       return response.status(400).json({ error: "A customer needs a last name" });
     }
 
-    // the phone number is required, and has to be a Philippine mobile number
     if (!String(phone || "").trim()) {
       return response.status(400).json({ error: "A customer needs a phone number" });
     }
@@ -1624,8 +1477,6 @@ function registerManagerRoutes(app, deps) {
     }
     const phoneText = cleanPhone(phone) || "";
 
-    // the address in parts: barangay, town or city and province are required;
-    // the house number and street and the landmark may be left out
     const parts = addressPartsFrom(request.body);
     const addressProblem = addressPartsProblem(parts, "customer's address");
     if (addressProblem) {
@@ -1633,7 +1484,6 @@ function registerManagerRoutes(app, deps) {
     }
     const addressLine = buildFullAddress(parts);
 
-    // the name as it is written on screen, with the middle name as an initial
     let fullName = first;
     if (middle !== "") fullName += " " + middle.charAt(0).toUpperCase() + ".";
     fullName += " " + last;
@@ -1658,8 +1508,6 @@ function registerManagerRoutes(app, deps) {
          parts.street, parts.barangay, parts.city, parts.province, parts.landmark, getActorId(request)]
       );
 
-      // 201: a new account. 200 would mean the procedure found the same name and
-      // phone and handed that account back, which the check above has already refused
       if (output.status_code !== 201 && output.status_code !== 200) {
         return response.status(output.status_code).json({ error: output.message });
       }
@@ -1682,16 +1530,8 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // ==========================================
-  // STOCKS, AND THE REORDER POINT
-  //
-  // The reorder point is the figure the shop types for each product; nothing
-  // works it out. What sold over the last 90 days is shown beside it.
-  // ==========================================
   const SALES_WINDOW_DAYS = 90;
 
-  // How many products have no price yet (price 0): the alert across the
-  // manager's screens. Archived products are not counted; they are not for sale.
   app.get("/api/stocks/unpriced", async function (request, response) {
     try {
       const countResult = await db.query(
@@ -1763,8 +1603,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // The manager sets a product's reorder point: one figure, typed. (The clerk
-  // sets it from the Material List the same way.)
   app.put("/api/stocks/:productId/reorder-policy", async function (request, response) {
     const typed = (request.body || {}).reorderPoint;
     const point = parseInt(typed, 10);
@@ -1809,13 +1647,8 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // The selling price. Sales already written keep the price they were rung
-  // up at (sale_items.unit_price), so a change here reaches the till and the
-  // stock value from the next sale on, never the invoices behind it. A size
-  // with its own price in product_units keeps it; one priced from the unit
-  // follows the new figure on its own.
   app.put("/api/stocks/:productId/price", async function (request, response) {
-    let price = NaN;   // NaN = "not a number"
+    let price = NaN;
     if (request.body) {
       price = Number(request.body.price);
     }
@@ -1865,11 +1698,6 @@ function registerManagerRoutes(app, deps) {
       response.status(500).json({ error: "Unable to change the price" });
     }
   });
-  // ==========================================
-  // EDITING A RECORD -- the manager corrects a supplier, a customer or a
-  // product's details from Records. Each answers what changed, and the change
-  // goes to the audit trail with the values before and after.
-  // ==========================================
   app.put("/api/suppliers/:supplierId", requireRole(MANAGER), async function (request, response) {
     const body = request.body || {};
     const name = tidyName(body.name, 100);
@@ -1913,8 +1741,6 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // A customer's name, phone and address are corrected by the cashier, who
-  // deals with the customer at the counter; the manager only reads them.
   app.put("/api/customers/:customerId", requireRole(CASHIER), async function (request, response) {
     const body = request.body || {};
     const first = tidy(body.firstName).slice(0, 100);
@@ -1973,13 +1799,10 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // The late-payment sweep: once at startup and every hour after. The rule
-  // is in sp_apply_late_penalties; here each run that charged something is
-  // logged and announced on the live channel, so an open credit screen redraws.
   const PENALTY_SWEEP_MS = 60 * 60 * 1000;
 
   async function runPenaltySweep() {
-    if (await proceduresAreMissing()) return;   // nothing can be written anyway
+    if (await proceduresAreMissing()) return;
 
     try {
       const output = await managerProcedures.applyLatePenalties();

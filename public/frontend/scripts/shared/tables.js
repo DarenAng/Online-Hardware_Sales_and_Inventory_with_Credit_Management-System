@@ -1,15 +1,9 @@
-// tables.js -- alignment, phone labels, hidden columns and steady heights
-// Loaded by: all five dashboards
-
-// Each header takes its alignment from the row underneath it. Runs again
-// whenever a table body changes.
 function alignTableColumns(table) {
     if (!table || !table.tHead || !table.tHead.rows.length || !table.tBodies.length) return;
 
     const headerCells = table.tHead.rows[0].cells;
     const bodyRows = table.tBodies[0].rows;
 
-    // the first body row that has one cell for every heading
     let sample = null;
     for (let i = 0; i < bodyRows.length; i++) {
         if (bodyRows[i].cells.length === headerCells.length) {
@@ -34,10 +28,6 @@ function alignTableColumns(table) {
     hideFilteredColumns(table);
 }
 
-// A filtered column says the same thing on every row, so a module can name
-// the columns its filters made redundant in data-hidden-columns (1-based).
-// Applied on every redraw because panels rebuild their rows on each page.
-// ['2', 'x', '5'] -> [2, 5]  (keeps only whole numbers above 0)
 function columnNumbers(values) {
     const list = [];
     for (let i = 0; i < values.length; i++) {
@@ -68,7 +58,6 @@ function hideFilteredColumns(table) {
     const headerCells = table.tHead.rows[0].cells;
     const columns = headerCells.length;
 
-    // hides or shows one cell, by its position in the row
     function mark(cell, index) {
         cell.classList.toggle('col-hidden', hidden.indexOf(index + 1) !== -1);
     }
@@ -89,8 +78,6 @@ function hideFilteredColumns(table) {
     }
 }
 
-// Below 380px each row becomes a card, so every body cell is stamped with
-// its own column heading for the stylesheet to print.
 function labelTableCells(table) {
     if (!table || !table.tHead || !table.tHead.rows.length || !table.tBodies.length) return;
 
@@ -122,7 +109,7 @@ function watchTablesForAlignment() {
     alignAllTables();
 
     const observer = new MutationObserver(function (records) {
-        const seen = [];   // the tables already aligned in this round
+        const seen = [];
 
         function note(table) {
             if (table && seen.indexOf(table) === -1) {
@@ -135,7 +122,6 @@ function watchTablesForAlignment() {
             const record = records[r];
             note(record.target.closest ? record.target.closest('table') : null);
 
-            // a table that arrived whole inside innerHTML is found among the added nodes
             for (let n = 0; n < record.addedNodes.length; n++) {
                 const node = record.addedNodes[n];
                 if (node.nodeType !== 1) continue;
@@ -154,16 +140,6 @@ function watchTablesForAlignment() {
     observer.observe(document.body, { childList: true, subtree: true });
 }
 
-// ==========================================
-// A FILTER HIDES ITS OWN COLUMN
-// A toolbar dropdown marked data-filter-table="sales-table" data-hides-column="5"
-// decides that column: while it holds anything but "all", every row would
-// say the same thing there, so the column is not drawn. Used on every page.
-// A dropdown can name values that keep its column drawn, because the column
-// holds more than the filtered word: data-keeps-column-for="Delayed".
-// A value can hide more columns too, those that say nothing for it:
-// data-also-hides="Cash:5" (more as "Cash:5|Cheque:3,4").
-// ==========================================
 function syncFilteredColumns(tableId) {
     const table = document.getElementById(tableId);
     if (!table) return;
@@ -194,9 +170,7 @@ document.addEventListener('change', function (event) {
     }
 });
 
-// the browser can bring a dropdown back with its last value after a reload
 document.addEventListener('DOMContentLoaded', function () {
-    // each table named by a dropdown, once
     const tables = [];
     const selects = document.querySelectorAll('select[data-filter-table]');
     for (let i = 0; i < selects.length; i++) {
@@ -209,23 +183,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
-// ==========================================
-// A TABLE KEEPS THE HEIGHT OF ITS FULLEST PAGE
-// A page with fewer rows than the page size is topped up with blank filler
-// rows, and a table never draws shorter than the tallest it has been on this
-// screen, so the pager and everything under it stay put: a last page of
-// three, a search with one match, "Reading the database..." all take the
-// room a full page took. Reset when the table's width changes, since rows
-// wrap differently then. Phones stack rows as cards (responsive.css), where
-// the fillers are hidden and nothing is held.
-// ==========================================
-// a row carrying a badge, as the grid-N heights in general-ui.css count it;
-// a filler is never taller, so a table of a few tall rows is not padded out
-// to a page of tall rows
 const FILLER_ROW_HEIGHT = 52.3;
-// What has been held is written on the element itself:
-//   a table's parent box:  box._heldTable = what its table has held
-//   a box:                 box._heldBox = the tallest it has been
 let heldWatch = null;
 
 function fillerRows(count, columns) {
@@ -240,8 +198,6 @@ function tablesStacked() {
     return window.matchMedia('(max-width: 640px)').matches;
 }
 
-// The record kept on this element under the given property name ('_heldTable'
-// or '_heldBox'); made the first time it is asked for.
 function heldRecord(holder, property) {
     let held = holder[property];
     if (!held) {
@@ -252,7 +208,6 @@ function heldRecord(holder, property) {
     return held;
 }
 
-// a width change (a resized window, a tab opened) starts the count again
 function watchHeldWidth(holder) {
     if (typeof ResizeObserver !== 'function') return;
     if (!heldWatch) {
@@ -281,13 +236,10 @@ function watchHeldWidth(holder) {
             }
         });
     }
-    heldWatch.observe(holder);   // observing twice is harmless
+    heldWatch.observe(holder);
 }
 
-// sets each row's height; '' hands it back to the stylesheet
-// (heightOf(row) gives the height wanted for that row)
 function setRowHeights(rows, heightOf) {
-    // every height is worked out first, then they are all applied
     const heights = [];
     for (let i = 0; i < rows.length; i++) {
         heights.push(heightOf(rows[i]));
@@ -297,8 +249,6 @@ function setRowHeights(rows, heightOf) {
     }
 }
 
-// grows the given rows until the table is the target height; checked once
-// more, because a row's border counts differently per browser
 function stretchRows(table, rows, target) {
     for (let pass = 0; pass < 2; pass += 1) {
         const gap = target - table.getBoundingClientRect().height;
@@ -310,16 +260,12 @@ function stretchRows(table, rows, target) {
     }
 }
 
-// Call after the rows are drawn. Message rows ("Loading...", "No match") are
-// one cell across the table and are stretched to the held height.
 function holdTableHeight(table) {
     if (!table || !table.tBodies.length || !table.parentElement) return;
 
     const held = heldRecord(table.parentElement, '_heldTable');
     held.table = table;
 
-    // the observer would align the headings after this measures, and a
-    // heading's class can change the column widths and so the row heights
     alignTableColumns(table);
 
     const body = table.tBodies[0];
@@ -339,10 +285,8 @@ function holdTableHeight(table) {
     const spacer = table.nextElementSibling;
     if (spacer && spacer.classList.contains('table-spacer')) spacer.remove();
 
-    // a closed tab has no size to read; it is held once it opens
     if (!table.getClientRects().length || tablesStacked()) return;
 
-    // the rows that carry data (not fillers; none at all when this is a message)
     const records = [];
     for (let i = 0; i < rows.length; i++) {
         if (!rows[i].classList.contains('row-filler') && !message) records.push(rows[i]);
@@ -364,8 +308,6 @@ function holdTableHeight(table) {
         }
     }
 
-    // a grid-N box (general-ui.css) is the least a table fills; read while
-    // the stylesheet alone sets it, before holdBoxHeight below adds its own
     const holder = table.parentElement;
     if (held.floor === undefined || holder.style.minHeight === '') {
         held.floor = holder.classList.contains('table-responsive')
@@ -379,8 +321,6 @@ function holdTableHeight(table) {
         if (message) stretchRows(table, [message], held.tallest);
         else if (fillers.length > 0) stretchRows(table, fillers, held.tallest);
         else {
-            // a full page of short rows after a page of wrapped ones; a block
-            // rather than a margin, which would fold into the pager's own
             const room = document.createElement('div');
             room.className = 'table-spacer';
             room.setAttribute('aria-hidden', 'true');
@@ -389,13 +329,9 @@ function holdTableHeight(table) {
         }
     }
 
-    // a table too wide for its box brings a sideways scrollbar with its rows
-    // and loses it with a one-line message; the box keeps that room too
     if (holder.classList.contains('table-responsive')) holdBoxHeight(holder);
 }
 
-// The same for a box whose contents are not one table (the till's catalog,
-// which swaps its table for a message): it never gets shorter.
 function holdBoxHeight(box) {
     if (!box) return;
     const held = heldRecord(box, '_heldBox');

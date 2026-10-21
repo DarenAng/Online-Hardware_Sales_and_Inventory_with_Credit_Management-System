@@ -1,23 +1,3 @@
-// purchase-orders.js -- purchase orders, shared by the manager and the clerk
-// Loaded by: manager.html, inventory-dashboard.html
-//
-// The clerk raises an order (For Approval) and prints it; the manager confirms
-// or declines it (Pending or Cancelled); once confirmed, the clerk counts the
-// delivery in (Received). The server refuses each role on the other's routes. The supplier and the
-// materials are typed, not picked, so an order can buy from a new company or
-// a product the shop has never stocked. The company comes first: the lines
-// stay shut until one is settled, and then offer only what it supplies.
-//
-//   configurePurchaseOrders({
-//       key: 'mgr-po',                  // the history panel's data-panel key
-//       canCreate: true,                // does this page have the form (the clerk's)
-//       canDecide: true,                // may this page confirm or decline (the manager's)
-//       canReceive: true,               // may this page count a delivery in (the clerk's)
-//       showPanel: showManagerPanel,    // (panelId, title) -- the page's own
-//       afterChange: function () {}     // optional; caches to drop after a write
-//   });
-//   buildPurchaseOrderPanel();
-
 const poSetup = {
     key: 'po',
     canCreate: false,
@@ -27,12 +7,10 @@ const poSetup = {
     historyPanelId: 'panel-po-history',
     historyTitle: 'Order History',
     gateText: 'Press Load Data for every order raised, or filter to the ones still pending.',
-    // false leaves the Lines column out of the history table (the manager's page has no such column)
     showLines: true,
     afterChange: null
 };
 
-// The material in a list of materials with this product id, or undefined when there is none.
 function poFindProduct(products, productId) {
     for (let i = 0; i < products.length; i++) {
         if (products[i].product_id === productId) return products[i];
@@ -40,12 +18,10 @@ function poFindProduct(products, productId) {
     return undefined;
 }
 
-// true when the object has this key of its own (not one that every object inherits)
 function poHas(object, key) {
     return Object.prototype.hasOwnProperty.call(object, key);
 }
 
-// The items of a list that are not empty (not blank, 0, null or undefined), in the same order.
 function poKeepFilled(items) {
     const kept = [];
     for (let i = 0; i < items.length; i++) {
@@ -67,19 +43,16 @@ function poAfterChange() {
     if (typeof loadNotifications === 'function') loadNotifications();
 }
 
-// ---------- the screens ----------
 function showPurchaseOrderHistory(event) {
     if (event) event.preventDefault();
     poShowPanel(poSetup.historyPanelId, poSetup.historyTitle);
 }
 
-// opening the form fills the two lists the typed boxes read from
 function showPurchaseOrders(event) {
     if (event) event.preventDefault();
     if (!poSetup.canCreate) { showPurchaseOrderHistory(); return; }
 
     poShowPanel('panel-po', 'New Purchase Order');
-    // the critical list needs the materials, and a click on it the suppliers
     renderCriticalStocks();
     Promise.all([loadPoSuppliers(false), ensurePoMaterials(false)]).then(renderCriticalStocks);
     if (poLineCount === 0) addPurchaseLine();
@@ -87,10 +60,9 @@ function showPurchaseOrders(event) {
     renderPoTotals();
 }
 
-// the picker's own copy of the material list; neither page's can be leaned on
 let poMaterials = [];
 let poMaterialsLoaded = false;
-let poMaterialsFailed = false;   // the list did not arrive, which is not the same as an empty one
+let poMaterialsFailed = false;
 
 async function ensurePoMaterials(force) {
     if (poMaterialsLoaded && !force) return true;
@@ -106,7 +78,6 @@ async function ensurePoMaterials(force) {
     }
 }
 
-// the way back from a list that did not arrive
 async function matReload(id) {
     const list = document.getElementById(id + '-list');
     if (list && !list.hidden) {
@@ -116,19 +87,17 @@ async function matReload(id) {
     matOpen(id);
 }
 
-let poSupplier = null;          // the company on file, once one is chosen
+let poSupplier = null;
 let poSuppliers = [];
 let poSuppliersLoaded = false;
 let poSupplierHighlight = -1;
-let poSupplierCommitted = false; // a new company's name, once the box is left
-let poLinesSupplierId = null;    // the company the lines were picked under
+let poSupplierCommitted = false;
+let poLinesSupplierId = null;
 let poLineCount = 0;
-let poDocument = null;          // the order currently being printed
-let poReceiving = null;         // the order currently being counted in
+let poDocument = null;
+let poReceiving = null;
 let recvExtraCount = 0;
 
-// Material picker shared by the order lines and the receiving sheet; each
-// keeps its own state under an id.
 const matPickers = {};
 
 function matState(id) {
@@ -165,7 +134,6 @@ function materialPickerHtml(id, label) {
         makeCardHtml(id);
 }
 
-// the three facts a new material cannot be created without
 function makeCardHtml(id) {
     return '' +
         '<div class="make-card" id="' + id + '-make" hidden>' +
@@ -199,11 +167,6 @@ function makeCardHtml(id) {
         '</div>';
 }
 
-// Unit, Category and Brand each offer what the material list already uses, so
-// a spelling is reused rather than invented twice. Nothing is forced: a word
-// that is not offered is simply a new one. Price has nothing on the list worth
-// offering (another material's price says nothing about this one), so it stays
-// a plain number box.
 const MAKE_SUGGEST_COLUMN = { unit: 'unit_name', category: 'category_name', brand: 'brand_name' };
 const MAKE_SUGGEST_LIMIT = 8;
 
@@ -225,12 +188,10 @@ function makeSuggestInputHtml(id, field, attributes) {
         '</div>';
 }
 
-// every spelling the material list uses for this field, once each, the most
-// used first
 function makeKnownValues(field) {
     const column = MAKE_SUGGEST_COLUMN[field];
-    const found = [];          // one { value, count } for each spelling, in the order first seen
-    const byKey = {};          // "k:" + lower-case spelling -> the same { value, count }
+    const found = [];
+    const byKey = {};
 
     for (let i = 0; i < poMaterials.length; i++) {
         const value = String(poMaterials[i][column] || '').trim();
@@ -249,14 +210,11 @@ function makeKnownValues(field) {
     });
 }
 
-// An empty box offers the common ones; typed text offers the ones that start
-// with it, then the ones with a word that starts with it (at most 8).
 function makeSuggest(id, field) {
     const list = document.getElementById(id + '-' + field + '-list');
     const box = document.getElementById(id + '-' + field);
     if (!list || !box) return;
 
-    // the list is normally in hand by now; if not, offer again once it arrives
     if (!poMaterialsLoaded) {
         ensurePoMaterials(false).then(function (ok) {
             if (ok && document.activeElement === box) makeSuggest(id, field);
@@ -284,13 +242,11 @@ function makeSuggest(id, field) {
     }
     matches = matches.slice(0, MAKE_SUGGEST_LIMIT);
 
-    // nothing to pick when the box already holds the only thing on offer
     if (matches.length === 0 || (matches.length === 1 && matches[0].value.toLowerCase() === query)) {
         makeSuggestHide(id, field);
         return;
     }
 
-    // one list open at a time: the others (a material's, another box's) close first
     hideAllMatSuggestions(box.closest('.suggest-wrap'));
 
     let itemsHtml = '';
@@ -320,8 +276,6 @@ function makeSuggestHide(id, field) {
     }
 }
 
-// what typing or picking a word changes on the line: the description under the
-// material box and, through the unit, what the line is priced per
 function makeFieldChanged(id) {
     renderMatDesc(id);
     renderPoTotals();
@@ -343,7 +297,6 @@ function makeSuggestKey(id, field, event) {
     const list = document.getElementById(id + '-' + field + '-list');
     const box = document.getElementById(id + '-' + field);
 
-    // Enter never sends the form from these boxes, open list or not
     if (!list || list.hidden) {
         if (event.key === 'Enter') event.preventDefault();
         if (event.key === 'ArrowDown') { event.preventDefault(); makeSuggest(id, field); }
@@ -378,8 +331,6 @@ function makeSuggestKey(id, field, event) {
         return;
     }
 
-    // Enter takes the highlighted one; with none highlighted it keeps what was
-    // typed (and does not send the form)
     if (event.key === 'Enter') {
         event.preventDefault();
         if (at >= 0) items[at].click(); else makeSuggestHide(id, field);
@@ -389,8 +340,6 @@ function makeSuggestKey(id, field, event) {
     if (event.key === 'Escape') makeSuggestHide(id, field);
 }
 
-// Opening the box shows the whole list to read down -- everything the chosen
-// company supplies -- rather than waiting for a name to be guessed at.
 async function matOpen(id) {
     await ensurePoMaterials(false);
     const state = matState(id);
@@ -401,7 +350,6 @@ async function matOpen(id) {
     renderMatSuggestions(id, typed);
 }
 
-// the caret: shut it if it is open, open it if it is not
 function matToggle(id) {
     const list = document.getElementById(id + '-list');
     if (list && !list.hidden) { hideMatSuggestions(id); return; }
@@ -416,7 +364,6 @@ async function matInput(id, value) {
     const typed = String(value || '').trim();
     state.browseAll = false;
 
-    // typing after a choice unmakes the choice
     let chosen;
     if (state.productId) {
         chosen = poFindProduct(poMaterials, state.productId);
@@ -456,7 +403,6 @@ function renderMatSuggestions(id, text) {
     if (browsing) {
         matches = choices;
     } else {
-        // the products whose name, category or brand starts with what was typed (at most 7)
         matches = [];
         for (let i = 0; i < choices.length; i++) {
             if (prefixMatch([choices[i].product_name, choices[i].category_name, choices[i].brand_name], typed)) {
@@ -486,8 +432,6 @@ function renderMatSuggestions(id, text) {
         '</li>';
     }
 
-    // the way out of the list, unless the list is only being read down or the
-    // typed name is already a material
     let make;
     if (browsing || exact) {
         make = '';
@@ -509,8 +453,6 @@ function renderMatSuggestions(id, text) {
     if (box) box.setAttribute('aria-expanded', 'true');
 }
 
-// Says whose list is being read down, so an empty one reads as a fact about
-// the company rather than as a box that will not work.
 function matHeadHtml(id, browsing, count) {
     if (!browsing) return '';
 
@@ -554,17 +496,12 @@ function hideMatSuggestions(id) {
     if (box) box.setAttribute('aria-expanded', 'false');
 }
 
-// Closing every open list has to leave each box saying it is closed: the
-// caret reads that, and a box left claiming to be open with nothing under it
-// is how a working picker looks broken.
 function hideAllMatSuggestions(except) {
     const lists = document.querySelectorAll('.suggest-list[id$="-list"]');
     for (let i = 0; i < lists.length; i++) {
         const list = lists[i];
-        if (except && except.contains(list)) continue;   // the box just clicked keeps its list
-        // /-list$/ matches "-list" at the very end of the id (taken off to get the box's id)
+        if (except && except.contains(list)) continue;
         const id = list.id.replace(/-list$/, '');
-        // a material box is "<id>-box"; the New material card's boxes carry the id itself
         const box = document.getElementById(id + '-box') || document.getElementById(id);
         if (matPickers[id]) matPickers[id].browseAll = false;
         list.hidden = true;
@@ -584,7 +521,6 @@ function matKey(id, event) {
         return;
     }
 
-    // leaving the box by Tab leaves its list behind otherwise
     if (event.key === 'Tab') { hideMatSuggestions(id); return; }
 
     const items = list.querySelectorAll('.suggest-item');
@@ -614,9 +550,6 @@ function matKey(id, event) {
     if (event.key === 'Escape') hideMatSuggestions(id);
 }
 
-// An order line offers only what the chosen company supplies; a new company
-// supplies nothing yet, so every line on it is a new material. The receiving
-// sheet is not narrowed: what arrived is what arrived.
 function matIsOrderLine(id) { return String(id).indexOf('po-mat-') === 0; }
 
 function matChoices(id) {
@@ -674,8 +607,6 @@ function matMakeNew(id) {
     if (unit) unit.focus();
 }
 
-// What the material is, under the box: the facts the material list keeps on
-// it, so a name taken off the list can be checked before it is ordered.
 function renderMatDesc(id) {
     const box = document.getElementById(id + '-desc');
     if (!box) return;
@@ -711,7 +642,6 @@ function renderMatDesc(id) {
         return;
     }
 
-    // a material being added: what was typed into the card above it
     const make = document.getElementById(id + '-make');
     if (!make || make.hidden || state.newName === '') { hide(); return; }
 
@@ -750,7 +680,6 @@ function renderMatVerdict(id) {
         return;
     }
 
-    // the New material card right under the line says this already
     if (newMode && state.newName !== '') {
         box.className = 'pick-verdict';
         box.textContent = '';
@@ -796,9 +725,6 @@ function matValue(id) {
     return { ok: false };
 }
 
-// ==========================================
-// THE SUPPLIER BOX
-// ==========================================
 async function loadPoSuppliers(force) {
     if (poSuppliersLoaded && !force) return true;
 
@@ -817,10 +743,8 @@ async function onSupplierInput(value) {
 
     const typed = String(value || '').trim();
     if (poSupplier && poSupplier.name !== typed) poSupplier = null;
-    poSupplierCommitted = false;      // still being typed
+    poSupplierCommitted = false;
 
-    // a name typed out in full is the same answer as one taken from the list;
-    // the server matches it anyway
     if (!poSupplier && typed !== '') {
         poSupplier = null;
         for (let i = 0; i < poSuppliers.length; i++) {
@@ -835,7 +759,6 @@ async function onSupplierInput(value) {
     renderSupplierState();
 }
 
-// leaving the box with a name in it settles the company, known or new
 function onSupplierLeave() {
     const box = document.getElementById('po-supplier');
     if (box && box.value.trim() !== '') poSupplierCommitted = true;
@@ -939,16 +862,10 @@ function pickSupplier(supplierId) {
     renderSupplierState();
 }
 
-// the company is settled once one on file is chosen, or a new name is typed
-// and the box left
-// only a company already on file: a new supplier is the manager's to add
 function poSupplierSettled() {
     return Boolean(poSupplier);
 }
 
-// The lines follow the company. Shut until one is settled; and when the
-// company changes under lines that already name its materials, those lines
-// go, because they belong to the other company.
 function renderPoLinesGate() {
     const lines = document.getElementById('po-lines');
     const lock = document.getElementById('po-lines-lock');
@@ -959,7 +876,6 @@ function renderPoLinesGate() {
     const supplierId = poSupplier ? poSupplier.id : null;
 
     if (open && supplierId !== poLinesSupplierId) {
-        // has any line already got a material picked?
         let picked = false;
         const lineRows = document.querySelectorAll('.po-line');
         for (let i = 0; i < lineRows.length; i++) {
@@ -995,9 +911,6 @@ function resetPurchaseLines() {
     addPurchaseLine();
 }
 
-// CRITICAL STOCKS beside the form: every material out of stock or low, the
-// emptiest first. Narrowed by the box above it; a material already on the
-// order is marked. One click puts it on the order (addCriticalToOrder).
 function renderCriticalStocks() {
     const list = document.getElementById('po-roster-list');
     if (!list) return;
@@ -1018,7 +931,6 @@ function renderCriticalStocks() {
         if (!prefixMatch([p.product_name, p.supplier_name, p.category_name, p.brand_name], query)) continue;
         critical.push(p);
     }
-    // out of stock first; inside each, the one furthest under its reorder point
     const shortBy = function (p) { return (Number(p.reorder_point) || 0) - (Number(p.quantity_in_stock) || 0); };
     critical.sort(function (a, b) {
         const aOut = a.stock_status === 'Out of Stock' ? 0 : 1;
@@ -1056,7 +968,6 @@ function renderCriticalStocks() {
     list.innerHTML = html;
 }
 
-// product id -> true for every material picked on an order line
 function poOrderedProductIds() {
     const ids = {};
     const rows = document.querySelectorAll('.po-line');
@@ -1067,8 +978,6 @@ function poOrderedProductIds() {
     return ids;
 }
 
-// how many to order: the suggested order, or enough to get back over the
-// reorder point; never less than one
 function criticalOrderQuantity(p) {
     let quantity = Math.ceil(Number(p.suggested_order) || 0);
     if (!(quantity > 0)) {
@@ -1077,9 +986,6 @@ function criticalOrderQuantity(p) {
     return Math.max(1, quantity);
 }
 
-// A critical material on the order: its supplier is picked (the lines only
-// offer one company's materials), then it goes on an empty line, or a new
-// one, at its suggested quantity. Already on the order: that line is shown.
 function addCriticalToOrder(productId) {
     const p = poFindProduct(poMaterials, productId);
     if (!p) return;
@@ -1090,7 +996,6 @@ function addCriticalToOrder(productId) {
         return;
     }
 
-    // a material from another company: the order changes company (picked lines go, with a warning)
     if (!poSupplier || poSupplier.id !== p.supplier_id) {
         let known = false;
         for (let i = 0; i < poSuppliers.length; i++) {
@@ -1103,7 +1008,6 @@ function addCriticalToOrder(productId) {
         pickSupplier(p.supplier_id);
     }
 
-    // already on a line: show that line
     const rows = document.querySelectorAll('.po-line');
     for (let i = 0; i < rows.length; i++) {
         if (matState(rows[i].dataset.picker).productId === productId) {
@@ -1114,7 +1018,6 @@ function addCriticalToOrder(productId) {
         }
     }
 
-    // an empty line (nothing picked or typed) is used before a new one is added
     let row = null;
     for (let i = 0; i < rows.length && !row; i++) {
         const state = matState(rows[i].dataset.picker);
@@ -1123,13 +1026,12 @@ function addCriticalToOrder(productId) {
     }
     if (!row) {
         addPurchaseLine();
-        row = document.querySelector('.po-line');      // a new line goes on top
+        row = document.querySelector('.po-line');
     }
     if (!row) return;
 
     matPick(row.dataset.picker, productId);
 
-    // the line may start on the pack the material is delivered in
     const index = row.id.replace('po-line-', '');
     const qty = document.getElementById('po-qty-' + index);
     const pack = poLineIn(row);
@@ -1140,7 +1042,6 @@ function addCriticalToOrder(productId) {
     if (qty) qty.focus({ preventScroll: true });
 }
 
-// nothing typed, a known company, or a new one
 function renderSupplierState() {
     const box = document.getElementById('po-supplier');
     const known = document.getElementById('po-supplier-known');
@@ -1179,14 +1080,6 @@ function renderSupplierState() {
     renderPoLinesGate();
 }
 
-// ==========================================
-// THE ORDER LINES
-// ==========================================
-// A new line goes on top, right under the Add button, so the clerk never scrolls
-// past the lines already filled in. "Line N" counts in the order they were
-// added (the newest, on top, has the highest number) and the order is sent
-// oldest first: poLineRows() is the one place that order is read.
-// fromButton: pressed by the clerk, which the shut lines refuse
 function addPurchaseLine(fromButton) {
     const box = document.getElementById('po-lines');
     if (!box) return;
@@ -1202,8 +1095,6 @@ function addPurchaseLine(fromButton) {
     const index = poLineCount++;
     const pickerId = 'po-mat-' + index;
 
-    // one card per line: "Line 1" and Remove across the top, then the material,
-    // how many, the price on file and what the line comes to, in one row
     const row = document.createElement('div');
     row.className = 'po-line';
     row.id = 'po-line-' + index;
@@ -1233,14 +1124,12 @@ function addPurchaseLine(fromButton) {
     box.insertBefore(row, box.firstChild);
     renderPoTotals();
 
-    // pressed by the clerk: straight into the new line's material box
     if (fromButton) {
         const field = matBox(pickerId);
         if (field) field.focus();
     }
 }
 
-// the lines as they were added, oldest first (the page shows them newest first)
 function poLineRows() {
     const found = document.querySelectorAll('.po-line');
     const rows = [];
@@ -1250,10 +1139,6 @@ function poLineRows() {
     return rows;
 }
 
-// A material delivered in a pack (a box of 20 kilogram) is ordered in that
-// pack: the line offers the pack and the unit, and starts on the pack. What
-// is sent to the server is always in the unit; the pack rides along so the
-// printed order reads "20 box".
 function poLinePack(row) {
     const state = matState(row.dataset.picker);
     const product = state.productId ? poFindProduct(poMaterials, state.productId) : null;
@@ -1261,10 +1146,6 @@ function poLinePack(row) {
     return { name: product.pack_name, size: Number(product.pack_size), unit: product.unit_name || 'unit' };
 }
 
-// The price the line is ordered at. A material on the list carries the price
-// the shop has on file for it, and a material being added carries the one
-// typed into its card; neither is typed onto the order itself. A line ordered
-// in packs is priced by the pack, which is the unit price times what it holds.
 function poLinePricing(row) {
     const id = row.dataset.picker;
     const state = matState(id);
@@ -1350,11 +1231,7 @@ function removePurchaseLine(index) {
     renderPoTotals();
 }
 
-// Priced as it is built, off the prices on file rather than off anything
-// typed here; harmless on a page without the form. This also keeps the line
-// count and, on a line ordered in packs, says what the packs come to.
 function renderPoTotals() {
-    // the Critical stocks list marks what is on the order
     renderCriticalStocks();
 
     let goods = 0;
@@ -1370,7 +1247,6 @@ function renderPoTotals() {
         const amount = qty > 0 ? qty * price.perPrice : 0;
         if (price.chosen) { goods += amount; priced += 1; }
 
-        // numbered as they were added, as they stand: removing line 2 of 3 leaves lines 1 and 2
         const title = document.getElementById('po-line-title-' + index);
         if (title) title.textContent = 'Line ' + (position + 1);
 
@@ -1380,7 +1256,6 @@ function renderPoTotals() {
         const note = document.getElementById('po-line-note-' + index);
         if (note) note.textContent = pack && qty > 0 ? '= ' + qtyText(qty * pack.size, pack.unit) : '';
 
-        // "Unit price" normally; a line ordered in packs is priced by the pack
         const priceLabel = document.getElementById('po-price-label-' + index);
         if (priceLabel) priceLabel.textContent = pack ? 'Price per ' + pack.name : 'Unit price';
 
@@ -1391,7 +1266,6 @@ function renderPoTotals() {
         const totalField = document.getElementById('po-line-total-' + index);
         if (totalField) totalField.value = price.chosen && !unpriced ? peso(amount) : '';
 
-        // only a line that cannot be priced says anything under the price
         const amountBox = document.getElementById('po-line-amount-' + index);
         if (amountBox) {
             amountBox.className = 'pick-verdict po-line-amount' + (unpriced ? ' is-stop' : '');
@@ -1405,7 +1279,6 @@ function renderPoTotals() {
         count.textContent = lines + (lines === 1 ? ' line' : ' lines');
     }
 
-    // nothing named yet is nothing to total
     const total = document.getElementById('po-total');
     if (total) {
         if (priced === 0) {
@@ -1431,8 +1304,6 @@ async function handleCreatePurchaseOrder(event) {
         return;
     }
 
-    // a new company's number must be a Philippine mobile; letters and symbols
-    // never reach the box (onPhoneInput), and a short or foreign number is refused here
     const numberBox = document.getElementById('po-supplier-number');
     if (!poSupplier && numberBox) {
         const problem = phoneComplaint(numberBox);
@@ -1450,7 +1321,6 @@ async function handleCreatePurchaseOrder(event) {
         const row = rows[r];
         const picked = matValue(row.dataset.picker);
 
-        // a material picked under another company cannot be on this order
         if (picked.ok && !picked.isNew &&
             !poFindProduct(matChoices(row.dataset.picker), picked.productId)) {
             notifyWarning('A line names a material ' + company + ' does not supply. ' +
@@ -1482,9 +1352,6 @@ async function handleCreatePurchaseOrder(event) {
             return;
         }
 
-        // ordered in packs: the unit figure goes to the server, the pack is
-        // remembered. The cost is the price on file, per unit, so the order is
-        // priced before the company ever sees it.
         const pack = poLineIn(row);
         const pricing = poLinePricing(row);
 
@@ -1525,7 +1392,6 @@ async function handleCreatePurchaseOrder(event) {
                 supplierId: poSupplier ? poSupplier.id : null,
                 supplierName: company,
                 contactPerson: detail('po-supplier-contact'),
-                // the box is hidden for a company on file, so nothing left in it is sent
                 contactNumber: (!poSupplier && numberBox) ? phoneToStore(numberBox) : '',
                 supplierEmail: detail('po-supplier-email'),
                 supplierAddress: detail('po-supplier-address'),
@@ -1543,7 +1409,6 @@ async function handleCreatePurchaseOrder(event) {
         await refreshPurchaseOrders();
         poAfterChange();
 
-        // straight to the document: printing it is the next thing that happens
         if (result.poId) openPurchaseOrderDocument(result.poId);
     } catch (error) {
         notifyOffline();
@@ -1576,15 +1441,6 @@ function resetPurchaseOrderForm() {
     renderPoTotals();
 }
 
-// The history. A row opens the order's card, where the lines are reviewed and
-// the order is approved, declined, emailed or printed. An accepted order's
-// delivery is counted in on Stock Adjustment.
-// The words below are the ones the Status filter offers, and every badge and
-// heading for an order uses the same. They are stages, not the database's
-// status: the database says Pending from the manager's approval until the
-// delivery is referred, and whether it was sent and the supplier's answer
-// split that into Approved, Pending Supplier Confirmation, Accepted and
-// Declined - Supplier.
 const PO_STATES = [
     { status: 'For Approval',                  label: 'Pending Manager Approval' },
     { status: 'Approved',                      label: 'Approved' },
@@ -1595,13 +1451,6 @@ const PO_STATES = [
     { status: 'Received',                      label: 'Received' }
 ];
 
-// the stage an order is in now
-//   For Approval                   sent to the manager, not decided yet
-//   Approved                       approved, the clerk has not sent it to the supplier yet
-//   Declined - Manager             the manager declined it, with remarks
-//   Pending Supplier Confirmation  sent to the supplier, not accepted or declined yet
-//   Accepted / Declined - Supplier the supplier's answer
-//   Received                       referred and counted in by the clerk
 function poStage(po) {
     if (po.status === 'Cancelled') return 'Declined - Manager';
     if (po.status !== 'Pending') return po.status;
@@ -1611,7 +1460,6 @@ function poStage(po) {
     return 'Approved';
 }
 
-// an order is referred only once the supplier has accepted it
 function poCanRefer(po) {
     return poStage(po) === 'Accepted';
 }
@@ -1627,7 +1475,6 @@ function poStatusWord(stage) {
     return state ? state.label : statusWord(stage);
 }
 
-// each stage's colour: waiting is amber, approved or accepted blue, declined red
 const PO_STAGE_TONES = {
     'For Approval': 'badge-warning',
     'Approved': 'badge-info',
@@ -1644,7 +1491,6 @@ function poStatusBadge(po) {
         escapeHtml(poStatusWord(stage)) + '</span>';
 }
 
-// the orders this page has to act on sort first; newest first after that
 function poNeedsMe(po) {
     const stage = poStage(po);
     return (poSetup.canDecide && stage === 'For Approval') ||
@@ -1659,15 +1505,12 @@ function sortPurchaseOrders(rows) {
     });
 }
 
-// the figure an order is worth: the invoice once received, the priced lines
-// before (the card says so); a cancelled order's is greyed
 function poValueCell(po) {
     if (po.status === 'Received') return peso(po.total_cost);
     if (po.status === 'Cancelled') return '<span class="muted">' + peso(po.goods_cost) + '</span>';
     return peso(po.goods_cost);
 }
 
-// an approved order not sent yet is still to be printed (or emailed) and sent
 function poToSend(po) {
     return poStage(po) === 'Approved';
 }
@@ -1724,7 +1567,6 @@ function buildPurchaseOrderPanel() {
 
 function purchaseOrderPanel() { return getDataPanel(poSetup.key); }
 
-// an order opened from Total Purchases may not be on the history's loaded rows
 function findPurchaseOrder(poId) {
     const panel = purchaseOrderPanel();
     const totals = getDataPanel(PO_TOTALS_KEY);
@@ -1741,28 +1583,19 @@ async function refreshPurchaseOrders() {
 
 async function loadPurchaseOrders() { await refreshPurchaseOrders(); }
 
-// ---------- total purchases ----------
-// What the shop has spent on orders: by month (this month when it opens), by
-// year, or all time, narrowed further by supplier, or by two dates instead.
-// A cancelled order was never bought, so it is never listed or counted; the
-// order's status is not shown here. The figures add up what the table lists.
 const PO_TOTALS_KEY = 'po-totals';
 
-// this month as the order dates write it: "2026-09"
 function poThisMonth() {
     const now = new Date();
     return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
 }
 
-// "2026-09" -> "September 2026"
 function poMonthLabel(month) {
     const parts = String(month).split('-');
     const date = new Date(Number(parts[0]), Number(parts[1]) - 1, 1);
     return date.toLocaleString('en-PH', { month: 'long', year: 'numeric' });
 }
 
-// an order's worth, as the history shows it: the invoice once received,
-// the priced lines before
 function poOrderValue(po) {
     return Number(po.status === 'Received' ? po.total_cost : po.goods_cost) || 0;
 }
@@ -1771,13 +1604,10 @@ function purchaseTotalsFilter(name, value) {
     dataPanelFilter(PO_TOTALS_KEY, name, value);
 }
 
-// the supplier list is whoever appears on the loaded orders
 function renderPurchaseTotalsSuppliers(rows) {
     const select = document.getElementById('po-totals-supplier');
     if (!select) return;
 
-    // each supplier once, in the order first seen: { id (as text), name }
-    // (a supplier seen again keeps the newest name)
     const suppliers = [];
     for (let i = 0; i < rows.length; i++) {
         const supplierId = String(rows[i].supplier_id);
@@ -1810,15 +1640,12 @@ function renderPurchaseTotalsSuppliers(rows) {
     select.value = currentStillListed ? current : 'all';
 }
 
-// this year as the order dates write it: "2026"
 function poThisYear() {
     return String(new Date().getFullYear());
 }
 
-// the first year the Month and Year boxes offer
 const PO_TOTALS_FIRST_YEAR = 2025;
 
-// the earliest year to offer: 2025, or earlier when an order is older than that
 function poFirstYear(rows) {
     let first = PO_TOTALS_FIRST_YEAR;
     for (let i = 0; i < rows.length; i++) {
@@ -1828,8 +1655,6 @@ function poFirstYear(rows) {
     return first;
 }
 
-// every month from January of the first year to December of this year, in
-// order: ['2025-01', '2025-02', ...]
 function poTotalsMonths(rows) {
     const months = [];
     const last = Number(poThisYear());
@@ -1841,7 +1666,6 @@ function poTotalsMonths(rows) {
     return months;
 }
 
-// "october 2026" (any capitals, extra spaces) -> "2026-10"; null when it is no month on the list
 function poMonthFromLabel(text) {
     const wanted = String(text || '').trim().replace(/\s+/g, ' ').toLowerCase();
     const months = poTotalsMonths(purchaseOrderRowsLoaded());
@@ -1851,17 +1675,13 @@ function poMonthFromLabel(text) {
     return null;
 }
 
-// the orders the Total Purchases table has loaded, or none yet
 function purchaseOrderRowsLoaded() {
     const panel = getDataPanel(PO_TOTALS_KEY);
     return panel && panel.rows ? panel.rows : [];
 }
 
-// The Month box is a search box: every month from January 2025 to December of
-// this year is on its list, January first. It shows the month in use; clicking
-// it opens the list, and typing narrows it (poMonthSuggest).
-let poMonthChoices = [];      // ['2025-01', ...] as the list offers them
-let poMonthActive = -1;       // the suggestion the arrow keys are on, or -1
+let poMonthChoices = [];
+let poMonthActive = -1;
 
 function renderPurchaseTotalsMonths(rows) {
     const box = document.getElementById('po-totals-month');
@@ -1876,17 +1696,11 @@ function renderPurchaseTotalsMonths(rows) {
     poMonthSyncClear();
 }
 
-// the month in use, written out: what the box goes back to
 function poMonthInUse() {
     const panel = getDataPanel(PO_TOTALS_KEY);
     return panel ? panel.filters.month : poThisMonth();
 }
 
-// The months that fit what is typed, as the Material box does it: every word
-// typed must be the start of a word of the month. "a" finds April and August
-// (not January or May, where the a is inside the word); "aug 2026", "2025" and
-// "oct 25" work too. Nothing typed, or the month already in the box, offers
-// every month.
 function poMonthMatches(text) {
     const typed = String(text || '').trim().toLowerCase();
     const months = poMonthChoices.length ? poMonthChoices : poTotalsMonths([]);
@@ -1895,12 +1709,11 @@ function poMonthMatches(text) {
     const words = typed.split(/\s+/);
     const found = [];
     for (let i = 0; i < months.length; i++) {
-        const parts = poMonthLabel(months[i]).toLowerCase().split(' ');   // ['august', '2026']
+        const parts = poMonthLabel(months[i]).toLowerCase().split(' ');
         let fits = true;
         for (let w = 0; w < words.length && fits; w++) {
             const word = words[w];
             const startsName = parts[0].startsWith(word);
-            // a year matches typed whole ("2026") or short ("26")
             const startsYear = /^\d+$/.test(word) && (parts[1].startsWith(word) || parts[1].slice(2).startsWith(word));
             if (!startsName && !startsYear) fits = false;
         }
@@ -1909,14 +1722,12 @@ function poMonthMatches(text) {
     return found;
 }
 
-// the × shows while the box holds text
 function poMonthSyncClear() {
     const box = document.getElementById('po-totals-month');
     const clear = document.getElementById('po-totals-month-clear');
     if (box && clear) clear.hidden = box.value === '';
 }
 
-// the × empties the box and opens every month
 function poMonthClear() {
     const box = document.getElementById('po-totals-month');
     if (!box) return;
@@ -1930,13 +1741,11 @@ function poMonthFocus(box) {
     poMonthSuggest(true);
 }
 
-// a click on the box while it already has focus (after a pick) opens the list again
 function poMonthClick(box) {
     const list = document.getElementById('po-totals-month-list');
     if (list && list.hidden) poMonthFocus(box);
 }
 
-// draws the list under the box; openAll scrolls it to the month in use
 function poMonthSuggest(openAll) {
     const box = document.getElementById('po-totals-month');
     const list = document.getElementById('po-totals-month-list');
@@ -1952,7 +1761,6 @@ function poMonthSuggest(openAll) {
         for (let i = 0; i < matches.length; i++) {
             html += '<li class="suggest-item' + (matches[i] === current ? ' is-current' : '') + '" role="option" ' +
                 'id="po-month-option-' + i + '" data-month="' + matches[i] + '" aria-selected="false" ' +
-                // mousedown, so the pick lands before the box loses focus and closes the list
                 'onmousedown="event.preventDefault(); poMonthPick(\'' + matches[i] + '\')">' +
                 '<span class="suggest-name">' + escapeHtml(poMonthLabel(matches[i])) + '</span></li>';
         }
@@ -1982,7 +1790,6 @@ function poMonthHide() {
     poMonthActive = -1;
 }
 
-// a month picked from the list (or typed and Enter): the table follows it
 function poMonthPick(month) {
     const box = document.getElementById('po-totals-month');
     if (box) box.value = poMonthLabel(month);
@@ -1990,7 +1797,6 @@ function poMonthPick(month) {
     if (month !== poMonthInUse()) purchaseTotalsMonth(month);
 }
 
-// the arrow keys move along the list, Enter picks, Escape puts the box back
 function poMonthKey(event) {
     const list = document.getElementById('po-totals-month-list');
     const box = event.target;
@@ -2025,7 +1831,6 @@ function poMonthKey(event) {
     }
 }
 
-// leaving the box: a whole month typed is used, anything else goes back
 function poMonthBlur() {
     const box = document.getElementById('po-totals-month');
     if (!box) return;
@@ -2035,7 +1840,6 @@ function poMonthBlur() {
     else box.value = poMonthLabel(poMonthInUse());
 }
 
-// every year from 2025 to this one, the oldest first
 function renderPurchaseTotalsYears(rows) {
     const select = document.getElementById('po-totals-year');
     if (!select) return;
@@ -2055,8 +1859,6 @@ function renderPurchaseTotalsYears(rows) {
     select.value = years.indexOf(current) !== -1 ? current : poThisYear();
 }
 
-// The Period box decides which second box shows: Month for Every Month,
-// Year for Every Year, and neither for All Time.
 function syncPurchaseTotalsPeriod() {
     const panel = getDataPanel(PO_TOTALS_KEY);
     const period = panel ? panel.filters.period : 'month';
@@ -2069,7 +1871,6 @@ function syncPurchaseTotalsPeriod() {
     if (monthField) monthField.hidden = period !== 'month';
     if (yearField) yearField.hidden = period !== 'year';
 
-    // Custom date shows From and To beside the box; any other period hides them
     const dateFields = ['po-totals-from-field', 'po-totals-to-field'];
     for (let i = 0; i < dateFields.length; i++) {
         const field = document.getElementById(dateFields[i]);
@@ -2077,7 +1878,6 @@ function syncPurchaseTotalsPeriod() {
     }
 }
 
-// a period, month or year replaces any dates typed, and the dates replace them
 function clearPurchaseTotalsDates(panel) {
     const dateIds = ['po-totals-from', 'po-totals-to'];
     for (let i = 0; i < dateIds.length; i++) {
@@ -2092,7 +1892,6 @@ function purchaseTotalsPeriod(value) {
     const panel = getDataPanel(PO_TOTALS_KEY);
     if (!panel) return;
 
-    // Custom date shows the two dates and waits for them
     if (value === 'custom') {
         panel.filters.period = 'custom';
         syncPurchaseTotalsPeriod();
@@ -2102,7 +1901,6 @@ function purchaseTotalsPeriod(value) {
     }
     clearPurchaseTotalsDates(panel);
 
-    // the month or year starts on the one the box already shows
     const month = document.getElementById('po-totals-month');
     const year = document.getElementById('po-totals-year');
     panel.filters.month = (month && poMonthFromLabel(month.value)) || poThisMonth();
@@ -2126,8 +1924,6 @@ function purchaseTotalsYear(value) {
     dataPanelFilter(PO_TOTALS_KEY, 'year', value);
 }
 
-// Show All Purchases: all time and every supplier, no dates, cancelled
-// orders still left out (they were never bought); loads the list if needed
 function purchaseTotalsShowAll() {
     const boxes = { 'po-totals-from': '', 'po-totals-to': '', 'po-totals-supplier': 'all' };
     for (const id in boxes) {
@@ -2141,15 +1937,13 @@ function purchaseTotalsShowAll() {
     syncPurchaseTotalsPeriod();
     panel.page = 1;
     if (panel.state === 'ready') panel.apply();
-    else if (panel.state !== 'loading') panel.open();   // a load already running applies these when it lands
+    else if (panel.state !== 'loading') panel.open();
 }
 
 function renderPurchaseTotalsFigures() {
     const grid = document.getElementById('po-totals-kpis');
     if (!grid) return;
 
-    // the cards stay while nothing is loaded, showing a dash, so the table
-    // under them does not jump when the figures arrive
     const panel = getDataPanel(PO_TOTALS_KEY);
     const ready = panel && panel.state === 'ready';
     const orders = ready ? panel.visible : [];
@@ -2188,11 +1982,10 @@ function buildPurchaseTotalsPanel() {
     createDataPanel({
         key: PO_TOTALS_KEY,
         tableId: 'po-totals-table',
-        columns: 4,             // PO, supplier, date, value; the rest is on the order's card
-        pageSize: 8,            // the manager's Reports tab: eight a page, like the other reports
+        columns: 4,
+        pageSize: 8,
         pagerId: 'po-totals-pager',
         idField: 'po_id',
-        // period: 'month' (the month box), 'year' (the year box), 'all', or 'custom' (From and To)
         filters: { period: 'month', month: poThisMonth(), year: poThisYear(), supplier: 'all', from: '', to: '' },
         inputs: ['po-totals-from', 'po-totals-to', 'po-totals-period', 'po-totals-month', 'po-totals-year', 'po-totals-supplier'],
 
@@ -2201,7 +1994,6 @@ function buildPurchaseTotalsPanel() {
             text: 'Press Load Data to add up this month\'s purchase orders.',
             button: 'Load Data'
         },
-        // shown when the default month (this one) holds nothing
         empty: {
             title: 'Nothing ordered this month',
             text: 'No purchase order was raised this month. Pick another month above, or Every Year or All Time.'
@@ -2226,7 +2018,6 @@ function buildPurchaseTotalsPanel() {
                 return String(b.order_date).localeCompare(String(a.order_date)) || (Number(b.po_id) - Number(a.po_id));
             });
         },
-        // the month, year and supplier lists count only what the report can list
         onLoaded: function (rows) {
             const bought = [];
             for (let i = 0; i < rows.length; i++) {
@@ -2248,19 +2039,16 @@ function buildPurchaseTotalsPanel() {
         }
     });
 
-    // before anything loads, the Month and Year boxes already name this month and year
     renderPurchaseTotalsMonths([]);
     renderPurchaseTotalsYears([]);
     syncPurchaseTotalsPeriod();
 
-    // the figures follow the table: every load, filter and Clear redraws them
     document.addEventListener('datapanel:change', function (event) {
         if (event.detail && event.detail.key === PO_TOTALS_KEY) renderPurchaseTotalsFigures();
     });
     renderPurchaseTotalsFigures();
 }
 
-// both dates are checked together, so a range that runs backwards is caught
 function purchaseTotalsDates() {
     const from = document.getElementById('po-totals-from');
     const to = document.getElementById('po-totals-to');
@@ -2277,7 +2065,6 @@ function purchaseTotalsDates() {
     panel.filters.from = from.value;
     panel.filters.to = to.value;
 
-    // the dates are the period: Custom date
     panel.filters.period = 'custom';
     syncPurchaseTotalsPeriod();
     panel.page = 1;
@@ -2285,7 +2072,6 @@ function purchaseTotalsDates() {
     else if (panel.state === 'closed' || panel.state === 'error') panel.open();
 }
 
-// "20 box (400 kilogram)" for a line ordered in packs; "400 kilogram" otherwise
 function poQuantityText(item) {
     const unit = item.unit_name || '';
     if (item.pack_name && Number(item.pack_size) > 0 && Number(item.pack_count) > 0) {
@@ -2294,9 +2080,6 @@ function poQuantityText(item) {
     return item.quantity + ' ' + unit;
 }
 
-// Print PDF on an order's card: the order is laid out as its document and
-// the print dialogue opens at once (save as PDF, or print), without leaving
-// the card or the list behind it.
 async function printPurchaseOrder(poId) {
     try {
         poDocument = await apiGetPurchaseOrderDocument(poId);
@@ -2305,13 +2088,10 @@ async function printPurchaseOrder(poId) {
         return;
     }
     renderPurchaseOrderDocument();
-    // the QR code is a picture: printing before it has loaded leaves an empty box
     await poDocumentImagesReady();
     printPurchaseOrderNow();
 }
 
-// Resolves once every picture on the order's document has loaded (or failed),
-// or after two seconds at most, so a slow picture never holds the print back for good.
 function poDocumentImagesReady() {
     const box = document.getElementById('po-doc');
     const images = box ? Array.prototype.slice.call(box.querySelectorAll('img')) : [];
@@ -2327,16 +2107,9 @@ function poDocumentImagesReady() {
     return Promise.race([Promise.all(waits), timeout]);
 }
 
-// only the order's document reaches the paper (the styles are in the Purchase
-// orders section at the end of css/shared/responsive.css, with css/pages/manager.css
-// and css/pages/inventory-dashboard.css)
-// A4 with no page margin: the browser then prints none of its own header and
-// footer (the date, the page's title, the address and the page number). The
-// document keeps its own margin inside (css/shared/responsive.css).
 const PO_PRINT_PAGE_STYLE_ID = 'po-print-page-style';
 
 function printPurchaseOrderNow() {
-    // a credit page still on the paper is put back first (only the pages that have one)
     if (typeof finishCreditPrint === 'function') finishCreditPrint();
     document.body.classList.add('printing-po');
 
@@ -2345,7 +2118,6 @@ function printPurchaseOrderNow() {
     style.textContent = '@media print { @page { size: A4; margin: 0; } }';
     document.head.appendChild(style);
 
-    // "Save as PDF" names the file after the page's title: the order's number
     const title = document.title;
     if (poDocument && poDocument.order) document.title = 'Purchase Order #' + poDocument.order.po_id;
 
@@ -2363,7 +2135,6 @@ function printPurchaseOrderNow() {
     window.setTimeout(done, 1500);
 }
 
-// The order as a printable document for a supplier with no login.
 async function openPurchaseOrderDocument(poId) {
     poShowPanel('panel-po-doc', 'Purchase Order #' + poId);
 
@@ -2389,7 +2160,6 @@ function renderPurchaseOrderDocument() {
     const shop = poDocument.shop || {};
     const items = poDocument.items || [];
 
-    // add up the quantities and the costs of all the lines
     let units = 0;
     let goods = 0;
     for (let i = 0; i < items.length; i++) {
@@ -2483,7 +2253,6 @@ function renderPurchaseOrderDocument() {
                     '</tr></tfoot>' +
                 '</table>' +
 
-                // the supplier answers the approved order from this QR code or link
                 (poDocument.supplier_link
                     ? '<div class="po-doc-answer">' +
                         '<img class="po-doc-qr" src="' + escapeHtml(poDocument.supplier_qr) + '" ' +
@@ -2510,8 +2279,6 @@ function renderPurchaseOrderDocument() {
         '</div>';
 }
 
-// Receiving: what was ordered on the left, what came off the lorry typed on
-// the right, and a way to add something that was never ordered.
 async function openReceiveOrder(poId) {
     if (!poSetup.canReceive) return;
     const order = findPurchaseOrder(poId);
@@ -2582,8 +2349,6 @@ function renderReceiveSheet() {
     if (extras) extras.innerHTML = '';
 }
 
-// What each line counted in and at what cost. A cost is per pack on a line
-// ordered in packs, per unit otherwise.
 function receiveLineAmounts() {
     if (!poReceiving) return [];
     const amounts = [];
@@ -2598,7 +2363,6 @@ function receiveLineAmounts() {
     return amounts;
 }
 
-// a line ordered in packs is counted in at the door in packs
 function recvPackOf(item) {
     if (item.pack_name && Number(item.pack_size) > 0 && Number(item.pack_count) > 0) {
         return { name: item.pack_name, size: Number(item.pack_size) };
@@ -2611,8 +2375,6 @@ function recvOrderedCount(item) {
     return pack ? Number(item.pack_count) : Number(item.quantity);
 }
 
-// what the line was ordered at, per pack where it was ordered in packs; the
-// invoice still wins, so this is only what the sheet opens on
 function recvOrderedCost(item) {
     const pack = recvPackOf(item);
     const unit = Number(item.unit_cost) || 0;
@@ -2655,7 +2417,6 @@ function renderReceiveVerdict(index, ordered) {
     box.textContent = (arrived - ordered) + ' more than ordered.';
 }
 
-// something on the lorry that is not on the order
 function addReceiveExtra() {
     const box = document.getElementById('recv-extras');
     if (!box) return;
@@ -2699,7 +2460,6 @@ async function submitReceiveOrder() {
         const pack = recvPackOf(item);
         received.push({
             productId: item.product_id,
-            // packs at the door become the unit on the shelf, and a cost per pack a cost per unit
             quantity: pack ? Math.round(counted * pack.size) : counted,
             unitCost: pack ? Math.round(amounts[i].cost / pack.size * 100) / 100 : amounts[i].cost
         });
@@ -2740,7 +2500,6 @@ async function submitReceiveOrder() {
         });
     }
 
-    // how many ordered lines came in under what was ordered
     let short = 0;
     for (let i = 0; i < received.length; i++) {
         if (i < poReceiving.items.length && received[i].quantity < poReceiving.items[i].quantity) short++;
@@ -2755,7 +2514,6 @@ async function submitReceiveOrder() {
     if (!yes) return;
 
     try {
-        // the discount the supplier gave from the order's link stays on the invoice
         const discount = poReceiving.order ? Number(poReceiving.order.discount) || 0 : 0;
         const response = await apiReceivePurchaseOrder(poReceiving.poId, received, discount);
         const result = await response.json();
@@ -2777,22 +2535,16 @@ async function submitReceiveOrder() {
     }
 }
 
-// ==========================================
-// ONE ORDER, IN A POPUP
-// ==========================================
 async function openPurchaseOrderDetail(poId, readOnly) {
     const po = findPurchaseOrder(poId);
     if (!po) return;
 
-    // opened from a report (Total Purchases), the order is only read: no
-    // approving, declining, sending or referring from there
     const canDecide = poSetup.canDecide && !readOnly;
     const canReceive = poSetup.canReceive && !readOnly;
 
     let items = [];
     try { items = await apiGetPurchaseOrderItems(poId); } catch (error) { items = []; }
 
-    // a received order's delivery Report: what came in under or over the order
     let report = null;
     if (po.status === 'Received') {
         try { report = await apiGetPurchaseOrderReport(poId); } catch (error) { report = null; }
@@ -2800,8 +2552,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
 
     const waiting = po.status === 'For Approval';
 
-    // the order as it was ordered: a received order's items are its lines as
-    // ordered (the server keeps that copy), so these match what was asked for
     let orderedLines = Number(po.line_count) || 0;
     let orderedUnits = Number(po.total_units) || 0;
     if (items.length > 0) {
@@ -2810,15 +2560,12 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         for (let i = 0; i < items.length; i++) orderedUnits += Number(items[i].quantity) || 0;
     }
 
-    // the figures: the invoice once received, the priced lines before
     let money;
     if (po.status === 'Received') {
-        // the invoice is for what arrived, which may differ from what was ordered
         money = detailField('Goods Received', peso(po.goods_cost)) +
                 detailField('Invoice Discount', peso(po.discount)) +
                 detailField('Total Cost', '<strong>' + peso(po.total_cost) + '</strong>');
     } else if (Number(po.discount) > 0) {
-        // the supplier gave a discount when accepting it from the link
         money = detailField('Goods', peso(po.goods_cost)) +
                 detailField('Supplier Discount', peso(po.discount)) +
                 detailField('Order Value', '<strong>' + peso(po.total_cost) + '</strong>');
@@ -2827,8 +2574,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 ' <span class="muted">before any invoice discount</span>');
     }
 
-    // no note on what happens next: the Status and the dates say where the
-    // order stands. A decline keeps its reason, as a field.
     const summary =
         '<div class="detail-grid">' +
         detailField('Supplier', escapeHtml(po.supplier_name)) +
@@ -2863,14 +2608,11 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         money +
         '</div>';
 
-    // the lines themselves, so an order is read before it is confirmed
     let priced = false;
     for (let i = 0; i < items.length; i++) {
         if (Number(items[i].unit_cost) > 0) priced = true;
     }
-    // a price the supplier corrected from the link shows the shop's own struck through
     const unitCostCell = function (it) {
-        // a received line where nothing arrived has no cost left on file
         if (it.unit_cost === null || it.unit_cost === undefined) return '<span class="muted">-</span>';
         const original = it.original_unit_cost;
         if (original === null || original === undefined || Number(original) === Number(it.unit_cost)) {
@@ -2897,7 +2639,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         lines = detailTable(['Material', 'Qty'], lineRows, [1]);
     }
 
-    // how to reach the supplier, under the order's facts (the name is in the facts already)
     const contact = '<h4 class="detail-subhead">Supplier contact</h4>' +
         '<div class="detail-grid">' +
         detailField('Contact Person', escapeHtml(po.contact_person || 'Not set')) +
@@ -2905,8 +2646,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         detailField('Email', po.supplier_email ? escapeHtml(po.supplier_email) : '<span class="muted">None on file</span>') +
         '</div>';
 
-    // the buttons sit in the popup's foot. An approved order's print carries
-    // the supplier's QR code; the clerk prints it, or emails it with the same link.
     let foot = '<button type="button" class="btn btn-ghost" onclick="printPurchaseOrder(' + po.po_id + ')">' +
                (po.status === 'Pending' ? 'Print Purchase Order' : 'Print PDF') + '</button>';
     if (canDecide && waiting) {
@@ -2920,9 +2659,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 (po.supplier_sent_at ? 'Email It Again' : 'Email to Supplier') + '</button>';
     }
 
-    // one wide page: the facts and the supplier's contact on the left, every
-    // material on the right; a very long order scrolls. A delivery that came
-    // in under or over the order gets a Report page of its own.
     const pages = [
         { label: 'Order', body: '<div class="po-detail-layout">' +
             '<div class="po-detail-facts">' + summary + contact + '</div>' +
@@ -2936,9 +2672,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         pages, foot, { wide: 'xl', scroll: true });
 }
 
-// The delivery Report: who counted the delivery in and when, then each
-// material with how many were missing or over and why (Under-delivery or
-// Over-delivery), then the clerk's remarks.
 function poDeliveryReportHtml(report) {
     const rows = [];
     for (let i = 0; i < report.lines.length; i++) {
@@ -2959,16 +2692,12 @@ function poDeliveryReportHtml(report) {
                 '<p><span class="po-report-label">Date reported:</span> ' +
                     (report.reported_at ? escapeHtml(poWhen(report.reported_at)) : '<span class="muted">Not recorded</span>') + '</p>' +
             '</div>' +
-            // the same table as every other list on the page
             detailTable(['Material', 'Quantity', 'Reason'], rows, [1]) +
             '<p class="po-report-remarks"><span class="po-report-label">Remarks:</span> ' +
                 (report.remarks ? escapeHtml(report.remarks) : '<span class="muted">None</span>') + '</p>' +
         '</div>';
 }
 
-// The manager's decision. Approving asks once; declining asks for the reason,
-// which is kept on the order and told to the clerk. Approving sends nothing:
-// the clerk prints the order and sends it to the supplier.
 async function decidePurchaseOrder(poId, approve) {
     if (!poSetup.canDecide) return;
     const po = findPurchaseOrder(poId);
@@ -3025,13 +2754,9 @@ async function decidePurchaseOrder(poId, approve) {
     }
 }
 
-// The clerk emails an approved order to its supplier: the printed order as a
-// PDF with the QR code and link to accept or decline it. Printing it and
-// handing it over carries the same link.
 async function sendPurchaseOrder(poId) {
     if (!poSetup.canReceive) return;
     const po = findPurchaseOrder(poId);
-    // only an approved order goes to the supplier, and only to an address on file
     if (!po || po.status !== 'Pending' || !po.supplier_email) return;
 
     const yes = await askConfirm(
@@ -3045,7 +2770,6 @@ async function sendPurchaseOrder(poId) {
         });
     if (!yes) return;
 
-    // the mail can take a few seconds, so the work card stays up until the server answers
     showWorking(sendingCard(po));
 
     try {
@@ -3068,8 +2792,6 @@ async function sendPurchaseOrder(poId) {
     }
 }
 
-// The clerk printed an approved order and handed it to the supplier: it now
-// waits for the supplier to accept or decline it (Pending Supplier Confirmation)
 async function markPurchaseOrderSent(poId) {
     if (!poSetup.canReceive) return;
     const po = findPurchaseOrder(poId);
@@ -3107,21 +2829,14 @@ function sendingCard(po) {
     };
 }
 
-// "2026-10-08 15:00" from a date the server sent
 function poWhen(value) {
     return String(value || '').replace('T', ' ').slice(0, 16);
 }
 
-// the delivery schedule the supplier gave, in the same form as every other
-// date on the order: "2026-10-28" (it is a day, with no time)
 function poShipDay(value) {
     return String(value || '').replace('T', ' ').slice(0, 10);
 }
 
-// A click closes every list but the one clicked into: two open at once is two
-// answers to the same question. The box that has the focus counts as clicked
-// into: a click on a list row that sends the focus to another box (a new
-// material's Unit) must not close the list that box has just opened.
 document.addEventListener('click', function (event) {
     const active = document.activeElement;
     hideAllMatSuggestions(event.target.closest('.suggest-wrap') ||

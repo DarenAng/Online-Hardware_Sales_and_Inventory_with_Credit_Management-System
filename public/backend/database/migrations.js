@@ -1,18 +1,3 @@
-// ============================================================
-// migrations.js -- the start-up work on the database: add what an older database lacks, load the stored procedures
-// Loaded by: server.js (migrateOneAtATime, once at start-up) and access-control.js (the procedure count).
-// Never sent to a browser.
-//
-// What is in this file:
-//   - the migrate... functions: each adds one column or table an older database is missing
-//   - the stored-procedure helpers: count them, spot an old version, load
-//     public/database/2-RUN-SECOND-stored-procedures.sql when they are missing
-//   - migrateDatabase and migrateOneAtATime, which run them all in order
-//
-// loadProceduresIfMissing needs a way to run a whole SQL file; routes/admin.js owns
-// that (runSqlScript), so server.js hands it in.
-// ============================================================
-
 const path = require("path");
 const fs = require("fs");
 const database = require("./connection");
@@ -27,7 +12,6 @@ const cleanPhone = validation.cleanPhone;
 const phoneComplaint = validation.phoneComplaint;
 const DEFAULT_RECEIPT_LAYOUT = require("../store-settings").DEFAULT_RECEIPT_LAYOUT;
 
-// The column names in a list of rows read from information_schema.COLUMNS.
 function columnNamesOf(columns) {
   const names = [];
   for (let i = 0; i < columns.length; i++) {
@@ -36,7 +20,6 @@ function columnNamesOf(columns) {
   return names;
 }
 
-// The row of the column with this name, or undefined when there is none.
 function findColumn(columns, name) {
   for (let i = 0; i < columns.length; i++) {
     if (columns[i].COLUMN_NAME === name) {
@@ -49,7 +32,6 @@ function findColumn(columns, name) {
 async function hashLegacyPasswords() {
   const rowsResult = await db.query("SELECT user_id, password FROM users");
   const rows = rowsResult[0];
-  // find the passwords that are still plain text (not hashed yet)
   const plain = [];
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex];
@@ -68,10 +50,6 @@ async function hashLegacyPasswords() {
   console.log("Hashed " + plain.length + " password(s) that were stored as readable text.");
 }
 
-// The password in the seed file ("admin123") is public. An administrator
-// account still using it is open to anyone who has read that file, so the
-// server says so when it starts. This only warns: no row is changed, because
-// the owner may have a reason, and a changed password is theirs to choose.
 async function warnIfAdminPasswordIsDefault() {
   try {
     const rowsResult = await db.query(
@@ -83,7 +61,6 @@ async function warnIfAdminPasswordIsDefault() {
         "(admin123). Sign in and change it now: anyone who has read the project files can sign in as the administrator.");
     }
   } catch (error) {
-    // a warning that cannot be worked out must never stop the server starting
     console.warn("Could not check the administrator's password:", error.message);
   }
 }
@@ -110,9 +87,6 @@ async function migrateSignInHold() {
   console.log("Added users.failed_attempts and users.held_until for the sign-in hold.");
 }
 
-// One-time upgrade: staff.middle_initial -> staff.middle_name. full_name is
-// a generated column reading it, so it is dropped and rebuilt in the same
-// statement. Does nothing once the column is already middle_name.
 async function migrateMiddleNameColumn() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -123,7 +97,7 @@ async function migrateMiddleNameColumn() {
   const columns = columnsResult[0];
 
   const names = columnNamesOf(columns);
-  if (names.indexOf("middle_initial") === -1) return;   // already migrated, or no staff table
+  if (names.indexOf("middle_initial") === -1) return;
 
   await db.query("ALTER TABLE staff DROP COLUMN full_name");
   await db.query(
@@ -147,7 +121,6 @@ async function migratePhoneNumbers() {
     "SELECT staff_id, phone FROM staff WHERE phone IS NOT NULL AND phone <> ''");
   const rows = rowsResult[0];
 
-  // find the phone numbers that are not written in the +63 form yet
   const wrong = [];
   for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
     const row = rows[rowIndex];
@@ -161,7 +134,6 @@ async function migratePhoneNumbers() {
 
   for (let rowIndex = 0; rowIndex < wrong.length; rowIndex++) {
     const row = wrong[rowIndex];
-    // a number we can fix is rewritten; a number that makes no sense is cleared
     let fixed = null;
     if (phoneComplaint(row.phone) === null) {
       fixed = cleanPhone(row.phone);
@@ -232,7 +204,6 @@ async function migrateAccessControlTables() {
   }
   let created = 0;
 
-  // the switches for which screens each role's menu holds; one row per override
   if (!have.includes("role_feature_permissions")) {
     await db.query(
       "CREATE TABLE role_feature_permissions (\n" +
@@ -274,11 +245,6 @@ async function migrateAccessControlTables() {
   }
 }
 
-// One-time upgrade: the sizes a product also sells in (nails kept by the
-// kilo, sold by the sack). product_units holds them, and a sale line says
-// which one it was charged in: quantity stays in the product's own unit so
-// stock comes off it directly, sold_unit and sold_quantity carry the size,
-// and subtotal is rebuilt to multiply the sold figure by the price of one.
 async function migrateSellingUnits() {
   const tablesResult = await db.query(
     "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
@@ -314,7 +280,6 @@ async function migrateSellingUnits() {
   if (columns.length === 0) {
     await db.query("ALTER TABLE sale_items ADD COLUMN sold_unit VARCHAR(20) NULL AFTER quantity");
     await db.query("ALTER TABLE sale_items ADD COLUMN sold_quantity DECIMAL(12,3) NULL AFTER sold_unit");
-    // subtotal is generated, so it is dropped and put back reading the sold figure
     await db.query("ALTER TABLE sale_items DROP COLUMN subtotal");
     await db.query(
       "ALTER TABLE sale_items ADD COLUMN subtotal DECIMAL(12,2)\n" +
@@ -328,9 +293,6 @@ async function migrateSellingUnits() {
   }
 }
 
-// The clerk raises an order For Approval and the manager decides it; a
-// database made before that has neither the status nor the columns the
-// decision is written to, and sp_decide_purchase_order fails on it.
 async function migratePurchaseOrderApproval() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -351,7 +313,6 @@ async function migratePurchaseOrderApproval() {
 
   const names = columnNamesOf(columns);
   if (!hasApproval) {
-    // existing rows keep their status; only new orders start For Approval
     await db.query(
       "ALTER TABLE purchase_orders MODIFY COLUMN status\n" +
         "         ENUM('For Approval', 'Pending', 'Received', 'Cancelled') NOT NULL DEFAULT 'For Approval'");
@@ -383,8 +344,6 @@ async function migratePurchaseOrderApproval() {
     "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
 }
 
-// Orders and deliveries are counted in packs (a box of 20); a database made
-// before that has nowhere to keep the pack, and the order procedures fail.
 async function migratePackSizes() {
   const wanted = [
     ["products", "pack_name", "VARCHAR(20) NULL"],
@@ -400,14 +359,12 @@ async function migratePackSizes() {
     [DB_NAME]
   );
   const columns = columnsResult[0];
-  // "have" = the columns the database already has, written as "table.column"
   const have = [];
   for (let rowIndex = 0; rowIndex < columns.length; rowIndex++) {
     const row = columns[rowIndex];
     have.push(row.TABLE_NAME + "." + row.COLUMN_NAME);
   }
 
-  // "missing" = the wanted columns that are not in "have"
   const missing = [];
   for (let itemIndex = 0; itemIndex < wanted.length; itemIndex++) {
     const item = wanted[itemIndex];
@@ -417,7 +374,6 @@ async function migratePackSizes() {
   }
   if (missing.length === 0) return;
 
-  // item[0] = table, item[1] = column, item[2] = column type
   for (let itemIndex = 0; itemIndex < missing.length; itemIndex++) {
     const item = missing[itemIndex];
     await db.query("ALTER TABLE " + item[0] + " ADD COLUMN " + item[1] + " " + item[2]);
@@ -426,10 +382,6 @@ async function migratePackSizes() {
     "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
 }
 
-// The late-payment penalty: the shop's rate, an account's own rate, and the
-// charge stamped on a sale the day it falls overdue. amount_due is the bill
-// with the penalty on it, and every balance reads it. A database made before
-// this has none of them, and the credit views and procedures fail.
 async function migrateLatePenalties() {
   const wanted = [
     ["store_settings", "penalty_rate", "DECIMAL(5,2) NOT NULL DEFAULT 3.00 AFTER invoice_note"],
@@ -455,14 +407,12 @@ async function migrateLatePenalties() {
   const notif = notifResult[0];
   const hasAlert = notif.length > 0 && notif[0].COLUMN_TYPE.indexOf("Late Penalty") !== -1;
 
-  // "have" = the columns the database already has, written as "table.column"
   const have = [];
   for (let rowIndex = 0; rowIndex < columns.length; rowIndex++) {
     const row = columns[rowIndex];
     have.push(row.TABLE_NAME + "." + row.COLUMN_NAME);
   }
 
-  // "missing" = the wanted columns that are not in "have"
   const missing = [];
   for (let itemIndex = 0; itemIndex < wanted.length; itemIndex++) {
     const item = wanted[itemIndex];
@@ -472,8 +422,6 @@ async function migrateLatePenalties() {
   }
   if (missing.length === 0 && hasAlert) return;
 
-  // Added in the order listed: amount_due uses penalty_amount, so it comes last.
-  // item[0] = table, item[1] = column, item[2] = column type
   for (let itemIndex = 0; itemIndex < missing.length; itemIndex++) {
     const item = missing[itemIndex];
     await db.query("ALTER TABLE " + item[0] + " ADD COLUMN " + item[1] + " " + item[2]);
@@ -489,12 +437,6 @@ async function migrateLatePenalties() {
     "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the views and procedures match.");
 }
 
-// A refund on a sale comes off what the customer owes: sales.refunded_amount
-// holds the part of the refunds that did, and amount_due is worked out from it.
-// public/database/4-MIGRATION-refunds-lower-balance.sql does the same by hand.
-// This only does the column. The procedures that use it are checked and loaded
-// again by loadProceduresIfMissing, from what the database holds (see
-// routinesAreOld), not from anything remembered while this ran.
 async function migrateRefundedAmount() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME, GENERATION_EXPRESSION FROM information_schema.COLUMNS\n" +
@@ -507,10 +449,9 @@ async function migrateRefundedAmount() {
   const due = findColumn(columns, "amount_due");
   const dueUsesIt = due && String(due.GENERATION_EXPRESSION).indexOf("refunded_amount") !== -1;
   if (hasRefunded && dueUsesIt) return;
-  if (!due) return;   // no amount_due yet: migrateLatePenalties could not add it
+  if (!due) return;
 
   if (!hasRefunded) {
-    // placed before amount_due, which is worked out from it
     await db.query(
       "ALTER TABLE sales ADD COLUMN refunded_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER penalty_applied_at");
   }
@@ -521,11 +462,6 @@ async function migrateRefundedAmount() {
     "(amount_due is worked out from it).");
 }
 
-// The cashier's note is kept in deliveries.cashier_remarks, because
-// deliveries.remarks is overwritten by every driver or manager status note.
-// A Pending delivery has not been written over yet, so its remarks are still
-// the cashier's note and are copied over. Older deliveries that already moved
-// on lost the cashier's note, so those stay empty.
 async function migrateCashierRemarks() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -535,10 +471,9 @@ async function migrateCashierRemarks() {
   );
   const columns = columnsResult[0];
   const names = columnNamesOf(columns);
-  if (names.indexOf("delivery_id") === -1) return;     // no deliveries table yet
-  if (names.indexOf("cashier_remarks") !== -1) return;  // already added
+  if (names.indexOf("delivery_id") === -1) return;
+  if (names.indexOf("cashier_remarks") !== -1) return;
 
-  // an earlier test version named this column booking_remarks: rename it
   if (names.indexOf("booking_remarks") !== -1) {
     await db.query("ALTER TABLE deliveries RENAME COLUMN booking_remarks TO cashier_remarks");
     console.log("Renamed deliveries.booking_remarks to cashier_remarks.");
@@ -550,11 +485,6 @@ async function migrateCashierRemarks() {
   console.log("Added deliveries.cashier_remarks to keep the cashier's note apart from status notes.");
 }
 
-// A delivery is created from a sale at the counter, so the day it was written
-// up is deliveries.created_date and its audit action is DELIVERY_CREATED.
-// An older database calls them booked_date and DELIVERY_BOOKED: rename the
-// column and the old audit rows. sp_create_delivery is loaded again afterwards
-// by loadProceduresIfMissing (see routinesAreOld).
 async function migrateDeliveryCreatedDate() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -576,15 +506,7 @@ async function migrateDeliveryCreatedDate() {
   }
 }
 
-// A delivery's address is now asked for in parts at the counter: house and
-// street, barangay, town or city, province and a landmark. They are kept in
-// their own columns; deliveries.delivery_address still holds the whole address
-// as one line (built when the delivery is made), so the driver's card, the
-// schedule and the receipt read it as before, and a delivery made before this
-// has only that line and shows it unchanged.
 async function migrateDeliveryAddressParts() {
-  // each column is added on its own, whatever else the table has, and none names
-  // another column to sit after, so an older table cannot make one of them fail
   const wanted = [
     ["address_street", "VARCHAR(150) NULL"],
     ["address_barangay", "VARCHAR(100) NULL"],
@@ -598,7 +520,7 @@ async function migrateDeliveryAddressParts() {
     [DB_NAME]
   );
   const names = columnNamesOf(columnsResult[0]);
-  if (names.indexOf("delivery_id") === -1) return;     // no deliveries table yet
+  if (names.indexOf("delivery_id") === -1) return;
 
   let added = 0;
   for (let i = 0; i < wanted.length; i++) {
@@ -613,16 +535,6 @@ async function migrateDeliveryAddressParts() {
   }
 }
 
-// A customer is now added with a first, a middle (optional) and a last name,
-// and an address in parts, the same parts a delivery has: house and street,
-// barangay, town or city, province, landmark. customers.address still holds
-// the whole address as one line, so every screen, receipt and report that
-// reads it goes on working; a customer added before this has only that line
-// and no middle name. full_name is a generated column that spells the name
-// with the middle name as an initial (like staff.full_name). Each column is
-// added on its own, so running this again changes nothing. The procedure that
-// adds a customer is reloaded afterwards by loadProceduresIfMissing (see
-// routinesAreOld).
 async function migrateCustomerNameAndAddress() {
   const wanted = [
     ["middle_name", "VARCHAR(100) NULL"],
@@ -638,7 +550,7 @@ async function migrateCustomerNameAndAddress() {
     [DB_NAME]
   );
   const names = columnNamesOf(columnsResult[0]);
-  if (names.indexOf("customer_id") === -1) return;     // no customers table yet
+  if (names.indexOf("customer_id") === -1) return;
 
   let added = 0;
   for (let i = 0; i < wanted.length; i++) {
@@ -648,7 +560,6 @@ async function migrateCustomerNameAndAddress() {
     }
   }
 
-  // the generated column comes last: it reads middle_name
   if (names.indexOf("full_name") === -1) {
     await db.query(
       "ALTER TABLE customers ADD COLUMN full_name VARCHAR(220) AS (\n" +
@@ -668,8 +579,6 @@ async function migrateCustomerNameAndAddress() {
   }
 }
 
-// The credit terms and conditions printed with a customer's credit account: the
-// manager's own wording. Empty (NULL) means the default text in store-settings.js.
 async function migrateCreditTerms() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -677,18 +586,13 @@ async function migrateCreditTerms() {
     [DB_NAME]
   );
   const names = columnNamesOf(columnsResult[0]);
-  if (names.length === 0) return;                         // no store_settings table yet
-  if (names.indexOf("credit_terms") !== -1) return;       // already added
+  if (names.length === 0) return;
+  if (names.indexOf("credit_terms") !== -1) return;
 
-  // no AFTER: the column goes last, whatever an older table has or lacks
   await db.query("ALTER TABLE store_settings ADD COLUMN credit_terms TEXT NULL");
   console.log("Added store_settings.credit_terms for the printed credit terms and conditions.");
 }
 
-// Deliveries are no longer archived (only customers, products, units,
-// categories, suppliers and staff accounts are). One put away by the old daily
-// sweep or by hand comes back into Delivery History. A delivery cancelled with
-// a voided sale stays put away: its sale is voided (archived) too.
 async function restoreArchivedDeliveries() {
   const tablesResult = await db.query(
     "SELECT COUNT(*) AS n FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'deliveries'",
@@ -706,8 +610,6 @@ async function restoreArchivedDeliveries() {
   }
 }
 
-// The other two policies on the back of the customer card: how the store
-// handles a customer's data, and its refund policy. NULL means the default text.
 async function migratePolicyTexts() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -715,7 +617,7 @@ async function migratePolicyTexts() {
     [DB_NAME]
   );
   const names = columnNamesOf(columnsResult[0]);
-  if (names.length === 0) return;                         // no store_settings table yet
+  if (names.length === 0) return;
 
   if (names.indexOf("data_terms") === -1) {
     await db.query("ALTER TABLE store_settings ADD COLUMN data_terms TEXT NULL");
@@ -727,9 +629,6 @@ async function migratePolicyTexts() {
   }
 }
 
-// A product added by the inventory clerk tells the manager, so the alert has a
-// kind of its own: 'New Product'. The kind is a word in notifications.notif_type,
-// so the column is widened (every kind it already has is kept).
 async function migrateNewProductAlert() {
   const typeResult = await db.query(
     "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
@@ -737,20 +636,15 @@ async function migrateNewProductAlert() {
     [DB_NAME]
   );
   const found = typeResult[0];
-  if (found.length === 0) return;                                  // no notifications table yet
+  if (found.length === 0) return;
   const current = String(found[0].COLUMN_TYPE);
-  if (current.indexOf("New Product") !== -1) return;               // already added
+  if (current.indexOf("New Product") !== -1) return;
 
-  // "enum('Low Stock','Out of Stock')" becomes "enum('Low Stock','Out of Stock','New Product')"
   const wider = current.replace(/\)$/, ",'New Product')");
   await db.query("ALTER TABLE notifications MODIFY COLUMN notif_type " + wider + " NOT NULL");
   console.log("Added the New Product kind of alert (notifications.notif_type).");
 }
 
-// The Lift Sign-in Hold screen became Account Management, so a switch the
-// administrator already gave a role is stored under the new key. A role that
-// somehow has both rows keeps the new one (role_id + feature_key is unique,
-// so IGNORE skips the row that would clash and the DELETE clears it).
 async function migrateAccountManagementKey() {
   const oldRowsResult = await db.query(
     "SELECT role_id FROM role_feature_permissions WHERE feature_key = 'release-holds'");
@@ -763,8 +657,6 @@ async function migrateAccountManagementKey() {
   console.log("Renamed the release-holds screen switch to account-management for " + oldRows.length + " role(s).");
 }
 
-// The proprietor's name on the invoice head. A database made before it
-// has no column, and sp_update_store_settings fails.
 async function migrateProprietorName() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -779,10 +671,6 @@ async function migrateProprietorName() {
     "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
 }
 
-// A refund the cashier takes back now waits for the clerk to inspect it:
-// disposition is empty until then, and the inspection is recorded on the
-// report. A database made before this has the column NOT NULL and none of
-// the inspection columns, and filing a refund fails.
 async function migrateReturnInspection() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME, IS_NULLABLE FROM information_schema.COLUMNS\n" +
@@ -816,12 +704,6 @@ async function migrateReturnInspection() {
     "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
 }
 
-// Goods missing from a supplier's delivery: a returned_items row of type
-// Missing, with the purchase order it is about in po_id. A database made
-// before this has neither, and filing a report fails.
-// public/database/5-MIGRATION-missing-delivery-reports.sql does the same by hand.
-// This only does the table. The procedures that use it are loaded again by
-// loadProceduresIfMissing (see routinesAreOld).
 async function migrateMissingReports() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS\n" +
@@ -831,7 +713,7 @@ async function migrateMissingReports() {
   );
   const columns = columnsResult[0];
   const type = findColumn(columns, "report_type");
-  if (!type) return;   // no returned_items table yet
+  if (!type) return;
   const hasPo = findColumn(columns, "po_id") !== undefined;
   const hasMissing = String(type.COLUMN_TYPE).indexOf("'Missing'") !== -1;
   if (hasMissing && hasPo) return;
@@ -849,9 +731,6 @@ async function migrateMissingReports() {
     "missing from a delivery. Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
 }
 
-// The account a customer sends a bank transfer to: shown at the till and
-// printed on the invoice. A database made before it has none of the columns,
-// and the store settings read and sp_update_store_bank_details fail.
 async function migrateBankDetails() {
   const wanted = [
     ["bank_name", "VARCHAR(100) NULL AFTER penalty_rate"],
@@ -880,8 +759,6 @@ async function migrateBankDetails() {
   }
   if (missing.length === 0) return;
 
-  // Added in the order listed, because each one is placed after the one before it.
-  // item[0] = column, item[1] = column type
   for (let itemIndex = 0; itemIndex < missing.length; itemIndex++) {
     const item = missing[itemIndex];
     await db.query("ALTER TABLE store_settings ADD COLUMN " + item[0] + " " + item[1]);
@@ -890,9 +767,6 @@ async function migrateBankDetails() {
     "bank_account_number). Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
 }
 
-// The receipt's layout (paper width, title, the shop's own header and footer
-// lines, what is shown) lives in store_settings.receipt_layout as JSON. A
-// database made before it gets the column, filled with the defaults.
 async function migrateReceiptLayout() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -909,10 +783,6 @@ async function migrateReceiptLayout() {
     [JSON.stringify(DEFAULT_RECEIPT_LAYOUT)]);
 }
 
-// The delivery address is now typed in full by the cashier, anywhere in the
-// Philippines, so the list of delivery areas kept in System Admin is gone.
-// A database made while it was there still has store_settings.delivery_areas;
-// the column is dropped.
 async function migrateRemoveDeliveryAreas() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -926,9 +796,6 @@ async function migrateRemoveDeliveryAreas() {
   }
 }
 
-// The codes behind "Forgot your password?". Only the scrypt hash of a code is
-// kept, never the code. A database made before it has no table, and asking
-// for a code fails.
 async function migratePasswordResets() {
   const tablesResult = await db.query(
     "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
@@ -954,8 +821,6 @@ async function migratePasswordResets() {
   console.log("Added the password_resets table for signing in again with a code sent by email.");
 }
 
-// The clerk's remarks on a delivery, typed when it is counted in on Stock
-// Adjustment and shown on the order's Report (under- or over-delivery).
 async function migrateDeliveryRemarks() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -967,13 +832,6 @@ async function migrateDeliveryRemarks() {
   console.log("Added purchase_orders.delivery_remarks, the clerk's remarks on a delivery.");
 }
 
-// The clerk's Reference card on Stock Adjustment. Receiving corrects a
-// purchase order's lines to what arrived; the lines as they were ordered are
-// copied into purchase_order_ordered_items first, and the day it was received
-// goes in purchase_orders.received_at. A database made before them has
-// neither, and receiving fails. sp_receive_purchase_order is loaded again
-// afterwards by loadProceduresIfMissing (see routinesAreOld). Orders received
-// before this have no copy: the card shows only what arrived for them.
 async function migrateOrderReference() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -982,7 +840,6 @@ async function migrateOrderReference() {
   );
   if (columnsResult[0].length === 0) {
     await db.query("ALTER TABLE purchase_orders ADD COLUMN received_at TIMESTAMP NULL AFTER decision_note");
-    // an order already received: the day its receipt went in the audit trail
     await db.query(
       "UPDATE purchase_orders po SET po.received_at = (\n" +
         "       SELECT MAX(a.created_at) FROM audit_logs a\n" +
@@ -1015,12 +872,6 @@ async function migrateOrderReference() {
     "beside what arrived.");
 }
 
-// The supplier's answer to an approved order. The printed order (and the
-// mail, when the clerk emails it) carries a link with the order's code and a
-// QR code of it; the supplier's Accept or Decline lands in the columns after
-// it. The code is kept as it is, not hashed, so every reprint carries the same
-// working link; it lets its holder answer that one order and nothing else.
-// An early version kept only a hash (supplier_token_hash); that is dropped.
 async function migrateSupplierResponse() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -1065,10 +916,6 @@ async function migrateSupplierResponse() {
     "supplier_response, supplier_responded_at, supplier_note).");
 }
 
-// The supplier, accepting from the link, says when the order ships and may
-// correct a price that does not match what they sell. The corrected price
-// goes on the line; the shop's own price is kept beside it (original_unit_cost)
-// so the change is never lost.
 async function migrateSupplierQuote() {
   const columnsResult = await db.query(
     "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -1091,8 +938,6 @@ async function migrateSupplierQuote() {
     "purchase_order_items.original_unit_cost).");
 }
 
-// Every GCash, Maya or bank-transfer payment tried by QR code. The same table as
-// public/database/3-ADD-qr-payments.sql, which does this by hand.
 async function migrateQrPayments() {
   const tablesResult = await db.query(
     "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
@@ -1136,8 +981,6 @@ async function migrateQrPayments() {
   console.log("Added the qr_payments table for GCash, Maya and bank-transfer payments by QR code.");
 }
 
-// A qr_payments table made before bank transfers: "Bank Transfer" joins the ways
-// of paying, and the bank and the customer's account get their columns.
 async function addBankColumnsToQrPayments() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME, COLUMN_TYPE FROM information_schema.COLUMNS\n" +
@@ -1166,10 +1009,6 @@ async function addBankColumnsToQrPayments() {
   }
 }
 
-// The bank and account behind a cheque or a bank transfer, one row for each
-// payment that has them (see the note over payment_details in
-// public/database/1-RUN-FIRST-database.sql). Must run after migrateQrPayments:
-// it points at qr_payments.
 async function migratePaymentDetails() {
   const tablesResult = await db.query(
     "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
@@ -1201,13 +1040,6 @@ async function migratePaymentDetails() {
   console.log("Added the payment_details table: the bank and account behind a cheque or a bank transfer.");
 }
 
-// Four rules the database itself enforces, so a bug in a procedure or a hand
-// edit cannot leave a negative figure behind: stock on hand, a sale's discount
-// and amount paid, and a refund amount. Every flow already refuses these
-// before it writes (the procedures check them), so this is the last guard.
-// Each rule has a name so it is added only once. MySQL 8.0.16 and later
-// enforce CHECK; an older MySQL accepts the line and ignores it.
-// public/database/1-RUN-FIRST-database.sql has the same four for new installs.
 const CHECK_RULES = [
   ["inventory", "chk_inventory_stock_not_negative", "quantity_in_stock >= 0"],
   ["sales", "chk_sales_discount_not_negative", "discount >= 0"],
@@ -1227,27 +1059,18 @@ async function migrateCheckConstraints() {
       [DB_NAME, table, name]
     );
     const found = foundResult[0];
-    if (found.length > 0) continue;   // already there
+    if (found.length > 0) continue;
 
-    // The table, name and rule above are fixed text, not user input.
     try {
       await db.query("ALTER TABLE " + table + " ADD CONSTRAINT " + name + " CHECK (" + rule + ")");
       console.log("Added the rule \"" + rule + "\" to the " + table + " table.");
     } catch (error) {
-      // Usually a row that already breaks the rule. Start-up goes on without
-      // this rule; fix the row, then restart to add it.
       console.warn("Could not add the rule \"" + rule + "\" to the " + table + " table (" + error.message + "). " +
         "Fix the rows that break it, then restart the server.");
     }
   }
 }
 
-// The tables the server keeps for itself, so that any copy of it can answer
-// any request (Vercel runs many): who is signed in, the live-update log,
-// account drafts waiting for a second look, backups when there is no disk to
-// keep them on, a few switches, and the offline payment simulator. They are
-// not shop data, so a backup leaves them out and a restore leaves them be.
-// Times are milliseconds since 1970 (Date.now()), free of any time zone.
 const SERVER_TABLES = ["user_sessions", "live_changes", "account_drafts",
                        "backup_files", "app_flags", "qr_sim_intents"];
 
@@ -1312,7 +1135,6 @@ async function migrateServerTables() {
       "       created_at BIGINT NOT NULL\n" +
       "     )");
 
-  // a simulator table made before bank transfers has no bank column
   const simColumnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
       "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'qr_sim_intents'",
@@ -1323,15 +1145,9 @@ async function migrateServerTables() {
   }
 }
 
-// a named figure so adding a procedure changes one number, not two
 const EXPECTED_PROCEDURES = 37;
 
-// Nearly every write goes through a stored procedure, so a database with the
-// tables but not the procedures (file 1 run, file 2 not) reads fine and
-// cannot be written to. The count is remembered and the guard below turns
-// those writes into one sentence naming the fix. Re-checked whenever it is
-// bad, so loading file 2 is picked up without a restart.
-let proceduresLoaded = null;      // null until the first count
+let proceduresLoaded = null;
 let procedureCheckAt = 0;
 const PROCEDURE_RECHECK_MS = 5000;
 
@@ -1346,7 +1162,6 @@ async function countProcedures() {
   return proceduresLoaded;
 }
 
-// once the full set has been seen it is believed
 async function proceduresAreMissing() {
   if (proceduresLoaded !== null && proceduresLoaded >= EXPECTED_PROCEDURES) return false;
   if (Date.now() - procedureCheckAt < PROCEDURE_RECHECK_MS) return true;
@@ -1354,12 +1169,10 @@ async function proceduresAreMissing() {
   try {
     return (await countProcedures()) < EXPECTED_PROCEDURES;
   } catch (error) {
-    return false;   // the database is unreachable; that is a different message
+    return false;
   }
 }
 
-// admin.js reads the count through these rather than the variable itself,
-// so forgetting it after a restore reaches the copy that matters
 function proceduresLoadedCount() {
   return proceduresLoaded;
 }
@@ -1369,50 +1182,9 @@ function forgetProcedureCount() {
   procedureCheckAt = 0;
 }
 
-// The views and procedures live in one file. When the database has fewer
-// than the code was built for (file 1 run without file 2, or an old copy of
-// file 2 run from a stale editor tab), the server loads that file itself,
-// after the column migrations so the views find every column they read.
-// The file drops and recreates views and procedures only; no row is touched.
 const PROCEDURES_FILE = path.join(__dirname, "..", "..", "database", "2-RUN-SECOND-stored-procedures.sql");
 
-// A database that has all the procedures can still hold older versions of the
-// ones that were rewritten later (the column was added by hand, or by an older
-// copy of this server). The text of the new versions has words the old ones do
-// not: v_refunded_before in sp_file_return_report, refunded_amount in
-// sp_apply_late_penalties, least( in the credit view. A second word in each of
-// two procedures marks the payment and refund checks: "nothing to refund" only
-// the newest sp_file_return_report has, "already paid in full" only the newest
-// sp_record_credit_payment. The routines that were made safe against two
-// people at once carry a word the old ones lack: FOR UPDATE in
-// sp_restore_archive and sp_update_delivery_status, "AND status = 'Open'" in
-// sp_resolve_return_report (and "v_type = 'Missing'", which closes a report of
-// goods missing from a delivery), p_inside_batch in sp_file_return_report (it
-// can file one item of a many-item report), "refund instead" in sp_archive_record,
-// p_driver_staff_id and DELIVERY_CREATED in sp_create_delivery, and p_qr_payment_id in
-// sp_create_sale_transaction and sp_record_credit_payment ("kept for the down
-// payment" there is the reference a payment may not borrow). The business
-// rules carry a word of their own: "Discount cannot be negative" in
-// sp_create_sale_transaction (it also holds COD to the credit hold and
-// limit; "has no price yet" is the check that refuses a line priced at 0),
-// "Add and Remove need a quantity" in sp_adjust_stock, and "A reason
-// is required for every report" in sp_file_return_report (a one-word reason
-// is accepted; the old one asked for ten characters).
-// purchase_order_ordered_items and "received_at = NOW()" in
-// sp_receive_purchase_order mark the one that keeps the order's lines as they
-// were ordered and the day it was received. p_address_barangay in
-// sp_create_customer marks the one that takes a middle name and an address in
-// parts (and with it the credit view that reads customers.full_name).
-// p_pay_details in sp_create_sale_transaction and sp_record_credit_payment marks the
-// ones that record a cheque's or a bank transfer's bank and account, and
-// p_bank_code in sp_create_qr_payment the one that takes a bank transfer. Every
-// procedure with an EXIT HANDLER must also have GET DIAGNOSTICS (checked once
-// for all of them below). A few small reads, and once file 2 has been loaded
-// they all pass, so nothing reloads on later starts.
-// Add a word here whenever a routine is rewritten and a database already holds
-// the old one.
 async function routinesAreOld() {
-  // [routine, a word only its newest version contains]
   const newestWords = [
     ["sp_file_return_report", "v_refunded_before"],
     ["sp_file_return_report", "nothing to refund"],
@@ -1461,7 +1233,7 @@ async function routinesAreOld() {
   for (let rowIndex = 0; rowIndex < routines.length; rowIndex++) {
     const row = routines[rowIndex];
     const text = String(row.ROUTINE_DEFINITION || "");
-    if (text === "") continue;   // not readable by this user: do not reload on every start
+    if (text === "") continue;
     for (let wordIndex = 0; wordIndex < newestWords.length; wordIndex++) {
       const name = newestWords[wordIndex][0];
       const word = newestWords[wordIndex][1];
@@ -1469,18 +1241,9 @@ async function routinesAreOld() {
     }
   }
 
-  // Every procedure's EXIT HANDLER now reads the real error with GET DIAGNOSTICS.
-  // A routine that has a handler but no GET DIAGNOSTICS is from before that, so
-  // one check covers all of them. (LIKE is not case sensitive here.)
-  // Only the procedures file 2 itself creates are looked at: a leftover one that
-  // file 2 no longer makes would never be fixed by loading it, and would make
-  // the file load again on every start.
   let ownNames = [];
   try {
     const fileText = fs.readFileSync(PROCEDURES_FILE, "utf8");
-    // KNOWN ISSUE (left as it is on purpose): this pattern is missing a backslash,
-    // it should read (\w+). As written it matches the letter w, so it finds no
-    // names and the "old handler" check below never runs.
     const namePattern = /^CREATE PROCEDURE (w+)/gm;
     let nameMatch = namePattern.exec(fileText);
     while (nameMatch !== null) {
@@ -1488,7 +1251,6 @@ async function routinesAreOld() {
       nameMatch = namePattern.exec(fileText);
     }
   } catch (error) {
-    // file 2 cannot be read, so loading it is not possible either
   }
   if (ownNames.length > 0) {
     const oldHandlersResult = await db.query(
@@ -1560,12 +1322,6 @@ function procedureAdvice() {
     "That file touches no table and no row. Nothing else is wrong: your data is intact.";
 }
 
-// The start-up work below runs once per copy of the server. On a PC that is
-// once; on Vercel it is every time a new copy wakes up, and the first request
-// waits for it (see the hook after this) so it never meets a missing table.
-// Suppliers, customers, categories and units can be archived like products:
-// is_archived, archived_at and archived_by_staff_id on each. A database made
-// before this has none of them, and the records lists and Archives fail.
 async function migrateRecordArchives() {
   const tables = ["suppliers", "customers", "categories", "units"];
   const columnsResult = await db.query(
@@ -1598,11 +1354,6 @@ async function migrateRecordArchives() {
   }
 }
 
-// The reorder point the system worked out (Dynamic) is gone: every product
-// reorders at the figure typed for it. A product still marked Dynamic is
-// marked Manual, keeping the reorder point stored on it.
-// A cashier asks a manager to void a sale of the same day (routes/void-requests.js):
-// the requests get their table, and the alerts about them a kind of their own.
 async function migrateVoidRequests() {
   const typeResult = await db.query(
     "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
@@ -1643,12 +1394,6 @@ async function migrateVoidRequests() {
   console.log("Added the void_requests table: a cashier's request to void a sale, for a manager to decide.");
 }
 
-// Deactivating an account no longer archives it: it stays in the Staff
-// Directory as Deactivated, and is archived by hand or by the daily sweep
-// once it has been deactivated for 30 days. staff.deactivated_at says when.
-// Before this, every deactivation stamped archived_at, so on the first run an
-// account deactivated less than 30 days ago comes back to the directory as
-// Deactivated; one deactivated longer ago stays archived.
 async function migrateStaffDeactivatedAt() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -1679,14 +1424,12 @@ async function migrateManualReorderPoints() {
 }
 
 async function migrateDatabase(runSqlScript) {
-  // first: sign-in reads user_sessions on every request
   await migrateServerTables();
 
   const total = await countProcedures();
   if (total >= EXPECTED_PROCEDURES) {
     console.log("All " + EXPECTED_PROCEDURES + " stored procedures are loaded.");
   }
-  // otherwise they are loaded from the file below, once the columns they read exist
 
   await migrateSignInHold();
   await migrateMiddleNameColumn();
@@ -1730,9 +1473,6 @@ async function migrateDatabase(runSqlScript) {
   await warnIfAdminPasswordIsDefault();
 }
 
-// Two copies starting together (Vercel waking several at once) would both
-// see a column missing and both add it, and one fails. A MySQL lock, held on
-// its own connection, makes them take turns; the second finds nothing to do.
 async function migrateOneAtATime(runSqlScript) {
   const lockName = DB_NAME + ".startup";
   const connection = await db.getConnection();
