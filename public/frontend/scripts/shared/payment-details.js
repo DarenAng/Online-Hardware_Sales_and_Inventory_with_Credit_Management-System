@@ -1,9 +1,6 @@
 const PAYMONGO_BANKS = [
     { code: 'bpi',       name: 'BPI',       minimum: 1 },
-    { code: 'ubp',       name: 'UnionBank', minimum: 1 },
-    { code: 'bdo',       name: 'BDO',       minimum: 100 },
-    { code: 'landbank',  name: 'Landbank',  minimum: 1 },
-    { code: 'metrobank', name: 'Metrobank', minimum: 1 }
+    { code: 'ubp',       name: 'UnionBank', minimum: 1 }
 ];
 
 function paymongoBank(code) {
