@@ -2764,8 +2764,8 @@ function registerAdminRoutes(app, deps) {
     }
   });
 
-  // The account a bank transfer is sent to: all three boxes are required, as
-  // the till shows it whenever Bank Transfer is chosen.
+  // The account a bank transfer is sent to: all three boxes, or none (then the
+  // stored account is left as it is).
   function bankDetailsFrom(body) {
     // trims the text, turns many spaces into one, and cuts it to "max" characters
     function tidy(value, max) {
@@ -2784,6 +2784,11 @@ function registerAdminRoutes(app, deps) {
     if (bank.bank_account_name !== "") filled += 1;
     if (bank.bank_account_number !== "") filled += 1;
 
+    // none of the three: the screen no longer shows the boxes, so whatever is
+    // stored is kept as it is (bank: null means "leave it alone")
+    if (filled === 0) {
+      return { bank: null };
+    }
     if (filled < 3) {
       return { error: "The bank, the account name and the account number are all required." };
     }
@@ -2857,7 +2862,7 @@ function registerAdminRoutes(app, deps) {
       // did any of the three bank fields change?
       let bankChanged = false;
       const bankKeys = ["bank_name", "bank_account_name", "bank_account_number"];
-      for (let i = 0; i < bankKeys.length; i++) {
+      for (let i = 0; bankCheck.bank && i < bankKeys.length; i++) {
         const key = bankKeys[i];
         if ((before[key] || null) !== bankCheck.bank[key]) {
           bankChanged = true;
