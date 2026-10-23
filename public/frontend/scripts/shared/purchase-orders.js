@@ -158,7 +158,7 @@ function makeCardHtml(id) {
                     '</div>' +
                     '<div class="form-group">' +
                         '<label for="' + id + '-price">Price per unit</label>' +
-                        '<input type="number" class="form-control" id="' + id + '-price" ' +
+                        '<input type="number" class="form-control amount-field" id="' + id + '-price" ' +
                                'min="0" step="0.01" value="0.00" ' +
                                'oninput="renderMatDesc(\'' + id + '\'); renderPoTotals()">' +
                     '</div>' +
@@ -2336,7 +2336,7 @@ function renderReceiveSheet() {
             '<div>' +
                 '<label class="recv-meta" for="recv-cost-' + index + '">Cost per ' +
                     escapeHtml(recvPackOf(item) ? item.pack_name : (item.unit_name || 'unit')) + '</label>' +
-                '<input type="number" class="form-control recv-qty" id="recv-cost-' + index + '" ' +
+                '<input type="number" class="form-control recv-qty amount-field" id="recv-cost-' + index + '" ' +
                        'min="0" step="0.01" placeholder="0.00" ' +
                        'value="' + recvOrderedCost(item) + '">' +
             '</div>' +
@@ -2434,7 +2434,7 @@ function addReceiveExtra() {
         '<input type="number" class="form-control recv-qty" id="recv-extra-qty-' + index + '" ' +
                'min="1" value="1"></div>' +
         '<div class="form-group"><label for="recv-extra-cost-' + index + '">Unit cost</label>' +
-        '<input type="number" class="form-control recv-qty" id="recv-extra-cost-' + index + '" ' +
+        '<input type="number" class="form-control recv-qty amount-field" id="recv-extra-cost-' + index + '" ' +
                'min="0" step="0.01" value="0.00"></div>' +
         '<button type="button" class="btn btn-sm btn-danger" ' +
                 'onclick="removeReceiveExtra(' + index + ')">Remove</button>';

@@ -237,7 +237,9 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
     font: 600 17px var(--font-figure);
     background: transparent;
     color: var(--ink);
+    text-align: right;
 }
+.so-money.is-percent input { text-align: left; }
 .so-money:focus-within { box-shadow: 0 0 0 3px var(--signal-dim); }
 .so-line.is-bad .so-money { border-color: var(--stop); }
 

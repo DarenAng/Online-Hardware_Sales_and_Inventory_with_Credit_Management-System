@@ -384,6 +384,7 @@ function startSupplierOrderPage() {
         const error = document.getElementById('so-discount-error');
         if (error) error.textContent = discountProblem() || '';
         document.querySelector('.so-discount-box').classList.toggle('is-bad', Boolean(discountProblem()));
+        document.querySelector('.so-discount-box').classList.toggle('is-percent', draft.discountType === 'percent');
     }
 
     function refreshDecision() {

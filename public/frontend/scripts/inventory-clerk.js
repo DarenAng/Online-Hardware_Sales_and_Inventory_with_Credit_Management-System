@@ -2321,7 +2321,10 @@ function openReturnDetail(returnId) {
         detailField(missing ? 'Quantity Missing' : 'Quantity', r.quantity + ' ' + escapeHtml(r.unit_name || '')) +
         (missing ? detailField('Purchase Order', '#' + r.po_id) : detailField('Refund Amount', peso(r.refund_amount))) +
         detailField('Status', statusBadge(r.status)) +
-        '</div>';
+        '</div>' +
+        '<h4 class="detail-subhead">' +
+            (r.report_type === 'Refunded' || r.report_type === 'Return' ? 'Cashier Remarks' : 'Remarks') + '</h4>' +
+        '<p class="detail-note">' + escapeHtml(r.reason || 'No remarks given.') + '</p>';
 
     const awaiting = returnAwaiting(r);
 

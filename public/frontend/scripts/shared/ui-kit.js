@@ -244,6 +244,7 @@ function openAsk(options) {
         field.style.display = 'block';
         document.getElementById('ask-label').textContent = options.label || 'Value';
         input.type = options.type || 'text';
+        input.classList.toggle('amount-field', Boolean(options.money));
         input.value = options.value || '';
         input.placeholder = options.placeholder || '';
     } else {

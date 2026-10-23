@@ -299,9 +299,9 @@
 
 .po-qty, .po-cost {
     font-family: var(--font-figure);
-    text-align: right;
     font-variant-numeric: tabular-nums;
 }
+.po-cost { text-align: right; }
 .po-line-total { font-weight: 600; }
 .po-in { margin-top: 6px; }
 
@@ -428,7 +428,6 @@
 .recv-qty {
     width: 110px;
     font-family: var(--font-figure);
-    text-align: right;
     font-variant-numeric: tabular-nums;
 }
 .recv-verdict { font-size: 12.5px; line-height: 1.4; }

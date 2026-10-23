@@ -1506,6 +1506,7 @@ async function changePrice(product) {
         message: askMessage,
         label: 'New price' + unit,
         type: 'number',
+        money: true,
         value: noPrice ? '' : current.toFixed(2),
         placeholder: '0.00',
         confirmLabel: 'Next',

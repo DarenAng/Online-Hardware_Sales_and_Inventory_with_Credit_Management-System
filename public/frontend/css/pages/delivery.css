@@ -163,7 +163,7 @@
 .refund-qty {
     grid-column: 2;
     grid-row: 1 / span 2;
-    text-align: right;
+    text-align: left;
     font-family: var(--font-figure);
 }
 .refund-amount {
