@@ -1221,11 +1221,6 @@ function removePurchaseLine(index) {
     const row = document.getElementById('po-line-' + index);
     if (!row) return;
 
-    if (document.querySelectorAll('.po-line').length === 1) {
-        notifyWarning('A purchase order needs at least one line.', 'Cannot remove');
-        return;
-    }
-
     delete matPickers[row.dataset.picker];
     row.remove();
     renderPoTotals();
@@ -1316,6 +1311,11 @@ async function handleCreatePurchaseOrder(event) {
 
     const rows = poLineRows();
     const items = [];
+
+    if (rows.length === 0) {
+        notifyWarning('Add at least one material to the order.', 'Order not sent');
+        return;
+    }
 
     for (let r = 0; r < rows.length; r++) {
         const row = rows[r];

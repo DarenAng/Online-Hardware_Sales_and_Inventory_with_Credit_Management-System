@@ -336,7 +336,7 @@
 .btn.is-inactive { opacity: 0.45; }
 
 #po-lines:empty::before {
-    content: 'No lines yet. Press Add line to start the order.';
+    content: 'No materials yet. Press Add another material, or click a critical stock.';
     display: block;
     padding: 20px 0;
     color: var(--steel-soft);
