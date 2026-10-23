@@ -18,7 +18,7 @@ const FEATURES = [
   { key: "refunds", name: "Refunds", module: "Point of Sale",
     description: "Take a sold item back and refund it at the counter; the stockroom inspects it before it can be sold again.",
     available: [CASHIER], defaults: [CASHIER],
-    routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/],
+    routes: [["GET", /^\/api\/returns$/], ["POST", /^\/api\/returns$/], ["POST", /^\/api\/returns\/batch$/],
              ["GET", /^\/api\/sales$/], ["GET", /^\/api\/sales\/\d+$/]] },
   { key: "sales-report", name: "Sales Report", module: "Point of Sale",
     description: "The cashier's own sales, by day and by method.",
