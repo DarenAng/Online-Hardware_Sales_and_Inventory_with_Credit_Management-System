@@ -36,3 +36,6 @@ vercel-static/
 *.pem
 
 tests/
+
+manuscript/
+APPENDIX*.docx
