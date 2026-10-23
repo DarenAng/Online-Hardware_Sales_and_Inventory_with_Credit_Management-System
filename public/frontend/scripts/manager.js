@@ -1310,7 +1310,7 @@ function buildStockPanels() {
         },
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                    'onclick="openStockDetail(' + p.product_id + ')">' +
+                    'onclick="openStockDetail(' + p.product_id + ', true)">' +
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + '</td>' +
                 '<td class="cell-num">' + p.effective_rop + '</td>' +
@@ -3177,7 +3177,7 @@ function lastCostText(lastCost) {
     return peso(lastCost);
 }
 
-function openStockDetail(productId) {
+function openStockDetail(productId, fromReorderAlerts) {
     const p = findCachedStock(productId);
     if (!p) return;
 
@@ -3196,9 +3196,11 @@ function openStockDetail(productId) {
         detailField('Sold Recently', p.units_sold_window + ' ' + escapeHtml(p.unit_name || '') +
             ' over ' + p.window_days + ' days') +
         '</div>' +
-        '<div class="detail-actions">' +
-        '<button type="button" class="btn btn-accent" onclick="changeReorderPoint(' + p.product_id + ')">' +
-        'Change Reorder Point</button></div>';
+        (fromReorderAlerts
+            ? '<div class="detail-actions">' +
+              '<button type="button" class="btn btn-accent" onclick="changeReorderPoint(' + p.product_id + ')">' +
+              'Change Reorder Point</button></div>'
+            : '');
 
     const product = '<div class="detail-grid">' +
         detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
