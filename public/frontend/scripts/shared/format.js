@@ -9,6 +9,26 @@ function peso(value) {
     return CURRENCY_SIGN + text;
 }
 
+function loyaltyRateText(rate) {
+    return String(Number(rate)) + '%';
+}
+
+function loyaltyFactHtml(status) {
+    if (!status) return '<span class="muted">Not available</span>';
+    if (!(Number(status.rate) > 0)) return '<span class="muted">Switched off</span>';
+
+    const rate = loyaltyRateText(status.rate);
+    const lastPaid = peso(status.lastMonthPaid);
+    const thisPaid = peso(status.thisMonthPaid);
+
+    if (status.qualifies) {
+        return rate + ' off sales paid in full this month <span class="muted">(paid ' + lastPaid +
+            ' last month; ' + thisPaid + ' so far this month)</span>';
+    }
+    return 'None this month <span class="muted">(paid ' + lastPaid + ' last month, ' +
+        peso(status.threshold) + ' needed; ' + thisPaid + ' so far this month)</span>';
+}
+
 function isUnpriced(product) {
     return !(Number(product.price) > 0);
 }

@@ -7,6 +7,7 @@ const addressPartsProblem = helpers.addressPartsProblem;
 const DEFAULT_CREDIT_TERMS = require("../store-settings").DEFAULT_CREDIT_TERMS;
 const DEFAULT_DATA_TERMS = require("../store-settings").DEFAULT_DATA_TERMS;
 const DEFAULT_REFUND_POLICY = require("../store-settings").DEFAULT_REFUND_POLICY;
+const defaultDiscountPolicy = require("../store-settings").defaultDiscountPolicy;
 const receiptLayoutFrom = require("../store-settings").receiptLayoutFrom;
 
 function registerManagerRoutes(app, deps) {
@@ -1082,6 +1083,122 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
+  function loyaltyAmountFrom(value) {
+    if (typeof value === "string" && value.trim() === "") return NaN;
+    if (typeof value !== "number" && typeof value !== "string") return NaN;
+    const amount = Number(value);
+    if (!Number.isFinite(amount)) return NaN;
+    return Math.round(amount * 100) / 100;
+  }
+
+  app.get("/api/customers/:customerId/loyalty", async function (request, response) {
+    try {
+      const rowsResult = await db.query(
+        "SELECT last_month_paid, this_month_paid FROM vw_customer_loyalty WHERE customer_id = ?",
+        [request.params.customerId]
+      );
+      const rows = rowsResult[0];
+      if (rows.length === 0) {
+        return response.status(404).json({ error: "That customer was not found." });
+      }
+
+      const settingsResult = await db.query(
+        "SELECT loyalty_rate, loyalty_threshold FROM store_settings WHERE setting_id = 1");
+      const settings = settingsResult[0][0] || { loyalty_rate: 2, loyalty_threshold: 5000 };
+
+      const row = rows[0];
+      const rate = Number(settings.loyalty_rate);
+      const threshold = Number(settings.loyalty_threshold);
+      const lastMonthPaid = Number(row.last_month_paid);
+      const thisMonthPaid = Number(row.this_month_paid);
+      response.json({
+        rate: rate,
+        threshold: threshold,
+        lastMonthPaid: lastMonthPaid,
+        thisMonthPaid: thisMonthPaid,
+        qualifies: rate > 0 && lastMonthPaid >= threshold
+      });
+    } catch (error) {
+      console.error("Loyalty status failed:", error.message);
+      response.status(500).json({ error: "Unable to read the loyalty discount status" });
+    }
+  });
+
+  app.get("/api/loyalty/policy", async function (request, response) {
+    try {
+      const rowsResult = await db.query(
+        "SELECT loyalty_rate, loyalty_threshold FROM store_settings WHERE setting_id = 1");
+      const row = rowsResult[0][0] || { loyalty_rate: "2.00", loyalty_threshold: "5000.00" };
+
+      const lastResult = await db.query(
+        "SELECT a.created_at, st.full_name AS updated_by " +
+        "FROM audit_logs a LEFT JOIN staff st ON st.staff_id = a.staff_id " +
+        "WHERE a.action = 'UPDATE_LOYALTY_POLICY' ORDER BY a.log_id DESC LIMIT 1"
+      );
+      const last = lastResult[0][0] || { created_at: null, updated_by: null };
+
+      response.json({
+        rate: Number(row.loyalty_rate),
+        threshold: Number(row.loyalty_threshold),
+        updated_at: last.created_at,
+        updated_by: last.updated_by
+      });
+    } catch (error) {
+      console.error("Loyalty policy read failed:", error.message);
+      response.status(500).json({ error: "Unable to read the loyalty discount policy" });
+    }
+  });
+
+  app.put("/api/loyalty/policy", requireRole(MANAGER), async function (request, response) {
+    const body = request.body || {};
+    const rate = loyaltyAmountFrom(body.rate);
+    const threshold = loyaltyAmountFrom(body.threshold);
+
+    if (!Number.isFinite(rate) || rate < 0 || rate > 20) {
+      return response.status(400).json({
+        error: "The loyalty discount is 0 to 20 percent. Use 0 to switch it off. The default is 2."
+      });
+    }
+    if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 9999999999) {
+      return response.status(400).json({
+        error: "The amount a customer must pay in full in a month must be more than 0 pesos. The default is 5,000."
+      });
+    }
+
+    try {
+      const beforeResult = await db.query(
+        "SELECT loyalty_rate, loyalty_threshold FROM store_settings WHERE setting_id = 1");
+      const before = beforeResult[0];
+
+      const updated = await db.query(
+        "UPDATE store_settings SET loyalty_rate = ?, loyalty_threshold = ?, updated_by_staff_id = ? " +
+        "WHERE setting_id = 1",
+        [rate, threshold, getActorId(request)]
+      );
+      if (!updated[0].affectedRows) {
+        return response.status(500).json({ error: "The shop settings row is missing, so nothing was saved." });
+      }
+
+      let oldValues = null;
+      if (before[0]) {
+        oldValues = { rate: Number(before[0].loyalty_rate), threshold: Number(before[0].loyalty_threshold) };
+      }
+
+      let details = "Loyalty discount set to " + rate + "% for customers who paid " + threshold +
+        " or more in full last month";
+      if (rate === 0) {
+        details = "Loyalty discount switched off (0%)";
+      }
+      await writeAuditLog(request, "UPDATE_LOYALTY_POLICY", details,
+        { changes: fieldChanges(oldValues, { rate: rate, threshold: threshold }) });
+
+      response.json({ message: "The loyalty discount was saved.", rate: rate, threshold: threshold });
+    } catch (error) {
+      console.error("Loyalty policy failed:", error.message);
+      response.status(500).json({ error: "Unable to save the loyalty discount policy" });
+    }
+  });
+
   const CREDIT_DUE_DAYS = 30;
 
   const POLICIES = {
@@ -1090,7 +1207,9 @@ function registerManagerRoutes(app, deps) {
     "data-terms": { column: "data_terms", fallback: DEFAULT_DATA_TERMS, name: "Customer data terms",
                     action: "UPDATE_DATA_TERMS" },
     refund: { column: "refund_policy", fallback: DEFAULT_REFUND_POLICY, name: "Refund policy",
-              action: "UPDATE_REFUND_POLICY" }
+              action: "UPDATE_REFUND_POLICY" },
+    discount: { column: "discount_policy", fallback: null, name: "Discount policy",
+                action: "UPDATE_DISCOUNT_POLICY" }
   };
 
   async function policyTexts() {
@@ -1100,10 +1219,14 @@ function registerManagerRoutes(app, deps) {
     for (const kind in POLICIES) {
       const policy = POLICIES[kind];
       const saved = row[policy.column];
+      let fallback = policy.fallback;
+      if (kind === "discount") {
+        fallback = defaultDiscountPolicy(row.loyalty_rate, row.loyalty_threshold);
+      }
       if (saved && String(saved).trim() !== "") {
-        texts[kind] = { text: String(saved), isDefault: false, defaultText: policy.fallback };
+        texts[kind] = { text: String(saved), isDefault: false, defaultText: fallback };
       } else {
-        texts[kind] = { text: policy.fallback, isDefault: true, defaultText: policy.fallback };
+        texts[kind] = { text: fallback, isDefault: true, defaultText: fallback };
       }
     }
     return texts;
@@ -1170,7 +1293,8 @@ function registerManagerRoutes(app, deps) {
       },
       policies: {
         data_terms: linesOf(policies["data-terms"].text),
-        refund_policy: linesOf(policies.refund.text)
+        refund_policy: linesOf(policies.refund.text),
+        discount_policy: linesOf(policies.discount.text)
       },
       prepared_by: staff ? staff.full_name : null,
       printed_at: new Date().toISOString()
@@ -1242,6 +1366,15 @@ function registerManagerRoutes(app, deps) {
       const rowResult = await db.query("SELECT setting_id FROM store_settings WHERE setting_id = 1");
       if (rowResult[0].length === 0) {
         return response.status(409).json({ error: "The store settings are not set up yet, so there is nowhere to keep the policy. The administrator fills them in first." });
+      }
+      if (request.params.kind === "discount" && saved !== null) {
+        const figures = await db.query(
+          "SELECT loyalty_rate, loyalty_threshold FROM store_settings WHERE setting_id = 1");
+        const current = figures[0][0];
+        const currentDefault = linesOf(defaultDiscountPolicy(current.loyalty_rate, current.loyalty_threshold)).join("\n");
+        const shown = typeof (request.body || {}).shownDefault === "string"
+          ? linesOf(request.body.shownDefault).join("\n") : null;
+        if (saved === currentDefault || (shown !== null && shown !== "" && saved === shown)) saved = null;
       }
       await db.query(
         "UPDATE store_settings SET " + policy.column + " = ?, updated_at = updated_at WHERE setting_id = 1",

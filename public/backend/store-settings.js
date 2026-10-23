@@ -13,31 +13,47 @@ const DEFAULT_STORE_SETTINGS = {
   receipt_layout: null,
   credit_terms: null,
   data_terms: null,
-  refund_policy: null
+  refund_policy: null,
+  discount_policy: null
 };
 
 const DEFAULT_CREDIT_TERMS = [
-  "Every credit purchase is paid in full by its due date, shown on the receipt.",
-  "A purchase paid late is charged the late-payment penalty for every month or part of a month it stays unpaid.",
-  "The store may hold, lower or stop the customer's credit when payments are late or the limit is exceeded.",
-  "The customer keeps every receipt and payment slip as proof of purchase and payment.",
-  "The customer tells the store of any change of address or contact number.",
-  "By signing, the customer confirms these details and accepts these terms."
+  "Pay each credit purchase in full by the due date on the receipt.",
+  "A late purchase is charged the late-payment penalty for each month it stays unpaid.",
+  "Credit may be held, lowered or stopped for late payment or going over the limit.",
+  "Keep every receipt and payment slip as proof.",
+  "Tell the store of any change of address or contact number.",
+  "Signing means the customer accepts these terms."
 ].join("\n");
 
 const DEFAULT_DATA_TERMS = [
-  "The store collects the customer's name, address, contact number and purchase records only to sell, deliver, give credit and collect payment.",
-  "This information is seen only by authorized staff and is not sold or shared, except with a courier or where the law requires.",
-  "The customer may ask to see, correct or update it at any time.",
-  "Handled under the Data Privacy Act of 2012 (RA 10173)."
+  "Name, address, contact number and purchases are kept only to sell, deliver, give credit and collect payment.",
+  "Only authorized staff see them; they are not sold or shared, except with a courier or as the law requires.",
+  "The customer may ask to see or correct them at any time.",
+  "Data Privacy Act of 2012 (RA 10173)."
 ].join("\n");
 
 const DEFAULT_REFUND_POLICY = [
-  "Returns within 3 days of purchase, with the receipt.",
+  "Returns within 3 days, with the receipt.",
   "Goods must be unused, undamaged and in their original packaging.",
-  "Goods cut to size, mixed or specially ordered cannot be returned.",
-  "A refund on a credit purchase first reduces the balance owed."
+  "A refund on a credit purchase first lowers the balance owed."
 ].join("\n");
+
+function defaultDiscountPolicy(rate, threshold) {
+  const rateNumber = Number(rate);
+  if (!(rateNumber > 0)) {
+    return "No loyalty discount at the moment.";
+  }
+  const amount = "\u20B1" + Number(threshold).toLocaleString("en-PH", {
+    minimumFractionDigits: 2, maximumFractionDigits: 2
+  });
+  return [
+    "Pay " + amount + " or more in full in a month: " + rateNumber +
+      "% off sales paid in full the next month.",
+    "Refunds are taken off the amount paid.",
+    "Credit and COD purchases neither count nor get the discount."
+  ].join("\n");
+}
 
 const DEFAULT_RECEIPT_LAYOUT = {
   paperWidth: 80,
@@ -122,6 +138,7 @@ module.exports = {
   DEFAULT_CREDIT_TERMS: DEFAULT_CREDIT_TERMS,
   DEFAULT_DATA_TERMS: DEFAULT_DATA_TERMS,
   DEFAULT_REFUND_POLICY: DEFAULT_REFUND_POLICY,
+  defaultDiscountPolicy: defaultDiscountPolicy,
   DEFAULT_RECEIPT_LAYOUT: DEFAULT_RECEIPT_LAYOUT,
   receiptLayoutFrom: receiptLayoutFrom
 };

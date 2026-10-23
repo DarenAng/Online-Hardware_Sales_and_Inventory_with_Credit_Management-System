@@ -16,7 +16,7 @@ const ROLE_PAGES = {
 const PAGE_SCREENS = {
     'manager.html': ['income', 'sales', 'reports', 'stock-reports', 'reorder-alerts', 'purchase-orders',
                      'credit', 'credit-requests', 'deliveries', 'delivery-schedule', 'records',
-                     'credit-maintenance', 'data-terms', 'refund-policy', 'archives', 'account-management'],
+                     'credit-maintenance', 'loyalty-discount', 'data-terms', 'refund-policy', 'archives', 'account-management'],
     'inventory-dashboard.html': ['material-list', 'stock-adjustment', 'adjustment-history', 'reorder-points',
                                  'purchase-orders', 'returns', 'records', 'archives', 'delivery-schedule'],
     'cashier-dashboard.html': ['pos', 'deliveries', 'refunds', 'credit', 'sales-report', 'delivery-schedule'],

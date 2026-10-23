@@ -80,6 +80,6 @@ async function main() {
 main().catch(function (error) {
   console.error("Recovering the password failed:", error.message);
   console.error("Check DB_HOST, DB_PORT, DB_USER and DB_PASSWORD in .env at the project root,");
-  console.error("and that public/database/2-RUN-SECOND-stored-procedures.sql has been loaded.");
+  console.error("and that public/database/2-stored-procedures.sql has been loaded.");
   process.exitCode = 1;
 });

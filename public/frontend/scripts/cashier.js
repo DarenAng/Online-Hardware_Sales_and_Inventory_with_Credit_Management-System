@@ -1223,20 +1223,35 @@ async function clearCart() {
     renderCart();
 }
 
+function loyaltyDiscountFor(gross, rate) {
+    const centavos = Math.round(gross * 100);
+    const hundredths = Math.round(Number(rate) * 100);
+    return Math.floor((centavos * hundredths + 500000) / 1000000);
+}
+
+function loyaltyDiscountLabel() {
+    if (!selectedCustomerLoyalty) return 'Loyalty Discount';
+    return 'Loyalty Discount (' + loyaltyRateText(selectedCustomerLoyalty.rate) + ')';
+}
+
 function cartTotals() {
     const form = document.getElementById('checkout-form');
     let gross = 0;
     for (let i = 0; i < cart.length; i++) {
         gross = gross + lineSubtotal(cart[i]);
     }
-    const discount = 0;
-    const due = Math.max(gross - discount, 0);
     let tendered = 0;
     let method = 'Cash';
     if (form) {
         tendered = parseFloat(form.elements.amountPaid.value) || 0;
         method = form.elements.paymentMethod.value;
     }
+
+    let discount = 0;
+    if (selectedCustomerLoyalty && selectedCustomerLoyalty.qualifies && method !== 'Credit' && method !== 'COD') {
+        discount = loyaltyDiscountFor(gross, selectedCustomerLoyalty.rate);
+    }
+    const due = Math.max(gross - discount, 0);
 
     const onCredit = method === 'Credit';
     const onAccount = onCredit || method === 'COD';
@@ -1381,7 +1396,7 @@ function renderCartFigures() {
     if (totals) {
         let html = '<div class="total-row"><span>Subtotal</span><span>' + peso(t.gross) + '</span></div>';
         if (t.discount > 0) {
-            html += '<div class="total-row"><span>Discount</span><span>' + peso(t.discount) + '</span></div>';
+            html += '<div class="total-row"><span>' + loyaltyDiscountLabel() + '</span><span>' + peso(t.discount) + '</span></div>';
         }
         html += '<div class="total-row total-due"><span>Amount Due</span><span>' + peso(t.due) + '</span></div>';
         totals.innerHTML = html;
@@ -1389,7 +1404,12 @@ function renderCartFigures() {
 
     const payTotals = document.getElementById('pay-totals');
     if (payTotals) {
-        let html = '<div class="total-row total-due"><span>Amount Due</span><span>' + peso(t.due) + '</span></div>';
+        let html = '';
+        if (t.discount > 0) {
+            html += '<div class="total-row"><span>Subtotal</span><span>' + peso(t.gross) + '</span></div>';
+            html += '<div class="total-row"><span>' + loyaltyDiscountLabel() + '</span><span>' + peso(t.discount) + '</span></div>';
+        }
+        html += '<div class="total-row total-due"><span>Amount Due</span><span>' + peso(t.due) + '</span></div>';
 
         if (t.onCredit) {
             html += '<div class="total-row"><span>Paid now</span><span>' + peso(t.down) + '</span></div>';
@@ -1419,6 +1439,7 @@ function renderCartFigures() {
     if (proceed) proceed.disabled = cart.length === 0;
 
     renderCreditVerdict(t);
+    renderLoyaltyNote(t);
     renderSalePaymentExtras(t);
 
     const taken = methodTakenNow(t);
@@ -1535,10 +1556,46 @@ function onPaymentMethodChange(method) {
 }
 
 let selectedCustomerCredit = null;
+let selectedCustomerLoyalty = null;
+
+function renderLoyaltyNote(t) {
+    const box = document.getElementById('loyalty-note');
+    if (!box) return;
+
+    const l = selectedCustomerLoyalty;
+    if (!l || !(Number(l.rate) > 0)) {
+        box.textContent = '';
+        box.className = 'loyalty-note';
+        return;
+    }
+
+    const rate = loyaltyRateText(l.rate);
+    let text;
+    if (l.qualifies) {
+        text = rate + ' loyalty discount this month: paid ' + peso(l.lastMonthPaid) + ' last month.';
+        if (t.onAccount) {
+            text += ' It applies only to sales paid in full now, not to Credit or COD.';
+        } else if (Number(l.thisMonthPaid) >= Number(l.threshold)) {
+            text += ' Already paid enough this month to keep it next month.';
+        }
+        box.className = 'loyalty-note is-good';
+    } else {
+        const more = Number(l.threshold) - Number(l.thisMonthPaid);
+        if (more > 0) {
+            text = 'Paid ' + peso(l.thisMonthPaid) + ' this month: ' + peso(more) +
+                ' more paid in full for the ' + rate + ' discount next month.';
+        } else {
+            text = 'Paid ' + peso(l.thisMonthPaid) + ' this month: the ' + rate + ' discount starts next month.';
+        }
+        box.className = 'loyalty-note';
+    }
+    box.textContent = text;
+}
 
 async function onCustomerChange(customerId) {
     const strip = document.getElementById('credit-strip');
     selectedCustomerCredit = null;
+    selectedCustomerLoyalty = null;
 
     syncDeliveryToSaleCustomer(customerId);
 
@@ -1554,6 +1611,13 @@ async function onCustomerChange(customerId) {
         renderCreditStrip();
     } catch (error) {
         if (strip) strip.style.display = 'none';
+    }
+
+    try {
+        const loyalty = await apiGetCustomerLoyalty(customerId);
+        if (String(selectedCustomerId()) === String(customerId)) selectedCustomerLoyalty = loyalty;
+    } catch (error) {
+        if (String(selectedCustomerId()) === String(customerId)) selectedCustomerLoyalty = null;
     }
 
     renderCart();
@@ -1772,7 +1836,7 @@ async function handleCheckout(event, viaQr) {
     }
 
     const form = event.target;
-    const t = cartTotals();
+    let t = cartTotals();
     const typedName = typedCustomerName();
 
     if (QR_METHODS.indexOf(methodTakenNow(t)) !== -1) viaQr = true;
@@ -1788,6 +1852,7 @@ async function handleCheckout(event, viaQr) {
             form.elements.customerId.value = String(exact.id);
             await onCustomerChange(String(exact.id));
             renderCustomerVerdict();
+            t = cartTotals();
         } else {
             notifyWarning(
                 '"' + typedName + '" is not a customer on record. Add them under Customers Record first, ' +
@@ -1803,6 +1868,7 @@ async function handleCheckout(event, viaQr) {
     if (pendingDelivery && !customerId && pendingDelivery.customerId) {
         customerId = pendingDelivery.customerId;
         await pickCustomer(customerId);
+        t = cartTotals();
     }
 
     if (t.onAccount && !customerId) {
@@ -1814,6 +1880,16 @@ async function handleCheckout(event, viaQr) {
         if (box) box.focus();
         return;
     }
+
+    try {
+        selectedCustomerLoyalty = customerId ? await apiGetCustomerLoyalty(customerId) : null;
+    } catch (error) {
+        notifyWarning('The loyalty discount could not be checked, so the sale was not rung up. Try again.',
+            'Sale not completed');
+        return;
+    }
+    t = cartTotals();
+    renderCart();
 
     if (!t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due) {
         notifyWarning('The amount entered is less than the amount due.', 'Sale not completed');
@@ -1914,7 +1990,7 @@ async function handleCheckout(event, viaQr) {
     const data = {
         customerId: customerId,
         walkInName: null,
-        discount: t.discount,
+        expectedDiscount: t.discount,
         amountPaid: amountPaid,
         paymentMethod: t.method,
         downPaymentMethod: downPaymentMethod,
@@ -1945,6 +2021,11 @@ async function handleCheckout(event, viaQr) {
 
         if (result.referenceNote) notifyWarning(result.referenceNote, 'Reference not saved');
 
+        if (Number(result.discount) !== Number(t.discount)) {
+            notifyWarning('The loyalty discount saved on this sale is ' + peso(result.discount) + ', not the ' +
+                peso(t.discount) + ' the till showed. The invoice shows the saved figures.', 'Discount differs');
+        }
+
         cart = [];
         form.elements.amountPaid.value = '';
         if (form.elements.downPayment) form.elements.downPayment.value = '0';
@@ -1962,6 +2043,8 @@ async function handleCheckout(event, viaQr) {
             await clearCustomer();
             form.elements.paymentMethod.value = 'Cash';
             onPaymentMethodChange('Cash');
+        } else if (customerId) {
+            await onCustomerChange(String(customerId));
         }
 
         catalogLoaded = false;
@@ -4042,6 +4125,13 @@ async function openCustomerCredit(customerId, tab) {
                 escapeHtml(penaltyRateWord(c.penalty_rate)) + ' a month</span>');
         }
 
+        let loyalty = null;
+        try {
+            loyalty = await apiGetCustomerLoyalty(customerId);
+        } catch (error) {
+            loyalty = null;
+        }
+
         document.getElementById('customer-facts').innerHTML =
             detailField('Credit Limit', peso(c.credit_limit)) +
             detailField('Balance', '<span class="' + (owed > 0 ? 'cell-due' : '') + '">' +
@@ -4054,6 +4144,7 @@ async function openCustomerCredit(customerId, tab) {
             detailField('Open Sales', String(c.open_sales)) +
             penaltiesFact +
             detailField('Lifetime Purchases', peso(c.total_purchase)) +
+            detailField('Loyalty Discount', loyaltyFactHtml(loyalty)) +
             detailField('Address', c.address ? escapeHtml(c.address) : '<span class="muted">Not on file</span>');
 
         resetHistoryFilters();

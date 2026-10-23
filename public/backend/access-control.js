@@ -154,11 +154,14 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/credit\/terms\/\d+$/,              [MANAGER, CASHIER]],
   ["GET",   /^\/api\/credit\/card\/\d+$/,               [MANAGER, CASHIER]],
   ["GET",   /^\/api\/policies$/,                         [MANAGER]],
-  ["PUT",   /^\/api\/policies\/(credit|data-terms|refund)$/, [MANAGER]],
+  ["PUT",   /^\/api\/policies\/(credit|data-terms|refund|discount)$/, [MANAGER]],
   ["GET",   /^\/api\/credit\/requests$/,               [MANAGER, CASHIER]],
   ["POST",  /^\/api\/credit\/requests$/,               [MANAGER, CASHIER]],
   ["POST",  /^\/api\/credit\/requests\/\d+\/decide$/,  [MANAGER]],
   ["GET",   /^\/api\/customers\/\d+\/history$/,        [MANAGER, CASHIER]],
+  ["GET",   /^\/api\/customers\/\d+\/loyalty$/,        [MANAGER, CASHIER]],
+  ["GET",   /^\/api\/loyalty\/policy$/,                [MANAGER]],
+  ["PUT",   /^\/api\/loyalty\/policy$/,                [MANAGER]],
 
   ["POST",  /^\/api\/customers$/,                      [MANAGER, CASHIER]],
 

@@ -148,6 +148,16 @@ async function showCreditMaintenance(event) {
     await loadPolicies();
 }
 
+async function showLoyaltyMaintenance(event) {
+    showManagerPanel('panel-loyalty-maintenance', 'Loyalty Discount Maintenance', event);
+    syncLoyaltyLayout();
+    if (holdsFeature('loyalty-discount')) {
+        const loyaltyRead = await loadLoyaltyPolicy();
+        fillLoyaltyForm(loyaltyRead);
+    }
+    if (holdsFeature('discount-policy')) await loadPolicies();
+}
+
 async function showDataTerms(event) {
     showManagerPanel('panel-data-terms', 'Customer Data Terms', event);
     await loadPolicies();
@@ -1851,7 +1861,152 @@ async function savePenaltyPolicy(event) {
     }
 }
 
-const POLICY_KINDS = ['credit', 'data-terms', 'refund'];
+let loyaltyPolicy = null;
+let loyaltyPolicyRead = false;
+
+async function loadLoyaltyPolicy() {
+    try {
+        loyaltyPolicy = await apiGetLoyaltyPolicy();
+    } catch (error) {
+        return false;
+    }
+    return true;
+}
+
+function fillLoyaltyForm(policyRead) {
+    const form = document.getElementById('loyalty-form');
+    if (!form) return;
+
+    const note = document.getElementById('loyalty-read-note');
+    const saveButton = document.getElementById('loyalty-save-btn');
+    if (note) note.hidden = policyRead;
+    if (saveButton) saveButton.disabled = !policyRead;
+    form.elements.rate.disabled = !policyRead;
+    form.elements.threshold.disabled = !policyRead;
+
+    if (!policyRead) {
+        loyaltyPolicyRead = false;
+        form.elements.rate.value = '';
+        form.elements.threshold.value = '';
+        document.getElementById('loyalty-preview').hidden = true;
+        return;
+    }
+
+    form.elements.rate.value = Number(loyaltyPolicy.rate).toFixed(2);
+    form.elements.threshold.value = Number(loyaltyPolicy.threshold).toFixed(2);
+    loyaltyPolicyRead = true;
+    document.getElementById('loyalty-preview').hidden = false;
+    previewLoyaltyPolicy();
+}
+
+function previewLoyaltyPolicy() {
+    const form = document.getElementById('loyalty-form');
+    const preview = document.getElementById('loyalty-preview');
+    if (!form || !preview) return;
+
+    const rate = Number(form.elements.rate.value);
+    const threshold = Number(form.elements.threshold.value);
+    if (form.elements.rate.value.trim() === '' || !Number.isFinite(rate) || rate < 0 || rate > 20) {
+        preview.className = 'formula-preview is-stop';
+        preview.innerHTML = '<span class="formula-verdict">The discount is from 0 to 20 percent. Use 0 to switch it off.</span>';
+        return;
+    }
+    if (form.elements.threshold.value.trim() === '' || !Number.isFinite(threshold) || threshold <= 0) {
+        preview.className = 'formula-preview is-stop';
+        preview.innerHTML = '<span class="formula-verdict">The amount paid in full last month must be more than zero.</span>';
+        return;
+    }
+
+    preview.className = 'formula-preview is-dynamic';
+    if (rate === 0) {
+        preview.innerHTML = '<span class="formula-verdict">The loyalty discount is switched off. No sale gets a discount.</span>';
+        return;
+    }
+    preview.innerHTML =
+        '<span class="formula-verdict">Customers who paid ' + peso(threshold) + ' or more in full last month get ' +
+            loyaltyRateText(rate) + ' off every sale paid in full this month. ' +
+            'Credit and COD sales neither count nor get the discount.</span>';
+}
+
+async function saveLoyaltyPolicy(event) {
+    event.preventDefault();
+    const form = event.target;
+    const rate = Number(form.elements.rate.value);
+    const threshold = Number(form.elements.threshold.value);
+    let figuresChanged = true;
+    if (loyaltyPolicy) {
+        figuresChanged = rate !== Number(loyaltyPolicy.rate) || threshold !== Number(loyaltyPolicy.threshold);
+    }
+
+    if (form.elements.rate.value.trim() === '' || !Number.isFinite(rate) || rate < 0 || rate > 20) {
+        notifyWarning('The loyalty discount is 0 to 20 percent. Use 0 to switch it off.', 'Not saved');
+        return;
+    }
+    if (form.elements.threshold.value.trim() === '' || !Number.isFinite(threshold) || threshold <= 0) {
+        notifyWarning('The amount paid in full last month must be more than zero.', 'Not saved');
+        return;
+    }
+
+    try {
+        const response = await apiSaveLoyaltyPolicy(rate, threshold);
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not saved');
+            return;
+        }
+
+        notifySuccess(result.message, 'Loyalty discount saved');
+        const policyRead = await loadLoyaltyPolicy();
+        fillLoyaltyForm(policyRead);
+        const discountPolicy = await refreshDiscountPolicyText();
+        if (figuresChanged && discountPolicy && !discountPolicy.isDefault) {
+            notifyWarning('The Discount Policy is the store\'s own wording, so it may still state the old figures. ' +
+                'Check it below.', 'Check the Discount Policy');
+        }
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+async function refreshDiscountPolicyText() {
+    const form = document.getElementById('policy-form-discount');
+    if (!form || !holdsFeature('discount-policy')) return null;
+
+    let fresh;
+    try {
+        fresh = await apiGetPolicies();
+    } catch (error) {
+        return null;
+    }
+
+    let shown = null;
+    if (policyData && policyData.policies.discount) shown = policyData.policies.discount;
+
+    const typedByHand = shown !== null && form.elements.text.value !== shown.text;
+    const showingDefault = shown !== null && form.elements.text.value === shown.defaultText;
+
+    if (policyData) {
+        policyData.policies.discount = fresh.policies.discount;
+    } else {
+        policyData = fresh;
+    }
+
+    if (showingDefault) {
+        form.elements.text.value = fresh.policies.discount.defaultText;
+    } else if (!typedByHand) {
+        form.elements.text.value = fresh.policies.discount.text;
+    }
+    previewCardBack();
+    return fresh.policies.discount;
+}
+
+function syncLoyaltyLayout() {
+    const layout = document.getElementById('loyalty-layout');
+    if (layout) layout.classList.toggle('is-single', !holdsFeature('discount-policy'));
+}
+
+const POLICY_KINDS = ['credit', 'data-terms', 'refund', 'discount'];
 let policyData = null;
 
 async function loadPolicies() {
@@ -1898,11 +2053,11 @@ function previewCardBack() {
         const fit = document.querySelector('[data-card-fit="' + kind + '"]');
         if (fit && size !== null) {
             const tooSmall = size < CARD_SMALLEST_READABLE_PT;
-            fit.hidden = false;
+            fit.hidden = !tooSmall;
             fit.classList.toggle('is-warn', tooSmall);
             fit.textContent = tooSmall
                 ? 'The policies print at ' + size + ' pt on the card, too small to read. Shorten them.'
-                : 'The policies print at ' + size + ' pt on the card. The dashed box is the one on this page.';
+                : '';
         }
     }
 }
@@ -1917,6 +2072,16 @@ function policyChangesUnsaved() {
         const typed = Number(rateForm.elements.penaltyRate.value);
         if (rateForm.elements.penaltyRate.value.trim() === '' || typed !== Number(penaltyPolicy.penalty_rate)) {
             return 'the late-payment rate';
+        }
+    }
+    const loyaltyForm = document.getElementById('loyalty-form');
+    if (loyaltyForm && loyaltyPolicyRead && loyaltyPolicy && !loyaltyForm.elements.rate.disabled) {
+        const typedRate = loyaltyForm.elements.rate.value.trim();
+        const typedThreshold = loyaltyForm.elements.threshold.value.trim();
+        if (typedRate === '' || typedThreshold === '' ||
+            Number(typedRate) !== Number(loyaltyPolicy.rate) ||
+            Number(typedThreshold) !== Number(loyaltyPolicy.threshold)) {
+            return 'the loyalty discount';
         }
     }
     if (policyData) {
@@ -1934,6 +2099,7 @@ function policyChangesUnsaved() {
 
 function discardPolicyChanges() {
     if (penaltyRateRead) fillPenaltyForm(true);
+    if (loyaltyPolicyRead) fillLoyaltyForm(true);
     if (policyData) {
         for (let i = 0; i < POLICY_KINDS.length; i++) {
             const form = document.getElementById('policy-form-' + POLICY_KINDS[i]);
@@ -2000,7 +2166,9 @@ async function savePolicyText(event, kind) {
     }
 
     try {
-        const response = await apiSavePolicy(kind, form.elements.text.value);
+        let shownDefault = null;
+        if (policyData && policyData.policies[kind]) shownDefault = policyData.policies[kind].defaultText;
+        const response = await apiSavePolicy(kind, form.elements.text.value, shownDefault);
         const result = await response.json();
 
         if (!response.ok) {
@@ -2034,6 +2202,13 @@ async function openCreditAccount(customerId) {
             (c.phone || 'No phone on file');
         document.getElementById('credit-avatar').textContent = initialsOf(c.customer_name);
 
+        let loyalty = null;
+        try {
+            loyalty = await apiGetCustomerLoyalty(customerId);
+        } catch (error) {
+            loyalty = null;
+        }
+
         document.getElementById('credit-facts').innerHTML =
             detailField('Credit Limit', peso(c.credit_limit)) +
             detailField('Balance', '<span class="' + (owed > 0 ? 'cell-due' : '') + '">' +
@@ -2053,6 +2228,7 @@ async function openCreditAccount(customerId) {
                     ? ' <span class="muted">the shop\'s rate</span>'
                     : ' <span class="muted">this account\'s own</span>')) +
             detailField('Lifetime Purchases', peso(c.total_purchase)) +
+            detailField('Loyalty Discount', loyaltyFactHtml(loyalty)) +
             detailField('Last Purchase', c.last_purchase
                 ? escapeHtml(String(c.last_purchase).slice(0, 16))
                 : '<span class="muted">Never</span>') +
@@ -3816,6 +3992,7 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
                 showReports();
             },
             onApply: function () {
+                syncLoyaltyLayout();
                 syncViewNavs();
                 loadPriceBanner();
                 placePriceAlert();

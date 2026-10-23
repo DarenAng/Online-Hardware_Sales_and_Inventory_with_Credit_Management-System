@@ -298,12 +298,16 @@ function apiGetPolicies() {
     return getJson('/api/policies');
 }
 
-function apiSavePolicy(kind, text) {
-    return sendJson('/api/policies/' + kind, 'PUT', { text: text });
+function apiSavePolicy(kind, text, shownDefault) {
+    return sendJson('/api/policies/' + kind, 'PUT', { text: text, shownDefault: shownDefault });
 }
 
 function apiGetCustomerHistory(customerId) {
     return getJson('/api/customers/' + customerId + '/history');
+}
+
+function apiGetCustomerLoyalty(customerId) {
+    return getJson('/api/customers/' + customerId + '/loyalty');
 }
 
 function apiGetReturns() {

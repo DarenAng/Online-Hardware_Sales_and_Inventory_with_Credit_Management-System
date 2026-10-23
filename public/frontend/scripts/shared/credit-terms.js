@@ -91,7 +91,8 @@ function creditTermsPage(data) {
 const CARD_POLICY_TITLES = {
     credit: 'Credit Policy',
     'data-terms': 'Customer Data Terms',
-    refund: 'Refund Policy'
+    refund: 'Refund Policy',
+    discount: 'Discount Policy'
 };
 
 function cardPolicyLines(text) {
@@ -122,7 +123,7 @@ function cardStoreContact(store) {
 
 function customerCardBackHtml(store, policies, editing) {
     let body = '';
-    const kinds = ['credit', 'data-terms', 'refund'];
+    const kinds = ['credit', 'data-terms', 'refund', 'discount'];
     for (let k = 0; k < kinds.length; k++) {
         const lines = policies[kinds[k]] || [];
         let items = '';
@@ -161,7 +162,6 @@ function customerCardFrontHtml(data) {
             '<div class="cc-front-facts">' +
                 '<div><span>Customer No.</span><strong>' + String(c.customer_id).padStart(6, '0') + '</strong></div>' +
                 '<div><span>Contact</span><strong>' + (c.phone ? escapeHtml(c.phone) : 'Not set') + '</strong></div>' +
-                '<div><span>Credit Limit</span><strong>' + peso(c.credit_limit) + '</strong></div>' +
             '</div>' +
         '</div>' +
         '<div class="cc-front-foot">Present this card with every credit purchase and payment.</div>' +
@@ -186,7 +186,8 @@ function customerCardSheet(data) {
     const policies = {
         credit: data.terms.lines,
         'data-terms': data.policies ? data.policies.data_terms : [],
-        refund: data.policies ? data.policies.refund_policy : []
+        refund: data.policies ? data.policies.refund_policy : [],
+        discount: data.policies ? data.policies.discount_policy : []
     };
     const measure = document.createElement('div');
     measure.className = 'cc-measure';

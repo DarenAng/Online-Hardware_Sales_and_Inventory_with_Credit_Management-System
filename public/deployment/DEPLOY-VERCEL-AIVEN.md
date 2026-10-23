@@ -29,7 +29,7 @@ runs between requests. So:
 
 The code that makes this work: `vercel.json`, `api/index.js`,
 `public/deployment/vercel-build.js`, and the server tables described in
-`public/database/1-RUN-FIRST-database.sql`.
+`public/database/1-database.sql`.
 
 ## Part 1: the database on Aiven
 
@@ -67,7 +67,7 @@ The code that makes this work: `vercel.json`, `api/index.js`,
    **B. The demo data**, as on a new PC:
 
    ```bash
-   node public/deployment/load-sql.js --env .env.aiven public/database/1-RUN-FIRST-database.sql public/database/2-RUN-SECOND-stored-procedures.sql --yes
+   node public/deployment/load-sql.js --env .env.aiven public/database/1-database.sql public/database/2-stored-procedures.sql --yes
    ```
 
    (`--yes` is needed because file 1 starts with `DROP DATABASE hardware_db`.)
@@ -136,7 +136,7 @@ a running deployment keeps the values it started with.
 | Symptom | Where to look |
 |---|---|
 | Every page says the session ended, or sign-in fails with a 500 | Vercel → Logs. `DATABASE CONNECTION FAILED` means a wrong `DB_*` value or `DB_SSL_CA`. `self-signed certificate` means `DB_SSL_CA` is missing or cut short. |
-| "This database has N of 37 stored procedures" | Load file 2: `node public/deployment/load-sql.js --env .env.aiven public/database/2-RUN-SECOND-stored-procedures.sql` |
+| "This database has N of 37 stored procedures" | Load file 2: `node public/deployment/load-sql.js --env .env.aiven public/database/2-stored-procedures.sql` |
 | Dates or "today's sales" are off by 8 hours | `HARDWARE_TIME_ZONE` was changed; remove it, or set `Asia/Manila` |
 | The daily job shows 401 in the logs | `CRON_SECRET` was added after the deploy: redeploy |
 | `/backend/...` or `/database/...` opens in a browser | It should not: those return 404. If they open, the Output Directory was changed from `vercel-static` in the Vercel settings. |

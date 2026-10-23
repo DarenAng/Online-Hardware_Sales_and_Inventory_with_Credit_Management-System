@@ -4,6 +4,7 @@ DELIMITER //
 
 DROP VIEW IF EXISTS vw_customer_credit //
 DROP VIEW IF EXISTS vw_customer_credit_facts //
+DROP VIEW IF EXISTS vw_customer_loyalty //
 DROP VIEW IF EXISTS vw_archives //
 
 CREATE VIEW vw_customer_credit_facts AS
@@ -114,6 +115,30 @@ SELECT
     END AS standing_reason
 
 FROM vw_customer_credit_facts f //
+
+CREATE VIEW vw_customer_loyalty AS
+SELECT
+    c.customer_id,
+
+    (SELECT COALESCE(SUM(s.final_amount - s.refunded_amount), 0.00)
+     FROM sales s
+     WHERE s.customer_id = c.customer_id
+       AND s.is_archived = FALSE
+       AND s.payment_method NOT IN ('Credit', 'COD')
+       AND s.payment_status = 'Paid'
+       AND s.sale_date >= DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-01')
+       AND s.sale_date <  DATE_FORMAT(CURDATE(), '%Y-%m-01')) AS last_month_paid,
+
+    (SELECT COALESCE(SUM(s.final_amount - s.refunded_amount), 0.00)
+     FROM sales s
+     WHERE s.customer_id = c.customer_id
+       AND s.is_archived = FALSE
+       AND s.payment_method NOT IN ('Credit', 'COD')
+       AND s.payment_status = 'Paid'
+       AND s.sale_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+       AND s.sale_date <  DATE_FORMAT(CURDATE() + INTERVAL 1 MONTH, '%Y-%m-01')) AS this_month_paid
+
+FROM customers c //
 
 CREATE VIEW vw_archives AS
 SELECT 'Staff' AS module, s.staff_id AS record_id,
@@ -548,7 +573,7 @@ CREATE PROCEDURE sp_create_sale_transaction (
     IN p_customer_id INT,
     IN p_walk_in_name VARCHAR(150),
     IN p_cashier_staff_id INT,
-    IN p_discount DECIMAL(10,2),
+    IN p_expected_discount DECIMAL(10,2),
     IN p_amount_paid DECIMAL(12,2),
     IN p_payment_method VARCHAR(30),
     IN p_items_json JSON,
@@ -578,6 +603,11 @@ PROC_BODY: BEGIN
     DECLARE v_amount_paid DECIMAL(12,2) DEFAULT 0.00;
     DECLARE v_calculated_total DECIMAL(12,2) DEFAULT 0.00;
     DECLARE v_final_amount DECIMAL(12,2) DEFAULT 0.00;
+
+    DECLARE v_loyalty_rate DECIMAL(5,2) DEFAULT 0.00;
+    DECLARE v_loyalty_threshold DECIMAL(12,2) DEFAULT 5000.00;
+    DECLARE v_loyalty_paid DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_loyalty_on BOOLEAN DEFAULT FALSE;
 
     DECLARE v_credit_limit DECIMAL(12,2) DEFAULT 0.00;
     DECLARE v_current_credit DECIMAL(12,2) DEFAULT 0.00;
@@ -616,19 +646,12 @@ PROC_BODY: BEGIN
     END;
 
     SET p_sale_id = NULL;
-    SET v_discount = IFNULL(p_discount, 0.00);
     SET v_amount_paid = IFNULL(p_amount_paid, 0.00);
     SET v_item_count = JSON_LENGTH(p_items_json);
 
     IF v_item_count IS NULL OR v_item_count = 0 THEN
         SET p_status_code = 400;
         SET p_message = 'Sale cannot be processed without line items.';
-        LEAVE PROC_BODY;
-    END IF;
-
-    IF v_discount < 0 THEN
-        SET p_status_code = 400;
-        SET p_message = 'Discount cannot be negative.';
         LEAVE PROC_BODY;
     END IF;
 
@@ -646,6 +669,28 @@ PROC_BODY: BEGIN
         SET v_walk_in_name = NULLIF(TRIM(IFNULL(p_walk_in_name, '')), '');
     ELSE
         SET v_walk_in_name = NULL;
+    END IF;
+
+    SET v_loyalty_on = FALSE;
+    IF p_customer_id IS NOT NULL AND p_payment_method NOT IN ('Credit', 'COD') THEN
+        SELECT loyalty_rate, loyalty_threshold
+        INTO v_loyalty_rate, v_loyalty_threshold
+        FROM store_settings
+        WHERE setting_id = 1;
+
+        IF v_loyalty_rate > 0 THEN
+            SELECT COALESCE(SUM(s.final_amount - s.refunded_amount), 0.00)
+            INTO v_loyalty_paid
+            FROM sales s
+            WHERE s.customer_id = p_customer_id
+              AND s.is_archived = FALSE
+              AND s.payment_method NOT IN ('Credit', 'COD')
+              AND s.payment_status = 'Paid'
+              AND s.sale_date >= DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-01')
+              AND s.sale_date <  DATE_FORMAT(CURDATE(), '%Y-%m-01');
+
+            SET v_loyalty_on = (v_loyalty_paid >= v_loyalty_threshold);
+        END IF;
     END IF;
 
     DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
@@ -725,6 +770,20 @@ PROC_BODY: BEGIN
         SET v_calculated_total = v_calculated_total + ROUND(v_unit_price * v_quantity, 2);
         SET v_i = v_i + 1;
     END WHILE;
+
+    SET v_discount = 0.00;
+    IF v_loyalty_on THEN
+        SET v_discount = ROUND(v_calculated_total * v_loyalty_rate / 100, 0);
+    END IF;
+
+    IF p_expected_discount IS NOT NULL AND p_expected_discount <> v_discount THEN
+        ROLLBACK;
+        DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
+        SET p_status_code = 409;
+        SET p_message = CONCAT('The loyalty discount changed to ', CHAR(0xE282B1 USING utf8mb4),
+                               FORMAT(v_discount, 2), '. Check the amount and try again.');
+        LEAVE PROC_BODY;
+    END IF;
 
     SELECT COUNT(*) INTO v_stock
     FROM inventory

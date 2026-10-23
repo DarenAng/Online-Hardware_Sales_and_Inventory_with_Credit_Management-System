@@ -321,6 +321,8 @@ CREATE TABLE store_settings (
     vat_rate DECIMAL(5,2) NOT NULL DEFAULT 12.00,
     invoice_note VARCHAR(255) NULL,
     penalty_rate DECIMAL(5,2) NOT NULL DEFAULT 3.00,
+    loyalty_rate DECIMAL(5,2) NOT NULL DEFAULT 2.00,
+    loyalty_threshold DECIMAL(12,2) NOT NULL DEFAULT 5000.00,
     bank_name VARCHAR(100) NULL,
     bank_account_name VARCHAR(150) NULL,
     bank_account_number VARCHAR(50) NULL,
@@ -328,11 +330,13 @@ CREATE TABLE store_settings (
     credit_terms TEXT NULL,
     data_terms TEXT NULL,
     refund_policy TEXT NULL,
+    discount_policy TEXT NULL,
     updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     updated_by_staff_id INT NULL,
     CONSTRAINT chk_store_settings_single_row CHECK (setting_id = 1),
     CONSTRAINT chk_store_settings_rate CHECK (vat_rate >= 0 AND vat_rate <= 100),
-    CONSTRAINT chk_store_settings_penalty CHECK (penalty_rate >= 1 AND penalty_rate <= 3)
+    CONSTRAINT chk_store_settings_penalty CHECK (penalty_rate >= 1 AND penalty_rate <= 3),
+    CONSTRAINT chk_store_settings_loyalty CHECK (loyalty_rate >= 0 AND loyalty_rate <= 20 AND loyalty_threshold > 0)
 );
 
 CREATE TABLE sales (

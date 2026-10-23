@@ -31,14 +31,14 @@ Open MySQL Workbench, or a terminal with the `mysql` command, and run these two
 files in order:
 
 ```
-public/database/1-RUN-FIRST-database.sql
-public/database/2-RUN-SECOND-stored-procedures.sql
+public/database/1-database.sql
+public/database/2-stored-procedures.sql
 ```
 
-The names give the order. `1-RUN-FIRST-database.sql` drops and rebuilds
+The names give the order. `1-database.sql` drops and rebuilds
 `hardware_db`, creates the 35 tables, loads the demo data, and then six months
 of mock trading on top of it (see *Mock data* below).
-`2-RUN-SECOND-stored-procedures.sql` loads the 3 views and the 37 stored
+`2-stored-procedures.sql` loads the 4 views and the 37 stored
 procedures; the tables have to exist before it will run.
 
 Run them in MySQL Workbench or the `mysql` command line. Those two honour the
@@ -48,8 +48,8 @@ load.
 From a terminal it looks like this:
 
 ```
-mysql -u root -p < public/database/1-RUN-FIRST-database.sql
-mysql -u root -p < public/database/2-RUN-SECOND-stored-procedures.sql
+mysql -u root -p < public/database/1-database.sql
+mysql -u root -p < public/database/2-stored-procedures.sql
 ```
 
 That is the whole of it. There is no third file and no upgrade step.
@@ -105,7 +105,7 @@ update, restart `npm start` and redeploy Vercel at the same time.
 
 Earlier versions of the project shipped `upgrade.sql` through `upgrade_v8.sql`
 and `fix_patch.sql` for stepping an existing database forward one version at a
-time. Every change they made is now inside `1-RUN-FIRST-database.sql`, so they
+time. Every change they made is now inside `1-database.sql`, so they
 did nothing on a machine that ran the schema fresh. They have been removed; git
 history still has them.
 
@@ -209,7 +209,7 @@ Server running at http://localhost:3000
 ```
 
 A warning about missing procedures means step 3 did not finish. Run
-`2-RUN-SECOND-stored-procedures.sql` again in Workbench or the `mysql` CLI.
+`2-stored-procedures.sql` again in Workbench or the `mysql` CLI.
 
 ## Demo logins
 
@@ -229,7 +229,7 @@ and pick a new password: at least 8 characters with an uppercase letter, a lower
 ### Mock data
 
 The demo data above is a handful of rows so every screen has something to
-show. Section 8 of `1-RUN-FIRST-database.sql` then loads six months of
+show. Section 8 of `1-database.sql` then loads six months of
 trading for a hardware shop in Nasugbu, Batangas, so the system can be tested
 and evaluated against something that looks like a shop rather than against
 tables with three rows in them: twenty-six more customers with credit accounts in every standing, four more
@@ -1012,8 +1012,8 @@ written to at all. Every form answers with its own failure — *Unable to create
 the account*, *Unable to complete the sale* — and every one of those names the
 wrong cause. The form is fine.
 
-It happens for one ordinary reason: **`1-RUN-FIRST-database.sql` was run and
-`2-RUN-SECOND-stored-procedures.sql` was not.** File 1 rebuilds the tables and
+It happens for one ordinary reason: **`1-database.sql` was run and
+`2-stored-procedures.sql` was not.** File 1 rebuilds the tables and
 the demo data. The procedures only exist because of file 2. Anybody resetting
 their database has done exactly half the job at that point, and the missing half
 is invisible.
@@ -1024,7 +1024,7 @@ Three things now make that state announce itself:
   warning line it used to print, which scrolled off the top of the terminal
   twenty requests before anybody went looking.
 - **Writes are refused with the actual fix.** A `503` naming
-  `2-RUN-SECOND-stored-procedures.sql`, instead of each form blaming itself.
+  `2-stored-procedures.sql`, instead of each form blaming itself.
   Reading still works, so the screens stay usable, and signing in still works,
   because locking somebody out of the screen that explains the problem is the
   wrong way round. The **Backup & Recovery** screen leads with it in red.
@@ -1541,28 +1541,34 @@ either; the server refuses the route to anyone but a manager.
 
 ### Policy Maintenance and the customer card
 
-**Policy Maintenance** in the manager's menu holds three pages:
+**Policy Maintenance** in the manager's menu holds four pages:
 
 - **Credit Maintenance**: the late-payment rate and the **Credit Policy**,
   printed on the credit terms page and on the back of the customer card.
+- **Loyalty Discount Maintenance**: the loyalty discount's percent and the
+  amount a customer must pay in full in a month to earn it, and the **Discount
+  Policy** printed on the card. Until the manager writes their own wording, the
+  Discount Policy is made from the current percent and amount, so it follows
+  them when they change; a policy the manager has written is kept as typed, and
+  saving the figures warns that it may still state the old ones.
 - **Customer Data Terms**: how the store collects, keeps and uses a
   customer's personal data (Data Privacy Act of 2012).
 - **Refund Policy**: the store's refund rules.
 
 Each policy is one term to a line (up to 20), with *Use Default*
 to put the standard text back; an emptied box saved does the same. They are
-kept in `store_settings.credit_terms`, `data_terms` and `refund_policy` (the
-last two are added on the next `npm start`) and read and saved through
+kept in `store_settings.credit_terms`, `data_terms`, `refund_policy` and
+`discount_policy` (the last three are added on the next `npm start`) and read and saved through
 `GET /api/policies` and `PUT /api/policies/:kind`. Each page is its own switch
-in Access Control (`credit-maintenance` with `credit-terms-text`, `data-terms`,
-`refund-policy`), held by managers by default.
+in Access Control (`credit-maintenance` with `credit-terms-text`, `loyalty-discount`
+with `discount-policy`, `data-terms`, `refund-policy`), held by managers by default.
 
 Beside each page is a live preview of **the back of the customer card** with
-all three policies on it. The text shrinks to fit the card, and the preview
+all four policies on it. The text shrinks to fit the card, and the preview
 warns when it gets too small to read (under 4.5 pt), so the policies can be
 shortened. **Print Customer Card** prints the physical card at true size
 (85.6 x 54 mm, a bank card's size): the front (the store, the customer, their
-number, contact and credit limit) and the back side by side, to cut out, fold
+number and contact) and the back side by side, to cut out, fold
 and laminate, followed by the credit terms page.
 
 ## Returns: what happened, and where the goods went
@@ -1840,8 +1846,8 @@ public/
 
   database/
     0-READ-ME-FIRST.md                    how to run the SQL files
-    1-RUN-FIRST-database.sql              the tables and the demo data
-    2-RUN-SECOND-stored-procedures.sql    the views and stored procedures
+    1-database.sql              the tables and the demo data
+    2-stored-procedures.sql    the views and stored procedures
     3-, 4-, 5-...                         upgrade files for a database that already holds data
 
   deployment/

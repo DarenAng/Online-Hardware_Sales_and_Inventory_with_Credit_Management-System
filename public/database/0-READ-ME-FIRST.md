@@ -4,8 +4,8 @@ Two files to set up, run in the order the names give, and three upgrade files.
 
 | File | What it is | When you run it |
 |---|---|---|
-| `1-RUN-FIRST-database.sql` | The whole schema: 36 tables (6 of them the server's own: sign-ins, live updates, stored backups), the demo data, and six months of mock trading | Setting up a new machine, or resetting one back to the demo and mock data |
-| `2-RUN-SECOND-stored-procedures.sql` | The 3 views and the 37 stored procedures the app uses | Straight after file 1, and again any time a view or a procedure changes |
+| `1-database.sql` | The whole schema: 36 tables (6 of them the server's own: sign-ins, live updates, stored backups), the demo data, and six months of mock trading | Setting up a new machine, or resetting one back to the demo and mock data |
+| `2-stored-procedures.sql` | The 4 views and the 37 stored procedures the app uses | Straight after file 1, and again any time a view or a procedure changes |
 | `3-ADD-qr-payments.sql` | The `qr_payments` table (GCash, Maya and bank transfers), for a database made before QR payments; the server adds the bank columns and the `payment_details` table to an older database when it starts | Once, on a database that already holds real data; then file 2 (or restart the server) |
 | `4-MIGRATION-refunds-lower-balance.sql` | `sales.refunded_amount`, and the procedures and credit views that use it, so a refund comes off what the customer owes | Once, on a database that already holds real data (safe to repeat); a fresh file 1 + file 2 already has it |
 | `5-MIGRATION-missing-delivery-reports.sql` | The `Missing` report type and `returned_items.po_id`, so the clerk can report goods missing from a supplier's delivery | Once, on a database that already holds real data (safe to repeat), then file 2; the server also does it when it starts |
@@ -13,9 +13,9 @@ Two files to set up, run in the order the names give, and three upgrade files.
 ## In MySQL Workbench
 
 1. Open Workbench and connect to your local MySQL server.
-2. **File → Open SQL Script…**, pick `1-RUN-FIRST-database.sql`, click the
+2. **File → Open SQL Script…**, pick `1-database.sql`, click the
    lightning bolt to run it.
-3. Do the same with `2-RUN-SECOND-stored-procedures.sql`.
+3. Do the same with `2-stored-procedures.sql`.
 
 That is the whole setup. Then `npm install` and `npm start` in the project
 root.
@@ -23,8 +23,8 @@ root.
 ## On the command line
 
 ```bash
-mysql -u root -p < public/database/1-RUN-FIRST-database.sql
-mysql -u root -p < public/database/2-RUN-SECOND-stored-procedures.sql
+mysql -u root -p < public/database/1-database.sql
+mysql -u root -p < public/database/2-stored-procedures.sql
 ```
 
 ## Before you run file 1
@@ -51,7 +51,7 @@ Earlier versions of the project shipped `upgrade.sql` through
 move a database that already held real data from one version to the next,
 one step at a time.
 
-Every change they made is now inside `1-RUN-FIRST-database.sql`, so on any
+Every change they made is now inside `1-database.sql`, so on any
 machine that runs the schema fresh they did nothing at all: the columns,
 views and tables they added were already there. They have been removed. Git
 history still has them if an old database ever needs stepping forward.

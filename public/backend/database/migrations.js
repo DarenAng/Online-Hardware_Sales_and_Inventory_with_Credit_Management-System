@@ -113,7 +113,7 @@ async function migrateMiddleNameColumn() {
   );
 
   console.log("Upgraded staff.middle_initial to staff.middle_name. " +
-    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+    "Re-run public/database/2-stored-procedures.sql so the procedures match.");
 }
 
 async function migratePhoneNumbers() {
@@ -186,7 +186,7 @@ async function migrateMeasuredQuantities() {
 
   if (widened > 0) {
     console.log("Widened " + widened + " quantity column(s) to take fractions (kilos, metres). " +
-      "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures take them too.");
+      "Re-run public/database/2-stored-procedures.sql so the procedures take them too.");
   }
 }
 
@@ -289,7 +289,7 @@ async function migrateSellingUnits() {
 
   if (created || widened) {
     console.log("Added selling units (product_units, sale_items.sold_unit). " +
-      "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the sale procedure takes them.");
+      "Re-run public/database/2-stored-procedures.sql so the sale procedure takes them.");
   }
 }
 
@@ -341,7 +341,7 @@ async function migratePurchaseOrderApproval() {
   }
   console.log("Added the purchase-order approval columns (purchase_orders.raised_by_staff_id, " +
     "confirmed_by_staff_id, confirmed_at, decision_note, discount). " +
-    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+    "Re-run public/database/2-stored-procedures.sql so the procedures match.");
 }
 
 async function migratePackSizes() {
@@ -379,7 +379,7 @@ async function migratePackSizes() {
     await db.query("ALTER TABLE " + item[0] + " ADD COLUMN " + item[1] + " " + item[2]);
   }
   console.log("Added " + missing.length + " pack column(s) to products and purchase_order_items. " +
-    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+    "Re-run public/database/2-stored-procedures.sql so the procedures match.");
 }
 
 async function migrateLatePenalties() {
@@ -434,7 +434,7 @@ async function migrateLatePenalties() {
   }
   console.log("Added the late-payment penalty columns (store_settings.penalty_rate, " +
     "customer_credits.penalty_rate, sales.penalty_rate, penalty_months, penalty_amount, penalty_applied_at, amount_due). " +
-    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the views and procedures match.");
+    "Re-run public/database/2-stored-procedures.sql so the views and procedures match.");
 }
 
 async function migrateRefundedAmount() {
@@ -668,7 +668,7 @@ async function migrateProprietorName() {
 
   await db.query("ALTER TABLE store_settings ADD COLUMN proprietor VARCHAR(150) NULL AFTER store_name");
   console.log("Added store_settings.proprietor for the invoice head. " +
-    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+    "Re-run public/database/2-stored-procedures.sql so the procedures match.");
 }
 
 async function migrateReturnInspection() {
@@ -701,7 +701,7 @@ async function migrateReturnInspection() {
   }
   console.log("Added the return-inspection columns (returned_items.inspected_by_staff_id, inspected_at, " +
     "inspection_note; disposition may now be empty until the clerk inspects). " +
-    "Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+    "Re-run public/database/2-stored-procedures.sql so the procedures match.");
 }
 
 async function migrateMissingReports() {
@@ -728,7 +728,7 @@ async function migrateMissingReports() {
         "         ADD FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE RESTRICT ON UPDATE CASCADE");
   }
   console.log("Added the Missing report type and returned_items.po_id: the clerk can now report goods " +
-    "missing from a delivery. Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+    "missing from a delivery. Re-run public/database/2-stored-procedures.sql so the procedures match.");
 }
 
 async function migrateBankDetails() {
@@ -764,7 +764,7 @@ async function migrateBankDetails() {
     await db.query("ALTER TABLE store_settings ADD COLUMN " + item[0] + " " + item[1]);
   }
   console.log("Added the bank transfer details (store_settings.bank_name, bank_account_name, " +
-    "bank_account_number). Re-run public/database/2-RUN-SECOND-stored-procedures.sql so the procedures match.");
+    "bank_account_number). Re-run public/database/2-stored-procedures.sql so the procedures match.");
 }
 
 async function migrateReceiptLayout() {
@@ -1040,11 +1040,51 @@ async function migratePaymentDetails() {
   console.log("Added the payment_details table: the bank and account behind a cheque or a bank transfer.");
 }
 
+async function migrateLoyaltySettings() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.length === 0) return;
+
+  const wanted = [
+    ["loyalty_rate", "DECIMAL(5,2) NOT NULL DEFAULT 2.00 AFTER penalty_rate"],
+    ["loyalty_threshold", "DECIMAL(12,2) NOT NULL DEFAULT 5000.00 AFTER loyalty_rate"]
+  ];
+  let added = 0;
+  for (let i = 0; i < wanted.length; i++) {
+    if (names.indexOf(wanted[i][0]) !== -1) continue;
+    await db.query("ALTER TABLE store_settings ADD COLUMN " + wanted[i][0] + " " + wanted[i][1]);
+    added++;
+  }
+  if (added > 0) {
+    console.log("Added the monthly loyalty discount settings (store_settings.loyalty_rate, loyalty_threshold).");
+  }
+}
+
+async function migrateDiscountPolicy() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.length === 0) return;
+  if (names.indexOf("discount_policy") !== -1) return;
+
+  await db.query("ALTER TABLE store_settings ADD COLUMN discount_policy TEXT NULL");
+  console.log("Added store_settings.discount_policy for the discount policy printed on the customer card.");
+}
+
 const CHECK_RULES = [
   ["inventory", "chk_inventory_stock_not_negative", "quantity_in_stock >= 0"],
   ["sales", "chk_sales_discount_not_negative", "discount >= 0"],
   ["sales", "chk_sales_amount_paid_not_negative", "amount_paid >= 0"],
-  ["returned_items", "chk_returned_items_refund_not_negative", "refund_amount >= 0"]
+  ["returned_items", "chk_returned_items_refund_not_negative", "refund_amount >= 0"],
+  ["store_settings", "chk_store_settings_loyalty",
+   "loyalty_rate >= 0 AND loyalty_rate <= 20 AND loyalty_threshold > 0"]
 ];
 
 async function migrateCheckConstraints() {
@@ -1182,7 +1222,7 @@ function forgetProcedureCount() {
   procedureCheckAt = 0;
 }
 
-const PROCEDURES_FILE = path.join(__dirname, "..", "..", "database", "2-RUN-SECOND-stored-procedures.sql");
+const PROCEDURES_FILE = path.join(__dirname, "..", "..", "database", "2-stored-procedures.sql");
 
 async function routinesAreOld() {
   const newestWords = [
@@ -1199,7 +1239,7 @@ async function routinesAreOld() {
     ["sp_create_sale_transaction", "p_pay_details"],
     ["sp_record_credit_payment", "p_pay_details"],
     ["sp_create_qr_payment", "p_bank_code"],
-    ["sp_create_sale_transaction", "Discount cannot be negative"],
+    ["sp_create_sale_transaction", "p_expected_discount"],
     ["sp_create_sale_transaction", "has no price yet"],
     ["sp_adjust_stock", "Add and Remove need a quantity"],
     ["sp_resolve_return_report", "AND status = 'Open'"],
@@ -1264,6 +1304,13 @@ async function routinesAreOld() {
     if (oldHandlers[0].n > 0) return true;
   }
 
+  const loyaltyViewResult = await db.query(
+    "SELECT COUNT(*) AS n FROM information_schema.VIEWS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'vw_customer_loyalty'",
+    [DB_NAME]
+  );
+  if (Number(loyaltyViewResult[0][0].n) === 0) return true;
+
   const viewsResult = await db.query(
     "SELECT VIEW_DEFINITION FROM information_schema.VIEWS\n" +
       "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'vw_customer_credit_facts'",
@@ -1294,10 +1341,10 @@ async function loadProceduresIfMissing(runSqlScript) {
 
   if (before >= EXPECTED_PROCEDURES) {
     console.log("Some stored procedures in this database are an older version; loading " +
-      "public/database/2-RUN-SECOND-stored-procedures.sql again (views and procedures only, no rows).");
+      "public/database/2-stored-procedures.sql again (views and procedures only, no rows).");
   } else {
     console.log(before + " of " + EXPECTED_PROCEDURES + " stored procedures are loaded; " +
-      "loading public/database/2-RUN-SECOND-stored-procedures.sql now (views and procedures only, no rows).");
+      "loading public/database/2-stored-procedures.sql now (views and procedures only, no rows).");
   }
   try {
     await runSqlScript(sql);
@@ -1311,14 +1358,14 @@ async function loadProceduresIfMissing(runSqlScript) {
     }
   } catch (error) {
     console.error("Loading the stored procedures failed:", error.message);
-    console.error("Run public/database/2-RUN-SECOND-stored-procedures.sql by hand; it touches no row.");
+    console.error("Run public/database/2-stored-procedures.sql by hand; it touches no row.");
   }
 }
 
 function procedureAdvice() {
   return "This database has " + proceduresLoaded + " of " + EXPECTED_PROCEDURES + " stored " +
     "procedures, so nothing can be saved. Restart the server: it loads " +
-    "public/database/2-RUN-SECOND-stored-procedures.sql itself on start-up. " +
+    "public/database/2-stored-procedures.sql itself on start-up. " +
     "That file touches no table and no row. Nothing else is wrong: your data is intact.";
 }
 
@@ -1463,6 +1510,8 @@ async function migrateDatabase(runSqlScript) {
   await migrateSupplierQuote();
   await migrateQrPayments();
   await migratePaymentDetails();
+  await migrateLoyaltySettings();
+  await migrateDiscountPolicy();
   await migrateCheckConstraints();
   await migrateRecordArchives();
   await migrateManualReorderPoints();

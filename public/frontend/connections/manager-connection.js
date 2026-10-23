@@ -53,6 +53,14 @@ function apiSavePenaltyPolicy(penaltyRate) {
     return sendJson('/api/credit/policy', 'PUT', { penaltyRate: penaltyRate });
 }
 
+function apiGetLoyaltyPolicy() {
+    return getJson('/api/loyalty/policy');
+}
+
+function apiSaveLoyaltyPolicy(rate, threshold) {
+    return sendJson('/api/loyalty/policy', 'PUT', { rate: rate, threshold: threshold });
+}
+
 function apiSaveCreditLimit(customerId, limit) {
     return sendJson('/api/credit/customers/' + customerId + '/limit', 'PUT', limit);
 }

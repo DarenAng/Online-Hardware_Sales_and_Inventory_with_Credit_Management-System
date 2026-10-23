@@ -162,7 +162,7 @@ function registerCashierRoutes(app, deps) {
   app.post("/api/sales", async function (request, response) {
     const customerId = request.body.customerId;
     const walkInName = request.body.walkInName;
-    const discount = request.body.discount;
+    const expectedDiscount = request.body.expectedDiscount;
     const amountPaid = request.body.amountPaid;
     const paymentMethod = request.body.paymentMethod;
     const items = request.body.items;
@@ -175,8 +175,12 @@ function registerCashierRoutes(app, deps) {
       return response.status(400).json({ error: "A payment method and at least one item are required" });
     }
 
-    if (Number(discount) < 0) {
-      return response.status(400).json({ error: "Discount cannot be negative." });
+    let expectedFigure = null;
+    if (expectedDiscount !== undefined && expectedDiscount !== null) {
+      expectedFigure = Number(expectedDiscount);
+      if (!Number.isFinite(expectedFigure) || expectedFigure < 0) {
+        return response.status(400).json({ error: "The discount the till expected is not a valid amount." });
+      }
     }
 
     const ids = [];
@@ -300,7 +304,7 @@ function registerCashierRoutes(app, deps) {
 
     try {
       const output = await cashierProcedures.recordSale(
-        [customerId || null, null, getActorId(request), discount || 0, amountPaid || 0,
+        [customerId || null, null, getActorId(request), expectedFigure, amountPaid || 0,
          paymentMethod, JSON.stringify(items), downMethod, qr ? qr.id : null, payDetails]
       );
 
@@ -329,7 +333,16 @@ function registerCashierRoutes(app, deps) {
         }
       }
 
-      response.json({ message: output.message, saleId: output.sale_id, referenceNote: referenceNote });
+      let savedDiscount = 0;
+      try {
+        const savedResult = await db.query("SELECT discount FROM sales WHERE sale_id = ?", [output.sale_id]);
+        if (savedResult[0].length > 0) savedDiscount = Number(savedResult[0][0].discount);
+      } catch (error) {
+        console.error("Reading the saved discount failed:", error.message);
+      }
+
+      response.json({ message: output.message, saleId: output.sale_id, discount: savedDiscount,
+                      referenceNote: referenceNote });
     } catch (error) {
       console.error("Create sale failed:", error.message);
       if (qr && !saleId) await qrPayments.recordUnsaved(qr.id, getActorId(request));
