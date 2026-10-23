@@ -1252,6 +1252,7 @@ async function routinesAreOld() {
     ["sp_receive_purchase_order", "purchase_order_ordered_items"],
     ["sp_receive_purchase_order", "received_at = NOW()"],
     ["sp_create_customer", "p_address_barangay"],
+    ["sp_create_customer", "starting credit limit"],
     ["sp_sweep_archives", "deliveries are never archived"],
     ["sp_sweep_archives", "deactivated for 30 days"],
     ["sp_archive_record", "Only a deactivated account can be archived"],

@@ -3570,18 +3570,18 @@ PROC_BODY: BEGIN
     SET p_customer_id = LAST_INSERT_ID();
 
     INSERT INTO customer_credits (customer_id, credit_limit, standing, updated_by_staff_id)
-    VALUES (p_customer_id, 0.00, 'Good', p_staff_id);
+    VALUES (p_customer_id, 5000.00, 'Good', p_staff_id);
 
     INSERT INTO audit_logs (staff_id, action, action_type, details)
     SELECT p_staff_id, 'CUSTOMER_CREATED', 'CREATE',
            CONCAT('Customer #', p_customer_id, ' ', full_name,
-                  ' opened at the counter with no credit limit')
+                  ' opened at the counter with a starting credit limit of 5,000.00')
     FROM customers WHERE customer_id = p_customer_id;
 
     COMMIT;
 
     SET p_status_code = 201;
-    SELECT CONCAT(full_name, ' now has an account. A manager sets any credit limit.')
+    SELECT CONCAT(full_name, ' now has an account with a starting credit limit of 5,000.00.')
     INTO p_message
     FROM customers WHERE customer_id = p_customer_id;
 END //
