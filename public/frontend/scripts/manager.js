@@ -1480,7 +1480,7 @@ async function changeProductPrice(index) {
     const row = panel ? panel.visible[index] : null;
     if (!row) return;
     await changePrice({
-        product_id: row.id, product_name: row.name, price: row.price,
+        product_id: row.id, product_name: row.name, price: row.price, last_cost: row.last_cost,
         unit_name: row.unit_name, quantity_in_stock: row.quantity_in_stock
     });
 }
@@ -1492,6 +1492,7 @@ async function changePrice(product) {
     const current = Number(product.price) || 0;
     const unit = product.unit_name ? ' per ' + product.unit_name : '';
     const noPrice = isUnpriced(product);
+    const lastCost = Number(product.last_cost) || 0;
 
     let askMessage = product.product_name + ' sells at ' + peso(current) + unit + '. What should it sell at now? ' +
                      'The till uses the new figure from the next sale on; nothing already sold changes.';
@@ -1534,6 +1535,18 @@ async function changePrice(product) {
         change = ' (' + (up ? 'up' : 'down') + ' ' + Math.round(share * 100) + '%)';
     }
 
+    const belowCost = lastCost > 0 && next <= lastCost;
+    const detail = [];
+    if (lastCost > 0) {
+        const markup = Math.round((next - lastCost) / lastCost * 1000) / 10;
+        detail.push('Bought at ' + peso(lastCost) + ', ' +
+            (markup < 0 ? Math.abs(markup) + '% below cost.' : markup + '% markup.'));
+    }
+    if (belowCost) detail.push('This price is at or below the last buying price.');
+    detail.push('The till sells at ' + peso(next) + ' from the next sale on.');
+    detail.push('Stock value moves from ' + peso(current * onHand) + ' to ' + peso(next * onHand) + '.');
+    detail.push('The change is written to the audit trail in your name.');
+
     const yes = await askConfirm(
         noPrice
             ? product.product_name + ' will sell at ' + peso(next) + unit + '.'
@@ -1542,12 +1555,8 @@ async function changePrice(product) {
             title: noPrice ? 'Set the price?' : (up ? 'Raise the price?' : 'Lower the price?'),
             eyebrow: 'Products',
             confirmLabel: 'Set the price',
-            tone: share !== null && share >= 0.5 ? 'danger' : undefined,
-            detail: [
-                'The till sells at ' + peso(next) + ' from the next sale on.',
-                'Stock value moves from ' + peso(current * onHand) + ' to ' + peso(next * onHand) + '.',
-                'The change is written to the audit trail in your name.'
-            ]
+            tone: belowCost || (share !== null && share >= 0.5) ? 'danger' : undefined,
+            detail: detail
         });
 
     if (!yes) return;
@@ -3163,6 +3172,11 @@ async function alertWaitingVoidRequests() {
         '. Open the sale to approve or decline it.', 'Void requests');
 }
 
+function lastCostText(lastCost) {
+    if (!(Number(lastCost) > 0)) return '<span class="muted">Not bought before</span>';
+    return peso(lastCost);
+}
+
 function openStockDetail(productId) {
     const p = findCachedStock(productId);
     if (!p) return;
@@ -3190,6 +3204,8 @@ function openStockDetail(productId) {
         detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
         detailField('Brand', escapeHtml(p.brand_name || 'No brand')) +
         detailField('Product Status', statusBadge(p.status)) +
+        detailField('Selling Price', priceOrBadge(p)) +
+        detailField('Last Buying Price', lastCostText(p.last_cost)) +
         detailField('Last Updated', escapeHtml(p.last_updated || 'Never')) +
         '</div>';
 
@@ -3224,7 +3240,13 @@ async function openRecordDetail(index) {
     let fields = '';
     for (const key in row) {
         if (key === 'id' || key === 'name' || /_id$/.test(key)) continue;
-        fields += detailField(prettyLabel(key), fieldValue(key, row[key]));
+        if (key === 'last_cost') {
+            fields += detailField('Last Buying Price', lastCostText(row[key]));
+        } else if (key === 'price' && type === 'product') {
+            fields += detailField('Selling Price', fieldValue(key, row[key]));
+        } else {
+            fields += detailField(prettyLabel(key), fieldValue(key, row[key]));
+        }
     }
     const body = '<div class="detail-grid detail-grid-3">' +
         detailField('Record ID', '#' + row.id) +

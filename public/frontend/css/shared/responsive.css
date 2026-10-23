@@ -288,7 +288,7 @@
 }
 .po-line-fields {
     display: grid;
-    grid-template-columns: minmax(0, 2.2fr) repeat(3, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr);
     gap: 12px;
     align-items: start;
 }
@@ -297,12 +297,10 @@
 .po-remove { min-height: 30px; padding: 3px 10px; color: var(--stop); border-color: transparent; }
 .po-remove:hover { background: var(--stop-dim); color: var(--stop); border-color: transparent; }
 
-.po-qty, .po-cost {
+.po-qty {
     font-family: var(--font-figure);
     font-variant-numeric: tabular-nums;
 }
-.po-cost { text-align: right; }
-.po-line-total { font-weight: 600; }
 .po-in { margin-top: 6px; }
 
 .po-line .make-card,
@@ -410,7 +408,7 @@
 
 .recv-line {
     display: grid;
-    grid-template-columns: 2fr 1fr 1fr 1fr auto;
+    grid-template-columns: 2fr 1fr 1fr auto;
     gap: 12px;
     align-items: center;
     padding: 12px 0;
@@ -682,18 +680,9 @@
 
 .po-line-note { margin: 4px 0 0; }
 
-.po-cost[readonly] {
-    background: var(--paper);
-    border-style: dashed;
-    color: var(--ink);
-    cursor: default;
-}
-.po-cost[readonly]:focus { box-shadow: none; }
-.po-line-amount {
-    margin: 4px 0 0;
-    font-family: var(--font-figure);
-    font-variant-numeric: tabular-nums;
-}
+.bp-price { width: 130px; font-family: var(--font-figure); font-variant-numeric: tabular-nums; }
+.bp-per { margin-top: 4px; font-size: 12.5px; color: var(--steel-soft); white-space: normal; }
+.bp-sum { margin-top: 12px; }
 
 .mat-desc {
     display: flex;
@@ -709,18 +698,6 @@
     line-height: 1.45;
     color: var(--steel);
 }
-.mat-desc-price {
-    display: inline-flex;
-    align-items: baseline;
-    gap: 4px;
-    font-family: var(--font-figure);
-    font-size: 13.5px;
-    font-weight: 600;
-    color: var(--ink);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-}
-.mat-desc-per { font-family: var(--font-ui); font-size: 12.5px; font-weight: 400; color: var(--steel-soft); }
 
 #po-table tr.row-attention td:first-child { box-shadow: inset var(--rule) 0 0 var(--signal); }
 

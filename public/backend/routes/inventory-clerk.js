@@ -106,7 +106,7 @@ function registerInventoryRoutes(app, deps) {
 
     try {
       const rowsResult = await db.query(
-        "SELECT p.product_id, p.product_name, p.price, p.reorder_point, p.status, " +
+        "SELECT p.product_id, p.product_name, p.price, p.last_cost, p.reorder_point, p.status, " +
         "p.pack_name, p.pack_size, " +
         "p.is_archived, p.archived_at, p.created_at, " +
         "COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, " +
@@ -139,9 +139,11 @@ function registerInventoryRoutes(app, deps) {
         [archived]
       );
       const rows = rowsResult[0];
+      const hideCost = request.actor && request.actor.roleName === CASHIER;
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         row.selling_units = sellingUnitsOf(row.selling_units);
+        if (hideCost) delete row.last_cost;
       }
       response.json(rows);
     } catch (error) {
@@ -690,9 +692,9 @@ function registerInventoryRoutes(app, deps) {
       if (orderedResult[0].length > 0) return response.json(orderedResult[0]);
 
       const rowsResult = await db.query(
-        "SELECT i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
+        "SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
         "i.pack_name, i.pack_size, i.pack_count, " +
-        "p.product_name, u.unit_name, c.category_name, b.brand_name, " +
+        "p.product_name, p.last_cost, u.unit_name, c.category_name, b.brand_name, " +
         "COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock " +
         "FROM purchase_order_items i " +
         "JOIN products p ON p.product_id = i.product_id " +
@@ -992,15 +994,13 @@ function registerInventoryRoutes(app, deps) {
       lines.push({
         product_id: Number(item.productId || item.product_id) || null,
         quantity: Number(item.quantity) || 0,
-        unit_cost: Number(firstGiven(item.unitCost, item.unit_cost)) || 0,
         new_name: shortText(item.newName || item.new_name, 150),
         brand_name: shortText(item.brandName || item.brand_name, 100),
         category_name: shortText(item.categoryName || item.category_name, 50),
         unit_name: shortText(item.unitName || item.unit_name, 20),
         pack_name: shortText(item.packName || item.pack_name, 20),
         pack_size: Number(firstGiven(item.packSize, item.pack_size)) || null,
-        pack_count: Number(firstGiven(item.packCount, item.pack_count)) || null,
-        price: Number(item.price) || 0
+        pack_count: Number(firstGiven(item.packCount, item.pack_count)) || null
       });
     }
 
@@ -1087,8 +1087,36 @@ function registerInventoryRoutes(app, deps) {
 
     try {
       const poId = Number(request.params.poId);
+
+      let prices = [];
+      if (approve) {
+        const itemsResult = await db.query(
+          "SELECT i.po_item_id, p.product_name FROM purchase_order_items i " +
+          "JOIN products p ON p.product_id = i.product_id WHERE i.po_id = ? ORDER BY i.po_item_id", [poId]);
+        const lines = itemsResult[0];
+        const asked = Array.isArray(body.prices) ? body.prices : [];
+
+        for (let i = 0; i < lines.length; i++) {
+          let entry = null;
+          for (let n = 0; n < asked.length; n++) {
+            if (Number(asked[n] && asked[n].id) === Number(lines[i].po_item_id)) entry = asked[n];
+          }
+          const cost = entry ? Number(entry.unitCost) : NaN;
+          if (!Number.isFinite(cost) || cost <= 0 || cost >= PRICE_CEILING) {
+            return response.status(400).json({
+              error: "Type a buying price above zero for " + lines[i].product_name + "." });
+          }
+          const rounded = Math.round(cost * 10000) / 10000;
+          if (!(rounded > 0)) {
+            return response.status(400).json({
+              error: "The buying price for " + lines[i].product_name + " is too small for one unit." });
+          }
+          prices.push({ po_item_id: lines[i].po_item_id, unit_cost: rounded });
+        }
+      }
+
       const output = await inventoryClerkProcedures.decidePurchaseOrder(
-        [poId, approve, note || null, getActorId(request)]
+        [poId, approve, JSON.stringify(prices), note || null, getActorId(request)]
       );
 
       if (output.status_code !== 200) {
@@ -1359,7 +1387,7 @@ function registerInventoryRoutes(app, deps) {
           return response.status(400).json({
             error: "A price was sent for a line that is not on this order. Reload the page and try again." });
         }
-        const price = Math.round(Number(entry.unitCost) * 100) / 100;
+        const price = Math.round(Number(entry.unitCost) * 10000) / 10000;
         if (!Number.isFinite(price) || price <= 0 || price >= PRICE_CEILING) {
           return response.status(400).json({ error: "Enter a price above zero for " + item.product_name + "." });
         }
@@ -1380,7 +1408,7 @@ function registerInventoryRoutes(app, deps) {
       let after = before;
       for (let i = 0; i < changes.length; i++) {
         const change = changes[i];
-        after += (change.price - Number(change.item.unit_cost)) * Number(change.item.quantity);
+        after += Math.round(change.price * Number(change.item.quantity) * 100) / 100 - Number(change.item.line_cost || 0);
       }
 
       let discount = 0;
@@ -1520,7 +1548,7 @@ function registerInventoryRoutes(app, deps) {
       sheet.push({
         product_id: Number(line.productId || line.product_id) || null,
         quantity: Math.max(0, Number(line.quantity) || 0),
-        unit_cost: Number(firstGiven(line.unitCost, line.unit_cost)) || 0,
+        unit_cost: Math.round((Number(firstGiven(line.unitCost, line.unit_cost)) || 0) * 10000) / 10000,
         new_name: shortText(line.newName || line.new_name, 150),
         brand_name: shortText(line.brandName || line.brand_name, 100),
         category_name: shortText(line.categoryName || line.category_name, 50),

@@ -5,6 +5,7 @@ const roles = require("../roles");
 const ADMIN = roles.ADMIN;
 const MANAGER = roles.MANAGER;
 const CLERK = roles.CLERK;
+const CASHIER = roles.CASHIER;
 const MANAGEMENT = roles.MANAGEMENT;
 const ROLE_PAGES = roles.ROLE_PAGES;
 const liveChanges = require("../live-changes");
@@ -81,7 +82,7 @@ const RECORD_QUERIES = {
     "                      c.address_province, c.address_landmark,\n" +
     "                      v.credit_limit, v.total_purchase, v.current_credit\n" +
     "             ORDER BY c.first_name",
-  product: "SELECT p.product_id AS id, p.product_name AS name, p.price, p.reorder_point, p.status,\n" +
+  product: "SELECT p.product_id AS id, p.product_name AS name, p.price, p.last_cost, p.reorder_point, p.status,\n" +
     "                   p.category_id, p.brand_id, p.unit_id, p.supplier_id,\n" +
     "                   b.brand_name, c.category_name, u.unit_name, sup.supplier_name,\n" +
     "                   COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, p.created_at\n" +
@@ -456,6 +457,9 @@ function registerSharedRoutes(app, deps) {
     try {
       const rowsResult = await db.query(sql);
       const rows = rowsResult[0];
+      if (request.actor && request.actor.roleName === CASHIER) {
+        for (let i = 0; i < rows.length; i++) delete rows[i].last_cost;
+      }
       response.json(rows);
     } catch (error) {
       console.error("Records failed:", error.message);

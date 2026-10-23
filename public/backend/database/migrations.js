@@ -932,7 +932,7 @@ async function migrateSupplierQuote() {
     await db.query("ALTER TABLE purchase_orders ADD COLUMN supplier_ship_date DATE NULL");
   }
   if (names.indexOf("original_unit_cost") === -1) {
-    await db.query("ALTER TABLE purchase_order_items ADD COLUMN original_unit_cost DECIMAL(10,2) NULL");
+    await db.query("ALTER TABLE purchase_order_items ADD COLUMN original_unit_cost DECIMAL(12,4) NULL");
   }
   console.log("Added the supplier-quote columns (purchase_orders.supplier_ship_date, " +
     "purchase_order_items.original_unit_cost).");
@@ -1251,6 +1251,10 @@ async function routinesAreOld() {
     ["sp_update_delivery_status", "FOR UPDATE"],
     ["sp_receive_purchase_order", "purchase_order_ordered_items"],
     ["sp_receive_purchase_order", "received_at = NOW()"],
+    ["sp_receive_purchase_order", "last_cost"],
+    ["sp_decide_purchase_order", "Every line needs a buying price"],
+    ["sp_receive_purchase_order", "needs a cost above zero"],
+    ["sp_create_purchase_order", "v_quantity, 0.00, v_pack_name"],
     ["sp_create_customer", "p_address_barangay"],
     ["sp_create_customer", "starting credit limit"],
     ["sp_sweep_archives", "deliveries are never archived"],
@@ -1267,7 +1271,8 @@ async function routinesAreOld() {
       "                            'sp_create_sale_transaction', 'sp_resolve_return_report', 'sp_archive_record',\n" +
       "                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',\n" +
       "                            'sp_adjust_stock', 'sp_receive_purchase_order', 'sp_create_customer',\n" +
-      "                            'sp_create_qr_payment', 'sp_sweep_archives', 'sp_set_staff_status')",
+      "                            'sp_create_qr_payment', 'sp_sweep_archives', 'sp_set_staff_status',\n" +
+      "                            'sp_decide_purchase_order', 'sp_create_purchase_order')",
     [DB_NAME]
   );
   const routines = routinesResult[0];
@@ -1462,6 +1467,41 @@ async function migrateStaffDeactivatedAt() {
     (moved > 0 ? " (" + moved + " recently deactivated account(s) are back in the Staff Directory)." : "."));
 }
 
+async function migrateLastCost() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'products' AND COLUMN_NAME = 'last_cost'",
+    [DB_NAME]
+  );
+  if (columnsResult[0].length > 0) return;
+
+  await db.query("ALTER TABLE products ADD COLUMN last_cost DECIMAL(12,4) NULL AFTER price");
+  console.log("Added products.last_cost, the latest buying price per unit. It stays empty until an order is received.");
+}
+
+async function migrateCostPrecision() {
+  const columnsResult = await db.query(
+    "SELECT TABLE_NAME, COLUMN_NAME, NUMERIC_SCALE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ?\n" +
+      "       AND ((TABLE_NAME = 'purchase_order_items' AND COLUMN_NAME IN ('unit_cost', 'original_unit_cost'))\n" +
+      "         OR (TABLE_NAME = 'products' AND COLUMN_NAME = 'last_cost'))",
+    [DB_NAME]
+  );
+  const columns = columnsResult[0];
+  let narrow = false;
+  for (let i = 0; i < columns.length; i++) {
+    if (Number(columns[i].NUMERIC_SCALE) !== 4) narrow = true;
+  }
+  if (!narrow) return;
+
+  await db.query("ALTER TABLE purchase_order_items MODIFY COLUMN unit_cost DECIMAL(12,4) NOT NULL");
+  await db.query("ALTER TABLE purchase_order_items MODIFY COLUMN original_unit_cost DECIMAL(12,4) NULL");
+  await db.query("ALTER TABLE purchase_order_items MODIFY COLUMN line_cost DECIMAL(12,2) AS (ROUND(quantity * unit_cost, 2)) STORED");
+  await db.query("ALTER TABLE products MODIFY COLUMN last_cost DECIMAL(12,4) NULL");
+  console.log("Widened the buying prices (purchase_order_items.unit_cost and original_unit_cost, " +
+    "products.last_cost) to four decimals, so a price per pack divides into a price per unit.");
+}
+
 async function migrateManualReorderPoints() {
   const result = await db.query("UPDATE products SET reorder_mode = 'Manual' WHERE reorder_mode = 'Dynamic'");
   const changed = result[0] && result[0].affectedRows ? result[0].affectedRows : 0;
@@ -1516,6 +1556,8 @@ async function migrateDatabase(runSqlScript) {
   await migrateCheckConstraints();
   await migrateRecordArchives();
   await migrateManualReorderPoints();
+  await migrateLastCost();
+  await migrateCostPrecision();
   await migrateVoidRequests();
   await migrateStaffDeactivatedAt();
   await loadProceduresIfMissing(runSqlScript);

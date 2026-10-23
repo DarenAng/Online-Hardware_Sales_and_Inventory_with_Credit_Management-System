@@ -127,6 +127,7 @@ let poLinesSupplierId = null;
 let poLineCount = 0;
 let poDocument = null;
 let poReceiving = null;
+let poPricing = null;
 let recvExtraCount = 0;
 
 const matPickers = {};
@@ -186,12 +187,6 @@ function makeCardHtml(id) {
                     '<div class="form-group">' +
                         '<label for="' + id + '-brand">Brand <span class="label-hint">optional</span></label>' +
                         makeSuggestInputHtml(id, 'brand', 'maxlength="100"') +
-                    '</div>' +
-                    '<div class="form-group">' +
-                        '<label for="' + id + '-price">Price per unit</label>' +
-                        '<input type="number" class="form-control amount-field" id="' + id + '-price" ' +
-                               'min="0" step="0.01" value="0.00" ' +
-                               'oninput="renderMatDesc(\'' + id + '\'); renderPoTotals()">' +
                     '</div>' +
                 '</div>' +
             '</div>' +
@@ -459,7 +454,7 @@ function renderMatSuggestions(id, text) {
                     escapeHtml(p.unit_name || '') + '</span>' +
             '</span>' +
             '<span class="suggest-note">' + escapeHtml(p.category_name || 'No category') +
-                ' · ' + peso(p.price) + '</span>' +
+                '</span>' +
         '</li>';
     }
 
@@ -627,8 +622,7 @@ function matMakeNew(id) {
     if (make) make.hidden = false;
     if (sub) {
         sub.textContent = '"' + state.newName + '" is not on the material list. Fill these in ' +
-            'and it joins the list when this is sent. The price goes on its record and is what ' +
-            'this line is ordered at.';
+            'and it joins the list when this is sent.';
     }
 
     hideMatSuggestions(id);
@@ -643,10 +637,8 @@ function renderMatDesc(id) {
     if (!box) return;
 
     const hide = function () { box.hidden = true; box.innerHTML = ''; };
-    const strip = function (facts, price, per) {
-        return '<span class="mat-desc-line">' + escapeHtml(poKeepFilled(facts).join(' \u00B7 ')) + '</span>' +
-            '<span class="mat-desc-price">' + peso(price) +
-                '<span class="mat-desc-per">/ ' + escapeHtml(per) + '</span></span>';
+    const strip = function (facts) {
+        return '<span class="mat-desc-line">' + escapeHtml(poKeepFilled(facts).join(' \u00B7 ')) + '</span>';
     };
 
     const state = matState(id);
@@ -669,7 +661,7 @@ function renderMatDesc(id) {
 
         box.hidden = false;
         box.innerHTML = strip([product.brand_name, product.category_name || 'No category',
-            'counted in ' + unit, pack], product.price, unit);
+            'counted in ' + unit, pack]);
         return;
     }
 
@@ -683,8 +675,7 @@ function renderMatDesc(id) {
     const unit = field('unit');
     box.hidden = false;
     box.innerHTML = strip([field('brand'), field('category') || 'No category',
-        unit ? 'counted in ' + unit : 'no unit yet'],
-        parseFloat(field('price')) || 0, unit || 'unit');
+        unit ? 'counted in ' + unit : 'no unit yet']);
 }
 
 function renderMatVerdict(id) {
@@ -747,7 +738,6 @@ function matValue(id) {
             unitName: field('unit'),
             categoryName: field('category'),
             brandName: field('brand'),
-            price: parseFloat(field('price')) || 0,
             ok: true,
             isNew: true
         };
@@ -1143,13 +1133,6 @@ function addPurchaseLine(fromButton) {
                    'oninput="renderPoTotals()">' +
             '<select id="po-in-' + index + '" class="form-control po-in" hidden onchange="renderPoTotals()"></select>' +
             '<p class="pick-verdict po-line-note" id="po-line-note-' + index + '"></p></div>' +
-            '<div class="form-group"><label for="po-price-' + index + '" id="po-price-label-' + index + '">Unit price</label>' +
-            '<input type="text" class="form-control po-cost" id="po-price-' + index + '" readonly tabindex="-1" ' +
-                   'title="The price on file for this material. It is not typed on the order.">' +
-            '<p class="pick-verdict po-line-amount" id="po-line-amount-' + index + '"></p></div>' +
-            '<div class="form-group"><label for="po-line-total-' + index + '">Line total</label>' +
-            '<input type="text" class="form-control po-cost po-line-total" id="po-line-total-' + index + '" ' +
-                   'readonly tabindex="-1"></div>' +
         '</div>';
 
     box.insertBefore(row, box.firstChild);
@@ -1175,44 +1158,6 @@ function poLinePack(row) {
     const product = state.productId ? poFindProduct(poMaterials, state.productId) : null;
     if (!product || !product.pack_name || !(Number(product.pack_size) > 0)) return null;
     return { name: product.pack_name, size: Number(product.pack_size), unit: product.unit_name || 'unit' };
-}
-
-function poLinePricing(row) {
-    const id = row.dataset.picker;
-    const state = matState(id);
-    const pack = poLineIn(row);
-    let product;
-    if (state.productId) {
-        product = poFindProduct(poMaterials, state.productId);
-    } else {
-        product = null;
-    }
-
-    const make = document.getElementById(id + '-make');
-    const isNew = Boolean(make) && !make.hidden && state.newName !== '';
-    const field = function (suffix) {
-        const element = document.getElementById(id + '-' + suffix);
-        return element ? element.value.trim() : '';
-    };
-
-    const unit = product ? (product.unit_name || 'unit') : (field('unit') || 'unit');
-    let unitPrice;
-    if (product) {
-        unitPrice = Math.max(0, Number(product.price) || 0);
-    } else if (isNew) {
-        unitPrice = Math.max(0, parseFloat(field('price')) || 0);
-    } else {
-        unitPrice = 0;
-    }
-
-    return {
-        chosen: Boolean(product) || isNew,
-        isNew: isNew,
-        unit: unit,
-        unitPrice: unitPrice,
-        per: pack ? pack.name : unit,
-        perPrice: pack ? unitPrice * pack.size : unitPrice
-    };
 }
 
 function poLineIn(row) {
@@ -1260,19 +1205,12 @@ function removePurchaseLine(index) {
 function renderPoTotals() {
     renderCriticalStocks();
 
-    let goods = 0;
-    let priced = 0;
-
     const lineRows = poLineRows();
     for (let position = 0; position < lineRows.length; position++) {
         const row = lineRows[position];
         const index = row.id.replace('po-line-', '');
         const qty = parseInt(row.querySelector('.po-qty').value, 10) || 0;
         const pack = poLineIn(row);
-        const price = poLinePricing(row);
-        const amount = qty > 0 ? qty * price.perPrice : 0;
-        if (price.chosen) { goods += amount; priced += 1; }
-
         const title = document.getElementById('po-line-title-' + index);
         if (title) title.textContent = 'Line ' + (position + 1);
 
@@ -1282,39 +1220,12 @@ function renderPoTotals() {
         const note = document.getElementById('po-line-note-' + index);
         if (note) note.textContent = pack && qty > 0 ? '= ' + qtyText(qty * pack.size, pack.unit) : '';
 
-        const priceLabel = document.getElementById('po-price-label-' + index);
-        if (priceLabel) priceLabel.textContent = pack ? 'Price per ' + pack.name : 'Unit price';
-
-        const priceField = document.getElementById('po-price-' + index);
-        if (priceField) priceField.value = price.chosen ? peso(price.perPrice) : '';
-
-        const unpriced = price.chosen && !(price.perPrice > 0);
-        const totalField = document.getElementById('po-line-total-' + index);
-        if (totalField) totalField.value = price.chosen && !unpriced ? peso(amount) : '';
-
-        const amountBox = document.getElementById('po-line-amount-' + index);
-        if (amountBox) {
-            amountBox.className = 'pick-verdict po-line-amount' + (unpriced ? ' is-stop' : '');
-            amountBox.textContent = unpriced ? 'No price on file for this one.' : '';
-        }
     }
 
     const count = document.getElementById('po-line-count');
     if (count) {
         const lines = document.querySelectorAll('.po-line').length;
         count.textContent = lines + (lines === 1 ? ' line' : ' lines');
-    }
-
-    const total = document.getElementById('po-total');
-    if (total) {
-        if (priced === 0) {
-            total.innerHTML = '';
-        } else {
-            total.innerHTML = '<div class="po-sum is-total">' +
-                '<span class="po-sum-label">Order total, at the prices on file</span>' +
-                '<span class="po-sum-value">' + peso(goods) + '</span>' +
-            '</div>';
-        }
     }
 }
 
@@ -1384,19 +1295,6 @@ async function handleCreatePurchaseOrder(event) {
         }
 
         const pack = poLineIn(row);
-        const pricing = poLinePricing(row);
-
-        if (!(pricing.unitPrice > 0)) {
-            notifyWarning(picked.isNew
-                ? '"' + picked.newName + '" needs a price before it can be ordered. It goes on ' +
-                  'the material\'s record and is what this line is ordered at.'
-                : 'That material has no price on file, so the line cannot be priced. Put a price ' +
-                  'on it in the Material List first.', 'Order not sent');
-            const field = document.getElementById(
-                row.dataset.picker + (picked.isNew ? '-price' : '-box'));
-            if (field) field.focus();
-            return;
-        }
 
         items.push({
             productId: picked.productId,
@@ -1404,9 +1302,7 @@ async function handleCreatePurchaseOrder(event) {
             unitName: picked.unitName,
             categoryName: picked.categoryName,
             brandName: picked.brandName,
-            price: picked.price,
             quantity: pack ? Math.round(quantity * pack.size) : quantity,
-            unitCost: pricing.unitPrice,
             packName: pack ? pack.name : null,
             packSize: pack ? pack.size : null,
             packCount: pack ? quantity : null
@@ -1538,6 +1434,7 @@ function sortPurchaseOrders(rows) {
 
 function poValueCell(po) {
     if (po.status === 'Received') return peso(po.total_cost);
+    if (po.status === 'For Approval' || !(Number(po.goods_cost) > 0)) return '<span class="muted">--</span>';
     if (po.status === 'Cancelled') return '<span class="muted">' + peso(po.goods_cost) + '</span>';
     return peso(po.goods_cost);
 }
@@ -1628,6 +1525,7 @@ function poMonthLabel(month) {
 }
 
 function poOrderValue(po) {
+    if (po.status === 'For Approval') return 0;
     return Number(po.status === 'Received' ? po.total_cost : po.goods_cost) || 0;
 }
 
@@ -2209,10 +2107,12 @@ function renderPurchaseOrderDocument() {
                     escapeHtml(item.brand_name) + '</span>' : '') + '</td>' +
             '<td>' + escapeHtml(item.category_name || '--') + '</td>' +
             '<td class="num">' + escapeHtml(poQuantityText(item)) + '</td>' +
-            '<td class="num">' + peso(item.unit_cost) +
-                '<br><span class="po-doc-party-line">per ' +
-                escapeHtml(item.unit_name || 'unit') + '</span></td>' +
-            '<td class="num">' + peso(item.line_cost) + '</td>' +
+            (Number(item.unit_cost) > 0
+                ? '<td class="num">' + peso(poPackPrice(item)) +
+                    '<br><span class="po-doc-party-line">per ' +
+                    escapeHtml(recvPackOf(item) ? item.pack_name : (item.unit_name || 'unit')) + '</span></td>' +
+                  '<td class="num">' + peso(item.line_cost) + '</td>'
+                : '<td class="num">--</td><td class="num">--</td>') +
         '</tr>';
     }
 
@@ -2276,11 +2176,11 @@ function renderPurchaseOrderDocument() {
                     '</tr></thead>' +
                     '<tbody>' + (lines || '<tr><td colspan="6">No lines on this order.</td></tr>') + '</tbody>' +
                     '<tfoot><tr>' +
-                        '<td colspan="3">' + items.length + ' line(s) &middot; priced at the rates ' +
-                            'on file for these materials; any discount is settled on the invoice</td>' +
+                        '<td colspan="3">' + items.length + ' line(s)' +
+                            (goods > 0 ? ' &middot; any discount is settled on the invoice' : '') + '</td>' +
                         '<td class="num">' + units + '</td>' +
                         '<td></td>' +
-                        '<td class="num">' + peso(goods) + '</td>' +
+                        '<td class="num">' + (goods > 0 ? peso(goods) : '--') + '</td>' +
                     '</tr></tfoot>' +
                 '</table>' +
 
@@ -2365,13 +2265,6 @@ function renderReceiveSheet() {
                        'min="0" value="' + recvOrderedCount(item) + '" ' +
                        'oninput="renderReceiveVerdict(' + index + ', ' + recvOrderedCount(item) + ')">' +
             '</div>' +
-            '<div>' +
-                '<label class="recv-meta" for="recv-cost-' + index + '">Cost per ' +
-                    escapeHtml(recvPackOf(item) ? item.pack_name : (item.unit_name || 'unit')) + '</label>' +
-                '<input type="number" class="form-control recv-qty amount-field" id="recv-cost-' + index + '" ' +
-                       'min="0" step="0.01" placeholder="0.00" ' +
-                       'value="' + recvOrderedCost(item) + '">' +
-            '</div>' +
             '<div class="recv-verdict is-exact" id="recv-verdict-' + index + '">As ordered</div>' +
         '</div>';
     }
@@ -2387,10 +2280,8 @@ function receiveLineAmounts() {
     for (let index = 0; index < poReceiving.items.length; index++) {
         const item = poReceiving.items[index];
         const qtyField = document.getElementById('recv-qty-' + index);
-        const costField = document.getElementById('recv-cost-' + index);
         const counted = Math.max(0, parseInt(qtyField ? qtyField.value : recvOrderedCount(item), 10) || 0);
-        const cost = Math.max(0, parseFloat(costField ? costField.value : 0) || 0);
-        amounts.push({ counted: counted, cost: cost, amount: counted * cost });
+        amounts.push({ counted: counted });
     }
     return amounts;
 }
@@ -2407,10 +2298,9 @@ function recvOrderedCount(item) {
     return pack ? Number(item.pack_count) : Number(item.quantity);
 }
 
-function recvOrderedCost(item) {
+function poPackPrice(item) {
     const pack = recvPackOf(item);
     const unit = Number(item.unit_cost) || 0;
-    if (!(unit > 0)) return '';
     return pack ? Math.round(unit * pack.size * 100) / 100 : unit;
 }
 
@@ -2467,7 +2357,7 @@ function addReceiveExtra() {
                'min="1" value="1"></div>' +
         '<div class="form-group"><label for="recv-extra-cost-' + index + '">Unit cost</label>' +
         '<input type="number" class="form-control recv-qty amount-field" id="recv-extra-cost-' + index + '" ' +
-               'min="0" step="0.01" value="0.00"></div>' +
+               'min="0" step="0.01" placeholder="0.00"></div>' +
         '<button type="button" class="btn btn-sm btn-danger" ' +
                 'onclick="removeReceiveExtra(' + index + ')">Remove</button>';
 
@@ -2492,8 +2382,7 @@ async function submitReceiveOrder() {
         const pack = recvPackOf(item);
         received.push({
             productId: item.product_id,
-            quantity: pack ? Math.round(counted * pack.size) : counted,
-            unitCost: pack ? Math.round(amounts[i].cost / pack.size * 100) / 100 : amounts[i].cost
+            quantity: pack ? Math.round(counted * pack.size) : counted
         });
     }
     const extras = document.querySelectorAll('#recv-extras .recv-line');
@@ -2521,6 +2410,13 @@ async function submitReceiveOrder() {
             return;
         }
 
+        const extraCost = parseFloat(document.getElementById('recv-extra-cost-' + index).value);
+        if (!(extraCost > 0)) {
+            notifyWarning('An extra line needs a unit cost above zero.', 'Nothing received');
+            document.getElementById('recv-extra-cost-' + index).focus();
+            return;
+        }
+
         received.push({
             productId: picked.productId,
             newName: picked.newName,
@@ -2528,7 +2424,7 @@ async function submitReceiveOrder() {
             categoryName: picked.categoryName,
             brandName: picked.brandName,
             quantity: quantity,
-            unitCost: parseFloat(document.getElementById('recv-extra-cost-' + index).value) || 0
+            unitCost: extraCost
         });
     }
 
@@ -2592,11 +2488,17 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         for (let i = 0; i < items.length; i++) orderedUnits += Number(items[i].quantity) || 0;
     }
 
+    const pricing = canDecide && waiting;
+
     let money;
-    if (po.status === 'Received') {
+    if (waiting) {
+        money = '';
+    } else if (po.status === 'Received') {
         money = detailField('Goods Received', peso(po.goods_cost)) +
                 detailField('Invoice Discount', peso(po.discount)) +
                 detailField('Total Cost', '<strong>' + peso(po.total_cost) + '</strong>');
+    } else if (!(Number(po.goods_cost) > 0)) {
+        money = detailField('Order Value', '<span class="muted">--</span>');
     } else if (Number(po.discount) > 0) {
         money = detailField('Goods', peso(po.goods_cost)) +
                 detailField('Supplier Discount', peso(po.discount)) +
@@ -2642,20 +2544,24 @@ async function openPurchaseOrderDetail(poId, readOnly) {
 
     let priced = false;
     for (let i = 0; i < items.length; i++) {
-        if (Number(items[i].unit_cost) > 0) priced = true;
+        if (Number(items[i].unit_cost) > 0 && !waiting) priced = true;
     }
     const unitCostCell = function (it) {
         if (it.unit_cost === null || it.unit_cost === undefined) return '<span class="muted">-</span>';
         const original = it.original_unit_cost;
         if (original === null || original === undefined || Number(original) === Number(it.unit_cost)) {
-            return peso(it.unit_cost);
+            return peso(poPackPrice(it));
         }
-        return '<s class="muted">' + peso(original) + '</s> ' + peso(it.unit_cost) +
+        return '<s class="muted">' + peso(poPackPrice({ unit_cost: original, pack_name: it.pack_name, pack_size: it.pack_size, pack_count: it.pack_count })) +
+            '</s> ' + peso(poPackPrice(it)) +
             ' <span class="po-answer is-warn">supplier\'s price</span>';
     };
     let lines;
     const lineRows = [];
-    if (priced) {
+    if (pricing) {
+        poPricing = { poId: po.po_id, items: items };
+        lines = poBuyingPricesHtml(items);
+    } else if (priced) {
         for (let i = 0; i < items.length; i++) {
             const it = items[i];
             lineRows.push([
@@ -2663,12 +2569,12 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 it.line_cost === null || it.line_cost === undefined ? '<span class="muted">-</span>' : peso(it.line_cost)
             ]);
         }
-        lines = detailTable(['Material', 'Qty', 'Unit Cost', 'Line Cost'], lineRows, [1, 2, 3]);
+        lines = detailTable(['Material', 'Qty', 'Unit Cost', 'Line Cost'], lineRows, [2, 3]);
     } else {
         for (let i = 0; i < items.length; i++) {
             lineRows.push([escapeHtml(items[i].product_name), escapeHtml(poQuantityText(items[i]))]);
         }
-        lines = detailTable(['Material', 'Qty'], lineRows, [1]);
+        lines = detailTable(['Material', 'Qty'], lineRows);
     }
 
     const contact = '<h4 class="detail-subhead">Supplier contact</h4>' +
@@ -2702,6 +2608,108 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     }
     openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(poStage(po)), 'P' + po.po_id,
         pages, foot, { wide: 'xl', scroll: true });
+
+    if (pricing) {
+        renderBuyingPrices();
+        guardModal('detail-modal', 'the buying prices');
+    } else {
+        poPricing = null;
+    }
+}
+
+function poBuyingPricesHtml(items) {
+    const rows = [];
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        const pack = recvPackOf(item);
+        const last = Number(item.last_cost) || 0;
+        const known = last > 0 ? last : (Number(item.unit_cost) || 0);
+        let start = '';
+        if (known > 0) start = (Math.round(known * (pack ? pack.size : 1) * 100) / 100).toFixed(2);
+
+        rows.push([
+            escapeHtml(item.product_name),
+            escapeHtml(poQuantityText(item)),
+            '<input type="number" class="form-control bp-price amount-field" id="bp-price-' + i + '" ' +
+                'min="0" step="0.01" placeholder="0.00" value="' + start + '" ' +
+                'aria-label="Buying price for ' + escapeHtml(item.product_name) + '" oninput="renderBuyingPrices()">' +
+                '<div class="bp-per" id="bp-per-' + i + '"></div>',
+            '<span id="bp-line-' + i + '"></span>'
+        ]);
+    }
+
+    return detailTable(['Material', 'Qty', 'Buying Price', 'Line Cost'], rows, [2, 3]) +
+        '<div class="po-sum is-total bp-sum">' +
+            '<span class="po-sum-label">Order total</span>' +
+            '<span class="po-sum-value" id="bp-total"></span>' +
+        '</div>';
+}
+
+function poReadBuyingPrices() {
+    const found = { lines: [], total: 0, missing: 0, problem: null, problemAt: -1 };
+    if (!poPricing) return found;
+
+    for (let i = 0; i < poPricing.items.length; i++) {
+        const item = poPricing.items[i];
+        const pack = recvPackOf(item);
+        const field = document.getElementById('bp-price-' + i);
+        const typed = field ? field.value.trim() : '';
+        const number = Number(typed);
+
+        let problem = null;
+        if (typed === '' || !Number.isFinite(number) || number <= 0) {
+            problem = 'Type a buying price above zero for ' + item.product_name + '.';
+        } else if (!/^\d+(\.\d{1,2})?$/.test(typed)) {
+            problem = 'The buying price for ' + item.product_name + ' can have two decimal places at most.';
+        } else if (number > 99999999.99) {
+            problem = 'The buying price for ' + item.product_name + ' is more than the system can hold.';
+        }
+
+        let unitCost = 0;
+        if (problem === null) {
+            unitCost = pack ? Math.round(number / pack.size * 10000) / 10000 : number;
+            if (!(unitCost > 0)) {
+                problem = 'The buying price for ' + item.product_name + ' is too small for one ' +
+                    (item.unit_name || 'unit') + '.';
+            }
+        }
+
+        if (problem === null) {
+            found.total += Math.round(unitCost * Number(item.quantity) * 100) / 100;
+        } else {
+            found.missing += 1;
+            if (found.problem === null) { found.problem = problem; found.problemAt = i; }
+        }
+        found.lines.push({ index: i, item: item, pack: pack, unitCost: unitCost, valid: problem === null });
+    }
+    return found;
+}
+
+function renderBuyingPrices() {
+    const found = poReadBuyingPrices();
+    for (let i = 0; i < found.lines.length; i++) {
+        const line = found.lines[i];
+        const unit = line.item.unit_name || 'unit';
+
+        const per = document.getElementById('bp-per-' + i);
+        if (per) {
+            if (line.pack) {
+                per.textContent = 'per ' + line.pack.name;
+            } else {
+                per.textContent = 'per ' + unit;
+            }
+        }
+
+        const cost = document.getElementById('bp-line-' + i);
+        if (cost) {
+            cost.textContent = line.valid
+                ? peso(Math.round(line.unitCost * Number(line.item.quantity) * 100) / 100)
+                : '--';
+        }
+    }
+
+    const total = document.getElementById('bp-total');
+    if (total) total.textContent = peso(found.total);
 }
 
 function poDeliveryReportHtml(report) {
@@ -2736,16 +2744,33 @@ async function decidePurchaseOrder(poId, approve) {
     if (!po) return;
 
     let note = '';
+    let prices = [];
     if (approve) {
+        if (!poPricing || poPricing.poId !== poId) {
+            notifyWarning('Open the order again to set its buying prices.', 'Order not approved');
+            return;
+        }
+        const found = poReadBuyingPrices();
+        if (found.problem !== null) {
+            notifyWarning(found.problem, 'Order not approved');
+            const field = document.getElementById('bp-price-' + found.problemAt);
+            if (field) field.focus();
+            return;
+        }
+        for (let i = 0; i < found.lines.length; i++) {
+            prices.push({ id: found.lines[i].item.po_item_id, unitCost: found.lines[i].unitCost });
+        }
+
         const yes = await askConfirm(
             'Order #' + po.po_id + ' to ' + po.supplier_name + ': ' + po.line_count + ' line(s), ' + po.total_units +
-            ' unit(s). Once approved, the clerk prints it and sends it to the supplier, and counts the ' +
-            'delivery in against it when it arrives.',
+            ' unit(s). Once approved, ' +
+            'the clerk prints it and sends it to the supplier, and counts the delivery in against it when it arrives.',
             {
                 title: 'Approve this purchase order?',
                 eyebrow: 'Purchase Orders',
                 confirmLabel: 'Approve the order',
                 detail: [
+                    'Order total: ' + peso(found.total),
                     'The printed order carries a QR code and a link: ' + po.supplier_name +
                         ' scans it to accept or decline the order.',
                     'You are notified the moment the supplier answers.'
@@ -2770,13 +2795,14 @@ async function decidePurchaseOrder(poId, approve) {
     }
 
     try {
-        const response = await apiDecidePurchaseOrder(poId, approve, note);
+        const response = await apiDecidePurchaseOrder(poId, approve, note, prices);
         const result = await response.json();
         if (!response.ok) {
             if (!handleAuthFailure(response, result)) notifyError(result.error);
             return;
         }
 
+        poPricing = null;
         closeModal('detail-modal');
         notifySuccess(result.message, approve ? 'Order approved' : 'Order declined');
         await refreshPurchaseOrders();

@@ -914,6 +914,7 @@ function registerManagerRoutes(app, deps) {
         "LEFT JOIN vw_customer_credit cc ON cc.customer_id = s.customer_id " +
         "WHERE s.is_archived = FALSE " +
         "AND s.customer_id IS NOT NULL " +
+        "AND s.payment_method IN ('Credit', 'COD') " +
         "AND s.amount_due - s.amount_paid > 0 " +
         "ORDER BY s.sale_date ASC");
       const rows = rowsResult[0];
@@ -1705,7 +1706,7 @@ function registerManagerRoutes(app, deps) {
         "AND s.sale_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY) " +
         "GROUP BY si.product_id " +
         ") " +
-        "SELECT p.product_id, p.product_name, p.price, p.reorder_point, p.status, " +
+        "SELECT p.product_id, p.product_name, p.price, p.last_cost, p.reorder_point, p.status, " +
         "p.lead_time_days, p.safety_stock, " +
         "COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, " +
         "i.last_updated, " +

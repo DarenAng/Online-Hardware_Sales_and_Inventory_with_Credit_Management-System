@@ -2023,12 +2023,10 @@ PROC_BODY: BEGIN
     DECLARE v_count INT DEFAULT 0;
     DECLARE v_product_id INT;
     DECLARE v_quantity DECIMAL(12,3);
-    DECLARE v_cost DECIMAL(10,2);
     DECLARE v_new_name VARCHAR(150);
     DECLARE v_brand VARCHAR(100);
     DECLARE v_category VARCHAR(50);
     DECLARE v_unit VARCHAR(20);
-    DECLARE v_price DECIMAL(10,2);
     DECLARE v_pack_name VARCHAR(20);
     DECLARE v_pack_size DECIMAL(12,3);
     DECLARE v_pack_count DECIMAL(12,3);
@@ -2086,12 +2084,10 @@ PROC_BODY: BEGIN
     WHILE v_i < v_count DO
         SET v_product_id = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].product_id'))), 'null');
         SET v_quantity   = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].quantity'))), 'null');
-        SET v_cost       = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].unit_cost'))), 'null');
         SET v_new_name   = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].new_name'))), 'null');
         SET v_brand      = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].brand_name'))), 'null');
         SET v_category   = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].category_name'))), 'null');
         SET v_unit       = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].unit_name'))), 'null');
-        SET v_price      = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].price'))), 'null');
         SET v_pack_name  = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].pack_name'))), 'null');
         SET v_pack_size  = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].pack_size'))), 'null');
         SET v_pack_count = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_items_json, CONCAT('$[', v_i, '].pack_count'))), 'null');
@@ -2109,7 +2105,7 @@ PROC_BODY: BEGIN
 
         SET v_made = FALSE;
         CALL sp_ensure_material(v_new_name, v_brand, v_category, v_unit,
-                                IFNULL(v_price, IFNULL(v_cost, 0.00)), v_supplier,
+                                0.00, v_supplier,
                                 v_product_id, v_made);
 
         IF v_product_id IS NULL THEN
@@ -2129,7 +2125,7 @@ PROC_BODY: BEGIN
         END IF;
 
         INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_cost, pack_name, pack_size, pack_count)
-        VALUES (p_po_id, v_product_id, v_quantity, IFNULL(v_cost, 0.00), v_pack_name, v_pack_size, v_pack_count);
+        VALUES (p_po_id, v_product_id, v_quantity, 0.00, v_pack_name, v_pack_size, v_pack_count);
 
         SET v_i = v_i + 1;
     END WHILE;
@@ -2161,6 +2157,7 @@ END //
 CREATE PROCEDURE sp_decide_purchase_order (
     IN p_po_id INT,
     IN p_approve BOOLEAN,
+    IN p_prices_json JSON,
     IN p_note VARCHAR(255),
     IN p_staff_id INT,
     OUT p_status_code INT,
@@ -2170,6 +2167,12 @@ PROC_BODY: BEGIN
     DECLARE v_status VARCHAR(20);
     DECLARE v_supplier VARCHAR(100);
     DECLARE v_lines INT DEFAULT 0;
+    DECLARE v_i INT DEFAULT 0;
+    DECLARE v_count INT DEFAULT 0;
+    DECLARE v_item INT;
+    DECLARE v_cost DECIMAL(12,4);
+    DECLARE v_unpriced INT DEFAULT 0;
+    DECLARE v_total DECIMAL(12,2) DEFAULT 0.00;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -2201,7 +2204,40 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    SELECT COUNT(*) INTO v_lines FROM purchase_order_items WHERE po_id = p_po_id;
+    IF p_approve THEN
+        SET v_count = IFNULL(JSON_LENGTH(p_prices_json), 0);
+
+        WHILE v_i < v_count DO
+            SET v_item = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_prices_json, CONCAT('$[', v_i, '].po_item_id'))), 'null');
+            SET v_cost = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_prices_json, CONCAT('$[', v_i, '].unit_cost'))), 'null');
+
+            IF v_item IS NULL OR v_cost IS NULL OR v_cost <= 0 OR v_cost > 99999999.99 THEN
+                ROLLBACK;
+                SET p_status_code = 400;
+                SET p_message = 'Every line needs a buying price above zero.';
+                LEAVE PROC_BODY;
+            END IF;
+
+            UPDATE purchase_order_items
+            SET unit_cost = v_cost
+            WHERE po_item_id = v_item AND po_id = p_po_id;
+
+            SET v_i = v_i + 1;
+        END WHILE;
+
+        SELECT COUNT(*) INTO v_unpriced
+        FROM purchase_order_items WHERE po_id = p_po_id AND unit_cost <= 0;
+
+        IF v_unpriced > 0 THEN
+            ROLLBACK;
+            SET p_status_code = 400;
+            SET p_message = 'Every line needs a buying price above zero.';
+            LEAVE PROC_BODY;
+        END IF;
+    END IF;
+
+    SELECT COUNT(*), COALESCE(SUM(line_cost), 0.00) INTO v_lines, v_total
+    FROM purchase_order_items WHERE po_id = p_po_id;
 
     UPDATE purchase_orders
     SET status = IF(p_approve, 'Pending', 'Cancelled'),
@@ -2213,14 +2249,15 @@ PROC_BODY: BEGIN
     INSERT INTO audit_logs (staff_id, action, action_type, details)
     VALUES (p_staff_id, IF(p_approve, 'PO_CONFIRMED', 'PO_DECLINED'), 'UPDATE',
             CONCAT('PO #', p_po_id, ' to ', v_supplier, ' ', IF(p_approve, 'confirmed', 'declined'),
+                   IF(p_approve, CONCAT(', buying prices set, total PHP ', FORMAT(v_total, 2)), ''),
                    IF(p_note IS NULL OR TRIM(p_note) = '', '', CONCAT(': ', TRIM(p_note)))));
 
     INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)
     VALUES (3, 'Purchase Order',
             CONCAT('Purchase order #', p_po_id, IF(p_approve, ' confirmed', ' declined')),
             IF(p_approve,
-               CONCAT(v_lines, ' line(s) to ', v_supplier, '. Send it to the supplier, and check the goods ',
-                      'against it when they arrive.'),
+               CONCAT(v_lines, ' line(s) to ', v_supplier, ', total PHP ', FORMAT(v_total, 2),
+                      '. Send it to the supplier, and check the goods against it when they arrive.'),
                CONCAT('The manager declined the order to ', v_supplier,
                       IF(p_note IS NULL OR TRIM(p_note) = '', '.', CONCAT(': ', TRIM(p_note))))),
             p_staff_id);
@@ -2258,13 +2295,14 @@ PROC_BODY: BEGIN
     DECLARE v_unit VARCHAR(20);
     DECLARE v_category VARCHAR(50);
     DECLARE v_brand VARCHAR(100);
-    DECLARE v_cost DECIMAL(10,2);
+    DECLARE v_cost DECIMAL(12,4);
+    DECLARE v_unit_cost DECIMAL(12,4);
     DECLARE v_supplier INT;
     DECLARE v_made BOOLEAN DEFAULT FALSE;
     DECLARE v_short INT DEFAULT 0;
 
     DECLARE cur CURSOR FOR
-        SELECT product_id, quantity FROM purchase_order_items WHERE po_id = p_po_id;
+        SELECT product_id, quantity, unit_cost FROM purchase_order_items WHERE po_id = p_po_id;
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -2326,7 +2364,7 @@ PROC_BODY: BEGIN
 
         SET v_made = FALSE;
         CALL sp_ensure_material(v_new_name, v_brand, v_category, v_unit,
-                                IFNULL(v_cost, 0.00), v_supplier,
+                                0.00, v_supplier,
                                 v_json_id, v_made);
 
         IF v_json_id IS NOT NULL THEN
@@ -2348,13 +2386,19 @@ PROC_BODY: BEGIN
                        WHERE po_id = p_po_id AND product_id = v_json_id) THEN
                 UPDATE purchase_order_items
                 SET quantity = IFNULL(v_json_qty, quantity),
-                    unit_cost = IFNULL(v_cost, unit_cost),
                     pack_count = IF(pack_size IS NULL OR pack_size <= 0, NULL,
                                     ROUND(IFNULL(v_json_qty, quantity) / pack_size, 3))
                 WHERE po_id = p_po_id AND product_id = v_json_id;
             ELSE
+                IF IFNULL(v_cost, 0) <= 0 THEN
+                    ROLLBACK;
+                    SET p_status_code = 400;
+                    SET p_message = 'A material that was not on the order needs a cost above zero.';
+                    LEAVE PROC_BODY;
+                END IF;
+
                 INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_cost)
-                VALUES (p_po_id, v_json_id, IFNULL(v_json_qty, 0), IFNULL(v_cost, 0.00));
+                VALUES (p_po_id, v_json_id, IFNULL(v_json_qty, 0), v_cost);
                 SET p_extras = p_extras + 1;
             END IF;
         END IF;
@@ -2364,7 +2408,7 @@ PROC_BODY: BEGIN
 
     OPEN cur;
     read_loop: LOOP
-        FETCH cur INTO v_product_id, v_ordered;
+        FETCH cur INTO v_product_id, v_ordered, v_unit_cost;
         IF v_done = 1 THEN
             LEAVE read_loop;
         END IF;
@@ -2372,6 +2416,10 @@ PROC_BODY: BEGIN
         SET v_arrived = v_ordered;
 
         IF v_arrived > 0 THEN
+            IF v_unit_cost > 0 THEN
+                UPDATE products SET last_cost = v_unit_cost WHERE product_id = v_product_id;
+            END IF;
+
             SET v_before = 0;
             SELECT quantity_in_stock INTO v_before FROM inventory WHERE product_id = v_product_id FOR UPDATE;
 

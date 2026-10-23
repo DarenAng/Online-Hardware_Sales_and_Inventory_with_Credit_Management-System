@@ -195,6 +195,7 @@ CREATE TABLE products (
     category_id INT,
     unit_id INT,
     price DECIMAL(10,2) NOT NULL,
+    last_cost DECIMAL(12,4) NULL,
     reorder_point INT NOT NULL DEFAULT 10,
     lead_time_days INT NOT NULL DEFAULT 7,
     safety_stock INT NOT NULL DEFAULT 0,
@@ -260,8 +261,8 @@ CREATE TABLE purchase_order_items (
     po_id INT NOT NULL,
     product_id INT NOT NULL,
     quantity INT NOT NULL,
-    unit_cost DECIMAL(10,2) NOT NULL,
-    line_cost DECIMAL(12,2) AS (quantity * unit_cost) STORED,
+    unit_cost DECIMAL(12,4) NOT NULL,
+    line_cost DECIMAL(12,2) AS (ROUND(quantity * unit_cost, 2)) STORED,
     pack_name VARCHAR(20) NULL,
     pack_size DECIMAL(12,3) NULL,
     pack_count DECIMAL(12,3) NULL,
@@ -1469,3 +1470,13 @@ INSERT INTO audit_logs (staff_id, role_name, ip_address, action, action_type, de
 (2, 'Manager', '192.168.1.12', 'LOGIN_FAILURE', 'LOGIN_FAILURE', 'Sign-in refused for manager@hardware.com: wrong password', '{"email":"manager@hardware.com","reason":"wrong_password"}', '2026-09-08 12:25:35'),
 (4, 'Cashier', '192.168.1.14', 'FILE_RETURN', 'CREATE', 'Return report filed', NULL, '2026-09-11 08:10:32'),
 (NULL, NULL, NULL, 'ARCHIVE_SWEEP', 'DELETE', 'Archived 13 closed deliveries older than 90 days', NULL, '2026-09-12 02:00:00');
+
+UPDATE products p
+SET p.last_cost = (
+    SELECT i.unit_cost
+    FROM purchase_order_items i
+    JOIN purchase_orders o ON o.po_id = i.po_id
+    WHERE i.product_id = p.product_id AND o.status = 'Received' AND i.unit_cost > 0
+    ORDER BY o.po_id DESC, i.po_item_id DESC
+    LIMIT 1
+);

@@ -2263,7 +2263,8 @@ function openMaterialDetail(productId) {
         '<div class="detail-grid">' +
             detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
             detailField('Brand', escapeHtml(p.brand_name || 'No brand')) +
-            detailField('Unit Price', priceOrBadge(p) + ' <span class="muted">per ' + escapeHtml(p.unit_name || 'unit') + '</span>') +
+            detailField('Selling Price', priceOrBadge(p) + ' <span class="muted">per ' + escapeHtml(p.unit_name || 'unit') + '</span>') +
+            detailField('Last Buying Price', Number(p.last_cost) > 0 ? peso(p.last_cost) + ' <span class="muted">per ' + escapeHtml(p.unit_name || 'unit') + '</span>' : '<span class="muted">Not bought before</span>') +
             detailField('On Hand', p.quantity_in_stock + ' ' + unit + ' ' + statusBadge(p.stock_status)) +
         '</div>';
 

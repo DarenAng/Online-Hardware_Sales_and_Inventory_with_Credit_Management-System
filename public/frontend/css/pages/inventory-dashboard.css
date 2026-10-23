@@ -76,12 +76,6 @@
     line-height: 1;
 }
 
-.po-footnote {
-    margin: 8px 2px 0;
-    font-size: 13px;
-    line-height: 1.5;
-    color: var(--steel-soft);
-}
 .po-form-footer { justify-content: flex-end; }
 
 .po-lock {

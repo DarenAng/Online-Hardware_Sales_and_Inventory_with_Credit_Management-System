@@ -26,6 +26,14 @@ function quantityText(value) {
   return number.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function priceCell(item) {
+  if (!(Number(item.unit_cost) > 0)) return ["--", null];
+  if (item.pack_name && Number(item.pack_size) > 0 && Number(item.pack_count) > 0) {
+    return [peso(Math.round(Number(item.unit_cost) * Number(item.pack_size) * 100) / 100), "per " + item.pack_name];
+  }
+  return [peso(item.unit_cost), "per " + (item.unit_name || "unit")];
+}
+
 function lineQuantity(item) {
   const unit = item.unit_name || "units";
   if (item.pack_name && Number(item.pack_size) > 0 && Number(item.pack_count) > 0) {
@@ -166,8 +174,8 @@ function purchaseOrderPdf(details) {
       [item.product_name, item.brand_name || null],
       [item.category_name || "--", null],
       [lineQuantity(item), null],
-      [peso(item.unit_cost), "per " + (item.unit_name || "unit")],
-      [peso(item.line_cost), null]
+      priceCell(item),
+      Number(item.line_cost) > 0 ? [peso(item.line_cost), null] : ["--", null]
     ];
 
     let height = 0;
@@ -223,13 +231,12 @@ function purchaseOrderPdf(details) {
     figures += columns[columnIndex].width;
   }
   doc.font("Helvetica-Bold").fontSize(10).fillColor(INK)
-    .text(items.length + " " + (items.length === 1 ? "line" : "lines") + " · priced at the rates on file for these materials; " +
-          "any discount is settled on the invoice", left + pad, y + 10, { width: width - figures - pad * 2 });
+    .text(items.length + " " + (items.length === 1 ? "line" : "lines") + (total > 0 ? " · any discount is settled on the invoice" : ""), left + pad, y + 10, { width: width - figures - pad * 2 });
   const labelBottom = doc.y;
   doc.font("Helvetica-Bold").fontSize(10)
     .text(quantityText(units), right - figures + pad, y + 10, { width: columns[3].width - pad * 2, align: "right" });
   doc.font("Helvetica-Bold").fontSize(13)
-    .text(peso(total), right - columns[5].width - 60, y + 8, { width: columns[5].width + 60 - pad, align: "right" });
+    .text(total > 0 ? peso(total) : "--", right - columns[5].width - 60, y + 8, { width: columns[5].width + 60 - pad, align: "right" });
   y = Math.max(labelBottom, doc.y) + 18;
 
   const note = "Please quote " + number + " on the delivery receipt and the invoice. Goods are counted on arrival " +

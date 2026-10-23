@@ -84,16 +84,36 @@ function startSupplierOrderPage() {
             ', ' + when.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
     }
 
+    function isPackLine(item) {
+        return Boolean(item.pack_name) && Number(item.pack_size) > 0 && Number(item.pack_count) > 0;
+    }
+
+    function packSizeOf(item) {
+        return isPackLine(item) ? Number(item.pack_size) : 1;
+    }
+
+    function priceUnitOf(item) {
+        return isPackLine(item) ? item.pack_name : (item.unit_name || 'unit');
+    }
+
+    function shownPrice(unitCost, item) {
+        return Math.round(Number(unitCost) * packSizeOf(item) * 100) / 100;
+    }
+
+    function lineAmount(price, item) {
+        return Math.round(price * Number(item.quantity) * 100) / 100;
+    }
+
     function priceFor(item) {
         if (!has(draft.prices, item.id)) return null;
         const typed = parseFloat(draft.prices[item.id]);
         if (!Number.isFinite(typed)) return NaN;
-        return Math.round(typed * 100) / 100;
+        return Math.round(Math.round(typed * 100) / 100 / packSizeOf(item) * 10000) / 10000;
     }
 
     function lineChanged(item) {
         const price = priceFor(item);
-        return price !== null && !Number.isNaN(price) && price !== Number(item.unit_cost);
+        return price !== null && !Number.isNaN(price) && price !== Math.round(Number(item.unit_cost) * 10000) / 10000;
     }
 
     function discountAmount(goods) {
@@ -112,7 +132,7 @@ function startSupplierOrderPage() {
         for (let i = 0; i < view.items.length; i++) {
             const item = view.items[i];
             if (lineChanged(item)) {
-                goods += priceFor(item) * Number(item.quantity);
+                goods += lineAmount(priceFor(item), item);
             } else {
                 goods += Number(item.line_cost || 0);
             }
@@ -130,7 +150,7 @@ function startSupplierOrderPage() {
             const line = Number(item.line_cost || 0);
             ours += line;
             if (lineChanged(item)) {
-                theirs += priceFor(item) * Number(item.quantity);
+                theirs += lineAmount(priceFor(item), item);
                 changed += 1;
             } else {
                 theirs += line;
@@ -275,7 +295,6 @@ function startSupplierOrderPage() {
     }
 
     function lineHtml(item, index) {
-        const unit = item.unit_name || 'unit';
         return '<li class="so-line" data-id="' + item.id + '">' +
             '<div class="so-line-top">' +
                 '<span class="so-line-no">' + (index + 1) + '</span>' +
@@ -290,7 +309,7 @@ function startSupplierOrderPage() {
                     '<i class="bi bi-pencil" aria-hidden="true"></i>Edit price</button>' +
             '</div>' +
             '<div class="so-edit" data-editor>' +
-                '<label class="so-label" for="so-price-' + item.id + '">Your price per ' + escapeHtml(unit) + '</label>' +
+                '<label class="so-label" for="so-price-' + item.id + '">Your price per ' + escapeHtml(priceUnitOf(item)) + '</label>' +
                 '<div class="so-edit-row">' +
                     '<span class="so-money"><span aria-hidden="true">₱</span>' +
                         '<input type="number" inputmode="decimal" min="0.01" step="0.01" ' +
@@ -322,8 +341,6 @@ function startSupplierOrderPage() {
             const editing = Boolean(draft.editing[item.id]);
             const price = priceFor(item);
             const changed = lineChanged(item);
-            const unit = item.unit_name || 'unit';
-
             row.classList.toggle('is-editing', editing);
             row.classList.toggle('is-changed', changed);
 
@@ -331,7 +348,7 @@ function startSupplierOrderPage() {
             const total = row.querySelector('[data-total]');
             const delta = row.querySelector('[data-delta]');
             if (changed) {
-                const theirs = price * Number(item.quantity);
+                const theirs = lineAmount(price, item);
                 total.innerHTML = '<s>' + peso(ours) + '</s> ' + peso(theirs);
                 delta.innerHTML = deltaChip(ours, theirs);
             } else {
@@ -341,10 +358,11 @@ function startSupplierOrderPage() {
 
             if (changed) {
                 row.querySelector('[data-price-text]').innerHTML =
-                    '<s>' + peso(item.unit_cost) + '</s> <strong>' + peso(price) + '</strong> per ' + escapeHtml(unit) +
+                    '<s>' + peso(shownPrice(item.unit_cost, item)) + '</s> <strong>' + peso(shownPrice(price, item)) +
+                    '</strong> per ' + escapeHtml(priceUnitOf(item)) +
                     ' <span class="so-yours">your price</span>';
             } else {
-                row.querySelector('[data-price-text]').innerHTML = peso(item.unit_cost) + ' per ' + escapeHtml(unit);
+                row.querySelector('[data-price-text]').innerHTML = peso(shownPrice(item.unit_cost, item)) + ' per ' + escapeHtml(priceUnitOf(item));
             }
 
             row.querySelector('[data-edit]').hidden = editing;
@@ -488,7 +506,7 @@ function startSupplierOrderPage() {
             input.focus();
             return;
         }
-        if (typed === Number(item.unit_cost)) delete draft.prices[id];
+        if (typed === shownPrice(item.unit_cost, item)) delete draft.prices[id];
         else draft.prices[id] = String(typed);
         delete draft.editing[id];
         lineError(id, '');
@@ -509,7 +527,7 @@ function startSupplierOrderPage() {
                 const id = edit.dataset.edit;
                 const item = findItem(id);
                 const input = document.getElementById('so-price-' + id);
-                input.value = has(draft.prices, id) ? Number(draft.prices[id]).toFixed(2) : Number(item.unit_cost).toFixed(2);
+                input.value = has(draft.prices, id) ? Number(draft.prices[id]).toFixed(2) : shownPrice(item.unit_cost, item).toFixed(2);
                 draft.editing[id] = true;
                 lineError(id, '');
                 refreshLines();
@@ -711,7 +729,7 @@ function startSupplierOrderPage() {
                 original = Number(item.original_unit_cost);
             }
             if (original !== null) {
-                ours += original * Number(item.quantity);
+                ours += lineAmount(original, item);
             } else {
                 ours += Number(item.line_cost || 0);
             }
@@ -719,8 +737,8 @@ function startSupplierOrderPage() {
             rows += '<li class="so-rline' + (moved ? ' is-changed' : '') + '">' +
                 '<span class="so-rname">' + escapeHtml(item.product_name) +
                     '<small>' + escapeHtml(lineQuantity(item)) + '</small></span>' +
-                '<span class="so-rprice">' + (moved ? '<s>' + peso(original) + '</s>' : '') +
-                    peso(item.unit_cost) + '<small>per ' + escapeHtml(item.unit_name || 'unit') + '</small></span>' +
+                '<span class="so-rprice">' + (moved ? '<s>' + peso(shownPrice(original, item)) + '</s>' : '') +
+                    peso(shownPrice(item.unit_cost, item)) + '<small>per ' + escapeHtml(priceUnitOf(item)) + '</small></span>' +
                 '<span class="so-fig">' + peso(item.line_cost) + '</span>' +
             '</li>';
         }
