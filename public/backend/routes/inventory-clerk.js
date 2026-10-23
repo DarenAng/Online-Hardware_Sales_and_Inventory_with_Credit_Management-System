@@ -1813,9 +1813,16 @@ function registerInventoryRoutes(app, deps) {
   const REPORT_TYPES = ["Return", "Damaged", "Refunded", "Missing"];
   const MOST_REPORT_ITEMS = 50;
 
-  app.post("/api/returns/batch", async function (request, response) {
+  app.post("/api/returns/batch", function (request, response) {
+    return fileReportBatch(request, response, (request.body || {}).reportType);
+  });
+
+  app.post("/api/refunds", function (request, response) {
+    return fileReportBatch(request, response, "Refunded");
+  });
+
+  async function fileReportBatch(request, response, reportType) {
     const body = request.body || {};
-    const reportType = body.reportType;
 
     if (!REPORT_TYPES.includes(reportType)) {
       return response.status(400).json({ error: "Pick the type of report." });
@@ -1954,7 +1961,7 @@ function registerInventoryRoutes(app, deps) {
       console.error("File report (several items) failed:", error.message);
       response.status(500).json({ error: "Unable to file the report" });
     }
-  });
+  }
 
   app.post("/api/returns/:reportId/resolve", async function (request, response) {
     const body = request.body || {};

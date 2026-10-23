@@ -141,8 +141,9 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/materials$/,                      [CLERK]],
 
   ["GET",   /^\/api\/returns$/,                        [CLERK, CASHIER]],
-  ["POST",  /^\/api\/returns$/,                        [CLERK, CASHIER, DRIVER]],
-  ["POST",  /^\/api\/returns\/batch$/,                 [CLERK, CASHIER]],
+  ["POST",  /^\/api\/returns$/,                        [CLERK, DRIVER]],
+  ["POST",  /^\/api\/returns\/batch$/,                 [CLERK]],
+  ["POST",  /^\/api\/refunds$/,                        [CASHIER]],
   ["POST",  /^\/api\/returns\/\d+\/resolve$/,          [CLERK]],
 
   ["GET",   /^\/api\/credit\/customers$/,              [MANAGER, CASHIER]],

@@ -3107,7 +3107,10 @@ async function handleIssueRefund(event) {
     }
 
     try {
-        const response = await apiFileReturn(data);
+        const response = await apiFileRefund({
+            saleId: data.saleId, reason: data.reason,
+            items: [{ productId: data.productId, quantity: data.quantity, refundAmount: data.refundAmount }]
+        });
         const result = await response.json();
         if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
 
@@ -3169,9 +3172,7 @@ async function issueRefundForLines(form, reason) {
 
     const saleId = refundSale.saleId;
     try {
-        const response = await apiFileRefundBatch({
-            reportType: 'Refunded', saleId: saleId, reason: reason, items: items
-        });
+        const response = await apiFileRefund({ saleId: saleId, reason: reason, items: items });
         const result = await response.json();
         if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error, 'Refund not issued'); return; }
 

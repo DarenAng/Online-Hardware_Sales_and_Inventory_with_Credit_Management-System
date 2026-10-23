@@ -9,7 +9,7 @@ const LIVE_POLL_SECONDS = numberSetting(process.env.LIVE_POLL_SECONDS, IS_VERCEL
 function scopeOf(pathname) {
   if (/^\/api\/(users|roles|staff)/.test(pathname)) return "staff";
   if (/^\/api\/(inventory|purchase-orders|stocks|units|materials|suppliers|categories)/.test(pathname)) return "inventory";
-  if (/^\/api\/returns/.test(pathname)) return "returns";
+  if (/^\/api\/(returns|refunds)/.test(pathname)) return "returns";
   if (/^\/api\/(deliveries|delivery\/)/.test(pathname)) return "deliveries";
   if (/^\/api\/(credit|customers)/.test(pathname)) return "credit";
   if (/^\/api\/sales/.test(pathname)) return "sales";

@@ -34,8 +34,8 @@ function apiRequestVoid(saleId, reason) {
     return sendJson('/api/sales/' + encodeURIComponent(saleId) + '/void-request', 'POST', { reason: reason });
 }
 
-function apiFileRefundBatch(data) {
-    return sendJson('/api/returns/batch', 'POST', data);
+function apiFileRefund(data) {
+    return sendJson('/api/refunds', 'POST', data);
 }
 
 function apiTakePayment(saleId, payment) {
