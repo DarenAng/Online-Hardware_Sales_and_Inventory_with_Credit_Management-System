@@ -299,6 +299,7 @@ function openDelayReason(deliveryId, status) {
     button.className = failed ? 'btn btn-danger' : 'btn btn-gold';
 
     showModal('delay-modal');
+    guardModal('delay-modal', failed ? 'the reason for the failed delivery' : 'the reason for the delay');
 }
 
 async function handleDelayReason(event) {

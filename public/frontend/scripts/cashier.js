@@ -2779,6 +2779,7 @@ async function openDeliveryForm() {
     }
 
     showModal('delivery-modal');
+    guardModal('delivery-modal', pendingDelivery ? 'your changes to the delivery' : 'the new delivery');
     setTimeout(function () { if (fields.contactName) fields.contactName.focus(); }, 60);
 }
 
@@ -2890,7 +2891,8 @@ async function saveDeliveryForm(event) {
     notifyInfo('It will be created when you complete this sale.', 'Delivery attached');
 }
 
-function cancelDeliveryForm() {
+async function cancelDeliveryForm() {
+    if (!(await requestCloseModal('delivery-modal'))) return;
     deliveryFormIsOpen = false;
     closeModal('delivery-modal');
     clearDeliveryErrors();
@@ -3498,14 +3500,40 @@ function renderRefundPreview() {
         (picked === 0 ? '<span class="preview-note">Type how many of each item came back.</span>' : '');
 }
 
-function cancelRefundForm(event) {
+function refundFormHasWork() {
+    const form = document.getElementById('refund-form');
+    if (!form || !panelShowing('panel-refund')) return false;
+    const productBox = refundProductBox();
+    return Boolean(refundSale) ||
+        form.elements.reason.value.trim() !== '' ||
+        form.elements.productId.value !== '' ||
+        (productBox && productBox.value.trim() !== '') ||
+        form.elements.saleId.value.trim() !== '' ||
+        form.elements.quantity.value !== '1' ||
+        form.elements.refundAmount.value !== '0';
+}
+
+function discardRefundForm() {
     const form = document.getElementById('refund-form');
     if (form) {
         form.elements.reason.value = '';
     }
     clearRefundSale();
-    showCashierHome(event);
 }
+
+async function cancelRefundForm(event) {
+    if (event) event.preventDefault();
+    if (refundFormHasWork() && !(await askDiscard('this refund'))) return;
+    discardRefundForm();
+    showCashierHome();
+}
+
+watchPanelLeave({
+    panelId: 'panel-refund',
+    hasWork: refundFormHasWork,
+    what: function () { return 'this refund'; },
+    discard: discardRefundForm
+});
 
 function buildSalesPanel() {
     createDataPanel({
@@ -3684,7 +3712,13 @@ async function openPaymentForm(saleId) {
 
     renderPaymentVerdict();
     showModal('payment-modal');
+    guardModal('payment-modal', 'this payment');
     setTimeout(function () { if (fields && fields.amount) { fields.amount.focus(); fields.amount.select(); } }, 60);
+}
+
+async function cancelPaymentForm() {
+    if (!(await requestCloseModal('payment-modal'))) return;
+    closePaymentForm(true);
 }
 
 function closePaymentForm(cancelled) {
@@ -4362,12 +4396,18 @@ function askForExtension() {
     renderLimitVerdict();
     closeModal('customer-modal');
     showModal('limit-modal');
+    guardModal('limit-modal', 'this credit limit request');
     setTimeout(function () { form.elements.requestedLimit.focus(); }, 60);
 }
 
 function renderLimitVerdict() {
     const verdict = document.getElementById('limit-verdict');
     if (verdict) { verdict.textContent = ''; verdict.className = 'delivery-verdict'; }
+}
+
+async function cancelLimitForm() {
+    if (!(await requestCloseModal('limit-modal'))) return;
+    closeLimitForm();
 }
 
 function closeLimitForm() {
@@ -4497,6 +4537,7 @@ function prefillAddCustomerName(typed) {
     if (words[0] === '') return;
     form.elements.firstName.value = words.shift();
     form.elements.lastName.value = words.join(' ');
+    guardModal('add-customer-modal', 'the new customer');
 }
 
 let editCustomerId = null;
@@ -4533,10 +4574,12 @@ function openAddCustomer() {
     if (save) save.disabled = false;
 
     showModal('add-customer-modal');
+    guardModal('add-customer-modal', 'the new customer');
     setTimeout(function () { form.elements.firstName.focus(); }, 60);
 }
 
-function cancelAddCustomer() {
+async function cancelAddCustomer() {
+    if (!(await requestCloseModal('add-customer-modal'))) return;
     addCustomerFor = '';
     editCustomerId = null;
     closeModal('add-customer-modal');
@@ -4570,6 +4613,7 @@ async function editOpenCustomer() {
     form.elements.city.value = row.address_city || '';
     form.elements.province.value = row.address_province || '';
     form.elements.landmark.value = row.address_landmark || '';
+    guardModal('add-customer-modal', 'your changes to this customer');
 }
 
 async function handleAddCustomer(event) {

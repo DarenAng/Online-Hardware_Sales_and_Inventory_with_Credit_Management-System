@@ -208,7 +208,7 @@
 
                                 <div class="form-footer">
                                     <button type="submit" class="btn btn-success">Apply Adjustment</button>
-                                    <button type="button" class="btn btn-ghost" onclick="clearAdjustForm()">Clear</button>
+                                    <button type="button" class="btn btn-ghost" onclick="askClearAdjustForm()">Clear</button>
                                 </div>
                             </form>
                         </div>
@@ -394,7 +394,7 @@
                             when the delivery is counted in.</p>
 
                         <div class="form-footer po-form-footer">
-                            <button type="button" class="btn btn-ghost" onclick="showPurchaseOrderHistory(event)">Back to Purchase Orders</button>
+                            <button type="button" class="btn btn-ghost" onclick="leavePurchaseOrderForm(event)">Back to Purchase Orders</button>
                             <button type="submit" class="btn btn-success">Send to the manager</button>
                         </div>
                     </form>
@@ -482,7 +482,7 @@
                     <div class="form-footer">
                         <button type="button" class="btn btn-ghost" onclick="addReceiveExtra()">Add something that arrived</button>
                         <button type="button" class="btn btn-success" onclick="submitReceiveOrder()">Receive this delivery</button>
-                        <button type="button" class="btn btn-ghost" onclick="showPurchaseOrderHistory(event)">Cancel</button>
+                        <button type="button" class="btn btn-ghost" onclick="cancelReceiveOrder(event)">Cancel</button>
                     </div>
                 </div>
 
@@ -510,17 +510,6 @@
                                 <option value="Refunded">Refunded</option>
                                 <option value="Return">Return</option>
                                 <option value="Missing">Missing from delivery</option>
-                            </select>
-                        </div>
-                        <div class="toolbar-field">
-                            <label for="returns-where">Adjustment</label>
-                            <select id="returns-where" data-filter-table="returns-table" data-hides-column="5"
-                                    onchange="dataPanelFilter('clerk-returns', 'where', this.value)">
-                                <option value="all">Any</option>
-                                <option value="awaiting">Awaiting inspection</option>
-                                <option value="Return to Stock">Back on shelf</option>
-                                <option value="Write-Off">Written off</option>
-                                <option value="Missing">Never arrived</option>
                             </select>
                         </div>
                         <div class="toolbar-spacer"></div>
@@ -606,7 +595,7 @@
                         <span class="modal-role" id="detail-subtitle">Detail</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('detail-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('detail-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-top" id="detail-top" hidden></div>

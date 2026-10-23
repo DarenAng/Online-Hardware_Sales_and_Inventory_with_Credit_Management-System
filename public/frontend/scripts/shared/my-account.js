@@ -16,7 +16,7 @@ function buildAccountModal() {
         '                        <span class="modal-role" id="account-role">Role</span>\n' +
         '                    </div>\n' +
         '                </div>\n' +
-        '                <button type="button" class="modal-close" onclick="closeModal(\'account-modal\')" aria-label="Close">&times;</button>\n' +
+        '                <button type="button" class="modal-close" onclick="requestCloseModal(\'account-modal\')" aria-label="Close">&times;</button>\n' +
         '            </div>\n' +
         '\n' +
         '            <div class="modal-tabs">\n' +
@@ -113,17 +113,42 @@ function buildAccountModal() {
         '                 long form never pushes them onto a second page -->\n' +
         '            <div class="modal-foot" id="account-foot">\n' +
         '                <div class="detail-foot-actions" data-account-foot="edit" hidden>\n' +
-        '                    <button type="button" class="btn btn-ghost" onclick="showAccountTab(\'view\')">Cancel</button>\n' +
+        '                    <button type="button" class="btn btn-ghost" onclick="cancelAccountForm(\'edit\')">Cancel</button>\n' +
         '                    <button type="submit" form="account-form" class="btn btn-success">Save Changes</button>\n' +
         '                </div>\n' +
         '                <div class="detail-foot-actions" data-account-foot="password" hidden>\n' +
-        '                    <button type="button" class="btn btn-ghost" onclick="showAccountTab(\'view\')">Cancel</button>\n' +
+        '                    <button type="button" class="btn btn-ghost" onclick="cancelAccountForm(\'password\')">Cancel</button>\n' +
         '                    <button type="submit" form="account-password-form" class="btn btn-success">Change Password</button>\n' +
         '                </div>\n' +
         '            </div>\n' +
         '        </div>';
     document.body.appendChild(modal);
     showPasswordRules();
+
+    setModalCloseGuard('account-modal', function () {
+        const editForm = document.getElementById('account-form');
+        const passwordForm = document.getElementById('account-password-form');
+        if (formChanged('account-edit', editForm)) return askDiscard('your changes to your details');
+        if (formChanged('account-password', passwordForm)) return askDiscard('your new password');
+        return true;
+    });
+}
+
+async function cancelAccountForm(tab) {
+    const form = document.getElementById(tab === 'edit' ? 'account-form' : 'account-password-form');
+    if (formChanged('account-' + tab, form)) {
+        const what = tab === 'edit' ? 'your changes to your details' : 'your new password';
+        if (!(await askDiscard(what))) return;
+    }
+
+    if (tab === 'edit') {
+        renderMyAccount();
+    } else {
+        form.reset();
+        showPasswordRules();
+        rememberForm('account-password', form);
+    }
+    showAccountTab('view');
 }
 
 function canEditOwnDetails() {
@@ -176,6 +201,11 @@ async function openMyAccount(tab) {
     document.getElementById('account-view').innerHTML =
         '<p class="table-empty">Loading your details...</p>';
     showAccountTab(tab || 'view');
+    const passwordForm = document.getElementById('account-password-form');
+    passwordForm.reset();
+    showPasswordRules();
+    rememberForm('account-password', passwordForm);
+    delete formStarts['account-edit'];
     showModal('account-modal');
 
     try {
@@ -233,6 +263,7 @@ function renderMyAccount() {
     form.elements.lastName.value = me.last_name || '';
     phoneFill(form.elements.phone, me.phone);
     form.elements.email.value = me.email || '';
+    rememberForm('account-edit', form);
 }
 
 async function handleSaveMyProfile(event) {

@@ -41,6 +41,7 @@ function showCreateAccount(event) {
     if (event) event.preventDefault();
     clearCreateForm();
     showModal('create-modal');
+    guardModal('create-modal', 'the new account');
     const first = document.getElementById('create-first');
     if (first) first.focus();
 }
@@ -669,15 +670,6 @@ function changeListFor(lines) {
     return lines.slice(0, CHANGE_LINES_MAX - 1).concat('and ' + more + ' more changes');
 }
 
-function askDiscardChanges(message, eyebrow) {
-    return askDanger(message, {
-        title: 'Discard your changes?',
-        eyebrow: eyebrow,
-        confirmLabel: 'Discard changes',
-        cancelLabel: 'Keep editing'
-    });
-}
-
 function editUserDirty() {
     const form = document.getElementById('edit-user-form');
     const modal = document.getElementById('user-modal');
@@ -694,8 +686,7 @@ function storeFormDirty() {
 
 async function confirmCloseEditUser() {
     if (!editUserDirty()) return true;
-    return askDiscardChanges('The changes made to this account have not been saved. ' +
-                             'Closing it now throws them away.', 'Accounts Management');
+    return askDiscard('your changes to this account');
 }
 
 setModalCloseGuard('user-modal', confirmCloseEditUser);
@@ -712,10 +703,9 @@ document.addEventListener('click', async function (event) {
     event.stopImmediatePropagation();
 
     const storeOpen = storeFormDirty();
-    const yes = await askDiscardChanges(storeOpen
-        ? 'The receipt details have not been saved. Leaving this screen throws the changes away.'
-        : 'The changes made to this account have not been saved. Leaving this screen throws them away.',
-        storeOpen ? 'Receipt Maintenance' : 'Accounts Management');
+    const yes = await askDiscard(storeOpen
+        ? 'your changes to the receipt details'
+        : 'your changes to this account');
     if (!yes) return;
 
     if (!storeOpen) closeModal('user-modal');
@@ -751,9 +741,9 @@ function hideNameErrors(form) {
     }
 }
 
-function cancelCreateAccount() {
+async function cancelCreateAccount() {
+    if (!(await requestCloseModal('create-modal'))) return;
     clearCreateForm();
-    closeModal('create-modal');
 }
 
 const EMAIL_PATTERN = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/;
@@ -1488,6 +1478,12 @@ function discardFeatureChanges() {
     renderFeatureMatrix();
 }
 
+async function askDiscardFeatureChanges() {
+    if (featureSaving) return;
+    if (!(await askDiscard('your changes to Access Control'))) return;
+    discardFeatureChanges();
+}
+
 function featureScreenOpen() {
     const panel = document.getElementById('panel-features');
     return Boolean(panel) && panel.style.display !== 'none';
@@ -1503,18 +1499,7 @@ document.addEventListener('click', async function (event) {
     event.preventDefault();
     event.stopImmediatePropagation();
 
-    const count = featureMatrixChanges().length;
-    const leave = await askConfirm(
-        'You have ' + count + (count === 1 ? ' change' : ' changes') + ' to Access Control that ' +
-        (count === 1 ? 'is' : 'are') + ' not confirmed yet.',
-        {
-            title: 'Discard your changes?',
-            eyebrow: 'Access Control',
-            mark: '!',
-            confirmLabel: 'Discard Changes',
-            cancelLabel: 'Keep Editing',
-            tone: 'danger'
-        });
+    const leave = await askDiscard('your changes to Access Control');
     if (!leave) return;
 
     discardFeatureChanges();
@@ -2366,8 +2351,7 @@ const RECEIPT_LINE_LENGTH = 80;
 
 async function resetStoreForm() {
     if (storeFormDirty() &&
-        !(await askDiscardChanges('Reset puts back the details as last saved. ' +
-                                  'The changes made since then are thrown away.', 'Receipt Maintenance'))) {
+        !(await askDiscard('your changes to the receipt details'))) {
         return;
     }
     await loadStoreSettingsForm();

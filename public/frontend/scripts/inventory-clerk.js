@@ -206,7 +206,6 @@ async function loadInventoryAll(event) {
 
 const PRODUCT_NAME_MAX = 150;
 const BRAND_NAME_MAX = 100;
-const REORDER_POINT_MAX = 100000;
 
 function recordOptions(rows, firstLine) {
     let html = '<option value="">' + escapeHtml(firstLine) + '</option>';
@@ -285,21 +284,19 @@ async function openAddProduct() {
                         supplierOptions + '</select>' +
                 '</div>' +
             '</div>' +
-            '<div class="form-group">' +
-                '<label for="new-product-reorder">Reorder point <span class="label-hint">optional, 10 when left blank</span></label>' +
-                '<input type="number" class="form-control" id="new-product-reorder" name="reorderPoint" ' +
-                    'min="0" max="' + REORDER_POINT_MAX + '" step="1" placeholder="10">' +
-            '</div>' +
             '<p class="detail-note">The manager sets the selling price, and the till cannot sell this product until ' +
-                'then. It starts with nothing on the shelf: stock comes in by a delivery or a stock adjustment.</p>' +
+                'then. It starts with nothing on the shelf: stock comes in by a delivery or a stock adjustment. ' +
+                'Its reorder point starts at 10.</p>' +
             '<div class="detail-actions">' +
                 '<button type="submit" class="btn btn-accent" id="new-product-save">Add Product</button>' +
-                '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
+                '<button type="button" class="btn btn-ghost" onclick="requestCloseModal(\'detail-modal\')">Cancel</button>' +
             '</div>' +
         '</form>';
 
     openDetailModal('Add New Product', 'It starts with no price', '+',
         [{ label: 'New Product', body: body }], '', { scroll: true });
+
+    guardModal('detail-modal', 'the new product');
 
     const nameBox = document.getElementById('new-product-name');
     if (nameBox) nameBox.focus();
@@ -319,15 +316,6 @@ function checkNewProduct(form) {
     }
     if (form.elements.brandName.value.trim().length > BRAND_NAME_MAX) {
         return { message: 'A brand name is at most ' + BRAND_NAME_MAX + ' characters.', field: form.elements.brandName };
-    }
-
-    const reorder = form.elements.reorderPoint.value.trim();
-    if (reorder !== '') {
-        const number = Number(reorder);
-        if (!Number.isInteger(number) || number < 0 || number > REORDER_POINT_MAX) {
-            return { message: 'The reorder point is a whole number from 0 to ' + REORDER_POINT_MAX + '.',
-                     field: form.elements.reorderPoint };
-        }
     }
     return null;
 }
@@ -361,17 +349,36 @@ async function saveNewProduct(event) {
         return;
     }
 
+    const categoryName = form.elements.categoryName.value;
+    const unitName = form.elements.unitName.value;
+    const supplierBox = form.elements.supplierId;
+    const supplierName = supplierBox.value === '' ? 'No supplier' : supplierBox.options[supplierBox.selectedIndex].textContent;
+    const supplierId = supplierBox.value;
+    const brandName = form.elements.brandName.value.trim();
+
+    const lines = ['Name: ' + name];
+    if (brandName !== '') lines.push('Brand: ' + brandName);
+    lines.push('Category: ' + categoryName, 'Unit: ' + unitName, 'Supplier: ' + supplierName);
+    lines.push('It starts with no price and no stock: the manager sets the price, and stock comes in by a delivery or a stock adjustment.');
+
+    const yes = await askConfirm('Add ' + name + ' to the material list?', {
+        title: 'Add this product?',
+        eyebrow: 'Inventory',
+        confirmLabel: 'Add product',
+        detail: lines
+    });
+    if (!yes) return;
+
     const button = document.getElementById('new-product-save');
     if (button) button.disabled = true;
 
     try {
         const response = await apiAddProduct({
             name: name,
-            categoryName: form.elements.categoryName.value,
-            unitName: form.elements.unitName.value,
-            brandName: form.elements.brandName.value.trim(),
-            supplierId: form.elements.supplierId.value,
-            reorderPoint: form.elements.reorderPoint.value.trim()
+            categoryName: categoryName,
+            unitName: unitName,
+            brandName: brandName,
+            supplierId: supplierId
         });
         const result = await response.json();
 
@@ -1177,6 +1184,27 @@ async function handleAdjustStock(event) {
         return;
     }
 
+    const onHand = Number(adjustMaterial.quantity_in_stock) || 0;
+    const afterStock = Math.round((data.adjustmentType === 'Remove' ? onHand - data.quantity : onHand + data.quantity) * 1000) / 1000;
+
+    const yes = await askConfirm(
+        (data.adjustmentType === 'Remove' ? 'Remove ' : 'Add ') + qtyText(data.quantity, data.unitName) +
+        (data.adjustmentType === 'Remove' ? ' from ' : ' to ') + adjustMaterial.product_name + '.',
+        {
+            title: data.adjustmentType === 'Remove' ? 'Remove this stock?' : 'Add this stock?',
+            eyebrow: 'Stock Adjustment',
+            confirmLabel: data.adjustmentType === 'Remove' ? 'Remove from stock' : 'Add to stock',
+            tone: data.adjustmentType === 'Remove' ? 'danger' : undefined,
+            detail: [
+                'Material: ' + adjustMaterial.product_name,
+                'Adjustment: ' + data.adjustmentType + ' ' + qtyText(data.quantity, data.unitName),
+                'Stock before: ' + qtyText(onHand, data.unitName),
+                'Stock after: ' + qtyText(afterStock, data.unitName),
+                'Reason: ' + data.reason
+            ]
+        });
+    if (!yes) return;
+
     try {
         const response = await apiAdjustStock(data);
         const result = await response.json();
@@ -1320,45 +1348,41 @@ function clearAdjustForm() {
     renderAttentionList();
 }
 
-let adjustLeaveConfirmed = false;
-
 function adjustFormHasWork() {
     if (!adjustScreenOpen()) return false;
-    if (adjustSource) return true;
     const form = document.getElementById('adjust-form');
     if (!form) return false;
-    return form.elements.quantity.value.trim() !== '' || form.elements.reason.value.trim() !== '';
+    if (form.elements.reason.value.trim() !== '') return true;
+
+    if (adjustSource && adjustSource.loading) return false;
+    if (adjustSource && adjustSource.kind === 'po') {
+        const lines = poAdjustLines();
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].quantity !== Number(lines[i].item.quantity)) return true;
+        }
+        return false;
+    }
+    if (adjustSource) return form.elements.adjustmentType.value !== 'Add';
+    return form.elements.quantity.value.trim() !== '';
 }
 
-function leavesAdjustScreen(target) {
-    if (!target || target.closest('#panel-adjust')) return null;
-    const menuLink = target.closest('.sidebar a');
-    if (menuLink && menuLink.dataset.panelLink === 'panel-adjust') return null;
-    if (menuLink && !target.closest('.nav-caret')) return menuLink;
-    const other = target.closest('#stock-banner .btn, [onclick^="goToNotification"]');
-    return other || null;
+function adjustWhat() {
+    if (adjustSource && adjustSource.kind === 'po') return 'this delivery count';
+    if (adjustSource) return 'this decision on the returned items';
+    return 'this stock adjustment';
 }
 
-async function guardAdjustLeave(event) {
-    if (adjustLeaveConfirmed || !adjustFormHasWork()) return;
-    const leaving = leavesAdjustScreen(event.target);
-    if (!leaving) return;
-
-    event.preventDefault();
-    event.stopImmediatePropagation();
-
-    const yes = await askConfirm('What is on the Stock Adjustment form has not been applied. Leaving clears it.', {
-        title: 'Leave without applying?',
-        eyebrow: 'Stock Adjustment',
-        confirmLabel: 'Leave and clear',
-        tone: 'danger'
-    });
-    if (!yes) return;
-
+async function askClearAdjustForm() {
+    if (adjustFormHasWork() && !(await askDiscard(adjustWhat()))) return;
     clearAdjustForm();
-    adjustLeaveConfirmed = true;
-    try { leaving.click(); } finally { adjustLeaveConfirmed = false; }
 }
+
+watchPanelLeave({
+    panelId: 'panel-adjust',
+    hasWork: adjustFormHasWork,
+    what: adjustWhat,
+    discard: clearAdjustForm
+});
 
 function renderAdjustLines() {
     const box = document.getElementById('adjust-lines');
@@ -1793,7 +1817,7 @@ function buildReturnsPanel() {
         columns: 7,
         pagerId: 'returns-pager',
         idField: 'return_id',
-        filters: { type: 'All', where: 'all' },
+        filters: { type: 'All' },
 
         gate: {
             title: 'No reports loaded',
@@ -1812,8 +1836,6 @@ function buildReturnsPanel() {
         filter: function (r, filters) {
             if (filters.type === 'To inspect') { if (!returnAwaiting(r)) return false; }
             else if (filters.type !== 'All' && r.report_type !== filters.type) return false;
-            if (filters.where === 'awaiting') return returnAwaiting(r);
-            if (filters.where !== 'all' && returnWentTo(r) !== filters.where) return false;
             return true;
         },
 
@@ -1906,7 +1928,7 @@ function openArchivedMaterial(productId) {
         '</div>' +
         '<p class="detail-note">Restoring puts it back on the material list and makes it sellable again.</p>';
 
-    const foot = '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
+    const foot = '<button type="button" class="btn btn-ghost" onclick="requestCloseModal(\'detail-modal\')">Cancel</button>' +
         '<button type="button" class="btn btn-success" id="restore-material-button" onclick="restoreMaterial(' + p.product_id + ')">Restore This Material</button>';
 
     openDetailModal(p.product_name, (p.category_name || 'Uncategorised') + ' · archived',
@@ -2402,14 +2424,6 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         fillMaterialFilters();
         unfoldSidebarAtOpenScreen();
         loadNotifications();
-    });
-
-    document.addEventListener('click', guardAdjustLeave, true);
-
-    window.addEventListener('beforeunload', function (event) {
-        if (!adjustFormHasWork()) return;
-        event.preventDefault();
-        event.returnValue = '';
     });
 
     document.addEventListener('click', function (event) {

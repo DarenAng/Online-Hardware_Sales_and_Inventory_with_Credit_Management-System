@@ -94,7 +94,7 @@ function buildTopbarCorner() {
             '                            <span class="modal-role" id="notif-modal-sub">Alert</span>\n' +
             '                        </div>\n' +
             '                    </div>\n' +
-            '                    <button type="button" class="modal-close" onclick="closeModal(\'notif-modal\')"\n' +
+            '                    <button type="button" class="modal-close" onclick="requestCloseModal(\'notif-modal\')"\n' +
             '                            aria-label="Close">&times;</button>\n' +
             '                </div>\n' +
             '                <div class="modal-body" id="notif-modal-body"></div>\n' +

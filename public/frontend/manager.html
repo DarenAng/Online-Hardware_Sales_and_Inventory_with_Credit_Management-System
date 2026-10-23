@@ -1189,7 +1189,7 @@
                         <span class="modal-role" id="detail-subtitle">Detail</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('detail-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('detail-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-top" id="detail-top" hidden></div>
@@ -1214,7 +1214,7 @@
                         <span class="modal-role" id="credit-sub">Credit account</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('credit-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('credit-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-tabs">
@@ -1250,7 +1250,7 @@
                         <span class="modal-role">Records</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('record-add-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('record-add-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-body">
@@ -1288,7 +1288,7 @@
             </div>
 
             <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closeModal('record-add-modal')">Cancel</button>
+                <button type="button" class="btn btn-ghost" onclick="requestCloseModal('record-add-modal')">Cancel</button>
                 <button type="submit" form="record-add-form" class="btn btn-success" id="record-add-save">Save</button>
             </div>
         </div>
@@ -1304,7 +1304,7 @@
                         <span class="modal-role">Records</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('record-edit-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('record-edit-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-body">
@@ -1314,7 +1314,7 @@
             </div>
 
             <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closeModal('record-edit-modal')">Cancel</button>
+                <button type="button" class="btn btn-ghost" onclick="requestCloseModal('record-edit-modal')">Cancel</button>
                 <button type="submit" form="record-edit-form" class="btn btn-success" id="record-edit-save">Save Changes</button>
             </div>
         </div>
@@ -1399,7 +1399,7 @@
                         <span class="modal-role" id="decide-sub">Pending</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('decide-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('decide-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-body">
@@ -1414,7 +1414,7 @@
             </div>
 
             <div class="modal-foot" id="decide-actions">
-                <button type="button" class="btn btn-ghost" onclick="closeModal('decide-modal')">Cancel</button>
+                <button type="button" class="btn btn-ghost" onclick="requestCloseModal('decide-modal')">Cancel</button>
                 <button type="button" class="btn btn-danger" onclick="decideCreditRequest(false)">Decline</button>
                 <button type="button" class="btn btn-success" onclick="decideCreditRequest(true)">Approve</button>
             </div>

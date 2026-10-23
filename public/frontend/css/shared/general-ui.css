@@ -1344,6 +1344,9 @@ html:has(.modal.open) { overflow: hidden; }
     .modal-top { max-height: 20vh; }
 }
 
+#ask-modal { z-index: 2200; }
+#work-modal { z-index: 2300; }
+#idle-modal { z-index: 2400; }
 .ask-box { max-width: 460px; }
 
 .work-box .modal-head {

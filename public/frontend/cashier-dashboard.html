@@ -455,7 +455,7 @@
                         <span class="modal-role">Credit Settlement against a customer's balance</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('credit-pay-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('credit-pay-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-body">
@@ -469,7 +469,7 @@
             </div>
 
             <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closeModal('credit-pay-modal')">Cancel</button>
+                <button type="button" class="btn btn-ghost" onclick="requestCloseModal('credit-pay-modal')">Cancel</button>
             </div>
         </div>
     </div>
@@ -484,7 +484,7 @@
                         <span class="modal-role" id="limit-sub">Credit Management</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeLimitForm()" aria-label="Cancel">&times;</button>
+                <button type="button" class="modal-close" onclick="cancelLimitForm()" aria-label="Cancel">&times;</button>
             </div>
 
             <div class="modal-body">
@@ -504,7 +504,7 @@
             </div>
 
             <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closeLimitForm()">Cancel</button>
+                <button type="button" class="btn btn-ghost" onclick="cancelLimitForm()">Cancel</button>
                 <button type="button" class="btn btn-gold" id="limit-send" onclick="handleLimitRequest(event)">Send the Request</button>
             </div>
         </div>
@@ -750,7 +750,7 @@
                         <span class="modal-role" id="detail-subtitle">Detail</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('detail-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('detail-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-top" id="detail-top" hidden></div>
@@ -775,7 +775,7 @@
                         <span class="modal-role" id="payment-sub">Against a sale</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closePaymentForm(true)" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="cancelPaymentForm()" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-body">
@@ -812,7 +812,7 @@
             </div>
 
             <div class="modal-foot">
-                <button type="button" class="btn btn-ghost" onclick="closePaymentForm(true)">Cancel</button>
+                <button type="button" class="btn btn-ghost" onclick="cancelPaymentForm()">Cancel</button>
                 <button type="button" class="btn" id="payment-qr-btn" data-icon="qr-code"
                         onclick="handleTakePayment(event, true)" hidden>Pay by QR</button>
                 <button type="button" class="btn btn-success" id="payment-save-btn" data-icon="cash" onclick="handleTakePayment(event)">Confirm Payment</button>
@@ -830,7 +830,7 @@
                         <span class="modal-role" id="customer-sub">Credit account</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('customer-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('customer-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-tabs">
@@ -916,7 +916,7 @@
                         <span class="modal-role" id="receipt-role">Sales invoice</span>
                     </div>
                 </div>
-                <button type="button" class="modal-close" onclick="closeModal('receipt-modal')" aria-label="Close">&times;</button>
+                <button type="button" class="modal-close" onclick="requestCloseModal('receipt-modal')" aria-label="Close">&times;</button>
             </div>
 
             <div class="modal-body">

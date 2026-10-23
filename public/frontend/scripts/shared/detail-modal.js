@@ -40,6 +40,7 @@ function detailTable(headers, rows, numeric) {
 }
 
 function openDetailModal(title, subtitle, initials, pages, footActions, options) {
+    unguardModal('detail-modal');
     detailPages = pages;
     detailIndex = 0;
 

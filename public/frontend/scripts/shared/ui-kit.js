@@ -198,6 +198,7 @@ let askOptions = {};
 
 function openAsk(options) {
     ensureUiFurniture();
+    if (askResolve) closeAsk(false);
     askOptions = options;
 
     document.getElementById('ask-title').textContent = options.title || 'Please confirm';

@@ -2124,14 +2124,7 @@ document.addEventListener('click', async function (event) {
     event.preventDefault();
     event.stopImmediatePropagation();
 
-    const discard = await askConfirm('Changes to ' + unsaved + ' have not been saved.', {
-        title: 'Discard your changes?',
-        eyebrow: 'Policy Maintenance',
-        mark: '!',
-        confirmLabel: 'Discard changes',
-        cancelLabel: 'Keep editing',
-        detail: ['Discard puts back what was saved and goes on.', 'Keep editing stays on this page; press Save to keep them.']
-    });
+    const discard = await askDiscard('your changes to ' + unsaved);
     if (!discard) return;
 
     discardPolicyChanges();
@@ -2144,6 +2137,7 @@ document.addEventListener('click', async function (event) {
 }, true);
 
 window.addEventListener('beforeunload', function (event) {
+    if (!localStorage.getItem('currentUser')) return;
     if (!policyChangesUnsaved()) return;
     event.preventDefault();
     event.returnValue = '';
@@ -2391,11 +2385,12 @@ function openCreditRequest(requestId) {
     const actions = document.getElementById('decide-actions');
     actions.hidden = decided;
     actions.innerHTML = decided ? ''
-        : '<button type="button" class="btn btn-ghost" onclick="closeModal(\'decide-modal\')">Cancel</button>' +
+        : '<button type="button" class="btn btn-ghost" onclick="requestCloseModal(\'decide-modal\')">Cancel</button>' +
           '<button type="button" class="btn btn-danger" onclick="decideCreditRequest(false)">Decline</button>' +
           '<button type="button" class="btn btn-success" onclick="decideCreditRequest(true)">Approve</button>';
 
     showModal('decide-modal');
+    guardModal('decide-modal', 'your note on this request');
 }
 
 async function decideCreditRequest(approve) {
@@ -2717,6 +2712,7 @@ function openAddRecord() {
     document.getElementById('record-add-supplier').hidden = recordType !== 'supplier';
 
     showModal('record-add-modal');
+    guardModal('record-add-modal', 'the new supplier');
     setTimeout(function () {
         document.getElementById('record-add-name').focus();
     }, 60);
@@ -3379,6 +3375,7 @@ async function openEditRecord(index) {
 
     closeModal('detail-modal');
     showModal('record-edit-modal');
+    guardModal('record-edit-modal', 'your changes to the supplier');
 }
 
 async function saveEditRecord(event) {
@@ -3469,6 +3466,7 @@ function openCreateAccount() {
     clearAccountForm();
     showAccountStep('form');
     showModal('newacct-modal');
+    guardModal('newacct-modal', 'the new account', function () { return Boolean(accountReview); });
     loadAccountRoles();
     setTimeout(function () {
         document.getElementById('newacct-first').focus();
@@ -3522,8 +3520,9 @@ function showAccountStep(step) {
         reviewing ? 'Review before creating' : 'Account Management';
 }
 
-function closeAccountModal() {
+async function closeAccountModal() {
     if (accountBusy) return;
+    if (!(await requestCloseModal('newacct-modal'))) return;
     clearAccountForm();
     closeModal('newacct-modal');
 }
@@ -3898,7 +3897,7 @@ function openStaffAccount(staffId) {
             'password they already have. Their password is not changed, they get a full set of tries ' +
             'again, and the change is written to the audit trail in your name.</p>';
 
-        foot += '<button type="button" class="btn btn-ghost" onclick="closeModal(\'detail-modal\')">Cancel</button>' +
+        foot += '<button type="button" class="btn btn-ghost" onclick="requestCloseModal(\'detail-modal\')">Cancel</button>' +
             '<button type="button" class="btn btn-accent" id="lift-hold-button" ' +
             'onclick="liftHeldAccount(' + account.staff_id + ')">Lift hold</button>';
     }

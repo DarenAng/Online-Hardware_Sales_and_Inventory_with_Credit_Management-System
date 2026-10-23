@@ -48,6 +48,37 @@ function showPurchaseOrderHistory(event) {
     poShowPanel(poSetup.historyPanelId, poSetup.historyTitle);
 }
 
+function poFormHasWork() {
+    if (!panelShowing('panel-po')) return false;
+    const box = document.getElementById('po-supplier');
+    if (box && box.value.trim() !== '') return true;
+    const rows = poLineRows();
+    for (let i = 0; i < rows.length; i++) {
+        const field = document.getElementById(rows[i].dataset.picker + '-box');
+        if (field && field.value.trim() !== '') return true;
+    }
+    return false;
+}
+
+async function leavePurchaseOrderForm(event) {
+    if (event) event.preventDefault();
+    if (poFormHasWork() && !(await askDiscard('the purchase order'))) return;
+    resetPurchaseOrderForm();
+    showPurchaseOrderHistory();
+}
+
+function receiveSheetHasWork() {
+    if (!poReceiving || !panelShowing('panel-po-receive')) return false;
+    return formChanged('po-receive', document.getElementById('panel-po-receive'));
+}
+
+async function cancelReceiveOrder(event) {
+    if (event) event.preventDefault();
+    if (receiveSheetHasWork() && !(await askDiscard('this delivery count'))) return;
+    poReceiving = null;
+    showPurchaseOrderHistory();
+}
+
 function showPurchaseOrders(event) {
     if (event) event.preventDefault();
     if (!poSetup.canCreate) { showPurchaseOrderHistory(); return; }
@@ -2299,6 +2330,7 @@ async function openReceiveOrder(poId) {
         const items = await apiGetPurchaseOrderItems(poId);
         poReceiving = { poId: poId, items: items, order: findPurchaseOrder(poId) };
         renderReceiveSheet();
+        rememberForm('po-receive', document.getElementById('panel-po-receive'));
     } catch (error) {
         if (box) box.innerHTML = '<p class="panel-sub">That order could not be opened.</p>';
     }
@@ -2841,4 +2873,18 @@ document.addEventListener('click', function (event) {
     const active = document.activeElement;
     hideAllMatSuggestions(event.target.closest('.suggest-wrap') ||
         (active && active.closest ? active.closest('.suggest-wrap') : null));
+});
+
+watchPanelLeave({
+    panelId: 'panel-po',
+    hasWork: poFormHasWork,
+    what: function () { return 'the purchase order'; },
+    discard: resetPurchaseOrderForm
+});
+
+watchPanelLeave({
+    panelId: 'panel-po-receive',
+    hasWork: receiveSheetHasWork,
+    what: function () { return 'this delivery count'; },
+    discard: function () { poReceiving = null; }
 });

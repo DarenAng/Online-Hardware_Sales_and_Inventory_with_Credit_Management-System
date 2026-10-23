@@ -39,7 +39,7 @@ const QR_MODAL_HTML =
     '            </p>\n' +
     '        </div>\n' +
     '        <div class="modal-foot qr-foot">\n' +
-    '            <button type="button" class="btn btn-ghost" id="qr-cancel-btn" onclick="cancelQrPayment()">Cancel</button>\n' +
+    '            <button type="button" class="btn btn-ghost" id="qr-cancel-btn" onclick="askCancelQrPayment()">Cancel</button>\n' +
     '            <!-- after a failed or expired code -->\n' +
     '            <button type="button" class="btn btn-ghost" id="qr-other-btn" onclick="chooseAnotherMethod()" hidden>Choose another method</button>\n' +
     '            <button type="button" class="btn btn-success" id="qr-new-btn" onclick="newQrCode()" hidden>New QR</button>\n' +
@@ -198,6 +198,7 @@ function stopQrTimers(session) {
 
 function endQr(session, result) {
     if (session.done) return;
+    closeQrQuestion();
     session.done = true;
     stopQrTimers(session);
     if (qrSession === session) qrSession = null;
@@ -211,6 +212,7 @@ function endQr(session, result) {
 }
 
 function qrOver(session, text) {
+    closeQrQuestion();
     stopQrTimers(session);
     session.over = true;
     document.querySelector('#qr-modal .qr-box').classList.add('is-over');
@@ -285,6 +287,34 @@ function tickQr() {
     if (left === 0) checkQr(session);
 }
 
+let qrAsking = false;
+
+function closeQrQuestion() {
+    if (!qrAsking) return;
+    qrAsking = false;
+    closeAsk(false);
+}
+
+async function askCancelQrPayment() {
+    const session = qrSession;
+    if (!session || session.over || session.closing || session.done) return;
+
+    qrAsking = true;
+    const yes = await askConfirm('The customer has not paid yet. Cancel this QR code?', {
+        title: 'Cancel this QR payment?',
+        eyebrow: 'QR payment',
+        mark: '!',
+        tone: 'danger',
+        confirmLabel: 'Cancel the QR',
+        cancelLabel: 'Keep waiting'
+    });
+    qrAsking = false;
+
+    if (!yes) return;
+    if (qrSession !== session || session.over || session.closing || session.done) return;
+    cancelQrPayment();
+}
+
 async function cancelQrPayment(reason) {
     const session = qrSession;
     if (!session || session.closing || session.done) return;
@@ -346,6 +376,7 @@ function qrAmountChanged(purpose, amountNow) {
 }
 
 window.addEventListener('beforeunload', function (event) {
+    if (!localStorage.getItem('currentUser')) return;
     if (!qrSession) return;
     event.preventDefault();
     event.returnValue = '';

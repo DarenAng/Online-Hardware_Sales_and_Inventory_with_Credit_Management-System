@@ -38,6 +38,91 @@ async function requestCloseModal(id) {
     return true;
 }
 
+const formStarts = {};
+
+function formSnapshot(root) {
+    if (!root) return '';
+    const boxes = root.querySelectorAll('input, select, textarea');
+    let text = '';
+    for (let i = 0; i < boxes.length; i++) {
+        const box = boxes[i];
+        if (box.type === 'button' || box.type === 'submit' || box.hasAttribute('data-untracked')) continue;
+        if (box.type === 'checkbox' || box.type === 'radio') {
+            text += (box.id || box.name) + '=' + box.checked + '\n';
+        } else {
+            text += (box.id || box.name) + '=' + box.value + '\n';
+        }
+    }
+    return text;
+}
+
+function rememberForm(key, root) {
+    formStarts[key] = formSnapshot(root);
+}
+
+function formChanged(key, root) {
+    return formStarts[key] !== undefined && formStarts[key] !== formSnapshot(root);
+}
+
+function askDiscard(what) {
+    return askConfirm('Are you sure you want to discard ' + what + '? What you entered will be lost.', {
+        title: 'Discard ' + what + '?',
+        eyebrow: 'Unsaved work',
+        mark: '!',
+        tone: 'danger',
+        confirmLabel: 'Discard',
+        cancelLabel: 'Keep editing'
+    });
+}
+
+function guardModal(id, what, alsoChanged) {
+    const modal = document.getElementById(id);
+    if (!modal) return;
+    rememberForm(id, modal);
+    setModalCloseGuard(id, function () {
+        if (!formChanged(id, modal) && !(alsoChanged && alsoChanged())) return true;
+        return askDiscard(typeof what === 'function' ? what() : what);
+    });
+}
+
+function unguardModal(id) {
+    delete modalCloseGuards[id];
+    delete formStarts[id];
+}
+
+function panelShowing(panelId) {
+    const panel = document.getElementById(panelId);
+    return Boolean(panel) && panel.style.display !== 'none';
+}
+
+function watchPanelLeave(options) {
+    let passing = false;
+    document.addEventListener('click', async function (event) {
+        if (passing || !event.target.closest || !options.hasWork()) return;
+
+        const link = event.target.closest('.sidebar a, #notif-modal .modal-foot .btn, #stock-banner .btn');
+        if (!link || link.classList.contains('nav-parent') || event.target.closest('.nav-caret')) return;
+        if (link.dataset.panelLink === options.panelId) return;
+        if (event.target.closest('#' + options.panelId)) return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+
+        if (!(await askDiscard(options.what()))) return;
+
+        options.discard();
+        passing = true;
+        try { link.click(); } finally { passing = false; }
+    }, true);
+
+    window.addEventListener('beforeunload', function (event) {
+        if (!localStorage.getItem('currentUser')) return;
+        if (!options.hasWork()) return;
+        event.preventDefault();
+        event.returnValue = '';
+    });
+}
+
 document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
 

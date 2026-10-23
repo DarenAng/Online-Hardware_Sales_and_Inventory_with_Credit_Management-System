@@ -204,6 +204,7 @@ async function openDriverPayment(deliveryId, remarks) {
     onDriverPayAmountChange();
 
     showModal('pay-modal');
+    guardModal('pay-modal', 'this payment');
 }
 
 buildPaymentDetailsBox('pay-details-box', 'door', true);
@@ -269,7 +270,8 @@ function onDriverPayAmountChange() {
     qrAmountChanged('credit_payment', f.taken);
 }
 
-function cancelDriverPayment() {
+async function cancelDriverPayment() {
+    if (!(await requestCloseModal('pay-modal'))) return;
     const deliveryId = paymentDeliveryId;
 
     closeModal('pay-modal');
@@ -482,6 +484,7 @@ async function openDriverRefund(deliveryId) {
 
     onRefundLineChange();
     showModal('refund-modal');
+    guardModal('refund-modal', 'this refund');
 }
 
 function onRefundLineChange() {
