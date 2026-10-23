@@ -205,6 +205,7 @@ function openAsk(options) {
     document.getElementById('ask-eyebrow').textContent = options.eyebrow || 'Confirmation';
     document.getElementById('ask-mark').textContent = options.mark || '?';
     document.getElementById('ask-text').innerHTML = options.messageHtml || escapeHtml(options.message || '');
+    document.getElementById('ask-text').hidden = !(options.messageHtml || options.message);
     document.getElementById('ask-cancel').textContent = options.cancelLabel || 'Cancel';
 
     const okButton = document.getElementById('ask-ok');

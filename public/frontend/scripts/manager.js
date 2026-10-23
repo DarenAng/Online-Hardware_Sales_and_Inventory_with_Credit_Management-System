@@ -1494,17 +1494,9 @@ async function changePrice(product) {
     const noPrice = isUnpriced(product);
     const lastCost = Number(product.last_cost) || 0;
 
-    let askMessage = product.product_name + ' sells at ' + peso(current) + unit + '. What should it sell at now? ' +
-                     'The till uses the new figure from the next sale on; nothing already sold changes.';
-    if (noPrice) {
-        askMessage = product.product_name + ' has no price yet, so the till cannot sell it. What should it sell at' +
-                     unit + '? The till uses the figure from the next sale on.';
-    }
-
     const asked = await askInput({
         title: noPrice ? 'Set the price' : 'Change the price',
-        eyebrow: 'Products',
-        message: askMessage,
+        eyebrow: product.product_name,
         label: 'New price' + unit,
         type: 'number',
         money: true,
@@ -1528,7 +1520,6 @@ async function changePrice(product) {
     const next = Math.round(Number(String(asked).replace(/,/g, '').trim()) * 100) / 100;
     const up = next > current;
     const share = current > 0 ? Math.abs(next - current) / current : null;
-    const onHand = Number(product.quantity_in_stock) || 0;
 
     let change = '';
     if (share !== null) {
@@ -1543,9 +1534,6 @@ async function changePrice(product) {
             (markup < 0 ? Math.abs(markup) + '% below cost.' : markup + '% markup.'));
     }
     if (belowCost) detail.push('This price is at or below the last buying price.');
-    detail.push('The till sells at ' + peso(next) + ' from the next sale on.');
-    detail.push('Stock value moves from ' + peso(current * onHand) + ' to ' + peso(next * onHand) + '.');
-    detail.push('The change is written to the audit trail in your name.');
 
     const yes = await askConfirm(
         noPrice
