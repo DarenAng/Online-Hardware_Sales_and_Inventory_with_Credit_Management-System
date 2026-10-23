@@ -4699,6 +4699,7 @@ async function handleAddCustomer(event) {
         return;
     }
 
+    let newCustomerId = 0;
     try {
         const response = await apiCreateCustomer({
                 firstName: firstName, middleName: middleName, lastName: lastName, phone: phone,
@@ -4734,10 +4735,30 @@ async function handleAddCustomer(event) {
             if (panel.state === 'closed' || panel.state === 'error') await panel.open();
             else await panel.refresh();
         }
+
+        newCustomerId = Number(result.customerId);
     } catch (error) {
         if (save) save.disabled = false;
         notifyOffline();
+        return;
     }
+
+    try {
+        await offerCustomerCardPrint(newCustomerId, firstName + ' ' + lastName);
+    } catch (error) {
+        notifyError('The customer card could not be printed. Print it from the customer\'s card.');
+    }
+}
+
+async function offerCustomerCardPrint(customerId, name) {
+    if (!customerId || !holdsFeature('customer-card-print')) return;
+    const yes = await askConfirm('Print the customer card for ' + name + ' now?', {
+        title: 'Print the customer card?',
+        eyebrow: 'New customer',
+        confirmLabel: 'Print the card',
+        cancelLabel: 'Not now'
+    });
+    if (yes) await printCustomerCard(customerId);
 }
 
 async function openCreditPaymentPicker() {
