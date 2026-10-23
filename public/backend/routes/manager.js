@@ -475,16 +475,25 @@ function registerManagerRoutes(app, deps) {
     return String(value || "").trim().replace(/\s+/g, " ").slice(0, max);
   }
 
+  function supplierProblem(body) {
+    if (tidyName(body.name, 100) === "") return "The supplier needs a company name.";
+    if (tidyName(body.contactPerson, 100) === "") return "The supplier needs a contact person.";
+    if (String(body.contactNumber || "").trim() === "") return "The supplier needs a contact number.";
+    const phoneProblem = phoneComplaint(body.contactNumber);
+    if (phoneProblem) return phoneProblem;
+    const email = String(body.email || "").trim();
+    if (email === "") return "The supplier needs an email address.";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "That email address does not look right.";
+    if (String(body.address || "").trim() === "") return "The supplier needs an address.";
+    return null;
+  }
+
   app.post("/api/suppliers", async function (request, response) {
     const body = request.body || {};
     const name = tidyName(body.name, 100);
     const email = String(body.email || "").trim().slice(0, 100);
-    if (name === "") return response.status(400).json({ error: "The supplier needs a company name." });
-    if (email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return response.status(400).json({ error: "That email address does not look right." });
-    }
-    const phoneProblem = String(body.contactNumber || "").trim() === "" ? null : phoneComplaint(body.contactNumber);
-    if (phoneProblem) return response.status(400).json({ error: phoneProblem });
+    const problem = supplierProblem(body);
+    if (problem) return response.status(400).json({ error: problem });
 
     try {
       const takenResult = await db.query("SELECT supplier_id FROM suppliers WHERE LOWER(supplier_name) = LOWER(?)", [name]);
@@ -1835,12 +1844,8 @@ function registerManagerRoutes(app, deps) {
     const body = request.body || {};
     const name = tidyName(body.name, 100);
     const email = String(body.email || "").trim().slice(0, 100);
-    if (name === "") return response.status(400).json({ error: "The supplier needs a company name." });
-    if (email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return response.status(400).json({ error: "That email address does not look right." });
-    }
-    const phoneProblem = String(body.contactNumber || "").trim() === "" ? null : phoneComplaint(body.contactNumber);
-    if (phoneProblem) return response.status(400).json({ error: phoneProblem });
+    const problem = supplierProblem(body);
+    if (problem) return response.status(400).json({ error: problem });
 
     try {
       const id = request.params.supplierId;

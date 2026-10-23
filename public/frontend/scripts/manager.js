@@ -2721,6 +2721,16 @@ function openAddRecord() {
     }, 60);
 }
 
+function supplierMissingField(form) {
+    const fields = [['name', 'Company name'], ['contactPerson', 'Contact person'],
+                    ['contactNumber', 'Contact number'], ['email', 'Email'], ['address', 'Address']];
+    for (let i = 0; i < fields.length; i++) {
+        const input = form.elements[fields[i][0]];
+        if (input && input.value.trim() === '') return { input: input, label: fields[i][1] };
+    }
+    return null;
+}
+
 async function saveAddRecord(event) {
     event.preventDefault();
     const kind = RECORD_ADDABLE[recordType];
@@ -2736,8 +2746,13 @@ async function saveAddRecord(event) {
 
     let data = { name: name };
     if (recordType === 'supplier') {
-        const phoneProblem = form.elements.contactNumber.value.trim() === ''
-            ? null : phoneComplaint(form.elements.contactNumber);
+        const missing = supplierMissingField(form);
+        if (missing) {
+            notifyWarning(missing.label + ' is required.', 'Fill in the form');
+            missing.input.focus();
+            return;
+        }
+        const phoneProblem = phoneComplaint(form.elements.contactNumber);
         if (phoneProblem) {
             notifyWarning(phoneProblem, 'Check the phone number');
             form.elements.contactNumber.focus();
@@ -3347,10 +3362,10 @@ async function openEditRecord(index) {
     let html = '';
     if (type === 'supplier') {
         html = editFieldHtml('name', 'Company name', row.name, { required: true, max: 100 }) +
-            editFieldHtml('contactPerson', 'Contact person', row.contact_person) +
-            editFieldHtml('contactNumber', 'Contact number', '', { kind: 'phone' }) +
-            editFieldHtml('email', 'Email', row.email, { kind: 'email' }) +
-            editFieldHtml('address', 'Address', row.address, { max: 255 });
+            editFieldHtml('contactPerson', 'Contact person', row.contact_person, { required: true }) +
+            editFieldHtml('contactNumber', 'Contact number', '', { kind: 'phone', required: true }) +
+            editFieldHtml('email', 'Email', row.email, { kind: 'email', required: true }) +
+            editFieldHtml('address', 'Address', row.address, { max: 255, required: true });
     }
 
     editRecord = { type: type, row: row };
@@ -3374,11 +3389,10 @@ async function saveEditRecord(event) {
 
     let data;
     if (type === 'supplier') {
-        if (value('name') === '') { notifyWarning('Company name is required.', 'Fill in the form'); return; }
-        if (value('contactNumber') !== '') {
-            const problem = phoneComplaint(form.elements.contactNumber);
-            if (problem) { notifyWarning(problem, 'Check the phone number'); return; }
-        }
+        const missing = supplierMissingField(form);
+        if (missing) { notifyWarning(missing.label + ' is required.', 'Fill in the form'); missing.input.focus(); return; }
+        const problem = phoneComplaint(form.elements.contactNumber);
+        if (problem) { notifyWarning(problem, 'Check the phone number'); return; }
         data = { name: value('name'), contactPerson: value('contactPerson'),
                  contactNumber: phoneToStore(form.elements.contactNumber),
                  email: value('email'), address: value('address') };
