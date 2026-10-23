@@ -2632,8 +2632,7 @@ function poBuyingPricesHtml(items) {
             escapeHtml(poQuantityText(item)),
             '<input type="number" class="form-control bp-price amount-field" id="bp-price-' + i + '" ' +
                 'min="0" step="0.01" placeholder="0.00" value="' + start + '" ' +
-                'aria-label="Buying price for ' + escapeHtml(item.product_name) + '" oninput="renderBuyingPrices()">' +
-                '<div class="bp-per" id="bp-per-' + i + '"></div>',
+                'aria-label="Buying price for ' + escapeHtml(item.product_name) + '" oninput="renderBuyingPrices()">',
             '<span id="bp-line-' + i + '"></span>'
         ]);
     }
@@ -2689,17 +2688,6 @@ function renderBuyingPrices() {
     const found = poReadBuyingPrices();
     for (let i = 0; i < found.lines.length; i++) {
         const line = found.lines[i];
-        const unit = line.item.unit_name || 'unit';
-
-        const per = document.getElementById('bp-per-' + i);
-        if (per) {
-            if (line.pack) {
-                per.textContent = 'per ' + line.pack.name;
-            } else {
-                per.textContent = 'per ' + unit;
-            }
-        }
-
         const cost = document.getElementById('bp-line-' + i);
         if (cost) {
             cost.textContent = line.valid
