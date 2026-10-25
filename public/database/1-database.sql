@@ -21,12 +21,7 @@ CREATE TABLE staff (
     archived_at TIMESTAMP NULL,
     archived_by_staff_id INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    full_name VARCHAR(220) AS (
-        CONCAT(first_name,
-               IF(middle_name IS NULL OR middle_name = '', '',
-                  CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),
-               ' ', last_name)
-    ) VIRTUAL,
+    full_name VARCHAR(220) AS (CONCAT(first_name, ' ', last_name)) VIRTUAL,
     FOREIGN KEY (role_id) REFERENCES roles(role_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
@@ -136,12 +131,7 @@ CREATE TABLE customers (
     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
     archived_at TIMESTAMP NULL,
     archived_by_staff_id INT NULL,
-    full_name VARCHAR(220) AS (
-        TRIM(CONCAT(first_name,
-                    IF(middle_name IS NULL OR middle_name = '', '',
-                       CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),
-                    ' ', last_name))
-    ) VIRTUAL
+    full_name VARCHAR(220) AS (TRIM(CONCAT(first_name, ' ', last_name))) VIRTUAL
 );
 
 CREATE TABLE customer_credits (

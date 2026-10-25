@@ -478,10 +478,7 @@ function staffName(user) {
     if (!user) return '';
     if (user.full_name) return user.full_name;
 
-    const middle = (user.middle_name || '').trim();
-    const initial = middle === '' ? '' : ' ' + middle[0].toUpperCase() + '.';
-
-    const spelled = (user.first_name || '') + initial + ' ' + (user.last_name || '');
+    const spelled = (user.first_name || '') + ' ' + (user.last_name || '');
     return spelled.trim() || user.email || '';
 }
 

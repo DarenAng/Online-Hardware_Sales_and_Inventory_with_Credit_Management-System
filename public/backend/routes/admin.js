@@ -467,11 +467,7 @@ function registerAdminRoutes(app, deps) {
       const password = generatePassword();
       const draft = await newAccountDraft(request.actor.staffId, "staff", details, password);
 
-      let fullName = details.firstName;
-      if (details.middleName) {
-        fullName += " " + details.middleName[0].toUpperCase() + ".";
-      }
-      fullName += " " + details.lastName;
+      const fullName = details.firstName + " " + details.lastName;
 
       const answer = Object.assign({
         draftId: draft.draftId,

@@ -104,12 +104,8 @@ async function migrateMiddleNameColumn() {
     "ALTER TABLE staff CHANGE COLUMN middle_initial middle_name VARCHAR(100) NULL"
   );
   await db.query(
-    "ALTER TABLE staff ADD COLUMN full_name VARCHAR(220) AS (\n" +
-      "       CONCAT(first_name,\n" +
-      "              IF(middle_name IS NULL OR middle_name = '', '',\n" +
-      "                 CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),\n" +
-      "              ' ', last_name)\n" +
-      "     ) VIRTUAL AFTER created_at"
+    "ALTER TABLE staff ADD COLUMN full_name VARCHAR(220)\n" +
+      "       AS (CONCAT(first_name, ' ', last_name)) VIRTUAL AFTER created_at"
   );
 
   console.log("Upgraded staff.middle_initial to staff.middle_name. " +
@@ -562,12 +558,8 @@ async function migrateCustomerNameAndAddress() {
 
   if (names.indexOf("full_name") === -1) {
     await db.query(
-      "ALTER TABLE customers ADD COLUMN full_name VARCHAR(220) AS (\n" +
-        "       TRIM(CONCAT(first_name,\n" +
-        "                   IF(middle_name IS NULL OR middle_name = '', '',\n" +
-        "                      CONCAT(' ', UPPER(LEFT(middle_name, 1)), '.')),\n" +
-        "                   ' ', last_name))\n" +
-        "     ) VIRTUAL"
+      "ALTER TABLE customers ADD COLUMN full_name VARCHAR(220)\n" +
+        "       AS (TRIM(CONCAT(first_name, ' ', last_name))) VIRTUAL"
     );
     added += 1;
   }
@@ -576,6 +568,38 @@ async function migrateCustomerNameAndAddress() {
     console.log("Added the customer middle name, address parts and full name " +
       "(customers.middle_name, address_street, address_barangay, address_city, " +
       "address_province, address_landmark, full_name).");
+  }
+}
+
+async function migrateFullNameWithoutMiddle() {
+  const columnsResult = await db.query(
+    "SELECT TABLE_NAME, GENERATION_EXPRESSION FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('staff', 'customers')\n" +
+      "       AND COLUMN_NAME = 'full_name'",
+    [DB_NAME]
+  );
+  const columns = columnsResult[0];
+
+  let changed = 0;
+  for (let i = 0; i < columns.length; i++) {
+    const table = columns[i].TABLE_NAME;
+    if (String(columns[i].GENERATION_EXPRESSION).indexOf("middle_name") === -1) continue;
+
+    if (table === "staff") {
+      await db.query(
+        "ALTER TABLE staff MODIFY COLUMN full_name VARCHAR(220)\n" +
+          "       AS (CONCAT(first_name, ' ', last_name)) VIRTUAL");
+    } else {
+      await db.query(
+        "ALTER TABLE customers MODIFY COLUMN full_name VARCHAR(220)\n" +
+          "       AS (TRIM(CONCAT(first_name, ' ', last_name))) VIRTUAL");
+    }
+    changed += 1;
+  }
+
+  if (changed > 0) {
+    console.log("Names now show as first and last name only " +
+      "(staff.full_name and customers.full_name no longer add the middle initial).");
   }
 }
 
@@ -1532,6 +1556,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateCashierRemarks();
   await migrateDeliveryAddressParts();
   await migrateCustomerNameAndAddress();
+  await migrateFullNameWithoutMiddle();
   await migrateDeliveryCreatedDate();
   await migrateAccountManagementKey();
   await migrateProprietorName();

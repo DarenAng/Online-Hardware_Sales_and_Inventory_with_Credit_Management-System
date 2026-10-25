@@ -1627,9 +1627,7 @@ function registerManagerRoutes(app, deps) {
     }
     const addressLine = buildFullAddress(parts);
 
-    let fullName = first;
-    if (middle !== "") fullName += " " + middle.charAt(0).toUpperCase() + ".";
-    fullName += " " + last;
+    const fullName = first + " " + last;
 
     try {
       const sameResult = await db.query(
@@ -1926,9 +1924,7 @@ function registerManagerRoutes(app, deps) {
          after.address_street, after.address_barangay, after.address_city, after.address_province,
          after.address_landmark, id]);
 
-      let fullName = first;
-      if (middle !== "") fullName += " " + middle.charAt(0).toUpperCase() + ".";
-      fullName += " " + last;
+      const fullName = first + " " + last;
       await writeAuditLog(request, "UPDATE_CUSTOMER", "Customer " + fullName + " edited",
         { customer_id: Number(id), changes: fieldChanges(before, after) });
       response.json({ message: fullName + " was saved." });

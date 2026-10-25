@@ -880,21 +880,21 @@ page to pay it on.
 Two people may share a first and a last name. The middle name is what tells them
 apart, and it is optional, so a person with none on file is not a problem.
 
-**The whole middle name is stored, and only its first letter is shown.** Those
-are two different jobs and it is worth being clear about which is which:
+**The whole middle name is stored, and only the first and last name are
+shown.** Those are two different jobs:
 
-- The *name* is what settles which of the two Juan Cruzes a record belongs to
-  when somebody is checking it against a payslip or an ID. So `staff.middle_name`
-  holds the whole thing, at the length a real middle name runs to. It is on the
-  person's record for anybody who opens it.
-- The *initial* is what a reader needs at a glance, so that is what is printed.
-  `Juan D. Cruz`, everywhere a staff name appears: the directory, the account
-  chip in the corner, the receipt, the audit trail and every report. Never first
-  and last alone — that is the spelling that cannot tell two people apart.
+- The *middle name* is what settles which of the two Juan Cruzes a record
+  belongs to when somebody is checking it against a payslip or an ID. So
+  `staff.middle_name` holds the whole thing, at the length a real middle name
+  runs to. It is on the person's record for anybody who opens it.
+- The *displayed name* is first and last name only: `Juan Cruz`, everywhere a
+  staff name appears: the directory, the account chip in the corner, the
+  receipt, the audit trail and every report.
 
-The shortening happens in exactly one place, the generated `full_name` column in
-the `staff` table, so there is one definition of a staff name for the whole
-system and no screen can spell it differently.
+The displayed name is built in exactly one place, the generated `full_name`
+column in the `staff` table, so there is one definition of a staff name for the
+whole system and no screen can spell it differently. Databases made when it
+still added the middle initial are changed over on the next `npm start`.
 
 The column used to be `middle_initial VARCHAR(5)` and held one letter, because
 one letter was all any screen printed. That is the wrong way round: a stored
@@ -926,7 +926,7 @@ middle name differs; the same full name is refused as already on record.
 in Records and Customer Credit but cannot change their details.
 
 A customer's name is spelled the way a staff name is: the whole middle name is
-stored, and only its first letter is shown (`Maria R. Santos`). That happens once,
+stored, and only the first and last name are shown (`Maria Santos`). That happens once,
 in the generated `customers.full_name` column, which the credit view, the sales
 and delivery names and the reports read. The register and Customers Record
 still find a customer by first and last name alone, by the middle name written
