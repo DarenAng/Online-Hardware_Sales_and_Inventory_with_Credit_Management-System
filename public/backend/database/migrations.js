@@ -1276,7 +1276,7 @@ async function routinesAreOld() {
     ["sp_receive_purchase_order", "purchase_order_ordered_items"],
     ["sp_receive_purchase_order", "received_at = NOW()"],
     ["sp_receive_purchase_order", "last_cost"],
-    ["sp_decide_purchase_order", "Every line needs a buying price"],
+    ["sp_decide_purchase_order", "they set the prices"],
     ["sp_receive_purchase_order", "needs a cost above zero"],
     ["sp_create_purchase_order", "v_quantity, 0.00, v_pack_name"],
     ["sp_create_customer", "p_address_barangay"],

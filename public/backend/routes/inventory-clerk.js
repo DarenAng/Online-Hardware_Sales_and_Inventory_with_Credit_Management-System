@@ -1088,35 +1088,8 @@ function registerInventoryRoutes(app, deps) {
     try {
       const poId = Number(request.params.poId);
 
-      let prices = [];
-      if (approve) {
-        const itemsResult = await db.query(
-          "SELECT i.po_item_id, p.product_name FROM purchase_order_items i " +
-          "JOIN products p ON p.product_id = i.product_id WHERE i.po_id = ? ORDER BY i.po_item_id", [poId]);
-        const lines = itemsResult[0];
-        const asked = Array.isArray(body.prices) ? body.prices : [];
-
-        for (let i = 0; i < lines.length; i++) {
-          let entry = null;
-          for (let n = 0; n < asked.length; n++) {
-            if (Number(asked[n] && asked[n].id) === Number(lines[i].po_item_id)) entry = asked[n];
-          }
-          const cost = entry ? Number(entry.unitCost) : NaN;
-          if (!Number.isFinite(cost) || cost <= 0 || cost >= PRICE_CEILING) {
-            return response.status(400).json({
-              error: "Type a buying price above zero for " + lines[i].product_name + "." });
-          }
-          const rounded = Math.round(cost * 10000) / 10000;
-          if (!(rounded > 0)) {
-            return response.status(400).json({
-              error: "The buying price for " + lines[i].product_name + " is too small for one unit." });
-          }
-          prices.push({ po_item_id: lines[i].po_item_id, unit_cost: rounded });
-        }
-      }
-
       const output = await inventoryClerkProcedures.decidePurchaseOrder(
-        [poId, approve, JSON.stringify(prices), note || null, getActorId(request)]
+        [poId, approve, note || null, getActorId(request)]
       );
 
       if (output.status_code !== 200) {
@@ -1400,6 +1373,27 @@ function registerInventoryRoutes(app, deps) {
         }
       }
 
+      const repriced = [];
+      let quoted = 0;
+      for (let i = 0; i < changes.length; i++) {
+        if (Number(changes[i].item.unit_cost) > 0) repriced.push(changes[i]);
+        else quoted += 1;
+      }
+
+      if (accept) {
+        for (let i = 0; i < document.items.length; i++) {
+          const item = document.items[i];
+          if (Number(item.unit_cost) > 0) continue;
+          let priced = false;
+          for (let n = 0; n < changes.length; n++) {
+            if (changes[n].item === item) priced = true;
+          }
+          if (!priced) {
+            return response.status(400).json({ error: "Enter a price above zero for " + item.product_name + "." });
+          }
+        }
+      }
+
       let before = 0;
       for (let i = 0; i < document.items.length; i++) {
         const item = document.items[i];
@@ -1455,7 +1449,8 @@ function registerInventoryRoutes(app, deps) {
         const change = changes[i];
         await connection.query(
           "UPDATE purchase_order_items " +
-          "SET original_unit_cost = COALESCE(original_unit_cost, unit_cost), unit_cost = ? " +
+          "SET original_unit_cost = IF(unit_cost > 0, COALESCE(original_unit_cost, unit_cost), original_unit_cost), " +
+          "unit_cost = ? " +
           "WHERE po_item_id = ? AND po_id = ?",
           [change.price, change.item.po_item_id, order.po_id]);
       }
@@ -1466,16 +1461,20 @@ function registerInventoryRoutes(app, deps) {
 
       let title = order.supplier_name + " accepted purchase order #" + order.po_id;
       let message = order.supplier_name + " accepted " + number + " and will ship it on " + dayText(shipDate) + ".";
-      if (changes.length > 0) {
+      if (repriced.length > 0) {
         title = order.supplier_name + " accepted purchase order #" + order.po_id + " with new prices";
         const priceChanges = [];
-        for (let i = 0; i < changes.length; i++) {
-          const change = changes[i];
+        for (let i = 0; i < repriced.length; i++) {
+          const change = repriced[i];
           priceChanges.push(change.item.product_name + " " + pesoText(change.item.unit_cost) + " to " + pesoText(change.price));
         }
-        message += " They changed the price on " + changes.length + " " + (changes.length === 1 ? "line" : "lines") + ": " +
-                   priceChanges.join("; ") +
-                   ". Order total " + pesoText(before) + " to " + pesoText(after) + ".";
+        message += " They changed the price on " + repriced.length + " " + (repriced.length === 1 ? "line" : "lines") + ": " +
+                   priceChanges.join("; ") + ".";
+      }
+      if (quoted > 0) {
+        message += " Order total " + pesoText(after) + ".";
+      } else if (repriced.length > 0) {
+        message += " Order total " + pesoText(before) + " to " + pesoText(after) + ".";
       }
       if (discount > 0) {
         message += " They gave a discount of " + pesoText(discount) + ", so the order comes to " + pesoText(after - discount) + ".";
@@ -1493,10 +1492,14 @@ function registerInventoryRoutes(app, deps) {
 
       let details = number + " declined by " + order.supplier_name + " from the link on the order: " + note;
       if (accept) {
+        let priceNote = "";
+        if (quoted > 0) {
+          priceNote = ", prices set by the supplier, total " + pesoText(after);
+        } else if (repriced.length > 0) {
+          priceNote = ", " + repriced.length + " price(s) changed, total " + pesoText(before) + " to " + pesoText(after);
+        }
         details = number + " accepted by " + order.supplier_name + " from the link on the order, shipping " + shipDate +
-          (changes.length > 0
-            ? ", " + changes.length + " price(s) changed, total " + pesoText(before) + " to " + pesoText(after)
-            : "") +
+          priceNote +
           (discount > 0 ? ", discount " + pesoText(discount) : "") +
           (note ? ": " + note : "");
       }

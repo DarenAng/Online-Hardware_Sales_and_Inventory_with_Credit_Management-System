@@ -1374,6 +1374,11 @@ order, confirm it or send it back with a reason. There is no count sheet on
 the manager's page, and the server refuses a manager who calls the receive
 route anyway.
 
+**The supplier sets the buying prices.** The manager confirms an order without
+prices. The supplier types the price of every line on the page the link or QR
+code on the order opens, and cannot accept the order until every line has one.
+Until then the order's lines, line costs and total show `--`.
+
 **Confirming is placing the order.** The moment the manager confirms it, the
 server emails the order to the supplier at the address on the supplier's
 record: plain text, with the order number to quote, the date, where it is to be

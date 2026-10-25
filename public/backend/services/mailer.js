@@ -406,6 +406,7 @@ async function purchaseOrderMessage(details) {
   if (items.length === 1) {
     lineWord = "line";
   }
+  const priced = total > 0;
 
   let greeting = "Hello";
   if (order.contact_person) {
@@ -415,8 +416,9 @@ async function purchaseOrderMessage(details) {
   let nextStepText;
   if (link) {
     nextStepText =
-      "Once you have read it, open this link to answer. There you can correct any price that does " +
-      "not match yours, tell us the day it ships, and accept the order (or tell us you cannot fill it). " +
+      "Once you have read it, open this link to answer. There you can " +
+      (priced ? "correct any price that does not match yours" : "type your price for each line") +
+      ", tell us the day it ships, and accept the order (or tell us you cannot fill it). " +
       "Our manager is told the moment you answer:\n\n    " + link + "\n\n";
   } else {
     nextStepText = "Once you have read it, contact " + shopName + " to confirm the order.\n\n";
@@ -429,7 +431,7 @@ async function purchaseOrderMessage(details) {
     "    Purchase order:   " + number + "\n" +
     "    Date:             " + date + "\n" +
     "    Lines:            " + items.length + "\n" +
-    "    Total:            PHP " + money(total) + "\n" +
+    "    Total:            " + (priced ? "PHP " + money(total) : "--") + "\n" +
     "    Deliver to:       " + shopName + ", " + shopAddress + "\n\n" +
     nextStepText +
     "Please quote " + number + " on the delivery receipt and the invoice.\n\n" +
@@ -479,10 +481,13 @@ async function purchaseOrderMessage(details) {
             "<td valign=\"middle\" style=\"padding:16px 18px 16px 4px;font-size:14px;line-height:1.55;\">" +
               "<div style=\"" + label + "\">Answer in a minute, no account needed</div>" +
               "<div style=\"margin-bottom:14px;\">Scan the code with your phone's camera, or press the button. " +
-                "On the order's page you can <strong>correct a price</strong> that does not match yours, " +
+                "On the order's page you can " +
+                (priced ? "<strong>correct a price</strong> that does not match yours, "
+                        : "<strong>type your price</strong> for each line, ") +
                 "<strong>pick the day it ships</strong>, and accept it, or tell us you cannot fill it. " +
                 "Our manager is told the moment you answer.</div>" +
-              "<a href=\"" + htmlText(link) + "\" style=\"" + button + "\">Check prices and accept</a>" +
+              "<a href=\"" + htmlText(link) + "\" style=\"" + button + "\">" +
+                (priced ? "Check prices and accept" : "Set prices and accept") + "</a>" +
             "</td>" +
           "</tr></table>" +
           "<div style=\"margin-top:8px;font-size:11.5px;color:" + MAIL_STEEL + ";word-break:break-all;\">" +
@@ -542,7 +547,7 @@ async function purchaseOrderMessage(details) {
       "<tr><td style=\"padding:18px 28px 0;\">" +
         "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" style=\"border-collapse:collapse;\">" +
           "<tr>" + (fact("Purchase order", htmlText(number))) + (fact("Date", htmlText(date))) + "</tr>" +
-          "<tr>" + fact("Lines", items.length + " " + lineWord) + (fact("Total", "&#8369;" + money(total), true)) + "</tr>" +
+          "<tr>" + fact("Lines", items.length + " " + lineWord) + (fact("Total", priced ? "&#8369;" + money(total) : "--", true)) + "</tr>" +
         "</table>" +
       "</td></tr>" +
 

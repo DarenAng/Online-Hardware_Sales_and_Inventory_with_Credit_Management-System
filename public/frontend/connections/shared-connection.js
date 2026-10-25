@@ -349,11 +349,10 @@ function apiCreatePurchaseOrder(order) {
     return sendJson('/api/purchase-orders', 'POST', order);
 }
 
-function apiDecidePurchaseOrder(poId, approve, note, prices) {
+function apiDecidePurchaseOrder(poId, approve, note) {
     return sendJson('/api/purchase-orders/' + poId + '/decide', 'POST', {
         approve: approve,
-        note: note,
-        prices: prices || []
+        note: note
     });
 }
 

@@ -127,7 +127,6 @@ let poLinesSupplierId = null;
 let poLineCount = 0;
 let poDocument = null;
 let poReceiving = null;
-let poPricing = null;
 let recvExtraCount = 0;
 
 const matPickers = {};
@@ -2488,8 +2487,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         for (let i = 0; i < items.length; i++) orderedUnits += Number(items[i].quantity) || 0;
     }
 
-    const pricing = canDecide && waiting;
-
     let money;
     if (waiting) {
         money = '';
@@ -2558,10 +2555,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     };
     let lines;
     const lineRows = [];
-    if (pricing) {
-        poPricing = { poId: po.po_id, items: items };
-        lines = poBuyingPricesHtml(items);
-    } else if (priced) {
+    if (priced) {
         for (let i = 0; i < items.length; i++) {
             const it = items[i];
             lineRows.push([
@@ -2608,96 +2602,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     }
     openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(poStage(po)), 'P' + po.po_id,
         pages, foot, { wide: 'xl', scroll: true });
-
-    if (pricing) {
-        renderBuyingPrices();
-        guardModal('detail-modal', 'the buying prices');
-    } else {
-        poPricing = null;
-    }
-}
-
-function poBuyingPricesHtml(items) {
-    const rows = [];
-    for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        const pack = recvPackOf(item);
-        const last = Number(item.last_cost) || 0;
-        const known = last > 0 ? last : (Number(item.unit_cost) || 0);
-        let start = '';
-        if (known > 0) start = (Math.round(known * (pack ? pack.size : 1) * 100) / 100).toFixed(2);
-
-        rows.push([
-            escapeHtml(item.product_name),
-            escapeHtml(poQuantityText(item)),
-            '<input type="number" class="form-control bp-price amount-field" id="bp-price-' + i + '" ' +
-                'min="0" step="0.01" placeholder="0.00" value="' + start + '" ' +
-                'aria-label="Buying price for ' + escapeHtml(item.product_name) + '" oninput="renderBuyingPrices()">',
-            '<span id="bp-line-' + i + '"></span>'
-        ]);
-    }
-
-    return detailTable(['Material', 'Qty', 'Buying Price', 'Line Cost'], rows, [2, 3]) +
-        '<div class="po-sum is-total bp-sum">' +
-            '<span class="po-sum-label">Order total</span>' +
-            '<span class="po-sum-value" id="bp-total"></span>' +
-        '</div>';
-}
-
-function poReadBuyingPrices() {
-    const found = { lines: [], total: 0, missing: 0, problem: null, problemAt: -1 };
-    if (!poPricing) return found;
-
-    for (let i = 0; i < poPricing.items.length; i++) {
-        const item = poPricing.items[i];
-        const pack = recvPackOf(item);
-        const field = document.getElementById('bp-price-' + i);
-        const typed = field ? field.value.trim() : '';
-        const number = Number(typed);
-
-        let problem = null;
-        if (typed === '' || !Number.isFinite(number) || number <= 0) {
-            problem = 'Type a buying price above zero for ' + item.product_name + '.';
-        } else if (!/^\d+(\.\d{1,2})?$/.test(typed)) {
-            problem = 'The buying price for ' + item.product_name + ' can have two decimal places at most.';
-        } else if (number > 99999999.99) {
-            problem = 'The buying price for ' + item.product_name + ' is more than the system can hold.';
-        }
-
-        let unitCost = 0;
-        if (problem === null) {
-            unitCost = pack ? Math.round(number / pack.size * 10000) / 10000 : number;
-            if (!(unitCost > 0)) {
-                problem = 'The buying price for ' + item.product_name + ' is too small for one ' +
-                    (item.unit_name || 'unit') + '.';
-            }
-        }
-
-        if (problem === null) {
-            found.total += Math.round(unitCost * Number(item.quantity) * 100) / 100;
-        } else {
-            found.missing += 1;
-            if (found.problem === null) { found.problem = problem; found.problemAt = i; }
-        }
-        found.lines.push({ index: i, item: item, pack: pack, unitCost: unitCost, valid: problem === null });
-    }
-    return found;
-}
-
-function renderBuyingPrices() {
-    const found = poReadBuyingPrices();
-    for (let i = 0; i < found.lines.length; i++) {
-        const line = found.lines[i];
-        const cost = document.getElementById('bp-line-' + i);
-        if (cost) {
-            cost.textContent = line.valid
-                ? peso(Math.round(line.unitCost * Number(line.item.quantity) * 100) / 100)
-                : '--';
-        }
-    }
-
-    const total = document.getElementById('bp-total');
-    if (total) total.textContent = peso(found.total);
 }
 
 function poDeliveryReportHtml(report) {
@@ -2732,23 +2636,7 @@ async function decidePurchaseOrder(poId, approve) {
     if (!po) return;
 
     let note = '';
-    let prices = [];
     if (approve) {
-        if (!poPricing || poPricing.poId !== poId) {
-            notifyWarning('Open the order again to set its buying prices.', 'Order not approved');
-            return;
-        }
-        const found = poReadBuyingPrices();
-        if (found.problem !== null) {
-            notifyWarning(found.problem, 'Order not approved');
-            const field = document.getElementById('bp-price-' + found.problemAt);
-            if (field) field.focus();
-            return;
-        }
-        for (let i = 0; i < found.lines.length; i++) {
-            prices.push({ id: found.lines[i].item.po_item_id, unitCost: found.lines[i].unitCost });
-        }
-
         const yes = await askConfirm(
             'Order #' + po.po_id + ' to ' + po.supplier_name + ': ' + po.line_count + ' line(s), ' + po.total_units +
             ' unit(s). Once approved, ' +
@@ -2758,9 +2646,8 @@ async function decidePurchaseOrder(poId, approve) {
                 eyebrow: 'Purchase Orders',
                 confirmLabel: 'Approve the order',
                 detail: [
-                    'Order total: ' + peso(found.total),
                     'The printed order carries a QR code and a link: ' + po.supplier_name +
-                        ' scans it to accept or decline the order.',
+                        ' scans it to set the prices and accept or decline the order.',
                     'You are notified the moment the supplier answers.'
                 ]
             });
@@ -2783,14 +2670,13 @@ async function decidePurchaseOrder(poId, approve) {
     }
 
     try {
-        const response = await apiDecidePurchaseOrder(poId, approve, note, prices);
+        const response = await apiDecidePurchaseOrder(poId, approve, note);
         const result = await response.json();
         if (!response.ok) {
             if (!handleAuthFailure(response, result)) notifyError(result.error);
             return;
         }
 
-        poPricing = null;
         closeModal('detail-modal');
         notifySuccess(result.message, approve ? 'Order approved' : 'Order declined');
         await refreshPurchaseOrders();

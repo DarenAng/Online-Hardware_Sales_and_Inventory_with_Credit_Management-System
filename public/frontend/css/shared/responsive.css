@@ -680,9 +680,6 @@
 
 .po-line-note { margin: 4px 0 0; }
 
-.bp-price { width: 130px; margin-left: auto; font-family: var(--font-figure); font-variant-numeric: tabular-nums; }
-.bp-sum { margin-top: 12px; }
-
 .mat-desc {
     display: flex;
     flex-wrap: wrap;

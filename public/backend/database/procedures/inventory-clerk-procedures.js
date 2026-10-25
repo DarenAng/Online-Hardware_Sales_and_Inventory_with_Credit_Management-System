@@ -42,7 +42,7 @@ function createPurchaseOrder(params) {
 
 function decidePurchaseOrder(params) {
   return callProcedure(
-    "CALL sp_decide_purchase_order(?, ?, ?, ?, ?, @status_code, @message)",
+    "CALL sp_decide_purchase_order(?, ?, ?, ?, @status_code, @message)",
     params,
     ["status_code", "message"]
   );

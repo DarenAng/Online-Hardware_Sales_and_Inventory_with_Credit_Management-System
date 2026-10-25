@@ -96,6 +96,15 @@ function startSupplierOrderPage() {
         return isPackLine(item) ? item.pack_name : (item.unit_name || 'unit');
     }
 
+    function isUnpriced(item) {
+        return !(Number(item.unit_cost) > 0);
+    }
+
+    function hasTypedPrice(item) {
+        const price = priceFor(item);
+        return price !== null && !Number.isNaN(price);
+    }
+
     function shownPrice(unitCost, item) {
         return Math.round(Number(unitCost) * packSizeOf(item) * 100) / 100;
     }
@@ -137,7 +146,7 @@ function startSupplierOrderPage() {
                 goods += Number(item.line_cost || 0);
             }
         }
-        if (discountAmount(goods) >= goods) return 'The discount has to be less than the order total.';
+        if (goods > 0 && discountAmount(goods) >= goods) return 'The discount has to be less than the order total.';
         return null;
     }
 
@@ -145,20 +154,26 @@ function startSupplierOrderPage() {
         let ours = 0;
         let theirs = 0;
         let changed = 0;
+        let unpriced = 0;
+        let missing = 0;
         for (let i = 0; i < view.items.length; i++) {
             const item = view.items[i];
             const line = Number(item.line_cost || 0);
             ours += line;
+            if (isUnpriced(item)) {
+                unpriced += 1;
+                if (!hasTypedPrice(item)) missing += 1;
+            }
             if (lineChanged(item)) {
                 theirs += lineAmount(priceFor(item), item);
-                changed += 1;
+                if (!isUnpriced(item)) changed += 1;
             } else {
                 theirs += line;
             }
         }
         const discount = discountProblem() ? 0 : discountAmount(theirs);
-        return { ours: ours, theirs: theirs, changed: changed, discount: discount,
-                 total: Math.round((theirs - discount) * 100) / 100 };
+        return { ours: ours, theirs: theirs, changed: changed, unpriced: unpriced, missing: missing,
+                 discount: discount, total: Math.round((theirs - discount) * 100) / 100 };
     }
 
     function deltaChip(from, to) {
@@ -219,13 +234,16 @@ function startSupplierOrderPage() {
         for (let i = 0; i < view.items.length; i++) {
             linesHtml += lineHtml(view.items[i], i);
         }
+        const help = totals().unpriced > 0
+            ? 'Press <strong>Set price</strong> on each line and type your price.'
+            : 'Price not what you sell it for? Press <strong>Edit price</strong> on that line.';
 
         main.innerHTML =
             '<section class="so-hero">' + trackHtml(order) + '</section>' +
 
             '<section class="so-panel">' +
                 '<header class="so-step"><span class="so-num">1</span><div><h2>Check the order</h2>' +
-                    '<p>Price not what you sell it for? Press <strong>Edit price</strong> on that line.</p>' +
+                    '<p>' + help + '</p>' +
                 '</div></header>' +
                 '<ol class="so-lines" id="so-lines">' +
                     linesHtml +
@@ -305,8 +323,7 @@ function startSupplierOrderPage() {
             '</div>' +
             '<div class="so-line-bottom">' +
                 '<span class="so-line-price" data-price-text></span>' +
-                '<button type="button" class="so-btn so-btn-small" data-edit="' + item.id + '">' +
-                    '<i class="icon icon-pencil" aria-hidden="true"></i>Edit price</button>' +
+                '<button type="button" class="so-btn so-btn-small" data-edit="' + item.id + '"></button>' +
             '</div>' +
             '<div class="so-edit" data-editor>' +
                 '<label class="so-label" for="so-price-' + item.id + '">Your price per ' + escapeHtml(priceUnitOf(item)) + '</label>' +
@@ -341,12 +358,28 @@ function startSupplierOrderPage() {
             const editing = Boolean(draft.editing[item.id]);
             const price = priceFor(item);
             const changed = lineChanged(item);
+            const unpriced = isUnpriced(item);
             row.classList.toggle('is-editing', editing);
-            row.classList.toggle('is-changed', changed);
+            row.classList.toggle('is-changed', changed && !unpriced);
 
             const ours = Number(item.line_cost || 0);
             const total = row.querySelector('[data-total]');
             const delta = row.querySelector('[data-delta]');
+            const editButton = row.querySelector('[data-edit]');
+            editButton.hidden = editing;
+            editButton.innerHTML = '<i class="icon icon-pencil" aria-hidden="true"></i>' +
+                (unpriced && !hasTypedPrice(item) ? 'Set price' : 'Edit price');
+
+            if (unpriced) {
+                const typed = hasTypedPrice(item);
+                total.textContent = typed ? peso(lineAmount(price, item)) : '--';
+                delta.innerHTML = '';
+                row.querySelector('[data-price-text]').innerHTML =
+                    (typed ? '<strong>' + peso(shownPrice(price, item)) + '</strong>' : '--') +
+                    ' per ' + escapeHtml(priceUnitOf(item));
+                continue;
+            }
+
             if (changed) {
                 const theirs = lineAmount(price, item);
                 total.innerHTML = '<s>' + peso(ours) + '</s> ' + peso(theirs);
@@ -364,8 +397,6 @@ function startSupplierOrderPage() {
             } else {
                 row.querySelector('[data-price-text]').innerHTML = peso(shownPrice(item.unit_cost, item)) + ' per ' + escapeHtml(priceUnitOf(item));
             }
-
-            row.querySelector('[data-edit]').hidden = editing;
         }
         refreshTotal();
     }
@@ -384,8 +415,13 @@ function startSupplierOrderPage() {
                 (draft.discountType === 'percent' ? ' (' + escapeHtml(String(parseFloat(draft.discount))) + '%)' : '') +
                 '</span><span class="so-fig">−' + peso(figures.discount) + '</span></div>';
         }
-        html += '<div class="is-total"><span>Order total</span><span class="so-fig">' + peso(figures.total) + '</span>' +
-            (figures.total !== figures.ours ? deltaChip(figures.ours, figures.total) : '') + '</div>';
+        if (figures.missing > 0) {
+            html += '<div class="is-total"><span>Order total</span><span class="so-fig">--</span></div>';
+        } else {
+            html += '<div class="is-total"><span>Order total</span><span class="so-fig">' + peso(figures.total) + '</span>' +
+                (figures.unpriced === 0 && figures.total !== figures.ours ? deltaChip(figures.ours, figures.total) : '') +
+                '</div>';
+        }
         box.innerHTML = html;
     }
 
@@ -474,12 +510,16 @@ function startSupplierOrderPage() {
         rows.push('<li><span>Ships</span><strong>' +
             (draft.shipDate && !dateProblem() ? escapeHtml(dayText(draft.shipDate, true)) : '<em>pick a date above</em>') +
             '</strong></li>');
-        rows.push('<li><span>Prices</span><strong>' +
-            (figures.changed ? figures.changed + ' changed' : 'as ordered') + '</strong></li>');
+        let pricesText = figures.changed ? figures.changed + ' changed' : 'as ordered';
+        if (figures.unpriced > 0) {
+            pricesText = figures.missing > 0 ? '<em>' + figures.missing + ' still to set</em>' : 'set';
+        }
+        rows.push('<li><span>Prices</span><strong>' + pricesText + '</strong></li>');
         if (figures.discount > 0) {
             rows.push('<li><span>Discount</span><strong class="so-fig">−' + peso(figures.discount) + '</strong></li>');
         }
-        rows.push('<li><span>Total</span><strong class="so-fig">' + peso(figures.total) + '</strong></li>');
+        rows.push('<li><span>Total</span><strong class="so-fig">' +
+            (figures.missing > 0 ? '--' : peso(figures.total)) + '</strong></li>');
         box.innerHTML = '<p class="so-summary-head"><i class="icon icon-circle-check" aria-hidden="true"></i>' +
             'You are accepting ' + escapeHtml(view.order.number) + '</p><ul class="so-summary-list">' +
             rows.join('') + '</ul>';
@@ -527,7 +567,9 @@ function startSupplierOrderPage() {
                 const id = edit.dataset.edit;
                 const item = findItem(id);
                 const input = document.getElementById('so-price-' + id);
-                input.value = has(draft.prices, id) ? Number(draft.prices[id]).toFixed(2) : shownPrice(item.unit_cost, item).toFixed(2);
+                if (has(draft.prices, id)) input.value = Number(draft.prices[id]).toFixed(2);
+                else if (isUnpriced(item)) input.value = '';
+                else input.value = shownPrice(item.unit_cost, item).toFixed(2);
                 draft.editing[id] = true;
                 lineError(id, '');
                 refreshLines();
@@ -614,6 +656,14 @@ function startSupplierOrderPage() {
         const open = Object.keys(draft.editing)[0];
         if (open) {
             return { text: 'Press Save or Cancel on the price you are editing.', focus: 'so-price-' + open };
+        }
+        for (let i = 0; i < view.items.length; i++) {
+            const item = view.items[i];
+            if (isUnpriced(item) && !hasTypedPrice(item)) {
+                draft.editing[item.id] = true;
+                refreshLines();
+                return { text: 'Set the price for ' + item.product_name + '.', focus: 'so-price-' + item.id };
+            }
         }
         if (discountProblem()) return { text: discountProblem(), focus: 'so-discount' };
         if (!draft.shipDate) return { text: 'Pick the ship date.', focus: 'so-date' };
@@ -720,9 +770,20 @@ function startSupplierOrderPage() {
 
         let total = 0;
         let ours = 0;
+        let unpriced = 0;
         let rows = '';
         for (let i = 0; i < view.items.length; i++) {
             const item = view.items[i];
+            if (isUnpriced(item)) {
+                unpriced += 1;
+                rows += '<li class="so-rline">' +
+                    '<span class="so-rname">' + escapeHtml(item.product_name) +
+                        '<small>' + escapeHtml(lineQuantity(item)) + '</small></span>' +
+                    '<span class="so-rprice">--</span>' +
+                    '<span class="so-fig">--</span>' +
+                '</li>';
+                continue;
+            }
             total += Number(item.line_cost || 0);
             let original = null;
             if (item.original_unit_cost !== null && item.original_unit_cost !== undefined) {
@@ -753,8 +814,12 @@ function startSupplierOrderPage() {
             facts.push('<div><span class="so-tag">Discount</span><strong class="so-fig">−' + peso(discount) +
                 '</strong></div>');
         }
-        facts.push('<div><span class="so-tag">Total</span><strong class="so-fig">' + peso(total - discount) + '</strong>' +
-            (Math.abs(total - discount - ours) >= 0.005 ? deltaChip(ours, total - discount) : '') + '</div>');
+        if (unpriced > 0) {
+            facts.push('<div><span class="so-tag">Total</span><strong class="so-fig">--</strong></div>');
+        } else {
+            facts.push('<div><span class="so-tag">Total</span><strong class="so-fig">' + peso(total - discount) + '</strong>' +
+                (Math.abs(total - discount - ours) >= 0.005 ? deltaChip(ours, total - discount) : '') + '</div>');
+        }
         if (order.supplier_note) {
             facts.push('<div class="so-wide"><span class="so-tag">' +
                 (order.supplier_response === 'Declined' ? 'Reason' : 'Remarks') + '</span><span>' +

@@ -2157,7 +2157,6 @@ END //
 CREATE PROCEDURE sp_decide_purchase_order (
     IN p_po_id INT,
     IN p_approve BOOLEAN,
-    IN p_prices_json JSON,
     IN p_note VARCHAR(255),
     IN p_staff_id INT,
     OUT p_status_code INT,
@@ -2167,12 +2166,6 @@ PROC_BODY: BEGIN
     DECLARE v_status VARCHAR(20);
     DECLARE v_supplier VARCHAR(100);
     DECLARE v_lines INT DEFAULT 0;
-    DECLARE v_i INT DEFAULT 0;
-    DECLARE v_count INT DEFAULT 0;
-    DECLARE v_item INT;
-    DECLARE v_cost DECIMAL(12,4);
-    DECLARE v_unpriced INT DEFAULT 0;
-    DECLARE v_total DECIMAL(12,2) DEFAULT 0.00;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -2204,39 +2197,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    IF p_approve THEN
-        SET v_count = IFNULL(JSON_LENGTH(p_prices_json), 0);
-
-        WHILE v_i < v_count DO
-            SET v_item = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_prices_json, CONCAT('$[', v_i, '].po_item_id'))), 'null');
-            SET v_cost = NULLIF(JSON_UNQUOTE(JSON_EXTRACT(p_prices_json, CONCAT('$[', v_i, '].unit_cost'))), 'null');
-
-            IF v_item IS NULL OR v_cost IS NULL OR v_cost <= 0 OR v_cost > 99999999.99 THEN
-                ROLLBACK;
-                SET p_status_code = 400;
-                SET p_message = 'Every line needs a buying price above zero.';
-                LEAVE PROC_BODY;
-            END IF;
-
-            UPDATE purchase_order_items
-            SET unit_cost = v_cost
-            WHERE po_item_id = v_item AND po_id = p_po_id;
-
-            SET v_i = v_i + 1;
-        END WHILE;
-
-        SELECT COUNT(*) INTO v_unpriced
-        FROM purchase_order_items WHERE po_id = p_po_id AND unit_cost <= 0;
-
-        IF v_unpriced > 0 THEN
-            ROLLBACK;
-            SET p_status_code = 400;
-            SET p_message = 'Every line needs a buying price above zero.';
-            LEAVE PROC_BODY;
-        END IF;
-    END IF;
-
-    SELECT COUNT(*), COALESCE(SUM(line_cost), 0.00) INTO v_lines, v_total
+    SELECT COUNT(*) INTO v_lines
     FROM purchase_order_items WHERE po_id = p_po_id;
 
     UPDATE purchase_orders
@@ -2249,15 +2210,15 @@ PROC_BODY: BEGIN
     INSERT INTO audit_logs (staff_id, action, action_type, details)
     VALUES (p_staff_id, IF(p_approve, 'PO_CONFIRMED', 'PO_DECLINED'), 'UPDATE',
             CONCAT('PO #', p_po_id, ' to ', v_supplier, ' ', IF(p_approve, 'confirmed', 'declined'),
-                   IF(p_approve, CONCAT(', buying prices set, total PHP ', FORMAT(v_total, 2)), ''),
                    IF(p_note IS NULL OR TRIM(p_note) = '', '', CONCAT(': ', TRIM(p_note)))));
 
     INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id)
     VALUES (3, 'Purchase Order',
             CONCAT('Purchase order #', p_po_id, IF(p_approve, ' confirmed', ' declined')),
             IF(p_approve,
-               CONCAT(v_lines, ' line(s) to ', v_supplier, ', total PHP ', FORMAT(v_total, 2),
-                      '. Send it to the supplier, and check the goods against it when they arrive.'),
+               CONCAT(v_lines, ' line(s) to ', v_supplier,
+                      '. Send it to the supplier: they set the prices when they accept it. ',
+                      'Check the goods against it when they arrive.'),
                CONCAT('The manager declined the order to ', v_supplier,
                       IF(p_note IS NULL OR TRIM(p_note) = '', '.', CONCAT(': ', TRIM(p_note))))),
             p_staff_id);
