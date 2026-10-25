@@ -399,7 +399,7 @@ td.cell-num .stock-level { margin-left: auto; }
 .po-ref-fact-who { font-size: 13px; color: var(--steel); }
 
 .po-ref-verdict { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 10px 13px; border-radius: 6px; font-size: 14.5px; font-weight: 600; }
-.po-ref-verdict .bi { font-size: 17px; }
+.po-ref-verdict .icon { font-size: 17px; }
 .po-ref-verdict.is-complete { background: var(--ok-dim); color: var(--ok-ink); }
 .po-ref-verdict.is-short { background: var(--signal-dim); color: var(--signal-ink); }
 .po-ref-verdict.is-old { background: var(--paper); color: var(--steel); font-weight: 500; }

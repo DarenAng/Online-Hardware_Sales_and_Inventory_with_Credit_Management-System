@@ -1,7 +1,7 @@
 # Lucelyn Hardware — Online Sales and Inventory with Credit Management
 
 A point of sale, inventory, and customer credit system. Node with Express on the
-server, plain HTML, CSS, Bootstrap 5 and JavaScript on the client, MySQL 8 for
+server, plain HTML, CSS and JavaScript on the client, MySQL 8 for
 the data.
 
 > **Putting it online?** [DEPLOY-VERCEL-AIVEN.md](public/deployment/DEPLOY-VERCEL-AIVEN.md) runs the same
@@ -14,8 +14,8 @@ You need MySQL 8.0 or newer and Node 20 or newer installed first.
 ### 1. Copy the project folder
 
 Copy the whole folder. You do not need `node_modules`, step 2 rebuilds it.
-Bootstrap is already inside the folder under `public/vendor/`, so nothing is
-downloaded from the internet while the system runs.
+The icons are already inside the folder in `public/frontend/css/shared/icons.css`,
+so nothing is downloaded from the internet while the system runs.
 
 ### 2. Install the packages
 
@@ -190,7 +190,7 @@ this is being set up on.
 The server code in `public/backend/` — `server.js`, `services/mailer.js`, the old
 `services/mail-password.txt` — stays on the server; only `public/frontend/`
 (the pages, `css/`, the browser scripts in `scripts/` and the calls in
-`connections/`) and `public/vendor/` are handed to a browser.
+`connections/`) is handed to a browser.
 
 ### 6. Start the server
 
@@ -1769,6 +1769,8 @@ public/
 
     css/
       shared/
+        icons.css             every icon (Lucide drawings); shared/icons.js puts
+                              them on buttons, tabs, titles and cards
         general-ui.css        colours, type, the shell, and every component
                               two or more pages share
         responsive.css        the phone layout, for every page; the purchase
@@ -1854,10 +1856,6 @@ public/
     vercel-build.js         the Vercel build step: copies the browser files to vercel-static/
     load-sql.js             loads .sql files into a cloud database (Aiven)
     DEPLOY-VERCEL-AIVEN.md  putting the app online
-
-  vendor/bootstrap/         Bootstrap 5, kept in the project, no internet needed
-  vendor/bootstrap-icons/   Bootstrap Icons (the font and its stylesheet), also kept here;
-                            shared/icons.js puts them on buttons, tabs, titles and cards
 ```
 
 ### Which address serves which folder
@@ -1866,7 +1864,6 @@ The pages keep short addresses; server.js maps them onto the folders:
 
 ```
 /Login.html, /css/..., /scripts/..., /connections/...  ->  public/frontend/
-/vendor/...                                            ->  public/vendor/
 ```
 
 Nothing else is served. The server code is in `public/backend/`, not next to the
@@ -1878,7 +1875,7 @@ browser files, so it, the SQL files in `public/database/` and the tools in
 Every page loads the same shared set, then the files for its own page and role:
 
 ```
-css:  shared/general-ui.css  ->  shared/responsive.css  ->  pages/<page>.css
+css:  shared/icons.css  ->  shared/general-ui.css  ->  shared/responsive.css  ->  pages/<page>.css
       (supplier-order.html stops after general-ui.css; <page> is the name of the
       page's .html file)
 js:   scripts/shared/*  ->  connections/shared-connection.js
@@ -1892,7 +1889,7 @@ server, open the connection file of that role.
 
 ## Notes
 
-- Express serves only `public/frontend/` and `public/vendor/`. The server code
+- Express serves only `public/frontend/`. The server code
   and `database/` are never handed out.
 - Passwords are stored as scrypt hashes, never as readable text. A database
   restored from an older backup that still holds readable passwords is upgraded

@@ -95,7 +95,7 @@ function showCard(options) {
     if (options.when) meta.push(whenText(options.when));
 
     const card = document.createElement('div');
-    card.className = 'toast toast-card toast-' + tone + (options.onOpen ? ' is-clickable' : '');
+    card.className = 'toast-card toast-' + tone + (options.onOpen ? ' is-clickable' : '');
     card.setAttribute('role', tone === 'danger' ? 'alert' : 'status');
 
     let metaHtml = '';
@@ -139,19 +139,7 @@ function showCard(options) {
         card.title = 'Open the alert list';
     }
 
-    if (window.bootstrap && window.bootstrap.Toast) {
-        const toast = new window.bootstrap.Toast(card, {
-            autohide: life > 0,
-            delay: life || 5000
-        });
-        card.addEventListener('hidden.bs.toast', function () {
-            card.remove();
-        });
-        toast.show();
-    } else {
-        card.classList.add('show');
-        if (life > 0) setTimeout(remove, life);
-    }
+    if (life > 0) setTimeout(remove, life);
 
     const cards = deck.querySelectorAll('.toast-card');
     if (cards.length > 3) cards[0].remove();

@@ -5,7 +5,7 @@ the css and browser scripts are served from Vercel's CDN). The MySQL database
 runs on **Aiven**. The same code still runs on a PC with `npm start`.
 
 ```
-browser ──https──▶ Vercel CDN  (css, /scripts, /connections, /vendor)
+browser ──https──▶ Vercel CDN  (css, /scripts, /connections)
                 └▶ Vercel Function api/index.js ──▶ public/backend/server.js
                                                       │  SSL
                                                       ▼

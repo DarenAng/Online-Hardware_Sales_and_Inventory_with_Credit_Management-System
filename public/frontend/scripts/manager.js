@@ -3094,9 +3094,9 @@ async function openSaleDetail(saleId) {
 
         let foot = '';
         if (voidWaiting) {
-            foot = '<button type="button" class="btn btn-danger" data-icon="x-circle" onclick="decideVoidRequest(' +
+            foot = '<button type="button" class="btn btn-danger" data-icon="circle-x" onclick="decideVoidRequest(' +
                     vr.request_id + ', ' + s.sale_id + ', false)">Decline Void</button>' +
-                '<button type="button" class="btn btn-accent" data-icon="slash-circle" onclick="decideVoidRequest(' +
+                '<button type="button" class="btn btn-accent" data-icon="ban" onclick="decideVoidRequest(' +
                     vr.request_id + ', ' + s.sale_id + ', true)">Approve Void</button>';
         }
 

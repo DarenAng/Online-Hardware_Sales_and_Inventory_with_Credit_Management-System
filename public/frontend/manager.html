@@ -7,8 +7,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" media="print" onload="this.media='all'"
           href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
-    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/shared/icons.css">
     <link rel="stylesheet" href="css/shared/general-ui.css">
     <link rel="stylesheet" href="css/shared/responsive.css">
     <link rel="stylesheet" href="css/pages/manager.css">
@@ -26,96 +25,96 @@
             </a>
             <ul class="sidebar-nav">
                 <li data-sidebar-dropdown>
-                    <a href="#reports" onclick="sidebarHeading(event, 'reports-nav', 'reports-dropdown', showReports)" class="nav-parent" id="reports-nav"><i class="bi bi-bar-chart-line nav-icon" aria-hidden="true"></i>
+                    <a href="#reports" onclick="sidebarHeading(event, 'reports-nav', 'reports-dropdown', showReports)" class="nav-parent" id="reports-nav"><i class="icon icon-chart-column-big nav-icon" aria-hidden="true"></i>
                         Reports <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="reports-dropdown" class="nav-sub" style="display: none;">
                         <li data-feature="income"><a href="#" data-panel-link="panel-reports" data-panel-view="report-summary"
-                               onclick="showReport('report-summary', event)"><i class="bi bi-graph-up nav-icon" aria-hidden="true"></i>Sales Summary</a></li>
+                               onclick="showReport('report-summary', event)"><i class="icon icon-chart-line nav-icon" aria-hidden="true"></i>Sales Summary</a></li>
                         <li data-feature="sales"><a href="#" data-panel-link="panel-reports" data-panel-view="report-sales"
-                               onclick="showSalesTransactions(event)"><i class="bi bi-receipt-cutoff nav-icon" aria-hidden="true"></i>Sales Transactions</a></li>
+                               onclick="showSalesTransactions(event)"><i class="icon icon-receipt-text nav-icon" aria-hidden="true"></i>Sales Transactions</a></li>
                         <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-reports" data-panel-view="report-purchases"
-                               onclick="showReport('report-purchases', event)"><i class="bi bi-bag nav-icon" aria-hidden="true"></i>Total Purchases</a></li>
+                               onclick="showReport('report-purchases', event)"><i class="icon icon-shopping-bag nav-icon" aria-hidden="true"></i>Total Purchases</a></li>
                         <li data-feature="reports"><a href="#" data-panel-link="panel-reports" data-panel-view="report-unpaid"
-                               onclick="showReport('report-unpaid', event)"><i class="bi bi-wallet2 nav-icon" aria-hidden="true"></i>Receivables</a></li>
+                               onclick="showReport('report-unpaid', event)"><i class="icon icon-wallet nav-icon" aria-hidden="true"></i>Receivables</a></li>
                         <li data-feature="reports"><a href="#" data-panel-link="panel-reports" data-panel-view="report-loyal"
-                               onclick="showReport('report-loyal', event)"><i class="bi bi-person-check nav-icon" aria-hidden="true"></i>Repeat Customers</a></li>
+                               onclick="showReport('report-loyal', event)"><i class="icon icon-user-check nav-icon" aria-hidden="true"></i>Repeat Customers</a></li>
                     </ul>
                 </li>
                 <li data-sidebar-dropdown>
-                    <a href="#stocks" onclick="sidebarHeading(event, 'stocks-nav', 'stocks-dropdown', showStocks)" class="nav-parent" id="stocks-nav"><i class="bi bi-box-seam nav-icon" aria-hidden="true"></i>
+                    <a href="#stocks" onclick="sidebarHeading(event, 'stocks-nav', 'stocks-dropdown', showStocks)" class="nav-parent" id="stocks-nav"><i class="icon icon-package nav-icon" aria-hidden="true"></i>
                         Stocks <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="stocks-dropdown" class="nav-sub" style="display: none;">
                         <li data-feature="stock-reports"><a href="#" data-panel-link="panel-stocks" data-panel-view="stock-overview"
-                               onclick="showStockView('stock-overview', event)"><i class="bi bi-boxes nav-icon" aria-hidden="true"></i>Stocks Overview</a></li>
+                               onclick="showStockView('stock-overview', event)"><i class="icon icon-boxes nav-icon" aria-hidden="true"></i>Stocks Overview</a></li>
                         <li data-feature="reorder-alerts"><a href="#" data-panel-link="panel-stocks" data-panel-view="stock-reorder"
-                               onclick="showStockView('stock-reorder', event)"><i class="bi bi-exclamation-triangle nav-icon" aria-hidden="true"></i>Reorder Alerts</a></li>
+                               onclick="showStockView('stock-reorder', event)"><i class="icon icon-triangle-alert nav-icon" aria-hidden="true"></i>Reorder Alerts</a></li>
                         <li data-feature="stock-reports"><a href="#" data-panel-link="panel-stocks" data-panel-view="stock-moves"
-                               onclick="showStockView('stock-moves', event)"><i class="bi bi-arrow-left-right nav-icon" aria-hidden="true"></i>Stock Movements</a></li>
+                               onclick="showStockView('stock-moves', event)"><i class="icon icon-arrow-left-right nav-icon" aria-hidden="true"></i>Stock Movements</a></li>
                     </ul>
                 </li>
 
-                <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-po-history" onclick="showPurchasing(event)"><i class="bi bi-cart3 nav-icon" aria-hidden="true"></i>Purchase Orders</a></li>
+                <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-po-history" onclick="showPurchasing(event)"><i class="icon icon-shopping-cart nav-icon" aria-hidden="true"></i>Purchase Orders</a></li>
 
                 <li data-sidebar-dropdown>
-                    <a href="#credit" onclick="sidebarHeading(event, 'credit-nav', 'credit-dropdown', showCredit)" class="nav-parent" id="credit-nav"><i class="bi bi-person-vcard nav-icon" aria-hidden="true"></i>
+                    <a href="#credit" onclick="sidebarHeading(event, 'credit-nav', 'credit-dropdown', showCredit)" class="nav-parent" id="credit-nav"><i class="icon icon-id-card nav-icon" aria-hidden="true"></i>
                         Customers Record <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="credit-dropdown" class="nav-sub" style="display: none;">
-                        <li data-feature="credit"><a href="#" data-panel-link="panel-credit" onclick="showCredit(event)"><i class="bi bi-credit-card nav-icon" aria-hidden="true"></i>Customer Credit</a></li>
-                        <li data-feature="credit-requests"><a href="#" data-panel-link="panel-credit-requests" onclick="showCreditRequests(event)"><i class="bi bi-calendar-plus nav-icon" aria-hidden="true"></i>
+                        <li data-feature="credit"><a href="#" data-panel-link="panel-credit" onclick="showCredit(event)"><i class="icon icon-credit-card nav-icon" aria-hidden="true"></i>Customer Credit</a></li>
+                        <li data-feature="credit-requests"><a href="#" data-panel-link="panel-credit-requests" onclick="showCreditRequests(event)"><i class="icon icon-calendar-plus nav-icon" aria-hidden="true"></i>
                             Extension Requests</a></li>
                     </ul>
                 </li>
 
                 <li data-sidebar-dropdown>
-                    <a href="#deliveries" onclick="sidebarHeading(event, 'deliveries-nav', 'deliveries-dropdown', showDeliveries)" class="nav-parent" id="deliveries-nav"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>
+                    <a href="#deliveries" onclick="sidebarHeading(event, 'deliveries-nav', 'deliveries-dropdown', showDeliveries)" class="nav-parent" id="deliveries-nav"><i class="icon icon-truck nav-icon" aria-hidden="true"></i>
                         Delivery History <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="deliveries-dropdown" class="nav-sub" style="display: none;">
-                        <li data-feature="deliveries"><a href="#" data-panel-link="panel-deliveries" onclick="showDeliveries(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>
+                        <li data-feature="deliveries"><a href="#" data-panel-link="panel-deliveries" onclick="showDeliveries(event)"><i class="icon icon-truck nav-icon" aria-hidden="true"></i>
                             Delivery History</a></li>
-                        <li data-feature="delivery-schedule"><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
+                        <li data-feature="delivery-schedule"><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="icon icon-calendar-days nav-icon" aria-hidden="true"></i>
                             Delivery Schedule</a></li>
                     </ul>
                 </li>
                 <li data-sidebar-dropdown data-feature="records">
                     <a href="#records" onclick="sidebarHeading(event, 'records-nav', 'records-dropdown', showRecords)" class="nav-parent" id="records-nav"
-                       data-panel-link="panel-records"><i class="bi bi-folder2-open nav-icon" aria-hidden="true"></i>
+                       data-panel-link="panel-records"><i class="icon icon-folder-open nav-icon" aria-hidden="true"></i>
                         Records <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="records-dropdown" class="nav-sub" style="display: none;">
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="supplier"
-                               onclick="showRecordType('supplier', event)"><i class="bi bi-building nav-icon" aria-hidden="true"></i>Suppliers</a></li>
+                               onclick="showRecordType('supplier', event)"><i class="icon icon-building-2 nav-icon" aria-hidden="true"></i>Suppliers</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="customer"
-                               onclick="showRecordType('customer', event)"><i class="bi bi-people nav-icon" aria-hidden="true"></i>Customers</a></li>
+                               onclick="showRecordType('customer', event)"><i class="icon icon-users nav-icon" aria-hidden="true"></i>Customers</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="product"
-                               onclick="showRecordType('product', event)"><i class="bi bi-tag nav-icon" aria-hidden="true"></i>Products</a></li>
+                               onclick="showRecordType('product', event)"><i class="icon icon-tag nav-icon" aria-hidden="true"></i>Products</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="category"
-                               onclick="showRecordType('category', event)"><i class="bi bi-grid nav-icon" aria-hidden="true"></i>Categories</a></li>
+                               onclick="showRecordType('category', event)"><i class="icon icon-layout-grid nav-icon" aria-hidden="true"></i>Categories</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="unit"
-                               onclick="showRecordType('unit', event)"><i class="bi bi-rulers nav-icon" aria-hidden="true"></i>Units</a></li>
+                               onclick="showRecordType('unit', event)"><i class="icon icon-ruler nav-icon" aria-hidden="true"></i>Units</a></li>
                     </ul>
                 </li>
                 <li data-sidebar-dropdown>
-                    <a href="#policy" onclick="sidebarHeading(event, 'policy-nav', 'policy-dropdown', showCreditMaintenance)" class="nav-parent" id="policy-nav"><i class="bi bi-journal-text nav-icon" aria-hidden="true"></i>
+                    <a href="#policy" onclick="sidebarHeading(event, 'policy-nav', 'policy-dropdown', showCreditMaintenance)" class="nav-parent" id="policy-nav"><i class="icon icon-notebook-text nav-icon" aria-hidden="true"></i>
                         Policy Maintenance <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="policy-dropdown" class="nav-sub" style="display: none;">
-                        <li data-feature="credit-maintenance"><a href="#" data-panel-link="panel-credit-maintenance" onclick="showCreditMaintenance(event)"><i class="bi bi-sliders nav-icon" aria-hidden="true"></i>
+                        <li data-feature="credit-maintenance"><a href="#" data-panel-link="panel-credit-maintenance" onclick="showCreditMaintenance(event)"><i class="icon icon-sliders-horizontal nav-icon" aria-hidden="true"></i>
                             Credit Maintenance</a></li>
-                        <li data-feature="loyalty-discount"><a href="#" data-panel-link="panel-loyalty-maintenance" onclick="showLoyaltyMaintenance(event)"><i class="bi bi-percent nav-icon" aria-hidden="true"></i>
+                        <li data-feature="loyalty-discount"><a href="#" data-panel-link="panel-loyalty-maintenance" onclick="showLoyaltyMaintenance(event)"><i class="icon icon-percent nav-icon" aria-hidden="true"></i>
                             Loyalty Discount Maintenance</a></li>
-                        <li data-feature="data-terms"><a href="#" data-panel-link="panel-data-terms" onclick="showDataTerms(event)"><i class="bi bi-shield-lock nav-icon" aria-hidden="true"></i>
+                        <li data-feature="data-terms"><a href="#" data-panel-link="panel-data-terms" onclick="showDataTerms(event)"><i class="icon icon-shield-check nav-icon" aria-hidden="true"></i>
                             Customer Data Terms</a></li>
-                        <li data-feature="refund-policy"><a href="#" data-panel-link="panel-refund-policy" onclick="showRefundPolicy(event)"><i class="bi bi-arrow-counterclockwise nav-icon" aria-hidden="true"></i>
+                        <li data-feature="refund-policy"><a href="#" data-panel-link="panel-refund-policy" onclick="showRefundPolicy(event)"><i class="icon icon-rotate-ccw nav-icon" aria-hidden="true"></i>
                             Refund Policy</a></li>
                     </ul>
                 </li>
-                <li data-feature="archives"><a href="#" data-panel-link="panel-archives" onclick="showArchives(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archives</a></li>
-                <li data-feature="reports"><a href="#" data-panel-link="panel-activity" onclick="showActivityLog(event)"><i class="bi bi-clock-history nav-icon" aria-hidden="true"></i>Activity Log</a></li>
-                <li data-feature="account-management" hidden><a href="#" data-panel-link="panel-accounts" onclick="showAccountManagement(event)"><i class="bi bi-person-gear nav-icon" aria-hidden="true"></i>Account Management</a></li>
+                <li data-feature="archives"><a href="#" data-panel-link="panel-archives" onclick="showArchives(event)"><i class="icon icon-archive nav-icon" aria-hidden="true"></i>Archives</a></li>
+                <li data-feature="reports"><a href="#" data-panel-link="panel-activity" onclick="showActivityLog(event)"><i class="icon icon-history nav-icon" aria-hidden="true"></i>Activity Log</a></li>
+                <li data-feature="account-management" hidden><a href="#" data-panel-link="panel-accounts" onclick="showAccountManagement(event)"><i class="icon icon-user-cog nav-icon" aria-hidden="true"></i>Account Management</a></li>
             </ul>
         </aside>
 
@@ -1421,7 +1420,6 @@
         </div>
     </div>
 
-    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="scripts/shared/icons.js"></script>
     <script src="scripts/shared/helpers.js"></script>
     <script src="scripts/shared/format.js"></script>

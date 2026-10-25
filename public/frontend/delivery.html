@@ -7,8 +7,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" media="print" onload="this.media='all'"
           href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
-    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/shared/icons.css">
     <link rel="stylesheet" href="css/shared/general-ui.css">
     <link rel="stylesheet" href="css/shared/responsive.css">
     <link rel="stylesheet" href="css/pages/delivery.css">
@@ -25,19 +24,19 @@
                 </span>
             </a>
             <ul class="sidebar-nav">
-                <li data-feature="delivery-runs"><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>Pending Deliveries</a></li>
+                <li data-feature="delivery-runs"><a href="#" data-panel-link="panel-pending" onclick="showDeliveryHome(event)"><i class="icon icon-truck nav-icon" aria-hidden="true"></i>Pending Deliveries</a></li>
                 <li data-sidebar-dropdown data-feature="delivery-reports">
-                    <a href="#reports" onclick="sidebarHeading(event, 'reports-nav', 'reports-dropdown', showDeliveredReport)" class="nav-parent" id="reports-nav"><i class="bi bi-bar-chart-line nav-icon" aria-hidden="true"></i>
+                    <a href="#reports" onclick="sidebarHeading(event, 'reports-nav', 'reports-dropdown', showDeliveredReport)" class="nav-parent" id="reports-nav"><i class="icon icon-chart-column-big nav-icon" aria-hidden="true"></i>
                         Reports <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="reports-dropdown" class="nav-sub" style="display: none;">
-                        <li><a href="#" data-panel-link="panel-report-delivered" onclick="showDeliveredReport(event)"><i class="bi bi-box-seam nav-icon" aria-hidden="true"></i>
+                        <li><a href="#" data-panel-link="panel-report-delivered" onclick="showDeliveredReport(event)"><i class="icon icon-package nav-icon" aria-hidden="true"></i>
                             Deliveries Handled</a></li>
-                        <li><a href="#" data-panel-link="panel-report-payments" onclick="showPaymentsReport(event)"><i class="bi bi-cash-coin nav-icon" aria-hidden="true"></i>
+                        <li><a href="#" data-panel-link="panel-report-payments" onclick="showPaymentsReport(event)"><i class="icon icon-hand-coins nav-icon" aria-hidden="true"></i>
                             Payments Collected</a></li>
                     </ul>
                 </li>
-                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
+                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="icon icon-calendar-days nav-icon" aria-hidden="true"></i>
                     Delivery Schedule</a></li>
 
             </ul>
@@ -355,7 +354,6 @@
         </div>
     </div>
 
-    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="scripts/shared/icons.js"></script>
     <script src="scripts/shared/helpers.js"></script>
     <script src="scripts/shared/format.js"></script>

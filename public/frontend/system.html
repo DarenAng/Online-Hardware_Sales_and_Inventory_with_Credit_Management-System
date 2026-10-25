@@ -7,8 +7,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" media="print" onload="this.media='all'"
           href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
-    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/shared/icons.css">
     <link rel="stylesheet" href="css/shared/general-ui.css">
     <link rel="stylesheet" href="css/shared/responsive.css">
     <link rel="stylesheet" href="css/pages/system.css">
@@ -26,18 +25,18 @@
             </a>
             <ul class="sidebar-nav">
                 <li data-sidebar-dropdown>
-                    <a href="#accounts" onclick="sidebarHeading(event, 'accounts-nav', 'accounts-dropdown', showAllUsers)" class="nav-parent" id="accounts-nav"><i class="bi bi-people nav-icon" aria-hidden="true"></i>
+                    <a href="#accounts" onclick="sidebarHeading(event, 'accounts-nav', 'accounts-dropdown', showAllUsers)" class="nav-parent" id="accounts-nav"><i class="icon icon-users nav-icon" aria-hidden="true"></i>
                         Accounts Management <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="accounts-dropdown" class="nav-sub" style="display: none;">
-                        <li><a href="#" data-panel-link="panel-accounts" onclick="showAllUsers(event)"><i class="bi bi-person-lines-fill nav-icon" aria-hidden="true"></i>Staff Directory</a></li>
-                        <li><a href="#" data-panel-link="panel-archive" onclick="showArchiveModule(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
+                        <li><a href="#" data-panel-link="panel-accounts" onclick="showAllUsers(event)"><i class="icon icon-contact nav-icon" aria-hidden="true"></i>Staff Directory</a></li>
+                        <li><a href="#" data-panel-link="panel-archive" onclick="showArchiveModule(event)"><i class="icon icon-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
                     </ul>
                 </li>
-                <li><a href="#" data-panel-link="panel-features" onclick="showAccessControl(event)"><i class="bi bi-shield-lock nav-icon" aria-hidden="true"></i>Access Control</a></li>
-                <li><a href="#" data-panel-link="panel-logs" onclick="showAuditLogs(event)"><i class="bi bi-journal-text nav-icon" aria-hidden="true"></i>Audit Logs</a></li>
-                <li><a href="#" data-panel-link="panel-maintenance" onclick="showMaintenance(event)"><i class="bi bi-database-gear nav-icon" aria-hidden="true"></i>Backup &amp; Recovery</a></li>
-                <li><a href="#" data-panel-link="panel-store" onclick="showStoreSettings(event)"><i class="bi bi-receipt nav-icon" aria-hidden="true"></i>Receipt Maintenance</a></li>
+                <li><a href="#" data-panel-link="panel-features" onclick="showAccessControl(event)"><i class="icon icon-shield-check nav-icon" aria-hidden="true"></i>Access Control</a></li>
+                <li><a href="#" data-panel-link="panel-logs" onclick="showAuditLogs(event)"><i class="icon icon-notebook-text nav-icon" aria-hidden="true"></i>Audit Logs</a></li>
+                <li><a href="#" data-panel-link="panel-maintenance" onclick="showMaintenance(event)"><i class="icon icon-database nav-icon" aria-hidden="true"></i>Backup &amp; Recovery</a></li>
+                <li><a href="#" data-panel-link="panel-store" onclick="showStoreSettings(event)"><i class="icon icon-receipt nav-icon" aria-hidden="true"></i>Receipt Maintenance</a></li>
             </ul>
         </aside>
 
@@ -704,7 +703,6 @@
         </div>
     </aside>
 
-    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="scripts/shared/icons.js"></script>
     <script src="scripts/shared/helpers.js"></script>
     <script src="scripts/shared/format.js"></script>

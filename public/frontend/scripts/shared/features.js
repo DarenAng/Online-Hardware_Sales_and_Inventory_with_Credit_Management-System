@@ -82,7 +82,7 @@ function renderMoreScreens() {
         const target = screen.page + '#screen=' + encodeURIComponent(screen.key);
         links += '<li><a href="' + target + '" onclick="event.preventDefault(); event.stopPropagation(); ' +
             'window.location.href = \'' + target + '\'">' +
-            '<i class="bi bi-box-arrow-up-right nav-icon" aria-hidden="true"></i>' +
+            '<i class="icon icon-external-link nav-icon" aria-hidden="true"></i>' +
             escapeHtml(screen.name) +
             ' <span class="nav-host">' + escapeHtml(PAGE_TITLES[screen.page] || '') + '</span></a></li>';
     }
@@ -96,7 +96,7 @@ function renderMoreScreens() {
     block.innerHTML =
         '<a href="#" class="nav-parent" id="more-screens-head" ' +
             'onclick="toggleSidebarMenu(\'more-screens-head\', \'more-screens-list\', event)">' +
-            '<i class="bi bi-grid nav-icon" aria-hidden="true"></i>More Screens ' +
+            '<i class="icon icon-layout-grid nav-icon" aria-hidden="true"></i>More Screens ' +
             '<span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span></a>' +
         '<ul id="more-screens-list" class="nav-sub" style="display: none;">' + links + '</ul>';
 }
@@ -118,7 +118,7 @@ function renderVisitBar() {
     item.id = 'visit-back-nav';
     item.innerHTML = '<a href="' + escapeHtml(ownPageName()) + '" onclick="event.preventDefault(); event.stopPropagation(); ' +
         'window.location.href = \'' + escapeHtml(ownPageName()) + '\'">' +
-        '<i class="bi bi-arrow-left nav-icon" aria-hidden="true"></i>Back to My Dashboard</a>';
+        '<i class="icon icon-arrow-left nav-icon" aria-hidden="true"></i>Back to My Dashboard</a>';
     nav.insertBefore(item, nav.firstChild);
 }
 

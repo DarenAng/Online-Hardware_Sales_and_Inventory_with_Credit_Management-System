@@ -7,8 +7,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" media="print" onload="this.media='all'"
           href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
-    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/shared/icons.css">
     <link rel="stylesheet" href="css/shared/general-ui.css">
     <link rel="stylesheet" href="css/shared/responsive.css">
     <link rel="stylesheet" href="css/pages/cashier-dashboard.css">
@@ -26,18 +25,18 @@
             </a>
             <ul class="sidebar-nav">
                 <li data-sidebar-dropdown>
-                    <a href="#pos" onclick="sidebarHeading(event, 'pos-nav', 'pos-dropdown', showRegister)" class="nav-parent" id="pos-nav"><i class="bi bi-shop nav-icon" aria-hidden="true"></i>
+                    <a href="#pos" onclick="sidebarHeading(event, 'pos-nav', 'pos-dropdown', showRegister)" class="nav-parent" id="pos-nav"><i class="icon icon-store nav-icon" aria-hidden="true"></i>
                         Point of Sale <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="pos-dropdown" class="nav-sub" style="display: none;">
-                        <li data-feature="pos"><a href="#" data-panel-link="panel-pos" onclick="showRegister(event)"><i class="bi bi-cart-plus nav-icon" aria-hidden="true"></i>New Transaction</a></li>
-                        <li data-feature="deliveries"><a href="#" data-panel-link="panel-delivery" onclick="showCashierDeliveries(event)"><i class="bi bi-truck nav-icon" aria-hidden="true"></i>Deliveries</a></li>
-                        <li data-feature="refunds"><a href="#" data-panel-link="panel-refund" onclick="showRefunds(event)"><i class="bi bi-arrow-counterclockwise nav-icon" aria-hidden="true"></i>Refunds</a></li>
+                        <li data-feature="pos"><a href="#" data-panel-link="panel-pos" onclick="showRegister(event)"><i class="icon icon-shopping-cart nav-icon" aria-hidden="true"></i>New Transaction</a></li>
+                        <li data-feature="deliveries"><a href="#" data-panel-link="panel-delivery" onclick="showCashierDeliveries(event)"><i class="icon icon-truck nav-icon" aria-hidden="true"></i>Deliveries</a></li>
+                        <li data-feature="refunds"><a href="#" data-panel-link="panel-refund" onclick="showRefunds(event)"><i class="icon icon-rotate-ccw nav-icon" aria-hidden="true"></i>Refunds</a></li>
                     </ul>
                 </li>
-                <li data-feature="credit"><a href="#" data-panel-link="panel-customers" onclick="showCustomers(event)"><i class="bi bi-person-vcard nav-icon" aria-hidden="true"></i>Customers Record</a></li>
-                <li data-feature="sales-report"><a href="#" data-panel-link="panel-salesreport" onclick="showSalesReport(event)"><i class="bi bi-bar-chart nav-icon" aria-hidden="true"></i>Sales Report</a></li>
-                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
+                <li data-feature="credit"><a href="#" data-panel-link="panel-customers" onclick="showCustomers(event)"><i class="icon icon-id-card nav-icon" aria-hidden="true"></i>Customers Record</a></li>
+                <li data-feature="sales-report"><a href="#" data-panel-link="panel-salesreport" onclick="showSalesReport(event)"><i class="icon icon-chart-column nav-icon" aria-hidden="true"></i>Sales Report</a></li>
+                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="icon icon-calendar-days nav-icon" aria-hidden="true"></i>
                     Delivery Schedule</a></li>
 
             </ul>
@@ -815,7 +814,7 @@
                 <button type="button" class="btn btn-ghost" onclick="cancelPaymentForm()">Cancel</button>
                 <button type="button" class="btn" id="payment-qr-btn" data-icon="qr-code"
                         onclick="handleTakePayment(event, true)" hidden>Pay by QR</button>
-                <button type="button" class="btn btn-success" id="payment-save-btn" data-icon="cash" onclick="handleTakePayment(event)">Confirm Payment</button>
+                <button type="button" class="btn btn-success" id="payment-save-btn" data-icon="banknote" onclick="handleTakePayment(event)">Confirm Payment</button>
             </div>
         </div>
     </div>
@@ -924,14 +923,13 @@
             </div>
 
             <div class="modal-foot no-print">
-                <button type="button" class="btn btn-danger" id="receipt-void-btn" data-icon="slash-circle"
+                <button type="button" class="btn btn-danger" id="receipt-void-btn" data-icon="ban"
                         onclick="requestVoidSale()" hidden>Request Void</button>
                 <button type="button" class="btn btn-accent" id="receipt-print-btn" onclick="printReceipt()">Print Invoice</button>
             </div>
         </div>
     </div>
 
-    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="scripts/shared/icons.js"></script>
     <script src="scripts/shared/helpers.js"></script>
     <script src="scripts/shared/format.js"></script>

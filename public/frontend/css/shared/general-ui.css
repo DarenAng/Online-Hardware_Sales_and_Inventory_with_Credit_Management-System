@@ -76,6 +76,23 @@
 
 html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
 
+[hidden] { display: none !important; }
+
+p, ul, ol, dl { margin-bottom: 16px; }
+ul, ol { padding-left: 32px; }
+ul ul, ul ol, ol ul, ol ol { margin-bottom: 0; }
+label { display: inline-block; }
+small { font-size: 0.875em; }
+fieldset { min-width: 0; }
+textarea { resize: vertical; }
+select { overflow-wrap: normal; }
+
+button, input, select, optgroup, textarea {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+}
+
 body {
     background: var(--paper);
     color: var(--ink);
@@ -85,6 +102,7 @@ body {
     line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    -webkit-tap-highlight-color: transparent;
 }
 
 h1, h2, h3, h4 {
@@ -131,6 +149,8 @@ h4 { font-size: 18px; }
     background: var(--chrome);
     transition: background 0.15s, transform 0.06s;
     line-height: 1.4;
+    vertical-align: middle;
+    user-select: none;
 }
 .btn:hover  { background: var(--chrome-2); }
 .btn:active { transform: translateY(1px); }
@@ -149,6 +169,7 @@ h4 { font-size: 18px; }
     opacity: 1;
     cursor: not-allowed;
     transform: none;
+    pointer-events: none;
 }
 
 .btn-gold       { background: var(--signal); color: var(--ink); }
@@ -201,7 +222,10 @@ h4 { font-size: 18px; }
 }
 
 .form-control {
+    display: block;
     width: 100%;
+    line-height: 1.5;
+    appearance: none;
     padding: 10px 12px;
     min-height: 42px;
     border: 1px solid var(--line);
@@ -693,6 +717,10 @@ body.has-subnav .sidebar-nav li:not([data-sidebar-dropdown]) > .nav-parent { jus
 
 .card {
     display: block;
+    position: relative;
+    flex-direction: column;
+    min-width: 0;
+    overflow-wrap: break-word;
     background: var(--surface);
     padding: 20px 22px;
     border: 1px solid var(--line);
@@ -892,6 +920,8 @@ kbd {
     padding: 3px 9px;
     border-radius: var(--radius);
     border: 1px solid transparent;
+    line-height: 1;
+    text-align: center;
     white-space: nowrap;
 }
 .badge::before {
@@ -969,7 +999,7 @@ kbd {
 .tab-content.active { display: block; }
 
 .modal {
-    display: none; position: fixed; inset: 0; z-index: 2000;
+    display: none; position: fixed; inset: 0; z-index: 2000; outline: 0;
     background: rgba(20, 24, 29, 0.62);
     backdrop-filter: blur(3px);
     padding: 26px; overflow: hidden;
@@ -1055,6 +1085,7 @@ html:has(.modal.open) { overflow: hidden; }
 .modal-tab.active { color: var(--go); border-bottom-color: var(--go); }
 
 .modal-body {
+    position: relative;
     padding: 18px 22px;
     flex: 1 1 auto;
     min-height: 0;
@@ -1751,6 +1782,7 @@ html:has(.modal.open) { overflow: hidden; }
     border-radius: var(--radius-lg);
     box-shadow: var(--lift);
     padding: 13px 13px 13px 0;
+    font-size: 14px;
     overflow: hidden;
     animation: toast-in 0.24s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
@@ -1764,7 +1796,7 @@ html:has(.modal.open) { overflow: hidden; }
     to   { opacity: 0; transform: translateX(22px); }
 }
 .toast-stripe { grid-column: 1; grid-row: 1 / span 2; align-self: stretch; background: var(--steel); }
-.toast-body   { grid-column: 3; grid-row: 1 / span 2; min-width: 0; }
+.toast-body   { grid-column: 3; grid-row: 1 / span 2; min-width: 0; padding: 12px; }
 .toast-mark {
     grid-column: 2; grid-row: 1 / span 2;
     width: 26px; height: 26px; margin-left: 13px;
@@ -1802,11 +1834,6 @@ html:has(.modal.open) { overflow: hidden; }
 .toast-card.toast-warning .toast-mark   { background: var(--signal-dim); color: var(--signal-ink); }
 .toast-card.toast-info    .toast-stripe { background: var(--chrome); }
 .toast-card.toast-info    .toast-mark   { background: rgba(20, 24, 29, 0.07); color: var(--steel); }
-
-.card { display: block; }
-.badge { font-weight: 600; }
-.modal-body { flex: 1 1 auto; }
-.btn { --bs-btn-padding-x: initial; }
 
 :where(a, button, input, select, textarea):focus-visible {
     outline: 2px solid var(--signal);
@@ -2793,8 +2820,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 
 .panel-view[hidden] { display: none; }
 .panel-view.card { margin-bottom: 0; }
-
-.bi { line-height: 1; }
 
 .sidebar-nav .nav-icon {
     display: inline-block;

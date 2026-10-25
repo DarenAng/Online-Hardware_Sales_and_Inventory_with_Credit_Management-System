@@ -172,7 +172,7 @@ function startSupplierOrderPage() {
     }
 
     function showProblem(title, text) {
-        main.innerHTML = '<section class="so-panel so-closed"><i class="bi bi-link-45deg" aria-hidden="true"></i>' +
+        main.innerHTML = '<section class="so-panel so-closed"><i class="icon icon-link" aria-hidden="true"></i>' +
             '<h1>' + escapeHtml(title) + '</h1><p>' + escapeHtml(text) + '</p></section>';
     }
 
@@ -194,7 +194,7 @@ function startSupplierOrderPage() {
             if (index < stage) state = 'is-done';
             else if (index === stage) state = 'is-now';
             return '<li class="so-stop ' + state + '"><span class="so-dot">' +
-                (index < stage ? '<i class="bi bi-check-lg" aria-hidden="true"></i>' : index + 1) +
+                (index < stage ? '<i class="icon icon-check" aria-hidden="true"></i>' : index + 1) +
                 '</span><span class="so-stop-label">' + label + '</span>' +
                 '<span class="so-stop-sub">' + escapeHtml(sub) + '</span></li>';
         }
@@ -246,7 +246,7 @@ function startSupplierOrderPage() {
                 '</div>' +
                 '<div class="so-order-total" id="so-order-total"></div>' +
                 '<a class="so-btn so-btn-quiet so-pdf" href="' + pdf + '" target="_blank" rel="noopener">' +
-                    '<i class="bi bi-file-earmark-pdf" aria-hidden="true"></i>Open the printable order (PDF)</a>' +
+                    '<i class="icon icon-file-text" aria-hidden="true"></i>Open the printable order (PDF)</a>' +
             '</section>' +
 
             '<section class="so-panel">' +
@@ -254,11 +254,11 @@ function startSupplierOrderPage() {
                     '<p>Choose one.</p></div></header>' +
                 '<div class="so-choices" role="radiogroup" aria-label="Your answer">' +
                     '<button type="button" class="so-choice is-accept" data-decision="accept" role="radio" aria-checked="false">' +
-                        '<i class="bi bi-check-circle" aria-hidden="true"></i>' +
+                        '<i class="icon icon-circle-check" aria-hidden="true"></i>' +
                         '<span class="so-choice-title">Accept order</span>' +
                         '<span class="so-choice-sub">We can fill it</span></button>' +
                     '<button type="button" class="so-choice is-decline" data-decision="decline" role="radio" aria-checked="false">' +
-                        '<i class="bi bi-x-circle" aria-hidden="true"></i>' +
+                        '<i class="icon icon-circle-x" aria-hidden="true"></i>' +
                         '<span class="so-choice-title">Decline order</span>' +
                         '<span class="so-choice-sub">We cannot fill it</span></button>' +
                 '</div>' +
@@ -306,7 +306,7 @@ function startSupplierOrderPage() {
             '<div class="so-line-bottom">' +
                 '<span class="so-line-price" data-price-text></span>' +
                 '<button type="button" class="so-btn so-btn-small" data-edit="' + item.id + '">' +
-                    '<i class="bi bi-pencil" aria-hidden="true"></i>Edit price</button>' +
+                    '<i class="icon icon-pencil" aria-hidden="true"></i>Edit price</button>' +
             '</div>' +
             '<div class="so-edit" data-editor>' +
                 '<label class="so-label" for="so-price-' + item.id + '">Your price per ' + escapeHtml(priceUnitOf(item)) + '</label>' +
@@ -315,7 +315,7 @@ function startSupplierOrderPage() {
                         '<input type="number" inputmode="decimal" min="0.01" step="0.01" ' +
                                'id="so-price-' + item.id + '" data-price="' + item.id + '"></span>' +
                     '<button type="button" class="so-btn so-btn-small so-btn-save" data-save="' + item.id + '">' +
-                        '<i class="bi bi-check-lg" aria-hidden="true"></i>Save</button>' +
+                        '<i class="icon icon-check" aria-hidden="true"></i>Save</button>' +
                     '<button type="button" class="so-btn so-btn-small so-btn-quiet" data-cancel="' + item.id + '">' +
                         'Cancel</button>' +
                 '</div>' +
@@ -420,9 +420,9 @@ function startSupplierOrderPage() {
         const send = document.getElementById('so-send');
         send.className = 'so-btn so-btn-big ' + (draft.decision === 'decline' ? 'is-decline' : 'is-accept');
         if (draft.decision === 'decline') {
-            send.innerHTML = '<i class="bi bi-send" aria-hidden="true"></i>Send: decline the order';
+            send.innerHTML = '<i class="icon icon-send" aria-hidden="true"></i>Send: decline the order';
         } else {
-            send.innerHTML = '<i class="bi bi-send" aria-hidden="true"></i>Send: accept the order';
+            send.innerHTML = '<i class="icon icon-send" aria-hidden="true"></i>Send: accept the order';
         }
     }
 
@@ -453,7 +453,7 @@ function startSupplierOrderPage() {
             return;
         }
         box.className = 'so-when is-set';
-        box.innerHTML = '<i class="bi bi-truck" aria-hidden="true"></i><span>Ships <strong>' +
+        box.innerHTML = '<i class="icon icon-truck" aria-hidden="true"></i><span>Ships <strong>' +
             escapeHtml(dayText(draft.shipDate, true)) + '</strong>, ' + escapeHtml(daysAway(draft.shipDate)) + '</span>';
     }
 
@@ -463,7 +463,7 @@ function startSupplierOrderPage() {
 
         if (draft.decision === 'decline') {
             const dropped = Object.keys(draft.prices).length > 0 || discountAmount(totals().theirs) > 0;
-            box.innerHTML = '<p class="so-summary-head is-decline"><i class="bi bi-x-circle" aria-hidden="true"></i>' +
+            box.innerHTML = '<p class="so-summary-head is-decline"><i class="icon icon-circle-x" aria-hidden="true"></i>' +
                 'You are declining ' + escapeHtml(view.order.number) + '</p>' +
                 (dropped ? '<p class="so-summary-line">Price changes and discounts are not sent when you decline.</p>' : '');
             return;
@@ -480,7 +480,7 @@ function startSupplierOrderPage() {
             rows.push('<li><span>Discount</span><strong class="so-fig">−' + peso(figures.discount) + '</strong></li>');
         }
         rows.push('<li><span>Total</span><strong class="so-fig">' + peso(figures.total) + '</strong></li>');
-        box.innerHTML = '<p class="so-summary-head"><i class="bi bi-check-circle" aria-hidden="true"></i>' +
+        box.innerHTML = '<p class="so-summary-head"><i class="icon icon-circle-check" aria-hidden="true"></i>' +
             'You are accepting ' + escapeHtml(view.order.number) + '</p><ul class="so-summary-list">' +
             rows.join('') + '</ul>';
     }
@@ -696,17 +696,17 @@ function startSupplierOrderPage() {
 
     function renderReceipt(message) {
         const order = view.order;
-        let mark = 'bi-check-lg';
+        let mark = 'icon-check';
         let tone = 'is-ok';
         let title = 'Order accepted';
         let sub = 'You answered on ' + stampText(order.supplier_responded_at) + '.';
 
         if (order.supplier_response === 'Declined') {
-            mark = 'bi-x-lg';
+            mark = 'icon-x';
             tone = 'is-stop';
             title = 'Order declined';
         } else if (!order.supplier_response) {
-            mark = 'bi-lock';
+            mark = 'icon-lock';
             tone = 'is-closed';
             title = 'Nothing to answer';
             if (order.status === 'Received') {
@@ -764,7 +764,7 @@ function startSupplierOrderPage() {
         main.innerHTML =
             (message ? '<p class="so-flash is-ok">' + escapeHtml(message) + '</p>' : '') +
             '<section class="so-receipt ' + tone + '">' +
-                '<div class="so-seal"><i class="bi ' + mark + '" aria-hidden="true"></i></div>' +
+                '<div class="so-seal"><i class="icon ' + mark + '" aria-hidden="true"></i></div>' +
                 '<h1>' + title + '</h1>' +
                 '<p class="so-lede">' + escapeHtml(sub) + '</p>' +
                 trackHtml(order) +
@@ -775,7 +775,7 @@ function startSupplierOrderPage() {
                         '</strong> on the delivery receipt and the invoice. To change anything, contact the shop.</p>'
                     : '') +
                 '<a class="so-btn so-btn-quiet so-pdf" href="/api/supplier-order/' + encodeURIComponent(code) + '/pdf" ' +
-                    'target="_blank" rel="noopener"><i class="bi bi-file-earmark-pdf" aria-hidden="true"></i>' +
+                    'target="_blank" rel="noopener"><i class="icon icon-file-text" aria-hidden="true"></i>' +
                     'Open the printable order (PDF)</a>' +
             '</section>';
     }

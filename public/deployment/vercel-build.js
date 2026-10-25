@@ -15,4 +15,3 @@ function copyFolder(from, to) {
 copyFolder("public/frontend/css", "css");
 copyFolder("public/frontend/scripts", "scripts");
 copyFolder("public/frontend/connections", "connections");
-copyFolder("public/vendor", "vendor");

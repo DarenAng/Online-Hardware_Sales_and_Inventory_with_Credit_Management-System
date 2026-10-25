@@ -7,8 +7,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" media="print" onload="this.media='all'"
           href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
-    <link rel="stylesheet" href="vendor/bootstrap/bootstrap.min.css">
-    <link rel="stylesheet" href="vendor/bootstrap-icons/bootstrap-icons.min.css">
+    <link rel="stylesheet" href="css/shared/icons.css">
     <link rel="stylesheet" href="css/shared/general-ui.css">
     <link rel="stylesheet" href="css/shared/responsive.css">
     <link rel="stylesheet" href="css/pages/inventory-dashboard.css">
@@ -26,38 +25,38 @@
             </a>
             <ul class="sidebar-nav">
                 <li data-sidebar-dropdown>
-                    <a href="#inventory" onclick="sidebarHeading(event, 'inventory-nav', 'inventory-dropdown', loadInventoryAll)" class="nav-parent" id="inventory-nav"><i class="bi bi-box-seam nav-icon" aria-hidden="true"></i>
+                    <a href="#inventory" onclick="sidebarHeading(event, 'inventory-nav', 'inventory-dropdown', loadInventoryAll)" class="nav-parent" id="inventory-nav"><i class="icon icon-package nav-icon" aria-hidden="true"></i>
                         Inventory Management <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="inventory-dropdown" class="nav-sub" style="display: none;">
-                        <li data-feature="material-list"><a href="#" data-panel-link="panel-inventory" onclick="loadInventoryAll(event)"><i class="bi bi-list-ul nav-icon" aria-hidden="true"></i>Material List</a></li>
-                        <li data-feature="stock-adjustment"><a href="#" data-panel-link="panel-adjust" onclick="showAdjust(event)"><i class="bi bi-sliders nav-icon" aria-hidden="true"></i>Stock Adjustment</a></li>
-                        <li data-feature="adjustment-history"><a href="#" data-panel-link="panel-adjust-log" onclick="showAdjustmentHistory(event)"><i class="bi bi-clock-history nav-icon" aria-hidden="true"></i>Adjustment History</a></li>
-                        <li data-feature="reorder-points"><a href="#" data-panel-link="panel-reorder" onclick="showReorder(event)"><i class="bi bi-exclamation-triangle nav-icon" aria-hidden="true"></i>
+                        <li data-feature="material-list"><a href="#" data-panel-link="panel-inventory" onclick="loadInventoryAll(event)"><i class="icon icon-list nav-icon" aria-hidden="true"></i>Material List</a></li>
+                        <li data-feature="stock-adjustment"><a href="#" data-panel-link="panel-adjust" onclick="showAdjust(event)"><i class="icon icon-sliders-horizontal nav-icon" aria-hidden="true"></i>Stock Adjustment</a></li>
+                        <li data-feature="adjustment-history"><a href="#" data-panel-link="panel-adjust-log" onclick="showAdjustmentHistory(event)"><i class="icon icon-history nav-icon" aria-hidden="true"></i>Adjustment History</a></li>
+                        <li data-feature="reorder-points"><a href="#" data-panel-link="panel-reorder" onclick="showReorder(event)"><i class="icon icon-triangle-alert nav-icon" aria-hidden="true"></i>
                             Reorder Point</a></li>
-                        <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-po-history" onclick="showPurchaseOrderHistory(event)"><i class="bi bi-cart3 nav-icon" aria-hidden="true"></i>Purchase Orders</a></li>
-                        <li data-feature="returns"><a href="#" data-panel-link="panel-returns" onclick="showReturns(event)"><i class="bi bi-arrow-return-left nav-icon" aria-hidden="true"></i>
+                        <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-po-history" onclick="showPurchaseOrderHistory(event)"><i class="icon icon-shopping-cart nav-icon" aria-hidden="true"></i>Purchase Orders</a></li>
+                        <li data-feature="returns"><a href="#" data-panel-link="panel-returns" onclick="showReturns(event)"><i class="icon icon-corner-down-left nav-icon" aria-hidden="true"></i>
                             Returned Items</a></li>
                     </ul>
                 </li>
                 <li data-sidebar-dropdown data-feature="records">
                     <a href="#records" onclick="sidebarHeading(event, 'records-nav', 'records-dropdown', showClerkRecords)" class="nav-parent" id="records-nav"
-                       data-panel-link="panel-records"><i class="bi bi-folder2-open nav-icon" aria-hidden="true"></i>
+                       data-panel-link="panel-records"><i class="icon icon-folder-open nav-icon" aria-hidden="true"></i>
                         Records <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="records-dropdown" class="nav-sub" style="display: none;">
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="supplier"
-                               onclick="showClerkRecordType('supplier', event)"><i class="bi bi-building nav-icon" aria-hidden="true"></i>Suppliers</a></li>
+                               onclick="showClerkRecordType('supplier', event)"><i class="icon icon-building-2 nav-icon" aria-hidden="true"></i>Suppliers</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="product"
-                               onclick="showClerkRecordType('product', event)"><i class="bi bi-tag nav-icon" aria-hidden="true"></i>Products</a></li>
+                               onclick="showClerkRecordType('product', event)"><i class="icon icon-tag nav-icon" aria-hidden="true"></i>Products</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="category"
-                               onclick="showClerkRecordType('category', event)"><i class="bi bi-grid nav-icon" aria-hidden="true"></i>Categories</a></li>
+                               onclick="showClerkRecordType('category', event)"><i class="icon icon-layout-grid nav-icon" aria-hidden="true"></i>Categories</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="unit"
-                               onclick="showClerkRecordType('unit', event)"><i class="bi bi-rulers nav-icon" aria-hidden="true"></i>Units</a></li>
+                               onclick="showClerkRecordType('unit', event)"><i class="icon icon-ruler nav-icon" aria-hidden="true"></i>Units</a></li>
                     </ul>
                 </li>
-                <li data-feature="archives"><a href="#" data-panel-link="panel-archive" onclick="showInventoryArchive(event)"><i class="bi bi-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
-                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="bi bi-calendar-week nav-icon" aria-hidden="true"></i>
+                <li data-feature="archives"><a href="#" data-panel-link="panel-archive" onclick="showInventoryArchive(event)"><i class="icon icon-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
+                <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="icon icon-calendar-days nav-icon" aria-hidden="true"></i>
                     Delivery Schedule</a></li>
 
             </ul>
@@ -604,7 +603,6 @@
         </div>
     </div>
 
-    <script src="vendor/bootstrap/bootstrap.bundle.min.js"></script>
     <script src="scripts/shared/icons.js"></script>
     <script src="scripts/shared/helpers.js"></script>
     <script src="scripts/shared/format.js"></script>

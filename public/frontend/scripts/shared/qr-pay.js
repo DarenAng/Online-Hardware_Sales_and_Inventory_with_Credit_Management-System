@@ -16,7 +16,7 @@ const QR_MODAL_HTML =
     '    <div class="modal-box qr-box">\n' +
     '        <div class="modal-head">\n' +
     '            <div class="modal-identity">\n' +
-    '                <div class="avatar"><i class="bi bi-qr-code" aria-hidden="true"></i></div>\n' +
+    '                <div class="avatar"><i class="icon icon-qr-code" aria-hidden="true"></i></div>\n' +
     '                <div>\n' +
     '                    <h3 id="qr-title">Pay by QR</h3>\n' +
     '                    <span class="modal-role" id="qr-sub"></span>\n' +

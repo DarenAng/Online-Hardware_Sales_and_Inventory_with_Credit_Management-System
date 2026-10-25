@@ -261,7 +261,6 @@ async function mayVisitPage(roleName, page) {
 
 const PUBLIC_DIR = path.join(__dirname, "..");
 app.use(express.static(path.join(PUBLIC_DIR, "frontend")));
-app.use("/vendor", express.static(path.join(PUBLIC_DIR, "vendor")));
 
 app.use(accessControl.accessHook);
 

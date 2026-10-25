@@ -1,53 +1,53 @@
 function setUpIcons() {
     const BUTTON_PHRASES = [
-        ['sign in', 'box-arrow-in-right'],
-        ['sign out', 'box-arrow-right'],
-        ['log out', 'box-arrow-right'],
-        ['change password', 'key'],
-        ['credit settlement', 'cash'],
-        ['record the payment', 'cash'],
-        ['record payment', 'cash'],
+        ['sign in', 'log-in'],
+        ['sign out', 'log-out'],
+        ['log out', 'log-out'],
+        ['change password', 'key-round'],
+        ['credit settlement', 'banknote'],
+        ['record the payment', 'banknote'],
+        ['record payment', 'banknote'],
         ['back to', 'arrow-left'],
-        ['mark resolved', 'check2-square'],
+        ['mark resolved', 'square-check-big'],
         ['print / pdf', 'printer'],
-        ['print pdf', 'file-earmark-pdf']
+        ['print pdf', 'file-text']
     ];
 
     const BUTTON_WORDS = {
-        save: 'check2', apply: 'check2', confirm: 'check2-circle',
-        approve: 'check-circle', accept: 'check-circle',
-        decline: 'x-circle', reject: 'x-circle',
-        cancel: 'x-lg', close: 'x-lg',
-        print: 'printer', spreadsheet: 'file-earmark-spreadsheet', excel: 'file-earmark-spreadsheet',
+        save: 'check', apply: 'check', confirm: 'circle-check-big',
+        approve: 'circle-check', accept: 'circle-check',
+        decline: 'circle-x', reject: 'circle-x',
+        cancel: 'x', close: 'x',
+        print: 'printer', spreadsheet: 'file-spreadsheet', excel: 'file-spreadsheet',
         export: 'download', download: 'download', upload: 'upload', import: 'upload',
-        add: 'plus-lg', new: 'plus-lg', create: 'plus-lg',
-        edit: 'pencil-square', update: 'pencil-square',
-        archive: 'archive', restore: 'arrow-counterclockwise', reset: 'arrow-counterclockwise',
-        delete: 'trash', remove: 'trash',
-        search: 'search', find: 'search', review: 'search', filter: 'funnel', clear: 'eraser',
-        load: 'arrow-clockwise', refresh: 'arrow-clockwise', reload: 'arrow-clockwise',
+        add: 'plus', new: 'plus', create: 'plus',
+        edit: 'square-pen', update: 'square-pen',
+        archive: 'archive', restore: 'rotate-ccw', reset: 'rotate-ccw',
+        delete: 'trash-2', remove: 'trash-2',
+        search: 'search', find: 'search', review: 'search', filter: 'filter', clear: 'eraser',
+        load: 'rotate-cw', refresh: 'rotate-cw', reload: 'rotate-cw',
         back: 'arrow-left', previous: 'arrow-left', prev: 'arrow-left', next: 'arrow-right',
-        send: 'send', submit: 'send', tell: 'chat-dots',
-        show: 'eye', view: 'eye', hide: 'eye-slash',
-        receive: 'box-arrow-in-down', void: 'slash-circle', mark: 'check2-square',
-        backup: 'database-down', generate: 'gear',
-        pay: 'cash', collect: 'cash-coin', record: 'journal-plus',
-        deliver: 'truck', dispatch: 'truck', assign: 'person-check',
-        lock: 'lock', unlock: 'unlock'
+        send: 'send', submit: 'send', tell: 'message-circle-more',
+        show: 'eye', view: 'eye', hide: 'eye-off',
+        receive: 'package-open', void: 'ban', mark: 'square-check-big',
+        backup: 'database-backup', generate: 'settings',
+        pay: 'banknote', collect: 'hand-coins', record: 'book-plus',
+        deliver: 'truck', dispatch: 'truck', assign: 'user-check',
+        lock: 'lock', unlock: 'lock-open'
     };
 
     const TRAILING = ['next'];
 
     const KPI_ICONS = [
-        [/refund/i, 'arrow-counterclockwise'],
-        [/collect/i, 'cash-stack'],
+        [/refund/i, 'rotate-ccw'],
+        [/collect/i, 'coins'],
         [/average/i, 'calculator'],
-        [/units/i, 'box-seam'],
-        [/purchase/i, 'bag'],
-        [/order/i, 'cart3'],
+        [/units/i, 'package'],
+        [/purchase/i, 'shopping-bag'],
+        [/order/i, 'shopping-cart'],
         [/transaction/i, 'receipt'],
-        [/sales|gross|income|revenue/i, 'graph-up-arrow'],
-        [/credit|balance|receivable|unpaid/i, 'wallet2'],
+        [/sales|gross|income|revenue/i, 'trending-up'],
+        [/credit|balance|receivable|unpaid/i, 'wallet'],
         [/stock|material/i, 'boxes'],
         [/deliver/i, 'truck'],
         [/offline/i, 'wifi-off']
@@ -70,12 +70,12 @@ function setUpIcons() {
     }
 
     function setIcon(element, name, extraClass, atEnd) {
-        let icon = element.querySelector(':scope > i.bi-auto');
+        let icon = element.querySelector(':scope > i.icon-auto');
         if (!name) {
             if (icon) icon.remove();
             return;
         }
-        const className = 'bi bi-' + name + ' bi-auto' + (extraClass ? ' ' + extraClass : '');
+        const className = 'icon icon-' + name + ' icon-auto' + (extraClass ? ' ' + extraClass : '');
         if (icon) {
             if (icon.className !== className) icon.className = className;
             return;
@@ -103,7 +103,7 @@ function setUpIcons() {
     }
 
     function iconName(icon) {
-        const match = icon.className.match(/\bbi-(?!auto\b)([a-z0-9-]+)/);
+        const match = icon.className.match(/(?:^|\s)icon-(?!auto\b)([a-z0-9-]+)/);
         return match ? match[1] : null;
     }
 
@@ -112,7 +112,7 @@ function setUpIcons() {
         for (let i = 0; i < buttons.length; i++) {
             const button = buttons[i];
             if (button.closest('[data-no-icon], .sidebar-nav, .sidebar-brand')) continue;
-            if (button.querySelector('svg, img, i.bi:not(.bi-auto)')) continue;
+            if (button.querySelector('svg, img, i.icon:not(.icon-auto)')) continue;
             if (button.classList.contains('subnav-tab')) {
                 setIcon(button, sidebarIcon(button.textContent), 'tab-icon');
                 continue;
@@ -140,7 +140,7 @@ function setUpIcons() {
                 icon.setAttribute('aria-hidden', 'true');
                 title.parentNode.insertBefore(icon, title);
             }
-            const className = name ? 'bi bi-' + name + ' title-icon' : 'bi title-icon';
+            const className = name ? 'icon icon-' + name + ' title-icon' : 'icon title-icon';
             if (icon.className !== className) icon.className = className;
             icon.hidden = !name;
         }
