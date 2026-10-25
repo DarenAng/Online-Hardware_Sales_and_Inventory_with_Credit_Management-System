@@ -5,8 +5,6 @@ let incomeData = null;
 let reportView = 'report-summary';
 let stockView = 'stock-overview';
 
-const REPORT_ROWS_PER_PAGE = 8;
-
 function showManagerPanel(panelId, title, event) {
     if (event) event.preventDefault();
 
@@ -116,6 +114,7 @@ function showReports(event) { showReport(reportView, event); }
 function showReport(reportId, event) {
     const shown = showPanelView('panel-reports', reportId, 'Reports', event);
     if (shown) reportView = shown;
+    if (shown === 'report-summary' && !incomeSummaryShown) loadIncome();
 }
 
 function showStocks(event) { showStockView(stockView, event); }
@@ -857,9 +856,9 @@ function buildIncomePanels() {
     createDataPanel({
         key: 'mgr-income-methods',
         remember: false,
+        autoLoad: false,
         tableId: 'income-methods-table',
         columns: 5,
-        pageSize: 5,
         sortKeys: ['payment_method', 'sale_count', 'billed', 'collected', 'outstanding'],
         pagerId: 'income-methods-pager',
         gate: INCOME_GATE,
@@ -925,7 +924,6 @@ function buildReportPanels() {
         key: 'mgr-all',
         tableId: 'all-table',
         columns: 5,
-        pageSize: REPORT_ROWS_PER_PAGE,
         pagerId: 'all-pager',
         gate: {
             title: 'Not loaded',
@@ -972,7 +970,6 @@ function buildReportPanels() {
         key: 'mgr-unpaid',
         tableId: 'unpaid-table',
         columns: 6,
-        pageSize: REPORT_ROWS_PER_PAGE,
         pagerId: 'unpaid-pager',
         idField: 'sale_id',
         filters: { status: 'all', method: 'all', from: '', to: '' },
@@ -1020,7 +1017,6 @@ function buildReportPanels() {
         key: 'mgr-loyal',
         tableId: 'loyal-table',
         columns: 5,
-        pageSize: REPORT_ROWS_PER_PAGE,
         pagerId: 'loyal-pager',
         idField: 'customer_id',
         filters: { balance: 'all' },

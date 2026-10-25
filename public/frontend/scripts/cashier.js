@@ -4,10 +4,6 @@ let catalogMode = 'idle';
 let cart = [];
 let lastReceipt = null;
 
-const CASHIER_ROWS_PER_PAGE = 8;
-
-const RECENT_SALES_ROWS_PER_PAGE = 8;
-
 let customerDirectory = [];
 let customerDirectoryLoaded = false;
 let suggestHighlight = -1;
@@ -2991,7 +2987,6 @@ function buildDeliveryPanel() {
         key: 'cash-deliveries',
         tableId: 'cdel-table',
         columns: 7,
-        pageSize: CASHIER_ROWS_PER_PAGE,
         pagerId: 'cdel-pager',
         idField: 'delivery_id',
         filters: { status: 'all' },
@@ -3200,7 +3195,6 @@ function buildRecentSalesPanel() {
         key: 'cash-recent-sales',
         tableId: 'recent-sales-table',
         columns: 6,
-        pageSize: RECENT_SALES_ROWS_PER_PAGE,
         pagerId: 'recent-sales-pager',
         idField: 'sale_id',
         remember: false,
@@ -3541,7 +3535,6 @@ function buildSalesPanel() {
         key: 'cash-sales',
         tableId: 'csales-table',
         columns: 6,
-        pageSize: CASHIER_ROWS_PER_PAGE,
         pagerId: 'csales-pager',
         idField: 'sale_id',
         filters: { method: 'all', status: 'all' },
@@ -4067,7 +4060,6 @@ function buildCustomerPanel() {
         key: 'cash-credit',
         tableId: 'customers-table',
         columns: 3,
-        pageSize: CASHIER_ROWS_PER_PAGE,
         pagerId: 'customers-pager',
         idField: 'customer_id',
         filters: { due: 'all' },

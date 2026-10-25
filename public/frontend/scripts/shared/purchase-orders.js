@@ -1911,7 +1911,6 @@ function buildPurchaseTotalsPanel() {
         key: PO_TOTALS_KEY,
         tableId: 'po-totals-table',
         columns: 4,
-        pageSize: 8,
         pagerId: 'po-totals-pager',
         idField: 'po_id',
         filters: { period: 'month', month: poThisMonth(), year: poThisYear(), supplier: 'all', from: '', to: '' },

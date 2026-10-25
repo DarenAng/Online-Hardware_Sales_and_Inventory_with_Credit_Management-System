@@ -513,7 +513,7 @@ let referenceProblem = '';
 let referenceSearch = '';
 let referenceType = 'all';
 let referencePage = 1;
-const REFERENCE_PAGE_SIZE = 8;
+const REFERENCE_PAGE_SIZE = 10;
 
 async function loadReferenceRecords() {
     const problems = [];

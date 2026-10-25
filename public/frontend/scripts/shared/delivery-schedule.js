@@ -5,6 +5,8 @@ const scheduleSetup = {
 };
 
 let scheduleRows = null;
+let schedulePage = 1;
+const SCHEDULE_ROWS_PER_PAGE = 10;
 
 function configureDeliverySchedule(options) {
     Object.assign(scheduleSetup, options || {});
@@ -40,30 +42,20 @@ function buildDeliverySchedulePanel() {
         '                </div>\n' +
         '                <div class="toolbar-field">\n' +
         '                    <label for="schedule-status">Status</label>\n' +
-        '                    <select id="schedule-status" onchange="renderDeliverySchedule()">\n' +
+        '                    <select id="schedule-status" onchange="scheduleFilterChanged()">\n' +
         '                        <option value="all">Every status</option>\n' +
         '                    </select>\n' +
         '                </div>\n' +
         '                <div class="toolbar-field">\n' +
         '                    <label for="schedule-driver">Driver</label>\n' +
-        '                    <select id="schedule-driver" onchange="renderDeliverySchedule()">\n' +
+        '                    <select id="schedule-driver" onchange="scheduleFilterChanged()">\n' +
         '                        <option value="all">Every driver</option>\n' +
         '                    </select>\n' +
         '                </div>\n' +
         '            </div>\n' +
         '\n' +
         '            <div id="schedule-body">\n' +
-        '                <div class="empty-state">\n' +
-        '                    <div class="empty-mark">\n' +
-        '                        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8"\n' +
-        '                             stroke-linecap="round" stroke-linejoin="round">\n' +
-        '                            <rect x="3" y="5" width="18" height="16" rx="2"></rect>\n' +
-        '                            <path d="M3 10h18M8 3v4M16 3v4"></path>\n' +
-        '                        </svg>\n' +
-        '                    </div>\n' +
-        '                    <h4>Nothing has been asked yet</h4>\n' +
-        '                    <p>Press Load Schedule to read the deliveries still to go out.</p>\n' +
-        '                </div>\n' +
+        '                <p class="table-empty">Reading the database...</p>\n' +
         '            </div>\n' +
         '        </div>';
 
@@ -93,6 +85,18 @@ function showDeliverySchedule(event) {
             links[i].classList.toggle('active', links[i].dataset.panelLink === scheduleSetup.panelId);
         }
     }
+
+    if (scheduleRows === null) loadDeliverySchedule();
+}
+
+function scheduleFilterChanged() {
+    schedulePage = 1;
+    renderDeliverySchedule();
+}
+
+function scheduleGoTo(page) {
+    schedulePage = page;
+    renderDeliverySchedule();
 }
 
 const SCHEDULE_GROUPS = {
@@ -212,7 +216,7 @@ function onScheduleSearch(text) {
         if (searchText(text) !== '') loadDeliverySchedule();
         return;
     }
-    renderDeliverySchedule();
+    scheduleFilterChanged();
 }
 
 function scheduleMatches(d) {
@@ -272,9 +276,14 @@ function renderDeliverySchedule() {
     if (scheduleValue('schedule-driver') !== 'all') hidden.push(5);
     if (scheduleValue('schedule-status') !== 'all') hidden.push(6);
 
+    const pages = Math.max(1, Math.ceil(rows.length / SCHEDULE_ROWS_PER_PAGE));
+    schedulePage = Math.min(Math.max(1, schedulePage), pages);
+    const start = (schedulePage - 1) * SCHEDULE_ROWS_PER_PAGE;
+    const pageRows = rows.slice(start, start + SCHEDULE_ROWS_PER_PAGE);
+
     let rowsHtml = '';
-    for (let i = 0; i < rows.length; i++) {
-        const d = rows[i];
+    for (let i = 0; i < pageRows.length; i++) {
+        const d = pageRows[i];
         const group = SCHEDULE_GROUPS[scheduleGroupOf(d)];
         const day = scheduleDateOf(d.scheduled_date);
         const due = day ? (day + ' ' + scheduleTimeOf(d.scheduled_date)).trim() : 'Not set';
@@ -290,10 +299,23 @@ function renderDeliverySchedule() {
             '<td>' + statusBadge(d.status) + '</td></tr>';
     }
 
+    if (pages > 1) rowsHtml += fillerRows(SCHEDULE_ROWS_PER_PAGE - pageRows.length, SCHEDULE_HEADERS.length);
+
+    let pagerHtml = '';
+    if (pages > 1) {
+        pagerHtml = '<div class="pager"><div class="pager-controls">' +
+            '<button type="button" class="btn btn-sm" onclick="scheduleGoTo(' + (schedulePage - 1) + ')"' +
+                (schedulePage === 1 ? ' disabled' : '') + '>Previous</button>' +
+            '<span class="pager-page">Page ' + schedulePage + ' of ' + pages + '</span>' +
+            '<button type="button" class="btn btn-sm" onclick="scheduleGoTo(' + (schedulePage + 1) + ')"' +
+                (schedulePage === pages ? ' disabled' : '') + '>Next</button>' +
+        '</div></div>';
+    }
+
     body.innerHTML = '<div class="table-responsive">' +
         '<table id="schedule-table" data-hidden-columns="' + hidden.join(',') + '">' +
         '<thead><tr>' + scheduleHeaders() + '</tr></thead>' +
-        '<tbody>' + rowsHtml + '</tbody></table></div>';
+        '<tbody>' + rowsHtml + '</tbody></table></div>' + pagerHtml;
 
     body.dataset.canUpdate = canUpdate ? '1' : '';
 }
@@ -326,7 +348,7 @@ function scheduleHeaders() {
 function sortDeliverySchedule(column) {
     if (scheduleSort && scheduleSort.column === column) scheduleSort.descending = !scheduleSort.descending;
     else scheduleSort = { column: column, descending: false };
-    renderDeliverySchedule();
+    scheduleFilterChanged();
 }
 
 function openScheduledDelivery(deliveryId) {

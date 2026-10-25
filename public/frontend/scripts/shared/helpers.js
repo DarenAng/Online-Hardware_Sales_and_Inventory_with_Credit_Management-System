@@ -30,6 +30,7 @@ function leaveScreenFurniture() {
     if (typeof closeNotifications === 'function') closeNotifications();
     if (typeof closeAccountMenu === 'function') closeAccountMenu();
     window.scrollTo(0, 0);
+    if (typeof openShownPanels === 'function') setTimeout(openShownPanels, 0);
 }
 
 document.addEventListener('click', function (event) {

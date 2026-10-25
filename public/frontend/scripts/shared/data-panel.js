@@ -712,6 +712,22 @@ function screenIsHidden(panel) {
     return Boolean((item && item.hidden) || (heading && heading.hidden));
 }
 
+let panelsRestored = false;
+
+function tableIsShown(panel) {
+    const table = document.getElementById(panel.config.tableId);
+    return Boolean(table) && table.getClientRects().length > 0;
+}
+
+function openShownPanels() {
+    if (!panelsRestored) return;
+    for (const key in dataPanels) {
+        const panel = dataPanels[key];
+        if (panel.state !== 'closed' || panel.config.autoLoad === false) continue;
+        if (tableIsShown(panel)) panel.open();
+    }
+}
+
 async function restoreLoadedPanels() {
     if (typeof getCurrentUser !== 'function' || !getCurrentUser()) return;
 
@@ -742,6 +758,9 @@ async function restoreLoadedPanels() {
             panel.finish(saved[panel.key]);
         }
     }
+
+    panelsRestored = true;
+    openShownPanels();
 }
 
 document.addEventListener('DOMContentLoaded', function () {
