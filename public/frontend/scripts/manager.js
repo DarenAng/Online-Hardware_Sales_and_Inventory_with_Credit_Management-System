@@ -2536,7 +2536,7 @@ function renderDriverOptions(rows) {
 
 const RECORD_COLUMNS = {
     supplier: [['name', 'Supplier'], ['contact_person', 'Contact'], ['contact_number', 'Number'], ['email', 'Email'], ['product_count', 'Products']],
-    customer: [['name', 'Customer'], ['phone', 'Phone'], ['purchase_count', 'Purchases'], ['credit_limit', 'Credit Limit'], ['current_credit', 'Balance']],
+    customer: [['name', 'Customer'], ['phone', 'Phone'], ['credit_limit', 'Credit Limit'], ['current_credit', 'Balance']],
     product:  [['name', 'Product'], ['category_name', 'Category'], ['brand_name', 'Brand'], ['price', 'Price'], ['quantity_in_stock', 'On Hand']],
     category: [['name', 'Category'], ['product_count', 'Products'], ['total_stock', 'Total Stock']],
     unit:     [['name', 'Unit'], ['product_count', 'Products']]
