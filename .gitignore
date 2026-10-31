@@ -39,3 +39,6 @@ tests/
 
 manuscript/
 APPENDIX*.docx
+
+# Portal passwords for customers added online (never commit)
+online-customer-passwords.txt
