@@ -183,3 +183,6 @@
     .drec-layout { grid-template-columns: 1fr; }
     .drec-main .detail-subhead:first-child { margin-top: 22px; }
 }
+
+/* The driver's tabs: stop the 1px underline from adding a little scrollbar. */
+#dpend-tabs { overflow-y: hidden; }

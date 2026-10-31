@@ -625,6 +625,7 @@ PROC_BODY: BEGIN
     DECLARE v_qr_sale INT DEFAULT NULL;
     DECLARE v_qr_amount DECIMAL(12,2) DEFAULT 0.00;
     DECLARE v_qr_wallet VARCHAR(20) DEFAULT NULL;
+    DECLARE v_qr_portal INT DEFAULT NULL;
     DECLARE v_qr_method VARCHAR(30) DEFAULT NULL;
 
     DECLARE v_taken_method VARCHAR(30) DEFAULT NULL;
@@ -916,8 +917,8 @@ PROC_BODY: BEGIN
             SET v_qr_method = p_payment_method;
         END IF;
 
-        SELECT COUNT(*), MAX(status), MAX(sale_id), MAX(amount), MAX(wallet)
-          INTO v_qr_found, v_qr_status, v_qr_sale, v_qr_amount, v_qr_wallet
+        SELECT COUNT(*), MAX(status), MAX(sale_id), MAX(amount), MAX(wallet), MAX(portal_sale_id)
+          INTO v_qr_found, v_qr_status, v_qr_sale, v_qr_amount, v_qr_wallet, v_qr_portal
         FROM qr_payments WHERE qr_payment_id = p_qr_payment_id
         FOR UPDATE;
 
@@ -933,6 +934,14 @@ PROC_BODY: BEGIN
             ROLLBACK;
             SET p_status_code = 409;
             SET p_message = CONCAT('This QR payment has not been paid (it is ', v_qr_status, '), so nothing was recorded.');
+            DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
+            LEAVE PROC_BODY;
+        END IF;
+
+        IF v_qr_portal IS NOT NULL THEN
+            ROLLBACK;
+            SET p_status_code = 409;
+            SET p_message = 'This QR payment was made in the customer portal for a balance, so it cannot pay for a sale.';
             DROP TEMPORARY TABLE IF EXISTS tmp_sale_needed;
             LEAVE PROC_BODY;
         END IF;
@@ -1453,6 +1462,7 @@ PROC_BODY: BEGIN
     DECLARE v_qr_sale INT DEFAULT NULL;
     DECLARE v_qr_amount DECIMAL(12,2) DEFAULT 0.00;
     DECLARE v_qr_wallet VARCHAR(20) DEFAULT NULL;
+    DECLARE v_qr_portal INT DEFAULT NULL;
     DECLARE v_payment_row INT DEFAULT NULL;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
@@ -1530,8 +1540,8 @@ PROC_BODY: BEGIN
     END IF;
 
     IF p_qr_payment_id IS NOT NULL THEN
-        SELECT COUNT(*), MAX(status), MAX(sale_id), MAX(amount), MAX(wallet)
-          INTO v_qr_found, v_qr_status, v_qr_sale, v_qr_amount, v_qr_wallet
+        SELECT COUNT(*), MAX(status), MAX(sale_id), MAX(amount), MAX(wallet), MAX(portal_sale_id)
+          INTO v_qr_found, v_qr_status, v_qr_sale, v_qr_amount, v_qr_wallet, v_qr_portal
         FROM qr_payments WHERE qr_payment_id = p_qr_payment_id
         FOR UPDATE;
 
@@ -1546,6 +1556,14 @@ PROC_BODY: BEGIN
             ROLLBACK;
             SET p_status_code = 409;
             SET p_message = CONCAT('This QR payment has not been paid (it is ', v_qr_status, '), so nothing was recorded.');
+            LEAVE PROC_BODY;
+        END IF;
+
+        IF v_qr_portal IS NOT NULL AND v_qr_portal <> p_sale_id THEN
+            ROLLBACK;
+            SET p_status_code = 409;
+            SET p_message = CONCAT('This QR payment was made in the customer portal for OR-', LPAD(v_qr_portal, 6, '0'),
+                                   ', so it cannot be recorded on another sale.');
             LEAVE PROC_BODY;
         END IF;
 
@@ -2301,8 +2319,8 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    INSERT INTO purchase_order_ordered_items (po_id, product_id, quantity, pack_name, pack_size, pack_count)
-    SELECT po_id, product_id, quantity, pack_name, pack_size, pack_count
+    INSERT INTO purchase_order_ordered_items (po_id, product_id, quantity, pack_name, pack_size, pack_count, unit_cost)
+    SELECT po_id, product_id, quantity, pack_name, pack_size, pack_count, unit_cost
     FROM purchase_order_items WHERE po_id = p_po_id;
 
     SET v_count = IFNULL(JSON_LENGTH(p_received_json), 0);
@@ -4136,11 +4154,16 @@ CREATE PROCEDURE sp_create_qr_payment (
     IN p_bank_name VARCHAR(80),
     IN p_account_name VARCHAR(100),
     IN p_account_number VARCHAR(30),
+    IN p_portal_customer_id INT,
+    IN p_portal_sale_id INT,
     OUT p_qr_payment_id INT,
     OUT p_status_code INT,
     OUT p_message VARCHAR(255)
 )
 PROC_BODY: BEGIN
+    DECLARE v_balance DECIMAL(12,2) DEFAULT NULL;
+    DECLARE v_open INT DEFAULT 0;
+
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
         GET DIAGNOSTICS CONDITION 1 @err_no = MYSQL_ERRNO, @err_text = MESSAGE_TEXT;
@@ -4178,13 +4201,54 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
+    -- A portal code: lock the customer's sale first, so two requests cannot both pass the
+    -- "no other open code for this sale" check. The check counts codes still pending (even
+    -- an expired one nobody has refreshed yet) and codes paid but not yet written on the sale.
+    IF p_portal_sale_id IS NOT NULL THEN
+        SET v_balance = NULL;
+        SELECT GREATEST(amount_due - amount_paid, 0) INTO v_balance
+        FROM sales
+        WHERE sale_id = p_portal_sale_id AND customer_id = p_portal_customer_id
+          AND is_archived = FALSE AND payment_method IN ('Credit', 'COD')
+        FOR UPDATE;
+
+        IF v_balance IS NULL THEN
+            ROLLBACK;
+            SET p_status_code = 404;
+            SET p_message = 'That sale is not on your account.';
+            LEAVE PROC_BODY;
+        END IF;
+
+        IF p_amount > v_balance THEN
+            ROLLBACK;
+            SET p_status_code = 400;
+            SET p_message = CONCAT('Only ', FORMAT(v_balance, 2), ' is owed on OR-', LPAD(p_portal_sale_id, 6, '0'), '.');
+            LEAVE PROC_BODY;
+        END IF;
+
+        SELECT COUNT(*) INTO v_open FROM qr_payments
+        WHERE portal_sale_id = p_portal_sale_id
+          AND (status = 'pending'
+               OR (status = 'paid' AND sale_id IS NULL
+                   AND (error_message IS NULL OR error_message NOT LIKE 'paid but sale not saved%')));
+        IF v_open > 0 THEN
+            ROLLBACK;
+            SET p_status_code = 409;
+            SET p_message = CONCAT('A QR code for OR-', LPAD(p_portal_sale_id, 6, '0'),
+                                   ' is still open or being recorded. Wait for it, or cancel it first.');
+            LEAVE PROC_BODY;
+        END IF;
+    END IF;
+
     INSERT INTO qr_payments
         (provider, mode, provider_intent_id, amount, wallet, bank_code, bank_name,
-         account_name, account_number, purpose, status, created_by_staff_id, expires_at)
+         account_name, account_number, purpose, status, created_by_staff_id,
+         portal_customer_id, portal_sale_id, expires_at)
     VALUES
         (p_provider, p_mode, p_provider_intent_id, p_amount, p_wallet, p_bank_code, p_bank_name,
          p_account_name, p_account_number, p_purpose, 'pending',
-         p_staff_id, NOW() + INTERVAL GREATEST(IFNULL(p_seconds, 600), 1) SECOND);
+         p_staff_id, p_portal_customer_id, p_portal_sale_id,
+         NOW() + INTERVAL GREATEST(IFNULL(p_seconds, 600), 1) SECOND);
 
     SET p_qr_payment_id = LAST_INSERT_ID();
 
@@ -4298,6 +4362,7 @@ PROC_BODY: BEGIN
     DECLARE v_status VARCHAR(12) DEFAULT NULL;
     DECLARE v_sale INT DEFAULT NULL;
     DECLARE v_sale_found INT DEFAULT 0;
+    DECLARE v_portal INT DEFAULT NULL;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -4309,8 +4374,8 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    SELECT COUNT(*), MAX(status), MAX(sale_id)
-      INTO v_found, v_status, v_sale
+    SELECT COUNT(*), MAX(status), MAX(sale_id), MAX(portal_sale_id)
+      INTO v_found, v_status, v_sale, v_portal
     FROM qr_payments WHERE qr_payment_id = p_qr_payment_id
     FOR UPDATE;
 
@@ -4325,6 +4390,13 @@ PROC_BODY: BEGIN
         ROLLBACK;
         SET p_status_code = 409;
         SET p_message = CONCAT('This QR payment is ', v_status, ', not paid.');
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF v_portal IS NOT NULL THEN
+        ROLLBACK;
+        SET p_status_code = 409;
+        SET p_message = 'This QR payment was made in the customer portal, so it cannot be linked to a sale here.';
         LEAVE PROC_BODY;
     END IF;
 

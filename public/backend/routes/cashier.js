@@ -90,7 +90,7 @@ function registerCashierRoutes(app, deps) {
     }
 
     if (method !== "all") {
-      where.push(PAYMENT_GROUP_SQL + " = ?");
+      where.push("s.payment_method = ?");
       params.push(method);
     }
 
@@ -368,14 +368,22 @@ function registerCashierRoutes(app, deps) {
   }
 
   app.get("/api/deliveries/drivers", async function (request, response) {
+    // delivery_count is the driver's open deliveries on that day (today when no day is given)
+    let day = String(request.query.date || "").trim();
+    if (!isDateText(day)) day = "";
+
     try {
       const rowsResult = await db.query(
-        "SELECT st.staff_id, st.full_name\n" +
+        "SELECT st.staff_id, st.full_name,\n" +
+          "       (SELECT COUNT(*) FROM deliveries d\n" +
+          "         WHERE d.delivery_staff_id = st.staff_id AND d.is_archived = FALSE\n" +
+          "           AND d.status NOT IN ('Delivered', 'Failed')\n" +
+          "           AND DATE(d.scheduled_date) = COALESCE(NULLIF(?, ''), CURDATE())) AS delivery_count\n" +
           "       FROM staff st\n" +
           "       JOIN roles r ON r.role_id = st.role_id\n" +
           "       WHERE r.role_name = ? AND st.is_active = TRUE AND st.archived_at IS NULL\n" +
           "       ORDER BY st.full_name",
-        [DRIVER]
+        [day, DRIVER]
       );
       const rows = rowsResult[0];
       response.json(rows);
@@ -504,8 +512,8 @@ function registerCashierRoutes(app, deps) {
 
       response.json({
         message: driverId
-          ? "Delivery #" + output.delivery_id + " created and assigned to " + driverName + "."
-          : "Delivery #" + output.delivery_id + " created.",
+          ? "Delivery " + helpers.deliveryCode(output.delivery_id) + " created and assigned to " + driverName + "."
+          : "Delivery " + helpers.deliveryCode(output.delivery_id) + " created.",
         deliveryId: output.delivery_id
       });
     } catch (error) {
@@ -526,10 +534,13 @@ function registerCashierRoutes(app, deps) {
     if (status === "Delayed" && String(remarks || "").trim().length < 5) {
       return response.status(400).json({ error: "Say why the delivery is delayed (at least 5 characters)." });
     }
+    if (status === "Failed" && String(remarks || "").trim().length < 5) {
+      return response.status(400).json({ error: "Say why the delivery failed (at least 5 characters)." });
+    }
 
     try {
       const rowsResult = await db.query(
-        "SELECT status, delivery_staff_id FROM deliveries WHERE delivery_id = ? AND is_archived = FALSE",
+        "SELECT status, delivery_staff_id, scheduled_date FROM deliveries WHERE delivery_id = ? AND is_archived = FALSE",
         [request.params.deliveryId]
       );
       const rows = rowsResult[0];
@@ -562,6 +573,27 @@ function registerCashierRoutes(app, deps) {
 
       if (output.status_code !== 200) {
         return response.status(output.status_code).json({ error: output.message });
+      }
+
+      // Keep a record of each try: delivered, or failed with the reason
+      if (status === "Delivered" || status === "Failed") {
+        try {
+          const countResult = await db.query(
+            "SELECT COUNT(*) AS total FROM delivery_attempts WHERE delivery_id = ?",
+            [request.params.deliveryId]
+          );
+          const attemptNo = Number(countResult[0][0].total) + 1;
+          let reason = null;
+          if (status === "Failed") reason = String(remarks).trim().slice(0, 255);
+
+          await db.query(
+            "INSERT INTO delivery_attempts (delivery_id, attempt_no, outcome, reason, staff_id, scheduled_date) " +
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            [request.params.deliveryId, attemptNo, status, reason, actor.staffId, delivery.scheduled_date]
+          );
+        } catch (error) {
+          console.error("Saving the delivery attempt failed:", error.message);
+        }
       }
 
       response.json({ message: output.message });

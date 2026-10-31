@@ -1,3 +1,4 @@
+const helpers = require("../helpers");
 const crypto = require("crypto");
 const db = require("../database/connection").db;
 const sharedProcedures = require("../database/procedures/shared-procedures");
@@ -82,7 +83,7 @@ const RECORD_QUERIES = {
     "                      c.address_province, c.address_landmark,\n" +
     "                      v.credit_limit, v.total_purchase, v.current_credit\n" +
     "             ORDER BY c.first_name",
-  product: "SELECT p.product_id AS id, p.product_name AS name, p.price, p.last_cost, p.reorder_point, p.status,\n" +
+  product: "SELECT p.product_id AS id, p.product_name AS name, p.description, p.price, p.last_cost, p.reorder_point, p.status,\n" +
     "                   p.category_id, p.brand_id, p.unit_id, p.supplier_id,\n" +
     "                   b.brand_name, c.category_name, u.unit_name, sup.supplier_name,\n" +
     "                   COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, p.created_at\n" +
@@ -199,7 +200,7 @@ async function setSimpleArchive(request, module, recordId, archive) {
   }
 
   await writeAuditLog(request, archive ? "ARCHIVE" : "RESTORE",
-    module + " " + name + " (#" + recordId + ") " + (archive ? "archived" : "restored"),
+    module + " " + name + " (" + helpers.recordCode(module, recordId) + ") " + (archive ? "archived" : "restored"),
     { module: module, record_id: Number(recordId) });
   return { status: 200, message: archive ? "Record archived." : "Record restored." };
 }
@@ -246,6 +247,7 @@ function sameSecret(given, expected) {
 function registerSharedRoutes(app, deps) {
   const adminModule = deps.adminModule;
   const managerModule = deps.managerModule;
+  const portalModule = deps.portalModule;
 
   app.get("/api/events/poll", async function (request, response) {
     const since = parseInt(request.query.since, 10);
@@ -642,6 +644,8 @@ function registerSharedRoutes(app, deps) {
       archives: function () { return adminModule.runArchiveSweep(); },
       backup: function () { return adminModule.runDailyBackup(); },
       sessions: function () { return removeExpiredSessions(); },
+      portalSessions: function () { return portalModule.removeExpiredCustomerSessions(); },
+      portalPayments: function () { return portalModule.settleAllOpen(); },
       housekeeping: function () { return adminModule.removeExpiredDrafts(); }
     };
     const report = {};

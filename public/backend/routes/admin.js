@@ -1,3 +1,4 @@
+const helpers = require("../helpers");
 const path = require("path");
 const fs = require("fs");
 const fsp = require("fs/promises");
@@ -646,7 +647,7 @@ function registerAdminRoutes(app, deps) {
       await writeAuditLog(
         request,
         "UPDATE_ACCOUNT",
-        "Updated staff #" + request.params.staffId,
+        "Updated staff " + helpers.staffCode(request.params.staffId),
         { staff_id: Number(request.params.staffId), changes: fieldChanges(before, after) }
       );
       response.json({ message: output.message });
@@ -679,7 +680,7 @@ function registerAdminRoutes(app, deps) {
       await writeAuditLog(
         request,
         action,
-        "Staff #" + request.params.staffId + " was " + words + " the active list",
+        "Staff " + helpers.staffCode(request.params.staffId) + " was " + words + " the active list",
         { staff_id: Number(request.params.staffId),
           is_active: { before: !isActive, after: isActive } }
       );
@@ -789,7 +790,7 @@ function registerAdminRoutes(app, deps) {
       await writeAuditLog(
         request,
         "CREATE_LOGIN",
-        "Login created for staff #" + details.staffId +
+        "Login created for staff " + helpers.staffCode(details.staffId) +
           emailedText(delivery.emailed, " and the first password was emailed"),
         { staff_id: details.staffId, email: details.email,
           password_emailed: delivery.emailed }
@@ -1034,7 +1035,7 @@ function registerAdminRoutes(app, deps) {
   function exportRowValues(row) {
     return [
       String(row.created_at || ""),
-      String(row.staff_name || "") + (row.staff_id ? " #" + row.staff_id : ""),
+      String(row.staff_name || "") + (row.staff_id ? " " + helpers.staffCode(row.staff_id) : ""),
       String(row.role_name || ""),
       String(row.ip_address || "Not recorded"),
       AUDIT_TYPE_LABELS[row.action_type] || String(row.action_type || ""),

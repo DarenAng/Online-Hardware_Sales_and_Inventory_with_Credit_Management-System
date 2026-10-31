@@ -58,6 +58,8 @@
                 <li data-feature="archives"><a href="#" data-panel-link="panel-archive" onclick="showInventoryArchive(event)"><i class="icon icon-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
                 <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="icon icon-calendar-days nav-icon" aria-hidden="true"></i>
                     Delivery Schedule</a></li>
+                <li data-feature="failed-deliveries" hidden><a href="#" data-panel-link="panel-failed-deliveries" onclick="showFailedDeliveries(event)"><i class="icon icon-triangle-alert nav-icon" aria-hidden="true"></i>
+                    Failed Deliveries</a></li>
 
             </ul>
         </aside>
@@ -179,6 +181,7 @@
                                         <label for="adjust-type">Adjustment type</label>
                                         <select id="adjust-type" name="adjustmentType" class="form-control"
                                                 onchange="renderAdjustPreview()">
+                                            <option value="Recount">Manual count</option>
                                             <option value="Add">Add to stock</option>
                                             <option value="Remove">Remove from stock</option>
                                         </select>
@@ -191,7 +194,7 @@
                                     </div>
 
                                     <div class="form-group" id="adjust-qty-field">
-                                        <label for="adjust-qty">Quantity</label>
+                                        <label for="adjust-qty" id="adjust-qty-label">Counted quantity</label>
                                         <input type="number" id="adjust-qty" name="quantity" class="form-control"
                                                min="0" step="0.001" oninput="renderAdjustPreview()">
                                     </div>
@@ -199,7 +202,7 @@
                                     <div class="form-group" id="adjust-reason-field">
                                         <label for="adjust-reason">Remarks</label>
                                         <input type="text" id="adjust-reason" name="reason" class="form-control"
-                                               maxlength="255">
+                                               maxlength="200">
                                     </div>
                                 </div>
 
@@ -256,9 +259,10 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="adjust-type-filter">Type</label>
-                            <select id="adjust-type-filter" data-filter-table="adjust-table" data-hides-column="3"
+                            <select id="adjust-type-filter" data-filter-table="adjust-table" data-hides-column="4"
                                     onchange="dataPanelFilter('clerk-adjustments', 'type', this.value)">
                                 <option value="all">Every type</option>
+                                <option value="Recount">Manual count</option>
                                 <option value="Add">Added</option>
                                 <option value="Remove">Removed</option>
                             </select>
@@ -269,7 +273,7 @@
                     <div class="table-responsive grid-10">
                         <table id="adjust-table">
                             <thead>
-                                <tr><th>When</th><th>Material</th><th>Type</th><th>Before</th>
+                                <tr><th>Material ID</th><th>When</th><th>Material name</th><th>Type</th><th>Before</th>
                                     <th>Change</th><th>After</th><th>By</th></tr>
                             </thead>
                             <tbody></tbody>
@@ -292,7 +296,7 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="reorder-status">Stock status</label>
-                            <select id="reorder-status" data-filter-table="reorder-table" data-hides-column="5"
+                            <select id="reorder-status" data-filter-table="reorder-table" data-hides-column="6"
                                     onchange="dataPanelFilter('clerk-reorder', 'status', this.value)">
                                 <option value="all">Every status</option>
                                 <option value="Low Stock">Low stock</option>
@@ -305,7 +309,7 @@
                     <div class="table-responsive grid-10">
                         <table id="reorder-table">
                             <thead>
-                                <tr><th>Material</th><th>Stock Level</th><th>Reorder At</th><th>Suggested Order</th><th>Status</th></tr>
+                                <tr><th>ID</th><th>Material</th><th>Stock Level</th><th>Reorder At</th><th>Suggested Order</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -441,7 +445,7 @@
                     <div class="table-responsive grid-10">
                         <table id="po-table">
                             <thead>
-                                <tr><th>PO</th><th>Supplier</th><th>Ordered</th><th>Lines</th>
+                                <tr><th>PO</th><th>Supplier</th><th>Ordered Date</th><th>Lines</th>
                                     <th>Order Value</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
@@ -510,7 +514,7 @@
                     <div class="table-responsive grid-10">
                         <table id="returns-table">
                             <thead>
-                                <tr><th>ID</th><th>Type</th><th>Material</th><th>Qty</th><th>Adjustment</th><th>Filed</th><th>Status</th></tr>
+                                <tr><th>ID</th><th>Material ID</th><th>Type</th><th>Material name</th><th>Qty</th><th>Adjustment</th><th>Filed</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -622,6 +626,7 @@
     <script src="scripts/shared/features.js"></script>
     <script src="scripts/shared/deliveries.js"></script>
     <script src="scripts/shared/delivery-schedule.js"></script>
+    <script src="scripts/shared/failed-deliveries.js"></script>
     <script src="scripts/shared/purchase-orders.js"></script>
     <script src="connections/inventory-clerk-connection.js"></script>
     <script src="scripts/inventory-clerk.js"></script>

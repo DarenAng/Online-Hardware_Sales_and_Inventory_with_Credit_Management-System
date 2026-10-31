@@ -111,9 +111,10 @@ function showDeliveryRecord(d, canUpdate) {
     const isDriver = Boolean(user) && user.role_name === 'Delivery Personnel';
 
     const routeGrid = '<div class="detail-grid">' +
-        detailField('Delivery ID', '#' + d.delivery_id) +
+        detailField('Delivery ID', deliveryCode(d.delivery_id)) +
         detailField('Status', statusBadge(d.status)) +
         detailField('Scheduled', escapeHtml(d.scheduled_date || 'Not set')) +
+        (d.attempt_count !== undefined ? detailField('Attempts', String(d.attempt_count)) : '') +
         (d.status === 'Delivered' && d.delivered_at ? detailField('Delivered At', escapeHtml(d.delivered_at)) : '') +
         detailField('Drop-off Address', escapeHtml(d.delivery_address)) +
         '</div>';
@@ -199,13 +200,13 @@ function showDeliveryRecord(d, canUpdate) {
                 '</div>' +
             '</div>' }];
 
-        openDetailModal('Delivery #' + d.delivery_id, d.customer_name + ' · ' + d.status, 'D' + d.delivery_id,
+        openDetailModal('Delivery ' + deliveryCode(d.delivery_id), d.customer_name + ' · ' + d.status, deliveryCode(d.delivery_id),
             onePage, footActions, { wide: 'xl', scroll: true, top: deliveryStepper(d) });
         fillDeliveryItems(d.delivery_id, itemsPage, onePage);
         return;
     }
 
-    openDetailModal('Delivery #' + d.delivery_id, d.customer_name + ' · ' + d.status, 'D' + d.delivery_id,
+    openDetailModal('Delivery ' + deliveryCode(d.delivery_id), d.customer_name + ' · ' + d.status, deliveryCode(d.delivery_id),
         pages, footActions, { top: deliveryStepper(d) });
     fillDeliveryItems(d.delivery_id, itemsPage, pages);
 }
@@ -230,6 +231,7 @@ async function fillDeliveryItems(deliveryId, page, pages) {
             }
 
             rows.push([
+                materialCode(it.product_id),
                 escapeHtml(it.product_name),
                 quantity,
                 peso(it.unit_price),
@@ -237,7 +239,7 @@ async function fillDeliveryItems(deliveryId, page, pages) {
             ]);
         }
 
-        body = detailTable(['Product', 'Qty', 'Unit Price', 'Subtotal'], rows, [1, 2, 3]);
+        body = detailTable(['Material ID', 'Material name', 'Qty', 'Unit Price', 'Subtotal'], rows, [2, 3, 4], [0]);
         page.label = 'Items (' + items.length + ')';
     } catch (error) {
         body = '<p class="detail-empty">The items could not be loaded.</p>';
@@ -267,9 +269,9 @@ async function pickDeliveryStatus(deliveryId, status) {
 
     const yes = await askConfirm(
         status === 'Delivered'
-            ? 'Delivery #' + deliveryId + ' is closed out as delivered, with the time recorded now. ' +
+            ? 'Delivery ' + deliveryCode(deliveryId) + ' is closed out as delivered, with the time recorded now. ' +
               'A closed delivery cannot be reopened.'
-            : 'Delivery #' + deliveryId + ' is marked ' + status + '.',
+            : 'Delivery ' + deliveryCode(deliveryId) + ' is marked ' + status + '.',
         {
             title: 'Mark as ' + status + '?',
             eyebrow: 'Delivery',
@@ -289,10 +291,16 @@ function openDelayReason(deliveryId, status) {
     delayStatus = status;
     const failed = status === 'Failed';
 
-    document.getElementById('delay-subtitle').textContent = 'Delivery #' + deliveryId;
+    document.getElementById('delay-subtitle').textContent = 'Delivery ' + deliveryCode(deliveryId);
     document.getElementById('delay-title').textContent = failed ? 'Mark Failed' : 'Mark Delayed';
-    document.getElementById('delay-label').textContent = failed ? 'Reason' : 'Reason for the delay';
     document.getElementById('delay-reason').value = '';
+
+    // A failed delivery picks a reason from a list; Delayed types its own
+    document.getElementById('delay-choice').value = '';
+    document.getElementById('delay-choice-group').hidden = !failed;
+    document.getElementById('delay-text-group').hidden = failed;
+    document.getElementById('delay-reason').required = !failed;
+    document.getElementById('delay-label').textContent = failed ? 'Other reason' : 'Reason for the delay';
 
     const button = document.getElementById('delay-save');
     button.textContent = failed ? 'Mark Failed' : 'Mark Delayed';
@@ -302,13 +310,39 @@ function openDelayReason(deliveryId, status) {
     guardModal('delay-modal', failed ? 'the reason for the failed delivery' : 'the reason for the delay');
 }
 
+// Choosing Other for a failed delivery shows the box to type the reason in
+function onFailReasonChange() {
+    const other = document.getElementById('delay-choice').value === 'Other';
+    document.getElementById('delay-text-group').hidden = !other;
+    document.getElementById('delay-reason').required = other;
+    if (other) document.getElementById('delay-reason').focus();
+}
+
 async function handleDelayReason(event) {
     event.preventDefault();
 
-    const reason = document.getElementById('delay-reason').value.trim();
-    if (reason.length < 5) {
-        const ask = delayStatus === 'Failed' ? 'Say why it failed, in a few words.' : 'Say why it is delayed, in a few words.';
-        notifyWarning(ask, 'The reason is required');
+    const typed = document.getElementById('delay-reason').value.trim();
+    let reason = typed;
+
+    if (delayStatus === 'Failed') {
+        const choice = document.getElementById('delay-choice').value;
+        if (choice === '') {
+            notifyWarning('Choose why it failed.', 'The reason is required');
+            document.getElementById('delay-choice').focus();
+            return;
+        }
+        if (choice === 'Other') {
+            if (typed.length < 5) {
+                notifyWarning('Say why it failed, in a few words.', 'The reason is required');
+                document.getElementById('delay-reason').focus();
+                return;
+            }
+            reason = 'Other: ' + typed;
+        } else {
+            reason = choice;
+        }
+    } else if (typed.length < 5) {
+        notifyWarning('Say why it is delayed, in a few words.', 'The reason is required');
         document.getElementById('delay-reason').focus();
         return;
     }

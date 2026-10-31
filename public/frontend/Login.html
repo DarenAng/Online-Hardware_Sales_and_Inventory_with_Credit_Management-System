@@ -39,7 +39,7 @@
     </aside>
 
     <div class="login-pane">
-        <main class="login-card" id="sign-in-card">
+        <main class="login-card" id="choice-card">
             <div class="login-brand">
                 <span class="brand-mark">LH</span>
                 <span class="brand-text">
@@ -48,7 +48,23 @@
                 </span>
             </div>
 
-            <h2>Sign in</h2>
+            <h2>Log in</h2>
+            <button type="button" class="btn login-submit login-choice" onclick="showLoginForm('customer')">
+                <i class="icon icon-users" aria-hidden="true"></i>Customer log in
+            </button>
+            <button type="button" class="btn btn-accent login-submit" onclick="showLoginForm('staff')">Staff log in</button>
+        </main>
+
+        <main class="login-card" id="sign-in-card" hidden>
+            <div class="login-brand">
+                <span class="brand-mark">LH</span>
+                <span class="brand-text">
+                    <span class="brand-name">Lucelyn Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
+            </div>
+
+            <h2>Staff log in</h2>
             <form onsubmit="handleLogin(event)">
                 <p class="login-alert" id="login-alert" role="alert" hidden></p>
 
@@ -76,6 +92,43 @@
 
             <p class="login-foot">
                 <button type="button" class="login-link" id="forgot-link" onclick="openPasswordReset()">Forgot your password?</button>
+                <button type="button" class="login-link" onclick="showLoginChoice()">Back</button>
+            </p>
+        </main>
+
+        <main class="login-card" id="customer-card" hidden>
+            <div class="login-brand">
+                <span class="brand-mark">LH</span>
+                <span class="brand-text">
+                    <span class="brand-name">Lucelyn Hardware</span>
+                    <span class="brand-sub">Sales &amp; Inventory</span>
+                </span>
+            </div>
+
+            <h2>Customer log in</h2>
+            <form onsubmit="handleCustomerLogin(event)">
+                <p class="login-alert" id="customer-alert" role="alert" hidden></p>
+
+                <div class="form-group">
+                    <label for="customer-id">User ID</label>
+                    <input id="customer-id" type="text" name="customerId" class="form-control"
+                           autocomplete="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="customer-password">Password</label>
+                    <div class="password-field">
+                        <i class="icon icon-lock field-icon" aria-hidden="true"></i>
+                        <input id="customer-password" type="password" name="password" class="form-control"
+                               autocomplete="current-password" required>
+                        <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-accent login-submit" id="customer-submit">Log in</button>
+            </form>
+
+            <p class="login-foot">
+                <button type="button" class="login-link" onclick="showLoginChoice()">Back</button>
             </p>
         </main>
 
@@ -162,5 +215,6 @@
     <script src="scripts/shared/my-account.js"></script>
     <script src="scripts/shared/notifications.js"></script>
     <script src="scripts/shared/password-reset.js"></script>
+    <script src="scripts/shared/login-choice.js"></script>
 </body>
 </html>

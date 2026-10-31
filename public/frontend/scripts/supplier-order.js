@@ -318,7 +318,9 @@ function startSupplierOrderPage() {
                 '<span class="so-line-no">' + (index + 1) + '</span>' +
                 '<div class="so-line-what"><strong>' + escapeHtml(item.product_name) + '</strong>' +
                     '<span>' + escapeHtml(lineQuantity(item)) +
-                    (item.brand_name ? ' · ' + escapeHtml(item.brand_name) : '') + '</span></div>' +
+                    (item.brand_name ? ' · ' + escapeHtml(item.brand_name) : '') +
+                    (item.category_name ? ' · ' + escapeHtml(item.category_name) : '') + '</span>' +
+                    (item.description ? '<span>' + escapeHtml(item.description) + '</span>' : '') + '</div>' +
                 '<div class="so-line-sum"><span class="so-fig" data-total></span><span data-delta></span></div>' +
             '</div>' +
             '<div class="so-line-bottom">' +

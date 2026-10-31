@@ -1,3 +1,4 @@
+const helpers = require("../helpers");
 const net = require("net");
 const tls = require("tls");
 const os = require("os");
@@ -391,7 +392,7 @@ async function purchaseOrderMessage(details) {
   if (shop && shop.address) shopAddress = shop.address;
 
   const sender = MAIL_FROM_NAME || shopName;
-  const number = "PO-" + String(order.po_id).padStart(6, "0");
+  const number = helpers.poNumber(order.po_id);
   const date = String(order.order_date || "").slice(0, 10);
   const fileName = number + ".pdf";
 

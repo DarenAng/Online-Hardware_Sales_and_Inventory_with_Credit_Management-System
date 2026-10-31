@@ -689,7 +689,7 @@ function suggestRefundAmount() {
         if (note) {
             note.className = 'amount-source';
             note.textContent = saleLine
-                ? 'What the customer paid for ' + quantity + ' on sale #' + refundSale.saleId + '.'
+                ? 'What the customer paid for ' + quantity + ' on ' + orNumber(refundSale.saleId) + '.'
                 : quantity + ' at ' + peso(refundProduct.price) + '. Change it if the customer paid a different price.';
         }
         return;
@@ -1727,9 +1727,8 @@ function renderCreditVerdict(totals) {
     if (t.amountOnAccount > available) {
         const short = t.amountOnAccount - available;
         box.className = 'credit-verdict is-stop';
-        box.innerHTML = 'Over the limit by <strong>' + peso(short) + '</strong>. ' +
-            'Take at least ' + peso((t.down || 0) + short) + ' now, or ask for a higher limit ' +
-            'from <kbd>Customers Record</kbd>.';
+        box.innerHTML = 'The customer should at least pay <strong>' + peso((t.down || 0) + short) +
+            '</strong> to use the credit.';
         return;
     }
 
@@ -2112,7 +2111,7 @@ async function openReceipt(saleId, fromReport) {
 
     lastReceipt = data;
     const s = data.sale;
-    const receiptNo = 'OR-' + String(s.sale_id).padStart(6, '0');
+    const receiptNo = orNumber(s.sale_id);
 
     const shop = storeSettings || {};
 
@@ -2199,7 +2198,7 @@ async function requestVoidSale() {
     const button = document.getElementById('receipt-void-btn');
     const saleId = button ? Number(button.getAttribute('data-sale-id')) : 0;
     if (!saleId) return;
-    const receiptNo = 'OR-' + String(saleId).padStart(6, '0');
+    const receiptNo = orNumber(saleId);
 
     const typed = await askInput({
         title: 'Request a void?', eyebrow: 'Sales Report',
@@ -2231,7 +2230,7 @@ async function showPaymentReceipt(info) {
     await loadStoreSettings(false);
     const shop = storeSettings || {};
 
-    const saleNumber = 'OR-' + String(info.saleId).padStart(6, '0');
+    const saleNumber = orNumber(info.saleId);
 
     let receiptNo = 'CS-UNNUMBERED';
     if (info.paymentId) receiptNo = 'CS-' + String(info.paymentId).padStart(6, '0');
@@ -2519,11 +2518,33 @@ async function fillDriverPicker(chosenId, chosenName) {
     setDriverPick(chosenId ? { staff_id: chosenId, full_name: chosenName } : null);
     hideDriverSuggestions();
 
+    await loadDriverRoster();
+}
+
+// The drivers, each with how many open deliveries they have on the day in the date field
+async function loadDriverRoster() {
+    const fields = deliveryFormFields();
+    const day = fields && fields.scheduledDate ? fields.scheduledDate.value.slice(0, 10) : '';
+
     try {
-        driverRoster = await apiGetDeliveryDrivers();
+        driverRoster = await apiGetDeliveryDrivers(day);
     } catch (error) {
         driverRoster = [];
     }
+}
+
+function driverCountText(count) {
+    const total = Number(count) || 0;
+    if (total === 0) return 'No deliveries';
+    if (total === 1) return '1 delivery';
+    return total + ' deliveries';
+}
+
+async function onDeliveryDateChanged() {
+    await loadDriverRoster();
+
+    const list = document.getElementById('driver-suggest');
+    if (list && !list.hidden) renderDriverSuggestions(document.getElementById('dl-driver').value);
 }
 
 function onDriverInput(text) {
@@ -2578,6 +2599,7 @@ function renderDriverSuggestions(text) {
                 'onmousedown="event.preventDefault()" ' +
                 'onclick="pickDriver(' + d.staff_id + ')">' +
                 '<span class="suggest-name">' + escapeHtml(d.full_name) + '</span>' +
+                '<span class="suggest-note">' + driverCountText(d.delivery_count) + '</span>' +
             '</li>';
         }
         list.innerHTML = driverHtml;
@@ -2964,7 +2986,7 @@ async function createAttachedDelivery(saleId) {
 
         if (!response.ok) {
             if (!handleAuthFailure(response, result)) {
-                notifyError('Sale #' + saleId + ' went through, but its delivery was not created: ' +
+                notifyError(orNumber(saleId) + ' went through, but its delivery was not created: ' +
                     (result.error || 'the server refused it') +
                     '. The sale is saved and paid as rung up; tell the manager so the delivery is arranged.',
                     'Sale saved, delivery not created');
@@ -2975,7 +2997,7 @@ async function createAttachedDelivery(saleId) {
         notifySuccess(result.message, 'Delivery created');
         return true;
     } catch (error) {
-        notifyError('Sale #' + saleId + ' went through, but the delivery could not be sent to the ' +
+        notifyError(orNumber(saleId) + ' went through, but the delivery could not be sent to the ' +
             'server, so no delivery exists for it yet. Tell the manager so it is arranged.',
             'Sale saved, delivery not created');
         return false;
@@ -3004,7 +3026,7 @@ function buildDeliveryPanel() {
         match: function (row, query) {
             return prefixMatch([
                 row.customer_name, row.delivery_address, row.status,
-                row.sale_id, '#' + row.sale_id, row.delivery_id, '#' + row.delivery_id
+                row.sale_id, '#' + row.sale_id, orNumber(row.sale_id), row.delivery_id, '#' + row.delivery_id, deliveryCode(row.delivery_id)
             ], query);
         },
 
@@ -3015,8 +3037,8 @@ function buildDeliveryPanel() {
         renderRow: function (row, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
                 'onclick="openCashierDeliveryDetail(' + row.delivery_id + ')">' +
-                '<td class="cell-id">#' + row.delivery_id + '</td>' +
-                '<td class="cell-id">#' + row.sale_id + '</td>' +
+                '<td class="cell-id">' + deliveryCode(row.delivery_id) + '</td>' +
+                '<td class="cell-id">' + orNumber(row.sale_id) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
                 '<td>' + escapeHtml(row.delivery_address) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(scheduleText(row.scheduled_date)) + '</td>' +
@@ -3113,7 +3135,7 @@ async function handleIssueRefund(event) {
         const cashBack = Math.round((data.refundAmount - offBalance) * 100) / 100;
         let balanceNote = '';
         if (offBalance > 0) {
-            balanceNote = ' ' + peso(offBalance) + ' came off what the customer owes on sale #' + data.saleId + '.';
+            balanceNote = ' ' + peso(offBalance) + ' came off what the customer owes on ' + orNumber(data.saleId) + '.';
         }
         if (cashBack > 0) {
             balanceNote = balanceNote + ' Hand back ' + peso(cashBack) + ' in cash.';
@@ -3175,9 +3197,9 @@ async function issueRefundForLines(form, reason) {
         const offBalance = Number(result.offBalance) || 0;
         const cashBack = Math.round((total - offBalance) * 100) / 100;
         let balanceNote = '';
-        if (offBalance > 0) balanceNote = ' ' + peso(offBalance) + ' came off what the customer owes on sale #' + saleId + '.';
+        if (offBalance > 0) balanceNote = ' ' + peso(offBalance) + ' came off what the customer owes on ' + orNumber(saleId) + '.';
         if (cashBack > 0) balanceNote += ' Hand back ' + peso(cashBack) + ' in cash.';
-        notifySuccess(items.length + (items.length === 1 ? ' item' : ' items') + ' refunded on sale #' + saleId +
+        notifySuccess(items.length + (items.length === 1 ? ' item' : ' items') + ' refunded on ' + orNumber(saleId) +
             '. The goods are set aside for the stockroom; the clerk has been asked to inspect them.' + balanceNote,
             'Refund issued');
 
@@ -3216,7 +3238,7 @@ function buildRecentSalesPanel() {
 
         match: function (row, query) {
             return prefixMatch([
-                row.customer_name, row.sale_id, '#' + row.sale_id, 'OR-' + String(row.sale_id).padStart(6, '0')
+                row.customer_name, row.sale_id, '#' + row.sale_id, orNumber(row.sale_id)
             ], query);
         },
 
@@ -3229,7 +3251,7 @@ function buildRecentSalesPanel() {
             return '<tr class="row-clickable row-reveal' + picked + '" data-sale-id="' + row.sale_id + '" ' +
                 'style="animation-delay:' + (index % 8) * 28 + 'ms" title="Refund from this sale" ' +
                 'onclick="fillRefundFromSale(' + row.sale_id + ')">' +
-                '<td class="cell-id">#' + row.sale_id + '</td>' +
+                '<td class="cell-id">' + orNumber(row.sale_id) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 16)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
                 '<td class="cell-num">' + row.item_count + '</td>' +
@@ -3402,7 +3424,7 @@ function renderRefundSource() {
     box.innerHTML =
         '<div class="adjust-source-text">' +
             '<span class="adjust-source-eyebrow">Sale</span>' +
-            '<span class="adjust-source-title">#' + refundSale.saleId + ' · ' + escapeHtml(refundSale.customerName) + '</span>' +
+            '<span class="adjust-source-title">' + orNumber(refundSale.saleId) + ' · ' + escapeHtml(refundSale.customerName) + '</span>' +
             '<span class="adjust-source-sub">' + escapeHtml(refundSale.saleDate) + ' · ' + escapeHtml(refundSale.method) +
                 ' · ' + count + (count === 1 ? ' item' : ' items') + '. The refund is at what the customer paid.</span>' +
         '</div>' +
@@ -3489,7 +3511,7 @@ function renderRefundPreview() {
         return;
     }
     box.className = 'adjust-preview is-good';
-    box.innerHTML = '<span class="preview-name">Sale #' + refundSale.saleId + '</span>' +
+    box.innerHTML = '<span class="preview-name">' + orNumber(refundSale.saleId) + '</span>' +
         '<span class="preview-figures">' + picked + ' of ' + lines.length + ' items will be refunded' +
             (picked > 0 ? ': <strong>' + peso(Math.round(total * 100) / 100) + '</strong>' : '') + '</span>' +
         (picked === 0 ? '<span class="preview-note">Type how many of each item came back.</span>' : '');
@@ -3552,12 +3574,12 @@ function buildSalesPanel() {
         match: function (row, query) {
             return prefixMatch([
                 row.customer_name, row.payment_method, row.payment_status, row.transaction_status,
-                row.sale_id, '#' + row.sale_id, 'OR-' + String(row.sale_id).padStart(6, '0')
+                row.sale_id, '#' + row.sale_id, orNumber(row.sale_id)
             ], query);
         },
 
         filter: function (row, filters) {
-            if (filters.method !== 'all' && row.payment_group !== filters.method) return false;
+            if (filters.method !== 'all' && row.payment_method !== filters.method) return false;
             if (filters.status !== 'all' && row.transaction_status !== filters.status) return false;
             return true;
         },
@@ -3565,7 +3587,7 @@ function buildSalesPanel() {
         renderRow: function (row, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 8) * 28 + 'ms" ' +
                 'onclick="openReceipt(' + row.sale_id + ', true)">' +
-                '<td class="cell-id">OR-' + String(row.sale_id).padStart(6, '0') + '</td>' +
+                '<td class="cell-id">' + orNumber(row.sale_id) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(String(row.sale_date).slice(0, 10)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
                 '<td>' + escapeHtml(row.payment_method) + '</td>' +
@@ -3671,7 +3693,7 @@ async function openPaymentForm(saleId) {
     const balance = Number(row.balance_due) || 0;
     document.getElementById('payment-title').textContent = 'Credit Settlement';
     document.getElementById('payment-sub').textContent =
-        row.customer_name + ' \u00b7 OR-' + String(row.sale_id).padStart(6, '0');
+        row.customer_name + ' \u00b7 ' + orNumber(row.sale_id);
     document.getElementById('payment-avatar').textContent = initialsOf(row.customer_name);
 
     let penaltyNote = '';
@@ -3770,7 +3792,7 @@ function renderPaymentVerdict() {
     if (left <= 0.004) {
         box.className = 'credit-verdict is-good';
         box.innerHTML = 'This clears the sale. ' + escapeHtml(paymentSale.customer_name) +
-            ' owes nothing more on OR-' + String(paymentSale.sale_id).padStart(6, '0') + '.';
+            ' owes nothing more on ' + orNumber(paymentSale.sale_id) + '.';
         return;
     }
     box.className = 'credit-verdict is-watch';
@@ -3842,7 +3864,7 @@ async function handleTakePayment(event, viaQr) {
     if (button) button.disabled = true;
     if (qrButton) qrButton.disabled = true;
 
-    const saleNumber = 'OR-' + String(paymentSale.sale_id).padStart(6, '0');
+    const saleNumber = orNumber(paymentSale.sale_id);
     const details = [
         'Customer: ' + paymentSale.customer_name,
         'Sale: ' + saleNumber,
@@ -3877,7 +3899,7 @@ async function handleTakePayment(event, viaQr) {
 
     let qr = null;
     if (viaQr) {
-        qr = await collectQrPayment(amount, 'Payment on OR-' + String(paymentSale.sale_id).padStart(6, '0'), method,
+        qr = await collectQrPayment(amount, 'Payment on ' + orNumber(paymentSale.sale_id), method,
             'credit_payment', paymentSale.sale_id, transferDetails);
         if (!qr) { ready(); return; }
     }
@@ -3912,8 +3934,7 @@ async function handleTakePayment(event, viaQr) {
         const left = balance - amount;
         let leftText = peso(left) + ' is still owed on it.';
         if (left <= 0.004) leftText = 'The sale is paid in full.';
-        notifySuccess(peso(amount) + ' taken from ' + paymentSale.customer_name + ' against OR-' +
-            String(paymentSale.sale_id).padStart(6, '0') + '. ' +
+        notifySuccess(peso(amount) + ' taken from ' + paymentSale.customer_name + ' against ' + orNumber(paymentSale.sale_id) + '. ' +
             leftText,
             'Payment recorded');
 
@@ -3984,7 +4005,7 @@ function renderCustomerUnpaid() {
             penaltyNote = '<span class="cell-sub">incl. ' + peso(penaltyInBalance(row)) + ' penalty</span>';
         }
         unpaidRows.push([
-            '<span class="cell-id">OR-' + String(row.sale_id).padStart(6, '0') + '</span>',
+            '<span class="cell-id">' + orNumber(row.sale_id) + '</span>',
             escapeHtml(String(row.sale_date).slice(0, 10)) +
                 ' <span class="muted">' + escapeHtml(row.payment_method) + '</span>',
             '<span class="cell-due">' + peso(row.balance_due) + '</span>' + penaltyNote,
@@ -4160,6 +4181,7 @@ async function openCustomerCredit(customerId, tab) {
         }
 
         document.getElementById('customer-facts').innerHTML =
+            detailField('Customer ID', customerCode(c.customer_id)) +
             detailField('Credit Limit', peso(c.credit_limit)) +
             detailField('Balance', '<span class="' + (owed > 0 ? 'cell-due' : '') + '">' +
                 peso(owed) + '</span>') +
@@ -4186,6 +4208,7 @@ async function openCustomerCredit(customerId, tab) {
         if (pay) pay.hidden = !hasUnpaid;
 
         document.getElementById('customer-print-card').hidden = !holdsFeature('customer-card-print');
+        document.getElementById('customer-portal-btn').hidden = !holdsFeature('customer-portal-password');
 
         let open = 'account';
         if (tab === 'unpaid' && hasUnpaid) open = 'unpaid';
@@ -4266,8 +4289,8 @@ function renderCustomerHistory() {
             penaltyNote = '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty</span>';
         }
         const cells = [
+            orNumber(p.sale_id) + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
             escapeHtml(dayOfStamp(p.sale_date)),
-            '#' + p.sale_id + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
             peso(p.final_amount) + penaltyNote
         ];
         if (!onlyPaid) {
@@ -4279,7 +4302,7 @@ function renderCustomerHistory() {
     }
 
     box.innerHTML = pagedTable('cash-purchases',
-        onlyPaid ? ['Date', 'Sale', 'Amount'] : ['Date', 'Sale', 'Amount', 'Balance'],
+        onlyPaid ? ['Sale', 'Date', 'Amount'] : ['Sale', 'Date', 'Amount', 'Balance'],
         purchaseRows, onlyPaid ? [2] : [2, 3], {
             empty: emptyHistoryNote('Nothing bought yet.', from, to, status !== 'all' || from || to)
         });
@@ -4315,16 +4338,15 @@ function renderCustomerPayments() {
     for (let i = 0; i < rows.length; i++) {
         const p = rows[i];
         let receiptCell = '<span class="muted">-</span>';
-        if (p.sale_id) receiptCell = '#' + p.sale_id;
-        const cells = [escapeHtml(dayOfStamp(p.payment_date)), peso(p.amount)];
+        if (p.sale_id) receiptCell = orNumber(p.sale_id);
+        const cells = [receiptCell, escapeHtml(dayOfStamp(p.payment_date)), peso(p.amount)];
         if (how === 'all') cells.push(escapeHtml(p.payment_method));
-        cells.push(receiptCell);
         paymentRows.push(cells);
     }
 
     box.innerHTML = pagedTable('cash-payments',
-        how === 'all' ? ['Date', 'Amount', 'Method', 'Receipt'] : ['Date', 'Amount', 'Receipt'],
-        paymentRows, [1], {
+        how === 'all' ? ['Receipt', 'Date', 'Amount', 'Method'] : ['Receipt', 'Date', 'Amount'],
+        paymentRows, [2], {
             empty: emptyHistoryNote('No payments recorded.', from, to, how !== 'all' || from || to)
         });
 }
@@ -4693,6 +4715,7 @@ async function handleAddCustomer(event) {
     }
 
     let newCustomerId = 0;
+    let newPortalPassword = '';
     try {
         const response = await apiCreateCustomer({
                 firstName: firstName, middleName: middleName, lastName: lastName, phone: phone,
@@ -4730,28 +4753,83 @@ async function handleAddCustomer(event) {
         }
 
         newCustomerId = Number(result.customerId);
+        newPortalPassword = result.portalPassword || '';
     } catch (error) {
         if (save) save.disabled = false;
         notifyOffline();
         return;
     }
 
+    if (newPortalPassword) {
+        await showPortalPassword(newCustomerId, firstName + ' ' + lastName, newPortalPassword);
+    }
+
     try {
-        await offerCustomerCardPrint(newCustomerId, firstName + ' ' + lastName);
+        await offerCustomerCardPrint(newCustomerId, firstName + ' ' + lastName, newPortalPassword, 'New customer');
     } catch (error) {
         notifyError('The customer card could not be printed. Print it from the customer\'s card.');
     }
 }
 
-async function offerCustomerCardPrint(customerId, name) {
+let portalPasswordDone = null;
+
+// Shows a portal password once. Resolves when the cashier presses Done.
+function showPortalPassword(customerId, name, password) {
+    document.getElementById('portal-password-avatar').textContent = initialsOf(name);
+    document.getElementById('portal-password-name').textContent = name;
+    document.getElementById('portal-password-id').textContent = customerCode(customerId);
+    document.getElementById('portal-password-text').textContent = password;
+    showModal('portal-password-modal');
+    return new Promise(function (resolve) { portalPasswordDone = resolve; });
+}
+
+function closePortalPassword() {
+    document.getElementById('portal-password-text').textContent = '';
+    closeModal('portal-password-modal');
+    if (portalPasswordDone) {
+        portalPasswordDone();
+        portalPasswordDone = null;
+    }
+}
+
+async function issuePortalPassword() {
+    if (!openCustomerId) return;
+    const name = document.getElementById('customer-modal-name').textContent;
+    const yes = await askConfirm('Issue a new portal password for ' + name + '? The old one stops working.', {
+        title: 'Issue a portal password?',
+        eyebrow: 'Customer portal',
+        confirmLabel: 'Issue Password',
+        cancelLabel: 'Not now'
+    });
+    if (!yes) return;
+
+    try {
+        const response = await apiIssuePortalPassword(openCustomerId);
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) {
+                notifyError(result.error || 'The portal password was not issued.', 'Not issued');
+            }
+            return;
+        }
+        await showPortalPassword(result.customerId, result.name, result.password);
+        // Offer a card with the new password printed on its back, while it is still known.
+        await offerCustomerCardPrint(result.customerId, result.name, result.password, 'Customer portal');
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// portalPassword (when just made) is printed on the card's back with the User ID.
+async function offerCustomerCardPrint(customerId, name, portalPassword, eyebrow) {
     if (!customerId || !holdsFeature('customer-card-print')) return;
     const yes = await askConfirm('Print the customer card for ' + name + ' now?', {
         title: 'Print the customer card?',
-        eyebrow: 'New customer',
+        eyebrow: eyebrow || 'New customer',
         confirmLabel: 'Print the card',
         cancelLabel: 'Not now'
     });
-    if (yes) await printCustomerCard(customerId);
+    if (yes) await printCustomerCard(customerId, portalPassword);
 }
 
 async function openCreditPaymentPicker() {
@@ -4843,6 +4921,7 @@ if (window.location.pathname.toLowerCase().endsWith('cashier-dashboard.html')) {
             'Refund Report':  { label: 'Refunds', panelId: 'panel-refund',
                                 open: function () { showRefunds(); } },
             'Credit Request': creditAlert,
+            'Customer Payment': creditAlert,
             'Late Penalty':   creditAlert,
             'Void Request':   { label: 'Sales Report', panelId: 'panel-salesreport',
                                 open: function () { showSalesReport(); }, key: 'cash-sales' }

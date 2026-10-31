@@ -878,22 +878,34 @@ async function migrateOrderReference() {
     [DB_NAME]
   );
   const tables = tablesResult[0];
-  if (tables.length > 0) return;
+  if (tables.length === 0) {
+    await db.query(
+      "CREATE TABLE purchase_order_ordered_items (\n" +
+        "       ordered_item_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+        "       po_id INT NOT NULL,\n" +
+        "       product_id INT NOT NULL,\n" +
+        "       quantity INT NOT NULL,\n" +
+        "       pack_name VARCHAR(20) NULL,\n" +
+        "       pack_size DECIMAL(12,3) NULL,\n" +
+        "       pack_count DECIMAL(12,3) NULL,\n" +
+        "       unit_cost DECIMAL(12,4) NULL,\n" +
+        "       FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE CASCADE ON UPDATE CASCADE,\n" +
+        "       FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE\n" +
+        "     )");
+    console.log("Added the purchase_order_ordered_items table: a received order keeps what was ordered " +
+      "beside what arrived.");
+  }
 
-  await db.query(
-    "CREATE TABLE purchase_order_ordered_items (\n" +
-      "       ordered_item_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
-      "       po_id INT NOT NULL,\n" +
-      "       product_id INT NOT NULL,\n" +
-      "       quantity INT NOT NULL,\n" +
-      "       pack_name VARCHAR(20) NULL,\n" +
-      "       pack_size DECIMAL(12,3) NULL,\n" +
-      "       pack_count DECIMAL(12,3) NULL,\n" +
-      "       FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE CASCADE ON UPDATE CASCADE,\n" +
-      "       FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE\n" +
-      "     )");
-  console.log("Added the purchase_order_ordered_items table: a received order keeps what was ordered " +
-    "beside what arrived.");
+  // The price each ordered line was bought at, kept even when the line arrived as 0
+  const costColumnResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_order_ordered_items' AND COLUMN_NAME = 'unit_cost'",
+    [DB_NAME]
+  );
+  if (costColumnResult[0].length === 0) {
+    await db.query("ALTER TABLE purchase_order_ordered_items ADD COLUMN unit_cost DECIMAL(12,4) NULL");
+    console.log("Added purchase_order_ordered_items.unit_cost.");
+  }
 }
 
 async function migrateSupplierResponse() {
@@ -1136,7 +1148,60 @@ async function migrateCheckConstraints() {
 }
 
 const SERVER_TABLES = ["user_sessions", "live_changes", "account_drafts",
-                       "backup_files", "app_flags", "qr_sim_intents"];
+                       "backup_files", "app_flags", "qr_sim_intents", "customer_sessions"];
+
+// The customer portal (the separate customer-portal/ app) shares this database; this app owns the schema.
+async function migrateCustomerPortal() {
+  const customerColumnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'customers'",
+    [DB_NAME]
+  );
+  const customerNames = columnNamesOf(customerColumnsResult[0]);
+  if (customerNames.indexOf("customer_id") !== -1) {
+    const wanted = [
+      ["portal_password", "VARCHAR(255) NULL"],
+      ["portal_failed_attempts", "INT NOT NULL DEFAULT 0"],
+      ["portal_held_until", "TIMESTAMP NULL"],
+      ["portal_password_set_at", "TIMESTAMP NULL"]
+    ];
+    for (let i = 0; i < wanted.length; i++) {
+      if (customerNames.indexOf(wanted[i][0]) === -1) {
+        await db.query("ALTER TABLE customers ADD COLUMN " + wanted[i][0] + " " + wanted[i][1]);
+        console.log("Added customers." + wanted[i][0] + " for the customer portal.");
+      }
+    }
+  }
+
+  await db.query(
+    "CREATE TABLE IF NOT EXISTS customer_sessions (\n" +
+      "       token_hash CHAR(64) PRIMARY KEY,\n" +
+      "       customer_id INT NOT NULL,\n" +
+      "       started_at BIGINT NOT NULL,\n" +
+      "       last_seen BIGINT NOT NULL,\n" +
+      "       expires_at BIGINT NOT NULL,\n" +
+      "       ended_reason VARCHAR(255) NULL,\n" +
+      "       ended_at BIGINT NULL,\n" +
+      "       INDEX idx_customer_sessions_customer (customer_id),\n" +
+      "       INDEX idx_customer_sessions_expires (expires_at)\n" +
+      "     )");
+
+  const qrColumnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'qr_payments'",
+    [DB_NAME]
+  );
+  const qrNames = columnNamesOf(qrColumnsResult[0]);
+  if (qrNames.indexOf("qr_payment_id") !== -1) {
+    const portalFields = ["portal_customer_id", "portal_sale_id"];
+    for (let i = 0; i < portalFields.length; i++) {
+      if (qrNames.indexOf(portalFields[i]) === -1) {
+        await db.query("ALTER TABLE qr_payments ADD COLUMN " + portalFields[i] + " INT NULL");
+        console.log("Added qr_payments." + portalFields[i] + " for the customer portal.");
+      }
+    }
+  }
+}
 
 async function migrateServerTables() {
   await db.query(
@@ -1274,6 +1339,7 @@ async function routinesAreOld() {
     ["sp_create_delivery", "DELIVERY_CREATED"],
     ["sp_update_delivery_status", "FOR UPDATE"],
     ["sp_receive_purchase_order", "purchase_order_ordered_items"],
+    ["sp_receive_purchase_order", "pack_count, unit_cost)"],
     ["sp_receive_purchase_order", "received_at = NOW()"],
     ["sp_receive_purchase_order", "last_cost"],
     ["sp_decide_purchase_order", "they set the prices"],
@@ -1285,7 +1351,11 @@ async function routinesAreOld() {
     ["sp_sweep_archives", "deactivated for 30 days"],
     ["sp_archive_record", "Only a deactivated account can be archived"],
     ["sp_restore_archive", "deactivated_at = NULL"],
-    ["sp_set_staff_status", "deactivated_at"]
+    ["sp_set_staff_status", "deactivated_at"],
+    ["sp_create_qr_payment", "p_portal_sale_id"],
+    ["sp_record_credit_payment", "v_qr_portal"],
+    ["sp_create_sale_transaction", "v_qr_portal"],
+    ["sp_link_qr_payment_to_sale", "v_portal"]
   ];
 
   const routinesResult = await db.query(
@@ -1296,7 +1366,8 @@ async function routinesAreOld() {
       "                            'sp_restore_archive', 'sp_create_delivery', 'sp_update_delivery_status',\n" +
       "                            'sp_adjust_stock', 'sp_receive_purchase_order', 'sp_create_customer',\n" +
       "                            'sp_create_qr_payment', 'sp_sweep_archives', 'sp_set_staff_status',\n" +
-      "                            'sp_decide_purchase_order', 'sp_create_purchase_order')",
+      "                            'sp_decide_purchase_order', 'sp_create_purchase_order',\n" +
+      "                            'sp_link_qr_payment_to_sale')",
     [DB_NAME]
   );
   const routines = routinesResult[0];
@@ -1431,6 +1502,21 @@ async function migrateRecordArchives() {
   }
 }
 
+// The alert for a payment a customer made from the portal.
+async function migrateCustomerPaymentAlert() {
+  const typeResult = await db.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'notifications' AND COLUMN_NAME = 'notif_type'",
+    [DB_NAME]
+  );
+  const found = typeResult[0];
+  if (found.length > 0 && String(found[0].COLUMN_TYPE).indexOf("Customer Payment") === -1) {
+    const wider = String(found[0].COLUMN_TYPE).replace(/\)$/, ",'Customer Payment')");
+    await db.query("ALTER TABLE notifications MODIFY COLUMN notif_type " + wider + " NOT NULL");
+    console.log("Added the Customer Payment kind of alert (notifications.notif_type).");
+  }
+}
+
 async function migrateVoidRequests() {
   const typeResult = await db.query(
     "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
@@ -1471,6 +1557,39 @@ async function migrateVoidRequests() {
   console.log("Added the void_requests table: a cashier's request to void a sale, for a manager to decide.");
 }
 
+async function migrateDeliveryAttempts() {
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'delivery_attempts'",
+    [DB_NAME]
+  );
+  if (tablesResult[0].length > 0) return;
+
+  await db.query(
+    "CREATE TABLE delivery_attempts (\n" +
+      "       attempt_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+      "       delivery_id INT NOT NULL,\n" +
+      "       attempt_no INT NOT NULL,\n" +
+      "       outcome ENUM('Delivered','Failed') NOT NULL,\n" +
+      "       reason VARCHAR(255) NULL,\n" +
+      "       staff_id INT NULL,\n" +
+      "       scheduled_date DATETIME NULL,\n" +
+      "       attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n" +
+      "       INDEX idx_delivery_attempts_delivery (delivery_id),\n" +
+      "       FOREIGN KEY (delivery_id) REFERENCES deliveries(delivery_id) ON DELETE CASCADE ON UPDATE CASCADE,\n" +
+      "       FOREIGN KEY (staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE\n" +
+      "     )");
+  console.log("Added the delivery_attempts table: each time a delivery is delivered or fails.");
+
+  // Deliveries that already finished count as one attempt
+  const backfill = await db.query(
+    "INSERT INTO delivery_attempts (delivery_id, attempt_no, outcome, reason, staff_id, scheduled_date, attempted_at)\n" +
+      "     SELECT delivery_id, 1, status, IF(status = 'Failed', LEFT(remarks, 255), NULL), delivery_staff_id,\n" +
+      "            scheduled_date, COALESCE(delivered_at, updated_at)\n" +
+      "     FROM deliveries WHERE status IN ('Delivered', 'Failed')");
+  console.log("Counted " + backfill[0].affectedRows + " finished delivery(ies) as their first attempt.");
+}
+
 async function migrateStaffDeactivatedAt() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -1501,6 +1620,18 @@ async function migrateLastCost() {
 
   await db.query("ALTER TABLE products ADD COLUMN last_cost DECIMAL(12,4) NULL AFTER price");
   console.log("Added products.last_cost, the latest buying price per unit. It stays empty until an order is received.");
+}
+
+async function migrateProductDescription() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'products' AND COLUMN_NAME = 'description'",
+    [DB_NAME]
+  );
+  if (columnsResult[0].length > 0) return;
+
+  await db.query("ALTER TABLE products ADD COLUMN description VARCHAR(255) NULL AFTER pack_size");
+  console.log("Added products.description, a short note about a material.");
 }
 
 async function migrateCostPrecision() {
@@ -1582,9 +1713,13 @@ async function migrateDatabase(runSqlScript) {
   await migrateRecordArchives();
   await migrateManualReorderPoints();
   await migrateLastCost();
+  await migrateProductDescription();
   await migrateCostPrecision();
   await migrateVoidRequests();
+  await migrateDeliveryAttempts();
   await migrateStaffDeactivatedAt();
+  await migrateCustomerPortal();
+  await migrateCustomerPaymentAlert();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();
   await warnIfAdminPasswordIsDefault();

@@ -1,3 +1,4 @@
+const helpers = require("../helpers");
 const crypto = require("crypto");
 const mailer = require("../services/mailer");
 const inventoryClerkProcedures = require("../database/procedures/inventory-clerk-procedures");
@@ -107,7 +108,7 @@ function registerInventoryRoutes(app, deps) {
     try {
       const rowsResult = await db.query(
         "SELECT p.product_id, p.product_name, p.price, p.last_cost, p.reorder_point, p.status, " +
-        "p.pack_name, p.pack_size, " +
+        "p.pack_name, p.pack_size, p.description, " +
         "p.is_archived, p.archived_at, p.created_at, " +
         "COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, " +
         "i.last_updated, " +
@@ -367,9 +368,13 @@ function registerInventoryRoutes(app, deps) {
     const categoryName = String(body.categoryName || "").trim();
     const unitName = String(body.unitName || "").trim();
     const supplierId = Number(body.supplierId) || null;
+    const description = String(body.description || "").trim().replace(/\s+/g, " ");
 
     if (name === "") {
       return response.status(400).json({ error: "A product needs a name." });
+    }
+    if (description.length > 255) {
+      return response.status(400).json({ error: "A description is at most 255 characters." });
     }
     if (name.length > 150) {
       return response.status(400).json({ error: "A product name is at most 150 characters." });
@@ -447,6 +452,14 @@ function registerInventoryRoutes(app, deps) {
           await db.query("UPDATE products SET reorder_point = ? WHERE product_id = ?", [reorderPoint, productId]);
         } catch (error) {
           console.error("The product was added, but its reorder point was not saved:", error.message);
+        }
+      }
+
+      if (description !== "") {
+        try {
+          await db.query("UPDATE products SET description = ? WHERE product_id = ?", [description, productId]);
+        } catch (error) {
+          console.error("The product was added, but its description was not saved:", error.message);
         }
       }
 
@@ -536,6 +549,39 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
+  app.put("/api/inventory/products/:productId/description", async function (request, response) {
+    const productId = Number(request.params.productId);
+    const description = String((request.body || {}).description || "").trim().replace(/\s+/g, " ");
+
+    if (description.length > 255) {
+      return response.status(400).json({ error: "A description is at most 255 characters." });
+    }
+
+    try {
+      const rowsResult = await db.query(
+        "SELECT product_name, description FROM products WHERE product_id = ?", [productId]);
+      const rows = rowsResult[0];
+      if (rows.length === 0) return response.status(404).json({ error: "Product not found" });
+      const before = rows[0];
+
+      let saved = null;
+      if (description !== "") saved = description;
+
+      await db.query("UPDATE products SET description = ? WHERE product_id = ?", [saved, productId]);
+
+      const message = "The description of " + before.product_name + " was saved.";
+      await writeAuditLog(request, "UPDATE_DESCRIPTION", message, {
+        product_id: productId,
+        changes: fieldChanges({ description: before.description }, { description: saved })
+      });
+
+      response.json({ message: message, description: saved });
+    } catch (error) {
+      console.error("Product description failed:", error.message);
+      response.status(500).json({ error: "Unable to save the description" });
+    }
+  });
+
   app.put("/api/units/:unitId", async function (request, response) {
     const unitName = request.body.unitName;
 
@@ -562,7 +608,7 @@ function registerInventoryRoutes(app, deps) {
   app.get("/api/inventory/adjustments", async function (request, response) {
     try {
       const rowsResult = await db.query(
-        "SELECT a.adjustment_id, a.adjustment_type, a.quantity_before, a.quantity_change, " +
+        "SELECT a.adjustment_id, a.product_id, a.adjustment_type, a.quantity_before, a.quantity_change, " +
         "a.quantity_after, a.reason, a.created_at, " +
         "p.product_name, " +
         "-- What the entry itself says it counted, falling back to the\n" +
@@ -605,6 +651,10 @@ function registerInventoryRoutes(app, deps) {
       if (Number(quantity) < 0) {
         return response.status(400).json({ error: "A recount cannot be below zero." });
       }
+      // The saved reason gets a "Missing N unit: " prefix, so the remarks must leave room for it
+      if (String(reason).trim().length > 200) {
+        return response.status(400).json({ error: "The remarks can be at most 200 characters." });
+      }
     } else if (Number(quantity) <= 0) {
       return response.status(400).json({ error: "Add and Remove need a quantity greater than zero." });
     }
@@ -615,12 +665,52 @@ function registerInventoryRoutes(app, deps) {
     }
 
     try {
+      let savedReason = reason;
+      let missing = 0;
+      let productName = "";
+
+      // A manual count that is lower than the system stock means products are missing
+      if (adjustmentType === "Recount") {
+        const stockResult = await db.query(
+          "SELECT i.quantity_in_stock, p.product_name, u.unit_name " +
+          "FROM inventory i JOIN products p ON p.product_id = i.product_id " +
+          "LEFT JOIN units u ON u.unit_id = p.unit_id WHERE i.product_id = ?",
+          [productId]
+        );
+        if (stockResult[0].length > 0) {
+          const systemStock = Number(stockResult[0][0].quantity_in_stock);
+          productName = stockResult[0][0].product_name;
+          missing = Math.round((systemStock - Number(quantity)) * 1000) / 1000;
+          if (missing > 0) {
+            if (String(reason).trim().length < 5) {
+              return response.status(400).json({ error: "Some products are missing. Write what is known about them in the remarks (at least 5 characters)." });
+            }
+            const missingUnit = unit || stockResult[0][0].unit_name || "";
+            savedReason = ("Missing " + missing + (missingUnit ? " " + missingUnit : "") + ": " + String(reason).trim()).slice(0, 255);
+          }
+        }
+      }
+
       const output = await inventoryClerkProcedures.adjustStock(
-        [productId, adjustmentType, quantity, unit || null, reason, getActorId(request)]
+        [productId, adjustmentType, quantity, unit || null, savedReason, getActorId(request)]
       );
 
       if (output.status_code !== 200) {
         return response.status(output.status_code).json({ error: output.message });
+      }
+
+      // Tell the manager about the missing products
+      if (missing > 0) {
+        try {
+          await db.query(
+            "INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id) " +
+            "SELECT role_id, 'Stock Adjustment', ?, ?, ?, ? FROM roles WHERE role_name = 'Manager'",
+            [("Missing stock: " + productName).slice(0, 150), savedReason, productId, getActorId(request)]
+          );
+          publishChange("notifications", "missing stock " + productId, request.headers["x-client-id"] || null);
+        } catch (error) {
+          console.error("The count was saved, but telling the manager failed:", error.message);
+        }
       }
 
       response.json({ message: output.message });
@@ -644,7 +734,12 @@ function registerInventoryRoutes(app, deps) {
         "COALESCE(SUM(i.quantity), 0) AS total_units, " +
         "COALESCE(SUM(i.line_cost), 0) AS goods_cost, " +
         "po.discount, " +
-        "COALESCE(SUM(i.line_cost), 0) - po.discount AS total_cost " +
+        "COALESCE(SUM(i.line_cost), 0) - po.discount AS total_cost, " +
+        // Units still owed on a received order: ordered minus received, line by line
+        "IF(po.status = 'Received', COALESCE((SELECT SUM(GREATEST(o.quantity - " +
+        " COALESCE((SELECT SUM(r.quantity) FROM purchase_order_items r " +
+        "  WHERE r.po_id = o.po_id AND r.product_id = o.product_id), 0), 0)) " +
+        " FROM purchase_order_ordered_items o WHERE o.po_id = po.po_id), 0), 0) AS balance_units " +
         "FROM purchase_orders po " +
         "JOIN suppliers s ON s.supplier_id = po.supplier_id " +
         "LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id " +
@@ -668,15 +763,16 @@ function registerInventoryRoutes(app, deps) {
     try {
       const orderedResult = await db.query(
         "SELECT o.product_id, o.quantity, " +
-        "(SELECT i.unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
-        " ORDER BY i.po_item_id LIMIT 1) AS unit_cost, " +
+        // The received line's cost first; a line that arrived as 0 has none, so use the cost saved at receiving
+        "COALESCE((SELECT i.unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
+        " ORDER BY i.po_item_id LIMIT 1), o.unit_cost) AS unit_cost, " +
         "NULL AS original_unit_cost, " +
-        "o.quantity * (SELECT i.unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
-        " ORDER BY i.po_item_id LIMIT 1) AS line_cost, " +
+        "o.quantity * COALESCE((SELECT i.unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
+        " ORDER BY i.po_item_id LIMIT 1), o.unit_cost) AS line_cost, " +
         "COALESCE((SELECT SUM(i.quantity) FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id), 0) " +
         " AS received_quantity, " +
         "o.pack_name, o.pack_size, o.pack_count, " +
-        "p.product_name, u.unit_name, c.category_name, b.brand_name, " +
+        "p.product_name, p.description, u.unit_name, c.category_name, b.brand_name, " +
         "COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock " +
         "FROM purchase_order_ordered_items o " +
         "JOIN purchase_orders po ON po.po_id = o.po_id AND po.status = 'Received' " +
@@ -694,7 +790,7 @@ function registerInventoryRoutes(app, deps) {
       const rowsResult = await db.query(
         "SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
         "i.pack_name, i.pack_size, i.pack_count, " +
-        "p.product_name, p.last_cost, u.unit_name, c.category_name, b.brand_name, " +
+        "p.product_name, p.description, p.last_cost, u.unit_name, c.category_name, b.brand_name, " +
         "COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock " +
         "FROM purchase_order_items i " +
         "JOIN products p ON p.product_id = i.product_id " +
@@ -771,6 +867,7 @@ function registerInventoryRoutes(app, deps) {
         const difference = (arrived[line.product_id] || 0) - (Number(line.quantity) || 0);
         if (difference === 0) continue;
         report.lines.push({
+          product_id: line.product_id,
           product_name: line.product_name,
           unit_name: line.unit_name,
           quantity: Math.abs(difference),
@@ -781,6 +878,7 @@ function registerInventoryRoutes(app, deps) {
         const line = received[i];
         if (wasOrdered[line.product_id] || !(Number(line.quantity) > 0)) continue;
         report.lines.push({
+          product_id: line.product_id,
           product_name: line.product_name,
           unit_name: line.unit_name,
           quantity: Number(line.quantity),
@@ -815,7 +913,7 @@ function registerInventoryRoutes(app, deps) {
       if (orders.length === 0) return response.status(404).json({ error: "That purchase order does not exist" });
       const order = orders[0];
       if (order.status !== "Received") {
-        return response.status(400).json({ error: "Purchase order #" + poId + " has not been received yet." });
+        return response.status(400).json({ error: "Purchase order " + helpers.poNumber(poId) + " has not been received yet." });
       }
 
       const orderedResult = await db.query(
@@ -901,7 +999,7 @@ function registerInventoryRoutes(app, deps) {
     const itemsResult = await db.query(
       "SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
       "i.pack_name, i.pack_size, i.pack_count, " +
-      "p.product_name, u.unit_name, c.category_name, b.brand_name " +
+      "p.product_name, p.description, u.unit_name, c.category_name, b.brand_name " +
       "FROM purchase_order_items i " +
       "JOIN products p ON p.product_id = i.product_id " +
       "LEFT JOIN units u ON u.unit_id = p.unit_id " +
@@ -1102,7 +1200,7 @@ function registerInventoryRoutes(app, deps) {
 
       await ensureSupplierCode(poId);
       response.json({
-        message: "Purchase order #" + poId + " is approved. The clerk prints it and sends it to the supplier.",
+        message: "Purchase order " + helpers.poNumber(poId) + " is approved. The clerk prints it and sends it to the supplier.",
         status: "Pending"
       });
     } catch (error) {
@@ -1119,7 +1217,7 @@ function registerInventoryRoutes(app, deps) {
       if (!document) return response.status(404).json({ error: "That purchase order does not exist" });
 
       const order = document.order;
-      const number = "PO-" + String(order.po_id).padStart(6, "0");
+      const number = helpers.poNumber(order.po_id);
       if (order.status !== "Pending") {
         return response.status(409).json({
           error: order.status === "For Approval"
@@ -1184,7 +1282,7 @@ function registerInventoryRoutes(app, deps) {
       const order = rowsResult[0][0];
       if (!order) return response.status(404).json({ error: "That purchase order does not exist" });
 
-      const number = "PO-" + String(order.po_id).padStart(6, "0");
+      const number = helpers.poNumber(order.po_id);
       if (order.status !== "Pending") {
         return response.status(409).json({
           error: order.status === "For Approval"
@@ -1232,6 +1330,7 @@ function registerInventoryRoutes(app, deps) {
       viewItems.push({
         id: item.po_item_id,
         product_name: item.product_name, brand_name: item.brand_name, category_name: item.category_name,
+        description: item.description,
         quantity: item.quantity, unit_name: item.unit_name, unit_cost: item.unit_cost, line_cost: item.line_cost,
         original_unit_cost: item.original_unit_cost,
         pack_name: item.pack_name, pack_size: item.pack_size, pack_count: item.pack_count
@@ -1241,7 +1340,7 @@ function registerInventoryRoutes(app, deps) {
     return {
       order: {
         po_id: order.po_id,
-        number: "PO-" + String(order.po_id).padStart(6, "0"),
+        number: helpers.poNumber(order.po_id),
         status: order.status,
         order_date: order.confirmed_at || order.order_date,
         supplier_name: order.supplier_name,
@@ -1274,7 +1373,7 @@ function registerInventoryRoutes(app, deps) {
       const document = await orderForCode(request.params.code);
       if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
 
-      const number = "PO-" + String(document.order.po_id).padStart(6, "0");
+      const number = helpers.poNumber(document.order.po_id);
       const answer = await supplierAnswerLink(request, document.order);
       const pdf = await purchaseOrderPdf(Object.assign({}, document,
         answer ? { link: answer.link, qr: answer.qr } : {}));
@@ -1344,7 +1443,7 @@ function registerInventoryRoutes(app, deps) {
       const document = await orderForCode(request.params.code);
       if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
       const order = document.order;
-      const number = "PO-" + String(order.po_id).padStart(6, "0");
+      const number = helpers.poNumber(order.po_id);
 
       const changes = [];
       for (let i = 0; i < asked.length; i++) {
@@ -1459,10 +1558,10 @@ function registerInventoryRoutes(app, deps) {
       connection.release();
       connection = null;
 
-      let title = order.supplier_name + " accepted purchase order #" + order.po_id;
+      let title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id);
       let message = order.supplier_name + " accepted " + number + " and will ship it on " + dayText(shipDate) + ".";
       if (repriced.length > 0) {
-        title = order.supplier_name + " accepted purchase order #" + order.po_id + " with new prices";
+        title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id) + " with new prices";
         const priceChanges = [];
         for (let i = 0; i < repriced.length; i++) {
           const change = repriced[i];
@@ -1481,7 +1580,7 @@ function registerInventoryRoutes(app, deps) {
       }
       if (note) message += " Their note: " + note;
       if (!accept) {
-        title = order.supplier_name + " cannot fill purchase order #" + order.po_id;
+        title = order.supplier_name + " cannot fill purchase order " + helpers.poNumber(order.po_id);
         message = order.supplier_name + " declined " + number + ": " + note + " Order the materials elsewhere, " +
                   "or contact the supplier.";
       }
@@ -1569,7 +1668,7 @@ function registerInventoryRoutes(app, deps) {
       if (!state) return response.status(404).json({ error: "That purchase order does not exist" });
       if (state.status === "Pending" && state.supplier_response !== "Accepted") {
         return response.status(409).json({
-          error: "Purchase order #" + request.params.poId + " can only be referred once the supplier has accepted it."
+          error: "Purchase order " + helpers.poNumber(request.params.poId) + " can only be referred once the supplier has accepted it."
         });
       }
 
@@ -1793,7 +1892,7 @@ function registerInventoryRoutes(app, deps) {
       await writeAuditLog(
         request,
         action,
-        reportType + " #" + output.report_id + ": " + quantity + " unit(s), " + (where || "awaiting inspection"),
+        reportType + " " + helpers.returnCode(output.report_id) + ": " + quantity + " unit(s), " + (where || "awaiting inspection"),
         {
           report_id: output.report_id,
           product_id: Number(productId),
@@ -1945,8 +2044,8 @@ function registerInventoryRoutes(app, deps) {
       await writeAuditLog(
         request,
         reportType === "Refunded" ? "REFUND" : "RETURN",
-        reportType + " report for " + items.length + " item(s): #" + reportIds.join(", #") +
-          (poId ? ", purchase order #" + poId : ""),
+        reportType + " report for " + items.length + " item(s): " + reportIds.map(helpers.returnCode).join(", ") +
+          (poId ? ", purchase order " + helpers.poNumber(poId) : ""),
         {
           report_ids: reportIds,
           report_type: reportType,
@@ -1987,7 +2086,7 @@ function registerInventoryRoutes(app, deps) {
       }
 
       if (verdict) {
-        let details = "Report #" + request.params.reportId + " inspected: " + verdict;
+        let details = "Report " + helpers.returnCode(request.params.reportId) + " inspected: " + verdict;
         if (note) {
           details += " - " + note;
         }

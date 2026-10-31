@@ -121,7 +121,20 @@ function cardStoreContact(store) {
     return parts.join(' \u00b7 ');
 }
 
-function customerCardBackHtml(store, policies, editing) {
+// The customer portal sign-in printed at the bottom of the card's back. The password is only
+// known right after it is made, so otherwise a blank line is left to write it in.
+function cardPortalLoginHtml(login) {
+    if (!login) return '';
+    let password = '<span class="cc-login-blank"></span>';
+    if (login.password) password = '<strong>' + escapeHtml(login.password) + '</strong>';
+    return '<div class="cc-login">' +
+        '<span class="cc-login-title">Customer Portal</span>' +
+        '<span>User ID <strong>' + escapeHtml(login.userId) + '</strong></span>' +
+        '<span class="cc-login-password">Password ' + password + '</span>' +
+    '</div>';
+}
+
+function customerCardBackHtml(store, policies, editing, login) {
     let body = '';
     const kinds = ['credit', 'data-terms', 'refund', 'discount'];
     for (let k = 0; k < kinds.length; k++) {
@@ -140,6 +153,7 @@ function customerCardBackHtml(store, policies, editing) {
         '<div class="cc-back-body">' + body + '</div>' +
         '<div class="cc-back-foot">' +
             '<div class="cc-sign"><span class="cc-sign-line"></span><span>Cardholder\'s signature</span></div>' +
+            cardPortalLoginHtml(login) +
             '<div class="cc-return">This card belongs to ' + escapeHtml(store.name) + '. If found, please return it' +
                 (contact ? ': ' + escapeHtml(contact) : '.') + '</div>' +
         '</div>' +
@@ -160,7 +174,7 @@ function customerCardFrontHtml(data) {
             '<span class="cc-front-kind">Customer Card</span>' +
             '<span class="cc-front-name">' + escapeHtml(c.name) + '</span>' +
             '<div class="cc-front-facts">' +
-                '<div><span>Customer No.</span><strong>' + String(c.customer_id).padStart(6, '0') + '</strong></div>' +
+                '<div><span>Customer No.</span><strong>' + customerCode(c.customer_id) + '</strong></div>' +
                 '<div><span>Contact</span><strong>' + (c.phone ? escapeHtml(c.phone) : 'Not set') + '</strong></div>' +
             '</div>' +
         '</div>' +
@@ -182,7 +196,7 @@ function fitCustomerCard(card) {
 
 const CARD_SMALLEST_READABLE_PT = 4.5;
 
-function customerCardSheet(data) {
+function customerCardSheet(data, portalPassword) {
     const policies = {
         credit: data.terms.lines,
         'data-terms': data.policies ? data.policies.data_terms : [],
@@ -191,7 +205,8 @@ function customerCardSheet(data) {
     };
     const measure = document.createElement('div');
     measure.className = 'cc-measure';
-    measure.innerHTML = customerCardBackHtml(data.store, policies, null);
+    const login = { userId: customerCode(data.customer.customer_id), password: portalPassword || '' };
+    measure.innerHTML = customerCardBackHtml(data.store, policies, null, login);
     document.body.appendChild(measure);
     fitCustomerCard(measure.querySelector('.cc-card'));
     const back = measure.innerHTML;
@@ -270,7 +285,8 @@ async function printCreditTerms(customerId) {
     printCreditSheets(creditTermsPage(data));
 }
 
-async function printCustomerCard(customerId) {
+// portalPassword is passed only right after a portal password was made; it prints on the back.
+async function printCustomerCard(customerId, portalPassword) {
     if (typeof holdsFeature === 'function' && !holdsFeature('customer-card-print')) {
         notifyWarning('Printing a customer card is switched off for your role.', 'Not allowed');
         return;
@@ -278,5 +294,5 @@ async function printCustomerCard(customerId) {
     const data = await readCreditPrint(apiGetCustomerCard, customerId, 'customer card');
     if (!data) return;
 
-    printCreditSheets(customerCardSheet(data), '0');
+    printCreditSheets(customerCardSheet(data, portalPassword), '0');
 }

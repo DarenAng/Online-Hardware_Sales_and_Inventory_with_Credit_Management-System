@@ -809,7 +809,7 @@ table tbody tr:nth-child(even) { background: #f7f8f9; }
 table th.col-num { text-align: right; }
 table th.col-id  { width: 1%; white-space: nowrap; }
 table td.cell-num { font-size: 15.5px; }
-table .badge { font-size: 13.5px; padding: 4px 10px; }
+table .badge { font-size: 13.5px; padding: 4px 0; }
 
 table td:has(> .btn),
 table td:has(> .form-control),
@@ -917,24 +917,25 @@ kbd {
     font-size: 13px;
     font-weight: 600;
     letter-spacing: -0.005em;
-    padding: 3px 9px;
-    border-radius: var(--radius);
-    border: 1px solid transparent;
+    /* Statuses show as a coloured dot and text, with no box around them. */
+    padding: 3px 0;
     line-height: 1;
     text-align: center;
     white-space: nowrap;
 }
 .badge::before {
     content: '';
-    width: 5px; height: 5px; border-radius: 50%;
+    width: 7px; height: 7px; border-radius: 50%;
     background: currentColor;
     flex-shrink: 0;
 }
-.badge-success { background: var(--ok-dim);     color: var(--ok-ink);     border-color: rgba(14, 122, 95, 0.30); }
-.badge-danger  { background: var(--stop-dim);   color: var(--stop-hi);    border-color: rgba(158, 27, 50, 0.28); }
-.badge-warning { background: var(--signal-dim); color: var(--signal-ink); border-color: rgba(245, 179, 1, 0.5); }
-.badge-info    { background: rgba(29, 98, 176, 0.10); color: #1a4f94; border-color: rgba(29, 98, 176, 0.30); }
-.badge-neutral { background: rgba(20, 24, 29, 0.06); color: var(--steel); border-color: rgba(20, 24, 29, 0.14); }
+/* Two statuses side by side (e.g. Received + With balance) need a little space between them. */
+.badge + .badge { margin-left: 12px; }
+.badge-success { color: var(--ok-ink); }
+.badge-danger  { color: var(--stop-hi); }
+.badge-warning { color: var(--signal-ink); }
+.badge-info    { color: #1a4f94; }
+.badge-neutral { color: var(--steel); }
 
 .kpi-card {
     background: var(--surface);
@@ -1050,6 +1051,9 @@ html:has(.modal.open) { overflow: hidden; }
     font-family: var(--font-ui);
     font-weight: 700; font-size: 17px; letter-spacing: 0.01em;
 }
+
+/* The detail card avatar can hold a record code such as D0003, so it grows to fit. */
+#detail-avatar { width: auto; min-width: 44px; padding: 0 8px; }
 
 .modal-close {
     background: none; border: none;
@@ -2155,7 +2159,8 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
     thead { display: table-header-group; }
     tr { break-inside: avoid; page-break-inside: avoid; }
 
-    .badge, .pill { border: 1px solid #999; color: #000 !important; }
+    .badge { color: #000 !important; }
+    .pill { border: 1px solid #999; color: #000 !important; }
     .row-reveal { animation: none !important; opacity: 1 !important; }
     .kpi-card { border: 1px solid #ccc; break-inside: avoid; }
     .kpi-go { display: none; }
@@ -2317,6 +2322,17 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 .cc-back-foot { padding: 0.6mm 2.6mm 1.4mm; }
 .cc-sign { display: flex; align-items: flex-end; gap: 1.6mm; font-size: 5pt; color: #5b636d; }
 .cc-sign-line { flex: 1; height: 3.4mm; border-bottom: 0.25mm solid var(--cc-ink); }
+/* Customer portal sign-in at the bottom of the card's back. */
+.cc-login {
+    display: flex; align-items: baseline; gap: 2.4mm;
+    margin-top: 0.9mm; padding-top: 0.7mm;
+    border-top: 0.2mm solid #d9dde2;
+    font-size: 5pt; color: #5b636d; white-space: nowrap;
+}
+.cc-login strong { color: var(--cc-ink); font-size: 6pt; letter-spacing: 0.04em; }
+.cc-login-title { font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cc-accent); }
+.cc-login-password { display: flex; align-items: baseline; gap: 1mm; flex: 1; }
+.cc-login-blank { flex: 1; height: 2.6mm; border-bottom: 0.25mm solid var(--cc-ink); }
 .cc-return { margin-top: 0.8mm; font-size: 4.5pt; color: #5b636d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .cc-measure { position: fixed; left: -10000px; top: 0; visibility: hidden; }

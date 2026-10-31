@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Customer Portal &middot; Lucelyn Hardware</title>
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" media="print" onload="this.media='all'"
+          href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&amp;display=swap">
+    <link rel="stylesheet" href="../css/shared/icons.css">
+    <link rel="stylesheet" href="../css/shared/general-ui.css">
+    <link rel="stylesheet" href="../css/shared/responsive.css">
+    <link rel="stylesheet" href="css/customer-portal.css">
+</head>
+
+<body class="cp-body" hidden>
+    <div class="wrapper">
+        <aside class="sidebar" id="sidebar">
+            <a href="#" class="sidebar-brand" onclick="pickSection(event, 'credits')" title="Back to Credits">
+                <span class="brand-mark">LH</span>
+                <span class="brand-text">
+                    <span class="brand-name">Lucelyn Hardware</span>
+                    <span class="brand-sub">Customer Portal</span>
+                </span>
+            </a>
+            <ul class="sidebar-nav">
+                <li><a href="#" id="tab-credits" class="active" onclick="pickSection(event, 'credits')"><i class="icon icon-credit-card nav-icon" aria-hidden="true"></i>Credits</a></li>
+                <li><a href="#" id="tab-payments" onclick="pickSection(event, 'payments')"><i class="icon icon-history nav-icon" aria-hidden="true"></i>Payment History</a></li>
+                <li><a href="#" id="tab-loyalty" onclick="pickSection(event, 'loyalty')"><i class="icon icon-percent nav-icon" aria-hidden="true"></i>Loyalty Discount</a></li>
+            </ul>
+        </aside>
+
+        <div class="sidebar-shade" id="sidebar-shade" aria-hidden="true" onclick="toggleSidebar(false)"></div>
+
+        <main class="main-content">
+            <header class="topbar">
+                <div class="topbar-left">
+                    <button class="menu-toggle" type="button" onclick="toggleSidebar()"
+                            aria-controls="sidebar" aria-expanded="false" aria-label="Menu">&#9776;</button>
+                    <span class="topbar-title" id="cp-title">Credits</span>
+                </div>
+                <div class="cp-account">
+                    <button type="button" class="cp-account-btn" id="cp-account-btn" onclick="toggleAccountMenu(event)"
+                            aria-haspopup="true" aria-expanded="false">
+                        <i class="icon icon-users" aria-hidden="true"></i><span id="cp-name">Customer</span>
+                    </button>
+                    <div class="cp-menu" id="cp-menu" hidden>
+                        <button type="button" data-icon="users" onclick="openAccount()">Account</button>
+                        <button type="button" onclick="openChangePassword()">Change Password</button>
+                        <button type="button" onclick="handleLogout()">Log out</button>
+                    </div>
+                </div>
+            </header>
+
+            <div class="content-area">
+        <section class="card cp-panel" id="panel-account" hidden>
+            <div class="detail-grid" id="account-facts"></div>
+        </section>
+
+        <section class="card cp-panel" id="panel-credits">
+            <div class="table-responsive">
+                <table id="credits-table">
+                    <thead>
+                        <tr><th>OR Number</th><th>Date</th><th class="col-num">Total Due</th><th class="col-num">Paid</th><th class="col-num">Balance</th><th>Due Date</th><th>Status</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="pager is-single" id="credits-pager"></div>
+        </section>
+
+        <section class="card cp-panel" id="panel-payments" hidden>
+            <div class="table-responsive">
+                <table id="payments-table">
+                    <thead>
+                        <tr><th>OR Number</th><th>Date</th><th>Method</th><th>Reference</th><th class="col-num">Amount</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="pager is-single" id="payments-pager"></div>
+        </section>
+
+        <section class="card cp-panel" id="panel-loyalty" hidden>
+            <div class="detail-grid" id="loyalty-facts"></div>
+        </section>
+            </div>
+        </main>
+    </div>
+
+    <div class="modal" id="detail-modal" onclick="closeModalOnBackdrop(event, 'detail-modal')">
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar" id="detail-avatar">--</div>
+                    <div>
+                        <h3 id="detail-title">Record</h3>
+                        <span class="modal-role" id="detail-subtitle">Detail</span>
+                    </div>
+                </div>
+                <button type="button" class="modal-close" onclick="requestCloseModal('detail-modal')" aria-label="Close">&times;</button>
+            </div>
+
+            <div class="modal-top" id="detail-top" hidden></div>
+            <div class="modal-steps" id="detail-steps"></div>
+
+            <div class="modal-body">
+                <div id="detail-page"></div>
+            </div>
+
+            <div class="modal-foot" hidden></div>
+        </div>
+    </div>
+
+    <div class="modal" id="pay-modal" data-modal-locked>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar"><i class="icon icon-qr-code" aria-hidden="true"></i></div>
+                    <div>
+                        <h3>Pay by QR</h3>
+                        <span class="modal-role" id="pay-sub"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="pay-wallet">Pay with</label>
+                    <select id="pay-wallet" class="form-control">
+                        <option value="GCash">GCash</option>
+                        <option value="PayMaya">PayMaya</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="pay-amount">Amount</label>
+                    <input type="number" id="pay-amount" class="form-control amount-field" step="0.01" min="0.01">
+                    <span class="field-error" id="pay-error" hidden></span>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button type="button" class="btn btn-ghost" onclick="closeModal('pay-modal')">Cancel</button>
+                <button type="button" class="btn btn-accent" id="pay-make-btn" onclick="makeQrCode()">Make QR</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="qr-modal" data-modal-locked data-modal-scroll>
+        <div class="modal-box qr-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar"><i class="icon icon-qr-code" aria-hidden="true"></i></div>
+                    <div>
+                        <h3 id="qr-title">Pay by QR</h3>
+                        <span class="modal-role" id="qr-sub"></span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-body">
+                <p class="qr-amount" id="qr-amount"></p>
+                <p class="qr-status" id="qr-status" role="status" aria-live="polite"></p>
+                <p class="qr-clock" id="qr-clock">The code expires in <strong id="qr-countdown">10:00</strong></p>
+                <div class="qr-frame">
+                    <img id="qr-image" alt="QR code to scan" width="240" height="240">
+                </div>
+            </div>
+            <div class="modal-foot qr-foot">
+                <a class="btn btn-accent" id="qr-open-btn" href="#" target="_blank" rel="noopener" hidden>Open GCash</a>
+                <button type="button" class="btn btn-ghost" id="qr-cancel-btn" onclick="askCancelQr()">Cancel</button>
+                <button type="button" class="btn btn-ghost" id="qr-close-btn" onclick="closeQrModal()" hidden>Close</button>
+                <button type="button" class="btn btn-success" id="qr-new-btn" onclick="newQrCode()" hidden>New QR</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="password-modal" data-modal-locked>
+        <div class="modal-box">
+            <div class="modal-head">
+                <div class="modal-identity">
+                    <div class="avatar"><i class="icon icon-lock" aria-hidden="true"></i></div>
+                    <div>
+                        <h3>Change Password</h3>
+                    </div>
+                </div>
+            </div>
+            <form id="password-form" onsubmit="handleChangePassword(event)" autocomplete="off">
+                <div class="modal-body">
+                    <p class="login-alert" id="password-alert" role="alert" hidden></p>
+                    <div class="form-group">
+                        <label for="pw-current">Current password</label>
+                        <input type="password" id="pw-current" name="currentPassword" class="form-control"
+                               autocomplete="current-password" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="pw-new">New password</label>
+                        <input type="password" id="pw-new" name="newPassword" class="form-control"
+                               autocomplete="new-password" required>
+                        <ul class="password-rules" data-rules-for="pw-new"></ul>
+                    </div>
+                    <div class="form-group">
+                        <label for="pw-again">Type it again</label>
+                        <input type="password" id="pw-again" name="confirmPassword" class="form-control"
+                               autocomplete="new-password" required>
+                    </div>
+                    <div class="password-reveal">
+                        <button type="button" class="password-toggle" data-password-for="pw-current,pw-new,pw-again"
+                                aria-pressed="false">Show passwords</button>
+                    </div>
+                </div>
+                <div class="modal-foot">
+                    <button type="button" class="btn btn-ghost" onclick="closeModal('password-modal')">Cancel</button>
+                    <button type="submit" class="btn btn-accent" id="password-save-btn">Save the new password</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="../scripts/shared/icons.js"></script>
+    <script src="../scripts/shared/helpers.js"></script>
+    <script src="../scripts/shared/format.js"></script>
+    <script src="../scripts/shared/ui-kit.js"></script>
+    <script src="../scripts/shared/modals.js"></script>
+    <script src="../scripts/shared/detail-modal.js"></script>
+    <script src="../scripts/shared/tables.js"></script>
+    <script src="connections/customer-portal-connection.js"></script>
+    <script src="scripts/customer-portal.js"></script>
+</body>
+</html>

@@ -333,6 +333,26 @@ function apiUpdateDeliveryStatus(deliveryId, status, remarks) {
     });
 }
 
+function apiGetDeliveryDrivers(date) {
+    if (date) return getJson('/api/deliveries/drivers?date=' + encodeURIComponent(date));
+    return getJson('/api/deliveries/drivers');
+}
+
+function apiGetFailedDeliveries() {
+    return getJson('/api/deliveries/failed');
+}
+
+function apiGetDeliveryAttempts(deliveryId) {
+    return getJson('/api/deliveries/' + deliveryId + '/attempts');
+}
+
+function apiRescheduleDelivery(deliveryId, scheduledDate, driverStaffId) {
+    return sendJson('/api/deliveries/' + deliveryId + '/reschedule', 'POST', {
+        scheduledDate: scheduledDate,
+        driverStaffId: driverStaffId
+    });
+}
+
 function apiGetPurchaseOrders() {
     return getJson('/api/purchase-orders');
 }

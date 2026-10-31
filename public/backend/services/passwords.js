@@ -38,6 +38,25 @@ function generatePassword() {
   return password;
 }
 
+// Portal password for a customer: 8 letters and digits, no look-alikes (0 O 1 l I).
+const PORTAL_ALPHABET =
+  "ABCDEFGHJKLMNPQRSTUVWXYZ" +
+  "abcdefghijkmnpqrstuvwxyz" +
+  "23456789";
+const PORTAL_PASSWORD_LENGTH = 8;
+
+function generatePortalPassword() {
+  let password = "";
+  while (password.length < PORTAL_PASSWORD_LENGTH) {
+    password += PORTAL_ALPHABET[crypto.randomInt(PORTAL_ALPHABET.length)];
+  }
+
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
+    return generatePortalPassword();
+  }
+  return password;
+}
+
 async function verifyPassword(plainText, stored) {
   if (!isHashed(stored)) {
     return typeof stored === "string" && stored.length > 0 && stored === plainText;
@@ -57,5 +76,6 @@ module.exports = {
   hashPassword: hashPassword,
   isHashed: isHashed,
   generatePassword: generatePassword,
+  generatePortalPassword: generatePortalPassword,
   verifyPassword: verifyPassword
 };

@@ -10,7 +10,7 @@ function setQrPaymentResult(params) {
 
 function createQrPayment(params) {
   return callProcedure(
-    "CALL sp_create_qr_payment(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @qr_payment_id, @status_code, @message)",
+    "CALL sp_create_qr_payment(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @qr_payment_id, @status_code, @message)",
     params,
     ["qr_payment_id", "status_code", "message"]
   );

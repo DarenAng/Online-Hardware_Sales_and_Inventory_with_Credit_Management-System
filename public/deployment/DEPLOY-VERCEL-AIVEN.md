@@ -97,6 +97,7 @@ The code that makes this work: `vercel.json`, `api/index.js`,
    | `DB_SSL_CA` | the whole of `aiven-ca.pem` on **one line**, from `-----BEGIN CERTIFICATE-----` to `-----END CERTIFICATE-----` (Vercel's box takes one line; the app puts the line breaks back) |
    | `CRON_SECRET` | any long random text, such as the output of `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
    | `PAYMENT_PROVIDER` | `paymongo` (with `PAYMONGO_SECRET_KEY` = your `sk_test_...` key), or `sim` for the offline simulator |
+   | `PORTAL_TEST_PAYMENTS` | `1` lets customers make QR codes in the customer portal while the payment provider is the simulator or a PayMongo `sk_test_` key (test money, for a demo). Leave it unset in real use: then only live PayMongo keys can take portal payments |
    | `MAIL_USER`, `MAIL_PASSWORD` | optional: the Gmail account and App Password that send first passwords and reset codes. Without them the password is shown on screen. |
    | `NODEJS_HELPERS` | `0`, so Express reads request bodies itself (the PayMongo webhook checks the exact bytes it was sent) |
 

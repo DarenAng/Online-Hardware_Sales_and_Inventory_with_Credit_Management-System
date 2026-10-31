@@ -18,7 +18,8 @@ const NOTIF_TONE = {
     'Credit Request':   'info',
     'Late Penalty':     'danger',
     'New Product':      'warning',
-    'Void Request':     'danger'
+    'Void Request':     'danger',
+    'Customer Payment': 'success'
 };
 
 const NOTIF_ABOUT = {
@@ -32,7 +33,8 @@ const NOTIF_ABOUT = {
     'Credit Request':   ['Credit request',    'A cashier asked for a higher credit limit for a customer, and a manager has to decide it.'],
     'Late Penalty':     ['Late payment',      'A credit sale is another month past its due date still unpaid, and the month\'s late-payment penalty was added to it.'],
     'New Product':      ['New product',       'The inventory clerk added a product. It has no price yet, so the till cannot sell it until you set one.'],
-    'Void Request':     ['Void request',      'A cashier asked for a sale of today to be voided, or a manager decided such a request.']
+    'Void Request':     ['Void request',      'A cashier asked for a sale of today to be voided, or a manager decided such a request.'],
+    'Customer Payment': ['Customer payment',  'A customer paid a credit balance by QR code from the customer portal, and it was recorded on the sale.']
 };
 
 let notifTargets = {};
@@ -149,8 +151,8 @@ async function loadNotifications() {
             itemsHtml += '<button type="button" class="notif-item' + (n.is_read ? '' : ' unread') +
                 '" onclick="openNotification(' + n.notification_id + ')">' +
                 '<span class="notif-type">' + escapeHtml(n.notif_type) + '</span>' +
-                '<span class="notif-title">' + escapeHtml(n.title) + '</span>' +
-                '<span class="notif-msg">' + escapeHtml(n.message || '') + '</span>' +
+                '<span class="notif-title">' + escapeHtml(idsInText(n.title)) + '</span>' +
+                '<span class="notif-msg">' + escapeHtml(idsInText(n.message)) + '</span>' +
                 '<span class="notif-meta">' +
                 (n.is_read ? '' : '<span class="notif-new">New</span>') +
                 '<span class="notif-from">From <strong>' + escapeHtml(n.from_name || 'System') + '</strong>' +
@@ -250,8 +252,8 @@ function showQueuedCards() {
 
         showCard({
             tone: NOTIF_TONE[n.notif_type] || 'info',
-            title: n.title,
-            message: n.message || '',
+            title: idsInText(n.title),
+            message: idsInText(n.message),
             from: n.from_name || 'System',
             when: n.created_at,
             onOpen: function () {
@@ -292,7 +294,7 @@ function openNotification(id) {
         kind.textContent = about[0];
         kind.className = 'notif-modal-kind is-' + tone;
     }
-    title.textContent = n.title;
+    title.textContent = idsInText(n.title);
     sub.textContent = about[1] || n.notif_type;
     if (typeof initialsOf === 'function') {
         avatar.textContent = initialsOf(sender);
@@ -301,7 +303,7 @@ function openNotification(id) {
     }
     avatar.className = 'avatar avatar-' + tone;
 
-    const text = String(n.message || '').trim() || 'No further detail was given.';
+    const text = idsInText(n.message).trim() || 'No further detail was given.';
     const lines = text.split(/\n{2,}|\r?\n/);
     let paragraphs = '';
     for (let i = 0; i < lines.length; i++) {
@@ -358,8 +360,8 @@ async function markAllNotificationsRead() {
             return;
         }
 
+        // The emptied list is the confirmation; no pop-up message.
         await loadNotifications();
-        notifySuccess('Every alert for your role is marked as read.', 'Alerts cleared');
     } catch (error) {
         notifyOffline();
     }

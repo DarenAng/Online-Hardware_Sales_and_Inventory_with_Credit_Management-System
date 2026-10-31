@@ -1,4 +1,6 @@
 const managerProcedures = require("../database/procedures/manager-procedures");
+const issuePortalPassword = require("../portal-password").issuePortalPassword;
+const heldFeatures = require("../features").heldFeatures;
 const helpers = require("../helpers");
 const tidy = helpers.tidy;
 const buildFullAddress = helpers.buildFullAddress;
@@ -29,6 +31,27 @@ function registerManagerRoutes(app, deps) {
   const cleanPhone = deps.cleanPhone;
   const phoneComplaint = deps.phoneComplaint;
   const sendWorkbook = require("../services/spreadsheet").sendWorkbook;
+
+  // The store name and "who generated it" lines printed at the top of every Excel file.
+  async function excelHeader(request) {
+    let storeName = "Lucelyn Hardware";
+    let staffName = "";
+    try {
+      const shopResult = await db.query("SELECT store_name FROM store_settings WHERE setting_id = 1");
+      if (shopResult[0][0] && shopResult[0][0].store_name) storeName = shopResult[0][0].store_name;
+
+      const staffResult = await db.query("SELECT full_name FROM staff WHERE staff_id = ?", [request.actor.staffId]);
+      if (staffResult[0][0]) staffName = staffResult[0][0].full_name;
+    } catch (error) {
+      console.error("Excel header failed:", error.message);
+    }
+
+    let generatedBy = staffName || "Unknown";
+    if (request.actor.roleName) generatedBy += " (" + request.actor.roleName + ")";
+    generatedBy += " on " + new Date().toLocaleString("en-PH");
+
+    return { storeName: storeName, generatedBy: generatedBy };
+  }
 
   const REPORT_RANGES = {
     daily:     { days: 1,   label: "Today" },
@@ -214,7 +237,7 @@ function registerManagerRoutes(app, deps) {
 
       let cashier = null;
       if (cashierId !== null) {
-        cashier = { staff_id: cashierId, name: "Staff #" + cashierId };
+        cashier = { staff_id: cashierId, name: "Staff " + helpers.staffCode(cashierId) };
         for (let i = 0; i < cashierChoices.length; i++) {
           const choice = cashierChoices[i];
           if (choice.staff_id === cashierId) cashier.name = choice.full_name;
@@ -276,19 +299,19 @@ function registerManagerRoutes(app, deps) {
   const EXPORTS = {
     "payment-methods": {
       title: "payment-methods",
-      headers: ["Method", "Sales", "Billed", "Collected", "Outstanding"],
+      headers: ["Method", "Total Sales", "Collected", "Unpaid"],
       rows: function (data) {
         const rows = [];
         for (let i = 0; i < data.methods.length; i++) {
           const m = data.methods[i];
-          rows.push([m.payment_method, m.sale_count, m.billed, m.collected, m.outstanding]);
+          rows.push([m.payment_method, m.billed, m.collected, m.outstanding]);
         }
         return rows;
       }
     },
     "top-products": {
       title: "top-products",
-      headers: ["Product", "Unit", "Units Sold", "Revenue"],
+      headers: ["Material name", "Unit", "Units Sold", "Revenue"],
       rows: function (data) {
         const rows = [];
         for (let i = 0; i < data.products.length; i++) {
@@ -300,7 +323,7 @@ function registerManagerRoutes(app, deps) {
     },
     "staff-sales": {
       title: "staff-sales",
-      headers: ["Staff", "Sales", "Billed", "Collected"],
+      headers: ["Staff", "Transactions", "Total Sales", "Collected"],
       rows: function (data) {
         const rows = [];
         for (let i = 0; i < data.cashiers.length; i++) {
@@ -312,7 +335,7 @@ function registerManagerRoutes(app, deps) {
     },
     "income-series": {
       title: "income-over-time",
-      headers: ["Period", "Sales", "Billed", "Collected"],
+      headers: ["Period", "Transactions", "Total Sales", "Collected"],
       rows: function (data) {
         const rows = [];
         for (let i = 0; i < data.series.length; i++) {
@@ -332,9 +355,9 @@ function registerManagerRoutes(app, deps) {
         ["To", data.range.to],
         ["Cashier", data.cashier ? data.cashier.name : "All cashiers"],
         ["Transactions", data.totals.saleCount],
-        ["Billed", data.totals.billed],
+        ["Total Sales", data.totals.billed],
         ["Collected", data.totals.collected],
-        ["Outstanding", data.totals.outstanding]
+        ["Unpaid", data.totals.outstanding]
         ];
       }
     },
@@ -368,7 +391,7 @@ function registerManagerRoutes(app, deps) {
   };
 
   const EXPORT_MONEY = {
-    "payment-methods": [2, 3, 4],
+    "payment-methods": [1, 2, 3],
     "top-products": [3],
     "staff-sales": [2, 3],
     "income-series": [2, 3],
@@ -446,7 +469,6 @@ function registerManagerRoutes(app, deps) {
       cleaned.push({
         name: String(sheet.name || "Report").slice(0, 60),
         title: String(sheet.name || "Report").slice(0, 120),
-        subtitle: "Saved " + new Date().toLocaleString("en-PH"),
         headers: headers,
         rows: rows,
         money: money
@@ -463,7 +485,7 @@ function registerManagerRoutes(app, deps) {
       }
       await writeAuditLog(request, "EXPORT_REPORT", title + " saved as a spreadsheet (" + total + " rows)",
         { report: title, rows: total });
-      await sendWorkbook(response, title + "_" + stamp, cleaned);
+      await sendWorkbook(response, title + "_" + stamp, cleaned, await excelHeader(request));
     } catch (error) {
       console.error("Spreadsheet export failed:", error.message);
       if (!response.headersSent) response.status(500).json({ error: "Unable to build the spreadsheet" });
@@ -568,7 +590,8 @@ function registerManagerRoutes(app, deps) {
         plan.title + " exported for " + range.label + ", " + forWhom,
         { report: name, from: range.from, to: range.to, cashier_staff_id: data.cashier ? data.cashier.staff_id : null, rows: rows.length });
 
-      await sendWorkbook(response, plan.title + "_" + range.from + "_to_" + range.to, exportSheets(name, plan, data, range));
+      await sendWorkbook(response, plan.title + "_" + range.from + "_to_" + range.to, exportSheets(name, plan, data, range),
+        await excelHeader(request));
     } catch (error) {
       console.error("Report export failed:", error.message);
       response.status(500).json({ error: "Unable to build that export" });
@@ -734,7 +757,7 @@ function registerManagerRoutes(app, deps) {
       "FROM returned_items ri JOIN products pr ON pr.product_id = ri.product_id " +
       "UNION ALL " +
       "SELECT 'STOCK_ADJUST', sa.created_at, sa.adjusted_by_staff_id, sa.adjustment_id, " +
-      "CONCAT(pr.product_name, ': ', sa.adjustment_type, ' ', " + qty("sa.quantity_before") + ", ' to ', " +
+      "CONCAT(pr.product_name, ': ', IF(sa.adjustment_type = 'Recount', 'Manual count', sa.adjustment_type), ' ', " + qty("sa.quantity_before") + ", ' to ', " +
       qty("sa.quantity_after") + ", " +
       "IF(sa.unit_name IS NULL OR sa.unit_name = '', '', CONCAT(' ', sa.unit_name)), " +
       "IF(sa.reason IS NULL OR sa.reason = '', '', CONCAT(', ', sa.reason))) " +
@@ -882,7 +905,11 @@ function registerManagerRoutes(app, deps) {
       const rowsResult = await db.query(
         "SELECT v.*, " +
         "(SELECT COUNT(*) FROM credit_requests r " +
-        "WHERE r.customer_id = v.customer_id AND r.status = 'Pending') AS pending_requests " +
+        "WHERE r.customer_id = v.customer_id AND r.status = 'Pending') AS pending_requests, " +
+        "(SELECT r.request_id FROM credit_requests r WHERE r.customer_id = v.customer_id " +
+        "ORDER BY r.created_at DESC, r.request_id DESC LIMIT 1) AS latest_request_id, " +
+        "(SELECT r.status FROM credit_requests r WHERE r.customer_id = v.customer_id " +
+        "ORDER BY r.created_at DESC, r.request_id DESC LIMIT 1) AS latest_request_status " +
         "FROM vw_customer_credit v " +
         filter +
         " ORDER BY v.current_credit DESC, v.customer_name",
@@ -1474,7 +1501,7 @@ function registerManagerRoutes(app, deps) {
       }
 
       await writeAuditLog(request, "CREDIT_REQUEST",
-        "Extension to " + limit + " asked for on customer #" + customerId,
+        "Extension to " + limit + " asked for on customer " + helpers.customerCode(customerId),
         { customer_id: Number(customerId), requested_limit: limit, reason: why });
 
       response.json({ message: output.message, requestId: output.request_id });
@@ -1512,7 +1539,7 @@ function registerManagerRoutes(app, deps) {
       await writeAuditLog(
         request,
         action,
-        "Request #" + request.params.requestId + " " + word,
+        "Request " + helpers.creditRequestCode(request.params.requestId) + " " + word,
         { request_id: Number(request.params.requestId), approved: approve, note: note || null }
       );
 
@@ -1660,10 +1687,31 @@ function registerManagerRoutes(app, deps) {
             phone: phoneText || null, address: addressLine });
       }
 
+      // A new customer gets a customer portal password, shown once to hand over, but only when the
+      // person adding them holds the "Issue Portal Password" screen in Access Control.
+      let portalPassword = null;
+      if (created) {
+        try {
+          const held = await heldFeatures(request.actor.roleName);
+          if (held.held["customer-portal-password"] === true) {
+            portalPassword = await issuePortalPassword(Number(output.customer_id));
+          }
+          if (portalPassword) {
+            await writeAuditLog(request, "ISSUE_PORTAL_PASSWORD",
+              "Portal password issued for new customer " + fullName + " (customer " + helpers.customerCode(output.customer_id) + ")",
+              { customer_id: Number(output.customer_id), issued_by_staff_id: getActorId(request) });
+          }
+        } catch (error) {
+          console.error("Issuing the portal password of a new customer failed:", error.message);
+        }
+      }
+
+      if (portalPassword) response.set("Cache-Control", "no-store");
       response.status(output.status_code).json({
         message: created ? fullName + " was added to Customers Record." : output.message,
         customerId: output.customer_id,
-        created: created
+        created: created,
+        portalPassword: portalPassword
       });
     } catch (error) {
       console.error("Create customer failed:", error.message);
@@ -1704,7 +1752,7 @@ function registerManagerRoutes(app, deps) {
         "AND s.sale_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY) " +
         "GROUP BY si.product_id " +
         ") " +
-        "SELECT p.product_id, p.product_name, p.price, p.last_cost, p.reorder_point, p.status, " +
+        "SELECT p.product_id, p.product_name, p.description, p.price, p.last_cost, p.reorder_point, p.status, " +
         "p.lead_time_days, p.safety_stock, " +
         "COALESCE(i.quantity_in_stock, 0) AS quantity_in_stock, " +
         "i.last_updated, " +

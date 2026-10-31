@@ -27,6 +27,17 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/password-reset\/request$/,         PUBLIC],
   ["POST",  /^\/api\/password-reset\/verify$/,          PUBLIC],
   ["POST",  /^\/api\/password-reset\/confirm$/,         PUBLIC],
+
+  // Customer portal: PUBLIC to the staff rules. Each route except sign-in checks the customer session itself.
+  ["POST",  /^\/api\/portal\/login$/,                    PUBLIC],
+  ["POST",  /^\/api\/portal\/logout$/,                   PUBLIC],
+  ["GET",   /^\/api\/portal\/(me|account|credits|payments|loyalty)$/, PUBLIC],
+  ["POST",  /^\/api\/portal\/password$/,                 PUBLIC],
+  ["POST",  /^\/api\/portal\/qr-payments$/,              PUBLIC],
+  ["GET",   /^\/api\/portal\/qr-payments\/\d+$/,         PUBLIC],
+  ["POST",  /^\/api\/portal\/qr-payments\/\d+\/cancel$/, PUBLIC],
+
+
   ["POST",  /^\/api\/logout$/,                         SIGNED_IN],
   ["POST",  /^\/api\/change-password$/,                SIGNED_IN],
   ["POST",  /^\/api\/heartbeat$/,                      SIGNED_IN],
@@ -100,7 +111,10 @@ const ACCESS_RULES = [
 
   ["POST",  /^\/api\/deliveries$/,                     [CASHIER]],
   ["GET",   /^\/api\/deliveries$/,                     [CASHIER, MANAGER, DRIVER]],
-  ["GET",   /^\/api\/deliveries\/drivers$/,            [CASHIER, MANAGER]],
+  ["GET",   /^\/api\/deliveries\/drivers$/,            [CASHIER, MANAGER, CLERK]],
+  ["GET",   /^\/api\/deliveries\/failed$/,             [MANAGER, CLERK]],
+  ["GET",   /^\/api\/deliveries\/\d+\/attempts$/,      [MANAGER, CLERK]],
+  ["POST",  /^\/api\/deliveries\/\d+\/reschedule$/,    [MANAGER, CLERK]],
   ["GET",   /^\/api\/deliveries\/\d+\/items$/,         [CASHIER, MANAGER, DRIVER, CLERK]],
   ["PATCH", /^\/api\/deliveries\/\d+\/status$/,        [DRIVER]],
   ["GET",   /^\/api\/delivery\/list$/,                 [DRIVER]],
@@ -114,6 +128,7 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/inventory\/products\/\d+\/units$/,       [CLERK]],
   ["DELETE", /^\/api\/inventory\/products\/\d+\/units\/\d+$/, [CLERK]],
   ["PUT",   /^\/api\/inventory\/products\/\d+\/pack$/,        [CLERK]],
+  ["PUT",   /^\/api\/inventory\/products\/\d+\/description$/, [CLERK]],
   ["GET",   /^\/api\/inventory\/adjustments$/,         [CLERK]],
   ["POST",  /^\/api\/inventory\/adjust$/,              [CLERK]],
 
@@ -165,6 +180,7 @@ const ACCESS_RULES = [
   ["PUT",   /^\/api\/loyalty\/policy$/,                [MANAGER]],
 
   ["POST",  /^\/api\/customers$/,                      [MANAGER, CASHIER]],
+  ["POST",  /^\/api\/customers\/\d+\/portal-password$/, [CASHIER]],
 
   ["GET",   /^\/api\/records\/\w+$/,                   [MANAGER, CASHIER, CLERK]],
   ["GET",   /^\/api\/archives$/,                       MANAGEMENT],
@@ -239,6 +255,7 @@ async function accessHook(request, response, next) {
   const isWrite = request.method !== "GET" && request.method !== "HEAD";
   const isSignIn = request.path === "/api/login" || request.path === "/api/logout" ||
                    request.path === "/api/heartbeat" ||
+                   request.path === "/api/portal/login" || request.path === "/api/portal/logout" ||
                    request.path.startsWith("/api/password-reset/");
 
   if (isWrite && !isSignIn && (await proceduresAreMissing())) {

@@ -1,9 +1,11 @@
+const helpers = require("../helpers");
 const deliveryProcedures = require("../database/procedures/delivery-procedures");
 const cleanPaymentDetails = require("../payment-details").cleanPaymentDetails;
 
 function registerDeliveryRoutes(app, deps) {
   const db = deps.db;
   const getActorId = deps.getActorId;
+  const writeAuditLog = deps.writeAuditLog;
   const publishChange = deps.publishChange;
   const isDateText = deps.isDateText;
   const DELIVERY_CONTACT_SQL = deps.DELIVERY_CONTACT_SQL;
@@ -16,6 +18,10 @@ function registerDeliveryRoutes(app, deps) {
     "\n    WHEN GREATEST(s.amount_due - s.amount_paid, 0) > 0 THEN 'Pending Payment'" +
     "\n    ELSE 'Completed'" +
     "\n  END";
+
+  // How many times the driver has tried this delivery (delivered or failed)
+  const ATTEMPT_COUNT_SQL =
+    "(SELECT COUNT(*) FROM delivery_attempts da WHERE da.delivery_id = d.delivery_id)";
 
   app.get("/api/deliveries", async function (request, response) {
     const state = String(request.query.state || "all");
@@ -36,6 +42,7 @@ function registerDeliveryRoutes(app, deps) {
         DELIVERY_CONTACT_SQL + " AS customer_name, " +
         DELIVERY_PHONE_SQL + " AS customer_phone, " +
         "COALESCE(st.full_name, 'Unassigned') AS driver_name, " +
+        ATTEMPT_COUNT_SQL + " AS attempt_count, " +
         "s.final_amount, s.amount_due, s.amount_paid, s.payment_method, s.payment_status, " +
         "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
         FULFILMENT_SQL + " AS fulfilment_state " +
@@ -53,6 +60,139 @@ function registerDeliveryRoutes(app, deps) {
     } catch (error) {
       console.error("Deliveries failed:", error.message);
       response.status(500).json({ error: error.message });
+    }
+  });
+
+  // Failed deliveries that are waiting for a new date (manager and inventory clerk)
+  app.get("/api/deliveries/failed", async function (request, response) {
+    try {
+      const result = await db.query(
+        "SELECT d.delivery_id, d.sale_id, d.status, d.delivery_address, d.remarks, d.cashier_remarks, " +
+        "d.scheduled_date, d.created_date, d.delivered_at, d.updated_at, d.delivery_staff_id, " +
+        DELIVERY_CONTACT_SQL + " AS customer_name, " +
+        DELIVERY_PHONE_SQL + " AS customer_phone, " +
+        "COALESCE(st.full_name, 'Unassigned') AS driver_name, " +
+        ATTEMPT_COUNT_SQL + " AS attempt_count, " +
+        "COALESCE((SELECT MAX(da.attempted_at) FROM delivery_attempts da " +
+        "WHERE da.delivery_id = d.delivery_id AND da.outcome = 'Failed'), d.updated_at) AS failed_on, " +
+        "s.final_amount, s.amount_due, s.amount_paid, s.payment_method, s.payment_status, " +
+        "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due " +
+        "FROM deliveries d " +
+        "JOIN sales s ON s.sale_id = d.sale_id " +
+        "LEFT JOIN customers c ON c.customer_id = s.customer_id " +
+        "LEFT JOIN staff st ON st.staff_id = d.delivery_staff_id " +
+        "WHERE d.is_archived = FALSE AND d.status = 'Failed' " +
+        "ORDER BY failed_on DESC"
+      );
+      const rows = result[0];
+      response.json(rows);
+    } catch (error) {
+      console.error("Failed deliveries failed:", error.message);
+      response.status(500).json({ error: "Unable to read the failed deliveries" });
+    }
+  });
+
+  app.get("/api/deliveries/:deliveryId/attempts", async function (request, response) {
+    try {
+      const result = await db.query(
+        "SELECT da.attempt_no, da.outcome, da.reason, da.attempted_at, da.scheduled_date, " +
+        "COALESCE(st.full_name, 'Unassigned') AS driver_name " +
+        "FROM delivery_attempts da " +
+        "LEFT JOIN staff st ON st.staff_id = da.staff_id " +
+        "WHERE da.delivery_id = ? " +
+        "ORDER BY da.attempt_no",
+        [request.params.deliveryId]
+      );
+      const rows = result[0];
+      response.json(rows);
+    } catch (error) {
+      console.error("Delivery attempts failed:", error.message);
+      response.status(500).json({ error: "Unable to read the delivery attempts" });
+    }
+  });
+
+  // Give a failed delivery a new date and driver, and put it back to Pending
+  app.post("/api/deliveries/:deliveryId/reschedule", async function (request, response) {
+    const deliveryId = Number(request.params.deliveryId);
+    const newDate = String(request.body.scheduledDate || "").trim();
+    const driverId = request.body.driverStaffId ? Number(request.body.driverStaffId) : null;
+    if (driverId !== null && !Number.isInteger(driverId)) {
+      return response.status(400).json({ error: "That driver is not valid." });
+    }
+
+    const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?$/.exec(newDate);
+    const newTime = match ? new Date(match[1] + "T" + match[2]) : null;
+    if (!match || isNaN(newTime.getTime())) {
+      return response.status(400).json({ error: "Pick the new date and time of the delivery." });
+    }
+    const scheduled = match[1] + " " + match[2] + (match[3] || ":00");
+    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
+    if (newTime < oneMinuteAgo) {
+      return response.status(400).json({ error: "The new date cannot be in the past." });
+    }
+
+    try {
+      const rowsResult = await db.query(
+        "SELECT status FROM deliveries WHERE delivery_id = ? AND is_archived = FALSE",
+        [deliveryId]
+      );
+      const rows = rowsResult[0];
+      if (rows.length === 0) {
+        return response.status(404).json({ error: "Delivery not found" });
+      }
+      if (rows[0].status !== "Failed") {
+        return response.status(409).json({ error: "Only a failed delivery can be given a new date." });
+      }
+
+      let driverName = "no driver yet";
+      if (driverId) {
+        const driversResult = await db.query(
+          "SELECT st.full_name FROM staff st " +
+          "JOIN roles r ON r.role_id = st.role_id " +
+          "WHERE st.staff_id = ? AND r.role_name = 'Delivery Personnel' " +
+          "AND st.is_active = TRUE AND st.archived_at IS NULL",
+          [driverId]
+        );
+        if (driversResult[0].length === 0) {
+          return response.status(400).json({ error: "That driver is not an active delivery staff member." });
+        }
+        driverName = driversResult[0][0].full_name;
+      }
+
+      const updateResult = await db.query(
+        "UPDATE deliveries SET status = 'Pending', scheduled_date = ?, delivery_staff_id = ? " +
+        "WHERE delivery_id = ? AND status = 'Failed'",
+        [scheduled, driverId, deliveryId]
+      );
+      if (updateResult[0].affectedRows === 0) {
+        return response.status(409).json({ error: "This delivery is no longer failed." });
+      }
+
+      await writeAuditLog(request, "UPDATE_DELIVERY_SCHEDULE",
+        "Delivery " + helpers.deliveryCode(deliveryId) + " given a new date, " + scheduled + ", with " + driverName,
+        { delivery_id: deliveryId });
+
+      let who = ", unassigned.";
+      if (driverId) who = ", with " + driverName + ".";
+      try {
+        await db.query(
+          "INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id) " +
+          "SELECT role_id, 'Delivery', ?, ?, ? FROM roles WHERE role_name = 'Delivery Personnel'",
+          ["Delivery " + helpers.deliveryCode(deliveryId) + " rescheduled",
+           "Delivery " + helpers.deliveryCode(deliveryId) + " is back on the list for " + scheduled.slice(0, 16) + who,
+           getActorId(request)]
+        );
+      } catch (error) {
+        console.error("The delivery was rescheduled, but telling the drivers failed:", error.message);
+      }
+
+      const origin = request.headers["x-client-id"] || null;
+      publishChange("notifications", "delivery rescheduled " + deliveryId, origin);
+
+      response.json({ message: "Delivery " + helpers.deliveryCode(deliveryId) + " is Pending again, for " + scheduled.slice(0, 16) + "." });
+    } catch (error) {
+      console.error("Reschedule failed:", error.message);
+      response.status(500).json({ error: "Unable to reschedule the delivery" });
     }
   });
 
@@ -96,6 +236,7 @@ function registerDeliveryRoutes(app, deps) {
         DELIVERY_CONTACT_SQL + " AS customer_name, " +
         DELIVERY_PHONE_SQL + " AS customer_phone, " +
         "COALESCE(st.full_name, 'Unassigned') AS driver_name, " +
+        ATTEMPT_COUNT_SQL + " AS attempt_count, " +
         "s.final_amount, s.amount_due, s.amount_paid, s.payment_method, s.payment_status, " +
         "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due " +
         "FROM deliveries d " +
@@ -142,7 +283,7 @@ function registerDeliveryRoutes(app, deps) {
         return response.status(409).json({ error: "Another driver has already taken this delivery." });
       }
 
-      response.json({ message: "Delivery #" + deliveryId + " is now yours." });
+      response.json({ message: "Delivery " + helpers.deliveryCode(deliveryId) + " is now yours." });
     } catch (error) {
       console.error("Delivery claim failed:", error.message);
       response.status(500).json({ error: "Unable to take the delivery" });
@@ -250,10 +391,10 @@ function registerDeliveryRoutes(app, deps) {
         let driverName = "the driver";
         if (sale && sale.driver_name) driverName = sale.driver_name;
 
-        const title = "Payment collected on delivery #" + deliveryId + ": " + pesoText(amount) +
+        const title = "Payment collected on delivery " + helpers.deliveryCode(deliveryId) + ": " + pesoText(amount) +
                       " by " + driverName;
         let message = paymentMethod + " payment of " + pesoText(amount) +
-                      " on OR-" + String(saleId).padStart(6, "0") + ".";
+                      " on " + helpers.orNumber(saleId) + ".";
         if (referenceNo !== "") {
           message += " Reference " + referenceNo + ".";
         }

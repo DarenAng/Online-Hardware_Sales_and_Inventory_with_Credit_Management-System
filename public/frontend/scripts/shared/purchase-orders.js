@@ -141,7 +141,7 @@ function matBox(id) { return document.getElementById(id + '-box'); }
 function materialPickerHtml(id, label) {
     return '' +
         '<div class="form-group">' +
-            '<label for="' + id + '-box">' + escapeHtml(label || 'Material') + '</label>' +
+            '<label for="' + id + '-box">' + escapeHtml(label || 'Material name') + '</label>' +
             '<div class="suggest-wrap mat-wrap">' +
                 '<input type="text" class="form-control" id="' + id + '-box" autocomplete="off" ' +
                        'placeholder="Pick a material, or type a new name" ' +
@@ -659,8 +659,12 @@ function renderMatDesc(id) {
         }
 
         box.hidden = false;
-        box.innerHTML = strip([product.brand_name, product.category_name || 'No category',
+        box.innerHTML = strip([product.brand_name, 'Category: ' + (product.category_name || 'No category'),
             'counted in ' + unit, pack]);
+        if (product.description) {
+            box.innerHTML += '<span class="mat-desc-line mat-desc-full">' +
+                escapeHtml(product.description) + '</span>';
+        }
         return;
     }
 
@@ -972,6 +976,7 @@ function renderCriticalStocks() {
         const p = critical[i];
         const out = p.stock_status === 'Out of Stock';
         const unit = p.unit_name || '';
+        const order = criticalOrderLine(p);
         html += '<li class="po-roster-item' + (onOrder[p.product_id] ? ' is-active' : '') + '" role="button" tabindex="0" ' +
                 'title="' + (onOrder[p.product_id] ? 'On this order' : 'Add it to the order') + '" ' +
                 'onclick="addCriticalToOrder(' + p.product_id + ')" ' +
@@ -981,8 +986,11 @@ function renderCriticalStocks() {
                 '<span class="badge ' + (out ? 'badge-danger' : 'badge-warning') + '">' +
                     escapeHtml(qtyText(Number(p.quantity_in_stock) || 0, unit)) + '</span>' +
             '</span>' +
-            '<span class="po-roster-sub">' + escapeHtml(p.supplier_name || 'No supplier on file') +
-                ' · reorder at ' + (Number(p.reorder_point) || 0) + '</span>' +
+            '<span class="po-roster-sub">' +
+                escapeHtml([p.category_name || 'No category', p.supplier_name || 'No supplier on file'].join(' · ')) + '</span>' +
+            '<span class="po-roster-sub">Reorder point ' +
+                escapeHtml(qtyText(Number(p.reorder_point) || 0, unit)) + ' · Order ' +
+                escapeHtml(qtyText(order.quantity, order.unit)) + '</span>' +
         '</li>';
     }
     list.innerHTML = html;
@@ -1004,6 +1012,15 @@ function criticalOrderQuantity(p) {
         quantity = Math.ceil((Number(p.reorder_point) || 0) - (Number(p.quantity_in_stock) || 0)) + 1;
     }
     return Math.max(1, quantity);
+}
+
+// What the order line gets: packs when the material is delivered by the pack, else units
+function criticalOrderLine(p) {
+    const quantity = criticalOrderQuantity(p);
+    if (p.pack_name && Number(p.pack_size) > 0) {
+        return { quantity: Math.max(1, Math.ceil(quantity / Number(p.pack_size))), unit: p.pack_name };
+    }
+    return { quantity: quantity, unit: p.unit_name || '' };
 }
 
 function addCriticalToOrder(productId) {
@@ -1055,7 +1072,7 @@ function addCriticalToOrder(productId) {
     const index = row.id.replace('po-line-', '');
     const qty = document.getElementById('po-qty-' + index);
     const pack = poLineIn(row);
-    if (qty) qty.value = pack ? Math.max(1, Math.ceil(criticalOrderQuantity(p) / pack.size)) : criticalOrderQuantity(p);
+    if (qty) qty.value = pack ? criticalOrderLine(p).quantity : criticalOrderQuantity(p);
     renderPoTotals();
 
     row.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1126,7 +1143,7 @@ function addPurchaseLine(fromButton) {
                     'onclick="removePurchaseLine(' + index + ')" aria-label="Remove this line">Remove</button>' +
         '</div>' +
         '<div class="po-line-fields">' +
-            materialPickerHtml(pickerId, 'Material') +
+            materialPickerHtml(pickerId, 'Material name') +
             '<div class="form-group"><label for="po-qty-' + index + '" id="po-qty-label-' + index + '">Quantity</label>' +
             '<input type="number" id="po-qty-' + index + '" class="form-control po-qty" min="1" value="1" ' +
                    'oninput="renderPoTotals()">' +
@@ -1413,8 +1430,13 @@ const PO_STAGE_TONES = {
 
 function poStatusBadge(po) {
     const stage = poStage(po);
-    return '<span class="badge ' + (PO_STAGE_TONES[stage] || 'badge-neutral') + '">' +
+    let badge = '<span class="badge ' + (PO_STAGE_TONES[stage] || 'badge-neutral') + '">' +
         escapeHtml(poStatusWord(stage)) + '</span>';
+    // A received order that came in short still has a balance
+    if (po.status === 'Received' && Number(po.balance_units) > 0) {
+        badge += ' <span class="badge badge-warning">With balance</span>';
+    }
+    return badge;
 }
 
 function poNeedsMe(po) {
@@ -1468,7 +1490,7 @@ function buildPurchaseOrderPanel() {
         },
 
         match: function (po, query) {
-            return prefixMatch([po.supplier_name, po.po_id, '#' + po.po_id], query);
+            return prefixMatch([po.supplier_name, po.po_id, '#' + po.po_id, poNumber(po.po_id)], query);
         },
         filter: function (po, filters) {
             return filters.status === 'all' || poStage(po) === filters.status;
@@ -1482,7 +1504,7 @@ function buildPurchaseOrderPanel() {
                 'style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'title="' + poRowTitle(po) + '" ' +
                 'onclick="openPurchaseOrderDetail(' + po.po_id + ')">' +
-            '<td class="cell-id">#' + po.po_id + '</td>' +
+            '<td class="cell-id">' + poNumber(po.po_id) + '</td>' +
             '<td class="cell-name">' + escapeHtml(po.supplier_name) + '</td>' +
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
             (poSetup.showLines ? '<td class="cell-num">' + po.line_count + '</td>' : '') +
@@ -1959,7 +1981,7 @@ function buildPurchaseTotalsPanel() {
         renderRow: function (po, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'title="Open this order" onclick="openPurchaseOrderDetail(' + po.po_id + ', true)">' +
-            '<td class="cell-id">#' + po.po_id + '</td>' +
+            '<td class="cell-id">' + poNumber(po.po_id) + '</td>' +
             '<td class="cell-name">' + escapeHtml(po.supplier_name) + '</td>' +
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
             '<td class="cell-num">' + peso(poOrderValue(po)) + '</td></tr>';
@@ -2046,7 +2068,7 @@ function printPurchaseOrderNow() {
     document.head.appendChild(style);
 
     const title = document.title;
-    if (poDocument && poDocument.order) document.title = 'Purchase Order #' + poDocument.order.po_id;
+    if (poDocument && poDocument.order) document.title = 'Purchase Order ' + poNumber(poDocument.order.po_id);
 
     let finished = false;
     const done = function () {
@@ -2063,10 +2085,10 @@ function printPurchaseOrderNow() {
 }
 
 async function openPurchaseOrderDocument(poId) {
-    poShowPanel('panel-po-doc', 'Purchase Order #' + poId);
+    poShowPanel('panel-po-doc', 'Purchase Order ' + poNumber(poId));
 
     const box = document.getElementById('po-doc');
-    if (box) box.innerHTML = '<p class="panel-sub">Opening order #' + poId + '.</p>';
+    if (box) box.innerHTML = '<p class="panel-sub">Opening order ' + poNumber(poId) + '.</p>';
 
     try {
         poDocument = await apiGetPurchaseOrderDocument(poId);
@@ -2099,11 +2121,13 @@ function renderPurchaseOrderDocument() {
     for (let index = 0; index < items.length; index++) {
         const item = items[index];
         lines += '<tr>' +
+            '<td class="cell-id">' + materialCode(item.product_id) + '</td>' +
             '<td class="num">' + (index + 1) + '</td>' +
             '<td><strong>' + escapeHtml(item.product_name) + '</strong>' +
                 (item.brand_name ? '<br><span class="po-doc-party-line">' +
                     escapeHtml(item.brand_name) + '</span>' : '') + '</td>' +
             '<td>' + escapeHtml(item.category_name || '--') + '</td>' +
+            '<td>' + escapeHtml(item.description || '--') + '</td>' +
             '<td class="num">' + escapeHtml(poQuantityText(item)) + '</td>' +
             (Number(item.unit_cost) > 0
                 ? '<td class="num">' + peso(poPackPrice(item)) +
@@ -2138,7 +2162,7 @@ function renderPurchaseOrderDocument() {
                     '</div>' +
                     '<div class="po-doc-kind">' +
                         '<div class="po-doc-kind-title">Purchase Order</div>' +
-                        '<div class="po-doc-ref">#' + order.po_id + '</div>' +
+                        '<div class="po-doc-ref">' + poNumber(order.po_id) + '</div>' +
                         '<div class="po-doc-date">Raised ' + escapeHtml(ordered) + '</div>' +
                         '<div class="po-doc-date">' + escapeHtml(poStatusWord(poStage(order))) + '</div>' +
                     '</div>' +
@@ -2167,14 +2191,14 @@ function renderPurchaseOrderDocument() {
 
                 '<table>' +
                     '<thead><tr>' +
-                        '<th class="num" style="width:44px">No</th><th>Material</th><th>Category</th>' +
+                        '<th style="width:80px">Material ID</th><th class="num" style="width:44px">No</th><th>Material name</th><th>Category</th><th>Description</th>' +
                         '<th class="num" style="width:150px">Quantity</th>' +
                         '<th class="num" style="width:110px">Unit price</th>' +
                         '<th class="num" style="width:120px">Amount</th>' +
                     '</tr></thead>' +
-                    '<tbody>' + (lines || '<tr><td colspan="6">No lines on this order.</td></tr>') + '</tbody>' +
+                    '<tbody>' + (lines || '<tr><td colspan="8">No lines on this order.</td></tr>') + '</tbody>' +
                     '<tfoot><tr>' +
-                        '<td colspan="3">' + items.length + ' line(s)' +
+                        '<td colspan="5">' + items.length + ' line(s)' +
                             (goods > 0 ? ' &middot; any discount is settled on the invoice' : '') + '</td>' +
                         '<td class="num">' + units + '</td>' +
                         '<td></td>' +
@@ -2219,7 +2243,7 @@ async function openReceiveOrder(poId) {
     poShowPanel('panel-po-receive', 'Receive Delivery');
 
     const box = document.getElementById('recv-lines');
-    if (box) box.innerHTML = '<p class="panel-sub">Opening order #' + poId + '.</p>';
+    if (box) box.innerHTML = '<p class="panel-sub">Opening order ' + poNumber(poId) + '.</p>';
 
     recvExtraCount = 0;
 
@@ -2240,7 +2264,7 @@ function renderReceiveSheet() {
 
     const heading = document.getElementById('recv-heading');
     if (heading) {
-        heading.textContent = 'Purchase Order #' + poReceiving.poId +
+        heading.textContent = 'Purchase Order ' + poNumber(poReceiving.poId) +
             (poReceiving.order ? ' · ' + poReceiving.order.supplier_name : '');
     }
 
@@ -2432,8 +2456,8 @@ async function submitReceiveOrder() {
     }
 
     const yes = await askConfirm(
-        'The figures on this sheet go straight onto the shelf, and purchase order #' +
-        poReceiving.poId + ' closes.' +
+        'The figures on this sheet go straight onto the shelf, and purchase order ' +
+        poNumber(poReceiving.poId) + ' closes.' +
         (short > 0 ? ' ' + short + ' line(s) came up short and the order will be corrected to say so.' : ''),
         { title: 'Receive this delivery?', eyebrow: 'Purchase Orders', confirmLabel: 'Receive it' });
 
@@ -2504,6 +2528,18 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 ' <span class="muted">before any invoice discount</span>');
     }
 
+    // A received order shows what was ordered, what arrived and what is still owed
+    const showBalance = po.status === 'Received' && items.length > 0 && items[0].received_quantity !== undefined;
+    let balanceUnits = 0;
+    let balanceValue = 0;
+    if (showBalance) {
+        for (let i = 0; i < items.length; i++) {
+            const owed = Math.max((Number(items[i].quantity) || 0) - (Number(items[i].received_quantity) || 0), 0);
+            balanceUnits += owed;
+            balanceValue += owed * (Number(items[i].unit_cost) || 0);
+        }
+    }
+
     const summary =
         '<div class="detail-grid">' +
         detailField('Supplier', escapeHtml(po.supplier_name)) +
@@ -2536,6 +2572,10 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         detailField('Items', orderedLines + (orderedLines === 1 ? ' line' : ' lines') +
             ' <span class="muted">' + orderedUnits + (orderedUnits === 1 ? ' unit' : ' units') + '</span>') +
         money +
+        (balanceUnits > 0
+            ? detailField('Balance', '<strong>' + balanceUnits + (balanceUnits === 1 ? ' unit' : ' units') + '</strong>' +
+                ' <span class="muted">' + peso(balanceValue) + '</span>')
+            : '') +
         '</div>';
 
     let priced = false;
@@ -2554,20 +2594,46 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     };
     let lines;
     const lineRows = [];
-    if (priced) {
+    if (showBalance) {
+        for (let i = 0; i < items.length; i++) {
+            const it = items[i];
+            const owed = Math.max((Number(it.quantity) || 0) - (Number(it.received_quantity) || 0), 0);
+            const row = [
+                materialCode(it.product_id), escapeHtml(it.product_name), poCategoryCell(it), poDescriptionCell(it),
+                escapeHtml(poQuantityText(it)),
+                qtyText(Number(it.received_quantity) || 0, it.unit_name || ''),
+                qtyText(owed, it.unit_name || '')
+            ];
+            if (priced) {
+                row.push(unitCostCell(it));
+                row.push(it.line_cost === null || it.line_cost === undefined ? '<span class="muted">-</span>' : peso(it.line_cost));
+            }
+            lineRows.push(row);
+        }
+        if (priced) {
+            lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Ordered', 'Received', 'Balance', 'Unit Cost', 'Line Cost'],
+                lineRows, [4, 5, 6, 7, 8], [0]);
+        } else {
+            lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Ordered', 'Received', 'Balance'],
+                lineRows, [4, 5, 6], [0]);
+        }
+    } else if (priced) {
         for (let i = 0; i < items.length; i++) {
             const it = items[i];
             lineRows.push([
-                escapeHtml(it.product_name), escapeHtml(poQuantityText(it)), unitCostCell(it),
+                materialCode(it.product_id), escapeHtml(it.product_name), poCategoryCell(it), poDescriptionCell(it),
+                escapeHtml(poQuantityText(it)), unitCostCell(it),
                 it.line_cost === null || it.line_cost === undefined ? '<span class="muted">-</span>' : peso(it.line_cost)
             ]);
         }
-        lines = detailTable(['Material', 'Qty', 'Unit Cost', 'Line Cost'], lineRows, [2, 3]);
+        lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Qty', 'Unit Cost', 'Line Cost'],
+            lineRows, [4, 5, 6], [0]);
     } else {
         for (let i = 0; i < items.length; i++) {
-            lineRows.push([escapeHtml(items[i].product_name), escapeHtml(poQuantityText(items[i]))]);
+            lineRows.push([materialCode(items[i].product_id), escapeHtml(items[i].product_name), poCategoryCell(items[i]),
+                poDescriptionCell(items[i]), escapeHtml(poQuantityText(items[i]))]);
         }
-        lines = detailTable(['Material', 'Qty'], lineRows);
+        lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Qty'], lineRows, [4], [0]);
     }
 
     const contact = '<h4 class="detail-subhead">Supplier contact</h4>' +
@@ -2599,8 +2665,16 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     if (report && report.lines && report.lines.length > 0) {
         pages.push({ label: 'Report', body: poDeliveryReportHtml(report) });
     }
-    openDetailModal('Purchase Order #' + po.po_id, po.supplier_name + ' · ' + poStatusWord(poStage(po)), 'P' + po.po_id,
+    openDetailModal('Purchase Order ' + poNumber(po.po_id), po.supplier_name + ' · ' + poStatusWord(poStage(po)), 'PO',
         pages, foot, { wide: 'xl', scroll: true });
+}
+
+function poCategoryCell(item) {
+    return item.category_name ? escapeHtml(item.category_name) : '<span class="muted">-</span>';
+}
+
+function poDescriptionCell(item) {
+    return item.description ? escapeHtml(item.description) : '<span class="muted">-</span>';
 }
 
 function poDeliveryReportHtml(report) {
@@ -2609,6 +2683,7 @@ function poDeliveryReportHtml(report) {
         const line = report.lines[i];
         const under = line.reason === 'Under-delivery';
         rows.push([
+            materialCode(line.product_id),
             escapeHtml(line.product_name),
             escapeHtml(qtyText(line.quantity, line.unit_name || '')) +
                 ' <span class="muted">' + (under ? 'missing' : 'over') + '</span>',
@@ -2623,7 +2698,7 @@ function poDeliveryReportHtml(report) {
                 '<p><span class="po-report-label">Date reported:</span> ' +
                     (report.reported_at ? escapeHtml(poWhen(report.reported_at)) : '<span class="muted">Not recorded</span>') + '</p>' +
             '</div>' +
-            detailTable(['Material', 'Quantity', 'Reason'], rows, [1]) +
+            detailTable(['Material ID', 'Material name', 'Quantity', 'Reason'], rows, [2], [0]) +
             '<p class="po-report-remarks"><span class="po-report-label">Remarks:</span> ' +
                 (report.remarks ? escapeHtml(report.remarks) : '<span class="muted">None</span>') + '</p>' +
         '</div>';
@@ -2637,7 +2712,7 @@ async function decidePurchaseOrder(poId, approve) {
     let note = '';
     if (approve) {
         const yes = await askConfirm(
-            'Order #' + po.po_id + ' to ' + po.supplier_name + ': ' + po.line_count + ' line(s), ' + po.total_units +
+            poNumber(po.po_id) + ' to ' + po.supplier_name + ': ' + po.line_count + ' line(s), ' + po.total_units +
             ' unit(s). Once approved, ' +
             'the clerk prints it and sends it to the supplier, and counts the delivery in against it when it arrives.',
             {
@@ -2655,7 +2730,7 @@ async function decidePurchaseOrder(poId, approve) {
         const asked = await askInput({
             title: 'Decline this purchase order?',
             eyebrow: 'Purchase Orders',
-            message: 'Order #' + po.po_id + ' to ' + po.supplier_name + ' is cancelled and the clerk is told why.',
+            message: poNumber(po.po_id) + ' to ' + po.supplier_name + ' is cancelled and the clerk is told why.',
             label: 'Remarks: why it is declined',
             placeholder: 'Say why it is declined and what the clerk should do instead',
             confirmLabel: 'Decline the order',
@@ -2691,7 +2766,7 @@ async function sendPurchaseOrder(poId) {
     if (!po || po.status !== 'Pending' || !po.supplier_email) return;
 
     const yes = await askConfirm(
-        'Order #' + po.po_id + ' is emailed to ' + po.supplier_name + ' at ' + po.supplier_email + ', with the ' +
+        poNumber(po.po_id) + ' is emailed to ' + po.supplier_name + ' at ' + po.supplier_email + ', with the ' +
         'order as a PDF and the link to accept or decline it.',
         {
             title: po.supplier_sent_at ? 'Email this order again?' : 'Email this order to the supplier?',
@@ -2729,7 +2804,7 @@ async function markPurchaseOrderSent(poId) {
     if (!po || !poToSend(po)) return;
 
     const yes = await askConfirm(
-        'Order #' + po.po_id + ' is marked as sent to ' + po.supplier_name + '. It then waits for the supplier ' +
+        poNumber(po.po_id) + ' is marked as sent to ' + po.supplier_name + '. It then waits for the supplier ' +
         'to accept or decline it from the QR code or link on the order.',
         { title: 'Mark this order as sent?', eyebrow: 'Purchase Orders', confirmLabel: 'Mark as Sent' });
     if (!yes) return;
@@ -2755,7 +2830,7 @@ function sendingCard(po) {
         title: 'Emailing the order',
         eyebrow: 'Purchase Orders',
         message: 'This can take a few seconds while the mail goes out. Keep this page open.',
-        steps: ['Printing order #' + po.po_id + ' as a PDF',
+        steps: ['Printing order ' + poNumber(po.po_id) + ' as a PDF',
                 'Emailing it to ' + po.supplier_name + ' at ' + po.supplier_email]
     };
 }

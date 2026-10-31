@@ -9,6 +9,76 @@ function peso(value) {
     return CURRENCY_SIGN + text;
 }
 
+// Record codes people see: a letter prefix + the id padded to at least 4 digits (C0003).
+// The database keeps the plain number; only what is shown or typed uses the code.
+function idCode(prefix, id) {
+    return prefix + String(id).padStart(4, '0');
+}
+
+function customerCode(id) { return idCode('C', id); }
+function staffCode(id) { return idCode('S', id); }
+function materialCode(id) { return idCode('M', id); }
+function supplierCode(id) { return idCode('SP', id); }
+function deliveryCode(id) { return idCode('D', id); }
+function categoryCode(id) { return idCode('CT', id); }
+function brandCode(id) { return idCode('B', id); }
+function unitCode(id) { return idCode('U', id); }
+function adjustmentCode(id) { return idCode('SA', id); }
+function returnCode(id) { return idCode('RD', id); }
+function creditRequestCode(id) { return idCode('CR', id); }
+function voidRequestCode(id) { return idCode('VR', id); }
+function notificationCode(id) { return idCode('N', id); }
+function auditCode(id) { return idCode('AL', id); }
+function qrPaymentCode(id) { return idCode('QR', id); }
+function paymentCode(id) { return idCode('PY', id); }
+
+// Official document numbers keep their own formats.
+function orNumber(saleId) {
+    return 'OR-' + String(saleId).padStart(6, '0');
+}
+
+function poNumber(poId) {
+    return 'PO-' + String(poId).padStart(6, '0');
+}
+
+// The code for a row of the Records screens: the kind of record decides the prefix.
+function recordCode(type, id) {
+    const prefixes = { customer: 'C', product: 'M', inventory: 'M', staff: 'S', supplier: 'SP', category: 'CT', brand: 'B', unit: 'U' };
+    return idCode(prefixes[type] || 'ID', id);
+}
+
+// Texts the server saved earlier (notifications, the audit trail) may still say "Delivery #3".
+// This swaps those for the codes people see, only on screen; nothing saved is changed.
+const TEXT_ID_RULES = [
+    { find: /\b(sale) #(\d+)/gi, make: orNumber, keepWord: false },
+    { find: /\b(purchase order|PO) #(\d+)/gi, make: poNumber, keepWord: false },
+    { find: /\b(delivery) #(\d+)/gi, make: deliveryCode, keepWord: true },
+    { find: /\b(material|product) #(\d+)/gi, make: materialCode, keepWord: true },
+    { find: /\b(supplier) #(\d+)/gi, make: supplierCode, keepWord: true },
+    { find: /\b(customer) #(\d+)/gi, make: customerCode, keepWord: true },
+    { find: /\b(staff) #(\d+)/gi, make: staffCode, keepWord: true },
+    { find: /\b(report) #(\d+)/gi, make: returnCode, keepWord: true },
+    { find: /\b(adjustment) #(\d+)/gi, make: adjustmentCode, keepWord: true },
+    { find: /\b(QR payment) #(\d+)/gi, make: qrPaymentCode, keepWord: true },
+    { find: /\b(request) #(\d+)/gi, make: creditRequestCode, keepWord: true }
+];
+
+function idsInText(text) {
+    let result = String(text === null || text === undefined ? '' : text);
+    for (let i = 0; i < TEXT_ID_RULES.length; i++) {
+        const rule = TEXT_ID_RULES[i];
+        result = result.replace(rule.find, function (match, word, id) {
+            if (rule.keepWord) return word + ' ' + rule.make(id);
+            return rule.make(id);
+        });
+    }
+    // "Supplier record #3" from the archive log
+    result = result.replace(/\b(Staff|Supplier|Customer|Inventory|Category|Unit|Brand) record #(\d+)/g, function (match, kind, id) {
+        return kind + ' record ' + recordCode(kind.toLowerCase(), id);
+    });
+    return result;
+}
+
 function loyaltyRateText(rate) {
     return String(Number(rate)) + '%';
 }
@@ -102,7 +172,7 @@ function statusBadge(text, label) {
     return '<span class="badge ' + tone + '">' + escapeHtml(label || statusWord(text)) + '</span>';
 }
 
-const STATUS_WORDS = { 'For Approval': 'Pending Manager Approval', 'Missing': 'Missing from delivery' };
+const STATUS_WORDS = { 'For Approval': 'Pending Manager Approval', 'Missing': 'Missing from delivery', 'Recount': 'Manual count' };
 
 function statusWord(text) {
     return STATUS_WORDS[text] || text;

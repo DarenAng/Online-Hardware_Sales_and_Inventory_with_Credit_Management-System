@@ -131,7 +131,11 @@ CREATE TABLE customers (
     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
     archived_at TIMESTAMP NULL,
     archived_by_staff_id INT NULL,
-    full_name VARCHAR(220) AS (TRIM(CONCAT(first_name, ' ', last_name))) VIRTUAL
+    full_name VARCHAR(220) AS (TRIM(CONCAT(first_name, ' ', last_name))) VIRTUAL,
+    portal_password VARCHAR(255) NULL,
+    portal_failed_attempts INT NOT NULL DEFAULT 0,
+    portal_held_until TIMESTAMP NULL,
+    portal_password_set_at TIMESTAMP NULL
 );
 
 CREATE TABLE customer_credits (
@@ -192,6 +196,7 @@ CREATE TABLE products (
     reorder_mode ENUM('Manual','Dynamic') NOT NULL DEFAULT 'Manual',
     pack_name VARCHAR(20) NULL,
     pack_size DECIMAL(12,3) NULL,
+    description VARCHAR(255) NULL,
     status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
     supplier_id INT,
     is_archived BOOLEAN NOT NULL DEFAULT FALSE,
@@ -268,6 +273,7 @@ CREATE TABLE purchase_order_ordered_items (
     pack_name VARCHAR(20) NULL,
     pack_size DECIMAL(12,3) NULL,
     pack_count DECIMAL(12,3) NULL,
+    unit_cost DECIMAL(12,4) NULL,
     FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
@@ -290,7 +296,7 @@ CREATE TABLE stock_adjustments (
 CREATE TABLE notifications (
     notification_id INT AUTO_INCREMENT PRIMARY KEY,
     target_role_id INT NULL,
-    notif_type ENUM('Low Stock', 'Out of Stock', 'Damage Report', 'Refund Report', 'Purchase Order', 'Stock Adjustment', 'Delivery', 'Credit Request', 'Late Penalty', 'New Product', 'Void Request') NOT NULL,
+    notif_type ENUM('Low Stock', 'Out of Stock', 'Damage Report', 'Refund Report', 'Purchase Order', 'Stock Adjustment', 'Delivery', 'Credit Request', 'Late Penalty', 'New Product', 'Void Request', 'Customer Payment') NOT NULL,
     title VARCHAR(150) NOT NULL,
     message TEXT,
     product_id INT NULL,
@@ -425,6 +431,20 @@ CREATE TABLE deliveries (
         CHECK (status <> 'Delivered' OR delivered_at IS NOT NULL)
 );
 
+CREATE TABLE delivery_attempts (
+    attempt_id INT AUTO_INCREMENT PRIMARY KEY,
+    delivery_id INT NOT NULL,
+    attempt_no INT NOT NULL,
+    outcome ENUM('Delivered', 'Failed') NOT NULL,
+    reason VARCHAR(255) NULL,
+    staff_id INT NULL,
+    scheduled_date DATETIME NULL,
+    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_delivery_attempts_delivery (delivery_id),
+    FOREIGN KEY (delivery_id) REFERENCES deliveries(delivery_id) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+);
+
 CREATE TABLE returned_items (
     return_id INT AUTO_INCREMENT PRIMARY KEY,
     product_id INT NOT NULL,
@@ -467,6 +487,8 @@ CREATE TABLE qr_payments (
     error_message VARCHAR(255) NULL,
     sale_id INT NULL,
     created_by_staff_id INT NULL,
+    portal_customer_id INT NULL,
+    portal_sale_id INT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP NULL,
     paid_at TIMESTAMP NULL,
@@ -512,6 +534,18 @@ CREATE TABLE user_sessions (
     ended_at BIGINT NULL,
     INDEX idx_user_sessions_staff (staff_id),
     INDEX idx_user_sessions_expires (expires_at)
+);
+
+CREATE TABLE customer_sessions (
+    token_hash CHAR(64) PRIMARY KEY,
+    customer_id INT NOT NULL,
+    started_at BIGINT NOT NULL,
+    last_seen BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL,
+    ended_reason VARCHAR(255) NULL,
+    ended_at BIGINT NULL,
+    INDEX idx_customer_sessions_customer (customer_id),
+    INDEX idx_customer_sessions_expires (expires_at)
 );
 
 CREATE TABLE live_changes (
@@ -720,6 +754,70 @@ INSERT INTO customers (first_name, last_name, phone, address, created_at) VALUES
 ('Wilfredo', 'Panganiban', '0978-910-3504', 'Brgy. Malapad na Bato, Nasugbu, Batangas', '2026-03-26 11:20:47'),
 ('Aurora', 'Marasigan', '0979-471-7270', 'Brgy. Natipuan, Nasugbu, Batangas', '2026-04-14 08:15:14'),
 ('Teodoro', 'Ilagan', '0973-863-8042', 'Brgy. Reparo, Nasugbu, Batangas', '2026-02-19 13:40:14');
+
+-- Customer portal accounts (Customer log in on the sign-in page: User ID such as C0003 + portal password).
+-- The cashier can issue a new password any time with Issue Portal Password.
+--   User ID  Customer                        Portal password
+--   C0001    Pedro Penduko                   72arTHXz
+--   C0002    Juan Tamad                      ba5xGAh5
+--   C0003    Rosa Villamor                   S39hvfC4
+--   C0004    Mark Aguilar                    p63xshs5
+--   C0005    Maria Luisa Santos              8crMw3tH
+--   C0006    Ernesto Ramos                   kA8KD3NE
+--   C0007    Jocelyn Dela Cruz               2S9wXNZx
+--   C0008    Rodrigo Mendoza                 6spPDbQC
+--   C0009    Cristina Bautista               kXbzzkM8
+--   C0010    Alfredo Garcia                  ihLi3Cuz
+--   C0011    Nenita Reyes                    qeNCFJD9
+--   C0012    Dominador Torres                7jbKCXTr
+--   C0013    Evelyn Flores                   Vjib9V6L
+--   C0014    Renato Castillo                 w8x5rJjd
+--   C0015    Lorna Villanueva                69MfTugP
+--   C0016    Benjamin Aquino                 8Q6xLRb7
+--   C0017    Marites Navarro                 mTX3gXPG
+--   C0018    Ricardo Pascual                 jt5bRwSR
+--   C0019    Divina Mercado                  LnZKzuN8
+--   C0020    Arturo Salazar                  v2B7RR6m
+--   C0021    Imelda Fernandez                6h4Ebfzn
+--   C0022    Danilo Manalo                   kGbcU7wb
+--   C0023    JR Construction                 99bsCaFF
+--   C0024    Sta. Rosa Builders              pvM5qUHp
+--   C0025    Fely Trinidad                   vf4WUG6N
+--   C0026    Gerardo Lumbao                  3V7AAq7k
+--   C0027    Susan Macaraig                  PNeDmR6K
+--   C0028    Wilfredo Panganiban             Q6xXnBKC
+--   C0029    Aurora Marasigan                5md2eQwu
+--   C0030    Teodoro Ilagan                  MCfQ3wsP
+UPDATE customers SET portal_password = 'scrypt$8bb88738e795a2a1ac6f983aeb6bf1be$7294104b776a12af6b0821c245fe3a2fc0178c65ce0827f0c7f466d107ace73b57cdd795b762380d7cfa49cbfa69cbab7e7ab80c9b5a9c40d384f170f961f7aa', portal_password_set_at = NOW() WHERE customer_id = 1;
+UPDATE customers SET portal_password = 'scrypt$be8574bb73422dbee7749da907e12c22$6b86ab7c06ec6d8976d21241103a81846b5d696f1ba68e959dab604250e7045988504c4a949b2ec335e110b6949229f48759f559e25ab9bb15b2c1f2bdd19fe2', portal_password_set_at = NOW() WHERE customer_id = 2;
+UPDATE customers SET portal_password = 'scrypt$aa64f12e811345a5ed371fee1a2b8ad7$625fcff5c8807e2ba96b53fc308c271c662e409594d4d87f70e45edb517778f618027b4f06e559b791bbf8ae680812f20387e19055582f856aa66a775f256139', portal_password_set_at = NOW() WHERE customer_id = 3;
+UPDATE customers SET portal_password = 'scrypt$5441fbb9dd30ccba1ce1ec1bf5c89cfa$af324c064ada2b183a55e773a4a659429ca5507da24e99f8d503afe32603a2fb1c133b647e8a41c615680471788d6321561dcba6ca103c7090c1f90aab993c65', portal_password_set_at = NOW() WHERE customer_id = 4;
+UPDATE customers SET portal_password = 'scrypt$8b26f4dae8f66003cb42e259bdf2394b$56186e6db3e0b073f0801d035bf000e1dbc1cdefb573ac431cdaed4cd89e90ba580f7e4a09b7651220457d32851660bb32b576619e0c1c9f7ca59a03bde87de1', portal_password_set_at = NOW() WHERE customer_id = 5;
+UPDATE customers SET portal_password = 'scrypt$de554578b60d1fc73821c3a98bc5211c$f7cfa75f5b110ad371875671ff3fd5fd40776354c1f88a3bd80dd94121aef4159e80f351d628927c932b6bd2ddd3292985bea2d1806c364fe18fa46a6d5388ac', portal_password_set_at = NOW() WHERE customer_id = 6;
+UPDATE customers SET portal_password = 'scrypt$baab6d7617f554920d2f4b4e91acfc78$5fac99ab3dbcf23a1e72aa5d539beaac9dadcb183281ea05db49ea67ed7ddd1d557e744a2d5ecafd856000c029fa65aff70d426c4aa9679add5f3ff7ea4cc0d6', portal_password_set_at = NOW() WHERE customer_id = 7;
+UPDATE customers SET portal_password = 'scrypt$f6dbe58de8366ed2621e757c0309a8ea$c6d18aeb8a68112bcd02ab16c933749f0bf71b097f75cbbf8da1268bfb2687aba7da0e706773cc4ef316a15fda4ccbe069636891d04ab852eb708d6028f529c0', portal_password_set_at = NOW() WHERE customer_id = 8;
+UPDATE customers SET portal_password = 'scrypt$95d375ab14f54267d4cc1e9d83bee9ab$8fdb66f4f181dbf10f043562db0d0c16f3e491f82f926abaa0b7bb49b9e64ae1ebda81320e1757254072f60737ae53acaf2ecfcf1067dd51517680a26e3d1d9f', portal_password_set_at = NOW() WHERE customer_id = 9;
+UPDATE customers SET portal_password = 'scrypt$5ce6c2051d4713e3624fe53acd0dc8d2$e08efde82b45403fab5ee268a2da3f583c066e56ed2d960e1ecb30ff179a94bce4adbb59d5edd3b998dcd6cfb3ec4d1c11fd26365f7b2b8ac870b7119991f9db', portal_password_set_at = NOW() WHERE customer_id = 10;
+UPDATE customers SET portal_password = 'scrypt$be2f94e90d49b0f1e8ba9b9fd57a6da5$ec5cbd383d40431144985158a44d96b303f4d46eaf8366d2d3dee1c53b14a62999896da8a54ea0b677d8a0ee125b0679c5b6eec623b225641186d6568b3359a5', portal_password_set_at = NOW() WHERE customer_id = 11;
+UPDATE customers SET portal_password = 'scrypt$2233cda6be09e8c74568d05dab9dc97c$d8224d883bcdc9f1e7eaf12c856bf60a4867bebcd6244811e8377ddac9379d6d509095df4b5c615e42fc679886d819634202e4be2a1795aebf230637a10e59de', portal_password_set_at = NOW() WHERE customer_id = 12;
+UPDATE customers SET portal_password = 'scrypt$f8de74395b15bb5373c480bda7426390$880cf6b0828be5dd41948c896787e6682da504d11e3e08e7269da37b8dcf579cce7cba49c186f30c0ef77f2cdcf8e12271b6e1d17a36a9fab9af8cbff7ec78fc', portal_password_set_at = NOW() WHERE customer_id = 13;
+UPDATE customers SET portal_password = 'scrypt$73b0bf96f1084d227f5c0e07c8cb5b5e$285a7ed0fa69cc5263948277bae1c9756239f376498b5400eea89f5ca5d24c3c86556a6d97d75af89d2f4001141192f9b60e269071d2fbfc2636cbabed8f6d0b', portal_password_set_at = NOW() WHERE customer_id = 14;
+UPDATE customers SET portal_password = 'scrypt$e9aeb856d0de576526a0e378c989c8b7$4d238ab69fd148f3d8c2550525727a3a765cdafdac838244f60ea72d813c592c3fd53d32f2b6a2e7f7829614b425c5ab3aaf720842b9b5a716b7663713812c20', portal_password_set_at = NOW() WHERE customer_id = 15;
+UPDATE customers SET portal_password = 'scrypt$ada291269bd8ef36d975d1868cd10bcb$f80d3b6f1ec37e06dd323ff4a65324d27ac9a5e73c77dab3b5b41c525ed5fbe7dadb0139079afeb0a9884e4d5525c427a5712d7555df44f3dfa7990a7178f1d2', portal_password_set_at = NOW() WHERE customer_id = 16;
+UPDATE customers SET portal_password = 'scrypt$38c10a5cbd07d20fcaeea841d7960e9c$0a7e0cd2da2195ad48b3310bf1d142b584184a1dbaab45953a479c2046667b802d89e785e2b910dd0c3381883bc8a6c03f4683e0b2fcc3ca714f9f4a7ff70de0', portal_password_set_at = NOW() WHERE customer_id = 17;
+UPDATE customers SET portal_password = 'scrypt$b4f5f041a576ba49ec4ad5557ca2f39b$8634d9b28a167a64d18705593d80cd6dc2db59ecdba9b5d1606add6d34298b9cca0c0d46e4745aced86034e0be2d6ad7209ac6cf5915634832cc1c227e757c86', portal_password_set_at = NOW() WHERE customer_id = 18;
+UPDATE customers SET portal_password = 'scrypt$9c8f55cf65a4c71b0fcd350694ca9652$bcdf69a3e4570c8e166c9a5512ac4fc0fdcab68cdbde7f679a2e42259986b94dfc71106eca6421bfd1342fef55e1f37b8db1608d529d2ddef6e31c7d3ac90dae', portal_password_set_at = NOW() WHERE customer_id = 19;
+UPDATE customers SET portal_password = 'scrypt$bdd8ff8dbffc0f69d24ceb1cb972fcb8$87bbaed7c3464eacb356e171a8de9a24719aaf0b067e7f55d73e1ebcf5ffd3ce2c27295e2a58a78ff73f8bfa1c135be16ae8cbe032df6f5d0014409ff6a2cfc2', portal_password_set_at = NOW() WHERE customer_id = 20;
+UPDATE customers SET portal_password = 'scrypt$968972b3d8a361b5a047af4178080f9c$9fe636220c3fca09e5ada493f87f238338abfb0a18ebbd7c7971f9dc336766f5f2c0a19c89b1dae6de69abeb4158affd0e30da59c54ec3d882bb0cef95c29011', portal_password_set_at = NOW() WHERE customer_id = 21;
+UPDATE customers SET portal_password = 'scrypt$8c5fad8bdd257547f2b9fb40985bd47b$539768c4b0944e47c28e4d81d7f2f339a482c25d668bb1f0f3dd744794ccb1929936bc30e13522107ae878d57249b70b50b685a76f9cfeb87edeb6aa0414c68e', portal_password_set_at = NOW() WHERE customer_id = 22;
+UPDATE customers SET portal_password = 'scrypt$3d2a2038d3ffd63ae63f4e186877c6ef$08561a7a70c7a242a0a13e79691b1feb73507743ef10268caf1c9da82922703eb210cc54ddf7f85734e19d5d35ef7fa9cef96e00ab25aac2bff79ba16c334b30', portal_password_set_at = NOW() WHERE customer_id = 23;
+UPDATE customers SET portal_password = 'scrypt$3b526268ddeb2ca333a93438b3928c6d$ebc92d1e131a749904362f609112cf883d4fcf617f547aa62fc2ac90cc2d390bd81cd2103c9bcb2f259e9a1a395f9a391bae792bda4917235fdf0c2b45aece45', portal_password_set_at = NOW() WHERE customer_id = 24;
+UPDATE customers SET portal_password = 'scrypt$847a854678a00be04ff190589eff155b$e81126b399b01710618a68d3b19bf20341a53ba7491b4342a0806d2b6c03c6e5fec99b517d9400c740c8f5bbff6e4b0baafabd9031da82385e31dca8dee70bbd', portal_password_set_at = NOW() WHERE customer_id = 25;
+UPDATE customers SET portal_password = 'scrypt$c5cd30cb66fbce1438b29a715a0b5df2$bb0855375cc5c2d950d9946d10a8e6faa05c10abbeb7df56778a75bfa796d650e08972b5075c8efecf075b85e63c6e61b4011fa9bd64cfe01b53fb02210ab003', portal_password_set_at = NOW() WHERE customer_id = 26;
+UPDATE customers SET portal_password = 'scrypt$12146933e9f02c6d0a96a850dc656882$e4047fa07de53d826340b7e99f221959dedfecca82ca62ea89e76310d88340f26f3a7c4b778fdc9310f4923a892a16d62b26737505a8abf46da7f85544f27db5', portal_password_set_at = NOW() WHERE customer_id = 27;
+UPDATE customers SET portal_password = 'scrypt$dc0c22e40278f7138178fbc930c46638$d5f50e4317ed9b4845dec6302ca02c78b38368b4e9de45051f9ca86226307b534e4461feb394edbef50442583f20bfb0a86172e08ca7de032f438a4a986cb8fb', portal_password_set_at = NOW() WHERE customer_id = 28;
+UPDATE customers SET portal_password = 'scrypt$d4ba11b5c3e60269cee60ce00b38e46c$c42dcf90b9b621230b7671193a9865ee2746fbf6d673c73f8bfe3451e254607eb088ae01083ac7e00c27514850e15724f725f25c9b51c6bea7e5c9626625ba73', portal_password_set_at = NOW() WHERE customer_id = 29;
+UPDATE customers SET portal_password = 'scrypt$88593f9701199c1ae9850ab1ddd3b600$69b58d18d743623e77c0a8452a32b56544e8c823f1b89c561979e0e52d14dd18e2b3a2c6278cbcb777bf97e799ddfd808bcf78719e6a8ace7fe7831a0033c48f', portal_password_set_at = NOW() WHERE customer_id = 30;
 
 INSERT INTO customer_credits (customer_id, credit_limit, standing, notes, updated_by_staff_id, updated_at) VALUES
 (5, 40000.00, 'Good', NULL, 2, '2026-05-24 17:45:54'),
@@ -1307,6 +1405,11 @@ INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, contact_na
 (102, 5, 'Poblacion, Nasugbu, Batangas', 'Jocelyn Dela Cruz', '0944-650-9906', 'Delivered', NULL, '2026-08-18', '2026-08-19 14:00:10', '2026-08-19 15:06:10', FALSE, NULL, NULL),
 (106, 5, 'Brgy. Munting Indan, Nasugbu, Batangas', 'Evelyn Flores', '0924-867-7979', 'Delivered', NULL, '2026-08-31', '2026-09-01 10:00:37', '2026-09-01 11:33:37', FALSE, NULL, NULL),
 (107, 5, 'Pasig City, Metro Manila', 'Customer', '0924-671-4228', 'Delivered', 'Rescheduled by customer', '2026-09-01', '2026-09-04 10:00:07', '2026-09-04 13:23:07', FALSE, NULL, NULL);
+
+INSERT INTO delivery_attempts (delivery_id, attempt_no, outcome, reason, staff_id, scheduled_date, attempted_at)
+SELECT delivery_id, 1, status, IF(status = 'Failed', LEFT(remarks, 255), NULL), delivery_staff_id, scheduled_date,
+       COALESCE(delivered_at, updated_at)
+FROM deliveries WHERE status IN ('Delivered', 'Failed');
 
 INSERT INTO returned_items (product_id, sale_id, report_type, quantity, reason, disposition, refund_amount, restocked, status, reported_by_staff_id, return_date) VALUES
 (22, NULL, 'Damaged', 2, 'Two bulbs arrived with cracked bases in the supplier carton; cannot be sold.', 'Write-Off', 0.00, FALSE, 'Resolved', 3, '2026-04-05 16:25:03'),

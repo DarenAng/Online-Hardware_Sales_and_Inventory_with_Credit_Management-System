@@ -582,6 +582,7 @@
 #delivery-modal .modal-foot { justify-content: flex-end; }
 
 #driver-suggest { max-height: 150px; }
+#driver-suggest .suggest-item { flex-direction: row; justify-content: space-between; align-items: center; gap: 12px; }
 #driver-suggest .suggest-item.is-empty { cursor: default; }
 #driver-suggest .suggest-item.is-empty:hover { background: transparent; }
 #delivery-modal .modal-foot .btn:first-child { margin-right: auto; }
@@ -654,3 +655,9 @@
 #refund-lines .adjust-line-qty { width: 72px; padding-left: 6px; padding-right: 6px; }
 #refund-lines .adjust-lines-table .cell-sub { white-space: normal; }
 #refund-lines .adjust-line-note.is-refund { color: var(--ok-ink); }
+
+.portal-password-value {
+    font-family: Consolas, 'Courier New', monospace;
+    font-size: 22px;
+    letter-spacing: 0.12em;
+}

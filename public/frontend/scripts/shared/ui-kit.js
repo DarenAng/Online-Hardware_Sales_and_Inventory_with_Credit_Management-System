@@ -82,6 +82,9 @@ function ensureUiFurniture() {
 }
 
 function showCard(options) {
+    // Saved texts may still say "Delivery #3"; show the codes people see.
+    if (options.message) options.message = idsInText(options.message);
+    if (options.title) options.title = idsInText(options.title);
     ensureUiFurniture();
 
     const deck = document.getElementById('toast-deck');

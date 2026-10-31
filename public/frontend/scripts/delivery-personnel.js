@@ -81,6 +81,32 @@ function pendingForDriver(d) {
     return isMine(d) || d.delivery_staff_id == null;
 }
 
+// The three tabs on the Deliveries card
+function tabOfDelivery(d) {
+    if (d.status === 'Pending') return 'Pending';
+    if (d.status === 'Delivered' || d.status === 'Failed') return 'Deliveries';
+    return 'In Transit';
+}
+
+function driverTabPicked(tab) {
+    dataPanelFilter('driver-pending', 'tab', tab);
+    syncDriverTabs();
+}
+
+function syncDriverTabs() {
+    const panel = getDataPanel('driver-pending');
+    if (!panel) return;
+
+    const tabs = document.querySelectorAll('#dpend-tabs .subnav-tab');
+    for (let i = 0; i < tabs.length; i++) {
+        tabs[i].classList.toggle('is-current', tabs[i].dataset.tab === panel.filters.tab);
+    }
+}
+
+function openFinishedDelivery(deliveryId) {
+    showDeliveryRecord(findDriverDelivery(deliveryId), false);
+}
+
 function ownerTag(d) {
     if (isMine(d)) return '';
     return '<span class="badge badge-neutral owner-tag">Unassigned</span>';
@@ -127,26 +153,29 @@ function buildDriverPanels() {
         columns: 6,
         pagerId: 'dpend-pager',
         idField: 'delivery_id',
-        filters: { status: 'all', from: '', to: '' },
+        filters: { tab: 'Pending', from: '', to: '' },
         gate: { title: 'Your deliveries are not loaded',
                 text: 'Press Load Data to read your deliveries, or type a customer.',
                 button: 'Load Data' },
 
         load: async function () {
             await fetchDriverDeliveries();
-            const pending = [];
+            // Open ones the driver can take, and this driver's own finished ones
+            const mine = [];
             for (let i = 0; i < driverDeliveries.length; i++) {
-                if (pendingForDriver(driverDeliveries[i])) pending.push(driverDeliveries[i]);
+                const d = driverDeliveries[i];
+                if (pendingForDriver(d)) mine.push(d);
+                else if (!isActive(d) && isMine(d)) mine.push(d);
             }
-            return pending;
+            return mine;
         },
 
         match: function (d, query) {
-            return prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query);
+            return prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id, deliveryCode(d.delivery_id)], query);
         },
 
         filter: function (d, filters) {
-            if (filters.status !== 'all' && d.status !== filters.status) return false;
+            if (tabOfDelivery(d) !== filters.tab) return false;
 
             if (filters.from || filters.to) {
                 const day = String(d.scheduled_date || '').slice(0, 10);
@@ -158,9 +187,10 @@ function buildDriverPanels() {
         },
 
         renderRow: function (d, index) {
+            const opener = isActive(d) ? 'openPendingDelivery' : 'openFinishedDelivery';
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openPendingDelivery(' + d.delivery_id + ')">' +
-                '<td class="cell-id">#' + d.delivery_id + '</td>' +
+                'onclick="' + opener + '(' + d.delivery_id + ')">' +
+                '<td class="cell-id">' + deliveryCode(d.delivery_id) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(d.customer_name) + ' ' + ownerTag(d) + '</td>' +
                 '<td>' + escapeHtml(d.delivery_address) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
@@ -193,7 +223,7 @@ async function openDriverPayment(deliveryId, remarks) {
     paymentDeliveryId = deliveryId;
     paymentRemarks = remarks || null;
 
-    document.getElementById('pay-subtitle').textContent = 'Delivery #' + deliveryId;
+    document.getElementById('pay-subtitle').textContent = 'Delivery ' + deliveryCode(deliveryId);
     document.getElementById('pay-customer').value = d.customer_name || '';
 
     const form = document.getElementById('pay-form');
@@ -329,7 +359,7 @@ async function handleDriverPayment(event, viaQr) {
 
     if (stillOwed > 0) {
         const yes = await askConfirm(
-            peso(stillOwed) + ' will still be owed, and Delivery #' + paymentDeliveryId +
+            peso(stillOwed) + ' will still be owed, and Delivery ' + deliveryCode(paymentDeliveryId) +
             ' will be closed as Delivered. The rest is collected at the counter.',
             { title: 'Record a part payment?', eyebrow: 'Delivery', confirmLabel: 'Record Payment', tone: 'accent' });
         if (!yes) return;
@@ -343,8 +373,8 @@ async function handleDriverPayment(event, viaQr) {
 
     let qr = null;
     if (viaQr) {
-        const saleNumber = d && d.sale_id ? 'OR-' + String(d.sale_id).padStart(6, '0') : 'the sale';
-        qr = await collectQrPayment(amount, 'Payment on ' + saleNumber + ' \u00b7 Delivery #' + paymentDeliveryId,
+        const saleNumber = d && d.sale_id ? orNumber(d.sale_id) : 'the sale';
+        qr = await collectQrPayment(amount, 'Payment on ' + saleNumber + ' \u00b7 Delivery ' + deliveryCode(paymentDeliveryId),
             method, 'credit_payment', d ? d.sale_id : null, method === 'Bank Transfer' ? details : null);
         if (!qr) {
             if (button) button.disabled = false;
@@ -388,7 +418,7 @@ async function handleDriverPayment(event, viaQr) {
             if (figures.change > 0) message += ' Change: ' + peso(figures.change) + '.';
             if (stillOwed > 0) message += ' ' + peso(stillOwed) + ' is still owed.';
             else message += ' The sale is paid in full.';
-            notifySuccess(message, 'Delivery #' + paymentDeliveryId + ' delivered');
+            notifySuccess(message, 'Delivery ' + deliveryCode(paymentDeliveryId) + ' delivered');
         }
 
         await refreshDeliveryLists();
@@ -463,7 +493,7 @@ async function openDriverRefund(deliveryId) {
     refundBalance = Number(d.balance_due) || 0;
     closeModal('detail-modal');
 
-    document.getElementById('refund-subtitle').textContent = 'Delivery #' + deliveryId + ' · ' + d.customer_name;
+    document.getElementById('refund-subtitle').textContent = 'Delivery ' + deliveryCode(deliveryId) + ' · ' + d.customer_name;
     document.getElementById('refund-reason').value = '';
 
     let linesHtml = '';
@@ -776,7 +806,7 @@ function buildReportPanels() {
         },
 
         match: function (d, query) {
-            return prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id], query);
+            return prefixMatch([d.customer_name, d.delivery_address, '#' + d.delivery_id, deliveryCode(d.delivery_id)], query);
         },
 
         filter: function (d, filters) {
@@ -789,7 +819,7 @@ function buildReportPanels() {
             let dueClass = '';
             if (Number(d.balance_due) > 0) dueClass = ' cell-due';
             return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
-                '<td class="cell-id">#' + d.delivery_id + '</td>' +
+                '<td class="cell-id">' + deliveryCode(d.delivery_id) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(String(d.delivered_at).slice(0, 10)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
                 '<td>' + escapeHtml(d.delivery_address) + '</td>' +
@@ -816,7 +846,7 @@ function buildReportPanels() {
         },
 
         match: function (p, query) {
-            return prefixMatch([p.customer_name, p.payment_method, p.reference_no, p.delivery_id ? '#' + p.delivery_id : ''], query);
+            return prefixMatch([p.customer_name, p.payment_method, p.reference_no, p.delivery_id ? '#' + p.delivery_id : '', p.delivery_id ? deliveryCode(p.delivery_id) : ''], query);
         },
 
         filter: function (p, filters) {
@@ -826,8 +856,8 @@ function buildReportPanels() {
 
         renderRow: function (p, index) {
             return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
+                '<td class="cell-id">' + (p.delivery_id ? deliveryCode(p.delivery_id) : '<span class="muted">None</span>') + '</td>' +
                 '<td class="cell-id">' + escapeHtml(String(p.payment_date).slice(0, 16)) + '</td>' +
-                '<td class="cell-id">' + (p.delivery_id ? '#' + p.delivery_id : '<span class="muted">None</span>') + '</td>' +
                 '<td class="cell-name">' + escapeHtml(p.customer_name) + '</td>' +
                 '<td>' + escapeHtml(p.payment_method) + '</td>' +
                 '<td>' + (paymentReference(p.payment_method, p.reference_no)
@@ -974,6 +1004,7 @@ if (window.location.pathname.toLowerCase().endsWith('delivery.html')) {
         buildReportPanels();
 
         document.addEventListener('datapanel:change', syncDriverPeriodBoxes);
+        document.addEventListener('datapanel:change', syncDriverTabs);
 
         document.addEventListener('datapanel:change', syncDriverPrintButtons);
         syncDriverPrintButtons();

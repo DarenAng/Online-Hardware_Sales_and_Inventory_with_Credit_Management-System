@@ -858,8 +858,8 @@ function buildIncomePanels() {
         remember: false,
         autoLoad: false,
         tableId: 'income-methods-table',
-        columns: 5,
-        sortKeys: ['payment_method', 'sale_count', 'billed', 'collected', 'outstanding'],
+        columns: 4,
+        sortKeys: ['payment_method', 'billed', 'collected', 'outstanding'],
         pagerId: 'income-methods-pager',
         gate: INCOME_GATE,
         load: function () {
@@ -870,7 +870,6 @@ function buildIncomePanels() {
         },
         renderRow: function (m) {
             return '<tr><td class="cell-name">' + escapeHtml(m.payment_method) + '</td>' +
-                '<td class="cell-num">' + m.sale_count + '</td>' +
                 '<td class="cell-num">' + peso(m.billed) + '</td>' +
                 '<td class="cell-num">' + peso(m.collected) + '</td>' +
                 '<td class="cell-num' + (Number(m.outstanding) > 0 ? ' cell-due' : '') + '">' +
@@ -962,7 +961,7 @@ function buildReportPanels() {
                 '<td class="cell-name">' + escapeHtml(row.staff_name || 'Not recorded') + '</td>' +
                 '<td>' + escapeHtml(row.role_name || '') + '</td>' +
                 '<td>' + escapeHtml(activityKind(row.kind)) + '</td>' +
-                '<td>' + escapeHtml(row.details || '') + '</td></tr>';
+                '<td>' + escapeHtml(idsInText(row.details)) + '</td></tr>';
         }
     });
 
@@ -985,7 +984,7 @@ function buildReportPanels() {
         },
         match: function (row, query) {
             return prefixMatch([
-                row.customer_name, row.payment_method, row.sale_id, '#' + row.sale_id
+                row.customer_name, row.payment_method, row.sale_id, '#' + row.sale_id, orNumber(row.sale_id)
             ], query);
         },
         filter: function (row, filters) {
@@ -1004,7 +1003,7 @@ function buildReportPanels() {
         renderRow: function (u, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                     'onclick="openSaleDetail(' + u.sale_id + ')">' +
-                '<td class="cell-id">#' + u.sale_id + '</td>' +
+                '<td class="cell-id">' + orNumber(u.sale_id) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(u.customer_name) + '</td>' +
                 '<td>' + escapeHtml(u.payment_method) + '</td>' +
                 '<td>' + statusBadge(u.payment_status) + '</td>' +
@@ -1020,8 +1019,8 @@ function buildReportPanels() {
         pagerId: 'loyal-pager',
         idField: 'customer_id',
         filters: { balance: 'all' },
-        sortKeys: ['customer_name', 'purchase_count', function (row) { return Number(row.total_spent); },
-                   function (row) { return Number(row.balance_due); }, 'last_purchase'],
+        sortKeys: ['customer_id', 'customer_name', 'last_purchase', function (row) { return Number(row.total_spent); },
+                   function (row) { return Number(row.balance_due); }],
         gate: {
             title: 'Not loaded',
             text: 'Press Load Data for customers who have bought more than once.',
@@ -1032,7 +1031,7 @@ function buildReportPanels() {
             return overview.loyal;
         },
         match: function (row, query) {
-            return prefixMatch([row.customer_name], query);
+            return prefixMatch([row.customer_name, customerCode(row.customer_id)], query);
         },
         filter: function (row, filters) {
             return repeatCustomerMatches(row, filters);
@@ -1040,12 +1039,12 @@ function buildReportPanels() {
         renderRow: function (c, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                     'onclick="openCustomerDetail(' + c.customer_id + ')">' +
+                '<td class="cell-id">' + customerCode(c.customer_id) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(c.customer_name) + '</td>' +
-                '<td class="cell-num">' + c.purchase_count + '</td>' +
+                '<td class="cell-id">' + escapeHtml(String(c.last_purchase).slice(0, 10)) + '</td>' +
                 '<td class="cell-num">' + peso(c.total_spent) + '</td>' +
                 '<td class="cell-num' + (Number(c.balance_due) > 0 ? ' cell-due' : '') + '">' +
-                    peso(c.balance_due) + '</td>' +
-                '<td class="cell-id">' + escapeHtml(String(c.last_purchase).slice(0, 10)) + '</td></tr>';
+                    peso(c.balance_due) + '</td></tr>';
         }
     });
 
@@ -1235,7 +1234,7 @@ function buildSalesPanel() {
         pagerId: 'sales-pager',
         idField: 'sale_id',
         inputs: ['sales-method', 'sales-status', 'sales-period', 'sales-from', 'sales-to'],
-        sortKeys: ['sale_id', 'sale_date', 'customer_name', 'payment_group', 'transaction_status',
+        sortKeys: ['sale_id', 'sale_date', 'customer_name', 'payment_method', 'transaction_status',
                    function (row) { return Number(row.final_amount); }],
         gate: {
             title: 'No sales loaded',
@@ -1247,19 +1246,17 @@ function buildSalesPanel() {
         },
         match: function (s, query) {
             return prefixMatch([
-                s.customer_name, s.cashier_name, s.payment_method, s.sale_id, '#' + s.sale_id
+                s.customer_name, s.cashier_name, s.payment_method, s.sale_id, '#' + s.sale_id, orNumber(s.sale_id)
             ], query);
         },
         renderRow: function (s, index) {
             const tone = SALE_STATUS_TONE[s.transaction_status] || 'badge-neutral';
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openSaleDetail(' + s.sale_id + ')">' +
-                '<td class="cell-id">#' + s.sale_id + '</td>' +
+                '<td class="cell-id">' + orNumber(s.sale_id) + '</td>' +
                 '<td class="cell-id">' + escapeHtml(String(s.sale_date).slice(0, 10)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(s.customer_name) + '</td>' +
-                '<td>' + escapeHtml(s.payment_group) +
-                    (s.payment_group !== s.payment_method
-                        ? ' <span class="muted">' + escapeHtml(s.payment_method) + '</span>' : '') + '</td>' +
+                '<td>' + escapeHtml(s.payment_method) + '</td>' +
                 '<td><span class="badge ' + tone + '">' + escapeHtml(s.transaction_status) + '</span>' +
                     (s.void_request_id ? ' <span class="badge badge-danger">Void requested</span>' : '') + '</td>' +
                 '<td class="cell-num">' + peso(s.final_amount) + '</td></tr>';
@@ -1274,20 +1271,25 @@ async function stockRows() {
     return stocksCache;
 }
 
+function descriptionText(description) {
+    if (!description) return '<span class="muted">Not set</span>';
+    return escapeHtml(description);
+}
+
 function buildStockPanels() {
     createDataPanel({
         key: 'mgr-reorder',
         tableId: 'reorder-table',
-        columns: 6,
+        columns: 8,
         pagerId: 'reorder-pager',
         idField: 'product_id',
         filters: { status: 'all' },
-        sortKeys: ['product_name', function (p) { return Number(p.quantity_in_stock); },
+        sortKeys: ['product_id', 'product_name', 'description', function (p) { return Number(p.quantity_in_stock); },
                    function (p) { return Number(p.effective_rop); },
                    function (p) { return Number(p.suggested_order); }, 'supplier_name', 'stock_status'],
         gate: {
             title: 'Reorder alerts not loaded',
-            text: 'Press Load Data for every product at or below its reorder point.',
+            text: 'Press Load Data for every material at or below its reorder point.',
             button: 'Load Data'
         },
         load: async function () {
@@ -1299,7 +1301,7 @@ function buildStockPanels() {
             return low;
         },
         match: function (p, query) {
-            return prefixMatch([p.product_name, p.supplier_name], query);
+            return prefixMatch([p.product_name, p.description, p.supplier_name, materialCode(p.product_id)], query);
         },
         filter: function (p, filters) {
             return filters.status === 'all' || p.stock_status === filters.status;
@@ -1307,7 +1309,9 @@ function buildStockPanels() {
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                     'onclick="openStockDetail(' + p.product_id + ', true)">' +
+                '<td class="cell-id">' + materialCode(p.product_id) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
+                '<td>' + descriptionText(p.description) + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + '</td>' +
                 '<td class="cell-num">' + p.effective_rop + '</td>' +
                 '<td class="cell-num cell-due">' + p.suggested_order + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
@@ -1319,21 +1323,21 @@ function buildStockPanels() {
     createDataPanel({
         key: 'mgr-stocks',
         tableId: 'stocks-table',
-        columns: 4,
+        columns: 6,
         pagerId: 'stocks-pager',
         idField: 'product_id',
         filters: { status: 'all' },
-        sortKeys: ['product_name', 'category_name', function (p) { return Number(p.quantity_in_stock); }, 'stock_status'],
+        sortKeys: ['product_id', 'product_name', 'description', 'category_name', function (p) { return Number(p.quantity_in_stock); }, 'stock_status'],
         gate: {
             title: 'The stock report is not loaded',
-            text: 'Search for a product, pick a status or a quantity, or press Load Data for the whole inventory.',
+            text: 'Search for a material, pick a status or a quantity, or press Load Data for the whole inventory.',
             button: 'Load Data'
         },
         load: function () {
             return stockRows();
         },
         match: function (p, query) {
-            return prefixMatch([p.product_name, p.category_name, p.supplier_name], query);
+            return prefixMatch([p.product_name, p.description, p.category_name, p.supplier_name, materialCode(p.product_id)], query);
         },
         filter: function (p, filters) {
             return filters.status === 'all' || p.stock_status === filters.status;
@@ -1341,7 +1345,9 @@ function buildStockPanels() {
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                     'onclick="openStockDetail(' + p.product_id + ')">' +
+                '<td class="cell-id">' + materialCode(p.product_id) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
+                '<td>' + descriptionText(p.description) + '</td>' +
                 '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
                 '<td class="cell-num">' + p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '') + '</td>' +
                 '<td>' + statusBadge(p.stock_status) + '</td></tr>';
@@ -1383,7 +1389,7 @@ function buildStockMovesPanel() {
             return '<tr class="row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms">' +
                 '<td class="cell-id">' + escapeHtml(activityWhen(row.happened_at)) + '</td>' +
                 '<td>' + escapeHtml(activityKind(row.kind)) + '</td>' +
-                '<td>' + escapeHtml(row.details || '') + '</td>' +
+                '<td>' + escapeHtml(idsInText(row.details)) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(row.staff_name || 'Not recorded') + '</td>' +
                 '<td>' + escapeHtml(row.role_name || '') + '</td></tr>';
         }
@@ -1420,7 +1426,7 @@ async function loadPriceBanner() {
         return;
     }
 
-    const words = count === 1 ? '1 product has no price set' : count + ' products have no price set';
+    const words = count === 1 ? '1 material has no price set' : count + ' materials have no price set';
     let button = '';
     if (holdsFeature('records')) {
         button = '<button type="button" class="btn btn-sm" onclick="openUnpricedProducts()">Set prices</button>';
@@ -1537,7 +1543,7 @@ async function changePrice(product) {
             : product.product_name + ': ' + peso(current) + ' to ' + peso(next) + unit + change + '.',
         {
             title: noPrice ? 'Set the price?' : (up ? 'Raise the price?' : 'Lower the price?'),
-            eyebrow: 'Products',
+            eyebrow: 'Materials',
             confirmLabel: 'Set the price',
             tone: belowCost || (share !== null && share >= 0.5) ? 'danger' : undefined,
             detail: detail
@@ -1654,14 +1660,51 @@ function debtAge(days) {
     return text;
 }
 
+function requestBadge(status) {
+    let tone;
+    if (status === 'Pending') {
+        tone = 'badge-warning';
+    } else if (status === 'Approved') {
+        tone = 'badge-success';
+    } else {
+        tone = 'badge-danger';
+    }
+    return '<span class="badge ' + tone + '">' + escapeHtml(status) + '</span>';
+}
+
+function creditRequestCell(row) {
+    if (!row.latest_request_id) return '<td><span class="muted">None</span></td>';
+    return '<td class="cell-link" title="Open this request" ' +
+        'onclick="openCustomerRequest(event, ' + row.latest_request_id + ', \'' + row.latest_request_status + '\')">' +
+        requestBadge(row.latest_request_status) + '</td>';
+}
+
+async function openCustomerRequest(event, requestId, status) {
+    event.stopPropagation();
+
+    const select = document.getElementById('requests-status');
+    if (select) select.value = status === 'Pending' ? 'Pending' : 'all';
+
+    showCreditRequests();
+
+    const panel = getDataPanel('mgr-requests');
+    if (!panel) return;
+    await panel.open();
+    for (let i = 0; i < 50 && panel.state === 'loading'; i++) {
+        await new Promise(function (done) { setTimeout(done, 100); });
+    }
+    openCreditRequest(requestId);
+}
+
 function buildCreditPanels() {
     createDataPanel({
         key: 'mgr-credit',
         tableId: 'credit-table',
-        columns: 6,
+        columns: 7,
         sortKeys: ['customer_name', function (r) { return Number(r.credit_limit); }, function (r) { return Number(r.current_credit); },
                    function (r) { return Number(r.available_credit); }, function (r) { return Number(r.open_sales); },
-                   function (r) { return r.oldest_debt_days === null ? '' : Number(r.oldest_debt_days); }],
+                   function (r) { return r.oldest_debt_days === null ? '' : Number(r.oldest_debt_days); },
+                   'latest_request_status'],
         pagerId: 'credit-pager',
         idField: 'customer_id',
         filters: { owing: 'all' },
@@ -1698,9 +1741,7 @@ function buildCreditPanels() {
 
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openCreditAccount(' + row.customer_id + ')">' +
-                '<td class="cell-name">' + escapeHtml(row.customer_name) +
-                    (Number(row.pending_requests) > 0
-                        ? ' <span class="badge badge-warning">Request waiting</span>' : '') + '</td>' +
+                '<td class="cell-name">' + escapeHtml(row.customer_name) + '</td>' +
                 '<td class="cell-num">' + peso(row.credit_limit) + '</td>' +
                 '<td class="cell-num' + (owed > 0 ? ' cell-due' : '') + '">' + peso(owed) +
                     (Number(row.penalties_owed) > 0
@@ -1709,7 +1750,8 @@ function buildCreditPanels() {
                     ? '<span class="cell-due">Over by ' + peso(owed - limit) + '</span>'
                     : peso(row.available_credit)) + '</td>' +
                 '<td class="cell-num">' + row.open_sales + '</td>' +
-                '<td class="cell-num">' + debtAge(row.oldest_debt_days) + '</td></tr>';
+                '<td class="cell-num">' + debtAge(row.oldest_debt_days) + '</td>' +
+                creditRequestCell(row) + '</tr>';
         }
     });
 
@@ -2035,7 +2077,8 @@ function previewCardBack() {
     for (let i = 0; i < boxes.length; i++) {
         const box = boxes[i];
         const kind = box.dataset.cardPreview;
-        box.innerHTML = customerCardBackHtml(policyData.store, policies, kind);
+        // The preview shows the portal sign-in strip too, so the policies fit the same space as on the card.
+        box.innerHTML = customerCardBackHtml(policyData.store, policies, kind, { userId: customerCode(1), password: '' });
         const card = box.querySelector('.cc-card');
 
         if (box.clientWidth === 0) continue;
@@ -2244,7 +2287,7 @@ function showCreditTab(tab) {
     const history = tab !== 'account';
     document.getElementById('credit-account-tab').style.display = history ? 'none' : 'block';
     document.getElementById('credit-history-tab').style.display = history ? 'block' : 'none';
-    const tabs = ['account', 'purchases', 'payments', 'requests'];
+    const tabs = ['account', 'purchases', 'payments'];
     for (let i = 0; i < tabs.length; i++) {
         const button = document.getElementById('credit-tab-' + tabs[i]);
         if (button) button.classList.toggle('active', tabs[i] === tab);
@@ -2279,8 +2322,8 @@ function renderCreditHistory(data) {
     for (let i = 0; i < data.purchases.length; i++) {
         const p = data.purchases[i];
         purchaseRows.push([
+            orNumber(p.sale_id) + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
             escapeHtml(String(p.sale_date).slice(0, 10)),
-            '#' + p.sale_id + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
             peso(p.final_amount) +
                 (Number(p.penalty_amount) > 0
                     ? '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty (' +
@@ -2291,48 +2334,32 @@ function renderCreditHistory(data) {
                 : '<span class="muted">Paid</span>'
         ]);
     }
-    const purchases = pagedTable('mgr-purchases', ['Date', 'Sale', 'Amount', 'Balance'],
+    const purchases = pagedTable('mgr-purchases', ['Sale', 'Date', 'Amount', 'Balance'],
         purchaseRows, [2, 3], { empty: 'Nothing bought yet.' });
 
     const paymentRows = [];
     for (let i = 0; i < data.payments.length; i++) {
         const p = data.payments[i];
         paymentRows.push([
+            p.sale_id ? orNumber(p.sale_id) : '<span class="muted">On account</span>',
             escapeHtml(String(p.payment_date).slice(0, 10)),
             peso(p.amount),
-            escapeHtml(p.payment_method),
-            p.sale_id ? '#' + p.sale_id : '<span class="muted">On account</span>'
+            escapeHtml(p.payment_method)
         ]);
     }
-    const payments = pagedTable('mgr-payments', ['Date', 'Amount', 'Method', 'Receipt'],
-        paymentRows, [1], { empty: 'No payments recorded.' });
-
-    const requestRows = [];
-    for (let i = 0; i < data.requests.length; i++) {
-        const r = data.requests[i];
-        requestRows.push([
-            escapeHtml(String(r.created_at).slice(0, 10)),
-            peso(r.previous_limit),
-            peso(r.requested_limit),
-            escapeHtml(r.status) + (r.decided_by ? ' <span class="muted">' +
-                escapeHtml(r.decided_by) + '</span>' : '')
-        ]);
-    }
-    const requests = pagedTable('mgr-credit-requests', ['Date Requested', 'From', 'To', 'Outcome'],
-        requestRows, [1, 2], { empty: 'No requests yet.' });
+    const payments = pagedTable('mgr-payments', ['Receipt', 'Date', 'Amount', 'Method'],
+        paymentRows, [2], { empty: 'No payments recorded.' });
 
     if (creditTab === 'purchases') {
         box.innerHTML = '<h4 class="history-head">Purchase History' +
             '<span class="history-total">' + peso(data.credit.total_purchase) + '</span></h4>' + purchases;
-    } else if (creditTab === 'payments') {
+    } else {
         box.innerHTML = '<h4 class="history-head">Credit Payments' +
             '<span class="history-total">' +
                 (Number(data.credit.current_credit) > 0
                     ? '<span class="cell-due">' + peso(data.credit.current_credit) + ' balance</span>'
                     : 'No balance') +
             '</span></h4>' + payments;
-    } else {
-        box.innerHTML = '<h4 class="history-head">Extension Requests</h4>' + requests;
     }
 }
 
@@ -2479,7 +2506,7 @@ function buildDeliveryPanel() {
             return apiGetDeliveries();
         },
         match: function (d, query) {
-            return prefixMatch([d.customer_name, d.driver_name, d.delivery_address], query);
+            return prefixMatch([d.customer_name, d.driver_name, d.delivery_address, '#' + d.delivery_id, deliveryCode(d.delivery_id)], query);
         },
         filter: function (d, filters) {
             return (filters.state === 'all' || d.fulfilment_state === filters.state) &&
@@ -2494,7 +2521,7 @@ function buildDeliveryPanel() {
 
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                 'onclick="openDeliveryDetail(' + d.delivery_id + ')">' +
-                '<td class="cell-id">#' + d.delivery_id + '</td>' +
+                '<td class="cell-id">' + deliveryCode(d.delivery_id) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
                 '<td>' + escapeHtml(d.delivery_address) + '</td>' +
                 '<td>' + escapeHtml(d.driver_name) + '</td>' +
@@ -2535,16 +2562,16 @@ function renderDriverOptions(rows) {
 }
 
 const RECORD_COLUMNS = {
-    supplier: [['name', 'Supplier'], ['contact_person', 'Contact'], ['contact_number', 'Number'], ['email', 'Email'], ['product_count', 'Products']],
+    supplier: [['name', 'Supplier'], ['contact_person', 'Contact'], ['contact_number', 'Number'], ['email', 'Email'], ['product_count', 'Materials']],
     customer: [['name', 'Customer'], ['phone', 'Phone'], ['credit_limit', 'Credit Limit'], ['current_credit', 'Balance']],
-    product:  [['name', 'Product'], ['category_name', 'Category'], ['brand_name', 'Brand'], ['price', 'Price'], ['quantity_in_stock', 'On Hand']],
-    category: [['name', 'Category'], ['product_count', 'Products'], ['total_stock', 'Total Stock']],
-    unit:     [['name', 'Unit'], ['product_count', 'Products']]
+    product:  [['id', 'ID'], ['name', 'Material name'], ['description', 'Description'], ['category_name', 'Category'], ['brand_name', 'Brand'], ['price', 'Price'], ['quantity_in_stock', 'On Hand']],
+    category: [['name', 'Category'], ['product_count', 'Materials'], ['total_stock', 'Total Stock']],
+    unit:     [['name', 'Unit'], ['product_count', 'Materials']]
 };
 const MONEY_FIELDS = ['price', 'credit_limit', 'current_credit', 'total_purchase', 'stock_value'];
 
 const RECORD_TITLES = {
-    supplier: 'Suppliers', customer: 'Customers', product: 'Products',
+    supplier: 'Suppliers', customer: 'Customers', product: 'Materials',
     category: 'Categories', unit: 'Units'
 };
 
@@ -2631,6 +2658,7 @@ function buildRecordsPanel() {
             for (const field in row) {
                 values.push(row[field]);
             }
+            values.push(recordCode(recordType, row.id));
             return prefixMatch(values, query);
         },
         sort: function (rows) {
@@ -2646,7 +2674,9 @@ function buildRecordsPanel() {
                 const value = row[column[0]];
                 const money = MONEY_FIELDS.indexOf(column[0]) !== -1;
                 let shown;
-                if (money && recordType === 'product' && column[0] === 'price') {
+                if (column[0] === 'id') {
+                    shown = recordCode(recordType, row.id);
+                } else if (money && recordType === 'product' && column[0] === 'price') {
                     shown = priceOrBadge(row);
                 } else if (money) {
                     shown = peso(value);
@@ -2657,7 +2687,9 @@ function buildRecordsPanel() {
                 }
 
                 let style;
-                if (position === 0) {
+                if (column[0] === 'id') {
+                    style = 'cell-id';
+                } else if (column[0] === 'name') {
                     style = 'cell-name';
                 } else if (RECORD_NUMERIC.indexOf(column[0]) !== -1) {
                     style = 'cell-num';
@@ -2780,7 +2812,7 @@ async function saveAddRecord(event) {
 }
 
 const ARCHIVE_TYPE_NAMES = {
-    Customer: 'Customer', Inventory: 'Product', Unit: 'Unit',
+    Customer: 'Customer', Inventory: 'Material', Unit: 'Unit',
     Category: 'Category', Supplier: 'Supplier', Staff: 'User'
 };
 
@@ -2788,24 +2820,29 @@ function archiveTypeName(module) {
     return ARCHIVE_TYPE_NAMES[module] || module;
 }
 
+// Staff, Inventory, Supplier, Customer, Category and Unit are all names recordCode knows
+function archiveRecordCode(a) {
+    return recordCode(String(a.module).toLowerCase(), a.record_id);
+}
+
 function buildArchivePanel() {
     createDataPanel({
         key: 'mgr-archives',
         tableId: 'archives-table',
-        columns: 5,
-        sortKeys: [function (a) { return archiveTypeName(a.module); }, 'record_name', 'detail', 'archived_at', 'archived_by'],
+        columns: 6,
+        sortKeys: ['record_id', function (a) { return archiveTypeName(a.module); }, 'record_name', 'detail', 'archived_at', 'archived_by'],
         pagerId: 'archives-pager',
         filters: { type: 'all' },
         gate: {
             title: 'The archive is not loaded',
-            text: 'Press Load Data for every archived customer, product, unit, category, supplier and user.',
+            text: 'Press Load Data for every archived customer, material, unit, category, supplier and user.',
             button: 'Load Data'
         },
         load: function () {
             return apiGetArchives();
         },
         match: function (a, query) {
-            return prefixMatch([a.record_name, a.detail, archiveTypeName(a.module), a.archived_by], query);
+            return prefixMatch([a.record_name, a.detail, archiveTypeName(a.module), a.archived_by, archiveRecordCode(a)], query);
         },
         filter: function (a, filters) {
             return filters.type === 'all' || archiveTypeName(a.module) === filters.type;
@@ -2820,8 +2857,9 @@ function buildArchivePanel() {
         renderRow: function (a, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
                     'onclick="openArchiveEntry(' + index + ')">' +
+                '<td class="cell-id">' + archiveRecordCode(a) + '</td>' +
                 '<td>' + statusBadge(archiveTypeName(a.module)) + '</td>' +
-                '<td class="cell-name">' + escapeHtml(a.record_name) + '</td>' +
+                '<td class="cell-name">' + escapeHtml(idsInText(a.record_name)) + '</td>' +
                 '<td>' + escapeHtml(a.detail || '') + '</td>' +
                 '<td class="cell-id">' + escapeHtml(a.archived_at || 'Unknown') + '</td>' +
                 '<td>' + escapeHtml(a.archived_by || 'Not recorded') + '</td></tr>';
@@ -2837,7 +2875,8 @@ function openArchiveEntry(index) {
     const type = archiveTypeName(entry.module);
     const body = '<div class="detail-grid">' +
         detailField('Type', statusBadge(type)) +
-        detailField('Record', escapeHtml(entry.record_name)) +
+        detailField('ID', archiveRecordCode(entry)) +
+        detailField('Record', escapeHtml(idsInText(entry.record_name))) +
         detailField('Detail', escapeHtml(entry.detail || 'None recorded')) +
         detailField('Archived On', escapeHtml(entry.archived_at || 'Not recorded')) +
         detailField('Archived By', escapeHtml(entry.archived_by || 'Not recorded')) +
@@ -2847,8 +2886,8 @@ function openArchiveEntry(index) {
             entry.module + '\', ' + entry.record_id + ')">Restore This Record</button>' +
         '</div>';
 
-    openDetailModal(entry.record_name, type + ' · archived',
-        initialsOf(entry.record_name), [{ label: 'Archived Record', body: body }]);
+    openDetailModal(idsInText(entry.record_name), type + ' · archived',
+        initialsOf(idsInText(entry.record_name)), [{ label: 'Archived Record', body: body }]);
 }
 
 async function restoreArchive(module, recordId) {
@@ -2933,7 +2972,7 @@ async function openSaleDetail(saleId) {
         }
 
         const summary = voidBox + '<div class="detail-grid">' +
-            detailField('Sale ID', '#' + s.sale_id) +
+            detailField('Sale ID', orNumber(s.sale_id)) +
             detailField('Date', escapeHtml(s.sale_date)) +
             detailField('Customer', escapeHtml(s.customer_name)) +
             detailField('Phone', s.customer_phone ? escapeHtml(s.customer_phone) : '<span class="muted">Not set</span>') +
@@ -2976,13 +3015,14 @@ async function openSaleDetail(saleId) {
         for (let i = 0; i < data.items.length; i++) {
             const it = data.items[i];
             itemRows.push([
+                materialCode(it.product_id),
                 escapeHtml(it.product_name),
                 escapeHtml(qtyText(it.quantity, it.unit_name)),
                 peso(it.unit_price),
                 peso(it.subtotal)
             ]);
         }
-        const items = detailTable(['Product', 'Qty', 'Unit Price', 'Subtotal'], itemRows, [1, 2, 3]);
+        const items = detailTable(['Material ID', 'Material name', 'Qty', 'Unit Price', 'Subtotal'], itemRows, [2, 3, 4], [0]);
 
         const paidList = [];
         const references = {};
@@ -3072,7 +3112,7 @@ async function openSaleDetail(saleId) {
             }
 
             pages.push({ label: 'Delivery', body: '<div class="detail-grid">' +
-                detailField('Delivery ID', '#' + d.delivery_id) +
+                detailField('Delivery ID', deliveryCode(d.delivery_id)) +
                 detailField('Delivery Status', statusBadge(d.status)) +
                 detailField('Fulfilment', '<span class="badge ' +
                     (FULFILMENT_TONE[state] || 'badge-neutral') + '">' + escapeHtml(state) + '</span>') +
@@ -3096,11 +3136,11 @@ async function openSaleDetail(saleId) {
                     vr.request_id + ', ' + s.sale_id + ', true)">Approve Void</button>';
         }
 
-        openDetailModal('Sale #' + s.sale_id, s.customer_name + ' · ' + s.payment_method,
+        openDetailModal(orNumber(s.sale_id), s.customer_name + ' · ' + s.payment_method,
             'S' + s.sale_id, pages, foot);
 
         if (voidWaiting) {
-            notifyWarning((vr.requested_by || 'A cashier') + ' asks to void sale #' + s.sale_id + ': ' + vr.reason +
+            notifyWarning((vr.requested_by || 'A cashier') + ' asks to void ' + orNumber(s.sale_id) + ': ' + vr.reason +
                 '. Approve or decline it below.', 'Void request');
         }
     } catch (error) {
@@ -3111,7 +3151,7 @@ async function openSaleDetail(saleId) {
 async function decideVoidRequest(requestId, saleId, approve) {
     let note = '';
     if (approve) {
-        const yes = await askDanger('Sale #' + saleId + ' will be voided: it reads Voided in Sales Transactions and ' +
+        const yes = await askDanger(orNumber(saleId) + ' will be voided: it reads Voided in Sales Transactions and ' +
             'its goods go back on the shelf. This cannot be undone.', {
             title: 'Approve the void?', eyebrow: 'Void request', confirmLabel: 'Approve Void', cancelLabel: 'Go back'
         });
@@ -3119,7 +3159,7 @@ async function decideVoidRequest(requestId, saleId, approve) {
     } else {
         const typed = await askInput({
             title: 'Decline the void?', eyebrow: 'Void request',
-            message: 'Sale #' + saleId + ' stays as it is. Say why, so the cashier knows.',
+            message: orNumber(saleId) + ' stays as it is. Say why, so the cashier knows.',
             label: 'Reason for declining', confirmLabel: 'Decline Void', cancelLabel: 'Go back',
             check: function (value) {
                 return String(value || '').trim() === '' ? 'Type why the void is declined.' : null;
@@ -3150,9 +3190,9 @@ async function alertWaitingVoidRequests() {
     try { rows = await apiGetVoidRequests(); } catch (error) { return; }
     if (!rows || rows.length === 0) return;
     const names = [];
-    for (let i = 0; i < rows.length && i < 5; i++) names.push('#' + rows[i].sale_id);
+    for (let i = 0; i < rows.length && i < 5; i++) names.push(orNumber(rows[i].sale_id));
     notifyWarning(rows.length + (rows.length === 1 ? ' void request is' : ' void requests are') +
-        ' waiting for you: sale ' + names.join(', ') + (rows.length > 5 ? ' and more' : '') +
+        ' waiting for you: ' + names.join(', ') + (rows.length > 5 ? ' and more' : '') +
         '. Open the sale to approve or decline it.', 'Void requests');
 }
 
@@ -3166,8 +3206,9 @@ function openStockDetail(productId, fromReorderAlerts) {
     if (!p) return;
 
     const stock = '<div class="detail-grid">' +
-        detailField('Product ID', '#' + p.product_id) +
-        detailField('Product', escapeHtml(p.product_name)) +
+        detailField('Material ID', materialCode(p.product_id)) +
+        detailField('Material name', escapeHtml(p.product_name)) +
+        detailField('Description', descriptionText(p.description)) +
         detailField('On Hand', p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '')) +
         detailField('Reorder Point', String(p.reorder_point)) +
         detailField('Stock Status', statusBadge(p.stock_status)) +
@@ -3189,7 +3230,7 @@ function openStockDetail(productId, fromReorderAlerts) {
     const product = '<div class="detail-grid">' +
         detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
         detailField('Brand', escapeHtml(p.brand_name || 'No brand')) +
-        detailField('Product Status', statusBadge(p.status)) +
+        detailField('Material Status', statusBadge(p.status)) +
         detailField('Selling Price', priceOrBadge(p)) +
         detailField('Last Buying Price', lastCostText(p.last_cost)) +
         detailField('Last Updated', escapeHtml(p.last_updated || 'Never')) +
@@ -3204,7 +3245,7 @@ function openStockDetail(productId, fromReorderAlerts) {
     const pages = [
         { label: 'Stock', body: stock },
         { label: 'Reorder Point', body: reorder },
-        { label: 'Product', body: product },
+        { label: 'Material', body: product },
         { label: 'Supplier', body: supplier }
     ];
 
@@ -3235,12 +3276,12 @@ async function openRecordDetail(index) {
         }
     }
     const body = '<div class="detail-grid detail-grid-3">' +
-        detailField('Record ID', '#' + row.id) +
+        detailField('Record ID', recordCode(type, row.id)) +
         detailField('Name', escapeHtml(row.name)) +
         fields +
         '</div>' +
         (type === 'product' && isUnpriced(row)
-            ? '<p class="detail-note detail-warn">This product has no price yet, so the till cannot sell it.</p>'
+            ? '<p class="detail-note detail-warn">This material has no price yet, so the till cannot sell it.</p>'
             : '');
     const pages = [{ label: 'Details', body: body }];
 
@@ -3255,6 +3296,7 @@ async function openRecordDetail(index) {
                 if (p[field] !== row.name) continue;
                 const third = type === 'supplier' ? p.category_name : p.supplier_name;
                 productRows.push([
+                    materialCode(p.id),
                     escapeHtml(p.name),
                     p.brand_name ? escapeHtml(p.brand_name) : '<span class="muted">Not set</span>',
                     third ? escapeHtml(third) : '<span class="muted">Not set</span>',
@@ -3263,15 +3305,15 @@ async function openRecordDetail(index) {
                 ]);
             }
             productsBody = detailTable(
-                ['Product', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'],
-                productRows, [3, 4]);
-            pages.push({ label: 'Products (' + productRows.length + ')', body: productsBody });
+                ['ID', 'Material name', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'],
+                productRows, [4, 5], [0]);
+            pages.push({ label: 'Materials (' + productRows.length + ')', body: productsBody });
         } catch (error) {
             let where = 'using this unit';
             if (type === 'category') where = 'in this category';
             else if (type === 'supplier') where = 'from this supplier';
-            pages.push({ label: 'Products', body:
-                '<p class="detail-note detail-warn">The products ' + where + ' could not be loaded.</p>' });
+            pages.push({ label: 'Materials', body:
+                '<p class="detail-note detail-warn">The materials ' + where + ' could not be loaded.</p>' });
         }
     }
 
@@ -3443,7 +3485,7 @@ async function openCustomerDetail(customerId) {
         openDetailModal(customer.name, 'Customer record', initialsOf(customer.name), [{
             label: 'Customer',
             body: '<div class="detail-grid">' +
-                detailField('Record ID', '#' + customer.id) +
+                detailField('Record ID', customerCode(customer.id)) +
                 detailField('Name', escapeHtml(customer.name)) +
                 fields +
                 '</div>'
@@ -4055,7 +4097,7 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
                 key: 'mgr-stock-moves'
             },
             'New Product':      {
-                label: 'Products', panelId: 'panel-records',
+                label: 'Materials', panelId: 'panel-records',
                 open: function () {
                     openUnpricedProducts();
                 }
@@ -4082,6 +4124,13 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
                 key: 'mgr-sales'
             },
             'Late Penalty':     {
+                label: 'Receivables', panelId: 'panel-reports',
+                open: function () {
+                    showReport('report-unpaid');
+                },
+                key: 'mgr-unpaid'
+            },
+            'Customer Payment': {
                 label: 'Receivables', panelId: 'panel-reports',
                 open: function () {
                     showReport('report-unpaid');

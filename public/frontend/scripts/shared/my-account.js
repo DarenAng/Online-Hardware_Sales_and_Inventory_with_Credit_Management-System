@@ -240,7 +240,7 @@ function renderMyAccount() {
     const editableRowsLocked = !canEditOwnDetails();
 
     document.getElementById('account-view').innerHTML =
-        detailRow('Staff ID', '#' + escapeHtml(me.staff_id), locked) +
+        detailRow('Staff ID', staffCode(me.staff_id), locked) +
         detailRow('Full Name', escapeHtml(name), locked) +
         detailRow('First Name', escapeHtml(me.first_name), editableRowsLocked) +
         detailRow('Middle Name', me.middle_name

@@ -243,5 +243,8 @@ module.exports = {
   removeExpiredSessions: removeExpiredSessions,
   endSessionsForStaff: endSessionsForStaff,
   getActorId: getActorId,
-  renewSessionAfterPasswordChange: renewSessionAfterPasswordChange
+  renewSessionAfterPasswordChange: renewSessionAfterPasswordChange,
+  tokenHash: tokenHash,
+  readCookie: readCookie,
+  SECURE_COOKIE: SECURE_COOKIE
 };

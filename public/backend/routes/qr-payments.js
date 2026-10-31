@@ -10,6 +10,7 @@ if (Number(process.env.QR_PAYMENT_MINUTES) > 0) {
 }
 
 const WALLETS = ["GCash", "PayMaya", "Bank Transfer"];
+
 const PURPOSES = ["sale", "credit_payment"];
 
 const UNSAVED_NOTE = "paid but sale not saved – refund needed";
@@ -67,9 +68,16 @@ function pesoText(value) {
   return Number(value).toFixed(2);
 }
 
-function qrRefusal(row, amountNow, wallet) {
+function qrRefusal(row, amountNow, wallet, forSaleId) {
   if (!row) {
     return { status: 404, code: "QR_UNKNOWN", message: "That QR payment is not on record. Make a new QR code." };
+  }
+  // A code made in the customer portal pays that one sale, and nothing else.
+  if (row.portal_sale_id !== null && row.portal_sale_id !== undefined &&
+      Number(row.portal_sale_id) !== Number(forSaleId)) {
+    return { status: 409, code: "QR_PORTAL",
+      message: "This QR payment was made in the customer portal for " + helpers.orNumber(row.portal_sale_id) + ", so it cannot be used for anything else. " +
+               "Nothing was recorded." };
   }
   if (row.status !== "paid") {
     return { status: 409, code: "QR_NOT_PAID",
@@ -86,7 +94,7 @@ function qrRefusal(row, amountNow, wallet) {
   }
   if (row.sale_id !== null && row.sale_id !== undefined) {
     return { status: 409, code: "QR_USED",
-      message: "This QR payment is already recorded on OR-" + String(row.sale_id).padStart(6, "0") + ". " +
+      message: "This QR payment is already recorded on " + helpers.orNumber(row.sale_id) + ". " +
                "One payment cannot pay for two things." };
   }
   return null;
@@ -141,12 +149,29 @@ function registerQrPaymentRoutes(app, deps) {
     };
   }
 
+  // Things to do once a QR payment turns paid (the customer portal records its payments here).
+  const paidListeners = [];
+
+  function onPaid(listener) {
+    paidListeners.push(listener);
+  }
+
   async function setResult(id, status, paymentId, errorMessage, actorId) {
     const output = await qrPaymentProcedures.setQrPaymentResult(
       [id, status, paymentId || null, errorMessage || null, actorId || null]
     );
     if (Number(output.changed) === 1) {
       publishChange("qr-payments", "qr-payment " + id + " " + status, null);
+
+      if (status === "paid" && errorMessage !== UNSAVED_NOTE) {
+        for (let listenerIndex = 0; listenerIndex < paidListeners.length; listenerIndex++) {
+          try {
+            await paidListeners[listenerIndex](id);
+          } catch (error) {
+            console.error("Handling paid QR payment " + helpers.qrPaymentCode(id) + " failed:", error.message);
+          }
+        }
+      }
     }
     return output;
   }
@@ -163,7 +188,7 @@ function registerQrPaymentRoutes(app, deps) {
       try {
         state = await provider.getStatus(row.provider_intent_id);
       } catch (error) {
-        console.error("Checking QR payment #" + id + " failed:", error.message);
+        console.error("Checking QR payment " + helpers.qrPaymentCode(id) + " failed:", error.message);
         row.checkError = error.message;
         return row;
       }
@@ -265,10 +290,10 @@ function registerQrPaymentRoutes(app, deps) {
         }
         if (amount > Number(sales[0].balance) + 0.004) {
           return response.status(400).json({
-            error: "Only " + pesoText(sales[0].balance) + " is owed on OR-" + String(saleId).padStart(6, "0") + "."
+            error: "Only " + pesoText(sales[0].balance) + " is owed on " + helpers.orNumber(saleId) + "."
           });
         }
-        description = "Payment on OR-" + String(saleId).padStart(6, "0");
+        description = "Payment on " + helpers.orNumber(saleId);
       }
 
       const shopResult = await db.query("SELECT store_name FROM store_settings LIMIT 1");
@@ -302,8 +327,8 @@ function registerQrPaymentRoutes(app, deps) {
       const output = await qrPaymentProcedures.createQrPayment(
         [provider.name, provider.mode, made.providerIntentId, amount, wallet, purpose,
          Math.round(QR_MINUTES * 60), getActorId(request),
-         purpose === "credit_payment" ? "for OR-" + String(saleId).padStart(6, "0") : "for a sale",
-         bank ? bank.code : null, bank ? bank.name : null, accountName, accountNumber]
+         purpose === "credit_payment" ? "for " + helpers.orNumber(saleId) : "for a sale",
+         bank ? bank.code : null, bank ? bank.name : null, accountName, accountNumber, null, null]
       );
       if (output.status_code !== 201) {
         await provider.cancel(made.providerIntentId);
@@ -354,26 +379,32 @@ function registerQrPaymentRoutes(app, deps) {
     }
   });
 
+  // Stops a pending QR code (or notices that it was paid just before). Returns the fresh row.
+  async function cancelRow(row, actorId, note) {
+    row = await refresh(row, actorId);
+
+    if (row.status === "pending") {
+      await provider.cancel(row.provider_intent_id);
+      const last = await provider.getStatus(row.provider_intent_id).catch(function () {
+        return { status: "pending" };
+      });
+      if (last.status === "paid") {
+        await setResult(row.qr_payment_id, "paid", last.providerPaymentId, null, actorId);
+      } else {
+        await setResult(row.qr_payment_id, "cancelled", null, note, actorId);
+      }
+      row = await readRow(row.qr_payment_id);
+    }
+    return row;
+  }
+
   app.post("/api/qr-payments/:id/cancel", async function (request, response) {
     try {
       let row = await readRow(Number(request.params.id));
       if (!row || !mayTouch(request, row)) {
         return response.status(404).json({ error: "That QR payment is not on record." });
       }
-      row = await refresh(row, getActorId(request));
-
-      if (row.status === "pending") {
-        await provider.cancel(row.provider_intent_id);
-        const last = await provider.getStatus(row.provider_intent_id).catch(function () {
-          return { status: "pending" };
-        });
-        if (last.status === "paid") {
-          await setResult(row.qr_payment_id, "paid", last.providerPaymentId, null, getActorId(request));
-        } else {
-          await setResult(row.qr_payment_id, "cancelled", null, "Cancelled by the cashier.", getActorId(request));
-        }
-        row = await readRow(row.qr_payment_id);
-      }
+      row = await cancelRow(row, getActorId(request), "Cancelled by the cashier.");
       response.json(shape(row));
     } catch (error) {
       console.error("QR payment cancel failed:", error.message);
@@ -411,8 +442,128 @@ function registerQrPaymentRoutes(app, deps) {
     }
   });
 
-  app.get("/pay/done", function (request, response) {
+  // The customer portal makes its own QR codes: no staff member, GCash or PayMaya only.
+  // The checks are the staff route's (an amount above zero, no more than the balance).
+  // input: customerId, saleId, wallet, amount. Returns { status, body }.
+  async function createForCustomer(input) {
+    const amount = Math.round(Number(input.amount) * 100) / 100;
+    const wallet = input.wallet;
+    const saleId = Number(input.saleId);
+    const orText = helpers.orNumber(saleId);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { status: 400, body: { error: "Type the amount the QR code is for." } };
+    }
+    if (wallet !== "GCash" && wallet !== "PayMaya") {
+      return { status: 400, body: { error: "Pick GCash or PayMaya." } };
+    }
+    // The simulator and PayMongo test keys let anyone "pay" for nothing, so a customer may only
+    // get a code from live PayMongo, unless the owner set PORTAL_TEST_PAYMENTS=1 on purpose (a demo).
+    const live = provider.name === "paymongo" && provider.mode === "live";
+    if (!live && process.env.PORTAL_TEST_PAYMENTS !== "1") {
+      return { status: 503, body: { error: "Paying by QR is not available yet." } };
+    }
+    if (provider.problem) {
+      return { status: 503, body: { error: provider.problem } };
+    }
+
+    let description = "Payment on " + orText;
+    try {
+      const salesResult = await db.query(
+        "SELECT GREATEST(amount_due - amount_paid, 0) AS balance\n" +
+          "           FROM sales\n" +
+          "           WHERE sale_id = ? AND customer_id = ? AND is_archived = FALSE\n" +
+          "             AND payment_method IN ('Credit', 'COD')",
+        [saleId, input.customerId]);
+      const sale = salesResult[0][0];
+      if (!sale) {
+        return { status: 404, body: { error: "That sale is not on your account." } };
+      }
+      if (amount > Number(sale.balance) + 0.004) {
+        return { status: 400, body: { error: "Only " + pesoText(sale.balance) + " is owed on " + orText + "." } };
+      }
+
+      const shopResult = await db.query("SELECT store_name FROM store_settings LIMIT 1");
+      if (shopResult[0].length > 0 && shopResult[0][0].store_name) {
+        description = shopResult[0][0].store_name + ": " + description;
+      }
+    } catch (error) {
+      console.error("Portal QR checks failed:", error.message);
+      return { status: 500, body: { error: "Unable to make the QR code. Try again." } };
+    }
+
+    let made;
+    try {
+      made = await provider.createPayment({
+        amount: amount,
+        wallet: wallet,
+        bank: null,
+        description: description,
+        returnUrl: baseUrl + "/ohsicms-customer/"
+      });
+    } catch (error) {
+      console.error("Making a portal QR payment failed:", error.message);
+      let code = 502;
+      if (error.httpStatus >= 400 && error.httpStatus < 500) code = 400;
+      return { status: code, body: { error: error.message } };
+    }
+
+    try {
+      const output = await qrPaymentProcedures.createQrPayment(
+        [provider.name, provider.mode, made.providerIntentId, amount, wallet, "credit_payment",
+         Math.round(QR_MINUTES * 60), null, "for " + orText + " (customer portal)",
+         null, null, null, null, input.customerId, saleId]
+      );
+      // The procedure locks the sale, checks that no other code for it is open, and stores who the
+      // code is for in the same insert, so the server can record it even if the page is closed.
+      if (output.status_code !== 201) {
+        await provider.cancel(made.providerIntentId);
+        return { status: output.status_code, body: { error: output.message } };
+      }
+
+      const row = await readRow(output.qr_payment_id);
+      const qrImage = await QRCode.toDataURL(made.payUrl, { margin: 1, width: 260 });
+      publishChange("qr-payments", "qr-payment " + row.qr_payment_id + " pending", null);
+
+      return {
+        status: 201,
+        body: {
+          id: row.qr_payment_id,
+          qrImage: qrImage,
+          payUrl: made.payUrl,
+          secondsLeft: Number(row.seconds_left),
+          amount: amount,
+          wallet: wallet
+        }
+      };
+    } catch (error) {
+      console.error("Saving a portal QR payment failed:", error.message);
+      await provider.cancel(made.providerIntentId);
+      return { status: 500, body: { error: "Unable to make the QR code. Try again." } };
+    }
+  }
+
+  app.get("/pay/done", async function (request, response) {
     response.set("Cache-Control", "no-store");
+
+    // A code made in the customer portal gets its own wording.
+    try {
+      const rowsResult = await db.query(
+        "SELECT portal_customer_id FROM qr_payments WHERE provider_intent_id = ?",
+        [String(request.query.payment_intent_id || "")]);
+      if (rowsResult[0][0] && rowsResult[0][0].portal_customer_id !== null) {
+        return response.send("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n" +
+          "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Thank you</title>\n" +
+          "<style>body{margin:0;font-family:system-ui,sans-serif;background:#f4f5f7;color:#1f2933}\n" +
+          ".card{max-width:420px;margin:48px auto;background:#fff;border-radius:14px;padding:28px 20px;\n" +
+          "box-shadow:0 2px 10px rgba(0,0,0,.08);text-align:center}p{color:#616e7c}</style></head>\n" +
+          "<body><div class=\"card\"><h2>Payment sent</h2>\n" +
+          "<p>Your payment was received. You can close this page.</p></div></body></html>");
+      }
+    } catch (error) {
+      console.error("Reading the QR payment for /pay/done failed:", error.message);
+    }
+
     response.send("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\n" +
       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>Thank you</title>\n" +
       "<style>body{margin:0;font-family:system-ui,sans-serif;background:#f4f5f7;color:#1f2933}\n" +
@@ -424,7 +575,8 @@ function registerQrPaymentRoutes(app, deps) {
 
   const claiming = {};
 
-  async function verifyForMoney(qrPaymentId, amountNow, wallet, actorId, typedAccount) {
+  // forSaleId is only given for a portal code, by the code that records it on its own sale.
+  async function verifyForMoney(qrPaymentId, amountNow, wallet, actorId, typedAccount, forSaleId) {
     const id = Number(qrPaymentId);
     if (!Number.isInteger(id) || id <= 0) {
       throw new QrPaymentError(400, "That QR payment number is not valid.", "QR_UNKNOWN");
@@ -436,7 +588,7 @@ function registerQrPaymentRoutes(app, deps) {
 
     try {
       const row = await refresh(await readRow(id), actorId);
-      const refusal = qrRefusal(row, amountNow, wallet);
+      const refusal = qrRefusal(row, amountNow, wallet, forSaleId);
       if (refusal) throw new QrPaymentError(refusal.status, refusal.message, refusal.code);
       if (wallet === "Bank Transfer") {
         const typed = typedAccount || {};
@@ -471,7 +623,7 @@ function registerQrPaymentRoutes(app, deps) {
       if (row && row.sale_id !== null) return "QR_USED";
       await setResult(qrPaymentId, "paid", null, UNSAVED_NOTE, actorId);
     } catch (error) {
-      console.error("Noting QR payment #" + qrPaymentId + " as unsaved failed:", error.message);
+      console.error("Noting QR payment " + helpers.qrPaymentCode(qrPaymentId) + " as unsaved failed:", error.message);
     }
     return null;
   }
@@ -502,6 +654,11 @@ function registerQrPaymentRoutes(app, deps) {
   }
 
   return {
+    readRow: readRow,
+    refresh: refresh,
+    cancelRow: cancelRow,
+    onPaid: onPaid,
+    createForCustomer: createForCustomer,
     verifyForMoney: verifyForMoney,
     announceUsed: announceUsed,
     recordUnsaved: recordUnsaved,

@@ -16,6 +16,7 @@ const PANEL_SCOPES = {
     'mgr-reorder':        ['inventory', 'sales', 'returns'],
     'mgr-stocks':         ['inventory', 'sales', 'returns'],
     'mgr-deliveries':     ['deliveries', 'sales'],
+    'failed-deliveries':  ['deliveries'],
     'mgr-credit':         ['credit', 'sales'],
     'mgr-requests':       ['credit'],
     'mgr-archives':       ['archives', 'staff', 'inventory', 'sales', 'deliveries'],

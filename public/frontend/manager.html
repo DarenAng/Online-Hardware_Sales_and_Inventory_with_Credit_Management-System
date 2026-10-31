@@ -77,6 +77,8 @@
                             Delivery History</a></li>
                         <li data-feature="delivery-schedule"><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="icon icon-calendar-days nav-icon" aria-hidden="true"></i>
                             Delivery Schedule</a></li>
+                        <li data-feature="failed-deliveries"><a href="#" data-panel-link="panel-failed-deliveries" onclick="showFailedDeliveries(event)"><i class="icon icon-triangle-alert nav-icon" aria-hidden="true"></i>
+                            Failed Deliveries</a></li>
                     </ul>
                 </li>
                 <li data-sidebar-dropdown data-feature="records">
@@ -90,7 +92,7 @@
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="customer"
                                onclick="showRecordType('customer', event)"><i class="icon icon-users nav-icon" aria-hidden="true"></i>Customers</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="product"
-                               onclick="showRecordType('product', event)"><i class="icon icon-tag nav-icon" aria-hidden="true"></i>Products</a></li>
+                               onclick="showRecordType('product', event)"><i class="icon icon-tag nav-icon" aria-hidden="true"></i>Materials</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="category"
                                onclick="showRecordType('category', event)"><i class="icon icon-layout-grid nav-icon" aria-hidden="true"></i>Categories</a></li>
                         <li><a href="#" data-panel-link="panel-records" data-panel-view="unit"
@@ -209,7 +211,7 @@
                                 <div class="table-responsive grid-5">
                                     <table id="income-methods-table">
                                         <thead>
-                                            <tr><th>Method</th><th>Sales</th><th>Billed</th><th>Collected</th><th>Outstanding</th></tr>
+                                            <tr><th>Method</th><th>Total Sales</th><th>Collected</th><th>Unpaid</th></tr>
                                         </thead>
                                         <tbody></tbody>
                                     </table>
@@ -245,7 +247,11 @@
                                     <option value="all">Every method</option>
                                     <option value="Cash">Cash</option>
                                     <option value="Cheque">Cheque</option>
-                                    <option value="Online Payment">Online Payment</option>
+                                    <option value="GCash">GCash</option>
+                                    <option value="PayMaya">PayMaya</option>
+                                    <option value="PayPal">PayPal</option>
+                                    <option value="Bank Transfer">Bank Transfer</option>
+                                    <option value="COD">COD</option>
                                     <option value="Credit">Credit</option>
                                 </select>
                             </div>
@@ -387,7 +393,7 @@
                         <div class="table-responsive grid-8">
                             <table id="loyal-table">
                                 <thead>
-                                    <tr><th>Customer</th><th>Purchases</th><th>Total Spent</th><th>Balance Due</th><th>Last Purchase</th></tr>
+                                    <tr><th>Customer ID</th><th>Customer</th><th>Last Purchase</th><th>Total Spent</th><th>Balance Due</th></tr>
                                 </thead>
                                 <tbody></tbody>
                             </table>
@@ -460,7 +466,7 @@
                         <div class="table-responsive grid-8">
                             <table id="po-totals-table">
                                 <thead>
-                                    <tr><th>PO</th><th>Supplier</th><th>Ordered</th>
+                                    <tr><th>PO</th><th>Supplier</th><th>Ordered Date</th>
                                         <th>Order Value</th></tr>
                                 </thead>
                                 <tbody></tbody>
@@ -494,7 +500,7 @@
                         <div class="panel-head">
                             <div>
                                 <h3>Stocks Overview</h3>
-                                <p class="panel-sub">The whole inventory. Open a product to change its reorder point; prices are set in Records, Products.</p>
+                                <p class="panel-sub">The whole inventory. Open a material to change its reorder point; prices are set in Records, Materials.</p>
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -507,12 +513,12 @@
                         <div class="panel-toolbar no-print">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="stocks-search"
-                                       placeholder="Search Products"
+                                       placeholder="Search Materials"
                                        oninput="dataPanelSearchInput('mgr-stocks', event)" onkeydown="dataPanelSearchKey('mgr-stocks', event)" autocomplete="off">
                             </div>
                             <div class="toolbar-field">
                                 <label for="stocks-status">Stock status</label>
-                                <select id="stocks-status" data-filter-table="stocks-table" data-hides-column="4"
+                                <select id="stocks-status" data-filter-table="stocks-table" data-hides-column="5"
                                         onchange="dataPanelFilter('mgr-stocks', 'status', this.value)">
                                     <option value="all">Every status</option>
                                     <option value="In Stock">In stock</option>
@@ -527,7 +533,7 @@
                         <div class="table-responsive grid-10">
                             <table id="stocks-table">
                                 <thead>
-                                    <tr><th>Product</th><th>Category</th><th>On Hand</th><th>Status</th></tr>
+                                    <tr><th>ID</th><th>Material name</th><th>Description</th><th>Category</th><th>On Hand</th><th>Status</th></tr>
                                 </thead>
                                 <tbody></tbody>
                             </table>
@@ -539,7 +545,7 @@
                         <div class="panel-head">
                             <div>
                                 <h3>Reorder Alerts</h3>
-                                <p class="panel-sub">Products at or below the reorder point set for them.</p>
+                                <p class="panel-sub">Materials at or below the reorder point set for them.</p>
                             </div>
                             <div class="panel-actions no-print">
                                 <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -552,12 +558,12 @@
                         <div class="panel-toolbar no-print">
                             <div class="search-wrap">
                                 <input type="search" class="form-control search-input" id="reorder-search"
-                                       placeholder="Search Products"
+                                       placeholder="Search Materials"
                                        oninput="dataPanelSearchInput('mgr-reorder', event)" onkeydown="dataPanelSearchKey('mgr-reorder', event)" autocomplete="off">
                             </div>
                             <div class="toolbar-field">
                                 <label for="reorder-status">Stock status</label>
-                                <select id="reorder-status" data-filter-table="reorder-table" data-hides-column="6"
+                                <select id="reorder-status" data-filter-table="reorder-table" data-hides-column="7"
                                         onchange="dataPanelFilter('mgr-reorder', 'status', this.value)">
                                     <option value="all">All stocks</option>
                                     <option value="Low Stock">Low stock</option>
@@ -570,7 +576,7 @@
                         <div class="table-responsive grid-10">
                             <table id="reorder-table">
                                 <thead>
-                                    <tr><th>Product</th><th>On Hand</th><th>Reorder At</th>
+                                    <tr><th>ID</th><th>Material name</th><th>Description</th><th>On Hand</th><th>Reorder At</th>
                                         <th>Suggested Order</th><th>Supplier</th><th>Status</th></tr>
                                 </thead>
                                 <tbody></tbody>
@@ -680,7 +686,7 @@
                     <div class="table-responsive grid-10">
                         <table id="po-table">
                             <thead>
-                                <tr><th>PO</th><th>Supplier</th><th>Ordered</th>
+                                <tr><th>PO</th><th>Supplier</th><th>Ordered Date</th>
                                     <th>Order Value</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
@@ -731,7 +737,7 @@
                         <table id="credit-table">
                             <thead>
                                 <tr><th>Customer</th><th>Credit Limit</th><th>Balance</th><th>Available Balance</th>
-                                    <th>Open Sales</th><th>Oldest Debt</th></tr>
+                                    <th>Open Sales</th><th>Oldest Debt</th><th>Request</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -1116,7 +1122,7 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="archives-type">Type</label>
-                            <select id="archives-type" data-filter-table="archives-table" data-hides-column="1" onchange="dataPanelFilter('mgr-archives', 'type', this.value)">
+                            <select id="archives-type" data-filter-table="archives-table" data-hides-column="2" onchange="dataPanelFilter('mgr-archives', 'type', this.value)">
                                 <option value="all">Every type</option>
                             </select>
                         </div>
@@ -1126,7 +1132,7 @@
                     <div class="table-responsive grid-10">
                         <table id="archives-table">
                             <thead>
-                                <tr><th>Type</th><th>Record</th><th>Detail</th><th>Archived On</th><th>Archived By</th></tr>
+                                <tr><th>ID</th><th>Type</th><th>Record</th><th>Detail</th><th>Archived On</th><th>Archived By</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -1223,8 +1229,6 @@
                         onclick="showCreditTab('purchases')">Purchases</button>
                 <button type="button" class="modal-tab" id="credit-tab-payments"
                         onclick="showCreditTab('payments')">Payments</button>
-                <button type="button" class="modal-tab" id="credit-tab-requests"
-                        onclick="showCreditTab('requests')">Extension Requests</button>
             </div>
 
             <div class="modal-body">
@@ -1439,6 +1443,7 @@
     <script src="scripts/shared/features.js"></script>
     <script src="scripts/shared/deliveries.js"></script>
     <script src="scripts/shared/delivery-schedule.js"></script>
+    <script src="scripts/shared/failed-deliveries.js"></script>
     <script src="scripts/shared/purchase-orders.js"></script>
     <script src="scripts/shared/credit-terms.js"></script>
     <script src="scripts/shared/payment-details.js"></script>

@@ -1,0 +1,32 @@
+/* The portal uses the staff pages' sidebar, top bar and content area
+   (general-ui.css); this file only adds what the portal needs on top. */
+.cp-body[hidden] { display: none; }
+
+/* The customer's name button and its small menu, at the right of the top bar. */
+.cp-account { position: relative; }
+.cp-account-btn {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+    color: var(--ink); padding: 7px 12px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.cp-account-btn:hover { background: var(--paper-2); }
+.cp-menu {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
+    min-width: 190px;
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--lift);
+}
+.cp-menu[hidden] { display: none; }
+.cp-menu button {
+    display: block; width: 100%; text-align: left;
+    background: none; border: 0; padding: 11px 14px;
+    font: inherit; color: var(--ink); cursor: pointer;
+}
+.cp-menu button:hover { background: var(--paper-2); }
+
+.cp-panel[hidden] { display: none; }
+
+@media (max-width: 480px) {
+    .cp-account-btn span { display: none; }
+}

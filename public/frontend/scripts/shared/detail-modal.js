@@ -11,11 +11,15 @@ function detailField(label, value, locked) {
 
 const detailRow = detailField;
 
-function detailTable(headers, rows, numeric) {
+function detailTable(headers, rows, numeric, idColumns) {
     if (rows.length === 0) return '<p class="detail-empty">Nothing to show here.</p>';
 
     function isNumber(index) {
         return Array.isArray(numeric) && numeric.indexOf(index) !== -1;
+    }
+
+    function isId(index) {
+        return Array.isArray(idColumns) && idColumns.indexOf(index) !== -1;
     }
 
     let headHtml = '';
@@ -27,7 +31,8 @@ function detailTable(headers, rows, numeric) {
     for (let r = 0; r < rows.length; r++) {
         bodyHtml += '<tr>';
         for (let c = 0; c < rows[r].length; c++) {
-            bodyHtml += '<td class="' + (isNumber(c) ? 'cell-num' : '') + '">' + rows[r][c] + '</td>';
+            const cellClass = isNumber(c) ? 'cell-num' : (isId(c) ? 'cell-id' : '');
+            bodyHtml += '<td class="' + cellClass + '">' + rows[r][c] + '</td>';
         }
         bodyHtml += '</tr>';
     }

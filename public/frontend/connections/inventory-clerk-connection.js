@@ -48,6 +48,12 @@ function apiSaveDeliveryPack(productId, packName, packSize) {
     });
 }
 
+function apiSaveDescription(productId, description) {
+    return sendJson('/api/inventory/products/' + productId + '/description', 'PUT', {
+        description: description
+    });
+}
+
 function apiAddSellingUnit(productId, unitName, unitsPer, price) {
     let priceValue = null;
     if (price !== '') {

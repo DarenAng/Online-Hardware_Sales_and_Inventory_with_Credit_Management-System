@@ -16,6 +16,7 @@ const registerInventoryRoutes = require("./routes/inventory-clerk").registerInve
 const registerQrPaymentRoutes = require("./routes/qr-payments").registerQrPaymentRoutes;
 const registerVoidRequestRoutes = require("./routes/void-requests").registerVoidRequestRoutes;
 const registerSharedRoutes = require("./routes/shared").registerSharedRoutes;
+const registerCustomerPortalRoutes = require("./routes/customer-portal").registerCustomerPortalRoutes;
 
 const app = express();
 
@@ -131,8 +132,19 @@ const startup = db.getConnection()
         removeExpiredSessions().catch(function (error) {
           console.error("Session sweep failed:", error.message);
         });
+        portalModule.removeExpiredCustomerSessions().catch(function (error) {
+          console.error("Customer session sweep failed:", error.message);
+        });
       }, SESSION_SWEEP_MS);
       sessionTimer.unref();
+
+      // A QR payment made from the customer portal is recorded even if the customer closed the page.
+      const portalPaymentTimer = setInterval(function () {
+        portalModule.settleAllOpen().catch(function (error) {
+          console.error("Portal QR payment sweep failed:", error.message);
+        });
+      }, 60 * 1000);
+      portalPaymentTimer.unref();
     }
   })
   .catch(function (error) {
@@ -321,7 +333,7 @@ registerCashierRoutes(app, {
 });
 
 registerDeliveryRoutes(app, {
-  db: db, getActorId: getActorId, isDateText: isDateText, publishChange: publishChange,
+  db: db, getActorId: getActorId, writeAuditLog: writeAuditLog, isDateText: isDateText, publishChange: publishChange,
   DELIVERY_CONTACT_SQL: DELIVERY_CONTACT_SQL, DELIVERY_PHONE_SQL: DELIVERY_PHONE_SQL,
   qrPayments: qrPayments
 });
@@ -332,7 +344,14 @@ registerInventoryRoutes(app, {
   phoneComplaint: phoneComplaint, cleanPhone: cleanPhone, publishChange: publishChange
 });
 
-registerSharedRoutes(app, { adminModule: adminModule, managerModule: managerModule });
+const portalModule = registerCustomerPortalRoutes(app, {
+  db: db, getActorId: getActorId, writeAuditLog: writeAuditLog, publishChange: publishChange,
+  qrPayments: qrPayments, hashPassword: hashPassword, verifyPassword: verifyPassword,
+  passwordComplaint: passwordComplaint,
+  LOGIN_MAX_ATTEMPTS: LOGIN_MAX_ATTEMPTS, LOGIN_HOLD_MINUTES: LOGIN_HOLD_MINUTES
+});
+
+registerSharedRoutes(app, { adminModule: adminModule, managerModule: managerModule, portalModule: portalModule });
 
 if (require.main === module) {
   app.listen(port, function () {

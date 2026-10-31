@@ -1,9 +1,10 @@
+const helpers = require("../helpers");
 const sharedProcedures = require("../database/procedures/shared-procedures");
 
 const MOST_REASON = 255;
 
 function receiptNo(saleId) {
-  return "OR-" + String(saleId).padStart(6, "0");
+  return helpers.orNumber(saleId);
 }
 
 function registerVoidRequestRoutes(app, deps) {

@@ -10,12 +10,12 @@ function apiCreateCustomer(customer) {
     return sendJson('/api/customers', 'POST', customer);
 }
 
-function apiCreateDelivery(delivery) {
-    return sendJson('/api/deliveries', 'POST', delivery);
+function apiIssuePortalPassword(customerId) {
+    return sendJson('/api/customers/' + customerId + '/portal-password', 'POST', {});
 }
 
-function apiGetDeliveryDrivers() {
-    return getJson('/api/deliveries/drivers');
+function apiCreateDelivery(delivery) {
+    return sendJson('/api/deliveries', 'POST', delivery);
 }
 
 function apiGetDailySummary(staffId) {

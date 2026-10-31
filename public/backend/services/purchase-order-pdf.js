@@ -1,3 +1,4 @@
+const helpers = require("../helpers");
 const PDFDocument = require("pdfkit");
 
 const INK = "#14181d";
@@ -60,7 +61,7 @@ function purchaseOrderPdf(details) {
   const shop = details.shop || {};
 
   const doc = new PDFDocument({ size: "A4", margin: 44, bufferPages: true,
-    info: { Title: "Purchase Order PO-" + String(order.po_id).padStart(6, "0"),
+    info: { Title: "Purchase Order " + helpers.poNumber(order.po_id),
             Author: shop.store_name || "Lucelyn Hardware" } });
 
   const chunks = [];
@@ -82,7 +83,7 @@ function purchaseOrderPdf(details) {
   };
 
   const shopName = shop.store_name || "Lucelyn Hardware";
-  const number = "PO-" + String(order.po_id).padStart(6, "0");
+  const number = helpers.poNumber(order.po_id);
   const raised = String(order.order_date || "").slice(0, 10);
 
   doc.save();
@@ -134,12 +135,13 @@ function purchaseOrderPdf(details) {
   y = Math.max(supplierBottom, shopPartyBottom) + 20;
 
   const columns = [
-    { title: "NO", width: 28, align: "left" },
-    { title: "MATERIAL", width: 0, align: "left" },
-    { title: "CATEGORY", width: 78, align: "left" },
-    { title: "QUANTITY", width: 92, align: "right" },
-    { title: "UNIT PRICE", width: 82, align: "right" },
-    { title: "AMOUNT", width: 84, align: "right" }
+    { title: "NO", width: 30, align: "left" },
+    { title: "MATERIAL NAME", width: 0, align: "left" },
+    { title: "CATEGORY", width: 76, align: "left" },
+    { title: "DESCRIPTION", width: 86, align: "left" },
+    { title: "QTY", width: 56, align: "right" },
+    { title: "UNIT PRICE", width: 80, align: "right" },
+    { title: "AMOUNT", width: 86, align: "right" }
   ];
   let otherWidths = 0;
   for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
@@ -173,6 +175,7 @@ function purchaseOrderPdf(details) {
       [String(index + 1), null],
       [item.product_name, item.brand_name || null],
       [item.category_name || "--", null],
+      [item.description || "--", null],
       [lineQuantity(item), null],
       priceCell(item),
       Number(item.line_cost) > 0 ? [peso(item.line_cost), null] : ["--", null]
@@ -227,16 +230,16 @@ function purchaseOrderPdf(details) {
   }
   doc.moveTo(left, y).lineTo(right, y).lineWidth(1.6).strokeColor(CHROME).stroke();
   let figures = 0;
-  for (let columnIndex = 3; columnIndex < columns.length; columnIndex++) {
+  for (let columnIndex = 4; columnIndex < columns.length; columnIndex++) {
     figures += columns[columnIndex].width;
   }
   doc.font("Helvetica-Bold").fontSize(10).fillColor(INK)
     .text(items.length + " " + (items.length === 1 ? "line" : "lines") + (total > 0 ? " · any discount is settled on the invoice" : ""), left + pad, y + 10, { width: width - figures - pad * 2 });
   const labelBottom = doc.y;
   doc.font("Helvetica-Bold").fontSize(10)
-    .text(quantityText(units), right - figures + pad, y + 10, { width: columns[3].width - pad * 2, align: "right" });
+    .text(quantityText(units), right - figures + pad, y + 10, { width: columns[4].width - pad * 2, align: "right" });
   doc.font("Helvetica-Bold").fontSize(13)
-    .text(total > 0 ? peso(total) : "--", right - columns[5].width - 60, y + 8, { width: columns[5].width + 60 - pad, align: "right" });
+    .text(total > 0 ? peso(total) : "--", right - columns[6].width - 60, y + 8, { width: columns[6].width + 60 - pad, align: "right" });
   y = Math.max(labelBottom, doc.y) + 18;
 
   const note = "Please quote " + number + " on the delivery receipt and the invoice. Goods are counted on arrival " +

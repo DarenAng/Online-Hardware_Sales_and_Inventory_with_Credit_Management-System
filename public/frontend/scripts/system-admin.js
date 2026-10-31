@@ -116,7 +116,7 @@ function accountCell(user) {
 function userSearchFields(user) {
     return [
         user.full_name, user.first_name, user.middle_name, user.last_name,
-        user.email, user.role_name, user.staff_id, '#' + user.staff_id
+        user.email, user.role_name, user.staff_id, '#' + user.staff_id, staffCode(user.staff_id)
     ];
 }
 
@@ -200,7 +200,7 @@ function buildUsersPanel() {
             return '\n' +
                 '            <tr class="row-clickable row-reveal" style="animation-delay: ' + ((index % 10) * 28) + 'ms"\n' +
                 '                onclick="openUserModal(' + user.staff_id + ')" title="Click to view full details">\n' +
-                '                <td class="cell-id">#' + escapeHtml(user.staff_id) + '</td>\n' +
+                '                <td class="cell-id">' + staffCode(user.staff_id) + '</td>\n' +
                 '                <td class="cell-name">' + escapeHtml(staffName(user)) + '</td>\n' +
                 '                <td>' + (user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>') + '</td>\n' +
                 '                <td>' + escapeHtml(user.role_name) + '</td>\n' +
@@ -225,8 +225,7 @@ async function openUserModal(staffId) {
     document.getElementById('modal-user-avatar').textContent = initials;
 
     document.getElementById('modal-user-details').innerHTML =
-        detailRow('Staff ID', '#' + escapeHtml(selectedUser.staff_id)) +
-        detailRow('User ID', selectedUser.user_id ? '#' + escapeHtml(selectedUser.user_id) : '<span class="muted">None</span>') +
+        detailRow('Staff ID', staffCode(selectedUser.staff_id)) +
         detailRow('Full Name', escapeHtml(staffName(selectedUser))) +
         detailRow('First Name', escapeHtml(selectedUser.first_name)) +
         detailRow('Middle Name', selectedUser.middle_name
@@ -1091,7 +1090,7 @@ function buildArchivePanel() {
             return '\n' +
                 '            <tr class="row-clickable row-reveal" style="animation-delay: ' + ((index % 10) * 28) + 'ms"\n' +
                 '                onclick="openRestoreCard(' + user.staff_id + ')" title="Click to open the restoration card">\n' +
-                '                <td class="cell-id">#' + escapeHtml(user.staff_id) + '</td>\n' +
+                '                <td class="cell-id">' + staffCode(user.staff_id) + '</td>\n' +
                 '                <td class="cell-name">' + escapeHtml(staffName(user)) + '</td>\n' +
                 '                <td>' + (user.email ? escapeHtml(user.email) : '<span class="muted">No login account</span>') + '</td>\n' +
                 '                <td>' + escapeHtml(user.role_name) + '</td>\n' +
@@ -1115,7 +1114,7 @@ function openRestoreCard(staffId) {
         (user.first_name[0] + user.last_name[0]).toUpperCase();
 
     document.getElementById('restore-details').innerHTML =
-        detailRow('Staff ID', '#' + escapeHtml(user.staff_id)) +
+        detailRow('Staff ID', staffCode(user.staff_id)) +
         detailRow('Email', user.email
             ? escapeHtml(user.email)
             : '<span class="muted">No login account</span>') +
@@ -1816,11 +1815,11 @@ function buildLogsPanel() {
                 '                onclick="openLogEntry(' + log.log_id + ')" title="Click to read the full entry">\n' +
                 '                <td class="cell-id">' + escapeHtml(log.created_at) + '</td>\n' +
                 '                <td class="cell-name">' + escapeHtml(log.staff_name) +
-                    (log.staff_id ? ' <span class="muted">#' + escapeHtml(log.staff_id) + '</span>' : '') + '</td>\n' +
+                    (log.staff_id ? ' <span class="muted">' + staffCode(log.staff_id) + '</span>' : '') + '</td>\n' +
                 '                <td>' + escapeHtml(log.role_name) + '</td>\n' +
                 '                <td class="cell-id">' + (log.ip_address ? escapeHtml(log.ip_address) : '<span class="muted">Not recorded</span>') + '</td>\n' +
                 '                <td><span class="badge ' + tone + '">' + escapeHtml(label) + '</span></td>\n' +
-                '                <td>' + escapeHtml(log.details || log.action) + '</td>\n' +
+                '                <td>' + escapeHtml(idsInText(log.details || log.action)) + '</td>\n' +
                 '            </tr>';
         }
     });
@@ -1852,11 +1851,11 @@ function openLogEntry(logId) {
     document.getElementById('log-avatar').textContent = label.slice(0, 2).toUpperCase();
 
     document.getElementById('log-details').innerHTML =
-        detailRow('Entry', '#' + escapeHtml(log.log_id)) +
+        detailRow('Entry', auditCode(log.log_id)) +
         detailRow('Timestamp', escapeHtml(log.created_at)) +
         detailRow('User', escapeHtml(log.staff_name)) +
         detailRow('User ID', log.staff_id
-            ? '#' + escapeHtml(log.staff_id)
+            ? staffCode(log.staff_id)
             : '<span class="muted">Not a signed-in action</span>') +
         detailRow('Role', escapeHtml(log.role_name)) +
         detailRow('IP Address', log.ip_address
@@ -1864,7 +1863,7 @@ function openLogEntry(logId) {
             : '<span class="muted">Not recorded</span>') +
         detailRow('Action', escapeHtml(log.action)) +
         detailRow('Action Type', '<span class="badge ' + tone + '">' + escapeHtml(label) + '</span>') +
-        detailRow('Detail', escapeHtml(log.details || 'None recorded'));
+        detailRow('Detail', escapeHtml(idsInText(log.details) || 'None recorded'));
 
     showModal('log-modal');
 }

@@ -223,7 +223,7 @@ function scheduleMatches(d) {
     const query = searchText((document.getElementById('schedule-search') || {}).value);
     if (query !== '') {
         if (!prefixMatch([d.customer_name || 'Walk-in', d.delivery_address || '', d.driver_name || 'Unassigned',
-                          d.delivery_id], query)) return false;
+                          d.delivery_id, '#' + d.delivery_id, deliveryCode(d.delivery_id)], query)) return false;
     }
     const status = scheduleValue('schedule-status');
     if (status !== 'all' && d.status !== status) return false;

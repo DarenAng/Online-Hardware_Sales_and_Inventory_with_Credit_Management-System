@@ -93,7 +93,65 @@ function isMeasuredUnit(unit) {
   return MEASURED_UNITS.includes(String(unit || "").trim().toLowerCase());
 }
 
+// Record codes people see: a letter prefix + the id padded to at least 4 digits (C0003).
+// The database keeps the plain number; only what is shown or typed uses the code.
+function idCode(prefix, id) {
+  return prefix + String(id).padStart(4, "0");
+}
+
+function customerCode(id) { return idCode("C", id); }
+function staffCode(id) { return idCode("S", id); }
+function materialCode(id) { return idCode("M", id); }
+function supplierCode(id) { return idCode("SP", id); }
+function deliveryCode(id) { return idCode("D", id); }
+function categoryCode(id) { return idCode("CT", id); }
+function brandCode(id) { return idCode("B", id); }
+function unitCode(id) { return idCode("U", id); }
+function adjustmentCode(id) { return idCode("SA", id); }
+function returnCode(id) { return idCode("RD", id); }
+function creditRequestCode(id) { return idCode("CR", id); }
+function voidRequestCode(id) { return idCode("VR", id); }
+function notificationCode(id) { return idCode("N", id); }
+function auditCode(id) { return idCode("AL", id); }
+function qrPaymentCode(id) { return idCode("QR", id); }
+function paymentCode(id) { return idCode("PY", id); }
+
+// The code for a record of a kind named by a module or table (Supplier, Inventory, Category...).
+function recordCode(kind, id) {
+  const prefixes = { customer: "C", product: "M", inventory: "M", staff: "S", supplier: "SP", category: "CT", brand: "B", unit: "U" };
+  return idCode(prefixes[String(kind).toLowerCase()] || "ID", id);
+}
+
+// Official document numbers keep their own formats.
+function orNumber(saleId) {
+  return "OR-" + String(saleId).padStart(6, "0");
+}
+
+function poNumber(poId) {
+  return "PO-" + String(poId).padStart(6, "0");
+}
+
 module.exports = {
+  idCode: idCode,
+  orNumber: orNumber,
+  poNumber: poNumber,
+  recordCode: recordCode,
+  customerCode: customerCode,
+  staffCode: staffCode,
+  materialCode: materialCode,
+  supplierCode: supplierCode,
+  deliveryCode: deliveryCode,
+  categoryCode: categoryCode,
+  brandCode: brandCode,
+  unitCode: unitCode,
+  adjustmentCode: adjustmentCode,
+  returnCode: returnCode,
+  creditRequestCode: creditRequestCode,
+  voidRequestCode: voidRequestCode,
+  notificationCode: notificationCode,
+  auditCode: auditCode,
+  qrPaymentCode: qrPaymentCode,
+  paymentCode: paymentCode,
   searchPrefix: searchPrefix,
   isMeasuredUnit: isMeasuredUnit,
   wordStartSearch: wordStartSearch,
