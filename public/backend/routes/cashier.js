@@ -47,6 +47,7 @@ function registerCashierRoutes(app, deps) {
   const db = deps.db;
   const getActorId = deps.getActorId;
   const DRIVER = deps.DRIVER;
+  const CLERK = deps.CLERK;
   const CASHIER = deps.CASHIER;
   const isDateText = deps.isDateText;
   const SALE_CUSTOMER_SQL = deps.SALE_CUSTOMER_SQL;
@@ -556,6 +557,14 @@ function registerCashierRoutes(app, deps) {
         if (Number(delivery.delivery_staff_id) !== Number(actor.staffId)) {
           return response.status(403).json({ error: "This delivery is assigned to another driver." });
         }
+      }
+
+      if (actor.roleName === CLERK && (
+            (status !== "In Transit" && status !== "Out for Delivery") ||
+            (delivery.status !== "Pending" && delivery.status !== "In Transit"))) {
+        return response.status(403).json({
+          error: "The stockroom can only send a delivery out: In Transit or Out for Delivery."
+        });
       }
 
       const nextSteps = NEXT_DELIVERY_STATUS[delivery.status];

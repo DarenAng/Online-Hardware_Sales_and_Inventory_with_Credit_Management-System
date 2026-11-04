@@ -104,7 +104,7 @@ function collectBanner(d) {
         '<span class="collect-note">Nothing to collect on this delivery.</span></div>';
 }
 
-function showDeliveryRecord(d, canUpdate) {
+function showDeliveryRecord(d, canUpdate, onlyStatuses) {
     if (!d) return;
 
     const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
@@ -153,10 +153,11 @@ function showDeliveryRecord(d, canUpdate) {
         const allowed = NEXT_DELIVERY_STATUS[d.status] || [];
         const next = [];
         for (let i = 0; i < allowed.length; i++) {
+            if (onlyStatuses && onlyStatuses.indexOf(allowed[i]) === -1) continue;
             if (isDriver || allowed[i] !== 'Delivered') next.push(allowed[i]);
         }
 
-        if (next.length === 0) {
+        if (next.length === 0 && !onlyStatuses) {
             updateBody = '<p class="detail-note">This delivery is closed. Nothing further can be recorded against it.</p>';
             pages.push({ label: 'Update', body: updateBody });
         }
@@ -389,6 +390,9 @@ async function refreshDeliveryLists() {
     } else if (typeof loadDeliveries === 'function' && document.getElementById('deliveries-table')) {
         await loadDeliveries();
     }
+
+    const clerkPanel = typeof getDataPanel === 'function' ? getDataPanel('clerk-deliveries') : null;
+    if (clerkPanel && clerkPanel.state === 'ready') await clerkPanel.refresh();
 
     if (typeof loadDeliverySchedule === 'function' && typeof scheduleRows !== 'undefined' && scheduleRows !== null) {
         await loadDeliverySchedule(true);

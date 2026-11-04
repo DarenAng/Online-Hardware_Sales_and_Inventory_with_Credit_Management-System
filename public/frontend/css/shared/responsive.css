@@ -703,7 +703,8 @@
 /* The material's description gets a line of its own. */
 .mat-desc-full { flex-basis: 100%; }
 
-#po-table tr.row-attention td:first-child { box-shadow: inset var(--rule) 0 0 var(--signal); }
+#po-table tr.row-attention td:first-child,
+#clerk-deliveries-table tr.row-attention td:first-child { box-shadow: inset var(--rule) 0 0 var(--signal); }
 
 .po-next { margin: 0 0 14px; }
 

@@ -327,7 +327,7 @@ registerVoidRequestRoutes(app, {
 });
 
 registerCashierRoutes(app, {
-  db: db, getActorId: getActorId, DRIVER: DRIVER, CASHIER: CASHIER, isDateText: isDateText,
+  db: db, getActorId: getActorId, DRIVER: DRIVER, CLERK: CLERK, CASHIER: CASHIER, isDateText: isDateText,
   SALE_CUSTOMER_SQL: SALE_CUSTOMER_SQL, phoneComplaint: phoneComplaint, cleanPhone: cleanPhone,
   qrPayments: qrPayments
 });

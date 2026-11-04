@@ -58,8 +58,8 @@
                 <li data-feature="archives"><a href="#" data-panel-link="panel-archive" onclick="showInventoryArchive(event)"><i class="icon icon-archive nav-icon" aria-hidden="true"></i>Archive</a></li>
                 <li data-feature="delivery-schedule" hidden><a href="#" data-panel-link="panel-delivery-schedule" onclick="showDeliverySchedule(event)"><i class="icon icon-calendar-days nav-icon" aria-hidden="true"></i>
                     Delivery Schedule</a></li>
-                <li data-feature="failed-deliveries" hidden><a href="#" data-panel-link="panel-failed-deliveries" onclick="showFailedDeliveries(event)"><i class="icon icon-triangle-alert nav-icon" aria-hidden="true"></i>
-                    Failed Deliveries</a></li>
+                <li data-feature="delivery-dispatch,failed-deliveries" hidden><a href="#" data-panel-link="panel-clerk-deliveries" onclick="showClerkDeliveries(event)"><i class="icon icon-truck nav-icon" aria-hidden="true"></i>
+                    Delivery</a></li>
 
             </ul>
         </aside>
@@ -519,6 +519,46 @@
                         </table>
                     </div>
                     <div class="pager is-single" id="returns-pager"></div>
+                </div>
+
+                <div class="card" id="panel-clerk-deliveries" data-panel style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Delivery</h3>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="clerk-deliveries-search"
+                                   placeholder="Search by customer, driver, or delivery ID"
+                                   oninput="dataPanelSearchInput('clerk-deliveries', event)" onkeydown="dataPanelSearchKey('clerk-deliveries', event)" title="Type one letter or more; it finds words that start with it">
+                        </div>
+                        <div class="toolbar-field">
+                            <label for="clerk-deliveries-status">Status</label>
+                            <select id="clerk-deliveries-status"
+                                    onchange="dataPanelFilter('clerk-deliveries', 'status', this.value)">
+                                <option value="all">Every status</option>
+                                <option value="Pending">Pending</option>
+                                <option value="In Transit">In Transit</option>
+                                <option value="Out for Delivery">Out for Delivery</option>
+                                <option value="Delayed">Delayed</option>
+                                <option value="Failed">Failed</option>
+                                <option value="Delivered">Delivered</option>
+                            </select>
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+
+                    <div class="table-responsive grid-10">
+                        <table id="clerk-deliveries-table">
+                            <thead>
+                                <tr><th>Delivery ID</th><th>Customer</th><th>Scheduled Date</th><th>Driver</th><th>Status</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="clerk-deliveries-pager"></div>
                 </div>
 
                 <div class="card" id="panel-archive" data-panel style="display: none;">

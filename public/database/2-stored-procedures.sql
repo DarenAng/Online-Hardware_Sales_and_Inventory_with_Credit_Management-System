@@ -3216,10 +3216,17 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    IF p_role_id NOT IN (2, 5) THEN
+    IF p_role_id NOT IN (2, 3, 5) THEN
         ROLLBACK;
         SET p_status_code = 403;
         SET p_message = 'Your role cannot change a delivery status.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF p_role_id = 3 AND p_status NOT IN ('In Transit', 'Out for Delivery') THEN
+        ROLLBACK;
+        SET p_status_code = 403;
+        SET p_message = 'The stockroom can only send a delivery out: In Transit or Out for Delivery.';
         LEAVE PROC_BODY;
     END IF;
 

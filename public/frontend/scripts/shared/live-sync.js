@@ -35,6 +35,7 @@ const PANEL_SCOPES = {
     'clerk-po':           ['inventory'],
     'clerk-returns':      ['returns'],
     'clerk-archive':      ['inventory'],
+    'clerk-deliveries':   ['deliveries', 'sales'],
 
     'cash-credit':        ['credit', 'sales'],
     'cash-deliveries':    ['deliveries', 'sales'],

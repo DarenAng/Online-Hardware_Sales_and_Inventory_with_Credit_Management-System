@@ -65,6 +65,7 @@ function showAdjustmentHistory(event) {
 function showReorder(event) { showInventoryPanel('panel-reorder', 'Reorder Point Settings', event); }
 function showReturns(event) { showInventoryPanel('panel-returns', 'Returned Items', event); }
 function showInventoryArchive(event) { showInventoryPanel('panel-archive', 'Archive', event); }
+function showClerkDeliveries(event) { showInventoryPanel('panel-clerk-deliveries', 'Delivery', event); }
 
 async function ensureInventoryLoaded(force) {
     if (invLoaded && !force) return true;
@@ -2480,6 +2481,89 @@ function openReturnDetail(returnId) {
         ]);
 }
 
+// Delivery: what the stockroom still has to send out, and everything else for reference
+const CLERK_SENDS = ['In Transit', 'Out for Delivery'];
+
+function clerkDeliveryNeedsMe(d) {
+    return d.status === 'Pending' || d.status === 'In Transit';
+}
+
+function buildClerkDeliveriesPanel() {
+    createDataPanel({
+        key: 'clerk-deliveries',
+        tableId: 'clerk-deliveries-table',
+        columns: 5,
+        pagerId: 'clerk-deliveries-pager',
+        idField: 'delivery_id',
+        filters: { status: 'all' },
+        gate: { title: 'No deliveries loaded' },
+        empty: { title: 'No deliveries' },
+
+        load: function () {
+            // A clerk who only holds Failed Deliveries cannot read the full list: show the failed ones
+            if (!holdsFeature('delivery-dispatch')) return apiGetFailedDeliveries();
+            return apiGetDeliveries();
+        },
+
+        match: function (d, query) {
+            return prefixMatch([d.customer_name, d.driver_name, '#' + d.delivery_id, deliveryCode(d.delivery_id)], query);
+        },
+
+        filter: function (d, filters) {
+            return filters.status === 'all' || d.status === filters.status;
+        },
+
+        sort: function (rows) {
+            return rows.sort(function (a, b) {
+                return (Number(clerkDeliveryNeedsMe(b)) - Number(clerkDeliveryNeedsMe(a))) ||
+                    String(a.scheduled_date || '').localeCompare(String(b.scheduled_date || '')) ||
+                    (Number(a.delivery_id) - Number(b.delivery_id));
+            });
+        },
+
+        renderRow: function (d, index) {
+            return '<tr class="row-clickable row-reveal' + (clerkDeliveryNeedsMe(d) ? ' row-attention' : '') + '" ' +
+                'style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                'onclick="openClerkDelivery(' + d.delivery_id + ')">' +
+                '<td class="cell-id">' + deliveryCode(d.delivery_id) + '</td>' +
+                '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
+                '<td class="cell-id">' + escapeHtml(clerkScheduleText(d.scheduled_date)) + '</td>' +
+                '<td>' + escapeHtml(d.driver_name || 'Not assigned') + '</td>' +
+                '<td>' + statusBadge(d.status) + '</td></tr>';
+        }
+    });
+}
+
+// The day, and the time only when one was set
+function clerkScheduleText(stamp) {
+    if (!stamp) return 'Not set';
+    const text = String(stamp).replace('T', ' ');
+    const time = text.slice(11, 16);
+    if (time === '' || time === '00:00') return text.slice(0, 10);
+    return text.slice(0, 10) + ' ' + time;
+}
+
+async function openClerkDelivery(deliveryId) {
+    const panel = getDataPanel('clerk-deliveries');
+    const d = panel ? panel.find(deliveryId, 'delivery_id') : null;
+    if (!d) return;
+
+    // A failed delivery opens the failed-delivery popup, where it is rescheduled
+    if (d.status === 'Failed' && holdsFeature('failed-deliveries')) {
+        const failedPanel = getDataPanel('failed-deliveries');
+        if (failedPanel) {
+            await failedPanel.open();
+            if (findFailedDelivery(deliveryId)) {
+                openFailedDelivery(deliveryId);
+                return;
+            }
+        }
+    }
+
+    // The clerk moves a delivery only from Pending or In Transit; any other status is read only
+    showDeliveryRecord(d, true, clerkDeliveryNeedsMe(d) ? CLERK_SENDS : []);
+}
+
 if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html')) {
     document.addEventListener('DOMContentLoaded', function () {
         buildMaterialsPanel();
@@ -2489,6 +2573,7 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         buildReturnsPanel();
         buildInventoryArchivePanel();
         buildClerkRecordsPanel();
+        buildClerkDeliveriesPanel();
         writeClerkRecordHeaders();
         syncClerkRecordAddButton();
 

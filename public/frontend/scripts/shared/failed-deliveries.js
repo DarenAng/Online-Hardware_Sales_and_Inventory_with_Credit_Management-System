@@ -126,8 +126,11 @@ async function openFailedDelivery(deliveryId) {
         { label: 'Attempts', body: detailTable(['Attempt', 'Date', 'Driver', 'Outcome', 'Reason'], rows, [0]) }
     ];
 
-    const footActions = '<button type="button" class="btn btn-accent" ' +
-        'onclick="openRescheduleForm(' + d.delivery_id + ')">Reschedule</button>';
+    let footActions = '';
+    if (typeof holdsFeature !== 'function' || holdsFeature('failed-deliveries')) {
+        footActions = '<button type="button" class="btn btn-accent" ' +
+            'onclick="openRescheduleForm(' + d.delivery_id + ')">Reschedule</button>';
+    }
 
     openDetailModal('Delivery ' + deliveryCode(d.delivery_id), d.customer_name + ' · Failed', deliveryCode(d.delivery_id),
         pages, footActions);
@@ -261,9 +264,10 @@ async function handleReschedule(event) {
     }
 }
 
-// Build the panel on any page whose sidebar has the Failed Deliveries link
+// Build the panel on any page whose sidebar has the Failed Deliveries link,
+// or the clerk's Delivery link (its Failed rows open the popup and reschedule form)
 document.addEventListener('DOMContentLoaded', function () {
-    if (document.querySelector('[data-panel-link="panel-failed-deliveries"]')) {
+    if (document.querySelector('[data-panel-link="panel-failed-deliveries"], [data-panel-link="panel-clerk-deliveries"]')) {
         buildFailedDeliveriesPanel();
     }
 });

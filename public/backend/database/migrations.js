@@ -1361,6 +1361,7 @@ async function routinesAreOld() {
     ["sp_create_delivery", "p_driver_staff_id"],
     ["sp_create_delivery", "DELIVERY_CREATED"],
     ["sp_update_delivery_status", "FOR UPDATE"],
+    ["sp_update_delivery_status", "The stockroom can only send a delivery out"],
     ["sp_receive_purchase_order", "purchase_order_ordered_items"],
     ["sp_receive_purchase_order", "pack_count, unit_cost)"],
     ["sp_receive_purchase_order", "received_at = NOW()"],
