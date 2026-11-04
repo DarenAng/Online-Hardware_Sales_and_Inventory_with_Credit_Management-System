@@ -53,7 +53,7 @@ function buildFailedDeliveriesPanel() {
         columns: 6,
         pagerId: 'failed-pager',
         idField: 'delivery_id',
-        gate: { title: 'Failed deliveries are not loaded', text: 'Press Load Data to read them.', button: 'Load Data' },
+        gate: { title: 'Failed deliveries are not loaded' },
         empty: { title: 'No failed deliveries' },
 
         load: function () {

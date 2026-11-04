@@ -75,12 +75,7 @@ function buildMaterialsPanel() {
         idField: 'product_id',
         filters: { status: 'all', supplier: 'all', material: 'all', category: 'all' },
 
-        gate: {
-            title: 'No materials loaded',
-            text: 'Search above for one material, pick a filter, or press Load Data ' +
-                  'for the whole list. Archived materials never appear here.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No materials loaded' },
 
         load: async function () {
             invProducts = await apiGetProducts();
@@ -1123,11 +1118,7 @@ function buildAdjustmentsPanel() {
         idField: 'adjustment_id',
         filters: { type: 'all' },
 
-        gate: {
-            title: 'The log is not loaded',
-            text: 'Press Load Data for every stock movement on record, or type a material.',
-            button: 'Load Data'
-        },
+        gate: { title: 'The log is not loaded' },
 
         load: function () {
             return apiGetStockAdjustments();
@@ -1795,11 +1786,7 @@ function buildReorderPanel() {
         idField: 'product_id',
         filters: { status: 'all' },
 
-        gate: {
-            title: 'No materials loaded',
-            text: 'Search for a material, or press Load Data for the list, then press a material to set its reorder point.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No materials loaded' },
 
         load: function () {
             return apiGetProducts();
@@ -1866,8 +1853,6 @@ function buildClerkPurchaseOrderPanel() {
         showPanel: showInventoryPanel,
         historyPanelId: 'panel-po-history',
         historyTitle: 'Purchase Orders',
-        gateText: 'Press Load Data for every order raised, or filter to the ones still ' +
-                  'waiting to be confirmed or delivered.',
         afterChange: async function () {
             const keys = ['clerk-materials', 'clerk-reorder'];
             for (let i = 0; i < keys.length; i++) {
@@ -1888,11 +1873,7 @@ function buildReturnsPanel() {
         idField: 'return_id',
         filters: { type: 'All' },
 
-        gate: {
-            title: 'No reports loaded',
-            text: 'Press Load Data for every return, damage and refund on record.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No reports loaded' },
 
         load: function () {
             return apiGetReturns();
@@ -1959,11 +1940,7 @@ function buildInventoryArchivePanel() {
         pagerId: 'arch-pager',
         idField: 'product_id',
 
-        gate: {
-            title: 'The archive is not loaded',
-            text: 'Press Load Data for materials that have been taken out of circulation.',
-            button: 'Load Data'
-        },
+        gate: { title: 'The archive is not loaded' },
 
         load: function () {
             return apiGetArchivedProducts();
@@ -2077,11 +2054,7 @@ function buildClerkRecordsPanel() {
         tableId: 'records-table',
         columns: 5,
         pagerId: 'records-pager',
-        gate: {
-            title: 'No records loaded',
-            text: 'Press Load Data to see these records.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No records loaded' },
         filters: {},
         load: function () {
             return apiGetRecords(clerkRecordType);

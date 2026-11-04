@@ -838,11 +838,7 @@ async function incomeRows(field) {
     return incomeData[field];
 }
 
-const INCOME_GATE = {
-    title: 'Not loaded',
-    text: 'Pick the dates above and press Load Data.',
-    button: false
-};
+const INCOME_GATE = { title: 'Not loaded' };
 
 function buildIncomePanels() {
     renderIncome();
@@ -924,12 +920,7 @@ function buildReportPanels() {
         tableId: 'all-table',
         columns: 5,
         pagerId: 'all-pager',
-        gate: {
-            title: 'Not loaded',
-            text: 'Press Load Data for everything staff have filed: sales, payments, damage and refund ' +
-                  'reports, stock adjustments, deliveries, purchase orders and credit decisions.',
-            button: 'Load Data'
-        },
+        gate: { title: 'Not loaded' },
         filters: { kind: 'all', role: 'all', from: '', to: '' },
         sortKeys: ['happened_at', 'staff_name', 'role_name', function (row) { return activityKind(row.kind); }, 'details'],
         load: function () {
@@ -973,11 +964,7 @@ function buildReportPanels() {
         idField: 'sale_id',
         filters: { status: 'all', method: 'all', from: '', to: '' },
         sortKeys: ['sale_id', 'customer_name', 'payment_method', 'payment_status', function (row) { return Number(row.balance_due); }, 'sale_date'],
-        gate: {
-            title: 'Not loaded',
-            text: 'Press Load Data for every sale with money still owed on it.',
-            button: 'Load Data'
-        },
+        gate: { title: 'Not loaded' },
         load: async function () {
             const overview = await reportsOverview(true);
             return overview.unpaid;
@@ -1021,11 +1008,7 @@ function buildReportPanels() {
         filters: { balance: 'all' },
         sortKeys: ['customer_id', 'customer_name', 'last_purchase', function (row) { return Number(row.total_spent); },
                    function (row) { return Number(row.balance_due); }],
-        gate: {
-            title: 'Not loaded',
-            text: 'Press Load Data for customers who have bought more than once.',
-            button: 'Load Data'
-        },
+        gate: { title: 'Not loaded' },
         load: async function () {
             const overview = await reportsOverview();
             return overview.loyal;
@@ -1236,11 +1219,7 @@ function buildSalesPanel() {
         inputs: ['sales-method', 'sales-status', 'sales-period', 'sales-from', 'sales-to'],
         sortKeys: ['sale_id', 'sale_date', 'customer_name', 'payment_method', 'transaction_status',
                    function (row) { return Number(row.final_amount); }],
-        gate: {
-            title: 'No sales loaded',
-            text: 'Pick a payment method, a status or a date range above, then press Load Data.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No sales loaded' },
         load: function () {
             return apiGetSales(salesQuery());
         },
@@ -1287,11 +1266,7 @@ function buildStockPanels() {
         sortKeys: ['product_id', 'product_name', 'description', function (p) { return Number(p.quantity_in_stock); },
                    function (p) { return Number(p.effective_rop); },
                    function (p) { return Number(p.suggested_order); }, 'supplier_name', 'stock_status'],
-        gate: {
-            title: 'Reorder alerts not loaded',
-            text: 'Press Load Data for every material at or below its reorder point.',
-            button: 'Load Data'
-        },
+        gate: { title: 'Reorder alerts not loaded' },
         load: async function () {
             const all = await stockRows();
             const low = [];
@@ -1328,11 +1303,7 @@ function buildStockPanels() {
         idField: 'product_id',
         filters: { status: 'all' },
         sortKeys: ['product_id', 'product_name', 'description', 'category_name', function (p) { return Number(p.quantity_in_stock); }, 'stock_status'],
-        gate: {
-            title: 'The stock report is not loaded',
-            text: 'Search for a material, pick a status or a quantity, or press Load Data for the whole inventory.',
-            button: 'Load Data'
-        },
+        gate: { title: 'The stock report is not loaded' },
         load: function () {
             return stockRows();
         },
@@ -1365,11 +1336,7 @@ function buildStockMovesPanel() {
         pagerId: 'stock-moves-pager',
         filters: { kind: 'all', from: '', to: '' },
         sortKeys: ['happened_at', function (row) { return activityKind(row.kind); }, 'details', 'staff_name', 'role_name'],
-        gate: {
-            title: 'Not loaded',
-            text: 'Press Load Data for the damage and return reports, stock adjustments and purchase orders staff have filed.',
-            button: 'Load Data'
-        },
+        gate: { title: 'Not loaded' },
         load: async function () {
             const all = await apiGetActivityReport();
             const moves = [];
@@ -1621,8 +1588,7 @@ function buildManagerPurchaseOrderPanel() {
             showManagerPanel(panelId, title);
         },
         historyPanelId: 'panel-po-history',
-        historyTitle: 'Purchase Orders',
-        gateText: 'Press Load Data for every order raised, or filter to the ones waiting for your confirmation.'
+        historyTitle: 'Purchase Orders'
     });
     buildPurchaseOrderPanel();
     buildPurchaseTotalsPanel();
@@ -1709,11 +1675,7 @@ function buildCreditPanels() {
         idField: 'customer_id',
         filters: { owing: 'all' },
 
-        gate: {
-            title: 'The credit records are not loaded',
-            text: 'Search for a customer, filter by balance, or press Load Data for every account.',
-            button: 'Load Data'
-        },
+        gate: { title: 'The credit records are not loaded' },
 
         load: function () {
             return apiGetCreditCustomers();
@@ -1765,11 +1727,7 @@ function buildCreditPanels() {
         pagerId: 'requests-pager',
         idField: 'request_id',
 
-        gate: {
-            title: 'No requests loaded',
-            text: 'Press Load Data for extension requests raised at the counter.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No requests loaded' },
 
         inputs: ['requests-status'],
 
@@ -2497,11 +2455,7 @@ function buildDeliveryPanel() {
         filters: { state: 'all', driver: 'all' },
         sortKeys: ['delivery_id', 'customer_name', 'delivery_address', 'driver_name', 'scheduled_date',
                    function (d) { return Number(d.balance_due); }, 'fulfilment_state'],
-        gate: {
-            title: 'Delivery history not loaded',
-            text: 'Press Load Data for every delivery on record, or filter by fulfilment first.',
-            button: 'Load Data'
-        },
+        gate: { title: 'Delivery history not loaded' },
         load: function () {
             return apiGetDeliveries();
         },
@@ -2644,11 +2598,7 @@ function buildRecordsPanel() {
         tableId: 'records-table',
         columns: 5,
         pagerId: 'records-pager',
-        gate: {
-            title: 'No records loaded',
-            text: 'Pick a kind of record above, then press Load Data.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No records loaded' },
         sortKeys: [],
         load: function () {
             return apiGetRecords(recordType);
@@ -2833,11 +2783,7 @@ function buildArchivePanel() {
         sortKeys: ['record_id', function (a) { return archiveTypeName(a.module); }, 'record_name', 'detail', 'archived_at', 'archived_by'],
         pagerId: 'archives-pager',
         filters: { type: 'all' },
-        gate: {
-            title: 'The archive is not loaded',
-            text: 'Press Load Data for every archived customer, material, unit, category, supplier and user.',
-            button: 'Load Data'
-        },
+        gate: { title: 'The archive is not loaded' },
         load: function () {
             return apiGetArchives();
         },
@@ -3847,11 +3793,7 @@ function buildStaffAccountsPanel() {
         remember: false,
         loadOnFilter: false,
         loadOnSearch: false,
-        gate: {
-            title: 'The staff accounts are not loaded',
-            text: 'Press Load Data to list the cashier, inventory clerk and driver accounts.',
-            button: 'Load Data'
-        },
+        gate: { title: 'The staff accounts are not loaded' },
         empty: {
             title: 'No staff accounts yet',
             text: 'Use Create Account to add the first one.'

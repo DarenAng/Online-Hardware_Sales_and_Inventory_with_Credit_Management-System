@@ -202,12 +202,6 @@ const dataPanelMethods = {
                     '</svg>' +
                 '</div>' +
                 '<h4>' + escapeHtml(gate.title || 'Nothing loaded yet') + '</h4>' +
-                '<p>' + (gate.text || 'Search above, or press the button to read this from the database.') + '</p>' +
-                (gate.button === false ? '' :
-                '<button type="button" class="btn btn-accent" ' +
-                        'onclick="dataPanelOpen(\'' + this.key + '\')">' +
-                    escapeHtml(gate.button || 'Load Data') +
-                '</button>') +
             '</div></td></tr>';
 
         this.announce();

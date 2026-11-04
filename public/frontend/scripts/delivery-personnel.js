@@ -154,9 +154,7 @@ function buildDriverPanels() {
         pagerId: 'dpend-pager',
         idField: 'delivery_id',
         filters: { tab: 'Pending', from: '', to: '' },
-        gate: { title: 'Your deliveries are not loaded',
-                text: 'Press Load Data to read your deliveries, or type a customer.',
-                button: 'Load Data' },
+        gate: { title: 'Your deliveries are not loaded' },
 
         load: async function () {
             await fetchDriverDeliveries();
@@ -791,9 +789,7 @@ function buildReportPanels() {
         pagerId: 'drep-pager',
         idField: 'delivery_id',
         filters: { balance: 'all' },
-        gate: { title: 'The report is not loaded',
-                text: 'Pick a period above, or press Load Data.',
-                button: 'Load Data' },
+        gate: { title: 'The report is not loaded' },
 
         load: async function () {
             const report = await fetchDeliveryReport('driver-report', 'dhand-from', 'dhand-to');
@@ -836,9 +832,7 @@ function buildReportPanels() {
         pagerId: 'drep-pay-pager',
         idField: 'payment_id',
         filters: { method: 'all' },
-        gate: { title: 'The report is not loaded',
-                text: 'Pick a period above, or press Load Data.',
-                button: 'Load Data' },
+        gate: { title: 'The report is not loaded' },
 
         load: async function () {
             const report = await fetchDeliveryReport('driver-report-pay', 'dpay-from', 'dpay-to');

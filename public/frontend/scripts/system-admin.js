@@ -174,12 +174,7 @@ function buildUsersPanel() {
 
         loadOnFilter: false,
 
-        gate: {
-            title: 'The directory is not loaded',
-            text: 'Set the filters you want, then press Load Data to read the staff ' +
-                  'directory, or type a name in the search box to look one person up.',
-            button: 'Load Data'
-        },
+        gate: { title: 'The directory is not loaded' },
 
         load: function () {
             const status = currentStatusFilter();
@@ -1072,11 +1067,7 @@ function buildArchivePanel() {
         pagerId: 'archive-pager',
         idField: 'staff_id',
 
-        gate: {
-            title: 'The archive is not loaded',
-            text: 'Press Load Data to read the archived staff accounts, or type a name.',
-            button: 'Load Data'
-        },
+        gate: { title: 'The archive is not loaded' },
 
         load: function () {
             return apiGetStaff('?status=archived');
@@ -1789,12 +1780,7 @@ function buildLogsPanel() {
         pagerId: 'logs-pager',
         idField: 'log_id',
 
-        gate: {
-            title: 'The audit trail is not loaded',
-            text: 'Pick a period or a role, then press Load Data. ' +
-                  'Nothing is read from the trail until you ask for it.',
-            button: 'Load Data'
-        },
+        gate: { title: 'The audit trail is not loaded' },
 
         load: function () {
             return apiGetAuditLogs(auditLogQuery());
@@ -2001,11 +1987,7 @@ function buildBackupPanel() {
         pagerId: 'backup-pager',
         idField: 'fileName',
 
-        gate: {
-            title: 'Reading the backup folder',
-            text: 'The saved backups load as soon as this screen opens.',
-            button: 'Load Data'
-        },
+        gate: { title: 'Reading the backup folder' },
 
         load: async function () {
             const body = await apiGetBackups();

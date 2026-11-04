@@ -6,7 +6,6 @@ const poSetup = {
     showPanel: null,
     historyPanelId: 'panel-po-history',
     historyTitle: 'Order History',
-    gateText: 'Press Load Data for every order raised, or filter to the ones still pending.',
     showLines: true,
     afterChange: null
 };
@@ -1479,11 +1478,7 @@ function buildPurchaseOrderPanel() {
         idField: 'po_id',
         filters: { status: 'all' },
 
-        gate: {
-            title: 'No purchase orders loaded',
-            text: poSetup.gateText,
-            button: 'Load Data'
-        },
+        gate: { title: 'No purchase orders loaded' },
 
         load: function () {
             return apiGetPurchaseOrders();
@@ -1938,11 +1933,7 @@ function buildPurchaseTotalsPanel() {
         filters: { period: 'month', month: poThisMonth(), year: poThisYear(), supplier: 'all', from: '', to: '' },
         inputs: ['po-totals-from', 'po-totals-to', 'po-totals-period', 'po-totals-month', 'po-totals-year', 'po-totals-supplier'],
 
-        gate: {
-            title: 'Total purchases not loaded',
-            text: 'Press Load Data to add up this month\'s purchase orders.',
-            button: 'Load Data'
-        },
+        gate: { title: 'Total purchases not loaded' },
         empty: {
             title: 'Nothing ordered this month',
             text: 'No purchase order was raised this month. Pick another month above, or Every Year or All Time.'

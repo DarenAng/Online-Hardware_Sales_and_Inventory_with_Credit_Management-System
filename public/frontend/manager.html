@@ -171,7 +171,7 @@
                             <div class="panel-head">
                                 <div>
                                     <h3>Sales Summary</h3>
-                                    <p class="panel-sub" id="income-range-note">Pick the dates, then press Load Data.</p>
+                                    <p class="panel-sub" id="income-range-note"></p>
                                 </div>
                                 <div class="panel-actions no-print">
                                     <button type="button" class="btn btn-sm" data-export data-print-kind="sheet"
@@ -197,8 +197,6 @@
                                     <label for="income-to">To</label>
                                     <input type="date" id="income-to" onchange="incomeDatesPicked()">
                                 </div>
-                                <div class="toolbar-spacer"></div>
-                                <button type="button" class="btn btn-accent" onclick="loadIncome()">Load Data</button>
                             </div>
 
                             <div class="kpi-grid" id="income-kpis"></div>

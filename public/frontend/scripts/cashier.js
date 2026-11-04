@@ -36,6 +36,7 @@ function showRegister(event) {
     showCashierPanel('panel-pos', 'Point of Sale', event);
 
     renderCart();
+    if (!catalogLoaded) loadCatalogAll();
 }
 
 function showCashierHome(event) {
@@ -87,8 +88,6 @@ function renderCatalogEmpty() {
         '                </svg>\n' +
         '            </div>\n' +
         '            <h4>No products loaded</h4>\n' +
-        '            <p>Search above for what the customer is buying, or press Load Data to list every product.</p>\n' +
-        '            <button type="button" class="btn btn-accent" onclick="loadCatalogAll(event)">Load Data</button>\n' +
         '        </div>';
     holdBoxHeight(grid);
 }
@@ -110,7 +109,6 @@ function renderCatalogNoMatch(keyword) {
         '            </div>\n' +
         '            <h4>No match found</h4>\n' +
         '            <p>' + nothingText + categoryText + '. Archived and out-of-stock products never appear here.</p>\n' +
-        '            <button type="button" class="btn btn-accent" onclick="loadCatalogAll(event)">Load Data</button>\n' +
         '        </div>';
     holdBoxHeight(grid);
 }
@@ -3013,11 +3011,7 @@ function buildDeliveryPanel() {
         idField: 'delivery_id',
         filters: { status: 'all' },
 
-        gate: {
-            title: 'No deliveries loaded',
-            text: 'Search for a customer, an address or a sale number, or press Load Data to read them all.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No deliveries loaded' },
 
         load: function () {
             return apiGetDeliveries();
@@ -3221,11 +3215,7 @@ function buildRecentSalesPanel() {
         idField: 'sale_id',
         remember: false,
 
-        gate: {
-            title: 'No sales loaded',
-            text: 'The sales of the past three days are read when this screen opens.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No sales loaded' },
 
         empty: {
             title: 'No sales in the past 3 days',
@@ -3561,11 +3551,7 @@ function buildSalesPanel() {
         idField: 'sale_id',
         filters: { method: 'all', status: 'all' },
 
-        gate: {
-            title: 'No sales loaded',
-            text: 'Search for a customer or a receipt number, or press Load Data to read your sales.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No sales loaded' },
 
         load: function () {
             return apiGetSales('');
@@ -4085,11 +4071,7 @@ function buildCustomerPanel() {
         idField: 'customer_id',
         filters: { due: 'all' },
 
-        gate: {
-            title: 'No customers loaded',
-            text: 'Search for a customer, or press Load Data to read every credit account.',
-            button: 'Load Data'
-        },
+        gate: { title: 'No customers loaded' },
 
         load: function () {
             return apiGetCreditCustomers();
