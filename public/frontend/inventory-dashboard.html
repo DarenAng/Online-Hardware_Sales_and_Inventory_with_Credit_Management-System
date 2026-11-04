@@ -339,6 +339,7 @@
                                        role="combobox" aria-expanded="false"
                                        aria-controls="po-supplier-list" aria-autocomplete="list"
                                        oninput="onSupplierInput(this.value)"
+                                       onclick="onSupplierInput(this.value)"
                                        onfocus="onSupplierInput(this.value)"
                                        onblur="onSupplierLeave()"
                                        onkeydown="onSupplierKey(event)" required>
@@ -402,10 +403,9 @@
                         </div>
                         <input type="search" class="form-control" id="po-roster-filter"
                                placeholder="Find a material or supplier" autocomplete="off"
-                               oninput="renderCriticalStocks()">
+                               oninput="onCriticalSearch()">
                         <ul class="po-roster-list" id="po-roster-list"></ul>
-                        <p class="po-roster-note">Out of stock first, then low. Click a material to add it
-                            to the order with its suggested quantity; its supplier is picked for you.</p>
+                        <div class="po-roster-pager" id="po-roster-pager"></div>
                     </aside>
                     </div>
                 </div>
@@ -428,16 +428,15 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="po-status">Status</label>
-                            <select id="po-status" data-filter-table="po-table" data-hides-column="6"
+                            <select id="po-status" data-filter-table="po-table" data-hides-column="7"
                                     onchange="dataPanelFilter('clerk-po', 'status', this.value)">
                                 <option value="all">Every status</option>
-                                <option value="For Approval">Pending Manager Approval</option>
-                                <option value="Approved">Approved</option>
-                                <option value="Declined - Manager">Declined - Manager</option>
-                                <option value="Pending Supplier Confirmation">Pending Supplier Confirmation</option>
-                                <option value="Accepted">Accepted</option>
-                                <option value="Declined - Supplier">Declined - Supplier</option>
+                                <option value="For Approval">For Approval</option>
+                                <option value="To Send">To Send</option>
+                                <option value="Sent to Supplier">Sent to Supplier</option>
+                                <option value="Out for Delivery">Out for Delivery</option>
                                 <option value="Received">Received</option>
+                                <option value="Declined">Declined</option>
                             </select>
                         </div>
                         <div class="toolbar-spacer"></div>
@@ -446,7 +445,7 @@
                         <table id="po-table">
                             <thead>
                                 <tr><th>PO</th><th>Supplier</th><th>Ordered Date</th><th>Lines</th>
-                                    <th>Order Value</th><th>Status</th></tr>
+                                    <th>Order Value</th><th>Arrives</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>

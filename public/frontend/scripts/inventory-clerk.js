@@ -46,6 +46,18 @@ function showAdjust(event) {
     renderAdjustForm();
 }
 
+// From a purchase order that is Out for Delivery: open Stock Adjustment with that order picked
+async function receiveFromPurchaseOrder(poId) {
+    closeModal('detail-modal');
+    showAdjust();
+    await loadReferenceRecords();
+    if (!findReferencePo(poId)) {
+        notifyError(poNumber(poId) + ' could not be opened. Try again.', 'Not opened');
+        return;
+    }
+    await adjustFromPo(poId);
+}
+
 function showAdjustmentHistory(event) {
     showInventoryPanel('panel-adjust-log', 'Adjustment History', event);
 }
@@ -527,7 +539,7 @@ async function loadReferenceRecords() {
             const orders = await apiGetPurchaseOrders();
             const accepted = [];
             for (let i = 0; i < orders.length; i++) {
-                if (poStage(orders[i]) === 'Accepted') accepted.push(orders[i]);
+                if (poStage(orders[i]) === 'Out for Delivery') accepted.push(orders[i]);
             }
             referencePos = accepted;
         } catch (error) {

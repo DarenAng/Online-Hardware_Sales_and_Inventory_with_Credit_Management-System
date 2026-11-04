@@ -974,6 +974,29 @@ async function migrateSupplierQuote() {
     "purchase_order_items.original_unit_cost).");
 }
 
+async function migrateLineDescription() {
+  const columnsResult = await db.query(
+    "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND COLUMN_NAME = 'line_description'\n" +
+      "       AND TABLE_NAME IN ('purchase_order_items', 'purchase_order_ordered_items')",
+    [DB_NAME]
+  );
+  const columns = columnsResult[0];
+  const tables = [];
+  for (let i = 0; i < columns.length; i++) {
+    tables.push(columns[i].TABLE_NAME);
+  }
+  if (tables.length === 2) return;
+
+  if (tables.indexOf("purchase_order_items") === -1) {
+    await db.query("ALTER TABLE purchase_order_items ADD COLUMN line_description VARCHAR(255) NULL");
+  }
+  if (tables.indexOf("purchase_order_ordered_items") === -1) {
+    await db.query("ALTER TABLE purchase_order_ordered_items ADD COLUMN line_description VARCHAR(255) NULL");
+  }
+  console.log("Added line_description to purchase_order_items and purchase_order_ordered_items.");
+}
+
 async function migrateQrPayments() {
   const tablesResult = await db.query(
     "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
@@ -1705,6 +1728,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateDeliveryRemarks();
   await migrateSupplierResponse();
   await migrateSupplierQuote();
+  await migrateLineDescription();
   await migrateQrPayments();
   await migratePaymentDetails();
   await migrateLoyaltySettings();

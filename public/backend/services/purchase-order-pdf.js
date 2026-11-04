@@ -44,13 +44,12 @@ function lineQuantity(item) {
 }
 
 function statusWords(order) {
-  if (order.status === "For Approval") return "Pending Manager Approval";
-  if (order.status === "Cancelled") return "Declined - Manager";
+  if (order.status === "For Approval") return "For Approval";
+  if (order.status === "Cancelled") return "Declined";
   if (order.status === "Pending") {
     if (order.supplier_response === "Accepted") return "Accepted";
-    if (order.supplier_response === "Declined") return "Declined - Supplier";
-    if (order.supplier_sent_at) return "Pending Supplier Confirmation";
-    return "Approved";
+    if (order.supplier_response === "Declined") return "Declined";
+    return "Sent to Supplier";
   }
   return order.status || "";
 }

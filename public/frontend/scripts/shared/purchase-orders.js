@@ -84,7 +84,7 @@ function showPurchaseOrders(event) {
 
     poShowPanel('panel-po', 'New Purchase Order');
     renderCriticalStocks();
-    Promise.all([loadPoSuppliers(false), ensurePoMaterials(false)]).then(renderCriticalStocks);
+    Promise.all([loadPoSuppliers(false), ensurePoMaterials(false)]).then(renderPoTotals);
     if (poLineCount === 0) addPurchaseLine();
     renderSupplierState();
     renderPoTotals();
@@ -395,7 +395,10 @@ async function matInput(id, value) {
         chosen = null;
     }
 
-    if (chosen && chosen.product_name !== typed) state.productId = null;
+    if (chosen && chosen.product_name !== typed) {
+        state.productId = null;
+        if (matIsOrderLine(id)) poClearSavedDescription(id.replace('po-mat-', ''));
+    }
 
     state.newName = typed;
     renderMatSuggestions(id, typed);
@@ -437,8 +440,9 @@ function renderMatSuggestions(id, text) {
     }
 
     let exact = false;
-    for (let i = 0; i < matches.length; i++) {
-        if (matches[i].product_name.toLowerCase() === query) exact = true;
+    const everyChoice = matAllChoices(id);
+    for (let i = 0; i < everyChoice.length; i++) {
+        if (everyChoice[i].product_name.toLowerCase() === query) exact = true;
     }
 
     let rows = '';
@@ -576,7 +580,8 @@ function matKey(id, event) {
 
 function matIsOrderLine(id) { return String(id).indexOf('po-mat-') === 0; }
 
-function matChoices(id) {
+// Every material the picker could offer, whatever the line's Category says
+function matAllChoices(id) {
     if (!matIsOrderLine(id)) return poMaterials;
     if (poSupplier) {
         const supplied = [];
@@ -588,8 +593,98 @@ function matChoices(id) {
     return [];
 }
 
+// What the picker lists: narrowed to the line's Category when one is picked
+function matChoices(id) {
+    const all = matAllChoices(id);
+    if (!matIsOrderLine(id)) return all;
+
+    const select = document.getElementById('po-cat-' + id.replace('po-mat-', ''));
+    if (!select || select.value === '') return all;
+
+    const narrowed = [];
+    for (let i = 0; i < all.length; i++) {
+        if (all[i].category_name === select.value) narrowed.push(all[i]);
+    }
+    return narrowed;
+}
+
+// Fills a line's Category select with the categories of the supplier's materials
+function renderPoLineCategories() {
+    const names = [];
+    const supplied = matAllChoices('po-mat-0');
+    for (let i = 0; i < supplied.length; i++) {
+        const name = supplied[i].category_name;
+        if (name && names.indexOf(name) === -1) names.push(name);
+    }
+    names.sort(function (a, b) { return a.localeCompare(b); });
+    const key = names.join('|');
+
+    const selects = document.querySelectorAll('.po-cat');
+    for (let i = 0; i < selects.length; i++) {
+        const select = selects[i];
+        if (select.dataset.options === key) continue;
+
+        const was = select.value;
+        let html = '<option value="">Every category</option>';
+        for (let j = 0; j < names.length; j++) {
+            html += '<option value="' + escapeHtml(names[j]) + '">' + escapeHtml(names[j]) + '</option>';
+        }
+        select.innerHTML = html;
+        select.dataset.options = key;
+        if (names.indexOf(was) !== -1) select.value = was;
+    }
+}
+
+// Empties the Description when it still holds the text filled in from the material that was let go
+function poClearSavedDescription(index) {
+    const desc = document.getElementById('po-desc-' + index);
+    if (!desc) return;
+    if (desc.dataset.saved && desc.value === desc.dataset.saved) desc.value = '';
+    desc.dataset.saved = '';
+}
+
+// The Category select of a line was changed: a picked material from another category is let go
+function poCategoryChanged(index) {
+    const pickerId = 'po-mat-' + index;
+    const select = document.getElementById('po-cat-' + index);
+    const state = matState(pickerId);
+
+    if (select && select.value !== '' && state.productId) {
+        const product = poFindProduct(poMaterials, state.productId);
+        if (!product || product.category_name !== select.value) {
+            state.productId = null;
+            state.newName = '';
+            const box = matBox(pickerId);
+            if (box) box.value = '';
+            poClearSavedDescription(index);
+            renderMatVerdict(pickerId);
+            syncPoLineUnits(pickerId);
+        }
+    }
+    renderPoTotals();
+}
+
+// A material was picked on a line: set its Category and fill the Description from the material
+function poFillLineFromProduct(pickerId, product) {
+    const index = pickerId.replace('po-mat-', '');
+
+    const select = document.getElementById('po-cat-' + index);
+    if (select) {
+        select.value = product.category_name || '';
+        if (select.value !== (product.category_name || '')) select.value = '';
+    }
+
+    const desc = document.getElementById('po-desc-' + index);
+    if (desc) {
+        const saved = product.description || '';
+        const wasSaved = desc.dataset.saved || '';
+        if (desc.value.trim() === '' || desc.value === wasSaved) desc.value = saved;
+        desc.dataset.saved = saved;
+    }
+}
+
 function matPick(id, productId) {
-    const product = poFindProduct(matChoices(id), productId);
+    const product = poFindProduct(matAllChoices(id), productId);
     if (!product) return;
 
     const state = matState(id);
@@ -598,6 +693,8 @@ function matPick(id, productId) {
 
     const box = matBox(id);
     if (box) box.value = product.product_name;
+
+    if (matIsOrderLine(id)) poFillLineFromProduct(id, product);
 
     const make = document.getElementById(id + '-make');
     if (make) make.hidden = true;
@@ -618,6 +715,13 @@ function matMakeNew(id) {
     const make = document.getElementById(id + '-make');
     const sub = document.getElementById(id + '-make-sub');
     if (make) make.hidden = false;
+    if (matIsOrderLine(id)) {
+        const lineCategory = document.getElementById('po-cat-' + id.replace('po-mat-', ''));
+        const newCategory = document.getElementById(id + '-category');
+        if (lineCategory && newCategory && newCategory.value.trim() === '' && lineCategory.value !== '') {
+            newCategory.value = lineCategory.value;
+        }
+    }
     if (sub) {
         sub.textContent = '"' + state.newName + '" is not on the material list. Fill these in ' +
             'and it joins the list when this is sent.';
@@ -658,8 +762,7 @@ function renderMatDesc(id) {
         }
 
         box.hidden = false;
-        box.innerHTML = strip([product.brand_name, 'Category: ' + (product.category_name || 'No category'),
-            'counted in ' + unit, pack]);
+        box.innerHTML = strip([product.brand_name, 'counted in ' + unit, pack]);
         if (product.description) {
             box.innerHTML += '<span class="mat-desc-line mat-desc-full">' +
                 escapeHtml(product.description) + '</span>';
@@ -802,13 +905,16 @@ function renderSupplierSuggestions(text) {
         if (box) box.setAttribute('aria-expanded', 'false');
     };
 
-    if (searchText(query) === '') { hide(); return; }
-
-    const startsWithQuery = [];
-    for (let i = 0; i < poSuppliers.length; i++) {
-        if (startsAWord(poSuppliers[i].name, query)) startsWithQuery.push(poSuppliers[i]);
+    // An empty box lists every supplier, so a click shows the choices
+    let matches = [];
+    if (searchText(query) === '') {
+        matches = poSuppliers.slice();
+    } else {
+        for (let i = 0; i < poSuppliers.length; i++) {
+            if (startsAWord(poSuppliers[i].name, query)) matches.push(poSuppliers[i]);
+        }
+        matches = matches.slice(0, 6);
     }
-    const matches = startsWithQuery.slice(0, 6);
 
     if (matches.length === 1 && String(matches[0].name).toLowerCase() === query) {
         hide();
@@ -921,6 +1027,7 @@ function renderPoLinesGate() {
         add.classList.toggle('is-inactive', !open);
         add.setAttribute('aria-disabled', open ? 'false' : 'true');
     }
+    renderPoLineCategories();
 }
 
 function resetPurchaseLines() {
@@ -966,12 +1073,21 @@ function renderCriticalStocks() {
     if (critical.length === 0) {
         list.innerHTML = '<li class="po-roster-empty">' +
             (query ? 'No critical material matches that.' : 'No material is low or out of stock.') + '</li>';
+        renderCriticalPager(1);
         return;
     }
 
+    // One page at a time: 10 rows on a desktop, fewer on smaller screens
+    const size = criticalPageSize();
+    const pages = Math.ceil(critical.length / size);
+    if (poRosterPage > pages) poRosterPage = pages;
+    if (poRosterPage < 1) poRosterPage = 1;
+    const first = (poRosterPage - 1) * size;
+    const last = Math.min(first + size, critical.length);
+
     const onOrder = poOrderedProductIds();
     let html = '';
-    for (let i = 0; i < critical.length; i++) {
+    for (let i = first; i < last; i++) {
         const p = critical[i];
         const out = p.stock_status === 'Out of Stock';
         const unit = p.unit_name || '';
@@ -983,17 +1099,70 @@ function renderCriticalStocks() {
             '<span class="po-roster-line">' +
                 '<span class="po-roster-name">' + escapeHtml(p.product_name) + '</span>' +
                 '<span class="badge ' + (out ? 'badge-danger' : 'badge-warning') + '">' +
-                    escapeHtml(qtyText(Number(p.quantity_in_stock) || 0, unit)) + '</span>' +
+                    (out ? 'Out of stock' : 'Low stock') + '</span>' +
             '</span>' +
-            '<span class="po-roster-sub">' +
-                escapeHtml([p.category_name || 'No category', p.supplier_name || 'No supplier on file'].join(' · ')) + '</span>' +
-            '<span class="po-roster-sub">Reorder point ' +
-                escapeHtml(qtyText(Number(p.reorder_point) || 0, unit)) + ' · Order ' +
-                escapeHtml(qtyText(order.quantity, order.unit)) + '</span>' +
+            criticalDetail('In stock', qtyText(Number(p.quantity_in_stock) || 0, unit)) +
+            criticalDetail('Reorder point', qtyText(Number(p.reorder_point) || 0, unit)) +
+            criticalDetail('Suggested order', qtyText(order.quantity, order.unit)) +
+            criticalDetail('Supplier', p.supplier_name || 'None on file') +
+            criticalDetail('Category', p.category_name || 'None') +
         '</li>';
     }
     list.innerHTML = html;
+    renderCriticalPager(pages);
 }
+
+function criticalDetail(label, value) {
+    return '<span class="po-roster-sub"><span class="po-roster-label">' + label + ':</span> ' +
+        escapeHtml(value) + '</span>';
+}
+
+let poRosterPage = 1;
+
+function criticalPageSize() {
+    const width = window.innerWidth;
+    if (width >= 1200) return 10;
+    if (width >= 900) return 6;
+    if (width >= 600) return 4;
+    return 3;
+}
+
+function renderCriticalPager(pages) {
+    const mount = document.getElementById('po-roster-pager');
+    if (!mount) return;
+    if (pages <= 1) {
+        mount.innerHTML = '';
+        return;
+    }
+    mount.innerHTML =
+        '<div class="pager-controls">' +
+            '<button type="button" class="btn btn-sm" onclick="turnCriticalPage(-1)"' +
+                (poRosterPage === 1 ? ' disabled' : '') + '>Previous</button>' +
+            '<span class="pager-page">Page ' + poRosterPage + ' of ' + pages + '</span>' +
+            '<button type="button" class="btn btn-sm" onclick="turnCriticalPage(1)"' +
+                (poRosterPage === pages ? ' disabled' : '') + '>Next</button>' +
+        '</div>';
+}
+
+function turnCriticalPage(step) {
+    poRosterPage += step;
+    renderCriticalStocks();
+}
+
+function onCriticalSearch() {
+    poRosterPage = 1;
+    renderCriticalStocks();
+}
+
+// A different screen size can change how many rows fit on a page
+let poRosterSize = criticalPageSize();
+window.addEventListener('resize', function () {
+    const size = criticalPageSize();
+    if (size === poRosterSize) return;
+    poRosterSize = size;
+    poRosterPage = 1;
+    renderCriticalStocks();
+});
 
 function poOrderedProductIds() {
     const ids = {};
@@ -1142,12 +1311,18 @@ function addPurchaseLine(fromButton) {
                     'onclick="removePurchaseLine(' + index + ')" aria-label="Remove this line">Remove</button>' +
         '</div>' +
         '<div class="po-line-fields">' +
+            '<div class="form-group"><label for="po-cat-' + index + '">Category</label>' +
+            '<select id="po-cat-' + index + '" class="form-control po-cat" onchange="poCategoryChanged(' + index + ')">' +
+                '<option value="">Every category</option></select></div>' +
             materialPickerHtml(pickerId, 'Material name') +
             '<div class="form-group"><label for="po-qty-' + index + '" id="po-qty-label-' + index + '">Quantity</label>' +
             '<input type="number" id="po-qty-' + index + '" class="form-control po-qty" min="1" value="1" ' +
                    'oninput="renderPoTotals()">' +
             '<select id="po-in-' + index + '" class="form-control po-in" hidden onchange="renderPoTotals()"></select>' +
             '<p class="pick-verdict po-line-note" id="po-line-note-' + index + '"></p></div>' +
+            '<div class="form-group po-line-description"><label for="po-desc-' + index + '">Description</label>' +
+            '<input type="text" id="po-desc-' + index + '" class="form-control po-desc" maxlength="255" ' +
+                   'autocomplete="off"></div>' +
         '</div>';
 
     box.insertBefore(row, box.firstChild);
@@ -1219,6 +1394,7 @@ function removePurchaseLine(index) {
 
 function renderPoTotals() {
     renderCriticalStocks();
+    renderPoLineCategories();
 
     const lineRows = poLineRows();
     for (let position = 0; position < lineRows.length; position++) {
@@ -1268,6 +1444,7 @@ async function handleCreatePurchaseOrder(event) {
 
     const rows = poLineRows();
     const items = [];
+    const lineOfProduct = {};
 
     if (rows.length === 0) {
         notifyWarning('Add at least one material to the order.', 'Order not sent');
@@ -1279,7 +1456,7 @@ async function handleCreatePurchaseOrder(event) {
         const picked = matValue(row.dataset.picker);
 
         if (picked.ok && !picked.isNew &&
-            !poFindProduct(matChoices(row.dataset.picker), picked.productId)) {
+            !poFindProduct(matAllChoices(row.dataset.picker), picked.productId)) {
             notifyWarning('A line names a material ' + company + ' does not supply. ' +
                 'Pick one from their list, or add it as new.', 'Order not sent');
             const field = document.getElementById(row.dataset.picker + '-box');
@@ -1293,6 +1470,18 @@ async function handleCreatePurchaseOrder(event) {
             const field = document.getElementById(row.dataset.picker + '-box');
             if (field) field.focus();
             return;
+        }
+
+        if (picked.productId) {
+            if (lineOfProduct[picked.productId]) {
+                const again = poFindProduct(poMaterials, picked.productId);
+                notifyWarning((again ? again.product_name : 'This material') + ' is already on line ' +
+                    lineOfProduct[picked.productId] + '.', 'Same material twice');
+                const field = document.getElementById(row.dataset.picker + '-box');
+                if (field) field.focus();
+                return;
+            }
+            lineOfProduct[picked.productId] = r + 1;
         }
 
         const quantity = parseInt(row.querySelector('.po-qty').value, 10);
@@ -1310,9 +1499,11 @@ async function handleCreatePurchaseOrder(event) {
         }
 
         const pack = poLineIn(row);
+        const descriptionBox = row.querySelector('.po-desc');
 
         items.push({
             productId: picked.productId,
+            description: descriptionBox ? descriptionBox.value.trim() : '',
             newName: picked.newName,
             unitName: picked.unitName,
             categoryName: picked.categoryName,
@@ -1347,7 +1538,7 @@ async function handleCreatePurchaseOrder(event) {
 
         poMaterialsLoaded = false;
         poSuppliersLoaded = false;
-        Promise.all([loadPoSuppliers(true), ensurePoMaterials(true)]).then(renderCriticalStocks);
+        Promise.all([loadPoSuppliers(true), ensurePoMaterials(true)]).then(renderPoTotals);
         await refreshPurchaseOrders();
         poAfterChange();
 
@@ -1384,26 +1575,33 @@ function resetPurchaseOrderForm() {
 }
 
 const PO_STATES = [
-    { status: 'For Approval',                  label: 'Pending Manager Approval' },
-    { status: 'Approved',                      label: 'Approved' },
-    { status: 'Declined - Manager',            label: 'Declined - Manager' },
-    { status: 'Pending Supplier Confirmation', label: 'Pending Supplier Confirmation' },
-    { status: 'Accepted',                      label: 'Accepted' },
-    { status: 'Declined - Supplier',           label: 'Declined - Supplier' },
-    { status: 'Received',                      label: 'Received' }
+    { status: 'For Approval',     label: 'For Approval' },
+    { status: 'To Send',          label: 'To Send' },
+    { status: 'Sent to Supplier', label: 'Sent to Supplier' },
+    { status: 'Out for Delivery', label: 'Out for Delivery' },
+    { status: 'Received',         label: 'Received' },
+    { status: 'Declined',         label: 'Declined' }
 ];
 
 function poStage(po) {
-    if (po.status === 'Cancelled') return 'Declined - Manager';
+    if (po.status === 'Cancelled') return 'Declined';
     if (po.status !== 'Pending') return po.status;
-    if (po.supplier_response === 'Accepted') return 'Accepted';
-    if (po.supplier_response === 'Declined') return 'Declined - Supplier';
-    if (po.supplier_sent_at) return 'Pending Supplier Confirmation';
-    return 'Approved';
+    if (po.supplier_response === 'Accepted') return 'Out for Delivery';
+    if (po.supplier_response === 'Declined') return 'Declined';
+    if (po.supplier_sent_at) return 'Sent to Supplier';
+    return 'To Send';
 }
 
 function poCanRefer(po) {
-    return poStage(po) === 'Accepted';
+    return poStage(po) === 'Out for Delivery';
+}
+
+// The printed order goes to the supplier, so it avoids our own to-do words
+function poSupplierStageWord(po) {
+    const stage = poStage(po);
+    if (stage === 'To Send') return 'Sent to Supplier';
+    if (stage === 'Out for Delivery') return 'Accepted';
+    return poStatusWord(stage);
 }
 
 function poStatusWord(stage) {
@@ -1419,12 +1617,11 @@ function poStatusWord(stage) {
 
 const PO_STAGE_TONES = {
     'For Approval': 'badge-warning',
-    'Approved': 'badge-info',
-    'Declined - Manager': 'badge-danger',
-    'Pending Supplier Confirmation': 'badge-warning',
-    'Accepted': 'badge-info',
-    'Declined - Supplier': 'badge-danger',
-    'Received': 'badge-success'
+    'To Send': 'badge-warning',
+    'Sent to Supplier': 'badge-info',
+    'Out for Delivery': 'badge-info',
+    'Received': 'badge-success',
+    'Declined': 'badge-danger'
 };
 
 function poStatusBadge(po) {
@@ -1441,7 +1638,26 @@ function poStatusBadge(po) {
 function poNeedsMe(po) {
     const stage = poStage(po);
     return (poSetup.canDecide && stage === 'For Approval') ||
-           (poSetup.canReceive && (stage === 'Approved' || stage === 'Accepted'));
+           (poSetup.canReceive && (stage === 'To Send' || stage === 'Out for Delivery'));
+}
+
+// The date today as YYYY-MM-DD, in local time
+function poToday() {
+    const now = new Date();
+    return now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0');
+}
+
+// A Late label when an order that is out for delivery was due before today
+function poLateBadge(po) {
+    if (poStage(po) !== 'Out for Delivery' || !po.supplier_ship_date) return '';
+    if (poShipDay(po.supplier_ship_date) < poToday()) return ' <span class="badge badge-danger">Late</span>';
+    return '';
+}
+
+function poArrivesCell(po) {
+    if (poStage(po) !== 'Out for Delivery' || !po.supplier_ship_date) return '<span class="muted">--</span>';
+    return escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po);
 }
 
 function sortPurchaseOrders(rows) {
@@ -1460,11 +1676,12 @@ function poValueCell(po) {
 }
 
 function poToSend(po) {
-    return poStage(po) === 'Approved';
+    return poStage(po) === 'To Send';
 }
 
 function poRowTitle(po) {
-    if (poSetup.canReceive && poToSend(po)) return 'Print this order and send it to the supplier';
+    if (poSetup.canReceive && poToSend(po)) return 'Print or email this order to the supplier';
+    if (poSetup.canReceive && poStage(po) === 'Out for Delivery') return 'Receive this delivery';
     if (poSetup.canDecide && po.status === 'For Approval') return 'Review this order';
     return 'Open this order';
 }
@@ -1473,7 +1690,7 @@ function buildPurchaseOrderPanel() {
     createDataPanel({
         key: poSetup.key,
         tableId: 'po-table',
-        columns: poSetup.showLines ? 6 : 5,
+        columns: poSetup.showLines ? 7 : 6,
         pagerId: 'po-pager',
         idField: 'po_id',
         filters: { status: 'all' },
@@ -1504,6 +1721,7 @@ function buildPurchaseOrderPanel() {
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
             (poSetup.showLines ? '<td class="cell-num">' + po.line_count + '</td>' : '') +
             '<td class="cell-num">' + poValueCell(po) + '</td>' +
+            '<td class="cell-id">' + poArrivesCell(po) + '</td>' +
             '<td>' + poStatusBadge(po) + '</td></tr>';
         }
     });
@@ -2155,7 +2373,7 @@ function renderPurchaseOrderDocument() {
                         '<div class="po-doc-kind-title">Purchase Order</div>' +
                         '<div class="po-doc-ref">' + poNumber(order.po_id) + '</div>' +
                         '<div class="po-doc-date">Raised ' + escapeHtml(ordered) + '</div>' +
-                        '<div class="po-doc-date">' + escapeHtml(poStatusWord(poStage(order))) + '</div>' +
+                        '<div class="po-doc-date">' + escapeHtml(poSupplierStageWord(order)) + '</div>' +
                     '</div>' +
                 '</div>' +
 
@@ -2227,7 +2445,7 @@ async function openReceiveOrder(poId) {
     if (!poSetup.canReceive) return;
     const order = findPurchaseOrder(poId);
     if (order && !poCanRefer(order)) {
-        notifyWarning('A purchase order can only be referred once the supplier has accepted it.', 'Not accepted yet');
+        notifyWarning('Only an order that is Out for Delivery can be received.', 'Not out for delivery');
         return;
     }
 
@@ -2547,7 +2765,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 escapeHtml(poWhen(po.supplier_responded_at)))
             : '') +
         (po.supplier_ship_date
-            ? detailField('Delivery Schedule', escapeHtml(poShipDay(po.supplier_ship_date)))
+            ? detailField('Arrives', escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po))
             : '') +
         (po.status === 'Cancelled' && po.decision_note
             ? detailField('Manager\'s Remarks', escapeHtml(po.decision_note))
@@ -2646,6 +2864,15 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         foot += '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + po.po_id + ')">' +
                 (po.supplier_sent_at ? 'Email It Again' : 'Email to Supplier') + '</button>';
     }
+    if (canReceive && poToSend(po)) {
+        foot += '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + po.po_id + ')">' +
+                'Mark as Sent</button>';
+    }
+    if (canReceive && poStage(po) === 'Out for Delivery' && typeof receiveFromPurchaseOrder === 'function' &&
+        typeof holdsFeature === 'function' && holdsFeature('stock-adjustment')) {
+        foot += '<button type="button" class="btn btn-success" onclick="receiveFromPurchaseOrder(' + po.po_id + ')">' +
+                'Receive Delivery</button>';
+    }
 
     const pages = [
         { label: 'Order', body: '<div class="po-detail-layout">' +
@@ -2705,14 +2932,14 @@ async function decidePurchaseOrder(poId, approve) {
         const yes = await askConfirm(
             poNumber(po.po_id) + ' to ' + po.supplier_name + ': ' + po.line_count + ' line(s), ' + po.total_units +
             ' unit(s). Once approved, ' +
-            'the clerk prints it and sends it to the supplier, and counts the delivery in against it when it arrives.',
+            'it is emailed to the supplier, and the clerk counts the delivery in against it when it arrives.',
             {
                 title: 'Approve this purchase order?',
                 eyebrow: 'Purchase Orders',
                 confirmLabel: 'Approve the order',
                 detail: [
-                    'The printed order carries a QR code and a link: ' + po.supplier_name +
-                        ' scans it to set the prices and accept or decline the order.',
+                    'The email carries the order as a PDF and a link: ' + po.supplier_name +
+                        ' opens it to set the prices and accept or decline the order.',
                     'You are notified the moment the supplier answers.'
                 ]
             });
@@ -2734,19 +2961,36 @@ async function decidePurchaseOrder(poId, approve) {
         note = String(asked).trim();
     }
 
+    if (approve) {
+        showWorking({
+            title: 'Approving the order',
+            eyebrow: 'Purchase Orders',
+            message: 'This can take a few seconds while the mail goes out. Keep this page open.',
+            steps: ['Approving order ' + poNumber(po.po_id),
+                    'Emailing it to ' + po.supplier_name]
+        });
+    }
+
     try {
         const response = await apiDecidePurchaseOrder(poId, approve, note);
         const result = await response.json();
         if (!response.ok) {
+            if (approve) hideWorking();
             if (!handleAuthFailure(response, result)) notifyError(result.error);
             return;
         }
 
+        if (approve) await finishWorking('Order approved');
         closeModal('detail-modal');
-        notifySuccess(result.message, approve ? 'Order approved' : 'Order declined');
+        if (approve && result.emailed === false) {
+            notifyWarning(result.message, 'Order approved');
+        } else {
+            notifySuccess(result.message, approve ? 'Order approved' : 'Order declined');
+        }
         await refreshPurchaseOrders();
         poAfterChange();
     } catch (error) {
+        if (approve) hideWorking();
         notifyOffline();
     }
 }

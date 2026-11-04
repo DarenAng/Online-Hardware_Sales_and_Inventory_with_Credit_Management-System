@@ -261,6 +261,7 @@ CREATE TABLE purchase_order_items (
     pack_name VARCHAR(20) NULL,
     pack_size DECIMAL(12,3) NULL,
     pack_count DECIMAL(12,3) NULL,
+    line_description VARCHAR(255) NULL,
     FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );
@@ -274,6 +275,7 @@ CREATE TABLE purchase_order_ordered_items (
     pack_size DECIMAL(12,3) NULL,
     pack_count DECIMAL(12,3) NULL,
     unit_cost DECIMAL(12,4) NULL,
+    line_description VARCHAR(255) NULL,
     FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE CASCADE ON UPDATE CASCADE,
     FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE
 );

@@ -772,7 +772,8 @@ function registerInventoryRoutes(app, deps) {
         "COALESCE((SELECT SUM(i.quantity) FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id), 0) " +
         " AS received_quantity, " +
         "o.pack_name, o.pack_size, o.pack_count, " +
-        "p.product_name, p.description, u.unit_name, c.category_name, b.brand_name, " +
+        "p.product_name, COALESCE(NULLIF(o.line_description, ''), p.description) AS description, " +
+        "u.unit_name, c.category_name, b.brand_name, " +
         "COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock " +
         "FROM purchase_order_ordered_items o " +
         "JOIN purchase_orders po ON po.po_id = o.po_id AND po.status = 'Received' " +
@@ -790,7 +791,8 @@ function registerInventoryRoutes(app, deps) {
       const rowsResult = await db.query(
         "SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
         "i.pack_name, i.pack_size, i.pack_count, " +
-        "p.product_name, p.description, p.last_cost, u.unit_name, c.category_name, b.brand_name, " +
+        "p.product_name, COALESCE(NULLIF(i.line_description, ''), p.description) AS description, " +
+        "p.last_cost, u.unit_name, c.category_name, b.brand_name, " +
         "COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock " +
         "FROM purchase_order_items i " +
         "JOIN products p ON p.product_id = i.product_id " +
@@ -999,7 +1001,8 @@ function registerInventoryRoutes(app, deps) {
     const itemsResult = await db.query(
       "SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
       "i.pack_name, i.pack_size, i.pack_count, " +
-      "p.product_name, p.description, u.unit_name, c.category_name, b.brand_name " +
+      "p.product_name, COALESCE(NULLIF(i.line_description, ''), p.description) AS description, " +
+      "u.unit_name, c.category_name, b.brand_name " +
       "FROM purchase_order_items i " +
       "JOIN products p ON p.product_id = i.product_id " +
       "LEFT JOIN units u ON u.unit_id = p.unit_id " +
@@ -1087,8 +1090,24 @@ function registerInventoryRoutes(app, deps) {
     }
 
     const lines = [];
+    const lineDescriptions = [];
+    const lineOfProduct = {};
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
+      const pickedId = Number(item.productId || item.product_id) || null;
+      if (pickedId) {
+        if (lineOfProduct[pickedId]) {
+          return response.status(400).json({
+            error: "Line " + (i + 1) + " is the same material as line " + lineOfProduct[pickedId] + "."
+          });
+        }
+        lineOfProduct[pickedId] = i + 1;
+      }
+      const lineDescription = String(item.description || "").trim().replace(/\s+/g, " ");
+      if (lineDescription.length > 255) {
+        return response.status(400).json({ error: "A description is at most 255 characters." });
+      }
+      lineDescriptions.push(lineDescription);
       lines.push({
         product_id: Number(item.productId || item.product_id) || null,
         quantity: Number(item.quantity) || 0,
@@ -1148,6 +1167,25 @@ function registerInventoryRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
+      // The procedure does not take a description. It adds one row per line, in order,
+      // so save each typed description on the row with the same position
+      try {
+        const savedRowsResult = await db.query(
+          "SELECT po_item_id FROM purchase_order_items WHERE po_id = ? ORDER BY po_item_id", [output.po_id]);
+        const savedRows = savedRowsResult[0];
+        if (savedRows.length === lines.length) {
+          for (let i = 0; i < lines.length; i++) {
+            if (lineDescriptions[i] === "") continue;
+            await db.query(
+              "UPDATE purchase_order_items SET line_description = ? WHERE po_item_id = ?",
+              [lineDescriptions[i], savedRows[i].po_item_id]
+            );
+          }
+        }
+      } catch (descriptionError) {
+        console.error("The order was created, but its line descriptions were not saved:", descriptionError.message);
+      }
+
       const orderSupplier = Number(output.supplier_id_out) || Number(supplierId) || null;
       if (orderSupplier) {
         for (let i = 0; i < newLines.length; i++) {
@@ -1199,74 +1237,113 @@ function registerInventoryRoutes(app, deps) {
       }
 
       await ensureSupplierCode(poId);
-      response.json({
-        message: "Purchase order " + helpers.poNumber(poId) + " is approved. The clerk prints it and sends it to the supplier.",
-        status: "Pending"
-      });
+
+      // The approval stands even when the email cannot go out; the order then stays To Send
+      let emailed = { ok: false, problem: "Something went wrong while emailing it." };
+      try {
+        emailed = await emailOrderToSupplier(request, poId);
+      } catch (error) {
+        console.error("Emailing the approved purchase order failed:", error.message);
+      }
+
+      const number = helpers.poNumber(poId);
+      if (emailed.ok) {
+        response.json({
+          message: "Purchase order " + number + " is approved and emailed to " + emailed.supplier + " at " + emailed.email + ".",
+          status: "Pending",
+          emailed: true
+        });
+      } else {
+        response.json({
+          message: "Purchase order " + number + " is approved, but it was not emailed: " + emailed.problem,
+          status: "Pending",
+          emailed: false
+        });
+      }
     } catch (error) {
       console.error("Purchase order decision failed:", error.message);
       response.status(500).json({ error: "Unable to record the decision" });
     }
   });
 
+  // Emails an approved order to its supplier (PDF and accept link). Returns { ok: true, message, linked }
+  // or { ok: false, status, problem }. Throws if something unexpected breaks.
+  async function emailOrderToSupplier(request, poId) {
+    const document = await readOrderDocument(poId);
+    if (!document) return { ok: false, status: 404, problem: "That purchase order does not exist" };
+
+    const order = document.order;
+    const number = helpers.poNumber(order.po_id);
+    if (order.status !== "Pending") {
+      return {
+        ok: false,
+        status: 409,
+        problem: order.status === "For Approval"
+          ? number + " is not approved yet. The manager approves it before it goes to the supplier."
+          : number + " is " + String(order.status).toLowerCase() + "; there is nothing to send."
+      };
+    }
+
+    const email = String(order.supplier_email || "").trim();
+    let problem = null;
+    if (!email) {
+      problem = order.supplier_name + " has no email address on file. Print the order and send it to them.";
+    } else if (!isMailConfigured()) {
+      problem = "Mail is not set up on this server. Print the order and send it to " + order.supplier_name + ".";
+    }
+
+    const answer = await supplierAnswerLink(request, order);
+    if (!problem) {
+      try {
+        await sendMail(await purchaseOrderMessage({
+          order: Object.assign({}, order, { supplier_email: email, order_date: order.confirmed_at || order.order_date }),
+          items: document.items,
+          shop: document.shop,
+          link: answer ? answer.link : "",
+          pdf: await purchaseOrderPdf(Object.assign({}, document,
+            { order: Object.assign({}, order, { supplier_sent_at: order.supplier_sent_at || new Date() }) },
+            answer ? { link: answer.link, qr: answer.qr } : {}))
+        }));
+      } catch (error) {
+        console.error("Emailing " + number + " to the supplier failed:", error.message);
+        problem = "The mail server refused " + number + " for " + email + ": " + error.message + " " +
+                  "Print the order and send it to them.";
+      }
+    }
+
+    if (problem) {
+      await writeAuditLog(request, "PURCHASE_ORDER_NOT_SENT", number + " not emailed to " + order.supplier_name + ": " + problem,
+        { po_id: order.po_id, supplier: order.supplier_name, email: email || null, emailed: false });
+      return { ok: false, status: 400, problem: problem };
+    }
+
+    // The mail is out; a failure while recording it must not be reported as "not emailed"
+    try {
+      await db.query("UPDATE purchase_orders SET supplier_sent_at = NOW() WHERE po_id = ?", [poId]);
+      await writeAuditLog(request, "PURCHASE_ORDER_SENT", number + " emailed to " + order.supplier_name + " at " + email,
+        { po_id: order.po_id, supplier: order.supplier_name, email: email, emailed: true });
+    } catch (error) {
+      console.error("Recording that " + number + " was emailed failed:", error.message);
+    }
+
+    return {
+      ok: true,
+      supplier: order.supplier_name,
+      email: email,
+      message: number + " was emailed to " + order.supplier_name + " at " + email + ", with the PDF and the link " +
+               "to accept or decline it.",
+      linked: Boolean(answer)
+    };
+  }
+
   app.post("/api/purchase-orders/:poId/send", async function (request, response) {
     const poId = Number(request.params.poId);
 
     try {
-      const document = await readOrderDocument(poId);
-      if (!document) return response.status(404).json({ error: "That purchase order does not exist" });
+      const result = await emailOrderToSupplier(request, poId);
+      if (!result.ok) return response.status(result.status).json({ error: result.problem });
 
-      const order = document.order;
-      const number = helpers.poNumber(order.po_id);
-      if (order.status !== "Pending") {
-        return response.status(409).json({
-          error: order.status === "For Approval"
-            ? number + " is not approved yet. The manager approves it before it goes to the supplier."
-            : number + " is " + String(order.status).toLowerCase() + "; there is nothing to send."
-        });
-      }
-
-      const email = String(order.supplier_email || "").trim();
-      let problem = null;
-      if (!email) {
-        problem = order.supplier_name + " has no email address on file. Print the order and send it to them.";
-      } else if (!isMailConfigured()) {
-        problem = "Mail is not set up on this server. Print the order and send it to " + order.supplier_name + ".";
-      }
-
-      const answer = await supplierAnswerLink(request, order);
-      if (!problem) {
-        try {
-          await sendMail(await purchaseOrderMessage({
-            order: Object.assign({}, order, { supplier_email: email, order_date: order.confirmed_at || order.order_date }),
-            items: document.items,
-            shop: document.shop,
-            link: answer ? answer.link : "",
-            pdf: await purchaseOrderPdf(Object.assign({}, document,
-              answer ? { link: answer.link, qr: answer.qr } : {}))
-          }));
-        } catch (error) {
-          console.error("Emailing " + number + " to the supplier failed:", error.message);
-          problem = "The mail server refused " + number + " for " + email + ": " + error.message + " " +
-                    "Print the order and send it to them.";
-        }
-      }
-
-      if (problem) {
-        await writeAuditLog(request, "PURCHASE_ORDER_NOT_SENT", number + " not emailed to " + order.supplier_name + ": " + problem,
-          { po_id: order.po_id, supplier: order.supplier_name, email: email || null, emailed: false });
-        return response.status(400).json({ error: problem });
-      }
-
-      await db.query("UPDATE purchase_orders SET supplier_sent_at = NOW() WHERE po_id = ?", [poId]);
-      await writeAuditLog(request, "PURCHASE_ORDER_SENT", number + " emailed to " + order.supplier_name + " at " + email,
-        { po_id: order.po_id, supplier: order.supplier_name, email: email, emailed: true });
-
-      response.json({
-        message: number + " was emailed to " + order.supplier_name + " at " + email + ", with the PDF and the link " +
-                 "to accept or decline it.",
-        linked: Boolean(answer)
-      });
+      response.json({ message: result.message, linked: result.linked });
     } catch (error) {
       console.error("Sending the purchase order failed:", error.message);
       response.status(500).json({ error: "The order could not be sent. Print it and send it to the supplier." });
@@ -1672,12 +1749,31 @@ function registerInventoryRoutes(app, deps) {
         });
       }
 
+      // Receiving copies the lines into the ordered list without their descriptions, so keep them to copy across
+      const typedResult = await db.query(
+        "SELECT product_id, line_description FROM purchase_order_items " +
+        "WHERE po_id = ? AND line_description IS NOT NULL AND line_description <> ''",
+        [Number(request.params.poId)]
+      );
+      const typed = typedResult[0];
+
       const output = await inventoryClerkProcedures.receivePurchaseOrder(
         [request.params.poId, JSON.stringify(sheet), discount, getActorId(request)]
       );
 
       if (output.status_code !== 200) {
         return response.status(output.status_code).json({ error: output.message });
+      }
+
+      try {
+        for (let i = 0; i < typed.length; i++) {
+          await db.query(
+            "UPDATE purchase_order_ordered_items SET line_description = ? WHERE po_id = ? AND product_id = ?",
+            [typed[i].line_description, Number(request.params.poId), typed[i].product_id]
+          );
+        }
+      } catch (copyError) {
+        console.error("The order was received, but its line descriptions were not copied:", copyError.message);
       }
 
       const remarks = shortText(body.remarks, 255);

@@ -667,16 +667,15 @@
                         </div>
                         <div class="toolbar-field">
                             <label for="po-status">Status</label>
-                            <select id="po-status" data-filter-table="po-table" data-hides-column="5"
+                            <select id="po-status" data-filter-table="po-table" data-hides-column="6"
                                     onchange="dataPanelFilter('mgr-po', 'status', this.value)">
                                 <option value="all">Every status</option>
-                                <option value="For Approval">Pending Manager Approval</option>
-                                <option value="Approved">Approved</option>
-                                <option value="Declined - Manager">Declined - Manager</option>
-                                <option value="Pending Supplier Confirmation">Pending Supplier Confirmation</option>
-                                <option value="Accepted">Accepted</option>
-                                <option value="Declined - Supplier">Declined - Supplier</option>
+                                <option value="For Approval">For Approval</option>
+                                <option value="To Send">To Send</option>
+                                <option value="Sent to Supplier">Sent to Supplier</option>
+                                <option value="Out for Delivery">Out for Delivery</option>
                                 <option value="Received">Received</option>
+                                <option value="Declined">Declined</option>
                             </select>
                         </div>
                         <div class="toolbar-spacer"></div>
@@ -685,7 +684,7 @@
                         <table id="po-table">
                             <thead>
                                 <tr><th>PO</th><th>Supplier</th><th>Ordered Date</th>
-                                    <th>Order Value</th><th>Status</th></tr>
+                                    <th>Order Value</th><th>Arrives</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
