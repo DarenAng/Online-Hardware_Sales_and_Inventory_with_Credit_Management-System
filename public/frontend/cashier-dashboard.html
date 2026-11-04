@@ -124,7 +124,7 @@
                                    oninput="dataPanelSearchInput('cash-credit', event)" onkeydown="dataPanelSearchKey('cash-credit', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
-                            <label for="customers-due">Due</label>
+                            <label for="customers-due">Payment due</label>
                             <select id="customers-due"
                                     onchange="dataPanelFilter('cash-credit', 'due', this.value)">
                                 <option value="all">Every account</option>
@@ -140,7 +140,7 @@
                     <div class="table-responsive grid-8">
                         <table id="customers-table">
                             <thead>
-                                <tr><th>Customer</th><th>Balance</th><th>Due Date</th></tr>
+                                <tr><th>Customer</th><th>Balance</th><th>Payment Due</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>

@@ -3632,11 +3632,11 @@ function debtDueCell(row) {
 
     let word;
     if (left < 0) {
-        word = (-left) + (left === -1 ? ' day' : ' days') + ' overdue';
+        word = 'Overdue by ' + (-left) + (left === -1 ? ' day' : ' days');
     } else if (left === 0) {
-        word = 'due today';
+        word = 'Due today';
     } else {
-        word = 'due in ' + left + (left === 1 ? ' day' : ' days');
+        word = 'Due in ' + left + (left === 1 ? ' day' : ' days');
     }
 
     return '<span class="due-date">' + escapeHtml(when) + '</span> ' +
@@ -3694,7 +3694,7 @@ async function openPaymentForm(saleId) {
         detailField('Customer', escapeHtml(row.customer_name)) +
         detailField('Phone', row.phone ? escapeHtml(row.phone) : '<span class="muted">No phone on file</span>') +
         detailField('Sale Date', escapeHtml(String(row.sale_date).slice(0, 10))) +
-        detailField('Due Date', debtDueCell(row)) +
+        detailField('Payment Due', debtDueCell(row)) +
         detailField('Amount Due', peso(row.final_amount) + penaltyNote) +
         detailField('Total Payment', peso(row.amount_paid)) +
         detailField('Balance', '<span class="cell-due">' + peso(balance) + '</span>');
@@ -3999,7 +3999,7 @@ function renderCustomerUnpaid() {
         ]);
     }
 
-    box.innerHTML = pagedTable('cash-unpaid', ['Receipt', 'Sold', 'Balance', 'Due'],
+    box.innerHTML = pagedTable('cash-unpaid', ['Receipt', 'Sold', 'Balance', 'Payment Due'],
         unpaidRows, [2], {
             empty: 'Nothing is owed on any sale.',
             rowAttrs: function (index) {
@@ -4047,11 +4047,11 @@ function creditDueCell(row) {
 
     let word;
     if (left < 0) {
-        word = (-left) + (left === -1 ? ' day' : ' days') + ' overdue';
+        word = 'Overdue by ' + (-left) + (left === -1 ? ' day' : ' days');
     } else if (left === 0) {
-        word = 'due today';
+        word = 'Due today';
     } else {
-        word = 'due in ' + left + (left === 1 ? ' day' : ' days');
+        word = 'Due in ' + left + (left === 1 ? ' day' : ' days');
     }
 
     return '<span class="due-date">' + escapeHtml(date) + '</span> ' +
@@ -4168,7 +4168,7 @@ async function openCustomerCredit(customerId, tab) {
             detailField('Balance', '<span class="' + (owed > 0 ? 'cell-due' : '') + '">' +
                 peso(owed) + '</span>') +
             detailField('Available Balance', availableCell) +
-            detailField('Due Date', creditDueCell(c)) +
+            detailField('Payment Due', creditDueCell(c)) +
             detailField('Credit Rating', '<span class="badge ' +
                 (CASH_RATING_TONE[c.standing] || 'badge-neutral') + '">' +
                 escapeHtml(CASH_RATING_WORD[c.standing] || c.standing) + '</span>') +
