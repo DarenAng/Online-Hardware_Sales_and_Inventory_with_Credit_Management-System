@@ -75,7 +75,7 @@ async function cancelReceiveOrder(event) {
     if (event) event.preventDefault();
     if (receiveSheetHasWork() && !(await askDiscard('this delivery count'))) return;
     poReceiving = null;
-    showPurchaseOrderHistory();
+    showReceiveDeliveries();
 }
 
 function showPurchaseOrders(event) {
@@ -1579,6 +1579,7 @@ const PO_STATES = [
     { status: 'To Send',          label: 'To Send' },
     { status: 'Sent to Supplier', label: 'Sent to Supplier' },
     { status: 'Out for Delivery', label: 'Out for Delivery' },
+    { status: 'Incomplete',       label: 'Incomplete' },
     { status: 'Received',         label: 'Received' },
     { status: 'Declined',         label: 'Declined' }
 ];
@@ -1592,8 +1593,10 @@ function poStage(po) {
     return 'To Send';
 }
 
-function poCanRefer(po) {
-    return poStage(po) === 'Out for Delivery';
+// An order whose goods are still to come in: not delivered yet, or delivered short
+function poAwaitsDelivery(po) {
+    const stage = poStage(po);
+    return stage === 'Out for Delivery' || stage === 'Incomplete';
 }
 
 // The printed order goes to the supplier, so it avoids our own to-do words
@@ -1601,6 +1604,7 @@ function poSupplierStageWord(po) {
     const stage = poStage(po);
     if (stage === 'To Send') return 'Sent to Supplier';
     if (stage === 'Out for Delivery') return 'Accepted';
+    if (stage === 'Incomplete') return 'Incomplete delivery';
     return poStatusWord(stage);
 }
 
@@ -1620,6 +1624,7 @@ const PO_STAGE_TONES = {
     'To Send': 'badge-warning',
     'Sent to Supplier': 'badge-info',
     'Out for Delivery': 'badge-info',
+    'Incomplete': 'badge-warning',
     'Received': 'badge-success',
     'Declined': 'badge-danger'
 };
@@ -1638,7 +1643,7 @@ function poStatusBadge(po) {
 function poNeedsMe(po) {
     const stage = poStage(po);
     return (poSetup.canDecide && stage === 'For Approval') ||
-           (poSetup.canReceive && (stage === 'To Send' || stage === 'Out for Delivery'));
+           (poSetup.canReceive && (stage === 'To Send' || stage === 'Out for Delivery' || stage === 'Incomplete'));
 }
 
 // The date today as YYYY-MM-DD, in local time
@@ -1650,13 +1655,20 @@ function poToday() {
 
 // A Late label when an order that is out for delivery was due before today
 function poLateBadge(po) {
-    if (poStage(po) !== 'Out for Delivery' || !po.supplier_ship_date) return '';
+    if (!poAwaitsDelivery(po) || !po.supplier_ship_date) return '';
+    if (poWaitingForSupplier(po)) return '';
     if (poShipDay(po.supplier_ship_date) < poToday()) return ' <span class="badge badge-danger">Late</span>';
     return '';
 }
 
+// A short delivery whose supplier has not said yet whether the rest is coming
+function poWaitingForSupplier(po) {
+    return poStage(po) === 'Incomplete' && po.shortage_response !== 'Will deliver';
+}
+
 function poArrivesCell(po) {
-    if (poStage(po) !== 'Out for Delivery' || !po.supplier_ship_date) return '<span class="muted">--</span>';
+    if (poWaitingForSupplier(po)) return '<span class="muted">Waiting for supplier</span>';
+    if (!poAwaitsDelivery(po) || !po.supplier_ship_date) return '<span class="muted">--</span>';
     return escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po);
 }
 
@@ -1681,7 +1693,7 @@ function poToSend(po) {
 
 function poRowTitle(po) {
     if (poSetup.canReceive && poToSend(po)) return 'Print or email this order to the supplier';
-    if (poSetup.canReceive && poStage(po) === 'Out for Delivery') return 'Receive this delivery';
+    if (poSetup.canReceive && poAwaitsDelivery(po)) return 'Receive this delivery';
     if (poSetup.canDecide && po.status === 'For Approval') return 'Review this order';
     return 'Open this order';
 }
@@ -1732,8 +1744,10 @@ function purchaseOrderPanel() { return getDataPanel(poSetup.key); }
 function findPurchaseOrder(poId) {
     const panel = purchaseOrderPanel();
     const totals = getDataPanel(PO_TOTALS_KEY);
+    const receiving = getDataPanel(PO_RECEIVING_KEY);
     return (panel && panel.find(poId, 'po_id')) ||
-           (totals && totals.find(poId, 'po_id')) || null;
+           (totals && totals.find(poId, 'po_id')) ||
+           (receiving && receiving.find(poId, 'po_id')) || null;
 }
 
 async function refreshPurchaseOrders() {
@@ -1741,11 +1755,14 @@ async function refreshPurchaseOrders() {
     if (panel && panel.state !== 'closed') await panel.refresh();
     const totals = getDataPanel(PO_TOTALS_KEY);
     if (totals && totals.state !== 'closed') await totals.refresh();
+    const receiving = getDataPanel(PO_RECEIVING_KEY);
+    if (receiving && receiving.state !== 'closed') await receiving.refresh();
 }
 
 async function loadPurchaseOrders() { await refreshPurchaseOrders(); }
 
 const PO_TOTALS_KEY = 'po-totals';
+const PO_RECEIVING_KEY = 'clerk-receiving';
 
 function poThisMonth() {
     const now = new Date();
@@ -2235,7 +2252,7 @@ function poQuantityText(item) {
     if (item.pack_name && Number(item.pack_size) > 0 && Number(item.pack_count) > 0) {
         return qtyText(item.pack_count, item.pack_name) + ' (' + qtyText(item.quantity, unit) + ')';
     }
-    return item.quantity + ' ' + unit;
+    return qtyText(item.quantity, unit);
 }
 
 async function printPurchaseOrder(poId) {
@@ -2444,27 +2461,41 @@ function renderPurchaseOrderDocument() {
 async function openReceiveOrder(poId) {
     if (!poSetup.canReceive) return;
     const order = findPurchaseOrder(poId);
-    if (order && !poCanRefer(order)) {
-        notifyWarning('Only an order that is Out for Delivery can be received.', 'Not out for delivery');
+    if (order && !poAwaitsDelivery(order)) {
+        notifyWarning('Only an order that is Out for Delivery or Incomplete can be received.', 'Not out for delivery');
         return;
     }
 
     poShowPanel('panel-po-receive', 'Receive Delivery');
 
     const box = document.getElementById('recv-lines');
-    if (box) box.innerHTML = '<p class="panel-sub">Opening order ' + poNumber(poId) + '.</p>';
+    if (box) box.innerHTML = '<tr><td colspan="4" class="table-empty">Opening order ' + poNumber(poId) + '.</td></tr>';
+    const total = document.getElementById('recv-total');
+    if (total) total.hidden = true;
 
     recvExtraCount = 0;
 
     try {
         await ensurePoMaterials(false);
         const items = await apiGetPurchaseOrderItems(poId);
-        poReceiving = { poId: poId, items: items, order: findPurchaseOrder(poId) };
+        poReceiving = { poId: poId, items: items, lines: receiveLinesOwed(items), order: findPurchaseOrder(poId),
+                        seen: items.length > 0 ? Number(items[0].receipt_count) || 0 : 0 };
         renderReceiveSheet();
         rememberForm('po-receive', document.getElementById('panel-po-receive'));
     } catch (error) {
-        if (box) box.innerHTML = '<p class="panel-sub">That order could not be opened.</p>';
+        if (box) box.innerHTML = '<tr><td colspan="4" class="table-empty">That order could not be opened.</td></tr>';
     }
+}
+
+// The lines that still have something owed. Expected is what is still owed: the whole
+// ordered quantity on the first delivery, only the rest on a later one.
+function receiveLinesOwed(items) {
+    const lines = [];
+    for (let i = 0; i < items.length; i++) {
+        const owed = recvOwed(items[i]);
+        if (owed > 0) lines.push({ item: items[i], owed: owed, expected: recvExpectedCount(items[i]) });
+    }
+    return lines;
 }
 
 function renderReceiveSheet() {
@@ -2477,44 +2508,76 @@ function renderReceiveSheet() {
             (poReceiving.order ? ' · ' + poReceiving.order.supplier_name : '');
     }
 
-    let sheet = '';
-    for (let index = 0; index < poReceiving.items.length; index++) {
-        const item = poReceiving.items[index];
-        sheet += '<div class="recv-line" data-recv-index="' + index + '" data-product="' + item.product_id + '">' +
-            '<div>' +
-                '<div class="recv-name">' + escapeHtml(item.product_name) + '</div>' +
-                '<div class="recv-meta">' + escapeHtml(item.category_name || 'No category') + '</div>' +
-            '</div>' +
-            '<div>' +
-                '<div class="recv-meta">Ordered</div>' +
-                '<div class="recv-ordered">' + escapeHtml(poQuantityText(item)) + '</div>' +
-            '</div>' +
-            '<div>' +
-                '<label class="recv-meta" for="recv-qty-' + index + '">Arrived' +
-                    (recvPackOf(item) ? ' (' + escapeHtml(item.pack_name) + ')' : '') + '</label>' +
-                '<input type="number" class="form-control recv-qty" id="recv-qty-' + index + '" ' +
-                       'min="0" value="' + recvOrderedCount(item) + '" ' +
-                       'oninput="renderReceiveVerdict(' + index + ', ' + recvOrderedCount(item) + ')">' +
-            '</div>' +
-            '<div class="recv-verdict is-exact" id="recv-verdict-' + index + '">As ordered</div>' +
-        '</div>';
+    let rows = '';
+    for (let index = 0; index < poReceiving.lines.length; index++) {
+        const line = poReceiving.lines[index];
+        const item = line.item;
+        const pack = recvPackOf(item);
+        rows += '<tr data-product="' + item.product_id + '">' +
+            '<td class="cell-name">' + escapeHtml(item.product_name) + '</td>' +
+            '<td class="cell-num">' + escapeHtml(qtyText(line.expected, recvCountName(item))) + '</td>' +
+            '<td class="cell-num"><input type="number" class="form-control adjust-line-qty" id="recv-qty-' + index + '" ' +
+                'min="0" step="' + (pack ? 'any' : '1') + '" value="' + line.expected + '" ' +
+                'oninput="renderReceiveShortages()" aria-label="Arrived: ' + escapeHtml(item.product_name) + '"></td>' +
+            '<td class="cell-num" id="recv-short-' + index + '">—</td>' +
+        '</tr>';
     }
-    box.innerHTML = sheet;
+    if (rows === '') rows = '<tr><td colspan="4" class="table-empty">Nothing is owed on this order.</td></tr>';
+    box.innerHTML = rows;
 
     const extras = document.getElementById('recv-extras');
     if (extras) extras.innerHTML = '';
+    showReceiveExtrasHead();
+
+    renderReceiveShortages();
 }
 
-function receiveLineAmounts() {
-    if (!poReceiving) return [];
-    const amounts = [];
-    for (let index = 0; index < poReceiving.items.length; index++) {
-        const item = poReceiving.items[index];
-        const qtyField = document.getElementById('recv-qty-' + index);
-        const counted = Math.max(0, parseInt(qtyField ? qtyField.value : recvOrderedCount(item), 10) || 0);
-        amounts.push({ counted: counted });
+// What the clerk typed for each line, in units, and what is short of what was expected
+function receiveCounts() {
+    const counts = [];
+    if (!poReceiving) return counts;
+    for (let index = 0; index < poReceiving.lines.length; index++) {
+        const line = poReceiving.lines[index];
+        const pack = recvPackOf(line.item);
+        const field = document.getElementById('recv-qty-' + index);
+        const typed = Math.max(0, Number(field ? field.value : line.expected) || 0);
+        const arrived = Math.round(typed * (pack ? pack.size : 1));
+        const short = Math.max(line.owed - arrived, 0);
+        const over = Math.max(arrived - line.owed, 0);
+        const amount = Math.round(short * (Number(line.item.unit_cost) || 0) * 100) / 100;
+        counts.push({ line: line, arrived: arrived, short: short, over: over, amount: amount });
     }
-    return amounts;
+    return counts;
+}
+
+function renderReceiveShortages() {
+    const counts = receiveCounts();
+    let total = 0;
+    for (let index = 0; index < counts.length; index++) {
+        const cell = document.getElementById('recv-short-' + index);
+        if (!cell) continue;
+        const item = counts[index].line.item;
+        const pack = recvPackOf(item);
+        const size = pack ? pack.size : 1;
+        cell.className = 'cell-num';
+        if (counts[index].short > 0) {
+            cell.textContent = qtyText(Math.round(counts[index].short / size * 1000) / 1000, recvCountName(item)) +
+                ' · ' + peso(counts[index].amount);
+        } else if (counts[index].over > 0) {
+            cell.className = 'cell-num recv-over';
+            cell.textContent = qtyText(Math.round(counts[index].over / size * 1000) / 1000, recvCountName(item)) +
+                ' more than expected';
+        } else {
+            cell.textContent = '—';
+        }
+        total += counts[index].amount;
+    }
+
+    const box = document.getElementById('recv-total');
+    if (box) {
+        box.hidden = !(total > 0);
+        box.textContent = 'Total short: ' + peso(Math.round(total * 100) / 100);
+    }
 }
 
 function recvPackOf(item) {
@@ -2524,50 +2587,29 @@ function recvPackOf(item) {
         return null;
     }
 }
-function recvOrderedCount(item) {
+// What is still owed on a line: ordered less what has come in so far
+function recvOwed(item) {
+    const ordered = Number(item.quantity) || 0;
+    if (item.received_quantity === undefined || item.received_quantity === null) return ordered;
+    return Math.max(ordered - (Number(item.received_quantity) || 0), 0);
+}
+
+// The owed quantity as the clerk counts it: packs on a packed line, otherwise units
+function recvExpectedCount(item) {
     const pack = recvPackOf(item);
-    return pack ? Number(item.pack_count) : Number(item.quantity);
+    const owed = recvOwed(item);
+    return pack ? Math.round(owed / pack.size * 1000) / 1000 : owed;
+}
+
+function recvCountName(item) {
+    const pack = recvPackOf(item);
+    return pack ? pack.name : (item.unit_name || '');
 }
 
 function poPackPrice(item) {
     const pack = recvPackOf(item);
     const unit = Number(item.unit_cost) || 0;
     return pack ? Math.round(unit * pack.size * 100) / 100 : unit;
-}
-
-function renderReceiveVerdict(index, ordered) {
-    const field = document.getElementById('recv-qty-' + index);
-    const box = document.getElementById('recv-verdict-' + index);
-    if (!field || !box) return;
-
-    const arrived = parseInt(field.value, 10);
-
-    if (isNaN(arrived) || arrived < 0) {
-        box.className = 'recv-verdict is-short';
-        box.textContent = 'Type how many arrived.';
-        return;
-    }
-
-    if (arrived === ordered) {
-        box.className = 'recv-verdict is-exact';
-        box.textContent = 'As ordered';
-        return;
-    }
-
-    if (arrived === 0) {
-        box.className = 'recv-verdict is-short';
-        box.textContent = 'Nothing arrived. This line comes off the order.';
-        return;
-    }
-
-    if (arrived < ordered) {
-        box.className = 'recv-verdict is-short';
-        box.textContent = (ordered - arrived) + ' short of the order.';
-        return;
-    }
-
-    box.className = 'recv-verdict is-over';
-    box.textContent = (arrived - ordered) + ' more than ordered.';
 }
 
 function addReceiveExtra() {
@@ -2593,6 +2635,7 @@ function addReceiveExtra() {
                 'onclick="removeReceiveExtra(' + index + ')">Remove</button>';
 
     box.appendChild(row);
+    showReceiveExtrasHead();
 }
 
 function removeReceiveExtra(index) {
@@ -2600,21 +2643,31 @@ function removeReceiveExtra(index) {
     if (!row) return;
     delete matPickers[row.dataset.picker];
     row.remove();
+    showReceiveExtrasHead();
+}
+
+// "Arrived but never ordered" only shows once something has been added under it.
+function showReceiveExtrasHead() {
+    const head = document.getElementById('recv-extras-head');
+    const box = document.getElementById('recv-extras');
+    if (head && box) head.hidden = box.children.length === 0;
 }
 
 async function submitReceiveOrder() {
     if (!poReceiving) return;
 
-    const amounts = receiveLineAmounts();
+    const counts = receiveCounts();
     const received = [];
-    for (let i = 0; i < poReceiving.items.length; i++) {
-        const item = poReceiving.items[i];
-        const counted = amounts[i].counted;
-        const pack = recvPackOf(item);
-        received.push({
-            productId: item.product_id,
-            quantity: pack ? Math.round(counted * pack.size) : counted
-        });
+    let shortLines = 0;
+    let totalShort = 0;
+    let arrivedAny = false;
+    for (let i = 0; i < counts.length; i++) {
+        received.push({ productId: counts[i].line.item.product_id, quantity: counts[i].arrived });
+        if (counts[i].arrived > 0) arrivedAny = true;
+        if (counts[i].short > 0) {
+            shortLines++;
+            totalShort += counts[i].amount;
+        }
     }
     const extras = document.querySelectorAll('#recv-extras .recv-line');
 
@@ -2648,6 +2701,7 @@ async function submitReceiveOrder() {
             return;
         }
 
+        arrivedAny = true;
         received.push({
             productId: picked.productId,
             newName: picked.newName,
@@ -2659,37 +2713,67 @@ async function submitReceiveOrder() {
         });
     }
 
-    let short = 0;
-    for (let i = 0; i < received.length; i++) {
-        if (i < poReceiving.items.length && received[i].quantity < poReceiving.items[i].quantity) short++;
+    if (!arrivedAny) {
+        notifyWarning('Type how many arrived on at least one line.', 'Nothing received');
+        return;
     }
 
-    const yes = await askConfirm(
-        'The figures on this sheet go straight onto the shelf, and purchase order ' +
-        poNumber(poReceiving.poId) + ' closes.' +
-        (short > 0 ? ' ' + short + ' line(s) came up short and the order will be corrected to say so.' : ''),
-        { title: 'Receive this delivery?', eyebrow: 'Purchase Orders', confirmLabel: 'Receive it' });
+    totalShort = Math.round(totalShort * 100) / 100;
+    const number = poNumber(poReceiving.poId);
+    const overLines = [];
+    for (let i = 0; i < counts.length; i++) {
+        if (counts[i].over > 0) {
+            overLines.push(counts[i].line.item.product_name + ': ' +
+                qtyText(counts[i].over, counts[i].line.item.unit_name || '') + ' more than expected');
+        }
+    }
 
-    if (!yes) return;
+    // Once the sheet is on its way it cannot be sent twice
+    const button = document.getElementById('recv-submit');
+    if (button) button.disabled = true;
+
+    const yes = await askConfirm(
+        shortLines > 0
+            ? 'The figures on this sheet go straight onto the shelf. ' + number + ' stays open as Incomplete: ' +
+              shortLines + (shortLines === 1 ? ' line is' : ' lines are') + ' short, ' + peso(totalShort) +
+              ' in all, and the supplier is emailed what is missing.'
+            : 'The figures on this sheet go straight onto the shelf, and ' + number + ' is received and closed.',
+        { title: 'Receive this delivery?', eyebrow: 'Receive Deliveries', confirmLabel: 'Receive it',
+          detail: overLines.length > 0 ? overLines : undefined });
+
+    if (!yes) {
+        if (button) button.disabled = false;
+        return;
+    }
+
+    const saved = poReceiving;
+    poReceiving = null;
 
     try {
-        const discount = poReceiving.order ? Number(poReceiving.order.discount) || 0 : 0;
-        const response = await apiReceivePurchaseOrder(poReceiving.poId, received, discount);
+        const response = await apiReceivePurchaseOrder(saved.poId, received, null, null, saved.seen);
         const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
+        if (!response.ok) {
+            poReceiving = saved;
+            if (button) button.disabled = false;
+            if (!handleAuthFailure(response, result)) notifyError(result.error);
+            return;
+        }
 
-        notifySuccess(result.message);
-        poReceiving = null;
+        if (result.incomplete) notifyWarning(result.message, 'Delivery incomplete');
+        else notifySuccess(result.message, 'Delivery received');
+        if (button) button.disabled = false;
         poMaterialsLoaded = false;
 
         for (const key in matPickers) {
             delete matPickers[key];
         }
 
-        showPurchaseOrderHistory();
+        showReceiveDeliveries();
         await refreshPurchaseOrders();
         poAfterChange();
     } catch (error) {
+        poReceiving = saved;
+        if (button) button.disabled = false;
         notifyOffline();
     }
 }
@@ -2710,6 +2794,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     }
 
     const waiting = po.status === 'For Approval';
+    const incomplete = po.status === 'Incomplete';
 
     let orderedLines = Number(po.line_count) || 0;
     let orderedUnits = Number(po.total_units) || 0;
@@ -2722,6 +2807,9 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     let money;
     if (waiting) {
         money = '';
+    } else if (incomplete) {
+        money = detailField('Goods Received', peso(po.goods_cost)) +
+                (Number(po.discount) > 0 ? detailField('Invoice Discount', peso(po.discount)) : '');
     } else if (po.status === 'Received') {
         money = detailField('Goods Received', peso(po.goods_cost)) +
                 detailField('Invoice Discount', peso(po.discount)) +
@@ -2738,7 +2826,8 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     }
 
     // A received order shows what was ordered, what arrived and what is still owed
-    const showBalance = po.status === 'Received' && items.length > 0 && items[0].received_quantity !== undefined;
+    const showBalance = (po.status === 'Received' || incomplete) && items.length > 0 && items[0].received_quantity !== undefined;
+    const owedLabel = incomplete ? 'Still Owed' : 'Balance';
     let balanceUnits = 0;
     let balanceValue = 0;
     if (showBalance) {
@@ -2764,15 +2853,18 @@ async function openPurchaseOrderDetail(poId, readOnly) {
             ? detailField('Supplier ' + (po.supplier_response === 'Accepted' ? 'Accepted' : 'Declined'),
                 escapeHtml(poWhen(po.supplier_responded_at)))
             : '') +
-        (po.supplier_ship_date
-            ? detailField('Arrives', escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po))
-            : '') +
+        (poWaitingForSupplier(po)
+            ? detailField('Arrives', poArrivesCell(po))
+            : (po.supplier_ship_date
+                ? detailField('Arrives', escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po))
+                : '')) +
         (po.status === 'Cancelled' && po.decision_note
             ? detailField('Manager\'s Remarks', escapeHtml(po.decision_note))
             : '') +
         (po.supplier_response === 'Declined' && po.supplier_note
             ? detailField('Supplier\'s Reason', escapeHtml(po.supplier_note))
             : '') +
+        poShortageFields(po) +
         (po.status === 'Received'
             ? detailField('Received', po.received_at
                 ? escapeHtml(poWhen(po.received_at))
@@ -2782,7 +2874,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
             ' <span class="muted">' + orderedUnits + (orderedUnits === 1 ? ' unit' : ' units') + '</span>') +
         money +
         (balanceUnits > 0
-            ? detailField('Balance', '<strong>' + balanceUnits + (balanceUnits === 1 ? ' unit' : ' units') + '</strong>' +
+            ? detailField(incomplete ? 'Shortage' : 'Balance', '<strong>' + balanceUnits + (balanceUnits === 1 ? ' unit' : ' units') + '</strong>' +
                 ' <span class="muted">' + peso(balanceValue) + '</span>')
             : '') +
         '</div>';
@@ -2820,10 +2912,10 @@ async function openPurchaseOrderDetail(poId, readOnly) {
             lineRows.push(row);
         }
         if (priced) {
-            lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Ordered', 'Received', 'Balance', 'Unit Cost', 'Line Cost'],
+            lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Ordered', 'Received', owedLabel, 'Unit Cost', 'Line Cost'],
                 lineRows, [4, 5, 6, 7, 8], [0]);
         } else {
-            lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Ordered', 'Received', 'Balance'],
+            lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Ordered', 'Received', owedLabel],
                 lineRows, [4, 5, 6], [0]);
         }
     } else if (priced) {
@@ -2868,10 +2960,21 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         foot += '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + po.po_id + ')">' +
                 'Mark as Sent</button>';
     }
-    if (canReceive && poStage(po) === 'Out for Delivery' && typeof receiveFromPurchaseOrder === 'function' &&
-        typeof holdsFeature === 'function' && holdsFeature('stock-adjustment')) {
+    if (canReceive && poAwaitsDelivery(po) && typeof holdsFeature === 'function' && holdsFeature('po-receiving')) {
         foot += '<button type="button" class="btn btn-success" onclick="receiveFromPurchaseOrder(' + po.po_id + ')">' +
                 'Receive Delivery</button>';
+    }
+    if (canReceive && incomplete && po.supplier_email) {
+        foot += '<button type="button" class="btn btn-ghost" onclick="emailShortageAgain(' + po.po_id + ')">' +
+                'Email Shortage Again</button>';
+    }
+    if (canReceive && incomplete) {
+        foot += '<button type="button" class="btn btn-ghost" onclick="printShortageNotice(' + po.po_id + ')">' +
+                'Print Shortage Notice</button>';
+    }
+    if (canDecide && poCanCloseShort(po)) {
+        foot += '<button type="button" class="btn btn-danger" onclick="closeWithShortage(' + po.po_id + ')">' +
+                'Close with Shortage</button>';
     }
 
     const pages = [
@@ -3076,6 +3179,265 @@ function poWhen(value) {
 
 function poShipDay(value) {
     return String(value || '').replace('T', ' ').slice(0, 10);
+}
+
+// What the supplier answered about the shortage, or how the manager closed it
+function poShortageFields(po) {
+    let html = '';
+    if (po.status === 'Incomplete') {
+        html += detailField('Shortage Notice',
+            po.shortage_sent_at ? escapeHtml(poWhen(po.shortage_sent_at)) : '<span class="muted">Not sent</span>');
+    }
+    if (po.shortage_response === 'Will deliver') {
+        html += detailField('Supplier\'s Answer', 'Will deliver the rest' +
+            (po.shortage_responded_at ? ' <span class="muted">' + escapeHtml(poWhen(po.shortage_responded_at)) + '</span>' : ''));
+        if (po.shortage_note) html += detailField('Supplier\'s Note', escapeHtml(po.shortage_note));
+    } else if (po.shortage_response === 'Cannot deliver') {
+        html += detailField('Supplier\'s Answer', 'Cannot deliver the rest' +
+            (po.shortage_responded_at ? ' <span class="muted">' + escapeHtml(poWhen(po.shortage_responded_at)) + '</span>' : ''));
+        if (po.shortage_note) html += detailField('Supplier\'s Reason', escapeHtml(po.shortage_note));
+    } else if (po.status === 'Incomplete') {
+        html += detailField('Supplier\'s Answer', '<span class="muted">Not answered yet</span>');
+    } else if (po.status === 'Received' && po.decision_note) {
+        html += detailField('Closed With Shortage', escapeHtml(po.decision_note));
+    }
+    return html;
+}
+
+function showReceiveDeliveries(event) {
+    if (event) event.preventDefault();
+    poShowPanel('panel-receiving', 'Receive Deliveries');
+}
+
+// From the order popup: open the receive form for this order
+function receiveFromPurchaseOrder(poId) {
+    closeModal('detail-modal');
+    return openReceiveOrder(poId);
+}
+
+// The Receive Deliveries list: orders that are out for delivery or came in short
+function buildReceivingPanel() {
+    createDataPanel({
+        key: PO_RECEIVING_KEY,
+        tableId: 'receiving-table',
+        columns: 4,
+        pagerId: 'receiving-pager',
+        idField: 'po_id',
+        filters: {},
+
+        gate: { title: 'No deliveries loaded' },
+
+        load: async function () {
+            const orders = await apiGetPurchaseOrders();
+            const waiting = [];
+            for (let i = 0; i < orders.length; i++) {
+                if (poAwaitsDelivery(orders[i])) waiting.push(orders[i]);
+            }
+            return waiting;
+        },
+
+        match: function (po, query) {
+            return prefixMatch([po.supplier_name, po.po_id, '#' + po.po_id, poNumber(po.po_id)], query);
+        },
+        sort: function (rows) {
+            return rows.sort(function (a, b) {
+                const aDay = a.supplier_ship_date ? poShipDay(a.supplier_ship_date) : '9999-99-99';
+                const bDay = b.supplier_ship_date ? poShipDay(b.supplier_ship_date) : '9999-99-99';
+                return aDay.localeCompare(bDay) || (Number(b.po_id) - Number(a.po_id));
+            });
+        },
+
+        renderRow: function (po, index) {
+            return '<tr class="row-clickable row-reveal" ' +
+                'style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
+                'title="Receive this delivery" ' +
+                'onclick="openReceiveOrder(' + po.po_id + ')">' +
+            '<td class="cell-id">' + poNumber(po.po_id) + '</td>' +
+            '<td class="cell-name">' + escapeHtml(po.supplier_name) + '</td>' +
+            '<td class="cell-id">' + poArrivesCell(po) + '</td>' +
+            '<td>' + poStatusBadge(po) + '</td></tr>';
+        }
+    });
+}
+
+async function emailShortageAgain(poId) {
+    if (!poSetup.canReceive) return;
+    const po = findPurchaseOrder(poId);
+    if (!po || po.status !== 'Incomplete' || !po.supplier_email) return;
+
+    const yes = await askConfirm(
+        'The shortage notice for ' + poNumber(po.po_id) + ' is emailed to ' + po.supplier_name + ' at ' +
+        po.supplier_email + ', with the link to answer it.',
+        { title: 'Email the shortage notice again?', eyebrow: 'Purchase Orders', confirmLabel: 'Email it' });
+    if (!yes) return;
+
+    try {
+        const response = await apiSendShortageNotice(poId);
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not emailed');
+            return;
+        }
+
+        closeModal('detail-modal');
+        notifySuccess(result.message, 'Shortage notice emailed');
+        await refreshPurchaseOrders();
+        poAfterChange();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// The manager can close an order that came in short, or one the supplier accepted but never delivered
+function poCanCloseShort(po) {
+    return po.status === 'Incomplete' || (po.status === 'Pending' && po.supplier_response === 'Accepted');
+}
+
+async function closeWithShortage(poId) {
+    if (!poSetup.canDecide) return;
+    const po = findPurchaseOrder(poId);
+    if (!po || !poCanCloseShort(po)) return;
+
+    const asked = await askInput({
+        title: 'Close with a shortage?',
+        eyebrow: 'Purchase Orders',
+        message: poNumber(po.po_id) + ' is closed as Received. Only what arrived is paid for.',
+        label: 'Reason',
+        confirmLabel: 'Close the order',
+        tone: 'danger',
+        check: function (value) {
+            return String(value).trim().length < 5 ? 'Write why the order is closed with a shortage.' : null;
+        }
+    });
+    if (asked === false || asked === null) return;
+
+    try {
+        const response = await apiCloseShort(poId, String(asked).trim());
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error);
+            return;
+        }
+
+        closeModal('detail-modal');
+        notifySuccess(result.message, 'Order closed');
+        await refreshPurchaseOrders();
+        poAfterChange();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+async function printShortageNotice(poId) {
+    try {
+        poDocument = await apiGetPurchaseOrderDocument(poId);
+    } catch (error) {
+        notifyError('That shortage notice could not be opened for printing.', 'Nothing to print');
+        return;
+    }
+    if (!poDocument.shortage) {
+        notifyWarning(poNumber(poId) + ' is not an incomplete delivery.', 'Nothing to print');
+        return;
+    }
+    renderShortageNotice();
+    await poDocumentImagesReady();
+    printPurchaseOrderNow();
+}
+
+// The printed shortage notice, laid out like the printed purchase order
+function renderShortageNotice() {
+    const box = document.getElementById('po-doc');
+    if (!box || !poDocument) return;
+
+    const order = poDocument.order;
+    const shop = poDocument.shop || {};
+    const shortage = poDocument.shortage || { lines: [], total: 0 };
+
+    let rows = '';
+    for (let index = 0; index < shortage.lines.length; index++) {
+        const line = shortage.lines[index];
+        const unit = line.unit_name || '';
+        rows += '<tr>' +
+            '<td class="cell-id">' + materialCode(line.product_id) + '</td>' +
+            '<td class="num">' + (index + 1) + '</td>' +
+            '<td><strong>' + escapeHtml(line.product_name) + '</strong></td>' +
+            '<td class="num">' + escapeHtml(qtyText(line.ordered, unit)) + '</td>' +
+            '<td class="num">' + escapeHtml(qtyText(line.received, unit)) + '</td>' +
+            '<td class="num">' + escapeHtml(qtyText(line.short, unit)) + '</td>' +
+            '<td class="num">' + peso(line.unit_cost) + '</td>' +
+            '<td class="num">' + peso(line.amount) + '</td>' +
+        '</tr>';
+    }
+
+    box.innerHTML =
+        '<div class="po-doc">' +
+            '<div class="po-doc-stripe"></div>' +
+            '<div class="po-doc-inner">' +
+                '<div class="po-doc-head">' +
+                    '<div class="po-doc-shop">' +
+                        '<div class="po-doc-shop-name">' + escapeHtml(shop.store_name || 'Lucelyn Hardware') + '</div>' +
+                        '<div class="po-doc-shop-line">' + escapeHtml(shop.address || '') + '</div>' +
+                        '<div class="po-doc-shop-line">' +
+                            (shop.tin ? 'TIN ' + escapeHtml(shop.tin) : '') +
+                            (shop.registration_type ? ' · ' + escapeHtml(shop.registration_type) : '') +
+                        '</div>' +
+                    '</div>' +
+                    '<div class="po-doc-kind">' +
+                        '<div class="po-doc-kind-title">Shortage Notice</div>' +
+                        '<div class="po-doc-ref">' + poNumber(order.po_id) + '</div>' +
+                        '<div class="po-doc-date">' + escapeHtml(poToday()) + '</div>' +
+                        '<div class="po-doc-date">Incomplete delivery</div>' +
+                    '</div>' +
+                '</div>' +
+
+                '<div class="po-doc-parties">' +
+                    '<div>' +
+                        '<div class="po-doc-party-label">Notice to</div>' +
+                        '<div class="po-doc-party-name">' + escapeHtml(order.supplier_name) + '</div>' +
+                        '<div class="po-doc-party-line">' +
+                            escapeHtml(order.contact_person || 'Attention: Sales') + '</div>' +
+                        '<div class="po-doc-party-line">' +
+                            escapeHtml(order.contact_number || '') +
+                            (order.supplier_email ? '<br>' + escapeHtml(order.supplier_email) : '') +
+                            (order.supplier_address ? '<br>' + escapeHtml(order.supplier_address) : '') +
+                        '</div>' +
+                    '</div>' +
+                    '<div>' +
+                        '<div class="po-doc-party-label">From</div>' +
+                        '<div class="po-doc-party-name">' + escapeHtml(shop.store_name || 'Lucelyn Hardware') + '</div>' +
+                        '<div class="po-doc-party-line">' + escapeHtml(shop.address || '') + '</div>' +
+                    '</div>' +
+                '</div>' +
+
+                '<table>' +
+                    '<thead><tr>' +
+                        '<th style="width:80px">Material ID</th><th class="num" style="width:44px">No</th><th>Material name</th>' +
+                        '<th class="num" style="width:90px">Ordered</th>' +
+                        '<th class="num" style="width:90px">Received</th>' +
+                        '<th class="num" style="width:90px">Short</th>' +
+                        '<th class="num" style="width:110px">Unit price</th>' +
+                        '<th class="num" style="width:120px">Amount</th>' +
+                    '</tr></thead>' +
+                    '<tbody>' + (rows || '<tr><td colspan="8">Nothing is short.</td></tr>') + '</tbody>' +
+                    '<tfoot><tr>' +
+                        '<td colspan="7">Total short</td>' +
+                        '<td class="num">' + peso(shortage.total) + '</td>' +
+                    '</tr></tfoot>' +
+                '</table>' +
+
+                (poDocument.supplier_link
+                    ? '<div class="po-doc-answer">' +
+                        '<img class="po-doc-qr" src="' + escapeHtml(poDocument.supplier_qr) + '" ' +
+                            'alt="QR code to answer this notice">' +
+                        '<div class="po-doc-answer-text">' +
+                            '<div class="po-doc-answer-title">Answer online</div>' +
+                            '<p>Scan the QR code, or open the link, to say whether you will deliver the rest.</p>' +
+                            '<div class="po-doc-link">' + escapeHtml(poDocument.supplier_link) + '</div>' +
+                        '</div>' +
+                      '</div>'
+                    : '') +
+            '</div>' +
+        '</div>';
 }
 
 document.addEventListener('click', function (event) {

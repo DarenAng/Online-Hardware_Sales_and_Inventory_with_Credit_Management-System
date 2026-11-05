@@ -223,7 +223,231 @@ function startSupplierOrderPage() {
     function render(message) {
         fillHeader();
         if (view.order.can_respond) renderQuote();
+        else if (view.order.can_answer_shortage) renderShortage();
+        else if (view.order.status === 'Incomplete') renderShortageReceipt(message);
         else renderReceipt(message);
+    }
+
+    // The delivery came in short: what is missing, and whether the supplier will send the rest
+    const shortageDraft = { choice: '', shipDate: '', note: '', reason: '' };
+
+    function shortageRowsHtml() {
+        const lines = view.shortage ? view.shortage.lines : [];
+        let rows = '';
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const unit = line.unit_name || 'units';
+            rows += '<li class="so-rline">' +
+                '<span class="so-rname">' + escapeHtml(line.product_name) +
+                    '<small>' + quantityText(line.short) + ' ' + escapeHtml(unit) + ' short of ' +
+                    quantityText(line.ordered) + ' ordered</small></span>' +
+                '<span class="so-rprice">' + peso(line.unit_cost) + '<small>per ' + escapeHtml(unit) + '</small></span>' +
+                '<span class="so-fig">' + peso(line.amount) + '</span>' +
+            '</li>';
+        }
+        return rows;
+    }
+
+    function renderShortage() {
+        const total = view.shortage ? view.shortage.total : 0;
+        const pdf = '/api/supplier-order/' + encodeURIComponent(code) + '/pdf';
+
+        main.innerHTML =
+            '<section class="so-panel">' +
+                '<header class="so-step"><span class="so-num">1</span><div><h2>What did not arrive</h2></div></header>' +
+                '<ol class="so-rlines">' + shortageRowsHtml() + '</ol>' +
+                '<div class="so-order-total"><div class="is-total"><span>Total short</span>' +
+                    '<span class="so-fig">' + peso(total) + '</span></div></div>' +
+                '<a class="so-btn so-btn-quiet so-pdf" href="' + pdf + '" target="_blank" rel="noopener">' +
+                    '<i class="icon icon-file-text" aria-hidden="true"></i>Open the printable order (PDF)</a>' +
+            '</section>' +
+
+            '<section class="so-panel">' +
+                '<header class="so-step"><span class="so-num">2</span><div><h2>Your answer</h2></div></header>' +
+                '<div class="so-choices" role="radiogroup" aria-label="Your answer">' +
+                    '<button type="button" class="so-choice is-accept" data-shortage="deliver" role="radio" aria-checked="false">' +
+                        '<i class="icon icon-circle-check" aria-hidden="true"></i>' +
+                        '<span class="so-choice-title">I will deliver the rest</span></button>' +
+                    '<button type="button" class="so-choice is-decline" data-shortage="cannot" role="radio" aria-checked="false">' +
+                        '<i class="icon icon-circle-x" aria-hidden="true"></i>' +
+                        '<span class="so-choice-title">I cannot deliver the rest</span></button>' +
+                '</div>' +
+            '</section>' +
+
+            '<section class="so-panel" id="sh-deliver-part" hidden>' +
+                '<header class="so-step"><span class="so-num">3</span><div><h2>When will the rest arrive?</h2></div></header>' +
+                '<label class="so-label" for="sh-date">Delivery date</label>' +
+                '<span class="so-date-box">' +
+                    '<input type="date" id="sh-date" min="' + dayFromNow(0) + '" max="' + dayFromNow(365) + '"></span>' +
+                '<label class="so-label" for="sh-note">Remarks <span>optional</span></label>' +
+                '<textarea id="sh-note" class="so-input" maxlength="255" rows="2"></textarea>' +
+            '</section>' +
+
+            '<section class="so-panel" id="sh-cannot-part" hidden>' +
+                '<header class="so-step"><span class="so-num">3</span><div><h2>Why can you not deliver the rest?</h2></div></header>' +
+                '<textarea id="sh-why" class="so-input" maxlength="255" rows="2"></textarea>' +
+            '</section>' +
+
+            '<section class="so-send" id="sh-send-part" hidden>' +
+                '<p class="so-error" id="so-error" role="alert"></p>' +
+                '<button type="button" class="so-btn so-btn-big" id="sh-send"></button>' +
+            '</section>';
+
+        wireShortage();
+        refreshShortage();
+    }
+
+    function refreshShortage() {
+        const choices = document.querySelectorAll('[data-shortage]');
+        for (let i = 0; i < choices.length; i++) {
+            const on = choices[i].dataset.shortage === shortageDraft.choice;
+            choices[i].classList.toggle('is-on', on);
+            choices[i].setAttribute('aria-checked', on ? 'true' : 'false');
+        }
+        document.getElementById('sh-deliver-part').hidden = shortageDraft.choice !== 'deliver';
+        document.getElementById('sh-cannot-part').hidden = shortageDraft.choice !== 'cannot';
+        document.getElementById('sh-send-part').hidden = shortageDraft.choice === '';
+
+        const send = document.getElementById('sh-send');
+        send.className = 'so-btn so-btn-big ' + (shortageDraft.choice === 'cannot' ? 'is-decline' : 'is-accept');
+        send.innerHTML = '<i class="icon icon-send" aria-hidden="true"></i>' +
+            (shortageDraft.choice === 'cannot' ? 'Send: I cannot deliver the rest' : 'Send: I will deliver the rest');
+    }
+
+    function wireShortage() {
+        const choices = document.querySelectorAll('[data-shortage]');
+        for (let i = 0; i < choices.length; i++) {
+            const button = choices[i];
+            button.addEventListener('click', function () {
+                shortageDraft.choice = button.dataset.shortage;
+                setError('');
+                refreshShortage();
+                const part = document.getElementById(shortageDraft.choice === 'deliver' ? 'sh-deliver-part' : 'sh-cannot-part');
+                part.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        }
+
+        const picker = document.getElementById('sh-date');
+        function pickDate() { shortageDraft.shipDate = picker.value; setError(''); }
+        picker.addEventListener('change', pickDate);
+        picker.addEventListener('input', pickDate);
+
+        document.getElementById('sh-note').addEventListener('input', function (event) {
+            shortageDraft.note = event.target.value;
+        });
+        document.getElementById('sh-why').addEventListener('input', function (event) {
+            shortageDraft.reason = event.target.value;
+            setError('');
+        });
+        document.getElementById('sh-send').addEventListener('click', sendShortage);
+    }
+
+    function shortageProblem() {
+        if (shortageDraft.choice === 'cannot') {
+            if (shortageDraft.reason.trim().length < 5) {
+                return { text: 'Type why you cannot deliver the rest.', focus: 'sh-why' };
+            }
+            return null;
+        }
+        if (!shortageDraft.shipDate) return { text: 'Pick the date the rest will be delivered.', focus: 'sh-date' };
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(shortageDraft.shipDate)) return { text: 'That is not a date.', focus: 'sh-date' };
+        if (shortageDraft.shipDate < dayFromNow(0)) return { text: 'Pick today or a later date.', focus: 'sh-date' };
+        if (shortageDraft.shipDate > dayFromNow(365)) return { text: 'Pick a day within the next year.', focus: 'sh-date' };
+        return null;
+    }
+
+    async function sendShortage() {
+        const problem = shortageProblem();
+        if (problem) {
+            setError(problem.text);
+            const target = document.getElementById(problem.focus);
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                if (target.focus) target.focus({ preventScroll: true });
+            }
+            return;
+        }
+        setError('');
+
+        const deliver = shortageDraft.choice === 'deliver';
+        const payload = deliver
+            ? { deliver: true, shipDate: shortageDraft.shipDate, note: shortageDraft.note.trim() }
+            : { deliver: false, note: shortageDraft.reason.trim() };
+
+        const button = document.getElementById('sh-send');
+        button.disabled = true;
+        button.innerHTML = 'Sending&hellip;';
+
+        try {
+            const response = await fetch('/api/supplier-order/' + encodeURIComponent(code) + '/shortage', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json().catch(function () { return {}; });
+
+            if (!response.ok) {
+                if (result.view) {
+                    view = result.view;
+                    render();
+                    showBanner(result.error || '', 'is-stop');
+                    return;
+                }
+                setError(result.error || 'Your answer could not be saved. Try again in a moment.');
+                button.disabled = false;
+                refreshShortage();
+                return;
+            }
+
+            view = result.view;
+            render(result.message);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (problem) {
+            setError('The shop could not be reached. Check your connection and try again.');
+            button.disabled = false;
+            refreshShortage();
+        }
+    }
+
+    function renderShortageReceipt(message) {
+        const order = view.order;
+        let mark = 'icon-check';
+        let tone = 'is-ok';
+        let title = 'The rest is on its way';
+        let sub = 'You answered on ' + stampText(order.shortage_responded_at) + '.';
+        const facts = [];
+
+        if (order.shortage_response === 'Cannot deliver') {
+            mark = 'icon-x';
+            tone = 'is-stop';
+            title = 'Order closed';
+            sub = 'You answered on ' + stampText(order.shortage_responded_at) + ' that the rest cannot be delivered.';
+        } else if (order.shortage_response === 'Will deliver' && order.supplier_ship_date) {
+            facts.push('<div><span class="so-tag">Delivery</span><strong>' +
+                escapeHtml(dayText(order.supplier_ship_date, true)) + '</strong></div>');
+        }
+        if (order.shortage_note) {
+            facts.push('<div class="so-wide"><span class="so-tag">' +
+                (order.shortage_response === 'Cannot deliver' ? 'Reason' : 'Remarks') + '</span><span>' +
+                escapeHtml(order.shortage_note) + '</span></div>');
+        }
+        if (view.shortage) {
+            facts.push('<div><span class="so-tag">Total short</span><strong class="so-fig">' +
+                peso(view.shortage.total) + '</strong></div>');
+        }
+
+        main.innerHTML =
+            (message ? '<p class="so-flash is-ok">' + escapeHtml(message) + '</p>' : '') +
+            '<section class="so-receipt ' + tone + '">' +
+                '<div class="so-seal"><i class="icon ' + mark + '" aria-hidden="true"></i></div>' +
+                '<h1>' + title + '</h1>' +
+                '<p class="so-lede">' + escapeHtml(sub) + '</p>' +
+                '<div class="so-rfacts">' + facts.join('') + '</div>' +
+                (view.shortage ? '<ol class="so-rlines">' + shortageRowsHtml() + '</ol>' : '') +
+                '<a class="so-btn so-btn-quiet so-pdf" href="/api/supplier-order/' + encodeURIComponent(code) + '/pdf" ' +
+                    'target="_blank" rel="noopener"><i class="icon icon-file-text" aria-hidden="true"></i>' +
+                    'Open the printable order (PDF)</a>' +
+            '</section>';
     }
 
     function renderQuote() {
@@ -753,7 +977,10 @@ function startSupplierOrderPage() {
         let title = 'Order accepted';
         let sub = 'You answered on ' + stampText(order.supplier_responded_at) + '.';
 
-        if (order.supplier_response === 'Declined') {
+        if (order.status === 'Received') {
+            title = 'Order received';
+            sub = 'This order has been delivered and counted in.';
+        } else if (order.supplier_response === 'Declined') {
             mark = 'icon-x';
             tone = 'is-stop';
             title = 'Order declined';

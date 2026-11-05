@@ -974,6 +974,45 @@ async function migrateSupplierQuote() {
     "purchase_order_items.original_unit_cost).");
 }
 
+async function migrateShortage() {
+  const statusResult = await db.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'status'",
+    [DB_NAME]
+  );
+  const status = statusResult[0];
+  const hasIncomplete = status.length > 0 && status[0].COLUMN_TYPE.indexOf("Incomplete") !== -1;
+
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'\n" +
+      "       AND COLUMN_NAME IN ('shortage_sent_at', 'shortage_response', 'shortage_responded_at', 'shortage_note')",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (hasIncomplete && names.length === 4) return;
+
+  if (!hasIncomplete) {
+    await db.query(
+      "ALTER TABLE purchase_orders MODIFY COLUMN status\n" +
+        "         ENUM('For Approval', 'Pending', 'Incomplete', 'Received', 'Cancelled') NOT NULL DEFAULT 'For Approval'");
+  }
+  if (names.indexOf("shortage_sent_at") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN shortage_sent_at TIMESTAMP NULL");
+  }
+  if (names.indexOf("shortage_response") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN shortage_response ENUM('Will deliver', 'Cannot deliver') NULL");
+  }
+  if (names.indexOf("shortage_responded_at") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN shortage_responded_at TIMESTAMP NULL");
+  }
+  if (names.indexOf("shortage_note") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN shortage_note VARCHAR(255) NULL");
+  }
+  console.log("Added the Incomplete purchase order status and the shortage columns (purchase_orders.shortage_sent_at, " +
+    "shortage_response, shortage_responded_at, shortage_note).");
+}
+
 async function migrateLineDescription() {
   const columnsResult = await db.query(
     "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -1379,7 +1418,11 @@ async function routinesAreOld() {
     ["sp_create_qr_payment", "p_portal_sale_id"],
     ["sp_record_credit_payment", "v_qr_portal"],
     ["sp_create_sale_transaction", "v_qr_portal"],
-    ["sp_link_qr_payment_to_sale", "v_portal"]
+    ["sp_link_qr_payment_to_sale", "v_portal"],
+    ["sp_receive_purchase_order", "v_first_receipt"],
+    ["sp_receive_purchase_order", "This delivery was already recorded"],
+    ["sp_file_return_report", "NOT IN ('Pending', 'Incomplete')"],
+    ["sp_archive_record", "po.status IN ('Pending', 'Incomplete')"]
   ];
 
   const routinesResult = await db.query(
@@ -1729,6 +1772,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateDeliveryRemarks();
   await migrateSupplierResponse();
   await migrateSupplierQuote();
+  await migrateShortage();
   await migrateLineDescription();
   await migrateQrPayments();
   await migratePaymentDetails();

@@ -35,6 +35,7 @@
                         <li data-feature="reorder-points"><a href="#" data-panel-link="panel-reorder" onclick="showReorder(event)"><i class="icon icon-triangle-alert nav-icon" aria-hidden="true"></i>
                             Reorder Point</a></li>
                         <li data-feature="purchase-orders"><a href="#" data-panel-link="panel-po-history" onclick="showPurchaseOrderHistory(event)"><i class="icon icon-shopping-cart nav-icon" aria-hidden="true"></i>Purchase Orders</a></li>
+                        <li data-feature="po-receiving"><a href="#" data-panel-link="panel-receiving" onclick="showReceiveDeliveries(event)"><i class="icon icon-package-open nav-icon" aria-hidden="true"></i>Receive Deliveries</a></li>
                         <li data-feature="returns"><a href="#" data-panel-link="panel-returns" onclick="showReturns(event)"><i class="icon icon-corner-down-left nav-icon" aria-hidden="true"></i>
                             Returned Items</a></li>
                     </ul>
@@ -224,20 +225,19 @@
                             <div class="panel-toolbar reference-toolbar">
                                 <div class="search-wrap">
                                     <input type="search" class="form-control search-input" id="reference-search"
-                                           placeholder="Search PO, supplier, material or report"
+                                           placeholder="Search material or report"
                                            autocomplete="off" oninput="onReferenceSearch(this.value)">
                                 </div>
                                 <div class="toolbar-field">
                                     <label for="reference-type">Type</label>
                                     <select id="reference-type" onchange="onReferenceType(this.value)">
                                         <option value="all">Every type</option>
-                                        <option value="po">Purchase Order</option>
                                         <option value="return">Returned Items</option>
                                         <option value="material">Material</option>
                                     </select>
                                 </div>
                             </div>
-                            <p class="attention-hint">Accepted purchase orders, open returned items, then every material, most short first. Click one to fill the form.</p>
+                            <p class="attention-hint">Open returned items, then every material, most short first. Click one to fill the form.</p>
                             <ul class="attention-list" id="attention-list"></ul>
                             <div class="pager attention-more" id="attention-more" hidden></div>
                         </div>
@@ -435,6 +435,7 @@
                                 <option value="To Send">To Send</option>
                                 <option value="Sent to Supplier">Sent to Supplier</option>
                                 <option value="Out for Delivery">Out for Delivery</option>
+                                <option value="Incomplete">Incomplete</option>
                                 <option value="Received">Received</option>
                                 <option value="Declined">Declined</option>
                             </select>
@@ -457,17 +458,51 @@
                     <div id="po-doc"></div>
                 </div>
 
-                <div class="card" id="panel-po-receive" data-panel data-panel-of="panel-po-history" style="display: none;">
+                <div class="card" id="panel-receiving" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
-                            <h3>Count in the delivery</h3>
+                            <h3>Receive Deliveries</h3>
+                        </div>
+                    </div>
+
+                    <div class="panel-toolbar">
+                        <div class="search-wrap">
+                            <input type="search" class="form-control search-input" id="receiving-search"
+                                   placeholder="Search by supplier or order number"
+                                   oninput="dataPanelSearchInput('clerk-receiving', event)" onkeydown="dataPanelSearchKey('clerk-receiving', event)" title="Type one letter or more; it finds words that start with it">
+                        </div>
+                        <div class="toolbar-spacer"></div>
+                    </div>
+                    <div class="table-responsive grid-10">
+                        <table id="receiving-table">
+                            <thead>
+                                <tr><th>PO</th><th>Supplier</th><th>Arrives</th><th>Status</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pager is-single" id="receiving-pager"></div>
+                </div>
+
+                <div class="card" id="panel-po-receive" data-panel data-panel-of="panel-receiving" style="display: none;">
+                    <div class="panel-head">
+                        <div>
+                            <h3>Receive Delivery</h3>
                             <p class="panel-sub" id="recv-heading">Purchase Order</p>
                         </div>
                     </div>
 
-                    <div id="recv-lines"></div>
+                    <div class="table-responsive">
+                        <table class="mini-table adjust-lines-table" id="recv-table">
+                            <thead>
+                                <tr><th>Material</th><th class="col-num">Expected</th><th class="col-num">Arrived</th><th class="col-num">Short</th></tr>
+                            </thead>
+                            <tbody id="recv-lines"></tbody>
+                        </table>
+                    </div>
+                    <p class="recv-total" id="recv-total" hidden></p>
 
-                    <div class="panel-head recv-extras-head">
+                    <div class="panel-head recv-extras-head" id="recv-extras-head" hidden>
                         <div>
                             <h4>Arrived but never ordered</h4>
                         </div>
@@ -477,7 +512,7 @@
 
                     <div class="form-footer">
                         <button type="button" class="btn btn-ghost" onclick="addReceiveExtra()">Add something that arrived</button>
-                        <button type="button" class="btn btn-success" onclick="submitReceiveOrder()">Receive this delivery</button>
+                        <button type="button" class="btn btn-success" id="recv-submit" onclick="submitReceiveOrder()">Receive this delivery</button>
                         <button type="button" class="btn btn-ghost" onclick="cancelReceiveOrder(event)">Cancel</button>
                     </div>
                 </div>

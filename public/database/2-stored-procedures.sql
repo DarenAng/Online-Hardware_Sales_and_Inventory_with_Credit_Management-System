@@ -1185,7 +1185,7 @@ PROC_BODY: BEGIN
         SELECT COUNT(*) INTO v_found
         FROM purchase_order_items poi
         JOIN purchase_orders po ON po.po_id = poi.po_id
-        WHERE poi.product_id = p_record_id AND po.status = 'Pending';
+        WHERE poi.product_id = p_record_id AND po.status IN ('Pending', 'Incomplete');
         IF v_found > 0 THEN
             SET p_status_code = 409;
             SET p_message = 'This material is on a purchase order that has not arrived. Receive or cancel the order first.';
@@ -2254,6 +2254,7 @@ CREATE PROCEDURE sp_receive_purchase_order (
     IN p_received_json JSON,
     IN p_discount DECIMAL(12,2),
     IN p_staff_id INT,
+    IN p_seen INT,
     OUT p_lines INT,
     OUT p_extras INT,
     OUT p_status_code INT,
@@ -2261,9 +2262,8 @@ CREATE PROCEDURE sp_receive_purchase_order (
 )
 PROC_BODY: BEGIN
     DECLARE v_status VARCHAR(20);
-    DECLARE v_done INT DEFAULT 0;
-    DECLARE v_product_id INT;
-    DECLARE v_ordered INT;
+    DECLARE v_first_receipt BOOLEAN DEFAULT FALSE;
+    DECLARE v_receipts INT DEFAULT 0;
     DECLARE v_arrived INT;
     DECLARE v_before DECIMAL(12,3);
     DECLARE v_i INT DEFAULT 0;
@@ -2279,10 +2279,6 @@ PROC_BODY: BEGIN
     DECLARE v_supplier INT;
     DECLARE v_made BOOLEAN DEFAULT FALSE;
     DECLARE v_short INT DEFAULT 0;
-
-    DECLARE cur CURSOR FOR
-        SELECT product_id, quantity, unit_cost FROM purchase_order_items WHERE po_id = p_po_id;
-    DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION
     BEGIN
@@ -2311,7 +2307,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    IF v_status <> 'Pending' THEN
+    IF v_status NOT IN ('Pending', 'Incomplete') THEN
         SET p_status_code = 400;
         SET p_message = CONCAT('This purchase order is already ', LOWER(v_status), '.');
         LEAVE PROC_BODY;
@@ -2319,9 +2315,42 @@ PROC_BODY: BEGIN
 
     START TRANSACTION;
 
-    INSERT INTO purchase_order_ordered_items (po_id, product_id, quantity, pack_name, pack_size, pack_count, unit_cost)
-    SELECT po_id, product_id, quantity, pack_name, pack_size, pack_count, unit_cost
-    FROM purchase_order_items WHERE po_id = p_po_id;
+    -- Look again with the order locked, so a double click cannot count the same delivery twice
+    SELECT status INTO v_status FROM purchase_orders WHERE po_id = p_po_id FOR UPDATE;
+
+    IF v_status NOT IN ('Pending', 'Incomplete') THEN
+        ROLLBACK;
+        SET p_status_code = 400;
+        SET p_message = CONCAT('This purchase order is already ', LOWER(v_status), '.');
+        LEAVE PROC_BODY;
+    END IF;
+
+    -- Every receipt writes at least one stock movement, so this count tells how many deliveries were
+    -- counted in. The form sends the count it saw: a double click or a retry no longer matches.
+    SELECT COUNT(*) INTO v_receipts FROM stock_adjustments
+    WHERE reason = CONCAT('Received on purchase order #', p_po_id);
+
+    IF p_seen IS NOT NULL AND p_seen <> v_receipts THEN
+        ROLLBACK;
+        SET p_status_code = 409;
+        SET p_message = 'This delivery was already recorded. Open the order again.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    -- purchase_order_ordered_items holds what was ordered and is written once, at the first receipt.
+    -- From then on purchase_order_items.quantity holds what has been received so far.
+    SET v_first_receipt = NOT EXISTS (SELECT 1 FROM purchase_order_ordered_items WHERE po_id = p_po_id);
+
+    IF v_first_receipt THEN
+        INSERT INTO purchase_order_ordered_items (po_id, product_id, quantity, pack_name, pack_size, pack_count, unit_cost)
+        SELECT po_id, product_id, quantity, pack_name, pack_size, pack_count, unit_cost
+        FROM purchase_order_items WHERE po_id = p_po_id;
+
+        UPDATE purchase_order_items
+        SET quantity = 0,
+            pack_count = IF(pack_size IS NULL OR pack_size <= 0, NULL, 0)
+        WHERE po_id = p_po_id;
+    END IF;
 
     SET v_count = IFNULL(JSON_LENGTH(p_received_json), 0);
 
@@ -2361,12 +2390,15 @@ PROC_BODY: BEGIN
             INSERT IGNORE INTO inventory (product_id, quantity_in_stock)
             VALUES (v_json_id, 0);
 
+            -- v_json_qty is what arrived in this delivery; it is added to what came before
+            SET v_arrived = IFNULL(v_json_qty, 0);
+
             IF EXISTS (SELECT 1 FROM purchase_order_items
                        WHERE po_id = p_po_id AND product_id = v_json_id) THEN
                 UPDATE purchase_order_items
-                SET quantity = IFNULL(v_json_qty, quantity),
-                    pack_count = IF(pack_size IS NULL OR pack_size <= 0, NULL,
-                                    ROUND(IFNULL(v_json_qty, quantity) / pack_size, 3))
+                SET pack_count = IF(pack_size IS NULL OR pack_size <= 0, NULL,
+                                    ROUND((quantity + v_arrived) / pack_size, 3)),
+                    quantity = quantity + v_arrived
                 WHERE po_id = p_po_id AND product_id = v_json_id;
             ELSE
                 IF IFNULL(v_cost, 0) <= 0 THEN
@@ -2377,61 +2409,75 @@ PROC_BODY: BEGIN
                 END IF;
 
                 INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_cost)
-                VALUES (p_po_id, v_json_id, IFNULL(v_json_qty, 0), v_cost);
+                VALUES (p_po_id, v_json_id, v_arrived, v_cost);
                 SET p_extras = p_extras + 1;
+            END IF;
+
+            IF v_arrived > 0 THEN
+                SET v_unit_cost = NULL;
+                SELECT unit_cost INTO v_unit_cost FROM purchase_order_items
+                WHERE po_id = p_po_id AND product_id = v_json_id
+                ORDER BY po_item_id LIMIT 1;
+
+                IF v_unit_cost > 0 THEN
+                    UPDATE products SET last_cost = v_unit_cost WHERE product_id = v_json_id;
+                END IF;
+
+                SET v_before = 0;
+                SELECT quantity_in_stock INTO v_before FROM inventory WHERE product_id = v_json_id FOR UPDATE;
+
+                UPDATE inventory
+                SET quantity_in_stock = quantity_in_stock + v_arrived
+                WHERE product_id = v_json_id;
+
+                INSERT INTO stock_adjustments
+                    (product_id, adjustment_type, quantity_before, quantity_change, quantity_after, reason, adjusted_by_staff_id)
+                VALUES
+                    (v_json_id, 'Add', v_before, v_arrived, v_before + v_arrived,
+                     CONCAT('Received on purchase order #', p_po_id), p_staff_id);
+
+                CALL sp_raise_stock_alert(v_json_id, p_staff_id);
+
+                SET p_lines = p_lines + 1;
             END IF;
         END IF;
 
         SET v_i = v_i + 1;
     END WHILE;
 
-    OPEN cur;
-    read_loop: LOOP
-        FETCH cur INTO v_product_id, v_ordered, v_unit_cost;
-        IF v_done = 1 THEN
-            LEAVE read_loop;
-        END IF;
+    IF p_lines = 0 THEN
+        ROLLBACK;
+        SET p_status_code = 400;
+        SET p_message = 'Nothing was counted in. Type how many arrived on at least one line.';
+        LEAVE PROC_BODY;
+    END IF;
 
-        SET v_arrived = v_ordered;
+    -- Lines of the order that have received less than was ordered
+    SELECT COUNT(*) INTO v_short
+    FROM purchase_order_ordered_items o
+    WHERE o.po_id = p_po_id
+      AND o.quantity > COALESCE((SELECT SUM(i.quantity) FROM purchase_order_items i
+                                 WHERE i.po_id = o.po_id AND i.product_id = o.product_id), 0);
 
-        IF v_arrived > 0 THEN
-            IF v_unit_cost > 0 THEN
-                UPDATE products SET last_cost = v_unit_cost WHERE product_id = v_product_id;
-            END IF;
+    IF v_short = 0 THEN
+        DELETE FROM purchase_order_items WHERE po_id = p_po_id AND quantity <= 0;
 
-            SET v_before = 0;
-            SELECT quantity_in_stock INTO v_before FROM inventory WHERE product_id = v_product_id FOR UPDATE;
-
-            UPDATE inventory
-            SET quantity_in_stock = quantity_in_stock + v_arrived
-            WHERE product_id = v_product_id;
-
-            INSERT INTO stock_adjustments
-                (product_id, adjustment_type, quantity_before, quantity_change, quantity_after, reason, adjusted_by_staff_id)
-            VALUES
-                (v_product_id, 'Add', v_before, v_arrived, v_before + v_arrived,
-                 CONCAT('Received on purchase order #', p_po_id), p_staff_id);
-
-            CALL sp_raise_stock_alert(v_product_id, p_staff_id);
-
-            SET p_lines = p_lines + 1;
-        ELSE
-            SET v_short = v_short + 1;
-        END IF;
-    END LOOP;
-    CLOSE cur;
-
-    DELETE FROM purchase_order_items WHERE po_id = p_po_id AND quantity <= 0;
-
-    UPDATE purchase_orders
-    SET status = 'Received', received_at = NOW(), discount = GREATEST(IFNULL(p_discount, 0.00), 0.00)
-    WHERE po_id = p_po_id;
+        UPDATE purchase_orders
+        SET status = 'Received', received_at = NOW(),
+            discount = IF(p_discount IS NULL, discount, GREATEST(p_discount, 0.00))
+        WHERE po_id = p_po_id;
+    ELSE
+        UPDATE purchase_orders
+        SET status = 'Incomplete', discount = IF(p_discount IS NULL, discount, GREATEST(p_discount, 0.00)),
+            shortage_sent_at = NULL, shortage_response = NULL, shortage_responded_at = NULL
+        WHERE po_id = p_po_id;
+    END IF;
 
     INSERT INTO audit_logs (staff_id, action, action_type, details)
     VALUES (p_staff_id, 'PO_RECEIVED', 'UPDATE',
             CONCAT('PO #', p_po_id, ' received, ', p_lines, ' line(s) stocked',
                    IF(p_extras > 0, CONCAT(', ', p_extras, ' not on the order'), ''),
-                   IF(v_short > 0, CONCAT(', ', v_short, ' line(s) did not arrive'), '')));
+                   IF(v_short > 0, CONCAT(', ', v_short, ' line(s) still short, the order is Incomplete'), '')));
 
     COMMIT;
 
@@ -2439,7 +2485,7 @@ PROC_BODY: BEGIN
     SET p_message = CONCAT('Purchase order #', p_po_id, ' received. ',
         p_lines, ' line(s) added to stock',
         IF(p_extras > 0, CONCAT(', including ', p_extras, ' that was not on the order'), ''),
-        IF(v_short > 0, CONCAT('. ', v_short, ' line(s) did not arrive'), ''), '.');
+        IF(v_short > 0, CONCAT('. ', v_short, ' line(s) are still short, so the order is Incomplete'), ''), '.');
 END //
 
 CREATE PROCEDURE sp_file_return_report (
@@ -2573,7 +2619,7 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
-        IF v_po_status <> 'Pending' THEN
+        IF v_po_status NOT IN ('Pending', 'Incomplete') THEN
             ROLLBACK;
             SET p_status_code = 409;
             SET p_message = IF(v_po_status = 'Received',
@@ -2582,8 +2628,14 @@ PROC_BODY: BEGIN
             LEAVE PROC_BODY;
         END IF;
 
+        -- Once a delivery has been counted in, the ordered list holds what was ordered
         SELECT COALESCE(SUM(quantity), 0) INTO v_ordered
-        FROM purchase_order_items WHERE po_id = p_po_id AND product_id = p_product_id;
+        FROM purchase_order_ordered_items WHERE po_id = p_po_id AND product_id = p_product_id;
+
+        IF v_ordered = 0 THEN
+            SELECT COALESCE(SUM(quantity), 0) INTO v_ordered
+            FROM purchase_order_items WHERE po_id = p_po_id AND product_id = p_product_id;
+        END IF;
 
         IF v_ordered = 0 THEN
             ROLLBACK;
@@ -3985,7 +4037,7 @@ BEGIN
                       WHERE sa.product_id = p.product_id
                         AND sa.created_at > DATE_SUB(NOW(), INTERVAL 180 DAY))
       AND NOT EXISTS (SELECT 1 FROM purchase_order_items poi JOIN purchase_orders po ON po.po_id = poi.po_id
-                      WHERE poi.product_id = p.product_id AND po.status = 'Pending');
+                      WHERE poi.product_id = p.product_id AND po.status IN ('Pending', 'Incomplete'));
     SET p_materials = ROW_COUNT();
 
     UPDATE staff

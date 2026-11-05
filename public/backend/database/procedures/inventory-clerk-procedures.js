@@ -50,7 +50,7 @@ function decidePurchaseOrder(params) {
 
 function receivePurchaseOrder(params) {
   return callProcedure(
-    "CALL sp_receive_purchase_order(?, ?, ?, ?, @lines, @extras, @status_code, @message)",
+    "CALL sp_receive_purchase_order(?, ?, ?, ?, ?, @lines, @extras, @status_code, @message)",
     params,
     ["lines", "extras", "status_code", "message"]
   );

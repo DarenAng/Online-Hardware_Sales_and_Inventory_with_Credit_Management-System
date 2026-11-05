@@ -18,7 +18,7 @@ const PAGE_SCREENS = {
                      'credit', 'credit-requests', 'deliveries', 'delivery-schedule', 'failed-deliveries', 'records',
                      'credit-maintenance', 'loyalty-discount', 'data-terms', 'refund-policy', 'archives', 'account-management'],
     'inventory-dashboard.html': ['material-list', 'stock-adjustment', 'adjustment-history', 'reorder-points',
-                                 'purchase-orders', 'returns', 'records', 'archives', 'delivery-schedule', 'failed-deliveries', 'delivery-dispatch'],
+                                 'purchase-orders', 'po-receiving', 'returns', 'records', 'archives', 'delivery-schedule', 'failed-deliveries', 'delivery-dispatch'],
     'cashier-dashboard.html': ['pos', 'deliveries', 'refunds', 'credit', 'sales-report', 'delivery-schedule'],
     'delivery.html': ['delivery-runs', 'delivery-reports', 'delivery-schedule']
 };

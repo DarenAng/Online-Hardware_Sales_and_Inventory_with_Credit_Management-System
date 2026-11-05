@@ -5,6 +5,7 @@ const inventoryClerkProcedures = require("../database/procedures/inventory-clerk
 const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
 const purchaseOrderMessage = mailer.purchaseOrderMessage;
+const shortageMessage = mailer.shortageMessage;
 const supplierOrderLink = mailer.supplierOrderLink;
 const qrPng = mailer.qrPng;
 const purchaseOrderPdf = require("../services/purchase-order-pdf").purchaseOrderPdf;
@@ -63,7 +64,7 @@ function registerInventoryRoutes(app, deps) {
       const stockRows = stockRowsResult[0];
       const stock = stockRows[0];
       const poRowsResult = await db.query(
-        "SELECT COALESCE(SUM(CASE WHEN status = 'Pending' THEN 1 ELSE 0 END), 0) AS pending_po, " +
+        "SELECT COALESCE(SUM(CASE WHEN status IN ('Pending', 'Incomplete') THEN 1 ELSE 0 END), 0) AS pending_po, " +
         "COUNT(*) AS total_po " +
         "FROM purchase_orders"
       );
@@ -727,16 +728,17 @@ function registerInventoryRoutes(app, deps) {
         "po.confirmed_at, po.decision_note, po.received_at, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
         "po.supplier_ship_date, " +
+        "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
         "rb.full_name AS raised_by, cb.full_name AS confirmed_by, " +
         "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, " +
         "NULLIF(TRIM(s.email), '') AS supplier_email, " +
         "COUNT(i.po_item_id) AS line_count, " +
         "COALESCE(SUM(i.quantity), 0) AS total_units, " +
         "COALESCE(SUM(i.line_cost), 0) AS goods_cost, " +
-        "po.discount, " +
-        "COALESCE(SUM(i.line_cost), 0) - po.discount AS total_cost, " +
-        // Units still owed on a received order: ordered minus received, line by line
-        "IF(po.status = 'Received', COALESCE((SELECT SUM(GREATEST(o.quantity - " +
+        "LEAST(po.discount, COALESCE(SUM(i.line_cost), 0)) AS discount, " +
+        "GREATEST(COALESCE(SUM(i.line_cost), 0) - po.discount, 0) AS total_cost, " +
+        // Units still owed once a delivery has been counted in: ordered minus received, line by line
+        "IF(po.status IN ('Received', 'Incomplete'), COALESCE((SELECT SUM(GREATEST(o.quantity - " +
         " COALESCE((SELECT SUM(r.quantity) FROM purchase_order_items r " +
         "  WHERE r.po_id = o.po_id AND r.product_id = o.product_id), 0), 0)) " +
         " FROM purchase_order_ordered_items o WHERE o.po_id = po.po_id), 0), 0) AS balance_units " +
@@ -747,9 +749,10 @@ function registerInventoryRoutes(app, deps) {
         "LEFT JOIN purchase_order_items i ON i.po_id = po.po_id " +
         "GROUP BY po.po_id, po.status, po.order_date, po.confirmed_at, po.decision_note, po.received_at, po.discount, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
-        "po.supplier_ship_date, rb.full_name, cb.full_name, " +
+        "po.supplier_ship_date, po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
+        "rb.full_name, cb.full_name, " +
         "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, s.email " +
-        "ORDER BY FIELD(po.status, 'For Approval', 'Pending', 'Received', 'Cancelled'), po.po_id DESC"
+        "ORDER BY FIELD(po.status, 'For Approval', 'Pending', 'Incomplete', 'Received', 'Cancelled'), po.po_id DESC"
       );
       const rows = rowsResult[0];
       response.json(rows);
@@ -772,11 +775,13 @@ function registerInventoryRoutes(app, deps) {
         "COALESCE((SELECT SUM(i.quantity) FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id), 0) " +
         " AS received_quantity, " +
         "o.pack_name, o.pack_size, o.pack_count, " +
+        "(SELECT COUNT(*) FROM stock_adjustments sa " +
+        " WHERE sa.reason = CONCAT('Received on purchase order #', o.po_id)) AS receipt_count, " +
         "p.product_name, COALESCE(NULLIF(o.line_description, ''), p.description) AS description, " +
         "u.unit_name, c.category_name, b.brand_name, " +
         "COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock " +
         "FROM purchase_order_ordered_items o " +
-        "JOIN purchase_orders po ON po.po_id = o.po_id AND po.status = 'Received' " +
+        "JOIN purchase_orders po ON po.po_id = o.po_id AND po.status IN ('Received', 'Incomplete') " +
         "JOIN products p ON p.product_id = o.product_id " +
         "LEFT JOIN units u ON u.unit_id = p.unit_id " +
         "LEFT JOIN categories c ON c.category_id = p.category_id " +
@@ -792,6 +797,8 @@ function registerInventoryRoutes(app, deps) {
         "SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
         "i.pack_name, i.pack_size, i.pack_count, " +
         "p.product_name, COALESCE(NULLIF(i.line_description, ''), p.description) AS description, " +
+        "(SELECT COUNT(*) FROM stock_adjustments sa " +
+        " WHERE sa.reason = CONCAT('Received on purchase order #', i.po_id)) AS receipt_count, " +
         "p.last_cost, u.unit_name, c.category_name, b.brand_name, " +
         "COALESCE(inv.quantity_in_stock, 0) AS quantity_in_stock " +
         "FROM purchase_order_items i " +
@@ -979,6 +986,7 @@ function registerInventoryRoutes(app, deps) {
       "SELECT po.po_id, po.status, po.order_date, po.confirmed_at, " +
       "po.supplier_code, po.supplier_sent_at, " +
       "po.supplier_response, po.supplier_responded_at, po.supplier_note, po.supplier_ship_date, " +
+      "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
       "po.discount, " +
       "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, " +
       "s.email AS supplier_email, s.address AS supplier_address, " +
@@ -1012,7 +1020,36 @@ function registerInventoryRoutes(app, deps) {
       "ORDER BY i.po_item_id",
       [poId]
     );
-    const items = itemsResult[0];
+    let items = itemsResult[0];
+
+    if (orders[0].status === "Incomplete" || orders[0].status === "Received") {
+      const orderedResult = await db.query(
+        "SELECT o.ordered_item_id, o.product_id, o.quantity, o.pack_name, o.pack_size, o.pack_count, " +
+        "COALESCE((SELECT i.unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
+        " ORDER BY i.po_item_id LIMIT 1), o.unit_cost, 0) AS unit_cost, " +
+        "(SELECT i.original_unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
+        " ORDER BY i.po_item_id LIMIT 1) AS original_unit_cost, " +
+        "p.product_name, COALESCE(NULLIF(o.line_description, ''), p.description) AS description, " +
+        "u.unit_name, c.category_name, b.brand_name " +
+        "FROM purchase_order_ordered_items o " +
+        "JOIN products p ON p.product_id = o.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "LEFT JOIN categories c ON c.category_id = p.category_id " +
+        "LEFT JOIN brands b ON b.brand_id = p.brand_id " +
+        "WHERE o.po_id = ? " +
+        "ORDER BY o.ordered_item_id",
+        [poId]
+      );
+      if (orderedResult[0].length > 0) {
+        items = [];
+        for (let i = 0; i < orderedResult[0].length; i++) {
+          const row = orderedResult[0][i];
+          row.po_item_id = row.ordered_item_id;
+          row.line_cost = Math.round(Number(row.quantity) * Number(row.unit_cost) * 100) / 100;
+          items.push(row);
+        }
+      }
+    }
 
     const settingsResult = await db.query(
       "SELECT store_name, address, tin, registration_type, invoice_note " +
@@ -1020,7 +1057,74 @@ function registerInventoryRoutes(app, deps) {
     );
     const settings = settingsResult[0];
 
-    return { order: orders[0], items: items, shop: settings[0] || DEFAULT_STORE_SETTINGS };
+    const document = { order: orders[0], items: items, shop: settings[0] || DEFAULT_STORE_SETTINGS };
+    if (orders[0].status === "Incomplete") {
+      document.shortage = await readShortage(poId);
+    }
+    return document;
+  }
+
+  // What is still owed on an order. Ordered is the fixed list written at the first receipt,
+  // received is what purchase_order_items holds from then on, and short is the difference.
+  async function readShortage(poId) {
+    const rowsResult = await db.query(
+      "SELECT o.product_id, o.quantity AS ordered, " +
+      "COALESCE((SELECT SUM(i.quantity) FROM purchase_order_items i " +
+      " WHERE i.po_id = o.po_id AND i.product_id = o.product_id), 0) AS received, " +
+      "COALESCE((SELECT i.unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
+      " ORDER BY i.po_item_id LIMIT 1), o.unit_cost, 0) AS unit_cost, " +
+      "p.product_name, u.unit_name " +
+      "FROM purchase_order_ordered_items o " +
+      "JOIN products p ON p.product_id = o.product_id " +
+      "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+      "WHERE o.po_id = ? " +
+      "ORDER BY o.ordered_item_id",
+      [poId]
+    );
+    const rows = rowsResult[0];
+
+    const lines = [];
+    let total = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const short = Number(row.ordered) - Number(row.received);
+      if (short <= 0) continue;
+      const amount = Math.round(short * Number(row.unit_cost) * 100) / 100;
+      total += amount;
+      lines.push({
+        product_id: row.product_id,
+        product_name: row.product_name,
+        unit_name: row.unit_name,
+        ordered: Number(row.ordered),
+        received: Number(row.received),
+        short: short,
+        unit_cost: Number(row.unit_cost),
+        amount: amount
+      });
+    }
+    return { lines: lines, total: Math.round(total * 100) / 100 };
+  }
+
+  // After an order is closed short: the discount cannot be more than the goods that arrived,
+  // and the lines that never arrived come off the order.
+  async function trimClosedOrder(runner, poId) {
+    await runner.query(
+      "UPDATE purchase_orders SET discount = LEAST(discount, " +
+      "(SELECT COALESCE(SUM(line_cost), 0) FROM purchase_order_items WHERE po_id = ?)) WHERE po_id = ?",
+      [poId, poId]);
+    await runner.query("DELETE FROM purchase_order_items WHERE po_id = ? AND quantity <= 0", [poId]);
+  }
+
+  // Tells the manager and the clerk something about a purchase order
+  async function tellManagerAndClerk(title, message) {
+    await db.query(
+      "INSERT INTO notifications (target_role_id, notif_type, title, message) " +
+      "SELECT role_id, 'Purchase Order', ?, ? FROM roles WHERE role_name IN ('Manager', 'Inventory Clerk')",
+      [title.slice(0, 150), message]);
+    if (publishChange) {
+      publishChange("notifications", "purchase order " + title, null);
+      publishChange("inventory", "purchase order " + title, null);
+    }
   }
 
   async function ensureSupplierCode(poId) {
@@ -1030,7 +1134,7 @@ function registerInventoryRoutes(app, deps) {
   }
 
   async function supplierAnswerLink(request, order) {
-    if (order.status !== "Pending") return null;
+    if (order.status !== "Pending" && order.status !== "Incomplete") return null;
     let code = order.supplier_code;
     if (!code) {
       await ensureSupplierCode(order.po_id);
@@ -1388,6 +1492,170 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
+  // Emails the shortage notice of an Incomplete order. Returns { ok: true, supplier, email, message }
+  // or { ok: false, status, problem }. Throws if something unexpected breaks.
+  async function emailShortageToSupplier(request, poId) {
+    const document = await readOrderDocument(poId);
+    if (!document) return { ok: false, status: 404, problem: "That purchase order does not exist" };
+
+    const order = document.order;
+    const number = helpers.poNumber(order.po_id);
+    if (order.status !== "Incomplete") {
+      return { ok: false, status: 409, problem: number + " is not an incomplete delivery, so there is no shortage to send." };
+    }
+
+    const email = String(order.supplier_email || "").trim();
+    let problem = null;
+    if (!email) {
+      problem = order.supplier_name + " has no email address on file. Print the shortage notice and send it to them.";
+    } else if (!isMailConfigured()) {
+      problem = "Mail is not set up on this server. Print the shortage notice and send it to " + order.supplier_name + ".";
+    }
+
+    const answer = await supplierAnswerLink(request, order);
+    if (!problem) {
+      try {
+        await sendMail(await shortageMessage({
+          order: Object.assign({}, order, { supplier_email: email }),
+          lines: document.shortage.lines,
+          total: document.shortage.total,
+          shop: document.shop,
+          link: answer ? answer.link : "",
+          qr: answer ? answer.qr : null
+        }));
+      } catch (error) {
+        console.error("Emailing the shortage notice for " + number + " failed:", error.message);
+        problem = "The mail server refused the shortage notice for " + email + ": " + error.message + " " +
+                  "Print the shortage notice and send it to them.";
+      }
+    }
+
+    if (problem) {
+      await writeAuditLog(request, "PURCHASE_ORDER_SHORTAGE_NOT_SENT",
+        number + " shortage notice not emailed to " + order.supplier_name + ": " + problem,
+        { po_id: order.po_id, supplier: order.supplier_name, email: email || null, emailed: false });
+      return { ok: false, status: 400, problem: problem };
+    }
+
+    try {
+      await db.query("UPDATE purchase_orders SET shortage_sent_at = NOW() WHERE po_id = ?", [poId]);
+      await writeAuditLog(request, "PURCHASE_ORDER_SHORTAGE_SENT",
+        number + " shortage notice emailed to " + order.supplier_name + " at " + email,
+        { po_id: order.po_id, supplier: order.supplier_name, email: email, emailed: true,
+          total_short: document.shortage.total });
+    } catch (error) {
+      console.error("Recording that the shortage notice for " + number + " was emailed failed:", error.message);
+    }
+
+    return {
+      ok: true,
+      supplier: order.supplier_name,
+      email: email,
+      message: "The shortage notice for " + number + " was emailed to " + order.supplier_name + " at " + email + "."
+    };
+  }
+
+  app.post("/api/purchase-orders/:poId/shortage/send", async function (request, response) {
+    const poId = Number(request.params.poId);
+
+    try {
+      const result = await emailShortageToSupplier(request, poId);
+      if (!result.ok) return response.status(result.status).json({ error: result.problem });
+
+      response.json({ message: result.message });
+    } catch (error) {
+      console.error("Sending the shortage notice failed:", error.message);
+      response.status(500).json({ error: "The shortage notice could not be sent. Print it and send it to the supplier." });
+    }
+  });
+
+  // The manager closes an incomplete delivery as it stands, when the supplier never answers
+  app.post("/api/purchase-orders/:poId/close-short", async function (request, response) {
+    const poId = Number(request.params.poId);
+    const reason = String((request.body && request.body.reason) || "").trim().slice(0, 255);
+    if (reason.length < 5) {
+      return response.status(400).json({ error: "Write the reason the order is closed with a shortage." });
+    }
+
+    try {
+      const document = await readOrderDocument(poId);
+      if (!document) return response.status(404).json({ error: "That purchase order does not exist" });
+
+      const order = document.order;
+      const number = helpers.poNumber(poId);
+      const neverArrived = order.status === "Pending" && order.supplier_response === "Accepted";
+      if (order.status !== "Incomplete" && !neverArrived) {
+        return response.status(409).json({
+          error: number + " is not out for delivery or incomplete, so it cannot be closed with a shortage." });
+      }
+
+      let shortLines = 0;
+      let shortTotal = 0;
+      if (neverArrived) {
+        shortLines = document.items.length;
+        for (let i = 0; i < document.items.length; i++) shortTotal += Number(document.items[i].line_cost || 0);
+        shortTotal = Math.round(shortTotal * 100) / 100;
+
+        // Nothing arrived: the order becomes a received order with nothing received
+        const connection = await db.getConnection();
+        try {
+          await connection.beginTransaction();
+          const closedNow = await connection.query(
+            "UPDATE purchase_orders SET status = 'Received', received_at = NOW(), decision_note = ? " +
+            "WHERE po_id = ? AND status = 'Pending' AND supplier_response = 'Accepted'",
+            [reason, poId]);
+          if (closedNow[0].affectedRows === 0) {
+            await connection.rollback();
+            return response.status(409).json({ error: number + " is no longer waiting for its delivery." });
+          }
+          await connection.query(
+            "INSERT INTO purchase_order_ordered_items " +
+            "(po_id, product_id, quantity, pack_name, pack_size, pack_count, unit_cost, line_description) " +
+            "SELECT po_id, product_id, quantity, pack_name, pack_size, pack_count, unit_cost, line_description " +
+            "FROM purchase_order_items WHERE po_id = ?", [poId]);
+          await connection.query(
+            "UPDATE purchase_order_items SET quantity = 0, " +
+            "pack_count = IF(pack_size IS NULL OR pack_size <= 0, NULL, 0) WHERE po_id = ?", [poId]);
+          await trimClosedOrder(connection, poId);
+          await connection.commit();
+        } catch (innerError) {
+          try { await connection.rollback(); } catch (ignored) { }
+          throw innerError;
+        } finally {
+          connection.release();
+        }
+      } else {
+        shortLines = document.shortage.lines.length;
+        shortTotal = document.shortage.total;
+
+        const closed = await db.query(
+          "UPDATE purchase_orders SET status = 'Received', received_at = NOW(), decision_note = ? " +
+          "WHERE po_id = ? AND status = 'Incomplete'",
+          [reason, poId]);
+        if (closed[0].affectedRows === 0) {
+          return response.status(409).json({ error: number + " is no longer an incomplete delivery." });
+        }
+        await trimClosedOrder(db, poId);
+      }
+
+      await writeAuditLog(request, "PO_CLOSED_SHORT",
+        number + " closed with a shortage of " + pesoText(shortTotal) + ": " + reason,
+        { po_id: poId, supplier: order.supplier_name, total_short: shortTotal });
+      await tellManagerAndClerk(
+        number + " closed with a shortage",
+        number + " from " + order.supplier_name + " was closed with " + shortLines +
+        (shortLines === 1 ? " line" : " lines") + " still short, " + pesoText(shortTotal) +
+        " not delivered. Reason: " + reason);
+
+      response.json({
+        message: number + " is closed. " + pesoText(shortTotal) + " of the order was not delivered and is not paid for."
+      });
+    } catch (error) {
+      console.error("Closing the purchase order with a shortage failed:", error.message);
+      response.status(500).json({ error: "Unable to close the purchase order" });
+    }
+  });
+
   async function orderForCode(code) {
     const rowsResult = await db.query(
       "SELECT po_id FROM purchase_orders WHERE supplier_code = ?", [String(code)]);
@@ -1427,8 +1695,13 @@ function registerInventoryRoutes(app, deps) {
         supplier_note: order.supplier_note,
         supplier_ship_date: order.supplier_ship_date,
         discount: order.discount,
-        can_respond: order.status === "Pending" && !order.supplier_response
+        can_respond: order.status === "Pending" && !order.supplier_response,
+        shortage_response: order.shortage_response,
+        shortage_responded_at: order.shortage_responded_at,
+        shortage_note: order.shortage_note,
+        can_answer_shortage: order.status === "Incomplete" && !order.shortage_response
       },
+      shortage: document.shortage || null,
       items: viewItems,
       shop: { store_name: document.shop.store_name, address: document.shop.address }
     };
@@ -1713,6 +1986,92 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
+  // The supplier says whether the rest of an incomplete delivery is coming
+  app.post("/api/supplier-order/:code/shortage", async function (request, response) {
+    const body = request.body || {};
+    const deliver = body.deliver === true;
+    const note = String(body.note || "").trim().slice(0, 255);
+
+    if (!deliver && note.length < 5) {
+      return response.status(400).json({ error: "Say why the rest cannot be delivered, so the shop can act on it." });
+    }
+
+    let shipDate = null;
+    if (deliver) {
+      shipDate = String(body.shipDate || "").trim();
+      const parsed = new Date(shipDate + "T00:00:00");
+      const real = /^\d{4}-\d{2}-\d{2}$/.test(shipDate) && !Number.isNaN(parsed.getTime()) &&
+                   isoDay(parsed) === shipDate;
+      if (!real) {
+        return response.status(400).json({ error: "Pick the date the rest will be delivered." });
+      }
+      if (shipDate < calendarDay(0)) {
+        return response.status(400).json({ error: "Pick today or a later date." });
+      }
+      if (shipDate > calendarDay(365)) {
+        return response.status(400).json({ error: "Pick a date within the next year." });
+      }
+    }
+
+    try {
+      const document = await orderForCode(request.params.code);
+      if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
+      const order = document.order;
+      const number = helpers.poNumber(order.po_id);
+
+      const updated = await db.query(
+        "UPDATE purchase_orders " +
+        "SET shortage_response = ?, shortage_responded_at = NOW(), shortage_note = ?, " +
+        "supplier_ship_date = CASE WHEN ? THEN ? ELSE supplier_ship_date END, " +
+        "status = CASE WHEN ? THEN 'Incomplete' ELSE 'Received' END, " +
+        "received_at = CASE WHEN ? THEN received_at ELSE NOW() END " +
+        "WHERE po_id = ? AND status = 'Incomplete' AND shortage_response IS NULL",
+        [deliver ? "Will deliver" : "Cannot deliver", note || null, deliver, shipDate, deliver, deliver, order.po_id]);
+
+      if (updated[0].affectedRows === 0) {
+        const again = await readOrderDocument(order.po_id);
+        let why = number + " can no longer be answered here: it is " + String(again.order.status).toLowerCase() + ".";
+        if (again.order.status === "Incomplete" && again.order.shortage_response) {
+          why = "The shortage on " + number + " was already answered. Contact the shop to change it.";
+        }
+        return response.status(409).json({ error: why, view: supplierView(again) });
+      }
+
+      const shortage = document.shortage;
+      let title;
+      let message;
+      let details;
+      if (deliver) {
+        title = order.supplier_name + " will deliver the rest of purchase order " + number;
+        message = order.supplier_name + " will deliver the rest of " + number + " (" + pesoText(shortage.total) +
+                  " short) on " + dayText(shipDate) + "." + (note ? " Their note: " + note : "");
+        details = number + " shortage answered by " + order.supplier_name + ": will deliver the rest on " + shipDate +
+                  (note ? ": " + note : "");
+      } else {
+        await trimClosedOrder(db, order.po_id);
+        title = order.supplier_name + " cannot deliver the rest of purchase order " + number;
+        message = order.supplier_name + " cannot deliver the rest of " + number + " (" + pesoText(shortage.total) +
+                  " short): " + note + " The order is closed as Received, and only what arrived is paid for.";
+        details = number + " shortage answered by " + order.supplier_name + ": cannot deliver the rest: " + note;
+      }
+      await tellManagerAndClerk(title, message);
+      await writeAuditLog(request, deliver ? "PO_SHORTAGE_WILL_DELIVER" : "PO_SHORTAGE_CANNOT_DELIVER", details,
+        { po_id: order.po_id, supplier: order.supplier_name, deliver: deliver, ship_date: shipDate,
+          total_short: shortage.total });
+
+      response.json({
+        message: deliver
+          ? "Thank you. " + (document.shop.store_name || "The shop") + " has been told you will deliver the rest on " +
+            dayText(shipDate) + "."
+          : "Thank you. " + (document.shop.store_name || "The shop") + " has been told you cannot deliver the rest.",
+        view: supplierView(await readOrderDocument(order.po_id))
+      });
+    } catch (error) {
+      console.error("Supplier shortage answer failed:", error.message);
+      response.status(500).json({ error: "Your answer could not be saved. Try again in a moment." });
+    }
+  });
+
   app.post("/api/purchase-orders/:poId/receive", async function (request, response) {
     let received;
     if (Array.isArray(request.body && request.body.received)) {
@@ -1736,7 +2095,10 @@ function registerInventoryRoutes(app, deps) {
     }
 
     const body = request.body || {};
-    const discount = Math.max(0, Number(body.discount) || 0);
+    // No discount posted keeps the one on the order
+    const discount = body.discount === undefined || body.discount === null ? null : Math.max(0, Number(body.discount) || 0);
+    // The number of deliveries the form saw counted in. A stale form no longer matches.
+    const seen = body.seen === undefined || body.seen === null ? null : Number(body.seen);
 
     try {
       const stateResult = await db.query(
@@ -1758,31 +2120,78 @@ function registerInventoryRoutes(app, deps) {
       const typed = typedResult[0];
 
       const output = await inventoryClerkProcedures.receivePurchaseOrder(
-        [request.params.poId, JSON.stringify(sheet), discount, getActorId(request)]
+        [request.params.poId, JSON.stringify(sheet), discount, getActorId(request), Number.isFinite(seen) ? seen : null]
       );
 
       if (output.status_code !== 200) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
+      // The delivery is counted in. Whatever fails from here on must not make the clerk send it again.
       try {
-        for (let i = 0; i < typed.length; i++) {
-          await db.query(
-            "UPDATE purchase_order_ordered_items SET line_description = ? WHERE po_id = ? AND product_id = ?",
-            [typed[i].line_description, Number(request.params.poId), typed[i].product_id]
-          );
+        try {
+          for (let i = 0; i < typed.length; i++) {
+            await db.query(
+              "UPDATE purchase_order_ordered_items SET line_description = ? WHERE po_id = ? AND product_id = ?",
+              [typed[i].line_description, Number(request.params.poId), typed[i].product_id]
+            );
+          }
+        } catch (copyError) {
+          console.error("The order was received, but its line descriptions were not copied:", copyError.message);
         }
-      } catch (copyError) {
-        console.error("The order was received, but its line descriptions were not copied:", copyError.message);
-      }
 
-      const remarks = shortText(body.remarks, 255);
-      if (remarks) {
-        await db.query("UPDATE purchase_orders SET delivery_remarks = ? WHERE po_id = ?",
-          [remarks, Number(request.params.poId)]);
-      }
+        const remarks = shortText(body.remarks, 255);
+        if (remarks) {
+          await db.query("UPDATE purchase_orders SET delivery_remarks = ? WHERE po_id = ?",
+            [remarks, Number(request.params.poId)]);
+        }
 
-      response.json({ message: output.message, lines: output.lines, extras: output.extras });
+        // A delivery that came in short leaves the order Incomplete: tell the people and the supplier
+        const poId = Number(request.params.poId);
+        const afterResult = await db.query("SELECT status FROM purchase_orders WHERE po_id = ?", [poId]);
+        const incomplete = afterResult[0].length > 0 && afterResult[0][0].status === "Incomplete";
+        if (!incomplete) {
+          return response.json({ message: output.message, lines: output.lines, extras: output.extras, incomplete: false });
+        }
+
+        const number = helpers.poNumber(poId);
+        const shortage = await readShortage(poId);
+        let message = output.message;
+
+        try {
+          const supplierResult = await db.query(
+            "SELECT s.supplier_name FROM purchase_orders po JOIN suppliers s ON s.supplier_id = po.supplier_id WHERE po.po_id = ?",
+            [poId]);
+          await tellManagerAndClerk(
+            number + " came in short",
+            number + " from " + supplierResult[0][0].supplier_name + " came in short: " + shortage.lines.length +
+            (shortage.lines.length === 1 ? " line is" : " lines are") + " still owed, " + pesoText(shortage.total) +
+            " in all. The order stays Incomplete.");
+        } catch (notifyError) {
+          console.error("Telling the manager and clerk that " + number + " came in short failed:", notifyError.message);
+        }
+
+        // The receipt stands even when the notice cannot go out; the order stays Incomplete
+        let emailed = { ok: false, problem: "Something went wrong while emailing it." };
+        try {
+          emailed = await emailShortageToSupplier(request, poId);
+        } catch (mailError) {
+          console.error("Emailing the shortage notice failed:", mailError.message);
+        }
+        if (emailed.ok) {
+          message += " The supplier was emailed the shortage notice at " + emailed.email + ".";
+        } else {
+          message += " The supplier was not emailed: " + emailed.problem;
+        }
+
+        return response.json({
+          message: message, lines: output.lines, extras: output.extras,
+          incomplete: true, emailed: emailed.ok, total_short: shortage.total
+        });
+      } catch (afterError) {
+        console.error("The delivery was counted in, but finishing up failed:", afterError.message);
+        return response.json({ message: output.message, lines: output.lines, extras: output.extras });
+      }
     } catch (error) {
       console.error("Receive PO failed:", error.message);
       response.status(500).json({ error: "Unable to receive the purchase order" });

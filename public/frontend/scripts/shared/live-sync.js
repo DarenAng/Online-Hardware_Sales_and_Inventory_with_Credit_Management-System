@@ -33,6 +33,7 @@ const PANEL_SCOPES = {
     'clerk-reorder':      ['inventory', 'sales', 'returns'],
     'clerk-adjustments':  ['inventory'],
     'clerk-po':           ['inventory'],
+    'clerk-receiving':    ['inventory'],
     'clerk-returns':      ['returns'],
     'clerk-archive':      ['inventory'],
     'clerk-deliveries':   ['deliveries', 'sales'],

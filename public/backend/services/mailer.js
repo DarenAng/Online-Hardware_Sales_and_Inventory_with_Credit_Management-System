@@ -584,7 +584,118 @@ async function purchaseOrderMessage(details) {
   };
 }
 
+// The notice sent when a delivery came in short: what is missing, how much, and the link to answer
+async function shortageMessage(details) {
+  const order = details.order;
+  const lines = details.lines || [];
+  const shop = details.shop;
+
+  let shopName = "the hardware shop";
+  if (shop && shop.store_name) shopName = shop.store_name;
+
+  const sender = MAIL_FROM_NAME || shopName;
+  const number = helpers.poNumber(order.po_id);
+  const link = details.link || "";
+
+  let greeting = "Hello";
+  if (order.contact_person) {
+    greeting = "Hello " + order.contact_person;
+  }
+
+  let missingText = "";
+  let missingRows = "";
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const quantity = quantityText(line.short) + " " + (line.unit_name || "");
+    missingText += "    " + line.product_name + ": " + quantity.trim() + " short at PHP " + money(line.unit_cost) +
+      " each, PHP " + money(line.amount) + "\n";
+    missingRows += "<tr>" +
+      "<td style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\">" + htmlText(line.product_name) + "</td>" +
+      "<td align=\"right\" style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\">" + htmlText(quantity.trim()) + "</td>" +
+      "<td align=\"right\" style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\">&#8369;" + money(line.unit_cost) + "</td>" +
+      "<td align=\"right\" style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\">&#8369;" + money(line.amount) + "</td>" +
+      "</tr>";
+  }
+
+  let answerText = "Please contact " + shopName + " to tell us when the rest will come.\n\n";
+  if (link) {
+    answerText = "Open this link to tell us whether you will deliver the rest, and when, or that you cannot:\n\n    " +
+      link + "\n\n";
+  }
+
+  const body =
+    greeting + ",\n\n" +
+    "Our delivery for purchase order " + number + " came in short. These items did not arrive:\n\n" +
+    missingText + "\n" +
+    "    Total short:   PHP " + money(details.total) + "\n\n" +
+    answerText +
+    "-- \n" +
+    sender + "\n" +
+    "This message was sent automatically. To reply, contact the shop directly.\n";
+
+  const images = [];
+  if (link && details.qr) {
+    images.push({
+      cid: "qr-" + order.po_id + "@lucelyn-hardware",
+      filename: "order-link-qr.png",
+      contentType: "image/png",
+      content: details.qr
+    });
+  }
+
+  const button = "display:inline-block;background:" + MAIL_GO + ";color:#ffffff;text-decoration:none;" +
+                 "font-weight:bold;font-size:15px;padding:12px 22px;border-radius:3px;";
+  let answerHtml = "<p style=\"margin:16px 0 0;\">Please contact " + htmlText(shopName) +
+    " to tell us when the rest will come.</p>";
+  if (link) {
+    answerHtml = "<p style=\"margin:16px 0 12px;\">Tell us whether you will deliver the rest, and when, or that you cannot.</p>" +
+      "<a href=\"" + htmlText(link) + "\" style=\"" + button + "\">Answer on the order's page</a>" +
+      (images.length > 0
+        ? "<p style=\"margin:16px 0 0;\"><img src=\"cid:" + images[0].cid + "\" width=\"120\" height=\"120\" " +
+          "alt=\"QR code for the order's page\" style=\"display:block;width:120px;height:120px;border:0;\"></p>"
+        : "") +
+      "<p style=\"margin:12px 0 0;font-size:12px;color:" + MAIL_STEEL + ";word-break:break-all;\">" +
+      "If the button does not work, open: " + htmlText(link) + "</p>";
+  }
+
+  const html =
+    "<!DOCTYPE html><html><head><meta charset=\"UTF-8\"><title>" + htmlText(number) + "</title></head>" +
+    "<body style=\"margin:0;padding:24px 12px;background:" + MAIL_PAPER + ";font-family:" + MAIL_FONT + ";color:" + MAIL_INK + ";\">" +
+    "<div style=\"max-width:640px;margin:0 auto;background:#ffffff;border:1px solid " + MAIL_LINE + ";padding:24px 28px;" +
+      "font-size:15px;line-height:1.6;\">" +
+      "<p style=\"margin:0 0 12px;\">" + htmlText(greeting) + ",</p>" +
+      "<p style=\"margin:0 0 16px;\">Our delivery for purchase order <strong>" + htmlText(number) +
+        "</strong> came in short. These items did not arrive.</p>" +
+      "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
+        "style=\"border-collapse:collapse;font-size:14px;\">" +
+        "<tr style=\"background:" + MAIL_PAPER + ";\">" +
+          "<th align=\"left\" style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\">Item</th>" +
+          "<th align=\"right\" style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\">Short</th>" +
+          "<th align=\"right\" style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\">Unit price</th>" +
+          "<th align=\"right\" style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\">Amount</th></tr>" +
+        missingRows +
+        "<tr><td colspan=\"3\" align=\"right\" style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\"><strong>Total short</strong></td>" +
+          "<td align=\"right\" style=\"padding:8px 10px;border:1px solid " + MAIL_LINE + ";\"><strong>&#8369;" +
+          money(details.total) + "</strong></td></tr>" +
+      "</table>" +
+      answerHtml +
+      "<p style=\"margin:24px 0 0;font-size:12px;color:" + MAIL_STEEL + ";\"><strong style=\"color:" + MAIL_INK + ";\">" +
+        htmlText(sender) + "</strong><br>This message was sent automatically. To reply, contact the shop directly.</p>" +
+    "</div></body></html>";
+
+  return {
+    to: order.supplier_email,
+    fromName: sender,
+    subject: "Incomplete delivery for purchase order " + number,
+    body: body,
+    html: html,
+    images: images,
+    attachments: []
+  };
+}
+
 module.exports = {
+  shortageMessage: shortageMessage,
   isMailConfigured: isMailConfigured,
   sendMail: sendMail,
   firstPasswordMessage: firstPasswordMessage,

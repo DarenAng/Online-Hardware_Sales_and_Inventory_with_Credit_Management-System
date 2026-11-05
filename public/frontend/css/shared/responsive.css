@@ -603,8 +603,8 @@
 
 .po-detail-layout {
     display: grid;
-    /* The items table (with its Material ID column) gets two thirds of the width. */
-    grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+    /* The order facts keep a fixed width; the items table gets the rest. */
+    grid-template-columns: 320px minmax(0, 1fr);
     gap: 20px;
     align-items: start;
 }

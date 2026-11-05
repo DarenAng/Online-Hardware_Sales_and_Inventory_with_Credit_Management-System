@@ -160,6 +160,16 @@
 
 .recv-extras-head { margin-top: 18px; }
 
+/* Fixed column widths, so the table does not shift when a Short amount appears. */
+#recv-table { table-layout: fixed; }
+#recv-table th:nth-child(2) { width: 15%; }
+#recv-table th:nth-child(3) { width: 18%; }
+#recv-table th:nth-child(4) { width: 24%; }
+
+.recv-over { color: var(--signal-ink); font-weight: 600; }
+
+.recv-total { margin: 12px 0 0; text-align: right; font-weight: 600; color: var(--signal-ink); }
+
 @media (max-width: 640px) {
     .po-form-footer .btn { flex: 1 1 auto; }
 }

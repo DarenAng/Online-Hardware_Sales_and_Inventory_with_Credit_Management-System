@@ -46,6 +46,7 @@ function lineQuantity(item) {
 function statusWords(order) {
   if (order.status === "For Approval") return "For Approval";
   if (order.status === "Cancelled") return "Declined";
+  if (order.status === "Incomplete") return "Incomplete delivery";
   if (order.status === "Pending") {
     if (order.supplier_response === "Accepted") return "Accepted";
     if (order.supplier_response === "Declined") return "Declined";

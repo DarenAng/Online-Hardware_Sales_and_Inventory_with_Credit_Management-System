@@ -384,12 +384,21 @@ function apiMarkPurchaseOrderSent(poId) {
     return sendJson('/api/purchase-orders/' + poId + '/mark-sent', 'POST', {});
 }
 
-function apiReceivePurchaseOrder(poId, received, discount, remarks) {
+function apiReceivePurchaseOrder(poId, received, discount, remarks, seen) {
     return sendJson('/api/purchase-orders/' + poId + '/receive', 'POST', {
         received: received,
         discount: discount,
-        remarks: remarks || null
+        remarks: remarks || null,
+        seen: seen
     });
+}
+
+function apiSendShortageNotice(poId) {
+    return sendJson('/api/purchase-orders/' + poId + '/shortage/send', 'POST', {});
+}
+
+function apiCloseShort(poId, reason) {
+    return sendJson('/api/purchase-orders/' + poId + '/close-short', 'POST', { reason: reason });
 }
 
 function apiGetPurchaseOrderReport(poId) {

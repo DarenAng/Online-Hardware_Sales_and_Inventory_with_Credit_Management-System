@@ -46,18 +46,6 @@ function showAdjust(event) {
     renderAdjustForm();
 }
 
-// From a purchase order that is Out for Delivery: open Stock Adjustment with that order picked
-async function receiveFromPurchaseOrder(poId) {
-    closeModal('detail-modal');
-    showAdjust();
-    await loadReferenceRecords();
-    if (!findReferencePo(poId)) {
-        notifyError(poNumber(poId) + ' could not be opened. Try again.', 'Not opened');
-        return;
-    }
-    await adjustFromPo(poId);
-}
-
 function showAdjustmentHistory(event) {
     showInventoryPanel('panel-adjust-log', 'Adjustment History', event);
 }
@@ -524,7 +512,6 @@ async function refreshAdjustScreen() {
     loadStockBanner();
 }
 
-let referencePos = [];
 let referenceReturns = [];
 let referenceProblem = '';
 let referenceSearch = '';
@@ -534,21 +521,6 @@ const REFERENCE_PAGE_SIZE = 10;
 
 async function loadReferenceRecords() {
     const problems = [];
-
-    if (holdsFeature('purchase-orders')) {
-        try {
-            const orders = await apiGetPurchaseOrders();
-            const accepted = [];
-            for (let i = 0; i < orders.length; i++) {
-                if (poStage(orders[i]) === 'Out for Delivery') accepted.push(orders[i]);
-            }
-            referencePos = accepted;
-        } catch (error) {
-            problems.push('purchase orders');
-        }
-    } else {
-        referencePos = [];
-    }
 
     if (holdsFeature('returns')) {
         try {
@@ -590,13 +562,6 @@ function groupOpenReturns(rows) {
 function findReturnGroup(key) {
     for (let i = 0; i < referenceReturns.length; i++) {
         if (referenceReturns[i].key === key) return referenceReturns[i];
-    }
-    return undefined;
-}
-
-function findReferencePo(poId) {
-    for (let i = 0; i < referencePos.length; i++) {
-        if (Number(referencePos[i].po_id) === Number(poId)) return referencePos[i];
     }
     return undefined;
 }
@@ -655,22 +620,6 @@ function renderAttentionList() {
     const query = referenceSearch;
     const rows = [];
 
-    if (referenceType === 'all' || referenceType === 'po') {
-        for (let i = 0; i < referencePos.length; i++) {
-            const po = referencePos[i];
-            if (query && !prefixMatch(['PO', String(po.po_id), '#' + po.po_id, poNumber(po.po_id), po.supplier_name], query)) continue;
-            const picked = adjustSource && adjustSource.kind === 'po' && Number(adjustSource.po.po_id) === Number(po.po_id);
-            const lines = Number(po.line_count) || 0;
-            rows.push(referenceRowHtml('adjustFromPo(' + Number(po.po_id) + ')',
-                'Receive purchase order ' + po.po_id,
-                poNumber(po.po_id),
-                escapeHtml(po.supplier_name || 'No supplier'),
-                '', '',
-                lines ? lines + (lines === 1 ? ' item' : ' items') : 'PO',
-                picked));
-        }
-    }
-
     if (referenceType === 'all' || referenceType === 'return') {
         for (let i = 0; i < referenceReturns.length; i++) {
             const group = referenceReturns[i];
@@ -726,7 +675,6 @@ function renderAttentionList() {
     if (rows.length === 0) {
         let empty = 'Nothing to show.';
         if (query) empty = 'Nothing matches that search.';
-        else if (referenceType === 'po') empty = 'No purchase order is waiting for its delivery.';
         else if (referenceType === 'return') empty = 'No returned item is open.';
         else if (referenceType === 'material' && !invLoaded) empty = 'Loading materials...';
         list.innerHTML = note + '<li class="attention-empty">' + escapeHtml(empty) + '</li>';
@@ -1183,7 +1131,6 @@ async function handleAdjustStock(event) {
     event.preventDefault();
     const form = event.target;
 
-    if (adjustSource && adjustSource.kind === 'po') { await applyPoAdjustment(); return; }
     if (adjustSource && adjustSource.kind === 'return') { await applyReturnAdjustment(); return; }
 
     if (!adjustMaterial || !form.elements.productId.value) {
@@ -1328,7 +1275,6 @@ function renderAdjustForm() {
     show('adjust-material-field', kind === 'material');
     show('adjust-unit-field', kind === 'material');
     show('adjust-qty-field', kind === 'material');
-    show('adjust-type-field', kind !== 'po');
 
     renderAdjustTypeOptions(kind);
     renderAdjustSource();
@@ -1338,9 +1284,7 @@ function renderAdjustForm() {
 
     const button = document.querySelector('#adjust-form button[type="submit"]');
     if (button) {
-        let label = 'Apply Adjustment';
-        if (kind === 'po') label = 'Receive into Stock';
-        button.textContent = label;
+        button.textContent = 'Apply Adjustment';
     }
 }
 
@@ -1352,8 +1296,6 @@ function renderAdjustTypeOptions(kind) {
     let options;
     if (kind === 'return') {
         options = [['Add', 'Add to stock'], ['Discard', 'Discard Item']];
-    } else if (kind === 'po') {
-        options = [['Add', 'Add to stock']];
     } else {
         options = [['Recount', 'Manual count'], ['Add', 'Add to stock'], ['Remove', 'Remove from stock']];
     }
@@ -1374,23 +1316,15 @@ function renderAdjustSource() {
 
     if (!adjustSource) { box.hidden = true; box.innerHTML = ''; return; }
 
-    let title;
-    let sub;
-    if (adjustSource.kind === 'po') {
-        const po = adjustSource.po;
-        title = poNumber(po.po_id) + ' · ' + escapeHtml(po.supplier_name || '');
-        sub = 'Accepted by the supplier. What arrived goes onto the shelf and the order is marked Received.';
-    } else {
-        const group = adjustSource.group;
-        title = escapeHtml(returnGroupTitle(group));
-        sub = 'Filed ' + escapeHtml(String(group.filedOn || '').slice(0, 10)) +
-            (group.filedBy ? ' by ' + escapeHtml(group.filedBy) : '') + '. Add it back to stock, or discard it.';
-    }
+    const group = adjustSource.group;
+    const title = escapeHtml(returnGroupTitle(group));
+    const sub = 'Filed ' + escapeHtml(String(group.filedOn || '').slice(0, 10)) +
+        (group.filedBy ? ' by ' + escapeHtml(group.filedBy) : '') + '. Add it back to stock, or discard it.';
 
     box.hidden = false;
     box.innerHTML =
         '<div class="adjust-source-text">' +
-            '<span class="adjust-source-eyebrow">' + (adjustSource.kind === 'po' ? 'Purchase order' : 'Returned item') + '</span>' +
+            '<span class="adjust-source-eyebrow">Returned item</span>' +
             '<span class="adjust-source-title">' + title + '</span>' +
             '<span class="adjust-source-sub">' + sub + '</span>' +
         '</div>';
@@ -1425,19 +1359,11 @@ function adjustFormHasWork() {
     if (form.elements.reason.value.trim() !== '') return true;
 
     if (adjustSource && adjustSource.loading) return false;
-    if (adjustSource && adjustSource.kind === 'po') {
-        const lines = poAdjustLines();
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].quantity !== Number(lines[i].item.quantity)) return true;
-        }
-        return false;
-    }
     if (adjustSource) return form.elements.adjustmentType.value !== 'Add';
     return form.elements.quantity.value.trim() !== '';
 }
 
 function adjustWhat() {
-    if (adjustSource && adjustSource.kind === 'po') return 'this delivery count';
     if (adjustSource) return 'this decision on the returned items';
     return 'this stock adjustment';
 }
@@ -1467,36 +1393,17 @@ function renderAdjustLines() {
     }
 
     let rows = '';
-    let count = 0;
-    if (adjustSource.kind === 'po') {
-        const items = adjustSource.items;
-        count = items.length;
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            rows += '<tr>' +
-                '<td class="cell-id">' + materialCode(item.product_id) + '</td>' +
-                '<td class="cell-name">' + escapeHtml(item.product_name) +
-                    '<span class="cell-sub">Ordered ' + escapeHtml(poQuantityText(item)) + '</span>' +
-                    '<span class="adjust-line-note" id="adjust-line-note-' + i + '"></span></td>' +
-                '<td>' + escapeHtml(item.unit_name || '') + '</td>' +
-                '<td class="cell-num"><input type="number" class="form-control adjust-line-qty" ' +
-                    'id="adjust-line-qty-' + i + '" min="0" step="1" value="' + Number(item.quantity) + '" ' +
-                    'oninput="renderAdjustPreview()" aria-label="Quantity arrived: ' + escapeHtml(item.product_name) + '"></td>' +
-                '</tr>';
-        }
-    } else {
-        const items = adjustSource.group.items;
-        count = items.length;
-        for (let i = 0; i < items.length; i++) {
-            const r = items[i];
-            rows += '<tr>' +
-                '<td class="cell-id">' + materialCode(r.product_id) + '</td>' +
-                '<td class="cell-name">' + escapeHtml(r.product_name) +
-                    '<span class="cell-sub">Report ' + returnCode(r.return_id) + ' · ' + returnLineWent(r) + '</span></td>' +
-                '<td>' + escapeHtml(r.unit_name || '') + '</td>' +
-                '<td class="cell-num">' + Number(r.quantity) + '</td>' +
-                '</tr>';
-        }
+    const items = adjustSource.group.items;
+    const count = items.length;
+    for (let i = 0; i < items.length; i++) {
+        const r = items[i];
+        rows += '<tr>' +
+            '<td class="cell-id">' + materialCode(r.product_id) + '</td>' +
+            '<td class="cell-name">' + escapeHtml(r.product_name) +
+                '<span class="cell-sub">Report ' + returnCode(r.return_id) + ' · ' + returnLineWent(r) + '</span></td>' +
+            '<td>' + escapeHtml(r.unit_name || '') + '</td>' +
+            '<td class="cell-num">' + Number(r.quantity) + '</td>' +
+            '</tr>';
     }
 
     if (count === 0) {
@@ -1539,36 +1446,6 @@ function renderSourcePreview(box) {
     box.textContent = '';
     if (!adjustSource || adjustSource.loading) return;
 
-    if (adjustSource.kind === 'po') {
-        const lines = poAdjustLines();
-        let total = 0;
-        let blank = false;
-        let off = 0;
-        for (let i = 0; i < lines.length; i++) {
-            const state = poLineState(lines[i]);
-            const note = document.getElementById('adjust-line-note-' + i);
-            if (note) {
-                note.className = 'adjust-line-note' + (state.kind ? ' is-' + state.kind : '');
-                note.textContent = state.text;
-            }
-            if (state.kind === 'bad') blank = true;
-            else if (lines[i].quantity > 0) total++;
-            if (state.kind === 'under' || state.kind === 'over') off++;
-        }
-        if (blank) {
-            box.className = 'adjust-preview is-stop';
-            box.textContent = 'Every line needs a whole number of 0 or more. Type 0 for what did not arrive.';
-            return;
-        }
-        box.className = 'adjust-preview is-good';
-        box.innerHTML = '<span class="preview-name">' + poNumber(adjustSource.po.po_id) + '</span>' +
-            '<span class="preview-figures">' + total + ' of ' + lines.length +
-                (lines.length === 1 ? ' item' : ' items') + ' will be added to stock</span>' +
-            (off > 0 ? '<span class="preview-note">' + off + (off === 1 ? ' item differs' : ' items differ') +
-                ' from the order, so a Report is added to the order.</span>' : '');
-        return;
-    }
-
     const select = document.getElementById('adjust-type');
     const choice = select ? select.value : 'Add';
     const items = adjustSource.group.items;
@@ -1578,49 +1455,6 @@ function renderSourcePreview(box) {
             ? 'Back on the shelf: ' + items.length + (items.length === 1 ? ' item' : ' items')
             : 'Discarded: ' + items.length + (items.length === 1 ? ' item' : ' items')) + '</span>' +
         '<span class="preview-note">The report' + (items.length === 1 ? ' is' : 's are') + ' then closed.</span>';
-}
-
-function poLineState(line) {
-    const quantity = line.quantity;
-    if (!Number.isInteger(quantity) || quantity < 0) return { kind: 'bad', text: 'Type a whole number, 0 or more.' };
-    const difference = quantity - Number(line.item.quantity);
-    const unit = line.item.unit_name || '';
-    if (difference < 0) return { kind: 'under', text: 'Under-delivery: ' + qtyText(-difference, unit) + ' missing' };
-    if (difference > 0) return { kind: 'over', text: 'Over-delivery: ' + qtyText(difference, unit) + ' over' };
-    return { kind: '', text: '' };
-}
-
-function poAdjustLines() {
-    const lines = [];
-    if (!adjustSource || adjustSource.kind !== 'po') return lines;
-    for (let i = 0; i < adjustSource.items.length; i++) {
-        const field = document.getElementById('adjust-line-qty-' + i);
-        lines.push({ item: adjustSource.items[i], quantity: readQuantity(field ? field.value : adjustSource.items[i].quantity) });
-    }
-    return lines;
-}
-
-async function adjustFromPo(poId) {
-    const po = findReferencePo(poId);
-    if (!po) return;
-
-    const ticket = ++adjustSourceLoading;
-    setAdjustMaterial(null);
-    const box = adjustMaterialBox();
-    if (box) box.value = '';
-    setAdjustSource({ kind: 'po', po: po, items: [], loading: true });
-    renderAttentionList();
-
-    try {
-        const items = await apiGetPurchaseOrderItems(poId);
-        if (ticket !== adjustSourceLoading) return;
-        setAdjustSource({ kind: 'po', po: po, items: items });
-        focusAdjustForm('adjust-line-qty-0');
-    } catch (error) {
-        if (ticket !== adjustSourceLoading) return;
-        setAdjustSource(null);
-        notifyError('That purchase order could not be opened. Try again.', 'Not opened');
-    }
 }
 
 function adjustFromReturn(key) {
@@ -1644,10 +1478,7 @@ function adjustFromReturn(key) {
 function dropStaleAdjustSource() {
     if (!adjustSource || adjustSource.loading) return;
 
-    if (adjustSource.kind === 'po' && !findReferencePo(adjustSource.po.po_id)) {
-        notifyWarning(poNumber(adjustSource.po.po_id) + ' is no longer waiting for its delivery.', 'Order closed');
-        setAdjustSource(null);
-    } else if (adjustSource.kind === 'return') {
+    if (adjustSource.kind === 'return') {
         const fresh = findReturnGroup(adjustSource.group.key);
         if (!fresh) {
             notifyWarning(returnGroupTitle(adjustSource.group) + ' is no longer open.', 'Return closed');
@@ -1657,64 +1488,6 @@ function dropStaleAdjustSource() {
             renderAdjustLines();
             renderAdjustPreview();
         }
-    }
-}
-
-async function applyPoAdjustment() {
-    if (!adjustSource || adjustSource.loading) return;
-    const po = adjustSource.po;
-    const lines = poAdjustLines();
-
-    if (lines.length === 0) { notifyWarning('This order has no items to add.', 'Nothing to add'); return; }
-
-    const received = [];
-    const differs = [];
-    for (let i = 0; i < lines.length; i++) {
-        const quantity = lines[i].quantity;
-        const state = poLineState(lines[i]);
-        if (state.kind === 'bad') {
-            notifyWarning('Type how many of ' + lines[i].item.product_name + ' arrived, as a whole number, or 0.',
-                'Quantity needed');
-            const field = document.getElementById('adjust-line-qty-' + i);
-            if (field) field.focus();
-            return;
-        }
-        if (state.kind) differs.push(lines[i].item.product_name + ': ' + state.text);
-        received.push({
-            productId: lines[i].item.product_id,
-            quantity: quantity,
-            unitCost: Number(lines[i].item.unit_cost) || 0
-        });
-    }
-
-    const form = document.getElementById('adjust-form');
-    const remarks = form ? form.elements.reason.value.trim() : '';
-
-    const yes = await askConfirm(
-        'The quantities on the form go onto the shelf, and purchase order ' + poNumber(po.po_id) + ' is marked Received.' +
-        (differs.length > 0 ? ' The delivery differs from the order, so a Report is added to the order.' : ''),
-        { title: 'Add this delivery to stock?', eyebrow: 'Stock Adjustment', confirmLabel: 'Add to stock',
-          detail: differs.length > 0 ? differs : undefined });
-    if (!yes) return;
-
-    try {
-        const response = await apiReceivePurchaseOrder(po.po_id, received, Number(po.discount) || 0, remarks);
-        const result = await response.json();
-        if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
-
-        notifySuccess(result.message + (differs.length > 0 ? ' A Report was added to the order.' : ''),
-            'Delivery added to stock');
-        if (form) form.elements.reason.value = '';
-        if (typeof poMaterialsLoaded !== 'undefined') poMaterialsLoaded = false;
-        setAdjustSource(null);
-
-        invLoaded = false;
-        await ensureInventoryLoaded(true);
-        await loadReferenceRecords();
-        afterMaterialsLoaded(invLoaded);
-        await afterStockMoved();
-    } catch (error) {
-        notifyOffline();
     }
 }
 
@@ -2570,6 +2343,7 @@ if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html'))
         buildAdjustmentsPanel();
         buildReorderPanel();
         buildClerkPurchaseOrderPanel();
+        buildReceivingPanel();
         buildReturnsPanel();
         buildInventoryArchivePanel();
         buildClerkRecordsPanel();
