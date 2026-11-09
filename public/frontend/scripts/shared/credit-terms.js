@@ -46,6 +46,13 @@ function creditTermsPage(data) {
     let rateText = penaltyRateWord(t.penalty_rate) + ' a month of the unpaid balance, for every month or part of a month a purchase stays unpaid after its due date';
     if (t.penalty_rate_is_own) rateText += ' (the rate set for this account)';
 
+    // Interest is charged once on what is put on account, for the whole term
+    let interestText = 'None is charged';
+    if (Number(t.interest_rate) > 0) {
+        interestText = Number(t.interest_rate) + '% of the amount put on account, charged once for the whole term ' +
+            '(the rate the store usually charges; the receipt of each credit purchase shows the rate used)';
+    }
+
     let termsHtml = '';
     for (let i = 0; i < t.lines.length; i++) {
         termsHtml += '<li>' + escapeHtml(t.lines[i]) + '</li>';
@@ -65,9 +72,10 @@ function creditTermsPage(data) {
         '<h3>The credit account</h3>' +
         '<table class="cp-facts">' +
             creditPrintRow('Credit limit', peso(c.credit_limit), true) +
-            creditPrintRow('Payment due', t.due_days + ' days after the date of each credit purchase') +
+            creditPrintRow('Payment due', 'The due date on the receipt of each credit purchase, 1 to 12 months after the purchase (' +
+                t.term_months + (Number(t.term_months) === 1 ? ' month' : ' months') + ' unless set otherwise at the counter)') +
             creditPrintRow('Late-payment penalty', escapeHtml(rateText)) +
-            creditPrintRow('Interest', 'None is charged') +
+            creditPrintRow('Interest', interestText) +
         '</table>' +
 
         '<h3>Terms</h3>' +

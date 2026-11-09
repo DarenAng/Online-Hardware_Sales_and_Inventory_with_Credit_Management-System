@@ -237,6 +237,7 @@ async function openCredit(saleId) {
         detailField('Date', dayText(sale.sale_date)) +
         detailField('Sale Type', escapeHtml(sale.payment_method)) +
         detailField('Sale Amount', peso(sale.final_amount));
+    if (Number(sale.credit_interest_amount) > 0) body += detailField('Interest', peso(sale.credit_interest_amount));
     if (Number(sale.penalty_amount) > 0) body += detailField('Late Penalty', peso(sale.penalty_amount));
     if (Number(sale.refunded_amount) > 0) body += detailField('Refunded', peso(sale.refunded_amount));
     body += detailField('Total Due', peso(sale.amount_due)) +

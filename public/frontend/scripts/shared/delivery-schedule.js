@@ -158,7 +158,7 @@ async function loadDeliverySchedule(quiet) {
         scheduleRows = [];
         if (Array.isArray(rows)) {
             for (let i = 0; i < rows.length; i++) {
-                if (rows[i].status !== 'Delivered' && rows[i].status !== 'Failed') {
+                if (rows[i].status !== 'Delivered' && rows[i].status !== 'Failed' && rows[i].status !== 'Cancelled') {
                     scheduleRows.push(rows[i]);
                 }
             }

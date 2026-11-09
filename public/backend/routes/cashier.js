@@ -7,12 +7,12 @@ const addressPartsProblem = helpers.addressPartsProblem;
 const cleanPaymentDetails = require("../payment-details").cleanPaymentDetails;
 
 const NEXT_DELIVERY_STATUS = {
-  "Pending":          ["In Transit"],
-  "In Transit":       ["Out for Delivery"],
-  "Out for Delivery": ["Delivered", "Delayed", "Failed"],
-  "Delayed":          ["Out for Delivery", "Failed"],
-  "Failed":           ["Pending"],
-  "Delivered":        []
+  "Pending":          ["Out for Delivery"],
+  "Out for Delivery": ["Delivered", "Delayed", "Failed", "Cancelled"],
+  "Delayed":          ["Out for Delivery", "Failed", "Cancelled"],
+  "Failed":           ["Pending", "Cancelled"],
+  "Delivered":        [],
+  "Cancelled":        []
 };
 const ALL_DELIVERY_STATUSES = Object.keys(NEXT_DELIVERY_STATUS);
 
@@ -144,7 +144,7 @@ function registerCashierRoutes(app, deps) {
           "       FROM sales s\n" +
           "       LEFT JOIN customers c ON c.customer_id = s.customer_id\n" +
           "       JOIN staff st ON st.staff_id = s.cashier_staff_id\n" +
-          "       LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE\n" +
+          "       LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE AND d.status <> 'Cancelled'\n" +
           "       WHERE " + where.join(" AND ") + "\n" +
           "       ORDER BY s.sale_date DESC, s.sale_id DESC",
         params
@@ -174,6 +174,23 @@ function registerCashierRoutes(app, deps) {
 
     if (!paymentMethod || !Array.isArray(items) || items.length === 0) {
       return response.status(400).json({ error: "A payment method and at least one item are required" });
+    }
+
+    // A credit sale carries its interest rate (percent, charged once) and its term in months
+    let creditRate = null;
+    let creditTerm = null;
+    if (paymentMethod === "Credit") {
+      const rateText = String(request.body.creditRate === undefined || request.body.creditRate === null ? "" : request.body.creditRate).trim();
+      const termText = String(request.body.creditTerm === undefined || request.body.creditTerm === null ? "" : request.body.creditTerm).trim();
+      creditRate = Number(rateText);
+      creditTerm = Number(termText);
+      if (rateText === "" || !Number.isFinite(creditRate) || creditRate < 0 || creditRate > 100) {
+        return response.status(400).json({ error: "The interest rate on a credit sale is 0 to 100 percent." });
+      }
+      if (termText === "" || !Number.isInteger(creditTerm) || creditTerm < 1 || creditTerm > 12) {
+        return response.status(400).json({ error: "The term of a credit sale is 1 to 12 months." });
+      }
+      creditRate = Math.round(creditRate * 100) / 100;
     }
 
     let expectedFigure = null;
@@ -306,7 +323,8 @@ function registerCashierRoutes(app, deps) {
     try {
       const output = await cashierProcedures.recordSale(
         [customerId || null, null, getActorId(request), expectedFigure, amountPaid || 0,
-         paymentMethod, JSON.stringify(items), downMethod, qr ? qr.id : null, payDetails]
+         paymentMethod, JSON.stringify(items), downMethod, qr ? qr.id : null, payDetails,
+         creditRate, creditTerm]
       );
 
       if (output.status_code !== 200) {
@@ -378,7 +396,7 @@ function registerCashierRoutes(app, deps) {
         "SELECT st.staff_id, st.full_name,\n" +
           "       (SELECT COUNT(*) FROM deliveries d\n" +
           "         WHERE d.delivery_staff_id = st.staff_id AND d.is_archived = FALSE\n" +
-          "           AND d.status NOT IN ('Delivered', 'Failed')\n" +
+          "           AND d.status NOT IN ('Delivered', 'Failed', 'Cancelled')\n" +
           "           AND DATE(d.scheduled_date) = COALESCE(NULLIF(?, ''), CURDATE())) AS delivery_count\n" +
           "       FROM staff st\n" +
           "       JOIN roles r ON r.role_id = st.role_id\n" +
@@ -538,6 +556,9 @@ function registerCashierRoutes(app, deps) {
     if (status === "Failed" && String(remarks || "").trim().length < 5) {
       return response.status(400).json({ error: "Say why the delivery failed (at least 5 characters)." });
     }
+    if (status === "Cancelled" && String(remarks || "").trim().length < 5) {
+      return response.status(400).json({ error: "Say why the delivery is cancelled (at least 5 characters)." });
+    }
 
     try {
       const rowsResult = await db.query(
@@ -559,12 +580,18 @@ function registerCashierRoutes(app, deps) {
         }
       }
 
-      if (actor.roleName === CLERK && (
-            (status !== "In Transit" && status !== "Out for Delivery") ||
-            (delivery.status !== "Pending" && delivery.status !== "In Transit"))) {
+      // The stockroom sends a delivery out, and marks it Failed or Cancelled when the driver is back
+      const clerkSendsOut = delivery.status === "Pending" && status === "Out for Delivery";
+      const clerkClosesOut = (delivery.status === "Out for Delivery" || delivery.status === "Delayed") &&
+                             (status === "Failed" || status === "Cancelled");
+      const clerkCancelsFailed = delivery.status === "Failed" && status === "Cancelled";
+      if (actor.roleName === CLERK && !clerkSendsOut && !clerkClosesOut && !clerkCancelsFailed) {
         return response.status(403).json({
-          error: "The stockroom can only send a delivery out: In Transit or Out for Delivery."
+          error: "The stockroom can send a delivery out, or mark it Failed or Cancelled when the driver is back."
         });
+      }
+      if (status === "Cancelled" && actor.roleName !== CLERK) {
+        return response.status(403).json({ error: "Only the stockroom can cancel a delivery." });
       }
 
       const nextSteps = NEXT_DELIVERY_STATUS[delivery.status];
@@ -595,10 +622,14 @@ function registerCashierRoutes(app, deps) {
           let reason = null;
           if (status === "Failed") reason = String(remarks).trim().slice(0, 255);
 
+          // When the stockroom marks it Failed, the attempt belongs to the driver who took it out
+          let attemptBy = actor.staffId;
+          if (actor.roleName === CLERK && delivery.delivery_staff_id !== null) attemptBy = delivery.delivery_staff_id;
+
           await db.query(
             "INSERT INTO delivery_attempts (delivery_id, attempt_no, outcome, reason, staff_id, scheduled_date) " +
             "VALUES (?, ?, ?, ?, ?, ?)",
-            [request.params.deliveryId, attemptNo, status, reason, actor.staffId, delivery.scheduled_date]
+            [request.params.deliveryId, attemptNo, status, reason, attemptBy, delivery.scheduled_date]
           );
         } catch (error) {
           console.error("Saving the delivery attempt failed:", error.message);
@@ -620,7 +651,7 @@ function registerCashierRoutes(app, deps) {
           "              COALESCE(c.address, '') AS customer_address\n" +
           "       FROM sales s\n" +
           "       LEFT JOIN customers c ON c.customer_id = s.customer_id\n" +
-          "       LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE\n" +
+          "       LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE AND d.status <> 'Cancelled'\n" +
           "       WHERE s.is_archived = FALSE AND d.delivery_id IS NULL\n" +
           "       ORDER BY s.sale_id DESC\n" +
           "       LIMIT 60"
@@ -646,7 +677,7 @@ function registerCashierRoutes(app, deps) {
         "SELECT COUNT(*) AS sale_count,\n" +
           "              COALESCE(SUM(final_amount), 0) AS gross,\n" +
           "              COALESCE(SUM(discount), 0) AS discounts,\n" +
-          "              COALESCE(SUM(LEAST(amount_paid, final_amount)), 0) AS collected\n" +
+          "              COALESCE(SUM(LEAST(amount_paid, final_amount + credit_interest_amount)), 0) AS collected\n" +
           "       FROM sales\n" +
           "       WHERE cashier_staff_id = ? AND is_archived = FALSE\n" +
           "         AND DATE(sale_date) = COALESCE(?, CURDATE())",

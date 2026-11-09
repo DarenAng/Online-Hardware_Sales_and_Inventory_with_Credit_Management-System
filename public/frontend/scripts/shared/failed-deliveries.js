@@ -132,6 +132,14 @@ async function openFailedDelivery(deliveryId) {
             'onclick="openRescheduleForm(' + d.delivery_id + ')">Reschedule</button>';
     }
 
+    // The stockroom can also close a failed delivery for good
+    const user = typeof getCurrentUser === 'function' ? getCurrentUser() : null;
+    if (user && user.role_name === 'Inventory Clerk' && typeof pickDeliveryStatus === 'function' &&
+        typeof holdsFeature === 'function' && holdsFeature('delivery-dispatch')) {
+        footActions += '<button type="button" class="btn btn-danger" ' +
+            'onclick="pickDeliveryStatus(' + d.delivery_id + ', \'Cancelled\')">Cancelled</button>';
+    }
+
     openDetailModal('Delivery ' + deliveryCode(d.delivery_id), d.customer_name + ' · Failed', deliveryCode(d.delivery_id),
         pages, footActions);
 }

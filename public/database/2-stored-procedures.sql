@@ -44,7 +44,7 @@ SELECT
      WHERE s.customer_id = c.customer_id
        AND s.is_archived = FALSE
        AND s.payment_status <> 'Paid'
-       AND DATE(s.sale_date) < DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS overdue_sales,
+       AND COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) < CURDATE()) AS overdue_sales,
 
     GREATEST(COALESCE(cc.credit_limit, 0.00) -
              COALESCE((SELECT SUM(s.amount_due - s.amount_paid)
@@ -64,6 +64,18 @@ SELECT
        AND s.is_archived = FALSE
        AND s.payment_status <> 'Paid') AS oldest_debt_days,
 
+    (SELECT MIN(COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)))
+     FROM sales s
+     WHERE s.customer_id = c.customer_id
+       AND s.is_archived = FALSE
+       AND s.payment_status <> 'Paid') AS next_due_date,
+
+    (SELECT DATEDIFF(CURDATE(), MIN(COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY))))
+     FROM sales s
+     WHERE s.customer_id = c.customer_id
+       AND s.is_archived = FALSE
+       AND s.payment_status <> 'Paid') AS days_past_due,
+
     (SELECT MAX(s.sale_date) FROM sales s
      WHERE s.customer_id = c.customer_id AND s.is_archived = FALSE) AS last_purchase,
 
@@ -79,8 +91,8 @@ SELECT
 
     CASE
         WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN 'Hold'
-        WHEN f.oldest_debt_days > 90                                   THEN 'Hold'
-        WHEN f.oldest_debt_days > 30                                   THEN 'Watch'
+        WHEN f.days_past_due > 90                                   THEN 'Hold'
+        WHEN f.days_past_due > 30                                   THEN 'Watch'
         WHEN f.credit_limit > 0 AND f.current_credit >= f.credit_limit * 0.75 THEN 'Watch'
         ELSE 'Good'
     END AS computed_standing,
@@ -88,9 +100,9 @@ SELECT
     CASE
         WHEN f.manual_standing = 'Hold'                                THEN 'Hold'
         WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN 'Hold'
-        WHEN f.oldest_debt_days > 90                                   THEN 'Hold'
+        WHEN f.days_past_due > 90                                   THEN 'Hold'
         WHEN f.manual_standing = 'Watch'                               THEN 'Watch'
-        WHEN f.oldest_debt_days > 30                                   THEN 'Watch'
+        WHEN f.days_past_due > 30                                   THEN 'Watch'
         WHEN f.credit_limit > 0 AND f.current_credit >= f.credit_limit * 0.75 THEN 'Watch'
         ELSE 'Good'
     END AS standing,
@@ -101,13 +113,13 @@ SELECT
                    IF(f.credit_notes IS NULL OR f.credit_notes = '', '', CONCAT(': ', f.credit_notes)))
         WHEN f.credit_limit > 0 AND f.current_credit > f.credit_limit THEN
             CONCAT('Over the limit by ', FORMAT(f.current_credit - f.credit_limit, 2))
-        WHEN f.oldest_debt_days > 90 THEN
-            CONCAT('Oldest unpaid sale is ', f.oldest_debt_days, ' days old; the limit is 90')
+        WHEN f.days_past_due > 90 THEN
+            CONCAT('Oldest unpaid sale is ', f.days_past_due, ' days past its due date; the limit is 90')
         WHEN f.manual_standing = 'Watch' THEN
             CONCAT('Flagged by a manager',
                    IF(f.credit_notes IS NULL OR f.credit_notes = '', '', CONCAT(': ', f.credit_notes)))
-        WHEN f.oldest_debt_days > 30 THEN
-            CONCAT('Oldest unpaid sale is ', f.oldest_debt_days, ' days old; watched past 30')
+        WHEN f.days_past_due > 30 THEN
+            CONCAT('Oldest unpaid sale is ', f.days_past_due, ' days past its due date; watched past 30')
         WHEN f.credit_limit > 0 AND f.current_credit >= f.credit_limit * 0.75 THEN
             CONCAT('Owes ', ROUND(f.current_credit / f.credit_limit * 100), '% of the limit; watched from 75%')
         WHEN f.current_credit > 0 THEN 'Owes within terms'
@@ -580,6 +592,8 @@ CREATE PROCEDURE sp_create_sale_transaction (
     IN p_down_payment_method VARCHAR(30),
     IN p_qr_payment_id INT,
     IN p_pay_details JSON,
+    IN p_credit_rate DECIMAL(5,2),
+    IN p_credit_term INT,
     OUT p_sale_id INT,
     OUT p_status_code INT,
     OUT p_message VARCHAR(255)
@@ -615,6 +629,10 @@ PROC_BODY: BEGIN
     DECLARE v_on_credit BOOLEAN DEFAULT FALSE;
     DECLARE v_on_account BOOLEAN DEFAULT FALSE;
     DECLARE v_new_exposure DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_interest DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_interest_rate DECIMAL(5,2) DEFAULT NULL;
+    DECLARE v_term_months INT DEFAULT NULL;
+    DECLARE v_due_date DATE DEFAULT NULL;
     DECLARE v_locked_customer_id INT DEFAULT NULL;
     DECLARE v_down_method VARCHAR(30) DEFAULT 'Cash';
     DECLARE v_payment_status VARCHAR(10) DEFAULT 'Paid';
@@ -659,6 +677,18 @@ PROC_BODY: BEGIN
     IF p_payment_method IN ('Credit', 'COD') AND p_customer_id IS NULL THEN
         SET p_status_code = 400;
         SET p_message = CONCAT('A ', p_payment_method, ' sale needs a named customer.');
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF p_payment_method = 'Credit' AND (p_credit_rate IS NULL OR p_credit_rate < 0 OR p_credit_rate > 100) THEN
+        SET p_status_code = 400;
+        SET p_message = 'The interest rate on a credit sale is 0 to 100 percent.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF p_payment_method = 'Credit' AND (p_credit_term IS NULL OR p_credit_term < 1 OR p_credit_term > 12) THEN
+        SET p_status_code = 400;
+        SET p_message = 'The term of a credit sale is 1 to 12 months.';
         LEAVE PROC_BODY;
     END IF;
 
@@ -835,6 +865,15 @@ PROC_BODY: BEGIN
 
         SET v_new_exposure = v_final_amount - v_amount_paid;
 
+        -- Interest is charged once, on the amount put on account, for the whole term
+        IF v_on_credit AND v_new_exposure > 0 THEN
+            SET v_interest_rate = p_credit_rate;
+            SET v_term_months = p_credit_term;
+            SET v_interest = ROUND(v_new_exposure * p_credit_rate / 100, 2);
+            SET v_due_date = DATE_ADD(CURDATE(), INTERVAL p_credit_term MONTH);
+            SET v_new_exposure = v_new_exposure + v_interest;
+        END IF;
+
         SELECT c.customer_id, COALESCE(cc.credit_limit, 0.00)
         INTO v_locked_customer_id, v_credit_limit
         FROM customers c
@@ -878,7 +917,8 @@ PROC_BODY: BEGIN
                 SET p_message = CONCAT('Credit limit exceeded. Remaining credit: ',
                                        FORMAT(GREATEST(v_credit_limit - v_current_credit, 0), 2),
                                        '. Take a down payment of at least ',
-                                       FORMAT(GREATEST(v_new_exposure - (v_credit_limit - v_current_credit), 0), 2),
+                                       FORMAT(CEILING(GREATEST(v_final_amount -
+                                           GREATEST(v_credit_limit - v_current_credit, 0) / (1 + p_credit_rate / 100), 0) * 100) / 100, 2),
                                        ', or raise an extension request.');
             ELSE
                 SET p_message = CONCAT('Credit limit exceeded. Remaining credit: ',
@@ -1017,10 +1057,12 @@ PROC_BODY: BEGIN
     INSERT INTO sales (
         customer_id, walk_in_name, cashier_staff_id, total_amount, discount, amount_paid,
         payment_method, payment_status,
+        credit_interest_rate, credit_term_months, credit_interest_amount, credit_due_date,
         tax_registration, vat_rate, vatable_sale, vat_amount
     ) VALUES (
         p_customer_id, v_walk_in_name, p_cashier_staff_id, v_calculated_total, v_discount, v_amount_paid,
         p_payment_method, v_payment_status,
+        v_interest_rate, v_term_months, v_interest, v_due_date,
         v_registration, v_vat_rate, v_vatable_sale, v_vat_amount
     );
 
@@ -1293,9 +1335,9 @@ PROC_BODY: BEGIN
         FROM deliveries d JOIN sales s ON s.sale_id = d.sale_id
         WHERE d.delivery_id = p_record_id;
 
-        IF v_delivery_status NOT IN ('Delivered', 'Failed') THEN
+        IF v_delivery_status NOT IN ('Delivered', 'Failed', 'Cancelled') THEN
             SET p_status_code = 409;
-            SET p_message = CONCAT('This delivery is ', v_delivery_status, '. Only a Delivered or Failed delivery can be archived.');
+            SET p_message = CONCAT('This delivery is ', v_delivery_status, '. Only a Delivered, Failed or Cancelled delivery can be archived.');
             LEAVE PROC_BODY;
         END IF;
         IF v_delivery_status = 'Delivered' AND v_payment_status <> 'Paid' THEN
@@ -2513,6 +2555,8 @@ PROC_BODY: BEGIN
     DECLARE v_taken DECIMAL(12,3) DEFAULT 0;
     DECLARE v_refunded_before DECIMAL(12,2) DEFAULT 0.00;
     DECLARE v_off DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_interest DECIMAL(12,2) DEFAULT 0.00;
+    DECLARE v_int_off DECIMAL(12,2) DEFAULT 0.00;
     DECLARE v_on_sale BOOLEAN DEFAULT FALSE;
     DECLARE v_before DECIMAL(12,3);
     DECLARE v_change DECIMAL(12,3) DEFAULT 0;
@@ -2666,8 +2710,8 @@ PROC_BODY: BEGIN
 
     IF p_report_type = 'Refunded' AND p_sale_id IS NOT NULL THEN
         SET v_due = NULL;
-        SELECT amount_due, amount_paid, final_amount, is_archived
-        INTO v_due, v_paid, v_final, v_voided
+        SELECT amount_due, amount_paid, final_amount, is_archived, credit_interest_amount
+        INTO v_due, v_paid, v_final, v_voided, v_interest
         FROM sales WHERE sale_id = p_sale_id
         FOR UPDATE;
 
@@ -2743,12 +2787,20 @@ PROC_BODY: BEGIN
     SET p_report_id = LAST_INSERT_ID();
 
     IF v_on_sale AND IFNULL(p_refund_amount, 0) > 0 THEN
-        SET v_off = LEAST(p_refund_amount, GREATEST(v_due - v_paid, 0.00));
+        -- The interest comes down in the same share as the goods taken back
+        SET v_int_off = 0.00;
+        IF v_interest > 0 AND v_final - v_refunded_before > 0 THEN
+            SET v_int_off = LEAST(v_interest,
+                ROUND(v_interest * p_refund_amount / (v_final - v_refunded_before), 2));
+        END IF;
 
-        IF v_off > 0 THEN
+        SET v_off = LEAST(p_refund_amount, GREATEST(v_due - v_paid - v_int_off, 0.00));
+
+        IF v_off > 0 OR v_int_off > 0 THEN
             UPDATE sales
             SET refunded_amount = refunded_amount + v_off,
-                payment_status = IF(v_paid >= v_due - v_off, 'Paid', payment_status)
+                credit_interest_amount = credit_interest_amount - v_int_off,
+                payment_status = IF(v_paid >= v_due - v_int_off - v_off, 'Paid', payment_status)
             WHERE sale_id = p_sale_id;
         END IF;
     END IF;
@@ -3140,7 +3192,7 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    SELECT COUNT(*) INTO v_already FROM deliveries WHERE sale_id = p_sale_id AND is_archived = FALSE;
+    SELECT COUNT(*) INTO v_already FROM deliveries WHERE sale_id = p_sale_id AND is_archived = FALSE AND status <> 'Cancelled';
 
     IF v_already > 0 THEN
         ROLLBACK;
@@ -3226,7 +3278,7 @@ PROC_BODY: BEGIN
         SET p_message = CONCAT('sp_update_delivery_status failed (', @err_no, '): ', LEFT(@err_text, 180));
     END;
 
-    IF p_status NOT IN ('Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed') THEN
+    IF p_status NOT IN ('Pending', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed', 'Cancelled') THEN
         SET p_status_code = 400;
         SET p_message = 'That is not a valid delivery status.';
         LEAVE PROC_BODY;
@@ -3261,6 +3313,14 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
+    IF v_current = 'Cancelled' THEN
+        ROLLBACK;
+        SET p_status_code = 409;
+        SET p_message = CONCAT('Delivery #', p_delivery_id,
+                               ' is cancelled and cannot be reopened.');
+        LEAVE PROC_BODY;
+    END IF;
+
     IF p_status = 'Delivered' AND p_role_id <> 5 THEN
         ROLLBACK;
         SET p_status_code = 403;
@@ -3275,20 +3335,36 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
-    IF p_role_id = 3 AND p_status NOT IN ('In Transit', 'Out for Delivery') THEN
+    IF p_role_id = 5 AND v_current = 'Pending' THEN
         ROLLBACK;
         SET p_status_code = 403;
-        SET p_message = 'The stockroom can only send a delivery out: In Transit or Out for Delivery.';
+        SET p_message = 'The stockroom sends a delivery out. The driver takes it from there.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF p_status = 'Cancelled' AND p_role_id <> 3 THEN
+        ROLLBACK;
+        SET p_status_code = 403;
+        SET p_message = 'Only the stockroom can cancel a delivery.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF p_role_id = 3 AND NOT (
+           (v_current = 'Pending' AND p_status = 'Out for Delivery')
+        OR (v_current IN ('Out for Delivery', 'Delayed') AND p_status IN ('Failed', 'Cancelled'))
+        OR (v_current = 'Failed' AND p_status = 'Cancelled')) THEN
+        ROLLBACK;
+        SET p_status_code = 403;
+        SET p_message = 'The stockroom can send a delivery out, or mark it Failed or Cancelled when the driver is back.';
         LEAVE PROC_BODY;
     END IF;
 
     SET v_allowed =
         CASE v_current
-            WHEN 'Pending'          THEN p_status IN ('In Transit')
-            WHEN 'In Transit'       THEN p_status IN ('Out for Delivery')
-            WHEN 'Out for Delivery' THEN p_status IN ('Delivered', 'Delayed', 'Failed')
-            WHEN 'Delayed'          THEN p_status IN ('Out for Delivery', 'Failed')
-            WHEN 'Failed'           THEN p_status IN ('Pending')
+            WHEN 'Pending'          THEN p_status IN ('Out for Delivery')
+            WHEN 'Out for Delivery' THEN p_status IN ('Delivered', 'Delayed', 'Failed', 'Cancelled')
+            WHEN 'Delayed'          THEN p_status IN ('Out for Delivery', 'Failed', 'Cancelled')
+            WHEN 'Failed'           THEN p_status IN ('Pending', 'Cancelled')
             ELSE 0
         END;
 
@@ -3929,10 +4005,10 @@ BEGIN
     DECLARE cur CURSOR FOR
         SELECT s.sale_id, s.customer_id,
                c.full_name,
-               GREATEST(s.final_amount - s.refunded_amount - s.amount_paid, 0.00),
+               GREATEST(s.final_amount + s.credit_interest_amount - s.refunded_amount - s.amount_paid, 0.00),
                s.amount_due - s.amount_paid,
                COALESCE(cc.penalty_rate, (SELECT penalty_rate FROM store_settings WHERE setting_id = 1), 3.00),
-               DATEDIFF(CURDATE(), DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)),
+               DATEDIFF(CURDATE(), COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY))),
                s.penalty_months
         FROM sales s
         JOIN customers c ON c.customer_id = s.customer_id
@@ -3940,9 +4016,9 @@ BEGIN
         WHERE s.is_archived = FALSE
           AND s.payment_method = 'Credit'
           AND s.payment_status <> 'Paid'
-          AND s.final_amount - s.refunded_amount - s.amount_paid > 0
-          AND DATE(s.sale_date) < DATE_SUB(CURDATE(), INTERVAL 30 DAY)
-          AND CEILING(DATEDIFF(CURDATE(), DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) / 30) > s.penalty_months;
+          AND s.final_amount + s.credit_interest_amount - s.refunded_amount - s.amount_paid > 0
+          AND COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) < CURDATE()
+          AND CEILING(DATEDIFF(CURDATE(), COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY))) / 30) > s.penalty_months;
     DECLARE CONTINUE HANDLER FOR NOT FOUND SET v_done = 1;
 
     DECLARE EXIT HANDLER FOR SQLEXCEPTION

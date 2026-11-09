@@ -2,7 +2,7 @@ const callProcedure = require("./shared-procedures").callProcedure;
 
 function recordSale(params) {
   return callProcedure(
-    "CALL sp_create_sale_transaction(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @sale_id, @status_code, @message)",
+    "CALL sp_create_sale_transaction(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, @sale_id, @status_code, @message)",
     params,
     ["sale_id", "status_code", "message"]
   );

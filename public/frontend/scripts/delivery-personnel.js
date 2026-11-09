@@ -73,7 +73,7 @@ function isMine(d) {
 }
 
 function isActive(d) {
-    return d.status !== 'Delivered' && d.status !== 'Failed';
+    return d.status !== 'Delivered' && d.status !== 'Failed' && d.status !== 'Cancelled';
 }
 
 function pendingForDriver(d) {
@@ -84,8 +84,8 @@ function pendingForDriver(d) {
 // The three tabs on the Deliveries card
 function tabOfDelivery(d) {
     if (d.status === 'Pending') return 'Pending';
-    if (d.status === 'Delivered' || d.status === 'Failed') return 'Deliveries';
-    return 'In Transit';
+    if (d.status === 'Delivered' || d.status === 'Failed' || d.status === 'Cancelled') return 'Deliveries';
+    return 'Out for Delivery';
 }
 
 function driverTabPicked(tab) {

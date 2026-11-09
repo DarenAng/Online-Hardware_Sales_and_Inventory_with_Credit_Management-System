@@ -284,13 +284,13 @@ function registerCustomerPortalRoutes(app, deps) {
     await settleQuietly(request.customerId);
 
     const rowsResult = await db.query(
-      "SELECT s.sale_id, s.sale_date, s.payment_method, s.final_amount, s.penalty_amount, s.refunded_amount,\n" +
+      "SELECT s.sale_id, s.sale_date, s.payment_method, s.final_amount, s.credit_interest_amount, s.penalty_amount, s.refunded_amount,\n" +
       "       s.amount_due, s.amount_paid,\n" +
       "       GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due,\n" +
-      "       DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY) AS due_date,\n" +
+      "       COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) AS due_date,\n" +
       "       CASE\n" +
       "         WHEN s.payment_status = 'Paid' THEN 'Paid'\n" +
-      "         WHEN DATEDIFF(CURDATE(), DATE(s.sale_date)) > 30 THEN 'Overdue'\n" +
+      "         WHEN COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) < CURDATE() THEN 'Overdue'\n" +
       "         ELSE s.payment_status\n" +
       "       END AS status\n" +
       "FROM sales s\n" +

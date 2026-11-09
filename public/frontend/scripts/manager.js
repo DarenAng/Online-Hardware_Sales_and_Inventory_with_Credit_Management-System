@@ -685,7 +685,7 @@ async function exportPanelSpreadsheet(keys, title) {
 let printRestore = null;
 
 const PRINT_DELIVERY_STATES = ['Pending Payment', 'Completed', 'Out for Delivery',
-                               'In Transit', 'Pending', 'Delayed', 'Failed'];
+                               'Pending', 'Delayed', 'Failed', 'Cancelled'];
 
 function printTotalRows(container, panel) {
     const rows = [];
@@ -1790,6 +1790,7 @@ function fillPenaltyForm(rateRead) {
     if (note) note.hidden = rateRead;
     if (saveButton) saveButton.disabled = !rateRead;
     form.elements.penaltyRate.disabled = !rateRead;
+    fillInterestForm(rateRead);
 
     if (!rateRead) {
         penaltyRateRead = false;
@@ -1826,6 +1827,57 @@ function previewPenaltyPolicy() {
         '<span class="formula-verdict">A sale with ' + peso(example) + ' of goods unpaid is charged ' +
             peso(month) + ' the day after its due date, and ' + peso(month) + ' more every thirty days ' +
             'after that: three months overdue, it owes ' + peso(example + month * 3) + '.</span>';
+}
+
+// The shop's usual interest rate and term for a credit sale (read with the late-payment policy)
+function fillInterestForm(policyRead) {
+    const form = document.getElementById('interest-form');
+    if (!form) return;
+
+    document.getElementById('interest-save-btn').disabled = !policyRead;
+    form.elements.interestRate.disabled = !policyRead;
+    form.elements.termMonths.disabled = !policyRead;
+    if (!policyRead) {
+        form.elements.interestRate.value = '';
+        return;
+    }
+
+    const rate = Number(penaltyPolicy.credit_interest_rate);
+    form.elements.interestRate.value = Number.isFinite(rate) ? rate.toFixed(2) : '0.00';
+    form.elements.termMonths.value = String(parseInt(penaltyPolicy.credit_term_months, 10) || 1);
+}
+
+async function saveCreditInterest(event) {
+    event.preventDefault();
+    const form = event.target;
+    const rateText = form.elements.interestRate.value.trim();
+    const rate = Number(rateText);
+    const term = parseInt(form.elements.termMonths.value, 10);
+
+    if (rateText === '' || !Number.isFinite(rate) || rate < 0 || rate > 100) {
+        notifyWarning('The interest rate is 0 to 100 percent.', 'Not saved');
+        return;
+    }
+    if (!Number.isInteger(term) || term < 1 || term > 12) {
+        notifyWarning('The term is 1 to 12 months.', 'Not saved');
+        return;
+    }
+
+    try {
+        const response = await apiSaveCreditInterest(rate, term);
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not saved');
+            return;
+        }
+
+        notifySuccess(result.message, 'Credit interest saved');
+        const rateRead = await loadPenaltyPolicy();
+        fillPenaltyForm(rateRead);
+    } catch (error) {
+        notifyOffline();
+    }
 }
 
 async function savePenaltyPolicy(event) {
@@ -1919,7 +1971,7 @@ function previewLoyaltyPolicy() {
     preview.innerHTML =
         '<span class="formula-verdict">Customers who paid ' + peso(threshold) + ' or more in full last month get ' +
             loyaltyRateText(rate) + ' off every sale paid in full this month. ' +
-            'Credit and COD sales neither count nor get the discount.</span>';
+            'Credit sales neither count nor get the discount.</span>';
 }
 
 async function saveLoyaltyPolicy(event) {
@@ -2067,6 +2119,14 @@ function policyChangesUnsaved() {
         const typed = Number(rateForm.elements.penaltyRate.value);
         if (rateForm.elements.penaltyRate.value.trim() === '' || typed !== Number(penaltyPolicy.penalty_rate)) {
             return 'the late-payment rate';
+        }
+    }
+    const interestForm = document.getElementById('interest-form');
+    if (interestForm && penaltyRateRead && penaltyPolicy && !interestForm.elements.interestRate.disabled) {
+        const typedInterest = interestForm.elements.interestRate.value.trim();
+        if (typedInterest === '' || Number(typedInterest) !== Number(penaltyPolicy.credit_interest_rate) ||
+            Number(interestForm.elements.termMonths.value) !== Number(penaltyPolicy.credit_term_months)) {
+            return 'the credit interest';
         }
     }
     const loyaltyForm = document.getElementById('loyalty-form');
@@ -2283,6 +2343,10 @@ function renderCreditHistory(data) {
             orNumber(p.sale_id) + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',
             escapeHtml(String(p.sale_date).slice(0, 10)),
             peso(p.final_amount) +
+                (Number(p.credit_interest_amount) > 0
+                    ? '<span class="cell-sub">+ ' + peso(p.credit_interest_amount) + ' interest (' +
+                      Number(p.credit_interest_rate) + '%, ' + p.credit_term_months +
+                      (Number(p.credit_term_months) === 1 ? ' month' : ' months') + ')</span>' : '') +
                 (Number(p.penalty_amount) > 0
                     ? '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty (' +
                       penaltyRateWord(p.penalty_rate) + ' &times; ' + p.penalty_months +
@@ -2439,10 +2503,10 @@ const FULFILMENT_TONE = {
     'Completed': 'badge-success',
     'Pending Payment': 'badge-warning',
     'Out for Delivery': 'badge-warning',
-    'In Transit': 'badge-warning',
     'Pending': 'badge-warning',
     'Delayed': 'badge-warning',
-    'Failed': 'badge-danger'
+    'Failed': 'badge-danger',
+    'Cancelled': 'badge-danger'
 };
 
 function buildDeliveryPanel() {
@@ -2939,6 +3003,11 @@ async function openSaleDetail(saleId) {
             detailField('Items Purchased', units + lineNote) +
             detailField('Gross Total', peso(s.total_amount)) +
             detailField('Discount', peso(s.discount)) +
+            (Number(s.credit_interest_amount) > 0
+                ? detailField('Interest', peso(s.credit_interest_amount) + ' <span class="muted">' +
+                    Number(s.credit_interest_rate) + '% over ' + s.credit_term_months +
+                    (Number(s.credit_term_months) === 1 ? ' month' : ' months') + '</span>')
+                : '') +
             (Number(s.penalty_amount) > 0
                 ? detailField('Late Penalty', '<span class="cell-due">' + peso(s.penalty_amount) + '</span> ' +
                     '<span class="muted">' + penaltyRateWord(s.penalty_rate) + ' a month for ' + s.penalty_months +

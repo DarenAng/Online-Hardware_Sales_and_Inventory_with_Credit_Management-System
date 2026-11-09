@@ -162,7 +162,7 @@ function qtyText(value, unit) {
 function statusBadge(text, label) {
     const good = ['Paid', 'Delivered', 'In Stock', 'Active', 'Received'];
     const bad = ['Unpaid', 'Failed', 'Out of Stock', 'Inactive', 'Cancelled'];
-    const warn = ['Partial', 'Low Stock', 'Delayed', 'Pending', 'For Approval', 'In Transit', 'Out for Delivery', 'Missing'];
+    const warn = ['Partial', 'Low Stock', 'Delayed', 'Pending', 'For Approval', 'Out for Delivery', 'Missing'];
 
     let tone = 'badge-neutral';
     if (good.indexOf(text) !== -1) tone = 'badge-success';

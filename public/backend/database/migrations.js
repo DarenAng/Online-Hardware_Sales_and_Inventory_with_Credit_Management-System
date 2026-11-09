@@ -11,6 +11,7 @@ const validation = require("../validation");
 const cleanPhone = validation.cleanPhone;
 const phoneComplaint = validation.phoneComplaint;
 const DEFAULT_RECEIPT_LAYOUT = require("../store-settings").DEFAULT_RECEIPT_LAYOUT;
+const defaultDiscountPolicy = require("../store-settings").defaultDiscountPolicy;
 
 function columnNamesOf(columns) {
   const names = [];
@@ -1400,7 +1401,13 @@ async function routinesAreOld() {
     ["sp_create_delivery", "p_driver_staff_id"],
     ["sp_create_delivery", "DELIVERY_CREATED"],
     ["sp_update_delivery_status", "FOR UPDATE"],
-    ["sp_update_delivery_status", "The stockroom can only send a delivery out"],
+    ["sp_update_delivery_status", "The stockroom can send a delivery out"],
+    ["sp_update_delivery_status", "is cancelled and cannot be reopened"],
+    ["sp_create_sale_transaction", "p_credit_rate"],
+    ["sp_file_return_report", "v_int_off"],
+    ["sp_archive_record", "Failed or Cancelled delivery"],
+    ["sp_create_delivery", "status <> 'Cancelled'"],
+    ["sp_apply_late_penalties", "credit_due_date"],
     ["sp_receive_purchase_order", "purchase_order_ordered_items"],
     ["sp_receive_purchase_order", "pack_count, unit_cost)"],
     ["sp_receive_purchase_order", "received_at = NOW()"],
@@ -1490,6 +1497,7 @@ async function routinesAreOld() {
     viewText = String(views[0].VIEW_DEFINITION || "").toLowerCase();
   }
   if (viewText !== "" && viewText.indexOf("least(") === -1) return true;
+  if (viewText !== "" && viewText.indexOf("days_past_due") === -1) return true;
 
   return false;
 }
@@ -1733,6 +1741,151 @@ async function migrateManualReorderPoints() {
   }
 }
 
+// Customer deliveries: "In Transit" is gone (it is Out for Delivery now) and "Cancelled" is new
+async function migrateDeliveryCancelled() {
+  const typeResult = await db.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'deliveries' AND COLUMN_NAME = 'status'",
+    [DB_NAME]
+  );
+  if (typeResult[0].length === 0) return;
+  const type = String(typeResult[0][0].COLUMN_TYPE);
+  const hasCancelled = type.indexOf("Cancelled") !== -1;
+  const hasTransit = type.indexOf("In Transit") !== -1;
+  if (hasCancelled && !hasTransit) return;
+
+  if (!hasCancelled) {
+    await db.query(
+      "ALTER TABLE deliveries MODIFY COLUMN status\n" +
+        "       ENUM('Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed', 'Cancelled')\n" +
+        "       NOT NULL DEFAULT 'Pending'");
+  }
+  const moved = await db.query("UPDATE deliveries SET status = 'Out for Delivery' WHERE status = 'In Transit'");
+  await db.query(
+    "ALTER TABLE deliveries MODIFY COLUMN status\n" +
+      "       ENUM('Pending', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed', 'Cancelled')\n" +
+      "       NOT NULL DEFAULT 'Pending'");
+  console.log("Deliveries: In Transit is now Out for Delivery (" + (moved[0].affectedRows || 0) +
+    " moved) and Cancelled is a new status.");
+}
+
+// Interest on a credit sale: the shop's usual rate and term, and what each sale was charged
+async function migrateCreditInterest() {
+  const settingsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'",
+    [DB_NAME]
+  );
+  const settingNames = columnNamesOf(settingsResult[0]);
+  if (settingNames.length > 0) {
+    if (settingNames.indexOf("credit_interest_rate") === -1) {
+      await db.query(
+        "ALTER TABLE store_settings ADD COLUMN credit_interest_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER loyalty_threshold");
+    }
+    if (settingNames.indexOf("credit_term_months") === -1) {
+      await db.query(
+        "ALTER TABLE store_settings ADD COLUMN credit_term_months INT NOT NULL DEFAULT 1 AFTER credit_interest_rate");
+    }
+  }
+
+  const salesResult = await db.query(
+    "SELECT COLUMN_NAME, GENERATION_EXPRESSION FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'sales'",
+    [DB_NAME]
+  );
+  const salesColumns = salesResult[0];
+  if (salesColumns.length === 0) return;
+  const salesNames = columnNamesOf(salesColumns);
+
+  const wanted = [
+    ["credit_interest_rate", "DECIMAL(5,2) NULL"],
+    ["credit_term_months", "INT NULL"],
+    ["credit_interest_amount", "DECIMAL(12,2) NOT NULL DEFAULT 0.00"],
+    ["credit_due_date", "DATE NULL"]
+  ];
+  let added = 0;
+  for (let i = 0; i < wanted.length; i++) {
+    if (salesNames.indexOf(wanted[i][0]) !== -1) continue;
+    await db.query("ALTER TABLE sales ADD COLUMN " + wanted[i][0] + " " + wanted[i][1] + " AFTER refunded_amount");
+    added++;
+  }
+
+  // What the customer owes now includes the interest
+  const due = findColumn(salesColumns, "amount_due");
+  const dueHasInterest = due && String(due.GENERATION_EXPRESSION).indexOf("credit_interest_amount") !== -1;
+  if (due && !dueHasInterest) {
+    await db.query(
+      "ALTER TABLE sales MODIFY COLUMN amount_due DECIMAL(12,2)\n" +
+        "       AS (total_amount - discount + credit_interest_amount + penalty_amount - refunded_amount) STORED");
+    added++;
+  }
+  if (added > 0) {
+    console.log("Added the credit interest columns (sales.credit_interest_rate, credit_term_months, " +
+      "credit_interest_amount, credit_due_date; store_settings.credit_interest_rate, credit_term_months); " +
+      "sales.amount_due now includes the interest.");
+  }
+}
+
+// The default discount policy no longer says COD: put the new wording back for a shop that never rewrote it
+async function migrateDiscountPolicyWording() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.indexOf("discount_policy") === -1) return;
+
+  const rowResult = await db.query(
+    "SELECT discount_policy, loyalty_rate, loyalty_threshold FROM store_settings WHERE setting_id = 1");
+  const row = rowResult[0][0];
+  if (!row || !row.discount_policy) return;
+
+  const newLine = "Credit purchases neither count nor get the discount.";
+  const oldLine = "Credit and COD purchases neither count nor get the discount.";
+  const newDefault = defaultDiscountPolicy(row.loyalty_rate, row.loyalty_threshold);
+  if (newDefault.indexOf(newLine) === -1) return;
+  const oldDefault = newDefault.replace(newLine, oldLine);
+
+  const keptLines = [];
+  const savedLines = String(row.discount_policy).split(/\r?\n/);
+  for (let i = 0; i < savedLines.length; i++) {
+    const line = savedLines[i].trim();
+    if (line !== "") keptLines.push(line);
+  }
+  if (keptLines.join("\n") !== oldDefault) return;
+
+  await db.query("UPDATE store_settings SET discount_policy = NULL, updated_at = updated_at WHERE setting_id = 1");
+  console.log("The discount policy was still the old default wording; it uses the new default now.");
+}
+
+// One time only: an account with no credit limit gets the 5,000.00 starting limit, and a customer
+// with no credit account gets one. A marker row keeps this from running again, so a manager who
+// later sets a limit of 0 on purpose (cash only) is not overwritten.
+async function migrateDefaultCreditLimit() {
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('customer_credits', 'customers', 'app_flags')",
+    [DB_NAME]
+  );
+  if (tablesResult[0].length < 3) return;
+
+  const flagKey = "credit_limit_default_5000";
+  const flagResult = await db.query("SELECT flag_key FROM app_flags WHERE flag_key = ?", [flagKey]);
+  if (flagResult[0].length > 0) return;
+
+  const zeroResult = await db.query("UPDATE customer_credits SET credit_limit = 5000.00 WHERE credit_limit = 0");
+  const newResult = await db.query(
+    "INSERT INTO customer_credits (customer_id, credit_limit, standing)\n" +
+      "     SELECT customer_id, 5000.00, 'Good' FROM customers\n" +
+      "      WHERE customer_id NOT IN (SELECT customer_id FROM customer_credits)");
+  await db.query(
+    "INSERT INTO app_flags (flag_key, flag_value, updated_at) VALUES (?, 'done', ?)",
+    [flagKey, Date.now()]);
+  console.log("Credit limits: " + (zeroResult[0].affectedRows || 0) + " account(s) at 0 raised to 5,000.00, " +
+    (newResult[0].affectedRows || 0) + " customer(s) without an account given one. This runs once.");
+}
+
 async function migrateDatabase(runSqlScript) {
   await migrateServerTables();
 
@@ -1789,6 +1942,10 @@ async function migrateDatabase(runSqlScript) {
   await migrateStaffDeactivatedAt();
   await migrateCustomerPortal();
   await migrateCustomerPaymentAlert();
+  await migrateDeliveryCancelled();
+  await migrateCreditInterest();
+  await migrateDiscountPolicyWording();
+  await migrateDefaultCreditLimit();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();
   await warnIfAdminPasswordIsDefault();

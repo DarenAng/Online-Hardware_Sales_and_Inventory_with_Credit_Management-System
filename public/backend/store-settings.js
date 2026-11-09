@@ -7,6 +7,8 @@ const DEFAULT_STORE_SETTINGS = {
   vat_rate: "12.00",
   invoice_note: null,
   penalty_rate: "3.00",
+  credit_interest_rate: "0.00",
+  credit_term_months: 1,
   bank_name: null,
   bank_account_name: null,
   bank_account_number: null,
@@ -51,7 +53,7 @@ function defaultDiscountPolicy(rate, threshold) {
     "Pay " + amount + " or more in full in a month: " + rateNumber +
       "% off sales paid in full the next month.",
     "Refunds are taken off the amount paid.",
-    "Credit and COD purchases neither count nor get the discount."
+    "Credit purchases neither count nor get the discount."
   ].join("\n");
 }
 

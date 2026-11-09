@@ -302,9 +302,9 @@ function renderCatalog(rows, keyword) {
             ' data-product-row="' + p.product_id + '">' +
             '<td class="cell-name">' + escapeHtml(p.product_name) +
                 '<span class="on-order-mark" title="On the order"' + markHidden + '>' + markText + '</span></td>' +
-            '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
             '<td>' + escapeHtml(p.brand_name || '-') + '</td>' +
             '<td class="cell-unit">' + escapeHtml(p.unit_name || '-') + sizesHtml + '</td>' +
+            '<td class="cell-num">' + String(Number(p.quantity_in_stock) || 0) + '</td>' +
             '<td class="cell-num catalog-price">' +
                 (noPrice ? '<span class="badge badge-warning">No price yet</span><span class="price-per">ask the manager</span>'
                          : peso(p.price) + perHtml) + '</td>' +
@@ -322,12 +322,13 @@ function renderCatalog(rows, keyword) {
     holdBoxHeight(grid);
 }
 
-const CATALOG_HEADERS = ['Product', 'Category', 'Brand', 'Sold By', 'Price'];
+const CATALOG_HEADERS = ['Product', 'Brand', 'Unit', 'Stock', 'Price'];
+const CATALOG_NUMBER_COLUMNS = [3, 4];
 const CATALOG_SORT_KEYS = [
     function (p) { return p.product_name || ''; },
-    function (p) { return p.category_name || 'Uncategorised'; },
     function (p) { return p.brand_name || ''; },
     function (p) { return p.unit_name || ''; },
+    function (p) { return Number(p.quantity_in_stock) || 0; },
     function (p) { return isUnpriced(p) ? '' : Number(p.price); }
 ];
 let catalogSort = null;
@@ -352,7 +353,8 @@ function catalogHeaders() {
     for (let i = 0; i < CATALOG_HEADERS.length; i++) {
         let state = 'none';
         if (catalogSort && catalogSort.column === i) state = catalogSort.descending ? 'descending' : 'ascending';
-        html += '<th class="th-sortable" tabindex="0" aria-sort="' + state + '" title="Sort by ' + CATALOG_HEADERS[i] + '" ' +
+        const numberClass = CATALOG_NUMBER_COLUMNS.indexOf(i) !== -1 ? ' col-num' : '';
+        html += '<th class="th-sortable' + numberClass + '" tabindex="0" aria-sort="' + state + '" title="Sort by ' + CATALOG_HEADERS[i] + '" ' +
             'onclick="sortCatalog(' + i + ')" ' +
             'onkeydown="if (event.key === \'Enter\' || event.key === \' \') { event.preventDefault(); sortCatalog(' + i + '); }">' +
             CATALOG_HEADERS[i] + '</th>';
@@ -1208,6 +1210,7 @@ async function clearCart() {
     const form = document.getElementById('checkout-form');
     if (form) {
         form.elements.amountPaid.value = '';
+        creditTermsTouched = false;
         if (form.elements.downPayment) form.elements.downPayment.value = '0';
     }
 
@@ -1226,6 +1229,73 @@ function loyaltyDiscountFor(gross, rate) {
 function loyaltyDiscountLabel() {
     if (!selectedCustomerLoyalty) return 'Loyalty Discount';
     return 'Loyalty Discount (' + loyaltyRateText(selectedCustomerLoyalty.rate) + ')';
+}
+
+// What the cashier typed for the interest rate and the term of a credit sale
+function creditTermsTyped() {
+    const form = document.getElementById('checkout-form');
+    let rate = 0;
+    let term = 1;
+    let valid = false;
+    if (form && form.elements.creditRate && form.elements.creditTerm) {
+        const rateText = form.elements.creditRate.value.trim();
+        rate = Number(rateText);
+        term = parseInt(form.elements.creditTerm.value, 10);
+        valid = rateText !== '' && Number.isFinite(rate) && rate >= 0 && rate <= 100 &&
+                Number.isInteger(term) && term >= 1 && term <= 12;
+    }
+    if (!Number.isFinite(rate)) rate = 0;
+    if (!Number.isInteger(term)) term = 1;
+    return { rate: rate, term: term, valid: valid };
+}
+
+// Interest in pesos, rounded to the centavo the way the database rounds it
+function creditInterestFor(amount, rate) {
+    const centavos = Math.round(amount * 100);
+    const hundredths = Math.round(Number(rate) * 100);
+    return Math.floor((centavos * hundredths + 5000) / 10000) / 100;
+}
+
+// Today plus some months; a day that does not exist in that month becomes the month's last day
+function addMonthsToToday(months) {
+    const today = new Date();
+    const target = new Date(today.getFullYear(), today.getMonth() + months, 1);
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    target.setDate(Math.min(today.getDate(), lastDay));
+    return target;
+}
+
+function creditDueText(date) {
+    return date.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function creditTermsLabel(rate, term) {
+    return Number(rate) + '% \u00b7 ' + term + (Number(term) === 1 ? ' month' : ' months');
+}
+
+// The shop's usual rate and term come from Maintenance (loaded with the page); the cashier can change
+// them for this sale. Once the cashier has typed or picked a value it is not overwritten.
+let creditTermsTouched = false;
+
+function creditTermsEdited() {
+    creditTermsTouched = true;
+    renderCart();
+}
+
+function fillCreditTermDefaults() {
+    const form = document.getElementById('checkout-form');
+    if (!form || !form.elements.creditRate || !form.elements.creditTerm) return;
+    if (creditTermsTouched) return;
+
+    const settings = storeSettings;
+    let rate = 0;
+    let term = 1;
+    if (settings) {
+        rate = Number(settings.credit_interest_rate) || 0;
+        term = parseInt(settings.credit_term_months, 10) || 1;
+    }
+    form.elements.creditRate.value = rate.toFixed(2);
+    form.elements.creditTerm.value = String(term);
 }
 
 function cartTotals() {
@@ -1269,7 +1339,20 @@ function cartTotals() {
         amountOnAccount = due;
     }
 
+    // Interest on a credit sale is charged once, on the amount put on account, for the whole term
+    const terms = creditTermsTyped();
+    let interest = 0;
+    if (onCredit && amountOnAccount > 0 && terms.valid) {
+        interest = creditInterestFor(amountOnAccount, terms.rate);
+    }
+
     return {
+        creditRate: terms.rate,
+        creditTerm: terms.term,
+        creditTermsValid: terms.valid,
+        interest: interest,
+        owedOnAccount: amountOnAccount + interest,
+        dueDate: addMonthsToToday(terms.term),
         gross: gross,
         discount: discount,
         due: due,
@@ -1408,7 +1491,14 @@ function renderCartFigures() {
         if (t.onCredit) {
             html += '<div class="total-row"><span>Paid now</span><span>' + peso(t.down) + '</span></div>';
             if (t.amountOnAccount > 0) {
-                html += '<div class="total-row total-short"><span>On account</span><span>' + peso(t.amountOnAccount) + '</span></div>';
+                html += '<div class="total-row"><span>On account</span><span>' + peso(t.amountOnAccount) + '</span></div>';
+                if (t.creditTermsValid) {
+                    html += '<div class="total-row"><span>Interest (' + creditTermsLabel(t.creditRate, t.creditTerm) +
+                            ')</span><span>' + peso(t.interest) + '</span></div>';
+                    html += '<div class="total-row total-short"><span>Total owed</span><span>' +
+                            peso(t.owedOnAccount) + '</span></div>';
+                    html += '<div class="total-row"><span>Due date</span><span>' + creditDueText(t.dueDate) + '</span></div>';
+                }
             } else {
                 html += '<div class="total-row total-change"><span>Paid in full</span><span>' + peso(t.amountOnAccount) + '</span></div>';
             }
@@ -1546,6 +1636,12 @@ function onPaymentMethodChange(method) {
     if (tender) tender.style.display = (onAccount || method === 'Bank Transfer') ? 'none' : 'block';
     if (down) down.style.display = onCredit ? 'block' : 'none';
 
+    if (onCredit) {
+        fillCreditTermDefaults();
+        // If the settings are not here yet, fetch them and fill the defaults when they arrive
+        if (!storeSettings) loadStoreSettings(false).then(function () { fillCreditTermDefaults(); renderCart(); });
+    }
+
     renderCart();
 }
 
@@ -1568,7 +1664,7 @@ function renderLoyaltyNote(t) {
     if (l.qualifies) {
         text = rate + ' loyalty discount this month: paid ' + peso(l.lastMonthPaid) + ' last month.';
         if (t.onAccount) {
-            text += ' It applies only to sales paid in full now, not to Credit or COD.';
+            text += ' It applies only to sales paid in full now, not to Credit.';
         } else if (Number(l.thisMonthPaid) >= Number(l.threshold)) {
             text += ' Already paid enough this month to keep it next month.';
         }
@@ -1722,17 +1818,19 @@ function renderCreditVerdict(totals) {
         return;
     }
 
-    if (t.amountOnAccount > available) {
-        const short = t.amountOnAccount - available;
+    if (t.owedOnAccount > available) {
+        // The least to pay now so that what goes on account, with its interest, fits the limit
+        const ratio = 1 + (t.creditTermsValid ? t.creditRate : 0) / 100;
+        const least = Math.ceil(Math.max(t.due - available / ratio, 0) * 100) / 100;
         box.className = 'credit-verdict is-stop';
-        box.innerHTML = 'The customer should at least pay <strong>' + peso((t.down || 0) + short) +
+        box.innerHTML = 'The customer should at least pay <strong>' + peso(least) +
             '</strong> to use the credit.';
         return;
     }
 
     box.className = 'credit-verdict is-good';
-    box.innerHTML = peso(t.amountOnAccount) + ' goes on ' + escapeHtml(name) + "'s account, leaving " +
-        peso(available - t.amountOnAccount) + ' of their limit.';
+    box.innerHTML = peso(t.owedOnAccount) + ' goes on ' + escapeHtml(name) + "'s account, leaving " +
+        peso(available - t.owedOnAccount) + ' of their limit.';
 }
 
 function fillDownPayment(share) {
@@ -1792,6 +1890,8 @@ function checkoutQuestion(t, customerName) {
     } else if (t.onCredit) {
         detail.push('Amount Paid: ' + peso(t.down) + (t.down > 0 ? ' by ' + downPaymentMethod() : ''));
         if (t.amountOnAccount > 0) {
+            detail.push('Interest (' + creditTermsLabel(t.creditRate, t.creditTerm) + '): ' + peso(t.interest));
+            detail.push('Due date: ' + creditDueText(t.dueDate));
             if (t.down > 0) {
                 title = 'Take part payment and put the rest on account?';
                 confirmLabel = 'Confirm';
@@ -1799,8 +1899,8 @@ function checkoutQuestion(t, customerName) {
                 title = 'Put this sale on account?';
                 confirmLabel = 'Put it on their account';
             }
-            message = peso(t.amountOnAccount) + ' of this sale goes on ' + customerName + "'s account.";
-            detail.push('Balance: ' + peso(t.amountOnAccount));
+            message = peso(t.owedOnAccount) + ' of this sale, with its interest, goes on ' + customerName + "'s account.";
+            detail.push('Balance: ' + peso(t.owedOnAccount));
         } else {
             detail.push('Balance: ' + peso(0));
         }
@@ -1829,6 +1929,11 @@ async function handleCheckout(event, viaQr) {
     }
 
     const form = event.target;
+    if (form.elements.paymentMethod.value === 'Credit') {
+        // Never send before the shop's defaults are in the fields
+        await loadStoreSettings(false);
+        fillCreditTermDefaults();
+    }
     let t = cartTotals();
     const typedName = typedCustomerName();
 
@@ -1886,6 +1991,12 @@ async function handleCheckout(event, viaQr) {
 
     if (!t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due) {
         notifyWarning('The amount entered is less than the amount due.', 'Sale not completed');
+        return;
+    }
+
+    if (t.onCredit && !t.creditTermsValid) {
+        notifyWarning('The interest rate is 0 to 100 percent and the term is 1 to 12 months.', 'Credit terms needed');
+        focusBox('pay-interest');
         return;
     }
 
@@ -1986,6 +2097,8 @@ async function handleCheckout(event, viaQr) {
         expectedDiscount: t.discount,
         amountPaid: amountPaid,
         paymentMethod: t.method,
+        creditRate: t.onCredit ? t.creditRate : null,
+        creditTerm: t.onCredit ? t.creditTerm : null,
         downPaymentMethod: downPaymentMethod,
         referenceNo: referenceNo,
         qrPaymentId: qr ? qr.id : null,
@@ -2023,6 +2136,7 @@ async function handleCheckout(event, viaQr) {
         form.elements.amountPaid.value = '';
         if (form.elements.downPayment) form.elements.downPayment.value = '0';
         if (form.elements.referenceNo) form.elements.referenceNo.value = '';
+        creditTermsTouched = false;
         clearPaymentDetails('sale');
 
         if (deliveryMade) { pendingDelivery = null; renderDeliveryAttached(); }
@@ -2137,7 +2251,16 @@ async function openReceipt(saleId, fromReport) {
 
     const totals = [{ label: 'Subtotal', value: peso(s.total_amount) }];
     if (Number(s.discount) > 0) totals.push({ label: 'Discount', value: peso(s.discount) });
-    totals.push({ label: 'Total Due', value: peso(s.final_amount), due: true });
+    if (Number(s.credit_interest_amount) > 0) {
+        totals.push({
+            label: 'Interest (' + creditTermsLabel(s.credit_interest_rate, s.credit_term_months) + ')',
+            value: peso(s.credit_interest_amount)
+        });
+    }
+    totals.push({ label: 'Total Due', value: peso(Number(s.final_amount) + (Number(s.credit_interest_amount) || 0)), due: true });
+    if (s.credit_due_date) {
+        totals.push({ label: 'Payment Due', value: escapeHtml(String(s.credit_due_date).slice(0, 10)) });
+    }
     if (Number(s.penalty_amount) > 0) {
         totals.push({
             label: 'Late Penalty (' + penaltyRateWord(s.penalty_rate) + '/mo \u00d7 ' + s.penalty_months + ')',
@@ -3607,7 +3730,9 @@ async function loadCashierSales() {
 
 const DEBT_TERM_DAYS = 30;
 
+// The days left come from the sale's own due date; an old sale without one is due after 30 days
 function debtDaysLeft(row) {
+    if (row.days_left !== undefined && row.days_left !== null) return Number(row.days_left);
     return DEBT_TERM_DAYS - (Number(row.days_old) || 0);
 }
 
@@ -3682,6 +3807,11 @@ async function openPaymentForm(saleId) {
         row.customer_name + ' \u00b7 ' + orNumber(row.sale_id);
     document.getElementById('payment-avatar').textContent = initialsOf(row.customer_name);
 
+    let interestNote = '';
+    if (Number(row.credit_interest_amount) > 0) {
+        interestNote = ' <span class="muted">+ ' + peso(row.credit_interest_amount) + ' interest (' +
+            escapeHtml(creditTermsLabel(row.credit_interest_rate, row.credit_term_months)) + ')</span>';
+    }
     let penaltyNote = '';
     if (Number(row.penalty_amount) > 0) {
         let monthWord = ' months';
@@ -3695,7 +3825,7 @@ async function openPaymentForm(saleId) {
         detailField('Phone', row.phone ? escapeHtml(row.phone) : '<span class="muted">No phone on file</span>') +
         detailField('Sale Date', escapeHtml(String(row.sale_date).slice(0, 10))) +
         detailField('Payment Due', debtDueCell(row)) +
-        detailField('Amount Due', peso(row.final_amount) + penaltyNote) +
+        detailField('Amount Due', peso(row.final_amount) + interestNote + penaltyNote) +
         detailField('Total Payment', peso(row.amount_paid)) +
         detailField('Balance', '<span class="cell-due">' + peso(balance) + '</span>');
 
@@ -4011,14 +4141,12 @@ function renderCustomerUnpaid() {
 
 const CASH_RATING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
 
-const CREDIT_TERM_DAYS = 30;
-
+// The earliest due date among the customer's unpaid sales (the view works it out)
 function creditDueDate(row) {
-    if (row.oldest_debt_days === null || row.oldest_debt_days === undefined) return null;
+    if (!row.next_due_date) return null;
     if (!(Number(row.current_credit) > 0)) return null;
-    const now = new Date();
-    const due = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    due.setDate(due.getDate() - Number(row.oldest_debt_days) + CREDIT_TERM_DAYS);
+    const due = new Date(String(row.next_due_date).slice(0, 10) + 'T00:00:00');
+    if (isNaN(due.getTime())) return null;
     return due;
 }
 
@@ -4267,8 +4395,11 @@ function renderCustomerHistory() {
     for (let i = 0; i < rows.length; i++) {
         const p = rows[i];
         let penaltyNote = '';
+        if (Number(p.credit_interest_amount) > 0) {
+            penaltyNote = '<span class="cell-sub">+ ' + peso(p.credit_interest_amount) + ' interest</span>';
+        }
         if (Number(p.penalty_amount) > 0) {
-            penaltyNote = '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty</span>';
+            penaltyNote += '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty</span>';
         }
         const cells = [
             orNumber(p.sale_id) + ' <span class="muted">' + escapeHtml(p.payment_method) + '</span>',

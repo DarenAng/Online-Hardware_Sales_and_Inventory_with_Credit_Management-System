@@ -326,6 +326,8 @@ CREATE TABLE store_settings (
     penalty_rate DECIMAL(5,2) NOT NULL DEFAULT 3.00,
     loyalty_rate DECIMAL(5,2) NOT NULL DEFAULT 2.00,
     loyalty_threshold DECIMAL(12,2) NOT NULL DEFAULT 5000.00,
+    credit_interest_rate DECIMAL(5,2) NOT NULL DEFAULT 0.00,
+    credit_term_months INT NOT NULL DEFAULT 1,
     bank_name VARCHAR(100) NULL,
     bank_account_name VARCHAR(150) NULL,
     bank_account_number VARCHAR(50) NULL,
@@ -357,7 +359,11 @@ CREATE TABLE sales (
     penalty_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
     penalty_applied_at TIMESTAMP NULL,
     refunded_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-    amount_due DECIMAL(12,2) AS (total_amount - discount + penalty_amount - refunded_amount) STORED,
+    credit_interest_rate DECIMAL(5,2) NULL,
+    credit_term_months INT NULL,
+    credit_interest_amount DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+    credit_due_date DATE NULL,
+    amount_due DECIMAL(12,2) AS (total_amount - discount + credit_interest_amount + penalty_amount - refunded_amount) STORED,
     payment_method ENUM('Cash','Cheque','GCash','PayMaya','PayPal','Bank Transfer','COD','Credit') NOT NULL,
     payment_status ENUM('Paid','Partial','Unpaid') NOT NULL DEFAULT 'Paid',
 
@@ -421,7 +427,7 @@ CREATE TABLE deliveries (
     address_city VARCHAR(100) NULL,
     address_province VARCHAR(100) NULL,
     address_landmark VARCHAR(150) NULL,
-    status ENUM('Pending', 'In Transit', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed') NOT NULL DEFAULT 'Pending',
+    status ENUM('Pending', 'Out for Delivery', 'Delivered', 'Delayed', 'Failed', 'Cancelled') NOT NULL DEFAULT 'Pending',
     remarks TEXT,
     cashier_remarks TEXT NULL,
     created_date DATE NULL,
@@ -703,7 +709,7 @@ INSERT INTO deliveries (sale_id, delivery_staff_id, delivery_address, status, re
 (1, 5, 'Quezon City, Metro Manila',  'Delivered',        'Delivered safely to customer front door', '2026-08-21', '2026-08-21 14:30:00'),
 (2, 5, 'Pasig City, Metro Manila',   'Pending',          'Awaiting truck dispatch',                 '2026-08-29', NULL),
 (4, 5, 'Caloocan City, Metro Manila','Out for Delivery', 'Driver left the warehouse 9:00 AM',       '2026-09-02', NULL),
-(6, 5, 'Taguig City, Metro Manila',  'In Transit',       'Bulk cement load, two stops',             '2026-09-02', NULL),
+(6, 5, 'Taguig City, Metro Manila',  'Out for Delivery', 'Bulk cement load, two stops',             '2026-09-02', NULL),
 (8, 5, 'Pasig City, Metro Manila',   'Delivered',        'COD collected in full',                   '2026-08-30', '2026-08-30 15:05:00'),
 (10, 5,'Taguig City, Metro Manila',  'Delayed',          'Heavy rain, rescheduled',                 '2026-09-03', NULL);
 
@@ -840,12 +846,17 @@ INSERT INTO customer_credits (customer_id, credit_limit, standing, notes, update
 (16, 25000.00, 'Hold', 'Cheque returned in July. On hold until the balance is cleared.', 2, '2026-06-04 16:15:25'),
 (17, 8000.00, 'Good', NULL, 2, '2026-04-07 13:05:27'),
 (18, 45000.00, 'Good', NULL, 2, '2026-03-14 09:35:16'),
-(19, 0.00, 'Good', NULL, 2, '2026-05-25 11:35:07'),
+(19, 5000.00, 'Good', NULL, 2, '2026-05-25 11:35:07'),
 (20, 22000.00, 'Good', NULL, 2, '2026-05-07 13:55:49'),
 (23, 150000.00, 'Good', 'Contractor account, settles monthly.', 2, '2026-05-09 15:50:54'),
 (24, 120000.00, 'Good', 'Site account, PO-backed.', 2, '2026-04-20 13:10:28'),
 (26, 16000.00, 'Good', NULL, 2, '2026-04-26 11:10:34'),
 (27, 9000.00, 'Good', NULL, 2, '2026-05-04 15:50:01');
+
+-- Every customer starts with a 5,000.00 credit limit, so no one is left at zero
+INSERT INTO customer_credits (customer_id, credit_limit, standing, updated_by_staff_id)
+SELECT customer_id, 5000.00, 'Good', NULL FROM customers
+WHERE customer_id NOT IN (SELECT customer_id FROM customer_credits);
 
 INSERT INTO suppliers (supplier_name, contact_person, contact_number, email, address) VALUES
 ('Batangas Builders Depot', 'Ricky Alonzo', '0917-201-4455', 'orders@bbdepot.ph', 'Diversion Road, Balayan, Batangas'),

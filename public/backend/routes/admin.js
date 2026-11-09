@@ -2404,7 +2404,7 @@ function registerAdminRoutes(app, deps) {
     try {
       const rowsResult = await db.query(
         "SELECT setting_id, store_name, proprietor, address, tin, registration_type, " +
-        "vat_rate, invoice_note, penalty_rate, " +
+        "vat_rate, invoice_note, penalty_rate, credit_interest_rate, credit_term_months, " +
         "bank_name, bank_account_name, bank_account_number, receipt_layout, updated_at, " +
         "st.full_name AS updated_by " +
         "FROM store_settings cfg " +

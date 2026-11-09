@@ -170,6 +170,7 @@ const ACCESS_RULES = [
   ["PUT",   /^\/api\/credit\/customers\/\d+\/limit$/,  [MANAGER]],
   ["GET",   /^\/api\/credit\/policy$/,                 [MANAGER, CASHIER]],
   ["PUT",   /^\/api\/credit\/policy$/,                 [MANAGER]],
+  ["PUT",   /^\/api\/credit\/interest$/,               [MANAGER]],
   ["GET",   /^\/api\/credit\/terms\/\d+$/,              [MANAGER, CASHIER]],
   ["GET",   /^\/api\/credit\/card\/\d+$/,               [MANAGER, CASHIER]],
   ["GET",   /^\/api\/policies$/,                         [MANAGER]],

@@ -51,7 +51,7 @@ function registerDeliveryRoutes(app, deps) {
         "LEFT JOIN customers c ON c.customer_id = s.customer_id " +
         "LEFT JOIN staff st ON st.staff_id = d.delivery_staff_id " +
         "WHERE " + where.join(" AND ") + " " +
-        "ORDER BY FIELD(d.status, 'Out for Delivery', 'In Transit', 'Pending', 'Delayed', 'Failed', 'Delivered'), " +
+        "ORDER BY FIELD(d.status, 'Out for Delivery', 'Pending', 'Delayed', 'Failed', 'Delivered', 'Cancelled'), " +
         "d.scheduled_date",
         params
       );
@@ -245,7 +245,7 @@ function registerDeliveryRoutes(app, deps) {
         "LEFT JOIN staff st ON st.staff_id = d.delivery_staff_id " +
         "WHERE d.is_archived = FALSE " +
         "AND (d.delivery_staff_id = ? OR d.delivery_staff_id IS NULL) " +
-        "ORDER BY FIELD(d.status, 'Out for Delivery', 'In Transit', 'Pending', 'Delayed', 'Failed', 'Delivered'), " +
+        "ORDER BY FIELD(d.status, 'Out for Delivery', 'Pending', 'Delayed', 'Failed', 'Delivered', 'Cancelled'), " +
         "d.scheduled_date",
         [staffId]
       );
@@ -265,7 +265,7 @@ function registerDeliveryRoutes(app, deps) {
       const updateResult = await db.query(
         "UPDATE deliveries SET delivery_staff_id = ? " +
         "WHERE delivery_id = ? AND is_archived = FALSE " +
-        "AND status NOT IN ('Delivered', 'Failed') " +
+        "AND status NOT IN ('Delivered', 'Failed', 'Cancelled') " +
         "AND (delivery_staff_id IS NULL OR delivery_staff_id = ?)",
         [staffId, deliveryId, staffId]
       );

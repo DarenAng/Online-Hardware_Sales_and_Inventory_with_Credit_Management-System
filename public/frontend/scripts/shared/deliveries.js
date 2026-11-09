@@ -1,22 +1,21 @@
 const NEXT_DELIVERY_STATUS = {
-    'Pending':          ['In Transit'],
-    'In Transit':       ['Out for Delivery'],
-    'Out for Delivery': ['Delivered', 'Delayed', 'Failed'],
-    'Delayed':          ['Out for Delivery', 'Failed'],
-    'Failed':           ['Pending'],
-    'Delivered':        []
+    'Pending':          ['Out for Delivery'],
+    'Out for Delivery': ['Delivered', 'Delayed', 'Failed', 'Cancelled'],
+    'Delayed':          ['Out for Delivery', 'Failed', 'Cancelled'],
+    'Failed':           ['Pending', 'Cancelled'],
+    'Delivered':        [],
+    'Cancelled':        []
 };
 
 function deliveryStepper(d) {
-    const stages = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered'];
-    const names = ['Pending', 'In Transit', 'Out for Delivery', 'Delivered'];
-    const notes = ['Sale made at the counter.', 'Loaded and on the road.', 'Driver is near the customer.',
-        'Paid and handed over.'];
+    const stages = ['Pending', 'Out for Delivery', 'Delivered'];
+    const names = ['Pending', 'Out for Delivery', 'Delivered'];
+    const notes = ['Sale made at the counter.', 'Loaded and on the road.', 'Paid and handed over.'];
     let reached = stages.indexOf(d.status);
     if (d.status === 'Delayed') reached = stages.indexOf('Out for Delivery');
 
     const states = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < stages.length; i++) {
         if (reached === -1) {
             states.push(i === 0 ? 'done' : '');
         } else if (i < reached || d.status === 'Delivered') {
@@ -36,7 +35,7 @@ function deliveryStepper(d) {
         paid = d.payment_status === 'Paid';
     }
 
-    if (d.status === 'Delivered' && d.delivered_at) notes[3] = escapeHtml(d.delivered_at);
+    if (d.status === 'Delivered' && d.delivered_at) notes[2] = escapeHtml(d.delivered_at);
 
     let items = '';
     for (let i = 0; i < names.length; i++) {
@@ -51,7 +50,7 @@ function deliveryStepper(d) {
     let tone = '';
     if (d.status === 'Pending') {
         summary = 'Waiting to go out.';
-    } else if (d.status === 'In Transit' || d.status === 'Out for Delivery') {
+    } else if (d.status === 'Out for Delivery') {
         summary = 'On the way.';
     } else if (d.status === 'Delivered') {
         summary = paid ? 'This delivery is finished.' : 'Delivered. Balance still owed.';
@@ -62,18 +61,23 @@ function deliveryStepper(d) {
     } else if (d.status === 'Failed') {
         summary = 'Failed.';
         tone = 'is-fail';
+    } else if (d.status === 'Cancelled') {
+        summary = 'Cancelled.';
+        tone = 'is-fail';
     } else {
         summary = escapeHtml(d.status || '');
     }
 
     let message = '';
-    if (d.status === 'Delayed' || d.status === 'Failed') {
+    if (d.status === 'Delayed' || d.status === 'Failed' || d.status === 'Cancelled') {
         const late = d.status === 'Delayed';
         let words;
         if (d.remarks) {
             words = d.status + ': ' + escapeHtml(d.remarks);
         } else if (late) {
             words = 'This delivery is delayed.';
+        } else if (d.status === 'Cancelled') {
+            words = 'This delivery is cancelled.';
         } else {
             words = 'This delivery is marked failed.';
         }
@@ -154,6 +158,8 @@ function showDeliveryRecord(d, canUpdate, onlyStatuses) {
         const next = [];
         for (let i = 0; i < allowed.length; i++) {
             if (onlyStatuses && onlyStatuses.indexOf(allowed[i]) === -1) continue;
+            if (isDriver && d.status === 'Pending') continue;
+            if (allowed[i] === 'Cancelled' && !(user && user.role_name === 'Inventory Clerk')) continue;
             if (isDriver || allowed[i] !== 'Delivered') next.push(allowed[i]);
         }
 
@@ -215,7 +221,8 @@ function showDeliveryRecord(d, canUpdate, onlyStatuses) {
 const DELIVERY_STATUS_BUTTON = {
     'Delivered': 'btn-success',
     'Delayed':   'btn-gold',
-    'Failed':    'btn-danger'
+    'Failed':    'btn-danger',
+    'Cancelled': 'btn-danger'
 };
 
 async function fillDeliveryItems(deliveryId, page, pages) {
@@ -263,7 +270,7 @@ async function fillDeliveryItems(deliveryId, page, pages) {
 async function pickDeliveryStatus(deliveryId, status) {
     closeModal('detail-modal');
 
-    if (status === 'Delayed' || status === 'Failed') {
+    if (status === 'Delayed' || status === 'Failed' || status === 'Cancelled') {
         openDelayReason(deliveryId, status);
         return;
     }
@@ -291,9 +298,10 @@ function openDelayReason(deliveryId, status) {
     delayDeliveryId = deliveryId;
     delayStatus = status;
     const failed = status === 'Failed';
+    const cancelled = status === 'Cancelled';
 
     document.getElementById('delay-subtitle').textContent = 'Delivery ' + deliveryCode(deliveryId);
-    document.getElementById('delay-title').textContent = failed ? 'Mark Failed' : 'Mark Delayed';
+    document.getElementById('delay-title').textContent = 'Mark ' + status;
     document.getElementById('delay-reason').value = '';
 
     // A failed delivery picks a reason from a list; Delayed types its own
@@ -301,14 +309,20 @@ function openDelayReason(deliveryId, status) {
     document.getElementById('delay-choice-group').hidden = !failed;
     document.getElementById('delay-text-group').hidden = failed;
     document.getElementById('delay-reason').required = !failed;
-    document.getElementById('delay-label').textContent = failed ? 'Other reason' : 'Reason for the delay';
+    let label = 'Reason for the delay';
+    if (failed) label = 'Other reason';
+    if (cancelled) label = 'Reason for cancelling';
+    document.getElementById('delay-label').textContent = label;
 
     const button = document.getElementById('delay-save');
-    button.textContent = failed ? 'Mark Failed' : 'Mark Delayed';
-    button.className = failed ? 'btn btn-danger' : 'btn btn-gold';
+    button.textContent = 'Mark ' + status;
+    button.className = (failed || cancelled) ? 'btn btn-danger' : 'btn btn-gold';
 
     showModal('delay-modal');
-    guardModal('delay-modal', failed ? 'the reason for the failed delivery' : 'the reason for the delay');
+    let guarded = 'the reason for the delay';
+    if (failed) guarded = 'the reason for the failed delivery';
+    if (cancelled) guarded = 'the reason for cancelling the delivery';
+    guardModal('delay-modal', guarded);
 }
 
 // Choosing Other for a failed delivery shows the box to type the reason in
@@ -343,7 +357,9 @@ async function handleDelayReason(event) {
             reason = choice;
         }
     } else if (typed.length < 5) {
-        notifyWarning('Say why it is delayed, in a few words.', 'The reason is required');
+        notifyWarning(delayStatus === 'Cancelled' ? 'Say why it is cancelled, in a few words.'
+                                                  : 'Say why it is delayed, in a few words.',
+                      'The reason is required');
         document.getElementById('delay-reason').focus();
         return;
     }
@@ -393,6 +409,9 @@ async function refreshDeliveryLists() {
 
     const clerkPanel = typeof getDataPanel === 'function' ? getDataPanel('clerk-deliveries') : null;
     if (clerkPanel && clerkPanel.state === 'ready') await clerkPanel.refresh();
+
+    const failedPanel = typeof getDataPanel === 'function' ? getDataPanel('failed-deliveries') : null;
+    if (failedPanel && failedPanel.state === 'ready') await failedPanel.refresh();
 
     if (typeof loadDeliverySchedule === 'function' && typeof scheduleRows !== 'undefined' && scheduleRows !== null) {
         await loadDeliverySchedule(true);

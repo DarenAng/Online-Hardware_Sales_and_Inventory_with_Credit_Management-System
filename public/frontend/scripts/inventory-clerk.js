@@ -2255,10 +2255,16 @@ function openReturnDetail(returnId) {
 }
 
 // Delivery: what the stockroom still has to send out, and everything else for reference
-const CLERK_SENDS = ['In Transit', 'Out for Delivery'];
+// Pending goes Out for Delivery; when the driver is back, Out for Delivery or Delayed goes Failed or Cancelled
+const CLERK_SENDS = {
+    'Pending':          ['Out for Delivery'],
+    'Out for Delivery': ['Failed', 'Cancelled'],
+    'Delayed':          ['Failed', 'Cancelled'],
+    'Failed':           ['Cancelled']
+};
 
 function clerkDeliveryNeedsMe(d) {
-    return d.status === 'Pending' || d.status === 'In Transit';
+    return d.status === 'Pending';
 }
 
 function buildClerkDeliveriesPanel() {
@@ -2333,8 +2339,8 @@ async function openClerkDelivery(deliveryId) {
         }
     }
 
-    // The clerk moves a delivery only from Pending or In Transit; any other status is read only
-    showDeliveryRecord(d, true, clerkDeliveryNeedsMe(d) ? CLERK_SENDS : []);
+    // The clerk moves a delivery only as listed in CLERK_SENDS; any other status is read only
+    showDeliveryRecord(d, true, CLERK_SENDS[d.status] || []);
 }
 
 if (window.location.pathname.toLowerCase().endsWith('inventory-dashboard.html')) {

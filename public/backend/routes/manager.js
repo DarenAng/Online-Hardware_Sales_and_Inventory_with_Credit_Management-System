@@ -146,10 +146,10 @@ function registerManagerRoutes(app, deps) {
         "COALESCE(SUM(s.total_amount), 0) AS gross, " +
         "COALESCE(SUM(s.discount), 0) AS discounts, " +
         "COALESCE(SUM(s.final_amount), 0) AS billed, " +
-        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected, " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount + s.credit_interest_amount)), 0) AS collected, " +
         "COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS outstanding, " +
         "-- the part of outstanding that is late-payment penalty rather than goods\n" +
-        "COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0) - GREATEST(s.final_amount - s.refunded_amount - s.amount_paid, 0)), 0) AS penalties " +
+        "COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0) - GREATEST(s.final_amount + s.credit_interest_amount - s.refunded_amount - s.amount_paid, 0)), 0) AS penalties " +
         "FROM sales s " +
         "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql,
         window
@@ -173,7 +173,7 @@ function registerManagerRoutes(app, deps) {
         "SELECT " + bucket + " AS bucket, " +
         "COUNT(*) AS sale_count, " +
         "COALESCE(SUM(s.final_amount), 0) AS billed, " +
-        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount + s.credit_interest_amount)), 0) AS collected " +
         "FROM sales s " +
         "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql +
         " GROUP BY bucket " +
@@ -186,7 +186,7 @@ function registerManagerRoutes(app, deps) {
         "SELECT s.payment_method, " +
         "COUNT(*) AS sale_count, " +
         "COALESCE(SUM(s.final_amount), 0) AS billed, " +
-        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected, " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount + s.credit_interest_amount)), 0) AS collected, " +
         "COALESCE(SUM(GREATEST(s.amount_due - s.amount_paid, 0)), 0) AS outstanding " +
         "FROM sales s " +
         "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql +
@@ -216,7 +216,7 @@ function registerManagerRoutes(app, deps) {
         "SELECT st.staff_id, st.full_name AS staff_name, " +
         "COUNT(*) AS sale_count, " +
         "COALESCE(SUM(s.final_amount), 0) AS billed, " +
-        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount + s.credit_interest_amount)), 0) AS collected " +
         "FROM sales s " +
         "JOIN staff st ON st.staff_id = s.cashier_staff_id " +
         "WHERE s.is_archived = FALSE AND s.sale_date BETWEEN ? AND ?" + cashierSql +
@@ -618,7 +618,7 @@ function registerManagerRoutes(app, deps) {
         "SELECT COUNT(*) AS sale_count, " +
         "COALESCE(SUM(s.final_amount), 0) AS billed, " +
         "COALESCE(SUM(s.discount), 0) AS discounts, " +
-        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected, " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount + s.credit_interest_amount)), 0) AS collected, " +
         "COALESCE(SUM(s.change_given), 0) AS change_given, " +
         "COALESCE(SUM(CASE WHEN s.payment_method = 'Cash' " +
         "THEN s.amount_paid - s.change_given ELSE 0 END), 0) AS cash_drawer " +
@@ -633,7 +633,7 @@ function registerManagerRoutes(app, deps) {
       const methodsResult = await db.query(
         "SELECT s.payment_method, COUNT(*) AS sale_count, " +
         "COALESCE(SUM(s.final_amount), 0) AS billed, " +
-        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount)), 0) AS collected " +
+        "COALESCE(SUM(LEAST(s.amount_paid, s.final_amount + s.credit_interest_amount)), 0) AS collected " +
         "FROM sales s " +
         "WHERE s.is_archived = FALSE AND DATE(s.sale_date) = COALESCE(?, CURDATE()) " + scope +
         " GROUP BY s.payment_method " +
@@ -679,7 +679,7 @@ function registerManagerRoutes(app, deps) {
       const lowStock = lowStockRows[0];
       stock.low_stock = lowStock.n;
       const deliveryRowsResult = await db.query(
-        "SELECT COALESCE(SUM(CASE WHEN status IN ('Pending','In Transit','Out for Delivery') THEN 1 ELSE 0 END), 0) AS in_progress, " +
+        "SELECT COALESCE(SUM(CASE WHEN status IN ('Pending','Out for Delivery') THEN 1 ELSE 0 END), 0) AS in_progress, " +
         "COALESCE(SUM(CASE WHEN status IN ('Delayed','Failed') THEN 1 ELSE 0 END), 0) AS problem " +
         "FROM deliveries WHERE is_archived = FALSE"
       );
@@ -688,9 +688,9 @@ function registerManagerRoutes(app, deps) {
       const delivery = deliveryRows[0];
 
       const incomeRowsResult = await db.query(
-        "SELECT COALESCE(SUM(LEAST(amount_paid, final_amount)), 0) AS collected, " +
+        "SELECT COALESCE(SUM(LEAST(amount_paid, final_amount + credit_interest_amount)), 0) AS collected, " +
         "COALESCE(SUM(CASE WHEN DATE(sale_date) = CURDATE() " +
-        "THEN LEAST(amount_paid, final_amount) ELSE 0 END), 0) AS collected_today " +
+        "THEN LEAST(amount_paid, final_amount + credit_interest_amount) ELSE 0 END), 0) AS collected_today " +
         "FROM sales WHERE is_archived = FALSE"
       );
       const incomeRows = incomeRowsResult[0];
@@ -700,7 +700,7 @@ function registerManagerRoutes(app, deps) {
       const creditsRowsResult = await db.query(
         "SELECT COUNT(*) AS open_accounts, " +
         "COALESCE(SUM(GREATEST(amount_due - amount_paid, 0)), 0) AS owed, " +
-        "COALESCE(SUM(GREATEST(amount_due - amount_paid, 0) - GREATEST(final_amount - refunded_amount - amount_paid, 0)), 0) AS penalties " +
+        "COALESCE(SUM(GREATEST(amount_due - amount_paid, 0) - GREATEST(final_amount + credit_interest_amount - refunded_amount - amount_paid, 0)), 0) AS penalties " +
         "FROM sales " +
         "WHERE is_archived = FALSE AND payment_status <> 'Paid'"
       );
@@ -931,8 +931,10 @@ function registerManagerRoutes(app, deps) {
         "s.payment_method, s.payment_status, s.final_amount, s.amount_paid, " +
         "s.penalty_rate, s.penalty_months, s.penalty_amount, s.penalty_applied_at, s.amount_due, " +
         "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
+        "s.credit_interest_rate, s.credit_term_months, s.credit_interest_amount, " +
         "DATEDIFF(CURDATE(), DATE(s.sale_date)) AS days_old, " +
-        "DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY) AS due_date, " +
+        "COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) AS due_date, " +
+        "DATEDIFF(COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)), CURDATE()) AS days_left, " +
         "cc.standing, " +
         "(SELECT COUNT(*) FROM credit_payments cp WHERE cp.sale_id = s.sale_id) AS payment_count, " +
         "(SELECT MAX(cp.payment_date) FROM credit_payments cp WHERE cp.sale_id = s.sale_id) AS last_payment " +
@@ -1064,7 +1066,7 @@ function registerManagerRoutes(app, deps) {
   app.get("/api/credit/policy", async function (request, response) {
     try {
       const rowsResult = await db.query(
-        "SELECT cfg.penalty_rate, cfg.updated_at, st.full_name AS updated_by, " +
+        "SELECT cfg.penalty_rate, cfg.credit_interest_rate, cfg.credit_term_months, cfg.updated_at, st.full_name AS updated_by, " +
         "(SELECT COUNT(*) FROM customer_credits WHERE penalty_rate IS NOT NULL) AS own_rate_accounts, " +
         "(SELECT COUNT(*) FROM sales s " +
         "WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid' AND s.penalty_amount > 0) AS penalised_sales, " +
@@ -1076,7 +1078,8 @@ function registerManagerRoutes(app, deps) {
         "WHERE cfg.setting_id = 1"
       );
       const rows = rowsResult[0];
-      response.json(rows[0] || { penalty_rate: "3.00", updated_at: null, updated_by: null,
+      response.json(rows[0] || { penalty_rate: "3.00", credit_interest_rate: "0.00", credit_term_months: 1,
+                                 updated_at: null, updated_by: null,
                                  own_rate_accounts: 0, penalised_sales: 0, penalties_owed: 0 });
     } catch (error) {
       console.error("Penalty policy read failed:", error.message);
@@ -1117,6 +1120,59 @@ function registerManagerRoutes(app, deps) {
     } catch (error) {
       console.error("Penalty policy failed:", error.message);
       response.status(500).json({ error: "Unable to save the late-payment policy" });
+    }
+  });
+
+  // The shop's usual interest rate and term for a credit sale; the cashier can change both on a sale
+  app.put("/api/credit/interest", requireRole(MANAGER), async function (request, response) {
+    const body = request.body || {};
+    const rateText = String(body.interestRate === undefined || body.interestRate === null ? "" : body.interestRate).trim();
+    const termText = String(body.termMonths === undefined || body.termMonths === null ? "" : body.termMonths).trim();
+    const rate = Number(rateText);
+    const term = Number(termText);
+
+    if (rateText === "" || !Number.isFinite(rate) || rate < 0 || rate > 100) {
+      return response.status(400).json({ error: "The interest rate is 0 to 100 percent." });
+    }
+    if (termText === "" || !Number.isInteger(term) || term < 1 || term > 12) {
+      return response.status(400).json({ error: "The term is 1 to 12 months." });
+    }
+    const savedRate = Math.round(rate * 100) / 100;
+
+    try {
+      const beforeResult = await db.query(
+        "SELECT credit_interest_rate, credit_term_months FROM store_settings WHERE setting_id = 1");
+      const before = beforeResult[0];
+
+      const updated = await db.query(
+        "UPDATE store_settings SET credit_interest_rate = ?, credit_term_months = ?, updated_by_staff_id = ? " +
+        "WHERE setting_id = 1",
+        [savedRate, term, getActorId(request)]
+      );
+      if (!updated[0].affectedRows) {
+        return response.status(500).json({ error: "The shop settings row is missing, so nothing was saved." });
+      }
+
+      let oldValues = null;
+      if (before[0]) {
+        oldValues = { credit_interest_rate: Number(before[0].credit_interest_rate),
+                      credit_term_months: Number(before[0].credit_term_months) };
+      }
+
+      await writeAuditLog(request, "UPDATE_CREDIT_INTEREST",
+        "Credit interest set to " + savedRate + "% over " + term + (term === 1 ? " month" : " months") +
+        ", charged once on the amount put on account",
+        { changes: fieldChanges(oldValues, { credit_interest_rate: savedRate, credit_term_months: term }) });
+
+      response.json({
+        message: "Saved. A credit sale starts at " + savedRate.toFixed(2) + "% interest over " + term +
+                 (term === 1 ? " month." : " months."),
+        credit_interest_rate: savedRate.toFixed(2),
+        credit_term_months: term
+      });
+    } catch (error) {
+      console.error("Credit interest failed:", error.message);
+      response.status(500).json({ error: "Unable to save the credit interest" });
     }
   });
 
@@ -1300,6 +1356,10 @@ function registerManagerRoutes(app, deps) {
     const terms = policies.credit;
     const ownRate = customer.penalty_rate_override !== null && customer.penalty_rate_override !== undefined;
 
+    const interestResult = await db.query(
+      "SELECT credit_interest_rate, credit_term_months FROM store_settings WHERE setting_id = 1");
+    const interest = interestResult[0][0] || { credit_interest_rate: 0, credit_term_months: 1 };
+
     return {
       store: {
         name: store.store_name || "Lucelyn Hardware",
@@ -1324,6 +1384,8 @@ function registerManagerRoutes(app, deps) {
       },
       terms: {
         due_days: CREDIT_DUE_DAYS,
+        interest_rate: Number(interest.credit_interest_rate),
+        term_months: Number(interest.credit_term_months),
         penalty_rate: customer.penalty_rate,
         penalty_rate_is_own: ownRate,
         lines: linesOf(terms.text)
@@ -1565,14 +1627,15 @@ function registerManagerRoutes(app, deps) {
       const purchasesResult = await db.query(
         "SELECT s.sale_id, s.sale_date, s.total_amount, s.discount, s.final_amount, " +
         "s.amount_paid, s.payment_method, s.payment_status, s.reference_no, " +
-        "s.is_archived, s.penalty_rate, s.penalty_months, s.penalty_amount, s.penalty_applied_at, s.amount_due, " +
+        "s.is_archived, s.credit_interest_amount, s.credit_interest_rate, s.credit_term_months, s.credit_due_date, " +
+        "s.penalty_rate, s.penalty_months, s.penalty_amount, s.penalty_applied_at, s.amount_due, " +
         "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
         "st.full_name AS cashier_name, " +
         "(SELECT COUNT(*) FROM sale_items si WHERE si.sale_id = s.sale_id) AS item_count, " +
         "d.delivery_id, d.status AS delivery_status " +
         "FROM sales s " +
         "JOIN staff st ON st.staff_id = s.cashier_staff_id " +
-        "LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE " +
+        "LEFT JOIN deliveries d ON d.sale_id = s.sale_id AND d.is_archived = FALSE AND d.status <> 'Cancelled' " +
         "WHERE s.customer_id = ? " +
         "ORDER BY s.sale_date DESC",
         [customerId]
