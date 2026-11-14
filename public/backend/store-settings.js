@@ -6,9 +6,6 @@ const DEFAULT_STORE_SETTINGS = {
   registration_type: "VAT",
   vat_rate: "12.00",
   invoice_note: null,
-  penalty_rate: "3.00",
-  credit_interest_rate: "0.00",
-  credit_term_months: 1,
   bank_name: null,
   bank_account_name: null,
   bank_account_number: null,
@@ -21,7 +18,6 @@ const DEFAULT_STORE_SETTINGS = {
 
 const DEFAULT_CREDIT_TERMS = [
   "Pay each credit purchase in full by the due date on the receipt.",
-  "A late purchase is charged the late-payment penalty for each month it stays unpaid.",
   "Credit may be held, lowered or stopped for late payment or going over the limit.",
   "Keep every receipt and payment slip as proof.",
   "Tell the store of any change of address or contact number.",
@@ -31,8 +27,7 @@ const DEFAULT_CREDIT_TERMS = [
 const DEFAULT_DATA_TERMS = [
   "Name, address, contact number and purchases are kept only to sell, deliver, give credit and collect payment.",
   "Only authorized staff see them; they are not sold or shared, except with a courier or as the law requires.",
-  "The customer may ask to see or correct them at any time.",
-  "Data Privacy Act of 2012 (RA 10173)."
+  "The customer may ask to see or correct them at any time."
 ].join("\n");
 
 const DEFAULT_REFUND_POLICY = [

@@ -1,0 +1,18 @@
+# Keeps the Lucelyn Hardware app running on the Oracle server.
+# It starts the app when the server boots and starts it again if it stops.
+# Copy to /etc/systemd/system/ohsicms.service (see DEPLOY-ORACLE.md, Part 7).
+
+[Unit]
+Description=Lucelyn Hardware app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ohsicms
+ExecStart=/usr/bin/node public/backend/server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

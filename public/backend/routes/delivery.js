@@ -120,14 +120,15 @@ function registerDeliveryRoutes(app, deps) {
       return response.status(400).json({ error: "That driver is not valid." });
     }
 
-    const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?$/.exec(newDate);
-    const newTime = match ? new Date(match[1] + "T" + match[2]) : null;
-    if (!match || isNaN(newTime.getTime())) {
-      return response.status(400).json({ error: "Pick the new date and time of the delivery." });
+    // A delivery is scheduled for a day, not a time
+    const scheduled = newDate.slice(0, 10);
+    const newDay = isDateText(scheduled) ? new Date(scheduled + "T00:00:00") : null;
+    if (!newDay || isNaN(newDay.getTime())) {
+      return response.status(400).json({ error: "Pick the new date of the delivery." });
     }
-    const scheduled = match[1] + " " + match[2] + (match[3] || ":00");
-    const oneMinuteAgo = new Date(Date.now() - 60 * 1000);
-    if (newTime < oneMinuteAgo) {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    if (newDay < startOfToday) {
       return response.status(400).json({ error: "The new date cannot be in the past." });
     }
 
@@ -147,7 +148,7 @@ function registerDeliveryRoutes(app, deps) {
       let driverName = "no driver yet";
       if (driverId) {
         const driversResult = await db.query(
-          "SELECT st.full_name FROM staff st " +
+          "SELECT st.full_name, st.work_days FROM staff st " +
           "JOIN roles r ON r.role_id = st.role_id " +
           "WHERE st.staff_id = ? AND r.role_name = 'Delivery Personnel' " +
           "AND st.is_active = TRUE AND st.archived_at IS NULL",
@@ -157,6 +158,8 @@ function registerDeliveryRoutes(app, deps) {
           return response.status(400).json({ error: "That driver is not an active delivery staff member." });
         }
         driverName = driversResult[0][0].full_name;
+        const dayProblem = helpers.workDayProblem(driverName, driversResult[0][0].work_days, scheduled);
+        if (dayProblem) return response.status(400).json({ error: dayProblem });
       }
 
       const updateResult = await db.query(
@@ -179,7 +182,7 @@ function registerDeliveryRoutes(app, deps) {
           "INSERT INTO notifications (target_role_id, notif_type, title, message, created_by_staff_id) " +
           "SELECT role_id, 'Delivery', ?, ?, ? FROM roles WHERE role_name = 'Delivery Personnel'",
           ["Delivery " + helpers.deliveryCode(deliveryId) + " rescheduled",
-           "Delivery " + helpers.deliveryCode(deliveryId) + " is back on the list for " + scheduled.slice(0, 16) + who,
+           "Delivery " + helpers.deliveryCode(deliveryId) + " is back on the list for " + scheduled + who,
            getActorId(request)]
         );
       } catch (error) {
@@ -189,7 +192,7 @@ function registerDeliveryRoutes(app, deps) {
       const origin = request.headers["x-client-id"] || null;
       publishChange("notifications", "delivery rescheduled " + deliveryId, origin);
 
-      response.json({ message: "Delivery " + helpers.deliveryCode(deliveryId) + " is Pending again, for " + scheduled.slice(0, 16) + "." });
+      response.json({ message: "Delivery " + helpers.deliveryCode(deliveryId) + " is Pending again, for " + scheduled + "." });
     } catch (error) {
       console.error("Reschedule failed:", error.message);
       response.status(500).json({ error: "Unable to reschedule the delivery" });
@@ -262,6 +265,16 @@ function registerDeliveryRoutes(app, deps) {
     const deliveryId = Number(request.params.deliveryId);
 
     try {
+      const dayResult = await db.query(
+        "SELECT d.scheduled_date, st.full_name, st.work_days FROM deliveries d, staff st " +
+        "WHERE d.delivery_id = ? AND d.is_archived = FALSE AND st.staff_id = ?",
+        [deliveryId, staffId]);
+      if (dayResult[0].length > 0 && dayResult[0][0].scheduled_date) {
+        const row = dayResult[0][0];
+        const dayProblem = helpers.workDayProblem(row.full_name, row.work_days, String(row.scheduled_date).slice(0, 10));
+        if (dayProblem) return response.status(409).json({ error: dayProblem });
+      }
+
       const updateResult = await db.query(
         "UPDATE deliveries SET delivery_staff_id = ? " +
         "WHERE delivery_id = ? AND is_archived = FALSE " +

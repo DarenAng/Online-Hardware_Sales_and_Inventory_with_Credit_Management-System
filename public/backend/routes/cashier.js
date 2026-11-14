@@ -9,7 +9,7 @@ const cleanPaymentDetails = require("../payment-details").cleanPaymentDetails;
 const NEXT_DELIVERY_STATUS = {
   "Pending":          ["Out for Delivery"],
   "Out for Delivery": ["Delivered", "Delayed", "Failed", "Cancelled"],
-  "Delayed":          ["Out for Delivery", "Failed", "Cancelled"],
+  "Delayed":          ["Out for Delivery", "Delivered", "Failed", "Cancelled"],
   "Failed":           ["Pending", "Cancelled"],
   "Delivered":        [],
   "Cancelled":        []
@@ -371,29 +371,23 @@ function registerCashierRoutes(app, deps) {
     }
   });
 
-  function toMysqlDateTime(value) {
-    const text = String(value || "").trim();
-    if (text === "") return null;
-
-    const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?$/.exec(text);
-    if (match) {
-      const seconds = match[3] || ":00";
-      return match[1] + " " + match[2] + seconds;
-    }
-
-    if (isDateText(text)) return text + " 00:00:00";
-
-    return null;
+  // A delivery is scheduled for a day, not a time: "2026-11-14"
+  function toScheduleDate(value) {
+    const text = String(value || "").trim().slice(0, 10);
+    if (!isDateText(text)) return null;
+    if (isNaN(new Date(text + "T00:00:00").getTime())) return null;
+    return text;
   }
 
   app.get("/api/deliveries/drivers", async function (request, response) {
-    // delivery_count is the driver's open deliveries on that day (today when no day is given)
+    // delivery_count is the driver's open deliveries on that day (today when no day is given);
+    // with a day, only the drivers who work on that weekday are listed
     let day = String(request.query.date || "").trim();
     if (!isDateText(day)) day = "";
 
     try {
       const rowsResult = await db.query(
-        "SELECT st.staff_id, st.full_name,\n" +
+        "SELECT st.staff_id, st.full_name, st.work_days,\n" +
           "       (SELECT COUNT(*) FROM deliveries d\n" +
           "         WHERE d.delivery_staff_id = st.staff_id AND d.is_archived = FALSE\n" +
           "           AND d.status NOT IN ('Delivered', 'Failed', 'Cancelled')\n" +
@@ -404,7 +398,10 @@ function registerCashierRoutes(app, deps) {
           "       ORDER BY st.full_name",
         [day, DRIVER]
       );
-      const rows = rowsResult[0];
+      let rows = rowsResult[0];
+      if (day !== "") {
+        rows = rows.filter(function (row) { return helpers.worksOn(row.work_days, day); });
+      }
       response.json(rows);
     } catch (error) {
       console.error("Drivers list failed:", error.message);
@@ -458,13 +455,13 @@ function registerCashierRoutes(app, deps) {
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
     if (!String(scheduledDate || "").trim()) {
-      return response.status(400).json({ error: "Pick the date and time of the delivery." });
+      return response.status(400).json({ error: "Pick the date of the delivery." });
     }
-    const scheduled = toMysqlDateTime(scheduledDate);
+    const scheduled = toScheduleDate(scheduledDate);
 
-    if (scheduledDate && !scheduled) {
+    if (!scheduled) {
       return response.status(400).json({
-        error: "The scheduled date and time could not be read. Use the picker rather than typing it."
+        error: "The scheduled date could not be read. Use the picker rather than typing it."
       });
     }
 
@@ -475,7 +472,7 @@ function registerCashierRoutes(app, deps) {
       let driverName = null;
       if (driverId) {
         const driversResult = await db.query(
-          "SELECT st.full_name FROM staff st\n" +
+          "SELECT st.full_name, st.work_days FROM staff st\n" +
             "         JOIN roles r ON r.role_id = st.role_id\n" +
             "         WHERE st.staff_id = ? AND r.role_name = ? AND st.is_active = TRUE AND st.archived_at IS NULL",
           [driverId, DRIVER]
@@ -485,6 +482,8 @@ function registerCashierRoutes(app, deps) {
           return response.status(400).json({ error: "That driver is not an active delivery staff member." });
         }
         driverName = drivers[0].full_name;
+        const dayProblem = helpers.workDayProblem(driverName, drivers[0].work_days, scheduled);
+        if (dayProblem) return response.status(400).json({ error: dayProblem });
       }
 
       const saleRowsResult = await db.query(
@@ -571,6 +570,14 @@ function registerCashierRoutes(app, deps) {
       }
       const delivery = rows[0];
 
+      // The stockroom sends a delivery out and marks it Failed; the driver never does either
+      if (actor.roleName === DRIVER && status === "Failed") {
+        return response.status(403).json({ error: "Only the stockroom marks a delivery Failed." });
+      }
+      if (actor.roleName === DRIVER && status === "Out for Delivery") {
+        return response.status(403).json({ error: "The stockroom sends a delivery out." });
+      }
+
       if (actor.roleName === DRIVER) {
         if (delivery.delivery_staff_id === null) {
           return response.status(409).json({ error: "Take this delivery before updating it." });
@@ -581,7 +588,7 @@ function registerCashierRoutes(app, deps) {
       }
 
       // The stockroom sends a delivery out, and marks it Failed or Cancelled when the driver is back
-      const clerkSendsOut = delivery.status === "Pending" && status === "Out for Delivery";
+      const clerkSendsOut = (delivery.status === "Pending" || delivery.status === "Delayed") && status === "Out for Delivery";
       const clerkClosesOut = (delivery.status === "Out for Delivery" || delivery.status === "Delayed") &&
                              (status === "Failed" || status === "Cancelled");
       const clerkCancelsFailed = delivery.status === "Failed" && status === "Cancelled";

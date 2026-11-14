@@ -131,7 +131,48 @@ function poNumber(poId) {
   return "PO-" + String(poId).padStart(6, "0");
 }
 
+// Work days of a delivery person: "Mon,Tue,Wed,..." in the staff.work_days column
+const WEEK_DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const WEEK_DAY_NAMES = {
+  Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday",
+  Fri: "Friday", Sat: "Saturday", Sun: "Sunday"
+};
+
+// "2026-11-14" gives "Sat"
+function weekDayOf(dateText) {
+  const parts = String(dateText).split("-");
+  const day = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  return WEEK_DAYS[(day.getDay() + 6) % 7];
+}
+
+function worksOn(workDays, dateText) {
+  const list = String(workDays || WEEK_DAYS.join(",")).split(",");
+  return list.indexOf(weekDayOf(dateText)) !== -1;
+}
+
+// The error to show when a driver is picked for a day he does not work, or null
+function workDayProblem(driverName, workDays, dateText) {
+  if (worksOn(workDays, dateText)) return null;
+  return driverName + " does not deliver on " + WEEK_DAY_NAMES[weekDayOf(dateText)] + "s.";
+}
+
+// Turns a list from the screen into the stored text, in week order; null when it is not valid
+function cleanWorkDays(value) {
+  const list = Array.isArray(value) ? value : String(value || "").split(",");
+  const kept = [];
+  for (let i = 0; i < WEEK_DAYS.length; i++) {
+    if (list.indexOf(WEEK_DAYS[i]) !== -1) kept.push(WEEK_DAYS[i]);
+  }
+  if (kept.length === 0) return null;
+  return kept.join(",");
+}
+
 module.exports = {
+  WEEK_DAYS: WEEK_DAYS,
+  weekDayOf: weekDayOf,
+  worksOn: worksOn,
+  workDayProblem: workDayProblem,
+  cleanWorkDays: cleanWorkDays,
   idCode: idCode,
   orNumber: orNumber,
   poNumber: poNumber,

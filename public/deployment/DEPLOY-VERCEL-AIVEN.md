@@ -22,7 +22,7 @@ runs between requests. So:
 | Sign-ins kept by the server | Kept in the `user_sessions` table, so every copy knows them. A restart no longer signs anybody out. |
 | Live updates arrive at once | Each open screen asks every **8 seconds** (`LIVE_POLL_SECONDS`), every 30 when its tab is hidden |
 | Backups are files in `backups/` | Backups are kept gzipped in the `backup_files` table. **Download one now and then**: a backup kept inside the database it backs up is lost with it |
-| Daily backup, archive sweep and late-payment sweep run on timers | Run once a day by Vercel Cron (`/api/cron/daily`, 2:00 AM Manila; on the free plan Vercel may run it any time in that hour) |
+| Daily backup and archive sweep run on timers | Run once a day by Vercel Cron (`/api/cron/daily`, 2:00 AM Manila; on the free plan Vercel may run it any time in that hour) |
 | Restore from an uploaded file | Same, up to 4.5 MB (Vercel's limit). A bigger file goes in with `public/deployment/load-sql.js` (below) |
 | The clock is the PC's | The app sets Asia/Manila itself (`HARDWARE_TIME_ZONE`); Vercel does not allow `TZ` |
 | QR codes lead to this PC's Wi-Fi address | QR codes lead to the Vercel address, so a phone on any network can open them |
@@ -107,7 +107,7 @@ The code that makes this work: `vercel.json`, `api/index.js`,
    It goes to the sign-in page.
 5. Check the daily job: Vercel → your project → **Settings → Cron Jobs** lists
    `/api/cron/daily`. Press **Run** once; the function log shows
-   `Daily job: {"penalties":"ok","archives":"ok","backup":"ok",...}` and
+   `Daily job: {"archives":"ok","backup":"ok",...}` and
    Backup & Recovery shows a new automatic backup.
 6. PayMongo (optional): in the PayMongo dashboard make a webhook pointing at
    `https://<your-project>.vercel.app/api/paymongo/webhook` for `payment.paid`

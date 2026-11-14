@@ -640,7 +640,6 @@ function registerSharedRoutes(app, deps) {
     }
 
     const steps = {
-      penalties: function () { return managerModule.runPenaltySweep(); },
       archives: function () { return adminModule.runArchiveSweep(); },
       backup: function () { return adminModule.runDailyBackup(); },
       sessions: function () { return removeExpiredSessions(); },

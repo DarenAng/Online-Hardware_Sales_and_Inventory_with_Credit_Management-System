@@ -5,6 +5,7 @@ const fsp = require("fs/promises");
 const crypto = require("crypto");
 const zlib = require("zlib");
 const express = require("express");
+const heldFeatures = require("../features").heldFeatures;
 const mailer = require("../services/mailer");
 const splitSqlStatements = require("../services/sql-script").splitSqlStatements;
 const adminProcedures = require("../database/procedures/admin-procedures");
@@ -29,6 +30,7 @@ function registerAdminRoutes(app, deps) {
   const requireRole = deps.requireRole;
   const publishChange = deps.publishChange;
   const ADMIN = deps.ADMIN;
+  const DRIVER = deps.DRIVER;
   const USER_SELECT = deps.USER_SELECT;
   const withPresence = deps.withPresence;
   const notOwnAccount = deps.notOwnAccount;
@@ -229,7 +231,7 @@ function registerAdminRoutes(app, deps) {
       }
 
       const rowsResult = await db.query(
-        "SELECT s.staff_id, s.full_name, s.phone, s.is_active, r.role_name, " +
+        "SELECT s.staff_id, s.full_name, s.phone, s.is_active, s.work_days, r.role_name, " +
         "u.email, u.must_change_password, u.last_login, " +
         "IF(u.held_until IS NOT NULL AND u.held_until > NOW(), " +
         "CEIL(TIMESTAMPDIFF(SECOND, NOW(), u.held_until) / 60), NULL) AS minutes_left " +
@@ -251,6 +253,7 @@ function registerAdminRoutes(app, deps) {
           email: row.email,
           phone: row.phone,
           is_active: row.is_active === 1 || row.is_active === true,
+          work_days: row.role_name === DRIVER ? row.work_days : null,
           has_login: row.email !== null,
           must_change_password: row.must_change_password === 1 || row.must_change_password === true,
           last_login: row.last_login,
@@ -465,6 +468,21 @@ function registerAdminRoutes(app, deps) {
         email: address
       };
 
+      // A delivery person also gets the days of the week he works (all seven when none are sent)
+      if (roles[0].role_name === DRIVER) {
+        // Without the driver-work-days feature the picked days are ignored and he works all seven
+        let mayPick = request.actor.roleName === ADMIN;
+        if (!mayPick) {
+          const held = await heldFeatures(request.actor.roleName);
+          mayPick = held.held["driver-work-days"] === true;
+        }
+        const workDays = (request.body.workDays === undefined || !mayPick) ? helpers.WEEK_DAYS : request.body.workDays;
+        details.workDays = helpers.cleanWorkDays(workDays);
+        if (details.workDays === null) {
+          return response.status(400).json({ error: "Pick at least one work day for the delivery person." });
+        }
+      }
+
       const password = generatePassword();
       const draft = await newAccountDraft(request.actor.staffId, "staff", details, password);
 
@@ -513,6 +531,10 @@ function registerAdminRoutes(app, deps) {
         return response.status(output.status_code).json({ error: output.message });
       }
 
+      if (details.workDays) {
+        await db.query("UPDATE staff SET work_days = ? WHERE staff_id = ?", [details.workDays, output.staff_id]);
+      }
+
       const createdResult = await db.query(
         "SELECT full_name FROM staff WHERE staff_id = ?", [output.staff_id]);
       const created = createdResult[0];
@@ -534,7 +556,7 @@ function registerAdminRoutes(app, deps) {
         "Created account for " + details.email +
           emailedText(delivery.emailed, " and emailed the first password"),
         { staff_id: output.staff_id, email: details.email, role_id: details.roleId,
-          name: name, password_emailed: delivery.emailed }
+          name: name, password_emailed: delivery.emailed, work_days: details.workDays || null }
       );
 
       response.json({
@@ -891,6 +913,40 @@ function registerAdminRoutes(app, deps) {
     } catch (error) {
       console.error("Password reset failed:", error.message);
       response.status(500).json({ error: "Unable to reset the password" });
+    }
+  });
+
+  // The days of the week a delivery person works; the manager and the administrator can change them
+  app.put("/api/users/:staffId/work-days", async function (request, response) {
+    const staffId = Number(request.params.staffId);
+    const workDays = helpers.cleanWorkDays(request.body.workDays);
+    if (workDays === null) {
+      return response.status(400).json({ error: "Pick at least one work day." });
+    }
+
+    try {
+      const rowsResult = await db.query(
+        "SELECT s.full_name, s.work_days, r.role_name FROM staff s " +
+        "JOIN roles r ON r.role_id = s.role_id WHERE s.staff_id = ? AND s.archived_at IS NULL",
+        [staffId]);
+      const rows = rowsResult[0];
+      if (rows.length === 0) {
+        return response.status(404).json({ error: "Staff record not found" });
+      }
+      if (rows[0].role_name !== DRIVER) {
+        return response.status(400).json({ error: "Work days are only set for delivery personnel." });
+      }
+
+      await db.query("UPDATE staff SET work_days = ? WHERE staff_id = ?", [workDays, staffId]);
+
+      await writeAuditLog(request, "UPDATE_WORK_DAYS",
+        "Work days of " + rows[0].full_name + " set to " + workDays.split(",").join(", "),
+        { staff_id: staffId, changes: fieldChanges({ work_days: rows[0].work_days }, { work_days: workDays }) });
+
+      response.json({ message: rows[0].full_name + " now works " + workDays.split(",").join(", ") + ".", work_days: workDays });
+    } catch (error) {
+      console.error("Saving the work days failed:", error.message);
+      response.status(500).json({ error: "Unable to save the work days" });
     }
   });
 
@@ -2404,7 +2460,7 @@ function registerAdminRoutes(app, deps) {
     try {
       const rowsResult = await db.query(
         "SELECT setting_id, store_name, proprietor, address, tin, registration_type, " +
-        "vat_rate, invoice_note, penalty_rate, credit_interest_rate, credit_term_months, " +
+        "vat_rate, invoice_note, " +
         "bank_name, bank_account_name, bank_account_number, receipt_layout, updated_at, " +
         "st.full_name AS updated_by " +
         "FROM store_settings cfg " +

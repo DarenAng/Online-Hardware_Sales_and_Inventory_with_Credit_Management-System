@@ -45,16 +45,8 @@ function apiDecideCreditRequest(requestId, approve, note) {
     });
 }
 
-function apiGetPenaltyPolicy() {
-    return getJson('/api/credit/policy');
-}
-
-function apiSavePenaltyPolicy(penaltyRate) {
-    return sendJson('/api/credit/policy', 'PUT', { penaltyRate: penaltyRate });
-}
-
-function apiSaveCreditInterest(interestRate, termMonths) {
-    return sendJson('/api/credit/interest', 'PUT', { interestRate: interestRate, termMonths: termMonths });
+function apiLogReportPrint(report) {
+    return sendJson('/api/reports/print-log', 'POST', { report: report });
 }
 
 function apiGetLoyaltyPolicy() {
@@ -99,6 +91,10 @@ function apiCreateAccount(draftId) {
 
 function apiGetManagedStaff() {
     return getJson('/api/users');
+}
+
+function apiSaveWorkDays(staffId, workDays) {
+    return sendJson('/api/users/' + staffId + '/work-days', 'PUT', { workDays: workDays });
 }
 
 function apiReleaseHeldAccount(staffId) {

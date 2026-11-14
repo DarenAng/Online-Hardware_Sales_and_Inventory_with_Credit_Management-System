@@ -1262,7 +1262,7 @@ PROC_BODY: BEGIN
 
         SELECT COUNT(*) INTO v_found FROM deliveries
         WHERE sale_id = p_record_id AND is_archived = FALSE
-          AND status IN ('Out for Delivery', 'Delivered')
+          AND status IN ('Out for Delivery', 'Delayed', 'Delivered')
         FOR UPDATE;
         IF v_found > 0 THEN
             ROLLBACK;
@@ -3138,7 +3138,7 @@ END //
 CREATE PROCEDURE sp_create_delivery (
     IN p_sale_id INT,
     IN p_address TEXT,
-    IN p_scheduled_date DATETIME,
+    IN p_scheduled_date DATE,
     IN p_remarks TEXT,
     IN p_contact_name VARCHAR(150),
     IN p_contact_phone VARCHAR(30),
@@ -3335,6 +3335,20 @@ PROC_BODY: BEGIN
         LEAVE PROC_BODY;
     END IF;
 
+    IF p_status = 'Failed' AND p_role_id = 5 THEN
+        ROLLBACK;
+        SET p_status_code = 403;
+        SET p_message = 'Only the stockroom marks a delivery Failed.';
+        LEAVE PROC_BODY;
+    END IF;
+
+    IF p_status = 'Out for Delivery' AND p_role_id = 5 THEN
+        ROLLBACK;
+        SET p_status_code = 403;
+        SET p_message = 'The stockroom sends a delivery out.';
+        LEAVE PROC_BODY;
+    END IF;
+
     IF p_role_id = 5 AND v_current = 'Pending' THEN
         ROLLBACK;
         SET p_status_code = 403;
@@ -3350,7 +3364,7 @@ PROC_BODY: BEGIN
     END IF;
 
     IF p_role_id = 3 AND NOT (
-           (v_current = 'Pending' AND p_status = 'Out for Delivery')
+           (v_current IN ('Pending', 'Delayed') AND p_status = 'Out for Delivery')
         OR (v_current IN ('Out for Delivery', 'Delayed') AND p_status IN ('Failed', 'Cancelled'))
         OR (v_current = 'Failed' AND p_status = 'Cancelled')) THEN
         ROLLBACK;
@@ -3363,7 +3377,7 @@ PROC_BODY: BEGIN
         CASE v_current
             WHEN 'Pending'          THEN p_status IN ('Out for Delivery')
             WHEN 'Out for Delivery' THEN p_status IN ('Delivered', 'Delayed', 'Failed', 'Cancelled')
-            WHEN 'Delayed'          THEN p_status IN ('Out for Delivery', 'Failed', 'Cancelled')
+            WHEN 'Delayed'          THEN p_status IN ('Out for Delivery', 'Delivered', 'Failed', 'Cancelled')
             WHEN 'Failed'           THEN p_status IN ('Pending', 'Cancelled')
             ELSE 0
         END;
@@ -3462,10 +3476,7 @@ PROC_BODY: BEGIN
 
     INSERT INTO audit_logs (staff_id, action, action_type, details)
     VALUES (p_staff_id, 'CREDIT_LIMIT', 'UPDATE',
-            CONCAT(v_name, ': limit ', FORMAT(p_credit_limit, 2), ', standing ', p_standing,
-                   ', late-payment rate ',
-                   IF(p_penalty_rate IS NULL, CONCAT('the shop''s ', FORMAT(v_shop_rate, 2), '% a month'),
-                      CONCAT(FORMAT(p_penalty_rate, 2), '% a month'))));
+            CONCAT(v_name, ': limit ', FORMAT(p_credit_limit, 2), ', standing ', p_standing));
 
     COMMIT;
 

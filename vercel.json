@@ -4,7 +4,7 @@
   "installCommand": "npm install",
   "buildCommand": "node public/deployment/vercel-build.js",
   "outputDirectory": "vercel-static",
-  "regions": ["sin1"],
+  "regions": ["hkg1"],
   "functions": {
     "api/index.js": {
       "includeFiles": "{public/frontend/**,public/database/**,node_modules/pdfkit/js/standard-fonts/**,node_modules/pdfkit/js/data/**}",

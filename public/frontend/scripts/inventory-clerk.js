@@ -2259,7 +2259,7 @@ function openReturnDetail(returnId) {
 const CLERK_SENDS = {
     'Pending':          ['Out for Delivery'],
     'Out for Delivery': ['Failed', 'Cancelled'],
-    'Delayed':          ['Failed', 'Cancelled'],
+    'Delayed':          ['Out for Delivery', 'Failed', 'Cancelled'],
     'Failed':           ['Cancelled']
 };
 
@@ -2314,12 +2314,10 @@ function buildClerkDeliveriesPanel() {
 }
 
 // The day, and the time only when one was set
+// A delivery is scheduled for a day only
 function clerkScheduleText(stamp) {
     if (!stamp) return 'Not set';
-    const text = String(stamp).replace('T', ' ');
-    const time = text.slice(11, 16);
-    if (time === '' || time === '00:00') return text.slice(0, 10);
-    return text.slice(0, 10) + ' ' + time;
+    return String(stamp).slice(0, 10);
 }
 
 async function openClerkDelivery(deliveryId) {

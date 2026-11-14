@@ -185,6 +185,9 @@ function registerLoginRoutes(app, deps) {
 
   const decoyHash = hashPassword(crypto.randomBytes(24).toString("hex"));
 
+  // Error codes the MySQL driver gives when the database cannot be reached at all.
+  const DATABASE_DOWN_CODES = ["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "PROTOCOL_CONNECTION_LOST"];
+
   app.post("/api/login", async function (request, response) {
     const email = String(request.body.email || "").trim();
     const password = request.body.password;
@@ -289,6 +292,9 @@ function registerLoginRoutes(app, deps) {
       response.json({ message: "Login successful", user: user });
     } catch (error) {
       console.error("Login failed:", error.message);
+      if (DATABASE_DOWN_CODES.includes(error.code)) {
+        return response.status(503).json({ error: "The database is not answering. Try again in a moment." });
+      }
       response.status(500).json({ error: "Unable to log in" });
     }
   });

@@ -73,11 +73,13 @@
         </section>
 
         <section class="card cp-panel" id="panel-deliveries" hidden>
-            <h2>Deliveries</h2>
-            <div class="cp-delivery-tabs" aria-label="Delivery status">
-                <button type="button" class="btn active" id="delivery-Pending" onclick="pickDeliveryTab('Pending')">Pending</button>
-                <button type="button" class="btn" id="delivery-Completed" onclick="pickDeliveryTab('Completed')">Completed</button>
-                <button type="button" class="btn" id="delivery-Failed" onclick="pickDeliveryTab('Failed')">Failed</button>
+            <div class="panel-head"><div><h3>Deliveries</h3></div></div>
+            <div class="subnav" aria-label="Delivery status">
+                <button type="button" class="subnav-tab is-current" id="delivery-Pending" onclick="pickDeliveryTab('Pending')">Pending</button>
+                <button type="button" class="subnav-tab" id="delivery-Completed" onclick="pickDeliveryTab('Completed')">Completed</button>
+                <button type="button" class="subnav-tab" id="delivery-Failed" onclick="pickDeliveryTab('Failed')">Failed</button>
+            </div>
+            <div class="panel-toolbar">
                 <button type="button" class="btn btn-ghost" onclick="loadDeliveries()">Refresh</button>
             </div>
             <p id="delivery-message" role="status"></p>
@@ -243,6 +245,7 @@
     <script src="../scripts/shared/ui-kit.js"></script>
     <script src="../scripts/shared/modals.js"></script>
     <script src="../scripts/shared/detail-modal.js"></script>
+    <script src="../scripts/shared/deliveries.js"></script>
     <script src="../scripts/shared/tables.js"></script>
     <script src="connections/customer-portal-connection.js"></script>
     <script src="scripts/customer-portal.js"></script>

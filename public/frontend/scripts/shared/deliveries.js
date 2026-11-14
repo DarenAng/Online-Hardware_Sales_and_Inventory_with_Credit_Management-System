@@ -1,7 +1,7 @@
 const NEXT_DELIVERY_STATUS = {
     'Pending':          ['Out for Delivery'],
     'Out for Delivery': ['Delivered', 'Delayed', 'Failed', 'Cancelled'],
-    'Delayed':          ['Out for Delivery', 'Failed', 'Cancelled'],
+    'Delayed':          ['Out for Delivery', 'Delivered', 'Failed', 'Cancelled'],
     'Failed':           ['Pending', 'Cancelled'],
     'Delivered':        [],
     'Cancelled':        []
@@ -117,7 +117,7 @@ function showDeliveryRecord(d, canUpdate, onlyStatuses) {
     const routeGrid = '<div class="detail-grid">' +
         detailField('Delivery ID', deliveryCode(d.delivery_id)) +
         detailField('Status', statusBadge(d.status)) +
-        detailField('Scheduled', escapeHtml(d.scheduled_date || 'Not set')) +
+        detailField('Scheduled', escapeHtml(d.scheduled_date ? String(d.scheduled_date).slice(0, 10) : 'Not set')) +
         (d.attempt_count !== undefined ? detailField('Attempts', String(d.attempt_count)) : '') +
         (d.status === 'Delivered' && d.delivered_at ? detailField('Delivered At', escapeHtml(d.delivered_at)) : '') +
         detailField('Drop-off Address', escapeHtml(d.delivery_address)) +
@@ -159,6 +159,8 @@ function showDeliveryRecord(d, canUpdate, onlyStatuses) {
         for (let i = 0; i < allowed.length; i++) {
             if (onlyStatuses && onlyStatuses.indexOf(allowed[i]) === -1) continue;
             if (isDriver && d.status === 'Pending') continue;
+            // The stockroom sends a delivery out and marks it Failed; the driver does neither
+            if (isDriver && (allowed[i] === 'Out for Delivery' || allowed[i] === 'Failed')) continue;
             if (allowed[i] === 'Cancelled' && !(user && user.role_name === 'Inventory Clerk')) continue;
             if (isDriver || allowed[i] !== 'Delivered') next.push(allowed[i]);
         }
@@ -186,7 +188,7 @@ function showDeliveryRecord(d, canUpdate, onlyStatuses) {
     }
 
     const ownDelivery = typeof isMine === 'function' && isMine(d);
-    const goodsAtDoor = d.status === 'Out for Delivery' || d.status === 'Delivered';
+    const goodsAtDoor = d.status === 'Out for Delivery' || d.status === 'Delayed' || d.status === 'Delivered';
     const refundOn = typeof holdsFeature !== 'function' || holdsFeature('delivery-refunds');
     if (isDriver && canUpdate && ownDelivery && goodsAtDoor && refundOn) {
         footActions = '<button type="button" class="btn btn-ghost" ' +

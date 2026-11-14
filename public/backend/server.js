@@ -127,7 +127,6 @@ const startup = db.getConnection()
     if (!IS_VERCEL) {
       adminModule.startAutoBackup();
       adminModule.startArchiveSweep();
-      managerModule.startPenaltySweep();
       const sessionTimer = setInterval(function () {
         removeExpiredSessions().catch(function (error) {
           console.error("Session sweep failed:", error.message);
@@ -293,7 +292,7 @@ function loadProceduresIfMissing() {
 const adminModule = registerAdminRoutes(app, {
   db: db, getActorId: getActorId, writeAuditLog: writeAuditLog, fieldChanges: fieldChanges,
   wordStartSearch: wordStartSearch, requireRole: requireRole, publishChange: publishChange,
-  ADMIN: ADMIN, USER_SELECT: USER_SELECT, withPresence: withPresence, notOwnAccount: notOwnAccount,
+  ADMIN: ADMIN, DRIVER: DRIVER, USER_SELECT: USER_SELECT, withPresence: withPresence, notOwnAccount: notOwnAccount,
   endSessionsForStaff: endSessionsForStaff, hashPassword: hashPassword,
   generatePassword: generatePassword, phoneComplaint: phoneComplaint, cleanPhone: cleanPhone,
   cleanMiddleName: cleanMiddleName, findPhoneOwner: findPhoneOwner,

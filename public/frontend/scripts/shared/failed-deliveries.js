@@ -169,7 +169,7 @@ function buildRescheduleModal() {
                 '<form id="reschedule-form" onsubmit="handleReschedule(event)" autocomplete="off">' +
                     '<div class="form-group">' +
                         '<label for="reschedule-date">New date</label>' +
-                        '<input type="datetime-local" id="reschedule-date" class="form-control" required>' +
+                        '<input type="date" id="reschedule-date" class="form-control" required onchange="onRescheduleDateChanged()">' +
                     '</div>' +
                     '<div class="form-group">' +
                         '<label for="reschedule-driver">Driver</label>' +
@@ -185,31 +185,53 @@ function buildRescheduleModal() {
     document.body.appendChild(modal);
 }
 
-// Now, as the text a datetime-local box uses: 2026-10-28T09:30
+// Today, as the text a date box uses: 2026-10-28
 function nowForDateBox() {
     const now = new Date();
     const month = String(now.getMonth() + 1).padStart(2, '0');
     const day = String(now.getDate()).padStart(2, '0');
-    const hour = String(now.getHours()).padStart(2, '0');
-    const minute = String(now.getMinutes()).padStart(2, '0');
-    return now.getFullYear() + '-' + month + '-' + day + 'T' + hour + ':' + minute;
+    return now.getFullYear() + '-' + month + '-' + day;
 }
 
 let rescheduleDeliveryId = null;
+let rescheduleKeepDriver = '';
 
-async function openRescheduleForm(deliveryId) {
-    const d = findFailedDelivery(deliveryId);
-    if (!d) return;
+// Only the drivers who work on the chosen day are listed; with no day yet, all of them
+async function fillRescheduleDrivers() {
+    const driverBox = document.getElementById('reschedule-driver');
+    const day = document.getElementById('reschedule-date').value;
+    // The first time the old driver is picked; after that the user's own pick stays, Unassigned too
+    const keep = rescheduleKeepDriver !== null ? rescheduleKeepDriver : driverBox.value;
 
     let drivers;
     try {
-        drivers = await apiGetDeliveryDrivers();
+        drivers = await apiGetDeliveryDrivers(day);
     } catch (error) {
         notifyOffline();
         return;
     }
 
+    // The previous driver is picked first when he works that day; Unassigned otherwise
+    let optionsHtml = '<option value="">Unassigned</option>';
+    for (let i = 0; i < drivers.length; i++) {
+        optionsHtml += '<option value="' + drivers[i].staff_id + '">' + escapeHtml(drivers[i].full_name) + '</option>';
+    }
+    driverBox.innerHTML = optionsHtml;
+    driverBox.value = keep;
+    if (driverBox.value !== keep) driverBox.value = '';
+    rescheduleKeepDriver = null;
+}
+
+function onRescheduleDateChanged() {
+    fillRescheduleDrivers();
+}
+
+async function openRescheduleForm(deliveryId) {
+    const d = findFailedDelivery(deliveryId);
+    if (!d) return;
+
     rescheduleDeliveryId = deliveryId;
+    rescheduleKeepDriver = d.delivery_staff_id ? String(d.delivery_staff_id) : '';
     closeModal('detail-modal');
 
     document.getElementById('reschedule-subtitle').textContent = 'Delivery ' + deliveryCode(deliveryId) + ' · ' + d.customer_name;
@@ -218,14 +240,7 @@ async function openRescheduleForm(deliveryId) {
     dateBox.min = nowForDateBox();
     dateBox.value = '';
 
-    // The previous driver is picked first; Unassigned if there was none
-    let optionsHtml = '<option value="">Unassigned</option>';
-    for (let i = 0; i < drivers.length; i++) {
-        optionsHtml += '<option value="' + drivers[i].staff_id + '">' + escapeHtml(drivers[i].full_name) + '</option>';
-    }
-    const driverBox = document.getElementById('reschedule-driver');
-    driverBox.innerHTML = optionsHtml;
-    driverBox.value = d.delivery_staff_id ? String(d.delivery_staff_id) : '';
+    await fillRescheduleDrivers();
 
     showModal('reschedule-modal');
     guardModal('reschedule-modal', 'this new date');
@@ -236,7 +251,7 @@ async function handleReschedule(event) {
 
     const date = document.getElementById('reschedule-date').value;
     if (!date) {
-        notifyWarning('Pick the new date and time of the delivery.', 'The new date is required');
+        notifyWarning('Pick the new date of the delivery.', 'The new date is required');
         return;
     }
     if (date < nowForDateBox()) {

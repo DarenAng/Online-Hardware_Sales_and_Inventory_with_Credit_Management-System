@@ -35,7 +35,6 @@ const FEATURES = [
     routes: [["GET", /^\/api\/credit\/customers$/], ["GET", /^\/api\/credit\/customers\/\d+$/],
              ["PUT", /^\/api\/credit\/customers\/\d+\/limit$/], ["GET", /^\/api\/customers\/\d+\/history$/],
              ["GET", /^\/api\/customers\/\d+\/loyalty$/],
-             ["GET", /^\/api\/credit\/policy$/],
              ["GET", /^\/api\/credit\/requests$/], ["POST", /^\/api\/credit\/requests$/],
              ["POST", /^\/api\/customers$/], ["PUT", /^\/api\/customers\/\d+$/]] },
   { key: "debt-payments", name: "Credit Settlement", module: "Credit",
@@ -49,7 +48,7 @@ const FEATURES = [
     available: [CASHIER], defaults: [CASHIER],
     routes: [["POST", /^\/api\/customers\/\d+\/portal-password$/]] },
   { key: "credit-terms-print", name: "Print Credit Terms", module: "Credit",
-    description: "Print the Credit Terms and Conditions page for a customer: the store, the customer, the credit limit, the due days and the late-payment rate, the terms and the signature lines. Offered on a credit sale's invoice and on the customer's card.",
+    description: "Print the Credit Terms and Conditions page for a customer: the store, the customer, the credit limit, the terms and the signature lines. Offered on a credit sale's invoice and on the customer's card.",
     available: [MANAGER, CASHIER], defaults: [MANAGER, CASHIER],
     routes: [["GET", /^\/api\/credit\/terms\/\d+$/]] },
   { key: "customer-card-print", name: "Print Customer Card", module: "Credit",
@@ -73,10 +72,9 @@ const FEATURES = [
     available: [MANAGER], defaults: [MANAGER],
     routes: [["GET", /^\/api\/policies$/], ["PUT", /^\/api\/policies\/discount$/]] },
   { key: "credit-maintenance", name: "Credit Maintenance", module: "Policy Maintenance",
-    description: "Set the late-payment rate the shop charges every credit account, 1 to 3 percent a month, the usual interest rate and term (1 to 12 months) of a credit sale, and write the credit policy, on one page under Policy Maintenance.",
+    description: "The Credit Maintenance page under Policy Maintenance, where the credit policy is written. The interest rate and term (1 to 12 months) are chosen by the cashier on each credit sale; no late-payment penalty is charged.",
     available: [MANAGER], defaults: [MANAGER],
-    routes: [["GET", /^\/api\/credit\/policy$/], ["PUT", /^\/api\/credit\/policy$/],
-             ["PUT", /^\/api\/credit\/interest$/]] },
+    routes: [["GET", /^\/api\/policies$/]] },
   { key: "loyalty-discount", name: "Loyalty Discount", module: "Policy Maintenance",
     description: "Set the monthly loyalty discount: the percent off every sale paid in full this month for a registered customer who paid the set amount or more in full last month, on the Loyalty Discount Maintenance screen.",
     available: [MANAGER], defaults: [MANAGER],
@@ -226,11 +224,15 @@ const FEATURES = [
 
   { key: "account-management", name: "Account Management", module: "Staff",
     description: "See the cashier, inventory clerk and driver accounts, create new ones, and let the ones locked out after too many wrong passwords sign in again. Never an administrator or manager account.",
-    available: [MANAGER], defaults: [],
+    available: [MANAGER], defaults: [MANAGER],
     routes: [["GET", /^\/api\/roles$/], ["GET", /^\/api\/users$/],
              ["GET", /^\/api\/users\/email-check$/], ["GET", /^\/api\/users\/phone-check$/],
              ["POST", /^\/api\/users\/draft$/], ["POST", /^\/api\/users$/],
-             ["POST", /^\/api\/users\/\d+\/release-hold$/]] }
+             ["POST", /^\/api\/users\/\d+\/release-hold$/]] },
+  { key: "driver-work-days", name: "Driver Work Days", module: "Staff",
+    description: "Set the days of the week a delivery person works, when the account is created and from the account card. A driver can only be given a delivery on a day he works.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["PUT", /^\/api\/users\/\d+\/work-days$/]] }
 ];
 
 const FEATURE_ROLES = [MANAGER, CLERK, CASHIER, DRIVER];

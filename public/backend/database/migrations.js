@@ -1407,6 +1407,9 @@ async function routinesAreOld() {
     ["sp_update_delivery_status", "FOR UPDATE"],
     ["sp_update_delivery_status", "The stockroom can send a delivery out"],
     ["sp_update_delivery_status", "is cancelled and cannot be reopened"],
+    ["sp_update_delivery_status", "Only the stockroom marks a delivery Failed"],
+    ["sp_archive_record", "'Out for Delivery', 'Delayed', 'Delivered')"],
+    ["sp_set_credit_limit", "limit ', FORMAT(p_credit_limit, 2), ', standing ', p_standing)"],
     ["sp_create_sale_transaction", "p_credit_rate"],
     ["sp_file_return_report", "v_int_off"],
     ["sp_archive_record", "Failed or Cancelled delivery"],
@@ -1890,6 +1893,102 @@ async function migrateDefaultCreditLimit() {
     (newResult[0].affectedRows || 0) + " customer(s) without an account given one. This runs once.");
 }
 
+// A delivery is scheduled for a day, not a time: the date columns lose their time of day
+async function migrateDeliveryDateOnly() {
+  const tables = ["deliveries", "delivery_attempts"];
+  for (let i = 0; i < tables.length; i++) {
+    const typeResult = await db.query(
+      "SELECT DATA_TYPE FROM information_schema.COLUMNS\n" +
+        "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = 'scheduled_date'",
+      [DB_NAME, tables[i]]
+    );
+    if (typeResult[0].length === 0) continue;
+    if (String(typeResult[0][0].DATA_TYPE).toLowerCase() === "date") continue;
+
+    // deliveries keeps its updated_at as it was
+    const keepStamp = tables[i] === "deliveries" ? ", updated_at = updated_at" : "";
+    await db.query("UPDATE " + tables[i] + " SET scheduled_date = DATE(scheduled_date)" + keepStamp +
+      " WHERE scheduled_date IS NOT NULL");
+    await db.query("ALTER TABLE " + tables[i] + " MODIFY COLUMN scheduled_date DATE NULL");
+    console.log(tables[i] + ".scheduled_date is a date only now (no time of day).");
+  }
+}
+
+// The days of the week a delivery person works; every account works all seven until it is set
+async function migrateStaffWorkDays() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'staff'",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.length === 0 || names.indexOf("work_days") !== -1) return;
+
+  await db.query(
+    "ALTER TABLE staff ADD COLUMN work_days VARCHAR(30) NOT NULL DEFAULT 'Mon,Tue,Wed,Thu,Fri,Sat,Sun'\n" +
+      "       AFTER is_active");
+  console.log("Added staff.work_days: the days of the week a delivery person works (all seven to start).");
+}
+
+// Takes one exact line out of a policy text; returns the new text, or null when the line is not there
+function withoutPolicyLine(text, line) {
+  const separator = String(text).indexOf("\r\n") !== -1 ? "\r\n" : "\n";
+  const lines = String(text).split(/\r?\n/);
+  const kept = [];
+  let found = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === line) {
+      found = true;
+    } else {
+      kept.push(lines[i]);
+    }
+  }
+  if (!found) return null;
+  return kept.join(separator);
+}
+
+// Policy wording that was taken out: the Data Privacy Act line, "COD" in the discount policy and the
+// late-payment penalty line of the credit policy. Only a text that still has it is touched.
+async function migratePolicyWording() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'store_settings'",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.indexOf("data_terms") === -1 || names.indexOf("discount_policy") === -1 ||
+      names.indexOf("credit_terms") === -1) return;
+
+  const rowResult = await db.query(
+    "SELECT data_terms, discount_policy, credit_terms FROM store_settings WHERE setting_id = 1");
+  const row = rowResult[0][0];
+  if (!row) return;
+
+  const changes = [];
+
+  if (row.data_terms) {
+    const text = withoutPolicyLine(row.data_terms, "Data Privacy Act of 2012 (RA 10173).");
+    if (text !== null) changes.push(["data_terms", text]);
+  }
+
+  if (row.discount_policy && String(row.discount_policy).indexOf("Credit and COD purchases") !== -1) {
+    changes.push(["discount_policy", String(row.discount_policy).split("Credit and COD purchases").join("Credit purchases")]);
+  }
+
+  if (row.credit_terms) {
+    const text = withoutPolicyLine(row.credit_terms,
+      "A late purchase is charged the late-payment penalty for each month it stays unpaid.");
+    if (text !== null) changes.push(["credit_terms", text]);
+  }
+
+  for (let i = 0; i < changes.length; i++) {
+    let value = changes[i][1];
+    if (value.trim() === "") value = null;
+    await db.query("UPDATE store_settings SET " + changes[i][0] + " = ?, updated_at = updated_at WHERE setting_id = 1", [value]);
+    console.log("Policy wording: removed an old line from store_settings." + changes[i][0] + ".");
+  }
+}
+
 async function migrateDatabase(runSqlScript) {
   await migrateServerTables();
 
@@ -1950,6 +2049,9 @@ async function migrateDatabase(runSqlScript) {
   await migrateCreditInterest();
   await migrateDiscountPolicyWording();
   await migrateDefaultCreditLimit();
+  await migrateDeliveryDateOnly();
+  await migrateStaffWorkDays();
+  await migratePolicyWording();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();
   await warnIfAdminPasswordIsDefault();

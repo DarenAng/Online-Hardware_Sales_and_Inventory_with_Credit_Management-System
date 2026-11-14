@@ -1210,7 +1210,7 @@ async function clearCart() {
     const form = document.getElementById('checkout-form');
     if (form) {
         form.elements.amountPaid.value = '';
-        creditTermsTouched = false;
+        clearCreditTerms();
         if (form.elements.downPayment) form.elements.downPayment.value = '0';
     }
 
@@ -1273,29 +1273,17 @@ function creditTermsLabel(rate, term) {
     return Number(rate) + '% \u00b7 ' + term + (Number(term) === 1 ? ' month' : ' months');
 }
 
-// The shop's usual rate and term come from Maintenance (loaded with the page); the cashier can change
-// them for this sale. Once the cashier has typed or picked a value it is not overwritten.
-let creditTermsTouched = false;
 
+// The rate and the term are chosen for each credit sale; both start empty
 function creditTermsEdited() {
-    creditTermsTouched = true;
     renderCart();
 }
 
-function fillCreditTermDefaults() {
+function clearCreditTerms() {
     const form = document.getElementById('checkout-form');
     if (!form || !form.elements.creditRate || !form.elements.creditTerm) return;
-    if (creditTermsTouched) return;
-
-    const settings = storeSettings;
-    let rate = 0;
-    let term = 1;
-    if (settings) {
-        rate = Number(settings.credit_interest_rate) || 0;
-        term = parseInt(settings.credit_term_months, 10) || 1;
-    }
-    form.elements.creditRate.value = rate.toFixed(2);
-    form.elements.creditTerm.value = String(term);
+    form.elements.creditRate.value = '';
+    form.elements.creditTerm.value = '';
 }
 
 function cartTotals() {
@@ -1636,12 +1624,6 @@ function onPaymentMethodChange(method) {
     if (tender) tender.style.display = (onAccount || method === 'Bank Transfer') ? 'none' : 'block';
     if (down) down.style.display = onCredit ? 'block' : 'none';
 
-    if (onCredit) {
-        fillCreditTermDefaults();
-        // If the settings are not here yet, fetch them and fill the defaults when they arrive
-        if (!storeSettings) loadStoreSettings(false).then(function () { fillCreditTermDefaults(); renderCart(); });
-    }
-
     renderCart();
 }
 
@@ -1929,11 +1911,6 @@ async function handleCheckout(event, viaQr) {
     }
 
     const form = event.target;
-    if (form.elements.paymentMethod.value === 'Credit') {
-        // Never send before the shop's defaults are in the fields
-        await loadStoreSettings(false);
-        fillCreditTermDefaults();
-    }
     let t = cartTotals();
     const typedName = typedCustomerName();
 
@@ -1995,8 +1972,14 @@ async function handleCheckout(event, viaQr) {
     }
 
     if (t.onCredit && !t.creditTermsValid) {
-        notifyWarning('The interest rate is 0 to 100 percent and the term is 1 to 12 months.', 'Credit terms needed');
-        focusBox('pay-interest');
+        const t0 = creditTermsTyped();
+        if (document.getElementById('pay-interest').value.trim() === '' || t0.rate < 0 || t0.rate > 100) {
+            notifyWarning('Type the interest rate of this credit sale, 0 to 100 percent.', 'Credit terms needed');
+            focusBox('pay-interest');
+        } else {
+            notifyWarning('Pick the term of this credit sale, 1 to 12 months.', 'Credit terms needed');
+            focusBox('pay-term');
+        }
         return;
     }
 
@@ -2136,7 +2119,7 @@ async function handleCheckout(event, viaQr) {
         form.elements.amountPaid.value = '';
         if (form.elements.downPayment) form.elements.downPayment.value = '0';
         if (form.elements.referenceNo) form.elements.referenceNo.value = '';
-        creditTermsTouched = false;
+        clearCreditTerms();
         clearPaymentDetails('sale');
 
         if (deliveryMade) { pendingDelivery = null; renderDeliveryAttached(); }
@@ -2251,21 +2234,20 @@ async function openReceipt(saleId, fromReport) {
 
     const totals = [{ label: 'Subtotal', value: peso(s.total_amount) }];
     if (Number(s.discount) > 0) totals.push({ label: 'Discount', value: peso(s.discount) });
+    // A credit sale shows its agreed terms and due date; the interest comes before the total
+    const isCredit = s.payment_method === 'Credit';
+    if (isCredit && s.credit_term_months) {
+        totals.push({ label: 'Terms', value: escapeHtml(Number(s.credit_interest_rate) + '% interest · ' + s.credit_term_months + (Number(s.credit_term_months) === 1 ? ' month' : ' months')) });
+    }
     if (Number(s.credit_interest_amount) > 0) {
-        totals.push({
-            label: 'Interest (' + creditTermsLabel(s.credit_interest_rate, s.credit_term_months) + ')',
-            value: peso(s.credit_interest_amount)
-        });
+        totals.push({ label: 'Interest', value: peso(s.credit_interest_amount) });
     }
     totals.push({ label: 'Total Due', value: peso(Number(s.final_amount) + (Number(s.credit_interest_amount) || 0)), due: true });
-    if (s.credit_due_date) {
-        totals.push({ label: 'Payment Due', value: escapeHtml(String(s.credit_due_date).slice(0, 10)) });
+    if (isCredit && creditDueDateText(s) !== '') {
+        totals.push({ label: 'Due Date', value: escapeHtml(creditDueDateText(s)) });
     }
     if (Number(s.penalty_amount) > 0) {
-        totals.push({
-            label: 'Late Penalty (' + penaltyRateWord(s.penalty_rate) + '/mo \u00d7 ' + s.penalty_months + ')',
-            value: peso(s.penalty_amount)
-        });
+        totals.push({ label: 'Late penalty', value: peso(s.penalty_amount) });
     }
     if (Number(s.returned_total) > 0) totals.push({ label: 'Refunded', value: '-' + peso(s.returned_total) });
     if (Number(s.refunded_amount) > 0) totals.push({ label: 'Taken off the balance', value: '-' + peso(s.refunded_amount) });
@@ -2651,7 +2633,9 @@ async function loadDriverRoster() {
         driverRoster = await apiGetDeliveryDrivers(day);
     } catch (error) {
         driverRoster = [];
+        return false;
     }
+    return true;
 }
 
 function driverCountText(count) {
@@ -2662,7 +2646,21 @@ function driverCountText(count) {
 }
 
 async function onDeliveryDateChanged() {
-    await loadDriverRoster();
+    const loaded = await loadDriverRoster();
+
+    // A driver picked earlier who does not work on the new day is taken off
+    const id = driverIdField();
+    if (loaded && id && id.value) {
+        let works = false;
+        for (let i = 0; i < driverRoster.length; i++) {
+            if (String(driverRoster[i].staff_id) === id.value) works = true;
+        }
+        if (!works) {
+            const name = pickedDriverName || 'The driver';
+            setDriverPick(null);
+            notifyWarning(name + ' does not deliver on that day. Pick another driver.', 'Driver taken off');
+        }
+    }
 
     const list = document.getElementById('driver-suggest');
     if (list && !list.hidden) renderDriverSuggestions(document.getElementById('dl-driver').value);
@@ -2854,9 +2852,18 @@ function onDeliveryFieldTyped(event) {
     }
 }
 
+// Today as the text a date box uses: 2026-10-28
+function todayText() {
+    const now = new Date();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return now.getFullYear() + '-' + month + '-' + day;
+}
+
 async function openDeliveryForm() {
     const fields = deliveryFormFields();
     if (!fields) return;
+    fields.scheduledDate.min = todayText();
 
     await loadCustomerDirectory(false);
     deliveryFormIsOpen = true;
@@ -2971,9 +2978,9 @@ async function saveDeliveryForm(event) {
     if (fields.remarks.value.trim().length > 255) complain('remarks', 'The remarks are at most 255 characters.');
 
     if (!scheduledDate) {
-        complain('scheduledDate', 'Pick the date and time of the delivery.');
-    } else if (new Date(scheduledDate).getTime() < Date.now() - 60000) {
-        complain('scheduledDate', 'That date has already passed. Check the date and time.');
+        complain('scheduledDate', 'Pick the date of the delivery.');
+    } else if (scheduledDate < todayText()) {
+        complain('scheduledDate', 'That date has already passed. Check the date.');
     }
 
     const driverBox = document.getElementById('dl-driver');
@@ -3058,7 +3065,7 @@ function renderDeliveryAttached() {
     const d = pendingDelivery;
 
     let whenText = 'No date agreed yet';
-    if (d.scheduledDate) whenText = 'Preferred date ' + escapeHtml(String(d.scheduledDate).replace('T', ' '));
+    if (d.scheduledDate) whenText = 'Delivery date ' + escapeHtml(String(d.scheduledDate).slice(0, 10));
     const driverText = 'Driver: ' + escapeHtml(d.driverName);
 
     let remarksLine = '';
@@ -3169,15 +3176,10 @@ function buildDeliveryPanel() {
     });
 }
 
+// A delivery is scheduled for a day only
 function scheduleText(stamp) {
     if (!stamp) return 'Not set';
-
-    const text = String(stamp).replace('T', ' ');
-    const day = text.slice(0, 10);
-    const time = text.slice(11, 16);
-
-    if (time === '' || time === '00:00') return day;
-    return day + ' ' + time;
+    return String(stamp).slice(0, 10);
 }
 
 function clearDeliveryPanel() {
@@ -3814,11 +3816,7 @@ async function openPaymentForm(saleId) {
     }
     let penaltyNote = '';
     if (Number(row.penalty_amount) > 0) {
-        let monthWord = ' months';
-        if (Number(row.penalty_months) === 1) monthWord = ' month';
-        penaltyNote = ' <span class="muted">+ ' + peso(row.penalty_amount) + ' late penalty (' +
-            escapeHtml(penaltyRateWord(row.penalty_rate)) + ' a month, ' + row.penalty_months +
-            monthWord + ' overdue)</span>';
+        penaltyNote = ' <span class="muted">+ ' + peso(row.penalty_amount) + ' late penalty</span>';
     }
     document.getElementById('payment-facts').innerHTML =
         detailField('Customer', escapeHtml(row.customer_name)) +
@@ -4279,8 +4277,7 @@ async function openCustomerCredit(customerId, tab) {
         let penaltiesFact = '';
         if (Number(c.penalties_owed) > 0) {
             penaltiesFact = detailField('Late Penalties', '<span class="cell-due">' + peso(c.penalties_owed) +
-                '</span> <span class="muted">of the amount owed, at ' +
-                escapeHtml(penaltyRateWord(c.penalty_rate)) + ' a month</span>');
+                '</span> <span class="muted">of the amount owed</span>');
         }
 
         let loyalty = null;

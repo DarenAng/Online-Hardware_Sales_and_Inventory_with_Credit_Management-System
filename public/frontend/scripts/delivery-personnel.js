@@ -191,7 +191,7 @@ function buildDriverPanels() {
                 '<td class="cell-id">' + deliveryCode(d.delivery_id) + '</td>' +
                 '<td class="cell-name">' + escapeHtml(d.customer_name) + ' ' + ownerTag(d) + '</td>' +
                 '<td>' + escapeHtml(d.delivery_address) + '</td>' +
-                '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
+                '<td class="cell-id">' + escapeHtml(d.scheduled_date ? String(d.scheduled_date).slice(0, 10) : 'Not set') + '</td>' +
                 collectCell(d) +
                 '<td>' + statusBadge(d.status) + '</td></tr>';
         }
@@ -908,6 +908,7 @@ function driverPrintHeading(key, panel) {
     block.innerHTML =
         '<h2>' + escapeHtml(info.title) + '</h2>' +
         '<p>Driver: ' + escapeHtml(staffName(user)) + '</p>' +
+        '<p>' + escapeHtml(printedByText()) + '</p>' +
         '<p>From ' + escapeHtml(range.from) + ' to ' + escapeHtml(range.to) + '</p>' +
         '<p>' + escapeHtml(info.filterName) + ': ' + escapeHtml(filterText) + '</p>' +
         searchLine;

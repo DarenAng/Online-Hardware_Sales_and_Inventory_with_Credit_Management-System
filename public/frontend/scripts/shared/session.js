@@ -92,7 +92,9 @@ async function handleLogin(event) {
         if (!response.ok) {
             const reason = String(result.error || 'That sign-in did not work').trim();
 
-            if (response.status === 423) {
+            // Only a refused email or password (401) gets the "check and retype" advice.
+            // A held or deactivated account, or a server error, shows the reason alone.
+            if (response.status !== 401) {
                 showLoginAlert(reason.replace(/[.!]?$/, '.'));
             } else {
                 const meant = likelyMailDomain(email);
@@ -109,8 +111,9 @@ async function handleLogin(event) {
                 showLoginAlert(reason.replace(/[.!]?$/, '.') + advice + warning);
             }
 
+            // On a server error the password was never checked, so it stays in the box.
             const passwordBox = form.elements.password;
-            if (passwordBox) {
+            if (passwordBox && response.status < 500) {
                 passwordBox.value = '';
                 passwordBox.focus();
             }
@@ -480,6 +483,14 @@ function staffName(user) {
 
     const spelled = (user.first_name || '') + ' ' + (user.last_name || '');
     return spelled.trim() || user.email || '';
+}
+
+// The line under the title of a printed report, worded like the Excel header
+function printedByText() {
+    const user = getCurrentUser();
+    let who = staffName(user) || 'Unknown';
+    if (user && user.role_name) who += ' (' + user.role_name + ')';
+    return 'Printed by: ' + who + ' on ' + new Date().toLocaleString('en-PH');
 }
 
 function currentRole() {

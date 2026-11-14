@@ -142,8 +142,6 @@ function showSalesTransactions(event) {
 
 async function showCreditMaintenance(event) {
     showManagerPanel('panel-credit-maintenance', 'Credit Maintenance', event);
-    const rateRead = await loadPenaltyPolicy();
-    fillPenaltyForm(rateRead);
     await loadPolicies();
 }
 
@@ -734,6 +732,11 @@ function addPrintTotals(container, panel) {
     return block;
 }
 
+// The print itself happens in the browser, so the server is told for the audit log
+function logReportPrint(name) {
+    apiLogReportPrint(name).catch(function () {});
+}
+
 function printReport(keys) {
     if (typeof finishCreditPrint === 'function') finishCreditPrint();
     if (printRestore) printRestore();
@@ -798,6 +801,23 @@ function printReport(keys) {
         if (block) totalBlocks.push(block);
     }
 
+    // Who printed it and when, under the title of each report
+    const printedBy = [];
+    const reportNames = [];
+    for (let i = 0; i < reports.length; i++) {
+        const line = document.createElement('p');
+        line.className = 'print-by';
+        line.textContent = printedByText();
+        const head = reports[i].querySelector('.panel-head');
+        if (head) head.after(line);
+        else reports[i].prepend(line);
+        printedBy.push(line);
+
+        const title = reports[i].querySelector('.panel-head h3');
+        if (title && title.textContent.trim() !== '') reportNames.push(title.textContent.trim());
+    }
+    logReportPrint(reportNames.length > 0 ? reportNames.join(', ') : panelKeys.join(', '));
+
     document.body.classList.add('is-printing');
 
     printRestore = function () {
@@ -809,6 +829,9 @@ function printReport(keys) {
         }
         for (let i = 0; i < totalBlocks.length; i++) {
             totalBlocks[i].remove();
+        }
+        for (let i = 0; i < printedBy.length; i++) {
+            printedBy[i].remove();
         }
         for (let i = 0; i < saved.length; i++) {
             const entry = saved[i];
@@ -1597,8 +1620,6 @@ function buildManagerPurchaseOrderPanel() {
 const STANDING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
 const STANDING_WORD = { Good: 'Good', Watch: 'Watch', Hold: 'On hold' };
 
-let penaltyPolicy = null;
-
 let creditCustomer = null;
 let creditRequest = null;
 
@@ -1763,148 +1784,6 @@ function buildCreditPanels() {
                 '<td><span class="badge ' + tone + '">' + escapeHtml(row.status) + '</span></td></tr>';
         }
     });
-
-    loadPenaltyPolicy();
-    if (typeof onLiveChange === 'function') {
-        onLiveChange(['credit'], function () {
-            loadPenaltyPolicy();
-        });
-    }
-}
-
-async function loadPenaltyPolicy() {
-    try {
-        penaltyPolicy = await apiGetPenaltyPolicy();
-    } catch (error) {
-        return false;
-    }
-    return true;
-}
-
-function fillPenaltyForm(rateRead) {
-    const form = document.getElementById('penalty-form');
-    if (!form) return;
-
-    const note = document.getElementById('penalty-read-note');
-    const saveButton = document.getElementById('penalty-save-btn');
-    if (note) note.hidden = rateRead;
-    if (saveButton) saveButton.disabled = !rateRead;
-    form.elements.penaltyRate.disabled = !rateRead;
-    fillInterestForm(rateRead);
-
-    if (!rateRead) {
-        penaltyRateRead = false;
-        form.elements.penaltyRate.value = '';
-        document.getElementById('penalty-preview').hidden = true;
-        return;
-    }
-
-    const pct = Number(penaltyPolicy.penalty_rate);
-    form.elements.penaltyRate.value = Number.isFinite(pct) ? pct.toFixed(2) : '';
-    penaltyRateRead = true;
-    document.getElementById('penalty-preview').hidden = false;
-    previewPenaltyPolicy();
-}
-
-function previewPenaltyPolicy() {
-    const form = document.getElementById('penalty-form');
-    const preview = document.getElementById('penalty-preview');
-    if (!form || !preview) return;
-
-    const pct = Number(form.elements.penaltyRate.value);
-    if (!Number.isFinite(pct) || pct < 1 || pct > 3) {
-        preview.className = 'formula-preview is-stop';
-        preview.innerHTML = '<span class="formula-verdict">The rate is from 1 to 3 percent a month.</span>';
-        return;
-    }
-
-    const example = 10000;
-    const month = example * pct / 100;
-    preview.className = 'formula-preview is-dynamic';
-    preview.innerHTML =
-        '<span class="formula-line">' + peso(example) + ' unpaid &times; ' + penaltyRateWord(pct) +
-            ' = <strong>' + peso(month) + ' a month</strong></span>' +
-        '<span class="formula-verdict">A sale with ' + peso(example) + ' of goods unpaid is charged ' +
-            peso(month) + ' the day after its due date, and ' + peso(month) + ' more every thirty days ' +
-            'after that: three months overdue, it owes ' + peso(example + month * 3) + '.</span>';
-}
-
-// The shop's usual interest rate and term for a credit sale (read with the late-payment policy)
-function fillInterestForm(policyRead) {
-    const form = document.getElementById('interest-form');
-    if (!form) return;
-
-    document.getElementById('interest-save-btn').disabled = !policyRead;
-    form.elements.interestRate.disabled = !policyRead;
-    form.elements.termMonths.disabled = !policyRead;
-    if (!policyRead) {
-        form.elements.interestRate.value = '';
-        return;
-    }
-
-    const rate = Number(penaltyPolicy.credit_interest_rate);
-    form.elements.interestRate.value = Number.isFinite(rate) ? rate.toFixed(2) : '0.00';
-    form.elements.termMonths.value = String(parseInt(penaltyPolicy.credit_term_months, 10) || 1);
-}
-
-async function saveCreditInterest(event) {
-    event.preventDefault();
-    const form = event.target;
-    const rateText = form.elements.interestRate.value.trim();
-    const rate = Number(rateText);
-    const term = parseInt(form.elements.termMonths.value, 10);
-
-    if (rateText === '' || !Number.isFinite(rate) || rate < 0 || rate > 100) {
-        notifyWarning('The interest rate is 0 to 100 percent.', 'Not saved');
-        return;
-    }
-    if (!Number.isInteger(term) || term < 1 || term > 12) {
-        notifyWarning('The term is 1 to 12 months.', 'Not saved');
-        return;
-    }
-
-    try {
-        const response = await apiSaveCreditInterest(rate, term);
-        const result = await response.json();
-
-        if (!response.ok) {
-            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not saved');
-            return;
-        }
-
-        notifySuccess(result.message, 'Credit interest saved');
-        const rateRead = await loadPenaltyPolicy();
-        fillPenaltyForm(rateRead);
-    } catch (error) {
-        notifyOffline();
-    }
-}
-
-async function savePenaltyPolicy(event) {
-    event.preventDefault();
-    const form = event.target;
-    const pct = Number(form.elements.penaltyRate.value);
-
-    if (!Number.isFinite(pct) || pct < 1 || pct > 3) {
-        notifyWarning('The late-payment rate is 1 to 3 percent a month.', 'Not saved');
-        return;
-    }
-
-    try {
-        const response = await apiSavePenaltyPolicy(pct);
-        const result = await response.json();
-
-        if (!response.ok) {
-            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not saved');
-            return;
-        }
-
-        notifySuccess(result.message, 'Late-payment rate saved');
-        const rateRead = await loadPenaltyPolicy();
-        fillPenaltyForm(rateRead);
-    } catch (error) {
-        notifyOffline();
-    }
 }
 
 let loyaltyPolicy = null;
@@ -2111,24 +1990,7 @@ function previewCardBack() {
 
 window.addEventListener('resize', function () { previewCardBack(); });
 
-let penaltyRateRead = false;
-
 function policyChangesUnsaved() {
-    const rateForm = document.getElementById('penalty-form');
-    if (rateForm && penaltyRateRead && penaltyPolicy) {
-        const typed = Number(rateForm.elements.penaltyRate.value);
-        if (rateForm.elements.penaltyRate.value.trim() === '' || typed !== Number(penaltyPolicy.penalty_rate)) {
-            return 'the late-payment rate';
-        }
-    }
-    const interestForm = document.getElementById('interest-form');
-    if (interestForm && penaltyRateRead && penaltyPolicy && !interestForm.elements.interestRate.disabled) {
-        const typedInterest = interestForm.elements.interestRate.value.trim();
-        if (typedInterest === '' || Number(typedInterest) !== Number(penaltyPolicy.credit_interest_rate) ||
-            Number(interestForm.elements.termMonths.value) !== Number(penaltyPolicy.credit_term_months)) {
-            return 'the credit interest';
-        }
-    }
     const loyaltyForm = document.getElementById('loyalty-form');
     if (loyaltyForm && loyaltyPolicyRead && loyaltyPolicy && !loyaltyForm.elements.rate.disabled) {
         const typedRate = loyaltyForm.elements.rate.value.trim();
@@ -2153,7 +2015,6 @@ function policyChangesUnsaved() {
 }
 
 function discardPolicyChanges() {
-    if (penaltyRateRead) fillPenaltyForm(true);
     if (loyaltyPolicyRead) fillLoyaltyForm(true);
     if (policyData) {
         for (let i = 0; i < POLICY_KINDS.length; i++) {
@@ -2272,10 +2133,6 @@ async function openCreditAccount(customerId) {
             detailField('Late Penalties', Number(c.penalties_owed) > 0
                 ? '<span class="cell-due">' + peso(c.penalties_owed) + '</span> <span class="muted">of the amount owed</span>'
                 : '<span class="muted">None charged</span>') +
-            detailField('Late-Payment Rate', penaltyRateWord(c.penalty_rate) + ' a month' +
-                (c.penalty_rate_override === null || c.penalty_rate_override === undefined
-                    ? ' <span class="muted">the shop\'s rate</span>'
-                    : ' <span class="muted">this account\'s own</span>')) +
             detailField('Lifetime Purchases', peso(c.total_purchase)) +
             detailField('Loyalty Discount', loyaltyFactHtml(loyalty)) +
             detailField('Last Purchase', c.last_purchase
@@ -2348,9 +2205,7 @@ function renderCreditHistory(data) {
                       Number(p.credit_interest_rate) + '%, ' + p.credit_term_months +
                       (Number(p.credit_term_months) === 1 ? ' month' : ' months') + ')</span>' : '') +
                 (Number(p.penalty_amount) > 0
-                    ? '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' penalty (' +
-                      penaltyRateWord(p.penalty_rate) + ' &times; ' + p.penalty_months +
-                      (Number(p.penalty_months) === 1 ? ' month' : ' months') + ')</span>' : ''),
+                    ? '<span class="cell-sub">+ ' + peso(p.penalty_amount) + ' late penalty</span>' : ''),
             Number(p.balance_due) > 0
                 ? '<span class="cell-due">' + peso(p.balance_due) + '</span>'
                 : '<span class="muted">Paid</span>'
@@ -2543,7 +2398,7 @@ function buildDeliveryPanel() {
                 '<td class="cell-name">' + escapeHtml(d.customer_name) + '</td>' +
                 '<td>' + escapeHtml(d.delivery_address) + '</td>' +
                 '<td>' + escapeHtml(d.driver_name) + '</td>' +
-                '<td class="cell-id">' + escapeHtml(d.scheduled_date || 'Not set') + '</td>' +
+                '<td class="cell-id">' + escapeHtml(d.scheduled_date ? String(d.scheduled_date).slice(0, 10) : 'Not set') + '</td>' +
                 '<td class="cell-num' + (owed > 0 ? ' cell-due' : '') + '">' + peso(owed) + '</td>' +
                 '<td><span class="badge ' + tone + '">' + escapeHtml(d.fulfilment_state) + '</span></td></tr>';
         }
@@ -3009,10 +2864,7 @@ async function openSaleDetail(saleId) {
                     (Number(s.credit_term_months) === 1 ? ' month' : ' months') + '</span>')
                 : '') +
             (Number(s.penalty_amount) > 0
-                ? detailField('Late Penalty', '<span class="cell-due">' + peso(s.penalty_amount) + '</span> ' +
-                    '<span class="muted">' + penaltyRateWord(s.penalty_rate) + ' a month for ' + s.penalty_months +
-                    (Number(s.penalty_months) === 1 ? ' month' : ' months') + ' overdue, last charged ' +
-                    escapeHtml(String(s.penalty_applied_at || '').slice(0, 10)) + '</span>')
+                ? detailField('Late Penalty', '<span class="cell-due">' + peso(s.penalty_amount) + '</span>')
                 : '') +
             (Number(s.returned_total) > 0
                 ? detailField('Refunded', peso(s.returned_total))
@@ -3021,6 +2873,7 @@ async function openSaleDetail(saleId) {
                 ? detailField('Taken Off the Balance', peso(s.refunded_amount) + ' <span class="muted">of the refund came off what the customer owed</span>')
                 : '') +
             detailField('Amount Due', peso(saleAmountDue(s))) +
+            (s.payment_method === 'Credit' && creditDueDateText(s) !== '' ? detailField('Due Date', escapeHtml(creditDueDateText(s))) : '') +
             detailField('Amount Paid', peso(s.amount_paid)) +
             detailField('Change Given', peso(s.change_given)) +
             detailField('Balance Due', '<span class="' + (balance > 0 ? 'cell-due' : '') + '">' + peso(balance) + '</span>') +
@@ -3132,7 +2985,7 @@ async function openSaleDetail(saleId) {
                 detailField('Fulfilment', '<span class="badge ' +
                     (FULFILMENT_TONE[state] || 'badge-neutral') + '">' + escapeHtml(state) + '</span>') +
                 detailField('Driver', escapeHtml(d.driver_name || 'Unassigned')) +
-                detailField('Scheduled', escapeHtml(d.scheduled_date || 'Not set')) +
+                detailField('Scheduled', escapeHtml(d.scheduled_date ? String(d.scheduled_date).slice(0, 10) : 'Not set')) +
                 detailField('Delivered At', d.delivered_at ? escapeHtml(d.delivered_at) : '<span class="muted">Not yet</span>') +
                 detailField('Address', escapeHtml(d.delivery_address)) +
                 '</div>' +
@@ -3538,10 +3391,29 @@ function openCreateAccount() {
     }, 60);
 }
 
+// The work days only show when the role is Delivery Personnel
+function onAccountRoleChange() {
+    const select = document.getElementById('newacct-role');
+    const option = select.options[select.selectedIndex];
+    const mayPick = typeof holdsFeature !== 'function' || holdsFeature('driver-work-days');
+    const isDriver = mayPick && Boolean(option) && option.text === 'Delivery Personnel';
+    document.getElementById('newacct-days-group').hidden = !isDriver;
+}
+
+function pickedWorkDays(container) {
+    const boxes = container.querySelectorAll('input[name="workDay"]');
+    const days = [];
+    for (let i = 0; i < boxes.length; i++) {
+        if (boxes[i].checked) days.push(boxes[i].value);
+    }
+    return days;
+}
+
 function clearAccountForm() {
     const form = document.getElementById('newacct-form');
     form.reset();
     accountReview = null;
+    document.getElementById('newacct-days-group').hidden = true;
 
     phoneFill(form.elements.phone, '');
     const names = ['firstName', 'middleName', 'lastName', 'phone', 'email'];
@@ -3728,6 +3600,15 @@ async function reviewNewAccount(event) {
         return;
     }
 
+    let workDays = null;
+    if (!document.getElementById('newacct-days-group').hidden) {
+        workDays = pickedWorkDays(document.getElementById('newacct-days-group'));
+        if (workDays.length === 0) {
+            notifyWarning('Tick at least one work day.', 'Work days needed');
+            return;
+        }
+    }
+
     const button = document.getElementById('newacct-review-btn');
     accountBusy = true;
     button.disabled = true;
@@ -3749,7 +3630,8 @@ async function reviewNewAccount(event) {
             lastName: form.elements.lastName.value.trim(),
             phone: phoneToStore(form.elements.phone),
             email: form.elements.email.value.trim().toLowerCase(),
-            roleId: parseInt(form.elements.roleId.value, 10)
+            roleId: parseInt(form.elements.roleId.value, 10),
+            workDays: workDays
         });
         if (!review) return;
 
@@ -3779,6 +3661,7 @@ function showAccountReview(review) {
         detailField('Role', escapeHtml(review.roleName)) +
         detailField('Email', escapeHtml(review.email)) +
         detailField('Phone', '<span class="mono">' + escapeHtml(phoneForDisplay(review.phone)) + '</span>') +
+        (review.workDays ? detailField('Work Days', escapeHtml(review.workDays.split(',').join(', '))) : '') +
         detailField('First Password', sentText) +
         '</div>' +
         '<p class="detail-note">Nothing is saved until you press Confirm. ' + escapeHtml(review.firstName) +
@@ -3946,9 +3829,24 @@ function openStaffAccount(staffId) {
             : '<span class="muted">Not set</span>') +
         detailField('Status', staffStatusBadge(account)) +
         detailField('Last Sign-in', account.last_login ? escapeHtml(whenText(account.last_login)) : '<span class="muted">Never</span>');
+    if (account.work_days) {
+        const mayEdit = typeof holdsFeature !== 'function' || holdsFeature('driver-work-days');
+        let dayBoxes = '';
+        const week = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        for (let i = 0; i < week.length; i++) {
+            const on = account.work_days.split(',').indexOf(week[i]) !== -1;
+            dayBoxes += '<label><input type="checkbox" name="workDay" value="' + week[i] + '"' +
+                (on ? ' checked' : '') + (mayEdit ? '' : ' disabled') + '> ' + week[i] + '</label>';
+        }
+        body += detailField('Work Days', '<div class="day-checks" id="staff-days">' + dayBoxes + '</div>');
+    }
     body += '</div>';
 
     let foot = '';
+    if (account.work_days && (typeof holdsFeature !== 'function' || holdsFeature('driver-work-days'))) {
+        foot += '<button type="button" class="btn btn-success" id="work-days-button" ' +
+            'onclick="saveStaffWorkDays(' + account.staff_id + ')">Save Work Days</button>';
+    }
     if (!account.is_active) {
         foot += '<button type="button" class="btn btn-danger" onclick="archiveStaffAccount(' + account.staff_id + ')">' +
             'Archive Account</button>';
@@ -3965,6 +3863,35 @@ function openStaffAccount(staffId) {
 
     openDetailModal(account.full_name, account.role_name,
         initialsOf(account.full_name), [{ label: 'Account', body: body }], foot || null);
+}
+
+async function saveStaffWorkDays(staffId) {
+    const days = pickedWorkDays(document.getElementById('staff-days'));
+    if (days.length === 0) {
+        notifyWarning('Tick at least one work day.', 'Work days needed');
+        return;
+    }
+
+    const button = document.getElementById('work-days-button');
+    if (button) button.disabled = true;
+    try {
+        const response = await apiSaveWorkDays(staffId, days);
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Work days not saved');
+            if (button) button.disabled = false;
+            return;
+        }
+
+        notifySuccess(result.message, 'Work days saved');
+        closeModal('detail-modal');
+        const panel = getDataPanel('mgr-staff');
+        if (panel) await panel.refresh();
+    } catch (error) {
+        if (button) button.disabled = false;
+        notifyOffline();
+    }
 }
 
 async function archiveStaffAccount(staffId) {

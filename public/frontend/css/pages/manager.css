@@ -229,6 +229,14 @@
 .form-control.is-bad:focus { box-shadow: 0 0 0 3px var(--stop-dim); }
 
 .print-totals { display: none; }
+.print-by { display: none; }
+
+.day-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.day-checks label {
+    display: flex; align-items: center; gap: 6px;
+    margin: 0; font-size: 14.5px; cursor: pointer;
+}
+.day-checks input { width: 18px; height: 18px; accent-color: var(--go); }
 
 @media print {
     .summary-pane[hidden] { display: block !important; }
@@ -242,6 +250,7 @@
         break-inside: avoid;
         page-break-inside: avoid;
     }
+    body.is-printing .print-by { display: block; margin: 0 0 10px; font-size: 12px; }
     body.is-printing .print-totals h3 { font-size: 14px; margin-bottom: 6px; }
     body.is-printing .print-totals table { width: auto; min-width: 280px; }
     body.is-printing .print-totals td { padding: 4px 14px 4px 0; }

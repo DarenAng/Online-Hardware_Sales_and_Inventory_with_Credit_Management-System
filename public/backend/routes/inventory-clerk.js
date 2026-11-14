@@ -2340,7 +2340,7 @@ function registerInventoryRoutes(app, deps) {
         if (deliveries.length === 0) {
           return response.status(403).json({ error: "You can only refund items on a delivery you took." });
         }
-        if (!["Out for Delivery", "Delivered"].includes(deliveries[0].status)) {
+        if (!["Out for Delivery", "Delayed", "Delivered"].includes(deliveries[0].status)) {
           return response.status(409).json({ error: "Refund items once the delivery is out with the customer." });
         }
       } catch (error) {

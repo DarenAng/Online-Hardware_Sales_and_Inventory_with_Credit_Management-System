@@ -493,6 +493,15 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
+  // A printed report is made in the browser; this only writes it to the audit log
+  app.post("/api/reports/print-log", async function (request, response) {
+    const name = String((request.body || {}).report || "").trim().slice(0, 120);
+    if (name === "") return response.status(400).json({ error: "Say which report was printed." });
+
+    await writeAuditLog(request, "PRINT_REPORT", "Printed " + name, { report: name });
+    response.json({ message: "Logged." });
+  });
+
   function tidyName(value, max) {
     return String(value || "").trim().replace(/\s+/g, " ").slice(0, max);
   }
@@ -989,7 +998,6 @@ function registerManagerRoutes(app, deps) {
     const creditLimit = request.body.creditLimit;
     const standing = request.body.standing;
     const notes = request.body.notes;
-    const penaltyRate = request.body.penaltyRate;
 
     const limit = Number(creditLimit);
     if (!Number.isFinite(limit) || limit < 0) {
@@ -998,29 +1006,16 @@ function registerManagerRoutes(app, deps) {
       });
     }
 
-    let ownRate;
-    if (penaltyRate === undefined || penaltyRate === null || String(penaltyRate).trim() === "") {
-      ownRate = null;
-    } else {
-      ownRate = Number(penaltyRate);
-    }
-
-    if (ownRate !== null && (!Number.isFinite(ownRate) || ownRate < 1 || ownRate > 3)) {
-      return response.status(400).json({
-        error: "A late-payment rate is 1 to 3 percent a month. Leave it blank for the shop's rate."
-      });
-    }
-
     try {
       const beforeResult = await db.query(
-        "SELECT customer_name, credit_limit, manual_standing AS standing, penalty_rate_override " +
+        "SELECT customer_name, credit_limit, manual_standing AS standing " +
         "FROM vw_customer_credit WHERE customer_id = ?",
         [request.params.customerId]
       );
       const before = beforeResult[0];
 
       const output = await managerProcedures.setCreditLimit(
-        [request.params.customerId, limit, standing || "Good", ownRate,
+        [request.params.customerId, limit, standing || "Good", null,
          notes || null, getActorId(request)]
       );
 
@@ -1034,15 +1029,11 @@ function registerManagerRoutes(app, deps) {
         customerName = before[0].customer_name;
         oldValues = {
           credit_limit: before[0].credit_limit,
-          standing: before[0].standing,
-          penalty_rate: before[0].penalty_rate_override
+          standing: before[0].standing
         };
       }
 
       let details = customerName + " set to " + limit + " (" + (standing || "Good") + ")";
-      if (ownRate !== null) {
-        details += ", late-payment rate " + ownRate + "%";
-      }
 
       await writeAuditLog(
         request,
@@ -1052,7 +1043,7 @@ function registerManagerRoutes(app, deps) {
           customer_id: Number(request.params.customerId),
           changes: fieldChanges(
             oldValues,
-            { credit_limit: limit, standing: standing || "Good", penalty_rate: ownRate })
+            { credit_limit: limit, standing: standing || "Good" })
         }
       );
 
@@ -1060,119 +1051,6 @@ function registerManagerRoutes(app, deps) {
     } catch (error) {
       console.error("Credit limit failed:", error.message);
       response.status(500).json({ error: "Unable to save the credit limit" });
-    }
-  });
-
-  app.get("/api/credit/policy", async function (request, response) {
-    try {
-      const rowsResult = await db.query(
-        "SELECT cfg.penalty_rate, cfg.credit_interest_rate, cfg.credit_term_months, cfg.updated_at, st.full_name AS updated_by, " +
-        "(SELECT COUNT(*) FROM customer_credits WHERE penalty_rate IS NOT NULL) AS own_rate_accounts, " +
-        "(SELECT COUNT(*) FROM sales s " +
-        "WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid' AND s.penalty_amount > 0) AS penalised_sales, " +
-        "(SELECT COALESCE(SUM(LEAST(s.penalty_amount, GREATEST(s.amount_due - s.amount_paid, 0))), 0) " +
-        "FROM sales s " +
-        "WHERE s.is_archived = FALSE AND s.payment_status <> 'Paid') AS penalties_owed " +
-        "FROM store_settings cfg " +
-        "LEFT JOIN staff st ON st.staff_id = cfg.updated_by_staff_id " +
-        "WHERE cfg.setting_id = 1"
-      );
-      const rows = rowsResult[0];
-      response.json(rows[0] || { penalty_rate: "3.00", credit_interest_rate: "0.00", credit_term_months: 1,
-                                 updated_at: null, updated_by: null,
-                                 own_rate_accounts: 0, penalised_sales: 0, penalties_owed: 0 });
-    } catch (error) {
-      console.error("Penalty policy read failed:", error.message);
-      response.status(500).json({ error: "Unable to read the late-payment policy" });
-    }
-  });
-
-  app.put("/api/credit/policy", requireRole(MANAGER), async function (request, response) {
-    const rate = Number((request.body || {}).penaltyRate);
-    if (!Number.isFinite(rate) || rate < 1 || rate > 3) {
-      return response.status(400).json({
-        error: "The late-payment rate is 1 to 3 percent a month. The default is 3."
-      });
-    }
-
-    try {
-      const beforeResult = await db.query("SELECT penalty_rate FROM store_settings WHERE setting_id = 1");
-      const before = beforeResult[0];
-
-      const output = await managerProcedures.setPenaltyPolicy(
-        [rate, getActorId(request)]
-      );
-
-      if (output.status_code !== 200) {
-        return response.status(output.status_code).json({ error: output.message });
-      }
-
-      let oldValues = null;
-      if (before[0]) {
-        oldValues = { penalty_rate: before[0].penalty_rate };
-      }
-
-      await writeAuditLog(request, "UPDATE_PENALTY_POLICY",
-        "Late-payment penalty set to " + rate + "% a month of the unpaid balance",
-        { changes: fieldChanges(oldValues, { penalty_rate: rate }) });
-
-      response.json({ message: output.message, penalty_rate: rate.toFixed(2) });
-    } catch (error) {
-      console.error("Penalty policy failed:", error.message);
-      response.status(500).json({ error: "Unable to save the late-payment policy" });
-    }
-  });
-
-  // The shop's usual interest rate and term for a credit sale; the cashier can change both on a sale
-  app.put("/api/credit/interest", requireRole(MANAGER), async function (request, response) {
-    const body = request.body || {};
-    const rateText = String(body.interestRate === undefined || body.interestRate === null ? "" : body.interestRate).trim();
-    const termText = String(body.termMonths === undefined || body.termMonths === null ? "" : body.termMonths).trim();
-    const rate = Number(rateText);
-    const term = Number(termText);
-
-    if (rateText === "" || !Number.isFinite(rate) || rate < 0 || rate > 100) {
-      return response.status(400).json({ error: "The interest rate is 0 to 100 percent." });
-    }
-    if (termText === "" || !Number.isInteger(term) || term < 1 || term > 12) {
-      return response.status(400).json({ error: "The term is 1 to 12 months." });
-    }
-    const savedRate = Math.round(rate * 100) / 100;
-
-    try {
-      const beforeResult = await db.query(
-        "SELECT credit_interest_rate, credit_term_months FROM store_settings WHERE setting_id = 1");
-      const before = beforeResult[0];
-
-      const updated = await db.query(
-        "UPDATE store_settings SET credit_interest_rate = ?, credit_term_months = ?, updated_by_staff_id = ? " +
-        "WHERE setting_id = 1",
-        [savedRate, term, getActorId(request)]
-      );
-      if (!updated[0].affectedRows) {
-        return response.status(500).json({ error: "The shop settings row is missing, so nothing was saved." });
-      }
-
-      let oldValues = null;
-      if (before[0]) {
-        oldValues = { credit_interest_rate: Number(before[0].credit_interest_rate),
-                      credit_term_months: Number(before[0].credit_term_months) };
-      }
-
-      await writeAuditLog(request, "UPDATE_CREDIT_INTEREST",
-        "Credit interest set to " + savedRate + "% over " + term + (term === 1 ? " month" : " months") +
-        ", charged once on the amount put on account",
-        { changes: fieldChanges(oldValues, { credit_interest_rate: savedRate, credit_term_months: term }) });
-
-      response.json({
-        message: "Saved. A credit sale starts at " + savedRate.toFixed(2) + "% interest over " + term +
-                 (term === 1 ? " month." : " months."),
-        credit_interest_rate: savedRate.toFixed(2),
-        credit_term_months: term
-      });
-    } catch (error) {
-      console.error("Credit interest failed:", error.message);
-      response.status(500).json({ error: "Unable to save the credit interest" });
     }
   });
 
@@ -1354,11 +1232,6 @@ function registerManagerRoutes(app, deps) {
 
     const policies = await policyTexts();
     const terms = policies.credit;
-    const ownRate = customer.penalty_rate_override !== null && customer.penalty_rate_override !== undefined;
-
-    const interestResult = await db.query(
-      "SELECT credit_interest_rate, credit_term_months FROM store_settings WHERE setting_id = 1");
-    const interest = interestResult[0][0] || { credit_interest_rate: 0, credit_term_months: 1 };
 
     return {
       store: {
@@ -1384,10 +1257,6 @@ function registerManagerRoutes(app, deps) {
       },
       terms: {
         due_days: CREDIT_DUE_DAYS,
-        interest_rate: Number(interest.credit_interest_rate),
-        term_months: Number(interest.credit_term_months),
-        penalty_rate: customer.penalty_rate,
-        penalty_rate_is_own: ownRate,
         lines: linesOf(terms.text)
       },
       policies: {
@@ -2045,39 +1914,8 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  const PENALTY_SWEEP_MS = 60 * 60 * 1000;
-
-  async function runPenaltySweep() {
-    if (await proceduresAreMissing()) return;
-
-    try {
-      const output = await managerProcedures.applyLatePenalties();
-
-      const applied = Number(output.applied) || 0;
-      const total = Number(output.total) || 0;
-      if (applied < 0) {
-        console.error("Late-payment sweep failed inside the database (" + output.err_no + "): " + output.err_text);
-        return;
-      }
-      if (applied > 0) {
-        console.log("Late-payment sweep: " + applied + " overdue " + (applied === 1 ? "sale" : "sales") + " charged " +
-          "a month's penalty, " + total.toFixed(2) + " in all.");
-        publishChange("credit", "penalties", null);
-        publishChange("sales", "penalties", null);
-        publishChange("notifications", "penalties", null);
-      }
-    } catch (error) {
-      console.error("Late-payment sweep failed:", error.message);
-    }
-  }
-
-  function startPenaltySweep() {
-    runPenaltySweep();
-    const timer = setInterval(runPenaltySweep, PENALTY_SWEEP_MS);
-    if (typeof timer.unref === "function") timer.unref();
-  }
-
-  return { startPenaltySweep: startPenaltySweep, runPenaltySweep: runPenaltySweep };
+  // No late-payment penalty is charged any more (the daily sweep is gone)
+  return {};
 }
 
 module.exports = { registerManagerRoutes: registerManagerRoutes };

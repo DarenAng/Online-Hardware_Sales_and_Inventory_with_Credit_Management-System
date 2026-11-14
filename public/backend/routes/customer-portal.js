@@ -263,6 +263,26 @@ function registerCustomerPortalRoutes(app, deps) {
 
   // ---- Read-only screens ----
 
+  app.get("/api/portal/deliveries/:id", needsCustomer(async function (request, response) {
+    const result = await db.query(
+      "SELECT d.delivery_id, d.status, d.delivery_address, d.scheduled_date, d.delivered_at, d.remarks, " +
+      "c.full_name AS customer_name, c.phone AS customer_phone, s.final_amount, s.amount_due, s.amount_paid, s.payment_status, " +
+      "GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due, " +
+      "(SELECT COUNT(*) FROM delivery_attempts a WHERE a.delivery_id = d.delivery_id) AS attempt_count " +
+      "FROM deliveries d JOIN sales s ON s.sale_id = d.sale_id JOIN customers c ON c.customer_id = s.customer_id " +
+      "WHERE d.delivery_id = ? AND s.customer_id = ? AND d.is_archived = FALSE AND s.is_archived = FALSE",
+      [request.params.id, request.customerId]);
+    if (!result[0].length) return response.status(404).json({ error: 'Delivery not found.' });
+    const items = await db.query(
+      "SELECT si.product_id, p.product_name, COALESCE(si.sold_quantity, si.quantity) AS quantity, " +
+      "COALESCE(si.sold_unit, u.unit_name) AS unit_name, si.unit_price, si.subtotal " +
+      "FROM deliveries d JOIN sales s ON s.sale_id = d.sale_id JOIN sale_items si ON si.sale_id = s.sale_id " +
+      "JOIN products p ON p.product_id = si.product_id LEFT JOIN units u ON u.unit_id = p.unit_id " +
+      "WHERE d.delivery_id = ? AND s.customer_id = ? AND d.is_archived = FALSE AND s.is_archived = FALSE ORDER BY si.sale_item_id",
+      [request.params.id, request.customerId]);
+    response.json({ delivery: result[0][0], items: items[0] });
+  }));
+
   app.get("/api/portal/deliveries", needsCustomer(async function (request, response) {
     const result = await db.query(
       "SELECT d.delivery_id, d.sale_id, d.delivery_address, d.status, d.scheduled_date, d.delivered_at " +
@@ -361,7 +381,7 @@ function registerCustomerPortalRoutes(app, deps) {
     const newPassword = String(body.newPassword || "");
     const again = String(body.confirmPassword || "");
 
-    if (!current || !newPassword) {
+    if ((!request.mustChangePassword && !current) || !newPassword) {
       return response.status(400).json({ error: "Type your current password and the new one." });
     }
     const complaint = passwordComplaint(newPassword);
@@ -376,15 +396,18 @@ function registerCustomerPortalRoutes(app, deps) {
     }
 
     const customer = await findCustomer(request.customerId);
+    if (request.mustChangePassword && await verifyPassword(newPassword, customer.portal_password)) {
+      return response.status(400).json({ error: "Choose a password different from your temporary password." });
+    }
     if (customer.held_until) {
       return await refuseHeld(customer, request, response, minutesLeft(customer.held_for_seconds));
     }
-    if (!(await countTry(customer))) {
+    if (!request.mustChangePassword && !(await countTry(customer))) {
       await holdAccount(customer, LOGIN_MAX_ATTEMPTS, request);
       return await refuseHeld(customer, request, response, await heldMinutesNow(customer.customer_id));
     }
 
-    if (!(await verifyPassword(current, customer.portal_password))) {
+    if (!request.mustChangePassword && !(await verifyPassword(current, customer.portal_password))) {
       return await afterWrongTry(customer, request, response, "wrong current password when changing it",
         "The current password is not right.");
     }

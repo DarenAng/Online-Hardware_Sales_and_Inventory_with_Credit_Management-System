@@ -1,0 +1,8 @@
+# Caddy answers on the https address and passes every request to the app on port 3000.
+# It gets and renews the https certificate by itself.
+# Change the address below to your own, then copy this file to /etc/caddy/Caddyfile
+# (see DEPLOY-ORACLE.md, Part 8).
+
+lucelyn-hardware.duckdns.org {
+    reverse_proxy localhost:3000
+}

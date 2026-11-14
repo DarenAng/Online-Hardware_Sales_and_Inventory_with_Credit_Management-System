@@ -410,6 +410,22 @@ function saleAmountDue(sale) {
     return Number(due) || 0;
 }
 
+// Due date of a saved credit sale, like Mar 8, 2027: its own date, or the sale date plus 30 days for an old sale
+// Nothing (empty text) when the sale has no due date: a credit sale paid in full at the counter
+function creditDueDateText(sale) {
+    const dateText = String(sale.credit_due_date || '').slice(0, 10);
+    let due;
+    if (dateText !== '') {
+        due = new Date(dateText + 'T00:00:00');
+    } else if (!sale.credit_term_months && saleAmountDue(sale) - Number(sale.amount_paid) > 0) {
+        due = new Date(String(sale.sale_date).slice(0, 10) + 'T00:00:00');
+        due.setDate(due.getDate() + 30);
+    } else {
+        return '';
+    }
+    return due.toLocaleDateString('en-PH', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 function penaltyInBalance(sale) {
     const penalty = Number(sale.penalty_amount) || 0;
     const balance = Math.max(Number(sale.balance_due) || 0, 0);

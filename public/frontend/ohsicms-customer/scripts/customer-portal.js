@@ -42,7 +42,7 @@ async function startPortal() {
     watchTablesForAlignment();
     mustChangePassword = Boolean(me.body.mustChangePassword);
     if (mustChangePassword) {
-        openChangePassword();
+        window.location.replace('/ohsicms-customer/change-password.html');
         return;
     }
     showTab('credits');
@@ -293,10 +293,41 @@ function pickDeliveryTab(name) {
     renderDeliveries();
 }
 
+async function openCustomerDelivery(id) {
+    try {
+        const result = await portalRequest('GET', '/api/portal/deliveries/' + id);
+        if (!result.ok) { notifyError(result.body.error || 'Unable to load delivery.', 'Delivery details'); return; }
+        const d = result.body.delivery;
+        const code = 'D' + String(d.delivery_id).padStart(4, '0');
+        const route = '<div class="detail-grid">' +
+            detailField('Delivery ID', code) + detailField('Status', escapeHtml(d.status)) +
+            detailField('Scheduled', dayText(d.scheduled_date) || 'Not set') +
+            detailField('Attempts', Number(d.attempt_count)) +
+            detailField('Drop-off Address', escapeHtml(d.delivery_address)) + '</div>' +
+            '<p class="detail-note">' + escapeHtml(d.remarks || 'No remarks.') + '</p>';
+        const payment = collectBanner(d) + '<div class="detail-grid">' +
+            detailField('Customer', escapeHtml(d.customer_name)) +
+            detailField('Phone', escapeHtml(d.customer_phone || 'Not set')) +
+            detailField('Order Amount', peso(d.final_amount)) +
+            detailField('Amount Paid', peso(d.amount_paid)) +
+            detailField('Balance Due', peso(d.balance_due)) +
+            detailField('Payment Status', escapeHtml(d.payment_status)) + '</div>';
+        const items = result.body.items.map(function (item) {
+            return ['M' + String(item.product_id).padStart(4, '0'), escapeHtml(item.product_name),
+                Number(item.quantity) + ' ' + escapeHtml(item.unit_name || ''), peso(item.unit_price), peso(item.subtotal)];
+        });
+        const body = '<div class="cp-delivery-details"><div><h4 class="detail-subhead">Route</h4>' + route +
+            '<h4 class="detail-subhead">Payment</h4>' + payment + '</div><div><h4 class="detail-subhead">Items (' +
+            items.length + ')</h4>' + detailTable(['Material ID', 'Material name', 'Qty', 'Unit Price', 'Subtotal'], items, [2, 3, 4]) + '</div></div>';
+        openDetailModal('Delivery ' + code, d.customer_name + ' · ' + d.status, code,
+            [{ label: 'Delivery', body: body }], '', { wide: 'xl', scroll: true, top: deliveryStepper(d) });
+    } catch (error) { notifyOffline(); }
+}
+
 function renderDeliveries() {
     for (const name of ['Pending', 'Completed', 'Failed']) {
         const button = document.getElementById('delivery-' + name);
-        button.classList.toggle('active', name === deliveryTab);
+        button.classList.toggle('is-current', name === deliveryTab);
         button.setAttribute('aria-pressed', String(name === deliveryTab));
     }
     const rows = deliveryRows.filter(function (row) {
@@ -318,7 +349,7 @@ function renderDeliveries() {
         if (stopped) tracking += '<small>' + escapeHtml(status) + ' — contact the store for assistance.</small>';
         if (row.delivered_at) tracking += '<small>Delivered on ' + dayText(row.delivered_at) + '</small>';
         tracking += '</div>';
-        return '<tr><td>D' + String(row.delivery_id).padStart(4, '0') + '</td>' +
+        return '<tr><td><button type="button" class="cp-delivery-link" onclick="openCustomerDelivery(' + Number(row.delivery_id) + ')">D' + String(row.delivery_id).padStart(4, '0') + '</button></td>' +
             '<td>' + escapeHtml(row.delivery_address) + '</td><td>' + dayText(row.scheduled_date) + '</td>' +
             '<td>' + escapeHtml(status) + '</td><td>' + tracking + '</td></tr>';
     }, 'No ' + deliveryTab.toLowerCase() + ' deliveries.');

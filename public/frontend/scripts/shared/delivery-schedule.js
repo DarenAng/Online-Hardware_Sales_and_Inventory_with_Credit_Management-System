@@ -130,16 +130,6 @@ function scheduleGroupOf(delivery) {
     return 'later';
 }
 
-function scheduleTimeOf(stamp) {
-    const text = String(stamp || '');
-    const match = /(\d{2}):(\d{2})/.exec(text.slice(10));
-    if (!match) return '';
-    const hour = Number(match[1]);
-    const minute = match[2];
-    const suffix = hour >= 12 ? 'pm' : 'am';
-    return ((hour % 12) || 12) + ':' + minute + ' ' + suffix;
-}
-
 function scheduleDateOf(stamp) {
     const day = scheduleDayOf(stamp);
     if (!day) return '';
@@ -286,7 +276,7 @@ function renderDeliverySchedule() {
         const d = pageRows[i];
         const group = SCHEDULE_GROUPS[scheduleGroupOf(d)];
         const day = scheduleDateOf(d.scheduled_date);
-        const due = day ? (day + ' ' + scheduleTimeOf(d.scheduled_date)).trim() : 'Not set';
+        const due = day ? day : 'Not set';
 
         rowsHtml += '<tr class="' + (canOpen ? 'row-clickable ' : '') + 'row-reveal" ' +
             'style="animation-delay:' + (i % 10) * 28 + 'ms"' +
