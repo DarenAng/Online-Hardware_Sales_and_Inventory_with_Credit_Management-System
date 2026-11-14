@@ -61,10 +61,14 @@
         </section>
 
         <section class="card cp-panel" id="panel-credits">
+            <div class="subnav" aria-label="Credits">
+                <button type="button" class="subnav-tab is-current" id="credit-Unpaid" onclick="pickCreditTab('Unpaid')">Unpaid</button>
+                <button type="button" class="subnav-tab" id="credit-Paid" onclick="pickCreditTab('Paid')">Paid</button>
+            </div>
             <div class="table-responsive">
                 <table id="credits-table">
                     <thead>
-                        <tr><th>OR Number</th><th>Date</th><th class="col-num">Total Due</th><th class="col-num">Paid</th><th class="col-num">Balance</th><th>Due Date</th><th>Status</th></tr>
+                        <tr id="credits-head"></tr>
                     </thead>
                     <tbody></tbody>
                 </table>

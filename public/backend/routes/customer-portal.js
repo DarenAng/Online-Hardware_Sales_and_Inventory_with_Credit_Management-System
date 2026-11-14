@@ -323,7 +323,7 @@ function registerCustomerPortalRoutes(app, deps) {
 
     const rowsResult = await db.query(
       "SELECT s.sale_id, s.sale_date, s.payment_method, s.final_amount, s.credit_interest_amount, s.penalty_amount, s.refunded_amount,\n" +
-      "       s.amount_due, s.amount_paid,\n" +
+      "       s.amount_due, s.amount_paid, s.credit_interest_rate, s.credit_term_months,\n" +
       "       GREATEST(s.amount_due - s.amount_paid, 0) AS balance_due,\n" +
       "       COALESCE(s.credit_due_date, DATE_ADD(DATE(s.sale_date), INTERVAL 30 DAY)) AS due_date,\n" +
       "       CASE\n" +

@@ -32,6 +32,7 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/portal\/login$/,                    PUBLIC],
   ["POST",  /^\/api\/portal\/logout$/,                   PUBLIC],
   ["GET",   /^\/api\/portal\/(me|account|credits|payments|loyalty|deliveries)$/, PUBLIC],
+  ["GET",   /^\/api\/portal\/deliveries\/\d+$/,          PUBLIC],
   ["POST",  /^\/api\/portal\/password$/,                 PUBLIC],
   ["POST",  /^\/api\/portal\/qr-payments$/,              PUBLIC],
   ["GET",   /^\/api\/portal\/qr-payments\/\d+$/,         PUBLIC],

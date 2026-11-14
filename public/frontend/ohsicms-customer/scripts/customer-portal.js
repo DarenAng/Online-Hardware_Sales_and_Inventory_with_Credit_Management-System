@@ -200,18 +200,123 @@ async function loadCredits() {
     renderCredits();
 }
 
+// The Credits table has two tabs, Unpaid and Paid, and every column heading sorts the rows.
+let creditTab = 'Unpaid';
+let creditSort = { column: 4, descending: false };
+
+const CREDIT_HEADERS = ['OR Number', 'Interest Rate', 'Term (months)', 'Balance', 'Due Date', 'Days Left'];
+const CREDIT_NUMBER_COLUMNS = [1, 2, 3, 5];
+
+// Whole days from today to the due date. A date already passed gives a negative number.
+function creditDaysLeft(row) {
+    const due = new Date(String(row.due_date || '').slice(0, 10) + 'T00:00:00');
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.round((due.getTime() - today.getTime()) / 86400000);
+}
+
+// The value a column is sorted by.
+function creditSortValue(row, column) {
+    if (column === 0) return Number(row.sale_id);
+    if (column === 1) return row.credit_interest_rate === null ? null : Number(row.credit_interest_rate);
+    if (column === 2) return row.credit_term_months === null ? null : Number(row.credit_term_months);
+    if (column === 3) return Number(row.balance_due);
+    if (column === 4) return String(row.due_date || '').slice(0, 10);
+    return creditDaysLeft(row);
+}
+
+function pickCreditTab(name) {
+    creditTab = name;
+    // Unpaid starts with the nearest due date on top; Paid starts with the latest one.
+    creditSort = { column: 4, descending: name === 'Paid' };
+    pageOf.credits = 1;
+    renderCredits();
+}
+
+function sortCredits(column) {
+    if (creditSort.column === column) {
+        creditSort.descending = !creditSort.descending;
+    } else {
+        creditSort = { column: column, descending: false };
+    }
+    pageOf.credits = 1;
+    renderCredits();
+}
+
+function drawCreditHeaders() {
+    let html = '';
+    for (let i = 0; i < CREDIT_HEADERS.length; i++) {
+        let state = 'none';
+        if (creditSort.column === i) state = creditSort.descending ? 'descending' : 'ascending';
+        const numberClass = CREDIT_NUMBER_COLUMNS.indexOf(i) !== -1 ? ' col-num' : '';
+        html += '<th class="th-sortable' + numberClass + '" tabindex="0" aria-sort="' + state + '" ' +
+            'onclick="sortCredits(' + i + ')" ' +
+            'onkeydown="if (event.key === \'Enter\' || event.key === \' \') { event.preventDefault(); sortCredits(' + i + '); }">' +
+            CREDIT_HEADERS[i] + '</th>';
+    }
+    document.getElementById('credits-head').innerHTML = html;
+}
+
 function renderCredits() {
-    drawTable('credits', creditRows, 7, function (row) {
+    const tabNames = ['Unpaid', 'Paid'];
+    for (let i = 0; i < tabNames.length; i++) {
+        const button = document.getElementById('credit-' + tabNames[i]);
+        button.classList.toggle('is-current', tabNames[i] === creditTab);
+        button.setAttribute('aria-pressed', String(tabNames[i] === creditTab));
+    }
+    drawCreditHeaders();
+
+    // Unpaid = something is still owed on the sale.
+    const rows = [];
+    for (let i = 0; i < creditRows.length; i++) {
+        const owed = Number(creditRows[i].balance_due) > 0;
+        if ((creditTab === 'Unpaid') === owed) rows.push(creditRows[i]);
+    }
+
+    const column = creditSort.column;
+    const descending = creditSort.descending;
+    rows.sort(function (a, b) {
+        const x = creditSortValue(a, column);
+        const y = creditSortValue(b, column);
+        // A sale with no value in this column goes last.
+        if (x === null && y !== null) return 1;
+        if (y === null && x !== null) return -1;
+        let result = 0;
+        if (x < y) result = -1;
+        if (x > y) result = 1;
+        if (descending) result = -result;
+        if (result === 0) result = Number(b.sale_id) - Number(a.sale_id);
+        return result;
+    });
+
+    drawTable('credits', rows, 6, function (row) {
         const balance = Number(row.balance_due);
+        let rate = '';
+        if (row.credit_interest_rate !== null) rate = Number(row.credit_interest_rate) + '%';
+        let term = '';
+        if (row.credit_term_months !== null) term = Number(row.credit_term_months);
+
+        // Days left only means something while money is still owed.
+        let days = '';
+        let daysClass = 'cell-num';
+        if (balance > 0) {
+            const left = creditDaysLeft(row);
+            if (left < 0) {
+                days = 'Overdue ' + (-left);
+                daysClass = 'cell-num cell-due';
+            } else {
+                days = left;
+            }
+        }
+
         return '<tr class="row-clickable" onclick="openCredit(' + row.sale_id + ')">' +
             '<td class="cell-id">' + orNumber(row.sale_id) + '</td>' +
-            '<td>' + dayText(row.sale_date) + '</td>' +
-            '<td class="cell-num">' + peso(row.amount_due) + '</td>' +
-            '<td class="cell-num">' + peso(row.amount_paid) + '</td>' +
+            '<td class="cell-num">' + rate + '</td>' +
+            '<td class="cell-num">' + term + '</td>' +
             '<td class="cell-num' + (balance > 0 ? ' cell-due' : '') + '">' + peso(balance) + '</td>' +
             '<td>' + dayText(row.due_date) + '</td>' +
-            '<td>' + creditBadge(row.status) + '</td></tr>';
-    }, 'There are no credit sales.');
+            '<td class="' + daysClass + '">' + days + '</td></tr>';
+    }, 'There are no ' + creditTab.toLowerCase() + ' credit sales.');
 }
 
 function findCredit(saleId) {
