@@ -1224,6 +1224,8 @@ async function migrateCustomerPortal() {
   if (customerNames.indexOf("customer_id") !== -1) {
     const wanted = [
       ["portal_password", "VARCHAR(255) NULL"],
+      ["portal_must_change_password", "BOOLEAN NOT NULL DEFAULT TRUE"],
+      ["portal_email", "VARCHAR(255) NULL"],
       ["portal_failed_attempts", "INT NOT NULL DEFAULT 0"],
       ["portal_held_until", "TIMESTAMP NULL"],
       ["portal_password_set_at", "TIMESTAMP NULL"]
@@ -1235,6 +1237,8 @@ async function migrateCustomerPortal() {
       }
     }
   }
+
+  await require("../portal-email").fillDemoEmails(db);
 
   await db.query(
     "CREATE TABLE IF NOT EXISTS customer_sessions (\n" +

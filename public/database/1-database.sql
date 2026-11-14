@@ -133,6 +133,8 @@ CREATE TABLE customers (
     archived_by_staff_id INT NULL,
     full_name VARCHAR(220) AS (TRIM(CONCAT(first_name, ' ', last_name))) VIRTUAL,
     portal_password VARCHAR(255) NULL,
+    portal_email VARCHAR(255) NULL,
+    portal_must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
     portal_failed_attempts INT NOT NULL DEFAULT 0,
     portal_held_until TIMESTAMP NULL,
     portal_password_set_at TIMESTAMP NULL

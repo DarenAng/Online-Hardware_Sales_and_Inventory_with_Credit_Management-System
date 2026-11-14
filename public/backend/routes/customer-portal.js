@@ -26,7 +26,7 @@ function registerCustomerPortalRoutes(app, deps) {
   const LOGIN_MAX_ATTEMPTS = deps.LOGIN_MAX_ATTEMPTS;
   const LOGIN_HOLD_MINUTES = deps.LOGIN_HOLD_MINUTES;
 
-  const GENERIC_SIGN_IN_ERROR = "Invalid user ID or password";
+  const GENERIC_SIGN_IN_ERROR = "Invalid email, user ID or password";
 
   const decoyHash = hashPassword(crypto.randomBytes(24).toString("hex"));
 
@@ -43,7 +43,7 @@ function registerCustomerPortalRoutes(app, deps) {
   // ---- Sign-in tries (the same count and hold as the staff sign-in) ----
 
   const CUSTOMER_SELECT =
-    "SELECT customer_id, last_name, full_name, is_archived, portal_password,\n" +
+    "SELECT customer_id, last_name, full_name, is_archived, portal_password, portal_email, portal_must_change_password,\n" +
     "       IF(portal_held_until IS NOT NULL AND portal_held_until > NOW(), portal_held_until, NULL) AS held_until,\n" +
     "       TIMESTAMPDIFF(SECOND, NOW(), portal_held_until) AS held_for_seconds\n" +
     "FROM customers WHERE customer_id = ?";
@@ -167,6 +167,10 @@ function registerCustomerPortalRoutes(app, deps) {
         }
 
         request.customerId = Number(customer.customer_id);
+        request.mustChangePassword = Boolean(customer.portal_must_change_password);
+        if (request.mustChangePassword && request.path !== '/api/portal/me' && request.path !== '/api/portal/password') {
+          return response.status(403).json({ error: 'Change your password before using your account.', mustChangePassword: true });
+        }
         request.customerName = customer.full_name;
         request.customerToken = state.session.token;
         await handler(request, response);
@@ -188,7 +192,7 @@ function registerCustomerPortalRoutes(app, deps) {
     const password = body.password;
 
     if (!idText || !password) {
-      return response.status(400).json({ error: "User ID and password are required" });
+      return response.status(400).json({ error: "Email or User ID and password are required" });
     }
 
     try {
@@ -196,6 +200,10 @@ function registerCustomerPortalRoutes(app, deps) {
       const digitsText = idText.replace(/^[Cc]/, "");
       const customerId = Number(digitsText);
       let customer = null;
+      if (idText.includes('@')) {
+        const found = await db.query('SELECT customer_id FROM customers WHERE portal_email = ?', [idText.toLowerCase()]);
+        if (found[0].length === 1) customer = await findCustomer(found[0][0].customer_id);
+      }
       if (/^\d{1,9}$/.test(digitsText) && customerId > 0) {
         customer = await findCustomer(customerId);
       }
@@ -250,10 +258,19 @@ function registerCustomerPortalRoutes(app, deps) {
 
   // Who is signed in; the page uses it to decide between the portal and the sign-in page.
   app.get("/api/portal/me", needsCustomer(async function (request, response) {
-    response.json({ customerId: request.customerId, name: request.customerName });
+    response.json({ customerId: request.customerId, name: request.customerName, mustChangePassword: request.mustChangePassword });
   }));
 
   // ---- Read-only screens ----
+
+  app.get("/api/portal/deliveries", needsCustomer(async function (request, response) {
+    const result = await db.query(
+      "SELECT d.delivery_id, d.sale_id, d.delivery_address, d.status, d.scheduled_date, d.delivered_at " +
+      "FROM deliveries d JOIN sales s ON s.sale_id = d.sale_id " +
+      "WHERE s.customer_id = ? AND d.is_archived = FALSE AND s.is_archived = FALSE " +
+      "ORDER BY d.updated_at DESC, d.delivery_id DESC", [request.customerId]);
+    response.json(result[0]);
+  }));
 
   app.get("/api/portal/account", needsCustomer(async function (request, response) {
     await settleQuietly(request.customerId);
@@ -271,6 +288,7 @@ function registerCustomerPortalRoutes(app, deps) {
 
     response.json({
       customerId: row.customer_id,
+      email: (await findCustomer(request.customerId)).portal_email,
       name: row.customer_name,
       creditLimit: Number(row.credit_limit),
       balance: Number(row.current_credit),
@@ -372,7 +390,7 @@ function registerCustomerPortalRoutes(app, deps) {
     }
 
     await db.query(
-      "UPDATE customers SET portal_password = ?, portal_password_set_at = NOW(), " +
+      "UPDATE customers SET portal_password = ?, portal_password_set_at = NOW(), portal_must_change_password = FALSE, " +
       "portal_failed_attempts = 0, portal_held_until = NULL WHERE customer_id = ?",
       [await hashPassword(newPassword), customer.customer_id]);
     await customerSessions.endSessionsForCustomer(customer.customer_id, request.customerToken,

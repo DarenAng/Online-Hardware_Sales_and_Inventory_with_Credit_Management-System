@@ -5,7 +5,10 @@ const LOGIN_PAGE = '/Login.html';
 
 let creditRows = [];
 let paymentRows = [];
-const pageOf = { credits: 1, payments: 1 };
+let mustChangePassword = false;
+let deliveryRows = [];
+let deliveryTab = 'Pending';
+const pageOf = { credits: 1, payments: 1, deliveries: 1 };
 
 const STANDING_WORD = { Good: 'Good', Watch: 'Watch', Hold: 'On hold' };
 const STANDING_TONE = { Good: 'badge-success', Watch: 'badge-warning', Hold: 'badge-danger' };
@@ -37,6 +40,11 @@ async function startPortal() {
     document.body.hidden = false;
     // Right-align number columns and give each cell its column name on a phone, as the staff pages do.
     watchTablesForAlignment();
+    mustChangePassword = Boolean(me.body.mustChangePassword);
+    if (mustChangePassword) {
+        openChangePassword();
+        return;
+    }
     showTab('credits');
 }
 
@@ -122,12 +130,13 @@ function turnPage(name, step) {
     pageOf[name] += step;
     if (name === 'credits') renderCredits();
     if (name === 'payments') renderPayments();
+    if (name === 'deliveries') renderDeliveries();
 }
 
 // ---- Tabs ----
 
-const TABS = ['account', 'credits', 'payments', 'loyalty'];
-const TAB_TITLES = { account: 'Account', credits: 'Credits', payments: 'Payment History', loyalty: 'Loyalty Discount' };
+const TABS = ['account', 'credits', 'deliveries', 'payments', 'loyalty'];
+const TAB_TITLES = { account: 'Account', credits: 'Credits', deliveries: 'Deliveries', payments: 'Payment History', loyalty: 'Loyalty Discount' };
 
 // A sidebar link was clicked: open that section and close the sidebar on a phone.
 function pickSection(event, name) {
@@ -137,6 +146,7 @@ function pickSection(event, name) {
 }
 
 async function showTab(name) {
+    if (mustChangePassword) { openChangePassword(); return; }
     for (let i = 0; i < TABS.length; i++) {
         document.getElementById('panel-' + TABS[i]).hidden = TABS[i] !== name;
         // Account has no sidebar link (it is in the name menu), so only the others get highlighted.
@@ -148,6 +158,7 @@ async function showTab(name) {
     try {
         if (name === 'account') await loadAccount();
         if (name === 'credits') await loadCredits();
+        if (name === 'deliveries') await loadDeliveries();
         if (name === 'payments') await loadPayments();
         if (name === 'loyalty') await loadLoyalty();
     } catch (error) {
@@ -169,6 +180,7 @@ async function loadAccount() {
     document.getElementById('account-facts').innerHTML =
         detailField('Name', escapeHtml(a.name)) +
         detailField('User ID', customerCode(a.customerId)) +
+        detailField('Email', escapeHtml(a.email || '')) +
         detailField('Credit Limit', peso(a.creditLimit)) +
         detailField('Current Balance', '<span class="' + (a.balance > 0 ? 'cell-due' : '') + '">' + peso(a.balance) + '</span>') +
         detailField('Available Credit', peso(a.available)) +
@@ -260,6 +272,57 @@ async function openCredit(saleId) {
 }
 
 // ---- Payment History ----
+
+async function loadDeliveries() {
+    const message = document.getElementById('delivery-message');
+    message.textContent = 'Loading deliveries...';
+    try {
+        const result = await portalRequest('GET', '/api/portal/deliveries');
+        if (!result.ok) throw new Error('Unable to load deliveries.');
+        deliveryRows = result.body;
+        message.textContent = '';
+        renderDeliveries();
+    } catch (error) {
+        message.textContent = 'Unable to refresh deliveries. Please try again.';
+    }
+}
+
+function pickDeliveryTab(name) {
+    deliveryTab = name;
+    pageOf.deliveries = 1;
+    renderDeliveries();
+}
+
+function renderDeliveries() {
+    for (const name of ['Pending', 'Completed', 'Failed']) {
+        const button = document.getElementById('delivery-' + name);
+        button.classList.toggle('active', name === deliveryTab);
+        button.setAttribute('aria-pressed', String(name === deliveryTab));
+    }
+    const rows = deliveryRows.filter(function (row) {
+        if (deliveryTab === 'Completed') return row.status === 'Delivered';
+        if (deliveryTab === 'Failed') return row.status === 'Failed' || row.status === 'Cancelled';
+        return row.status === 'Pending' || row.status === 'Out for Delivery' || row.status === 'Delayed';
+    });
+    drawTable('deliveries', rows, 5, function (row) {
+        let progress = 1;
+        if (row.status === 'Out for Delivery' || row.status === 'Delayed' || row.status === 'Failed') progress = 2;
+        if (row.status === 'Delivered') progress = 3;
+        if (row.status === 'Cancelled') progress = 0;
+        const status = row.status === 'Delivered' ? 'Completed' : row.status;
+        const stopped = row.status === 'Failed' || row.status === 'Cancelled';
+        let tracking = '<div class="cp-tracking' + (stopped ? ' is-failed' : '') + '">' +
+            '<progress max="3" value="' + progress + '" aria-label="Delivery tracking: ' + escapeHtml(status) + '"></progress>' +
+            '<div class="cp-tracking-labels"><span>Pending</span><span>Out for Delivery</span><span>Completed</span></div>';
+        if (row.status === 'Delayed') tracking += '<small>Delayed — awaiting a delivery update.</small>';
+        if (stopped) tracking += '<small>' + escapeHtml(status) + ' — contact the store for assistance.</small>';
+        if (row.delivered_at) tracking += '<small>Delivered on ' + dayText(row.delivered_at) + '</small>';
+        tracking += '</div>';
+        return '<tr><td>D' + String(row.delivery_id).padStart(4, '0') + '</td>' +
+            '<td>' + escapeHtml(row.delivery_address) + '</td><td>' + dayText(row.scheduled_date) + '</td>' +
+            '<td>' + escapeHtml(status) + '</td><td>' + tracking + '</td></tr>';
+    }, 'No ' + deliveryTab.toLowerCase() + ' deliveries.');
+}
 
 async function loadPayments() {
     const result = await apiPortalPayments();
@@ -583,6 +646,9 @@ async function askCancelQr() {
 // ---- Change password ----
 
 function openChangePassword() {
+    document.getElementById('password-required').hidden = !mustChangePassword;
+    document.getElementById('password-cancel').hidden = mustChangePassword;
+    document.getElementById('password-logout').hidden = !mustChangePassword;
     const form = document.getElementById('password-form');
     form.reset();
     document.getElementById('password-alert').hidden = true;
@@ -626,7 +692,10 @@ async function handleChangePassword(event) {
             button.disabled = false;
             return;
         }
+        const wasRequired = mustChangePassword;
+        mustChangePassword = false;
         closeModal('password-modal');
+        if (wasRequired) showTab('credits');
         notifySuccess('Your password was changed.', 'Password changed');
     } catch (error) {
         button.disabled = false;

@@ -4,12 +4,13 @@ const db = require("./database/connection").db;
 const passwords = require("./services/passwords");
 
 async function issuePortalPassword(customerId) {
+  await require("./portal-email").fillDemoEmails(db);
   const password = passwords.generatePortalPassword();
   const hash = await passwords.hashPassword(password);
 
   const savedResult = await db.query(
     "UPDATE customers\n" +
-    "       SET portal_password = ?, portal_password_set_at = NOW(),\n" +
+    "       SET portal_password = ?, portal_password_set_at = NOW(), portal_must_change_password = TRUE,\n" +
     "           portal_failed_attempts = 0, portal_held_until = NULL\n" +
     "       WHERE customer_id = ? AND is_archived = FALSE",
     [hash, customerId]);

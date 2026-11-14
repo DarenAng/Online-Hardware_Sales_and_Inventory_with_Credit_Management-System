@@ -30,3 +30,10 @@
 @media (max-width: 480px) {
     .cp-account-btn span { display: none; }
 }
+.cp-delivery-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.cp-delivery-tabs .active { color: #d43b0b; border-bottom: 2px solid #d43b0b; }
+.cp-tracking { min-width: 240px; }
+.cp-tracking progress { width: 100%; height: 12px; accent-color: #d43b0b; }
+.cp-tracking.is-failed progress { accent-color: #a52a2a; }
+.cp-tracking-labels { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+.cp-tracking small { display: block; margin-top: 6px; }
