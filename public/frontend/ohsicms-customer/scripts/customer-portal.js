@@ -462,7 +462,8 @@ function renderDeliveries() {
         if (stopped) tracking += '<small>' + escapeHtml(status) + ' — contact the store for assistance.</small>';
         if (row.delivered_at) tracking += '<small>Delivered on ' + dayText(row.delivered_at) + '</small>';
         tracking += '</div>';
-        return '<tr><td><button type="button" class="cp-delivery-link" onclick="openCustomerDelivery(' + Number(row.delivery_id) + ')">D' + String(row.delivery_id).padStart(4, '0') + '</button></td>' +
+        return '<tr class="row-clickable" onclick="openCustomerDelivery(' + Number(row.delivery_id) + ')">' +
+            '<td class="cell-id">D' + String(row.delivery_id).padStart(4, '0') + '</td>' +
             '<td>' + escapeHtml(row.delivery_address) + '</td><td>' + dayText(row.scheduled_date) + '</td>' +
             '<td>' + escapeHtml(status) + '</td><td>' + tracking + '</td></tr>';
     }, 'No ' + deliveryTab.toLowerCase() + ' deliveries.');
