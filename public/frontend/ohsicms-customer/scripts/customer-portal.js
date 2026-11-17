@@ -457,7 +457,7 @@ function renderDeliveries() {
                 '<span class="dstep-dot">' + (state === 'done' ? '&#10003;' : i) + '</span>' +
                 '<span class="dstep-text"><span class="dstep-name">' + names[i - 1] + '</span></span></li>';
         }
-        let tracking = '<div class="cp-tracking"><ol class="dstep-list" aria-label="Delivery status: ' + escapeHtml(status) + '">' + steps + '</ol>';
+        let tracking = '<div class="cp-tracking"><ol class="dstep-list" aria-label="Delivery progress: ' + escapeHtml(status) + '">' + steps + '</ol>';
         if (row.status === 'Delayed') tracking += '<small>Delayed — awaiting a delivery update.</small>';
         if (stopped) tracking += '<small>' + escapeHtml(status) + ' — contact the store for assistance.</small>';
         if (row.delivered_at) tracking += '<small>Delivered on ' + dayText(row.delivered_at) + '</small>';
