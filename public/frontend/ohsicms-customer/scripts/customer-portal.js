@@ -441,15 +441,23 @@ function renderDeliveries() {
         return row.status === 'Pending' || row.status === 'Out for Delivery' || row.status === 'Delayed';
     });
     drawTable('deliveries', rows, 5, function (row) {
-        let progress = 1;
-        if (row.status === 'Out for Delivery' || row.status === 'Delayed' || row.status === 'Failed') progress = 2;
-        if (row.status === 'Delivered') progress = 3;
-        if (row.status === 'Cancelled') progress = 0;
+        // Which step the delivery is on: 1 Pending, 2 Out for Delivery, 3 Completed
+        let step = 1;
+        if (row.status === 'Out for Delivery' || row.status === 'Delayed' || row.status === 'Failed') step = 2;
+        if (row.status === 'Delivered') step = 3;
         const status = row.status === 'Delivered' ? 'Completed' : row.status;
         const stopped = row.status === 'Failed' || row.status === 'Cancelled';
-        let tracking = '<div class="cp-tracking' + (stopped ? ' is-failed' : '') + '">' +
-            '<progress max="3" value="' + progress + '" aria-label="Delivery tracking: ' + escapeHtml(status) + '"></progress>' +
-            '<div class="cp-tracking-labels"><span>Pending</span><span>Out for Delivery</span><span>Completed</span></div>';
+        const names = ['Pending', 'Out for Delivery', 'Completed'];
+        let steps = '';
+        for (let i = 1; i <= 3; i++) {
+            let state = '';
+            if (i < step || row.status === 'Delivered') state = 'done';
+            else if (i === step) state = stopped ? 'stop' : 'now';
+            steps += '<li class="dstep-item ' + state + '">' +
+                '<span class="dstep-dot">' + (state === 'done' ? '&#10003;' : i) + '</span>' +
+                '<span class="dstep-text"><span class="dstep-name">' + names[i - 1] + '</span></span></li>';
+        }
+        let tracking = '<div class="cp-tracking"><ol class="dstep-list" aria-label="Delivery status: ' + escapeHtml(status) + '">' + steps + '</ol>';
         if (row.status === 'Delayed') tracking += '<small>Delayed — awaiting a delivery update.</small>';
         if (stopped) tracking += '<small>' + escapeHtml(status) + ' — contact the store for assistance.</small>';
         if (row.delivered_at) tracking += '<small>Delivered on ' + dayText(row.delivered_at) + '</small>';

@@ -36,11 +36,10 @@
     overflow: visible;
     overscroll-behavior-x: auto;
 }
-.cp-tracking { min-width: 240px; }
-.cp-tracking progress { width: 100%; height: 12px; accent-color: #d43b0b; }
-.cp-tracking.is-failed progress { accent-color: #a52a2a; }
-.cp-tracking-labels { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
-.cp-tracking small { display: block; margin-top: 6px; }
+.cp-tracking { min-width: 300px; }
+.cp-tracking .dstep-item.stop .dstep-dot { background: var(--stop); border-color: var(--stop); color: var(--surface); }
+.cp-tracking .dstep-name { font-size: 13px; white-space: nowrap; }
+.cp-tracking small { display: block; margin-top: 8px; }
 .cp-delivery-link { border: 0; background: none; color: var(--steel); padding: 4px 0; font: inherit; text-decoration: underline; cursor: pointer; }
 .cp-delivery-details { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 20px; }
 .cp-delivery-details > div { min-width: 0; }
