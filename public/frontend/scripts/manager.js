@@ -1028,7 +1028,6 @@ function buildReportPanels() {
         columns: 5,
         pagerId: 'loyal-pager',
         idField: 'customer_id',
-        filters: { balance: 'all' },
         sortKeys: ['customer_id', 'customer_name', 'last_purchase', function (row) { return Number(row.total_spent); },
                    function (row) { return Number(row.balance_due); }],
         gate: { title: 'Not loaded' },
@@ -1038,9 +1037,6 @@ function buildReportPanels() {
         },
         match: function (row, query) {
             return prefixMatch([row.customer_name, customerCode(row.customer_id)], query);
-        },
-        filter: function (row, filters) {
-            return repeatCustomerMatches(row, filters);
         },
         renderRow: function (c, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
@@ -1085,13 +1081,6 @@ function dateFilterChanged(key, prefix) {
     } else {
         panel.open();
     }
-}
-
-function repeatCustomerMatches(row, filters) {
-    const owes = (Number(row.balance_due) || 0) > 0;
-    if (filters.balance === 'owing' && !owes) return false;
-    if (filters.balance === 'clear' && owes) return false;
-    return true;
 }
 
 function showUnpaidMethodField(status) {

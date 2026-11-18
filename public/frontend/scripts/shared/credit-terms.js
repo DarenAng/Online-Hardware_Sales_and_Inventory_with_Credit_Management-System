@@ -114,22 +114,19 @@ function cardInitials(name) {
 
 function cardStoreContact(store) {
     const parts = [];
-    if (store.address) parts.push(store.address);
+    // The address is left off while it is still the "Set your address..." placeholder
+    if (store.address && store.address.indexOf('Set your address') !== 0) parts.push(store.address);
     const lines = store.contact_lines || [];
     for (let i = 0; i < lines.length; i++) parts.push(lines[i]);
     return parts.join(' \u00b7 ');
 }
 
-// The customer portal sign-in printed at the bottom of the card's back. The password is only
-// known right after it is made, so otherwise a blank line is left to write it in.
+// The customer portal User ID printed at the bottom of the card's back
 function cardPortalLoginHtml(login) {
     if (!login) return '';
-    let password = '<span class="cc-login-blank"></span>';
-    if (login.password) password = '<strong>' + escapeHtml(login.password) + '</strong>';
     return '<div class="cc-login">' +
         '<span class="cc-login-title">Customer Portal</span>' +
         '<span>User ID <strong>' + escapeHtml(login.userId) + '</strong></span>' +
-        '<span class="cc-login-password">Password ' + password + '</span>' +
     '</div>';
 }
 
@@ -151,7 +148,7 @@ function customerCardBackHtml(store, policies, editing, login) {
         '<div class="cc-back-head"><span>' + escapeHtml(store.name) + '</span><span>Terms and Policies</span></div>' +
         '<div class="cc-back-body">' + body + '</div>' +
         '<div class="cc-back-foot">' +
-            '<div class="cc-sign"><span class="cc-sign-line"></span><span>Cardholder\'s signature</span></div>' +
+            '<div class="cc-sign"><span class="cc-sign-line"></span><span>Customer signature</span></div>' +
             cardPortalLoginHtml(login) +
             '<div class="cc-return">This card belongs to ' + escapeHtml(store.name) + '. If found, please return it' +
                 (contact ? ': ' + escapeHtml(contact) : '.') + '</div>' +

@@ -12,6 +12,14 @@ const DEFAULT_REFUND_POLICY = require("../store-settings").DEFAULT_REFUND_POLICY
 const defaultDiscountPolicy = require("../store-settings").defaultDiscountPolicy;
 const receiptLayoutFrom = require("../store-settings").receiptLayoutFrom;
 
+// A customer's email (optional). It is also what they can sign in to the customer portal with.
+function customerEmailProblem(email) {
+  if (email === "") return null;
+  if (email.length > 255) return "The email is at most 255 characters.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "Enter a valid email, like name@gmail.com.";
+  return null;
+}
+
 function registerManagerRoutes(app, deps) {
   const db = deps.db;
   const getActorId = deps.getActorId;
@@ -1580,11 +1588,17 @@ function registerManagerRoutes(app, deps) {
     const phoneText = cleanPhone(phone) || "";
 
     const parts = addressPartsFrom(request.body);
-    const addressProblem = addressPartsProblem(parts, "customer's address");
+    const addressProblem = addressPartsProblem(parts, "customer's address", false, true);
     if (addressProblem) {
       return response.status(400).json({ error: addressProblem });
     }
     const addressLine = buildFullAddress(parts);
+
+    const email = tidy(request.body.email).toLowerCase();
+    const emailProblem = customerEmailProblem(email);
+    if (emailProblem) {
+      return response.status(400).json({ error: emailProblem });
+    }
 
     const fullName = first + " " + last;
 
@@ -1603,6 +1617,13 @@ function registerManagerRoutes(app, deps) {
         });
       }
 
+      if (email !== "") {
+        const emailUsed = await db.query("SELECT 1 FROM customers WHERE portal_email = ? LIMIT 1", [email]);
+        if (emailUsed[0].length > 0) {
+          return response.status(409).json({ error: "Another customer already uses that email." });
+        }
+      }
+
       const output = await managerProcedures.createCustomer(
         [first, middle, last, phoneText, addressLine.slice(0, 500),
          parts.street, parts.barangay, parts.city, parts.province, parts.landmark, getActorId(request)]
@@ -1614,9 +1635,13 @@ function registerManagerRoutes(app, deps) {
 
       const created = output.status_code === 201;
       if (created) {
+        if (email !== "") {
+          await db.query("UPDATE customers SET portal_email = ? WHERE customer_id = ?",
+            [email, Number(output.customer_id)]);
+        }
         await writeAuditLog(request, "CREATE_CUSTOMER", "Customer " + fullName + " added",
           { customer_id: Number(output.customer_id), name: fullName,
-            phone: phoneText || null, address: addressLine });
+            phone: phoneText || null, email: email || null, address: addressLine });
       }
 
       // A new customer gets a customer portal password, shown once to hand over, but only when the
@@ -1870,14 +1895,18 @@ function registerManagerRoutes(app, deps) {
     if (phoneProblem) return response.status(400).json({ error: phoneProblem });
 
     const parts = addressPartsFrom(body);
-    const addressProblem = addressPartsProblem(parts, "customer's address");
+    const addressProblem = addressPartsProblem(parts, "customer's address", false, true);
     if (addressProblem) return response.status(400).json({ error: addressProblem });
     const addressLine = buildFullAddress(parts).slice(0, 500);
+
+    const email = tidy(body.email).toLowerCase();
+    const emailProblem = customerEmailProblem(email);
+    if (emailProblem) return response.status(400).json({ error: emailProblem });
 
     try {
       const id = request.params.customerId;
       const beforeResult = await db.query(
-        "SELECT first_name, middle_name, last_name, phone, address_street, address_barangay, address_city, " +
+        "SELECT first_name, middle_name, last_name, phone, portal_email, address_street, address_barangay, address_city, " +
         "address_province, address_landmark FROM customers WHERE customer_id = ? AND is_archived = FALSE", [id]);
       if (beforeResult[0].length === 0) return response.status(404).json({ error: "That customer was not found." });
       const before = beforeResult[0][0];
@@ -1890,17 +1919,26 @@ function registerManagerRoutes(app, deps) {
         return response.status(409).json({ error: "Another customer on record already has that name." });
       }
 
+      if (email !== "") {
+        const emailUsed = await db.query(
+          "SELECT 1 FROM customers WHERE portal_email = ? AND customer_id <> ? LIMIT 1", [email, id]);
+        if (emailUsed[0].length > 0) {
+          return response.status(409).json({ error: "Another customer already uses that email." });
+        }
+      }
+
       const after = {
         first_name: first, middle_name: middle || null, last_name: last, phone: cleanPhone(body.phone) || null,
+        portal_email: email || null,
         address_street: parts.street || null, address_barangay: parts.barangay || null,
         address_city: parts.city || null, address_province: parts.province || null,
         address_landmark: parts.landmark || null
       };
       await db.query(
-        "UPDATE customers SET first_name = ?, middle_name = ?, last_name = ?, phone = ?, address = ?, " +
+        "UPDATE customers SET first_name = ?, middle_name = ?, last_name = ?, phone = ?, portal_email = ?, address = ?, " +
         "address_street = ?, address_barangay = ?, address_city = ?, address_province = ?, address_landmark = ? " +
         "WHERE customer_id = ?",
-        [after.first_name, after.middle_name, after.last_name, after.phone, addressLine,
+        [after.first_name, after.middle_name, after.last_name, after.phone, after.portal_email, addressLine,
          after.address_street, after.address_barangay, after.address_city, after.address_province,
          after.address_landmark, id]);
 

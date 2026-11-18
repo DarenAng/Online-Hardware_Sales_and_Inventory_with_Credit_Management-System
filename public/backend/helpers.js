@@ -47,7 +47,8 @@ function barangayLine(barangay) {
 }
 
 function buildFullAddress(parts) {
-  let line = barangayLine(parts.barangay) + ", " + parts.city + ", " + parts.province;
+  let line = parts.city + ", " + parts.province;
+  if (parts.barangay !== "") line = barangayLine(parts.barangay) + ", " + line;
   if (parts.street !== "") line = parts.street + ", " + line;
   if (parts.landmark !== "") line += " (Landmark: " + parts.landmark + ")";
   return line;
@@ -63,12 +64,14 @@ function addressPartsFrom(body) {
   };
 }
 
-function addressPartsProblem(parts, whose, streetRequired) {
+// barangayOptional: a customer's address may leave the barangay out; a delivery's may not
+function addressPartsProblem(parts, whose, streetRequired, barangayOptional) {
   for (let i = 0; i < ADDRESS_PARTS.length; i++) {
     const key = ADDRESS_PARTS[i][0];
     const label = ADDRESS_PARTS[i][1];
     const longest = ADDRESS_PARTS[i][2];
-    const required = ADDRESS_PARTS[i][3] || (streetRequired === true && key === "street");
+    let required = ADDRESS_PARTS[i][3] || (streetRequired === true && key === "street");
+    if (barangayOptional === true && key === "barangay") required = false;
     let shortest = 2;
     if (key === "barangay") shortest = 1;
     if (required && parts[key].length < shortest) {

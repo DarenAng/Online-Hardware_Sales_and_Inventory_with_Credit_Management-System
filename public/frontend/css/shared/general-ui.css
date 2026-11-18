@@ -244,6 +244,8 @@ h4 { font-size: 18px; }
 }
 .form-control:focus-visible { outline: none; }
 select.form-control { cursor: pointer; }
+#dl-driver:disabled,
+#reschedule-driver:disabled { background-color: var(--paper); cursor: not-allowed; }
 
 select:not([multiple]):not([size]) {
     -webkit-appearance: none;
@@ -2331,8 +2333,6 @@ button.kpi-card:focus-visible .kpi-go { opacity: 1; }
 }
 .cc-login strong { color: var(--cc-ink); font-size: 6pt; letter-spacing: 0.04em; }
 .cc-login-title { font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cc-accent); }
-.cc-login-password { display: flex; align-items: baseline; gap: 1mm; flex: 1; }
-.cc-login-blank { flex: 1; height: 2.6mm; border-bottom: 0.25mm solid var(--cc-ink); }
 .cc-return { margin-top: 0.8mm; font-size: 4.5pt; color: #5b636d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .cc-measure { position: fixed; left: -10000px; top: 0; visibility: hidden; }

@@ -2620,8 +2620,22 @@ function setDriverPick(driver) {
 async function fillDriverPicker(chosenId, chosenName) {
     setDriverPick(chosenId ? { staff_id: chosenId, full_name: chosenName } : null);
     hideDriverSuggestions();
+    lockDriverUntilDate();
 
     await loadDriverRoster();
+}
+
+// The driver box opens only once a delivery date is picked
+function lockDriverUntilDate() {
+    const fields = deliveryFormFields();
+    const box = document.getElementById('dl-driver');
+    if (!box) return;
+    const hasDate = !!(fields && fields.scheduledDate && fields.scheduledDate.value);
+    if (!hasDate) {
+        setDriverPick(null);
+        hideDriverSuggestions();
+    }
+    box.disabled = !hasDate;
 }
 
 // The drivers, each with how many open deliveries they have on the day in the date field
@@ -2646,6 +2660,7 @@ function driverCountText(count) {
 }
 
 async function onDeliveryDateChanged() {
+    lockDriverUntilDate();
     const loaded = await loadDriverRoster();
 
     // A driver picked earlier who does not work on the new day is taken off
@@ -4605,6 +4620,7 @@ const ADD_CUSTOMER_ERROR_BOXES = {
     firstName: 'ac-first-error',
     lastName: 'ac-last-error',
     phone: 'ac-phone-error',
+    email: 'ac-email-error',
     street: 'ac-street-error',
     barangay: 'ac-barangay-error',
     city: 'ac-city-error',
@@ -4733,6 +4749,7 @@ async function editOpenCustomer() {
     form.elements.middleName.value = row.middle_name || '';
     form.elements.lastName.value = row.last_name || '';
     phoneFill(form.elements.phone, row.phone || '');
+    form.elements.email.value = row.email || '';
     form.elements.street.value = row.address_street || '';
     form.elements.barangay.value = row.address_barangay || '';
     form.elements.city.value = row.address_city || '';
@@ -4757,6 +4774,7 @@ async function handleAddCustomer(event) {
     const lastName = tidy(form.elements.lastName);
     const phone = phoneToStore(form.elements.phone);
     const phoneProblem = phoneComplaint(form.elements.phone);
+    const email = tidy(form.elements.email).toLowerCase();
     const street = tidy(form.elements.street);
     const barangay = tidy(form.elements.barangay);
     const city = tidy(form.elements.city);
@@ -4776,10 +4794,10 @@ async function handleAddCustomer(event) {
     } else if (phoneProblem) {
         complain('phone', phoneProblem);
     }
-    if (street !== '' && street.length < 2) complain('street', 'The house number and street is too short; leave it empty if there is none.');
-    if (barangay.length < 1) complain('barangay', 'Enter the barangay.');
-    if (city.length < 2) complain('city', 'Enter the town or city.');
+    if (email !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) complain('email', 'Enter a valid email, like name@gmail.com.');
     if (province.length < 2) complain('province', 'Enter the province.');
+    if (city.length < 2) complain('city', 'Enter the town or city.');
+    if (street !== '' && street.length < 2) complain('street', 'The house number and street is too short; leave it empty if there is none.');
 
     if (firstBad) {
         firstBad.focus();
@@ -4799,7 +4817,7 @@ async function handleAddCustomer(event) {
         const customerId = editCustomerId;
         try {
             const response = await apiEditCustomer(customerId, {
-                firstName: firstName, middleName: middleName, lastName: lastName, phone: phone,
+                firstName: firstName, middleName: middleName, lastName: lastName, phone: phone, email: email,
                 street: street, barangay: barangay, city: city, province: province, landmark: landmark });
             const result = await response.json();
             if (!response.ok) {
@@ -4828,7 +4846,7 @@ async function handleAddCustomer(event) {
     let newPortalPassword = '';
     try {
         const response = await apiCreateCustomer({
-                firstName: firstName, middleName: middleName, lastName: lastName, phone: phone,
+                firstName: firstName, middleName: middleName, lastName: lastName, phone: phone, email: email,
                 street: street, barangay: barangay, city: city, province: province, landmark: landmark });
         const result = await response.json();
 

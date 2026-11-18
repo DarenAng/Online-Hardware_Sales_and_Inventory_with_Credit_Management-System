@@ -116,7 +116,10 @@ function registerDeliveryRoutes(app, deps) {
     const deliveryId = Number(request.params.deliveryId);
     const newDate = String(request.body.scheduledDate || "").trim();
     const driverId = request.body.driverStaffId ? Number(request.body.driverStaffId) : null;
-    if (driverId !== null && !Number.isInteger(driverId)) {
+    if (driverId === null) {
+      return response.status(400).json({ error: "Pick the driver of the delivery." });
+    }
+    if (!Number.isInteger(driverId)) {
       return response.status(400).json({ error: "That driver is not valid." });
     }
 

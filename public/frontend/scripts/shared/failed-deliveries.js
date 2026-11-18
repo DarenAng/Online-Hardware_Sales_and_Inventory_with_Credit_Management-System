@@ -168,12 +168,12 @@ function buildRescheduleModal() {
             '<div class="modal-body">' +
                 '<form id="reschedule-form" onsubmit="handleReschedule(event)" autocomplete="off">' +
                     '<div class="form-group">' +
-                        '<label for="reschedule-date">New date</label>' +
+                        '<label for="reschedule-date">New date <span class="req-mark" aria-hidden="true">*</span></label>' +
                         '<input type="date" id="reschedule-date" class="form-control" required onchange="onRescheduleDateChanged()">' +
                     '</div>' +
                     '<div class="form-group">' +
-                        '<label for="reschedule-driver">Driver</label>' +
-                        '<select id="reschedule-driver" class="form-control"></select>' +
+                        '<label for="reschedule-driver">Driver <span class="req-mark" aria-hidden="true">*</span></label>' +
+                        '<select id="reschedule-driver" class="form-control" required disabled></select>' +
                     '</div>' +
                 '</form>' +
             '</div>' +
@@ -196,11 +196,19 @@ function nowForDateBox() {
 let rescheduleDeliveryId = null;
 let rescheduleKeepDriver = '';
 
-// Only the drivers who work on the chosen day are listed; with no day yet, all of them
+// The driver can be picked only once a date is chosen; only the drivers who work that day are listed
 async function fillRescheduleDrivers() {
     const driverBox = document.getElementById('reschedule-driver');
     const day = document.getElementById('reschedule-date').value;
-    // The first time the old driver is picked; after that the user's own pick stays, Unassigned too
+
+    if (!day) {
+        driverBox.innerHTML = '<option value="">Choose a driver</option>';
+        driverBox.value = '';
+        driverBox.disabled = true;
+        return;
+    }
+
+    // The first time the old driver is picked; after that the user's own pick stays
     const keep = rescheduleKeepDriver !== null ? rescheduleKeepDriver : driverBox.value;
 
     let drivers;
@@ -211,14 +219,15 @@ async function fillRescheduleDrivers() {
         return;
     }
 
-    // The previous driver is picked first when he works that day; Unassigned otherwise
-    let optionsHtml = '<option value="">Unassigned</option>';
+    // The previous driver stays picked when they work that day
+    let optionsHtml = '<option value="" disabled>Choose a driver</option>';
     for (let i = 0; i < drivers.length; i++) {
         optionsHtml += '<option value="' + drivers[i].staff_id + '">' + escapeHtml(drivers[i].full_name) + '</option>';
     }
     driverBox.innerHTML = optionsHtml;
     driverBox.value = keep;
-    if (driverBox.value !== keep) driverBox.value = '';
+    if (!keep || driverBox.value !== keep) driverBox.value = '';
+    driverBox.disabled = false;
     rescheduleKeepDriver = null;
 }
 
@@ -260,13 +269,17 @@ async function handleReschedule(event) {
     }
 
     const driverId = document.getElementById('reschedule-driver').value;
+    if (!driverId) {
+        notifyWarning('Pick the driver of the delivery.', 'The driver is required');
+        return;
+    }
 
     const button = document.getElementById('reschedule-save');
     if (button && button.disabled) return;
     if (button) button.disabled = true;
 
     try {
-        const response = await apiRescheduleDelivery(rescheduleDeliveryId, date, driverId ? Number(driverId) : null);
+        const response = await apiRescheduleDelivery(rescheduleDeliveryId, date, Number(driverId));
         const result = await response.json();
 
         if (!response.ok) {
