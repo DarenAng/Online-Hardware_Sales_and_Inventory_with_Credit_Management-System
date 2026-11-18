@@ -401,6 +401,10 @@ function apiCloseShort(poId, reason) {
     return sendJson('/api/purchase-orders/' + poId + '/close-short', 'POST', { reason: reason });
 }
 
+function apiUndoReceiving(poId, reason) {
+    return sendJson('/api/purchase-orders/' + poId + '/undo-receiving', 'POST', { reason: reason });
+}
+
 function apiGetPurchaseOrderReport(poId) {
     return getJson('/api/purchase-orders/' + poId + '/reports');
 }

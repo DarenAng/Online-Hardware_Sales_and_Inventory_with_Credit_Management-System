@@ -2976,6 +2976,10 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         foot += '<button type="button" class="btn btn-danger" onclick="closeWithShortage(' + po.po_id + ')">' +
                 'Close with Shortage</button>';
     }
+    if (poCanUndoReceiving(po, items)) {
+        foot += '<button type="button" class="btn btn-danger" onclick="undoReceiving(' + po.po_id + ')">' +
+                'Undo Receiving</button>';
+    }
 
     const pages = [
         { label: 'Order', body: '<div class="po-detail-layout">' +
@@ -3321,6 +3325,51 @@ async function closeWithShortage(poId) {
 
         closeModal('detail-modal');
         notifySuccess(result.message, 'Order closed');
+        await refreshPurchaseOrders();
+        poAfterChange();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// The manager can undo a receiving when something was counted in on a received or incomplete order
+function poCanUndoReceiving(po, items) {
+    if (!poSetup.canDecide) return false;
+    if (typeof holdsFeature !== 'function' || !holdsFeature('po-undo-receiving')) return false;
+    if (po.status !== 'Received' && po.status !== 'Incomplete') return false;
+    for (let i = 0; i < (items || []).length; i++) {
+        if (Number(items[i].received_quantity) > 0) return true;
+    }
+    return false;
+}
+
+async function undoReceiving(poId) {
+    const po = findPurchaseOrder(poId);
+    if (!po) return;
+
+    const asked = await askInput({
+        title: 'Undo the receiving?',
+        eyebrow: 'Purchase Orders',
+        message: 'Everything received on ' + poNumber(po.po_id) + ' is taken out of stock and the order goes back to Out for Delivery.',
+        label: 'Reason',
+        confirmLabel: 'Undo Receiving',
+        tone: 'danger',
+        check: function (value) {
+            return String(value).trim().length < 5 ? 'Write why the receiving is undone.' : null;
+        }
+    });
+    if (asked === false || asked === null) return;
+
+    try {
+        const response = await apiUndoReceiving(poId, String(asked).trim());
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not undone');
+            return;
+        }
+
+        closeModal('detail-modal');
+        notifySuccess(result.message, 'Receiving undone');
         await refreshPurchaseOrders();
         poAfterChange();
     } catch (error) {

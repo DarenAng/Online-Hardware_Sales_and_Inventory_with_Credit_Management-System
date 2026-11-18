@@ -169,6 +169,12 @@ const FEATURES = [
              ["GET", /^\/api\/purchase-orders\/\d+\/document$/],
              ["POST", /^\/api\/purchase-orders\/\d+\/receive$/],
              ["POST", /^\/api\/purchase-orders\/\d+\/shortage\/send$/]] },
+  { key: "po-undo-receiving", name: "Undo Receiving", module: "Inventory",
+    description: "Undo a delivery that was counted in but never arrived. The goods are taken back out of stock and the order is out for delivery again.",
+    available: [MANAGER], defaults: [MANAGER],
+    routes: [["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/],
+             ["GET", /^\/api\/purchase-orders\/\d+\/document$/],
+             ["POST", /^\/api\/purchase-orders\/\d+\/undo-receiving$/]] },
 
   { key: "deliveries", name: "Delivery History", module: "Deliveries",
     description: "Every delivery created and where it has got to. The manager's copy is to read only.",

@@ -1656,6 +1656,131 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
+  // Undo Receiving: a delivery was counted in but the goods never came. Every quantity received on the
+  // order is taken back out of stock and the order goes back to Out for Delivery, as if nothing arrived.
+  app.post("/api/purchase-orders/:poId/undo-receiving", async function (request, response) {
+    const poId = Number(request.params.poId);
+    const reason = String((request.body && request.body.reason) || "").trim().slice(0, 200);
+    if (reason.length < 5) {
+      return response.status(400).json({ error: "Write why the receiving is undone." });
+    }
+    const number = helpers.poNumber(poId);
+    const receiptReason = "Received on purchase order #" + poId;
+
+    let connection = null;
+    try {
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+
+      // Lock the order so it cannot be received or undone twice at the same time
+      const orderResult = await connection.query(
+        "SELECT po.status, po.supplier_response, s.supplier_name FROM purchase_orders po " +
+        "JOIN suppliers s ON s.supplier_id = po.supplier_id WHERE po.po_id = ? FOR UPDATE", [poId]);
+      const order = orderResult[0][0];
+      if (!order) {
+        await connection.rollback();
+        return response.status(404).json({ error: "That purchase order does not exist" });
+      }
+      if (order.status !== "Received" && order.status !== "Incomplete") {
+        await connection.rollback();
+        return response.status(409).json({ error: number + " has not been received, so there is nothing to undo." });
+      }
+
+      // What was received on this order, per material. Once anything is received the order lines
+      // hold the received quantities (what was ordered is kept in purchase_order_ordered_items).
+      const addedResult = await connection.query(
+        "SELECT i.product_id, p.product_name, SUM(i.quantity) AS added " +
+        "FROM purchase_order_items i JOIN products p ON p.product_id = i.product_id " +
+        "WHERE i.po_id = ? GROUP BY i.product_id, p.product_name HAVING SUM(i.quantity) > 0", [poId]);
+      const added = addedResult[0];
+      if (added.length === 0) {
+        await connection.rollback();
+        return response.status(409).json({ error: "Nothing was counted in on " + number + ", so there is nothing to undo." });
+      }
+
+      const missingResult = await connection.query(
+        "SELECT COUNT(*) AS reports FROM returned_items WHERE po_id = ? AND report_type = 'Missing'", [poId]);
+      if (Number(missingResult[0][0].reports) > 0) {
+        await connection.rollback();
+        return response.status(409).json({
+          error: "A missing-goods report was filed on " + number + ". Receiving cannot be undone once goods were reported missing." });
+      }
+
+      // The goods must still be in stock: what was sold or used cannot be taken back
+      const removals = [];
+      for (let i = 0; i < added.length; i++) {
+        const quantity = Number(added[i].added) || 0;
+        if (quantity <= 0) continue;
+        const stockResult = await connection.query(
+          "SELECT quantity_in_stock FROM inventory WHERE product_id = ? FOR UPDATE", [added[i].product_id]);
+        const inStock = stockResult[0].length > 0 ? Number(stockResult[0][0].quantity_in_stock) : 0;
+        if (inStock < quantity) {
+          await connection.rollback();
+          return response.status(409).json({
+            error: "Only " + inStock + " of " + added[i].product_name + " are in stock, but " + quantity +
+              " were received on " + number + ". Some were already sold or used, so the receiving cannot be undone." });
+        }
+        removals.push({ productId: added[i].product_id, quantity: quantity, before: inStock });
+      }
+
+      for (let i = 0; i < removals.length; i++) {
+        const r = removals[i];
+        await connection.query(
+          "UPDATE inventory SET quantity_in_stock = quantity_in_stock - ? WHERE product_id = ?",
+          [r.quantity, r.productId]);
+        await connection.query(
+          "INSERT INTO stock_adjustments (product_id, adjustment_type, quantity_before, quantity_change, " +
+          "quantity_after, reason, adjusted_by_staff_id) VALUES (?, 'Remove', ?, ?, ?, ?, ?)",
+          [r.productId, r.before, -r.quantity, r.before - r.quantity,
+           ("Receiving undone on purchase order #" + poId + ": " + reason).slice(0, 255), getActorId(request)]);
+      }
+
+      // The old receipts stay in the stock history, marked undone, so the order counts no deliveries again
+      await connection.query(
+        "UPDATE stock_adjustments SET reason = CONCAT(reason, ' (undone)') WHERE reason = ?", [receiptReason]);
+
+      // Put the order lines back to what was ordered, then the order back to Out for Delivery
+      const orderedResult = await connection.query(
+        "SELECT COUNT(*) AS lines_ordered FROM purchase_order_ordered_items WHERE po_id = ?", [poId]);
+      if (Number(orderedResult[0][0].lines_ordered) > 0) {
+        await connection.query("DELETE FROM purchase_order_items WHERE po_id = ?", [poId]);
+        await connection.query(
+          "INSERT INTO purchase_order_items " +
+          "(po_id, product_id, quantity, unit_cost, pack_name, pack_size, pack_count, line_description) " +
+          "SELECT po_id, product_id, quantity, COALESCE(unit_cost, 0), pack_name, pack_size, pack_count, line_description " +
+          "FROM purchase_order_ordered_items WHERE po_id = ? ORDER BY ordered_item_id", [poId]);
+        await connection.query("DELETE FROM purchase_order_ordered_items WHERE po_id = ?", [poId]);
+      }
+      await connection.query(
+        "UPDATE purchase_orders SET status = 'Pending', supplier_response = 'Accepted', received_at = NULL, " +
+        "delivery_remarks = NULL, shortage_sent_at = NULL, shortage_response = NULL, " +
+        "shortage_responded_at = NULL, shortage_note = NULL WHERE po_id = ?", [poId]);
+
+      await connection.commit();
+    } catch (error) {
+      if (connection) {
+        try { await connection.rollback(); } catch (ignored) { }
+      }
+      console.error("Undoing the receiving of a purchase order failed:", error.message);
+      return response.status(500).json({ error: "Unable to undo the receiving" });
+    } finally {
+      if (connection) connection.release();
+    }
+
+    try {
+      await writeAuditLog(request, "PO_RECEIVING_UNDONE",
+        "Receiving of " + number + " undone: " + reason, { po_id: poId });
+      await tellManagerAndClerk(
+        number + " receiving undone",
+        "The receiving of " + number + " was undone: " + reason +
+        ". The goods were taken out of stock and the order is out for delivery again.");
+    } catch (afterError) {
+      console.error("The receiving was undone, but logging it failed:", afterError.message);
+    }
+
+    response.json({ message: "The receiving of " + number + " was undone. The goods were taken out of stock and the order is out for delivery again." });
+  });
+
   async function orderForCode(code) {
     const rowsResult = await db.query(
       "SELECT po_id FROM purchase_orders WHERE supplier_code = ?", [String(code)]);
