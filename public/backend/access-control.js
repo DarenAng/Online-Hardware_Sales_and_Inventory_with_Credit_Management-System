@@ -153,6 +153,7 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/purchase-orders\/\d+\/shortage\/send$/, [CLERK]],
   ["POST",  /^\/api\/purchase-orders\/\d+\/close-short$/, [MANAGER]],
   ["POST",  /^\/api\/purchase-orders\/\d+\/undo-receiving$/, [MANAGER]],
+  ["POST",  /^\/api\/purchase-orders\/\d+\/cancel$/, [MANAGER, CLERK]],
   ["POST",  /^\/api\/purchase-orders\/\d+\/send$/,     [CLERK]],
   ["POST",  /^\/api\/purchase-orders\/\d+\/mark-sent$/, [CLERK]],
   ["GET",   /^\/api\/supplier-order\/[A-Za-z0-9_-]{43}$/,          PUBLIC],

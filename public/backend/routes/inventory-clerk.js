@@ -1708,6 +1708,53 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
+  // Cancel Order: the shop withdraws an order the supplier has not answered yet. The supplier's link stops working.
+  app.post("/api/purchase-orders/:poId/cancel", async function (request, response) {
+    const poId = Number(request.params.poId);
+    const reason = String((request.body && request.body.reason) || "").trim().slice(0, 255);
+    if (reason.length < 5) {
+      return response.status(400).json({ error: "Write why the order is cancelled." });
+    }
+    try {
+      // An order that ran out of answer time is closed first, so it is reported as closed
+      await closeUnansweredOrders();
+
+      // Only an approved order the supplier has not answered can be cancelled
+      const result = await db.query(
+        "UPDATE purchase_orders SET status = 'Cancelled', closed_as = 'Cancelled', closed_note = ?, " +
+        "closed_at = NOW(), closed_by_staff_id = ? WHERE po_id = ? AND status = 'Pending' AND supplier_response IS NULL",
+        [reason, getActorId(request), poId]);
+
+      // The order and its supplier, for the messages below
+      const rowsResult = await db.query(
+        "SELECT po.status, po.supplier_response, s.supplier_name FROM purchase_orders po " +
+        "JOIN suppliers s ON s.supplier_id = po.supplier_id WHERE po.po_id = ?", [poId]);
+      const order = rowsResult[0][0];
+      if (!order) return response.status(404).json({ error: "That purchase order does not exist" });
+
+      const number = helpers.poNumber(poId);
+      if (result[0].affectedRows === 0) {
+        if (order.status === "For Approval") {
+          return response.status(409).json({ error: number + " is not approved yet. The manager can decline it instead." });
+        }
+        if (order.supplier_response === "Accepted") {
+          return response.status(409).json({
+            error: order.supplier_name + " already accepted " + number + ". Phone them to stop the delivery." });
+        }
+        return response.status(409).json({ error: number + " is already closed." });
+      }
+
+      await writeAuditLog(request, "PURCHASE_ORDER_CANCELLED", number + " cancelled: " + reason,
+        { po_id: poId, supplier: order.supplier_name });
+      if (publishChange) publishChange("inventory", "cancelled " + number, request.headers["x-client-id"] || null);
+
+      response.json({ message: number + " is cancelled. " + order.supplier_name + "'s link no longer works." });
+    } catch (error) {
+      console.error("Cancelling the purchase order failed:", error.message);
+      response.status(500).json({ error: "Unable to cancel the purchase order" });
+    }
+  });
+
   // Undo Receiving: a delivery was counted in but the goods never came. Every quantity received on the
   // order is taken back out of stock and the order goes back to Out for Delivery, as if nothing arrived.
   app.post("/api/purchase-orders/:poId/undo-receiving", async function (request, response) {
@@ -1901,6 +1948,7 @@ function registerInventoryRoutes(app, deps) {
 
   app.get("/api/supplier-order/:code/pdf", async function (request, response) {
     try {
+      await closeUnansweredOrders();
       const document = await orderForCode(request.params.code);
       if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
 

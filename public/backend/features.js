@@ -175,6 +175,12 @@ const FEATURES = [
     routes: [["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/],
              ["GET", /^\/api\/purchase-orders\/\d+\/document$/],
              ["POST", /^\/api\/purchase-orders\/\d+\/undo-receiving$/]] },
+  { key: "po-cancel", name: "Cancel Purchase Orders", module: "Inventory",
+    description: "Cancel an order the supplier has not answered yet. The supplier's link stops working at once.",
+    available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
+    routes: [["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/],
+             ["GET", /^\/api\/purchase-orders\/\d+\/document$/],
+             ["POST", /^\/api\/purchase-orders\/\d+\/cancel$/]] },
 
   { key: "deliveries", name: "Delivery History", module: "Deliveries",
     description: "Every delivery created and where it has got to. The manager's copy is to read only.",
