@@ -213,9 +213,12 @@ function startSupplierOrderPage() {
                 '</span><span class="so-stop-label">' + label + '</span>' +
                 '<span class="so-stop-sub">' + escapeHtml(sub) + '</span></li>';
         }
+        // While waiting for the answer, show the deadline
+        let answerSub = order.supplier_response ? order.supplier_response : 'Now';
+        if (!order.supplier_response && order.answer_by) answerSub = 'By ' + stampText(order.answer_by);
         return '<ol class="so-track">' +
             stop(0, 'Order sent', String(order.order_date || '').slice(0, 10)) +
-            stop(1, 'Your answer', order.supplier_response ? order.supplier_response : 'Now') +
+            stop(1, 'Your answer', answerSub) +
             stop(2, 'Shipped', order.supplier_ship_date ? dayText(order.supplier_ship_date) : 'Next') +
             '</ol>';
     }
@@ -990,6 +993,12 @@ function startSupplierOrderPage() {
             title = 'Nothing to answer';
             if (order.status === 'Received') {
                 sub = 'This order has been delivered and counted in.';
+            } else if (order.closed_as === 'No Answer') {
+                title = 'Order expired';
+                sub = order.number + ' expired on ' + stampText(order.closed_at) + ' without an answer. Contact the shop.';
+            } else if (order.closed_as === 'Cancelled') {
+                title = 'Order cancelled';
+                sub = 'The shop cancelled ' + order.number + ' on ' + stampText(order.closed_at) + '. Contact the shop.';
             } else if (order.status === 'Cancelled') {
                 sub = 'The shop cancelled this order.';
             } else {
