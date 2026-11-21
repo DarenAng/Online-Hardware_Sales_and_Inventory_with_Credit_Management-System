@@ -144,6 +144,7 @@ const ACCESS_RULES = [
 
   ["GET",   /^\/api\/purchase-orders$/,                [CLERK, MANAGER]],
   ["GET",   /^\/api\/purchase-orders\/\d+\/items$/,    [CLERK, MANAGER]],
+  ["GET",   /^\/api\/purchase-orders\/\d+\/removed-items$/, [CLERK, MANAGER]],
   ["GET",   /^\/api\/purchase-orders\/\d+\/document$/, [CLERK, MANAGER]],
   ["GET",   /^\/api\/purchase-orders\/\d+\/reports$/,  [CLERK, MANAGER]],
   ["GET",   /^\/api\/purchase-orders\/\d+\/reference$/, [CLERK]],

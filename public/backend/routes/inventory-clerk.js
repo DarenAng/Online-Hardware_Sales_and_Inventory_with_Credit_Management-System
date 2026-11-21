@@ -782,6 +782,7 @@ function registerInventoryRoutes(app, deps) {
         "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, " +
         "NULLIF(TRIM(s.email), '') AS supplier_email, " +
         "COUNT(i.po_item_id) AS line_count, " +
+        "(SELECT COUNT(*) FROM purchase_order_removed_items rm WHERE rm.po_id = po.po_id) AS removed_count, " +
         "COALESCE(SUM(i.quantity), 0) AS total_units, " +
         "COALESCE(SUM(i.line_cost), 0) AS goods_cost, " +
         "LEAST(po.discount, COALESCE(SUM(i.line_cost), 0)) AS discount, " +
@@ -866,6 +867,26 @@ function registerInventoryRoutes(app, deps) {
       response.json(rows);
     } catch (error) {
       console.error("PO items failed:", error.message);
+      response.status(500).json({ error: error.message });
+    }
+  });
+
+  // The lines the supplier removed before accepting the order
+  app.get("/api/purchase-orders/:poId/removed-items", async function (request, response) {
+    try {
+      const rowsResult = await db.query(
+        "SELECT r.product_id, r.quantity, r.unit_cost, r.pack_name, r.pack_size, r.pack_count, r.removed_at, " +
+        "p.product_name, u.unit_name " +
+        "FROM purchase_order_removed_items r " +
+        "JOIN products p ON p.product_id = r.product_id " +
+        "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+        "WHERE r.po_id = ? " +
+        "ORDER BY r.removed_item_id",
+        [request.params.poId]
+      );
+      response.json(rowsResult[0]);
+    } catch (error) {
+      console.error("PO removed items failed:", error.message);
       response.status(500).json({ error: error.message });
     }
   });
@@ -1110,7 +1131,18 @@ function registerInventoryRoutes(app, deps) {
     );
     const settings = settingsResult[0];
 
-    const document = { order: orders[0], items: items, shop: settings[0] || DEFAULT_STORE_SETTINGS };
+    // Lines the supplier removed when accepting
+    const removedResult = await db.query(
+      "SELECT p.product_name, r.quantity, u.unit_name, r.pack_name, r.pack_size, r.pack_count " +
+      "FROM purchase_order_removed_items r " +
+      "JOIN products p ON p.product_id = r.product_id " +
+      "LEFT JOIN units u ON u.unit_id = p.unit_id " +
+      "WHERE r.po_id = ? " +
+      "ORDER BY r.removed_item_id",
+      [poId]
+    );
+
+    const document = { order: orders[0], items: items, removed: removedResult[0], shop: settings[0] || DEFAULT_STORE_SETTINGS };
     if (orders[0].status === "Incomplete") {
       document.shortage = await readShortage(poId);
     }
@@ -1934,6 +1966,7 @@ function registerInventoryRoutes(app, deps) {
       },
       shortage: document.shortage || null,
       items: viewItems,
+      removed: document.removed || [],
       shop: { store_name: document.shop.store_name, address: document.shop.address }
     };
   }
@@ -2020,6 +2053,9 @@ function registerInventoryRoutes(app, deps) {
 
     let asked = [];
     if (accept && Array.isArray(body.prices)) asked = body.prices;
+    // The line ids the supplier removed. Only an accept uses them.
+    let removedIds = [];
+    if (accept && Array.isArray(body.removed)) removedIds = body.removed;
 
     let connection = null;
     try {
@@ -2028,6 +2064,28 @@ function registerInventoryRoutes(app, deps) {
       if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
       const order = document.order;
       const number = helpers.poNumber(order.po_id);
+
+      // Find the removed lines on this order. A repeated id counts once.
+      const removedLines = [];
+      for (let i = 0; i < removedIds.length; i++) {
+        let line = null;
+        for (let n = 0; n < document.items.length; n++) {
+          if (Number(document.items[n].po_item_id) === Number(removedIds[i])) line = document.items[n];
+        }
+        if (!line) {
+          return response.status(400).json({
+            error: "A line was removed that is not on this order. Reload the page and try again." });
+        }
+        if (removedLines.indexOf(line) === -1) removedLines.push(line);
+      }
+      if (removedLines.length > 0 && removedLines.length === document.items.length) {
+        return response.status(400).json({ error: "Keep at least one line, or decline the order." });
+      }
+      // The lines that stay on the order
+      const keptLines = [];
+      for (let i = 0; i < document.items.length; i++) {
+        if (removedLines.indexOf(document.items[i]) === -1) keptLines.push(document.items[i]);
+      }
 
       const changes = [];
       for (let i = 0; i < asked.length; i++) {
@@ -2043,6 +2101,8 @@ function registerInventoryRoutes(app, deps) {
           return response.status(400).json({
             error: "A price was sent for a line that is not on this order. Reload the page and try again." });
         }
+        // A removed line is going off the order, so its price does not matter
+        if (removedLines.indexOf(item) !== -1) continue;
         const price = Math.round(Number(entry.unitCost) * 10000) / 10000;
         if (!Number.isFinite(price) || price <= 0 || price >= PRICE_CEILING) {
           return response.status(400).json({ error: "Enter a price above zero for " + item.product_name + "." });
@@ -2064,8 +2124,8 @@ function registerInventoryRoutes(app, deps) {
       }
 
       if (accept) {
-        for (let i = 0; i < document.items.length; i++) {
-          const item = document.items[i];
+        for (let i = 0; i < keptLines.length; i++) {
+          const item = keptLines[i];
           if (Number(item.unit_cost) > 0) continue;
           let priced = false;
           for (let n = 0; n < changes.length; n++) {
@@ -2078,8 +2138,8 @@ function registerInventoryRoutes(app, deps) {
       }
 
       let before = 0;
-      for (let i = 0; i < document.items.length; i++) {
-        const item = document.items[i];
+      for (let i = 0; i < keptLines.length; i++) {
+        const item = keptLines[i];
         before += Number(item.line_cost || 0);
       }
       let after = before;
@@ -2145,9 +2205,30 @@ function registerInventoryRoutes(app, deps) {
           [change.price, change.item.po_item_id, order.po_id]);
       }
 
+      // Move each removed line to the removed table
+      for (let i = 0; i < removedLines.length; i++) {
+        await connection.query(
+          "INSERT INTO purchase_order_removed_items " +
+          "(po_id, product_id, quantity, unit_cost, pack_name, pack_size, pack_count, line_description) " +
+          "SELECT po_id, product_id, quantity, unit_cost, pack_name, pack_size, pack_count, line_description " +
+          "FROM purchase_order_items WHERE po_item_id = ? AND po_id = ?",
+          [removedLines[i].po_item_id, order.po_id]);
+        await connection.query("DELETE FROM purchase_order_items WHERE po_item_id = ? AND po_id = ?",
+          [removedLines[i].po_item_id, order.po_id]);
+      }
+
       await connection.commit();
       connection.release();
       connection = null;
+
+      // " They removed 2 lines they cannot supply: A; B."
+      let removedText = "";
+      if (removedLines.length > 0) {
+        const removedNames = [];
+        for (let i = 0; i < removedLines.length; i++) removedNames.push(removedLines[i].product_name);
+        removedText = " They removed " + removedLines.length + " " + (removedLines.length === 1 ? "line" : "lines") +
+                      " they cannot supply: " + removedNames.join("; ") + ".";
+      }
 
       let title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id);
       let message = order.supplier_name + " accepted " + number + " and will ship it on " + dayText(shipDate) + ".";
@@ -2166,6 +2247,7 @@ function registerInventoryRoutes(app, deps) {
       } else if (repriced.length > 0) {
         message += " Order total " + pesoText(before) + " to " + pesoText(after) + ".";
       }
+      message += removedText;
       if (discount > 0) {
         message += " They gave a discount of " + pesoText(discount) + ", so the order comes to " + pesoText(after - discount) + ".";
       }
@@ -2189,7 +2271,7 @@ function registerInventoryRoutes(app, deps) {
           priceNote = ", " + repriced.length + " price(s) changed, total " + pesoText(before) + " to " + pesoText(after);
         }
         details = number + " accepted by " + order.supplier_name + " from the link on the order, shipping " + shipDate +
-          priceNote +
+          priceNote + removedText.replace(" They removed", ", removed").replace(/\.$/, "") +
           (discount > 0 ? ", discount " + pesoText(discount) : "") +
           (note ? ": " + note : "");
       }

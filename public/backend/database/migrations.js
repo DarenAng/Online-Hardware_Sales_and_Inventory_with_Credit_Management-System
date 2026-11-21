@@ -2018,6 +2018,26 @@ async function migratePolicyWording() {
   }
 }
 
+// Lines a supplier removed before accepting an order, kept so the shop can see what they could not supply
+async function migrateRemovedItems() {
+  await db.query(
+    "CREATE TABLE IF NOT EXISTS purchase_order_removed_items (\n" +
+      "       removed_item_id INT AUTO_INCREMENT PRIMARY KEY,\n" +
+      "       po_id INT NOT NULL,\n" +
+      "       product_id INT NOT NULL,\n" +
+      "       quantity INT NOT NULL,\n" +
+      "       unit_cost DECIMAL(12,4) NOT NULL,\n" +
+      "       pack_name VARCHAR(20) NULL,\n" +
+      "       pack_size DECIMAL(12,3) NULL,\n" +
+      "       pack_count DECIMAL(12,3) NULL,\n" +
+      "       line_description VARCHAR(255) NULL,\n" +
+      "       removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n" +
+      "       INDEX idx_removed_items_po (po_id),\n" +
+      "       FOREIGN KEY (po_id) REFERENCES purchase_orders(po_id) ON DELETE CASCADE ON UPDATE CASCADE,\n" +
+      "       FOREIGN KEY (product_id) REFERENCES products(product_id) ON DELETE RESTRICT ON UPDATE CASCADE\n" +
+      "     )");
+}
+
 async function migrateDatabase(runSqlScript) {
   await migrateServerTables();
 
@@ -2082,6 +2102,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateDeliveryDateOnly();
   await migrateStaffWorkDays();
   await migratePolicyWording();
+  await migrateRemovedItems();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();
   await warnIfAdminPasswordIsDefault();

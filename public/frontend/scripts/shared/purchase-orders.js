@@ -1120,10 +1120,8 @@ function criticalDetail(label, value) {
 let poRosterPage = 1;
 
 function criticalPageSize() {
-    const width = window.innerWidth;
-    if (width >= 1200) return 10;
-    if (width >= 900) return 6;
-    if (width >= 600) return 4;
+    // 4 rows fit beside the order form without scrolling; phones show 3
+    if (window.innerWidth >= 600) return 4;
     return 3;
 }
 
@@ -2793,6 +2791,12 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     let items = [];
     try { items = await apiGetPurchaseOrderItems(poId); } catch (error) { items = []; }
 
+    // Lines the supplier removed before accepting
+    let removedItems = [];
+    if (Number(po.removed_count) > 0) {
+        try { removedItems = await apiGetPurchaseOrderRemovedItems(poId); } catch (error) { removedItems = []; }
+    }
+
     let report = null;
     if (po.status === 'Received') {
         try { report = await apiGetPurchaseOrderReport(poId); } catch (error) { report = null; }
@@ -2800,14 +2804,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
 
     const waiting = po.status === 'For Approval';
     const incomplete = po.status === 'Incomplete';
-
-    let orderedLines = Number(po.line_count) || 0;
-    let orderedUnits = Number(po.total_units) || 0;
-    if (items.length > 0) {
-        orderedLines = items.length;
-        orderedUnits = 0;
-        for (let i = 0; i < items.length; i++) orderedUnits += Number(items[i].quantity) || 0;
-    }
 
     let money;
     if (waiting) {
@@ -2820,13 +2816,13 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 detailField('Invoice Discount', peso(po.discount)) +
                 detailField('Total Cost', '<strong>' + peso(po.total_cost) + '</strong>');
     } else if (!(Number(po.goods_cost) > 0)) {
-        money = detailField('Order Value', '<span class="muted">--</span>');
+        money = detailField('Total Purchases', '<span class="muted">--</span>');
     } else if (Number(po.discount) > 0) {
         money = detailField('Goods', peso(po.goods_cost)) +
                 detailField('Supplier Discount', peso(po.discount)) +
-                detailField('Order Value', '<strong>' + peso(po.total_cost) + '</strong>');
+                detailField('Total Purchases', '<strong>' + peso(po.total_cost) + '</strong>');
     } else {
-        money = detailField('Order Value', '<strong>' + peso(po.goods_cost) + '</strong>' +
+        money = detailField('Total Purchases', '<strong>' + peso(po.goods_cost) + '</strong>' +
                 ' <span class="muted">before any invoice discount</span>');
     }
 
@@ -2886,8 +2882,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 ? escapeHtml(poWhen(po.received_at))
                 : '<span class="muted">Not recorded</span>')
             : '') +
-        detailField('Items', orderedLines + (orderedLines === 1 ? ' line' : ' lines') +
-            ' <span class="muted">' + orderedUnits + (orderedUnits === 1 ? ' unit' : ' units') + '</span>') +
         money +
         (balanceUnits > 0
             ? detailField(incomplete ? 'Shortage' : 'Balance', '<strong>' + balanceUnits + (balanceUnits === 1 ? ' unit' : ' units') + '</strong>' +
@@ -2953,6 +2947,21 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Qty'], lineRows, [4], [0]);
     }
 
+    // Removed by the supplier: same columns as the ordered items, numbers on the right
+    let removedHtml = '';
+    if (removedItems.length > 0) {
+        const removedRows = [];
+        for (let i = 0; i < removedItems.length; i++) {
+            const it = removedItems[i];
+            removedRows.push([
+                materialCode(it.product_id), escapeHtml(it.product_name), escapeHtml(poQuantityText(it)),
+                Number(it.unit_cost) > 0 ? peso(poPackPrice(it)) : '<span class="muted">-</span>'
+            ]);
+        }
+        removedHtml = '<h4 class="detail-subhead">Removed by supplier</h4>' +
+            detailTable(['Material ID', 'Material name', 'Qty', 'Unit Cost'], removedRows, [2, 3], [0]);
+    }
+
     const contact = '<h4 class="detail-subhead">Supplier contact</h4>' +
         '<div class="detail-grid">' +
         detailField('Contact Person', escapeHtml(po.contact_person || 'Not set')) +
@@ -2960,8 +2969,12 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         detailField('Email', po.supplier_email ? escapeHtml(po.supplier_email) : '<span class="muted">None on file</span>') +
         '</div>';
 
-    let foot = '<button type="button" class="btn btn-ghost" onclick="printPurchaseOrder(' + po.po_id + ')">' +
-               (po.status === 'Pending' ? 'Print Purchase Order' : 'Print PDF') + '</button>';
+    // Once an order has been sent to the supplier it is no longer printed from here
+    let foot = '';
+    if (po.status !== 'Pending' || !po.supplier_sent_at) {
+        foot += '<button type="button" class="btn btn-ghost" onclick="printPurchaseOrder(' + po.po_id + ')">' +
+                (po.status === 'Pending' ? 'Print Purchase Order' : 'Print PDF') + '</button>';
+    }
     if (canDecide && waiting) {
         foot += '<button type="button" class="btn btn-danger" onclick="decidePurchaseOrder(' + po.po_id + ', false)">' +
                 'Decline</button>' +
@@ -2971,10 +2984,6 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     if (canReceive && po.status === 'Pending' && !po.supplier_response && po.supplier_email) {
         foot += '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + po.po_id + ')">' +
                 (po.supplier_sent_at ? 'Email It Again' : 'Email to Supplier') + '</button>';
-    }
-    if (canReceive && poToSend(po)) {
-        foot += '<button type="button" class="btn btn-ghost" onclick="markPurchaseOrderSent(' + po.po_id + ')">' +
-                'Mark as Sent</button>';
     }
     if (canReceive && poAwaitsDelivery(po) && typeof holdsFeature === 'function' && holdsFeature('po-receiving')) {
         foot += '<button type="button" class="btn btn-success" onclick="receiveFromPurchaseOrder(' + po.po_id + ')">' +
@@ -3005,7 +3014,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     const pages = [
         { label: 'Order', body: '<div class="po-detail-layout">' +
             '<div class="po-detail-facts">' + summary + contact + '</div>' +
-            '<div class="po-detail-lines"><h4 class="detail-subhead">Ordered Items</h4>' + lines + '</div>' +
+            '<div class="po-detail-lines"><h4 class="detail-subhead">Ordered Items</h4>' + lines + removedHtml + '</div>' +
           '</div>' }
     ];
     if (report && report.lines && report.lines.length > 0) {
@@ -3157,33 +3166,6 @@ async function sendPurchaseOrder(poId) {
         poAfterChange();
     } catch (error) {
         hideWorking();
-        notifyOffline();
-    }
-}
-
-async function markPurchaseOrderSent(poId) {
-    if (!poSetup.canReceive) return;
-    const po = findPurchaseOrder(poId);
-    if (!po || !poToSend(po)) return;
-
-    const yes = await askConfirm(
-        poNumber(po.po_id) + ' is marked as sent to ' + po.supplier_name + '. It then waits for the supplier ' +
-        'to accept or decline it from the QR code or link on the order.',
-        { title: 'Mark this order as sent?', eyebrow: 'Purchase Orders', confirmLabel: 'Mark as Sent' });
-    if (!yes) return;
-
-    try {
-        const response = await apiMarkPurchaseOrderSent(poId);
-        const result = await response.json();
-        if (!response.ok) {
-            if (!handleAuthFailure(response, result)) notifyError(result.error);
-            return;
-        }
-        closeModal('detail-modal');
-        notifySuccess(result.message, 'Order sent');
-        await refreshPurchaseOrders();
-        poAfterChange();
-    } catch (error) {
         notifyOffline();
     }
 }

@@ -162,6 +162,15 @@ function unpaginateModal(modal) {
     if (pager) pager.remove();
 }
 
+// True when the popup is showing a form the person fills in (not just reading details)
+function modalShowsForm(body) {
+    const forms = body.querySelectorAll('form');
+    for (let i = 0; i < forms.length; i++) {
+        if (forms[i].offsetParent !== null) return true;
+    }
+    return false;
+}
+
 function modalBodyFits(body) {
     return body.scrollHeight <= body.clientHeight + 1;
 }
@@ -204,6 +213,14 @@ function layoutModalPages(modal, resetPage) {
     unpaginateModal(modal);
 
     if (modal.hasAttribute('data-modal-scroll')) { delete modal._pages; return; }
+
+    // A popup with a form scrolls instead of turning pages. On a phone the keyboard
+    // covers half the screen, so the person must be able to scroll to every field.
+    if (modalShowsForm(body)) {
+        modal.setAttribute('data-modal-scroll', '');
+        delete modal._pages;
+        return;
+    }
 
     if (modalBodyFits(body)) { delete modal._pages; return; }
 

@@ -212,6 +212,19 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
     border-radius: 4px;
 }
 
+.so-line-buttons { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.so-remove-error { margin-left: 26px; }
+
+/* A line the supplier removed: crossed out, with Not available */
+.so-line.is-removed .so-line-what strong,
+.so-line.is-removed .so-line-what span { text-decoration: line-through; color: var(--steel-soft); }
+.so-line.is-removed .so-line-sum .so-fig { color: var(--steel-soft); }
+.so-gone {
+    display: inline-block;
+    font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--stop);
+}
+
 .so-edit { display: none; margin: 4px 0 0 26px; }
 .so-line.is-editing .so-edit { display: block; }
 .so-edit .so-label { margin-top: 8px; }
@@ -420,6 +433,7 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-rprice { text-align: right; font-family: var(--font-figure); }
 .so-rprice s { margin-right: 6px; }
 .so-rline.is-changed .so-rprice { color: var(--signal-ink); }
+.so-rline.is-removed .so-rname { text-decoration: line-through; color: var(--steel-soft); }
 .so-quote { margin: 16px 0 0; font-size: 14px; color: var(--steel); }
 
 .so-closed { text-align: center; padding: 34px 20px; }
@@ -446,6 +460,7 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
     .so-line.is-changed { margin: 0 -14px; padding: 14px; }
     .so-line-bottom { margin-left: 0; flex-wrap: wrap; }
     .so-edit { margin-left: 0; }
+    .so-remove-error { margin-left: 0; }
     .so-choice { padding: 16px 6px; }
     .so-rline { grid-template-columns: minmax(0, 1fr) auto; }
     .so-rline > .so-fig { grid-column: 2; text-align: right; }

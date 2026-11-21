@@ -7,6 +7,7 @@ function startSupplierOrderPage() {
         decision: '',
         prices: {},
         editing: {},
+        removed: {},
         discount: '',
         discountType: 'amount',
         shipDate: '',
@@ -47,6 +48,17 @@ function startSupplierOrderPage() {
             if (String(view.items[i].id) === String(id)) return view.items[i];
         }
         return null;
+    }
+
+    // Lines the supplier took off the order (id -> true)
+    function isRemoved(item) { return has(draft.removed, item.id); }
+
+    function keptCount() {
+        let count = 0;
+        for (let i = 0; i < view.items.length; i++) {
+            if (!isRemoved(view.items[i])) count += 1;
+        }
+        return count;
     }
 
     function isoDay(day) {
@@ -140,6 +152,7 @@ function startSupplierOrderPage() {
         let goods = 0;
         for (let i = 0; i < view.items.length; i++) {
             const item = view.items[i];
+            if (isRemoved(item)) continue;
             if (lineChanged(item)) {
                 goods += lineAmount(priceFor(item), item);
             } else {
@@ -158,6 +171,7 @@ function startSupplierOrderPage() {
         let missing = 0;
         for (let i = 0; i < view.items.length; i++) {
             const item = view.items[i];
+            if (isRemoved(item)) continue;
             const line = Number(item.line_cost || 0);
             ours += line;
             if (isUnpriced(item)) {
@@ -555,8 +569,12 @@ function startSupplierOrderPage() {
             '</div>' +
             '<div class="so-line-bottom">' +
                 '<span class="so-line-price" data-price-text></span>' +
-                '<button type="button" class="so-btn so-btn-small" data-edit="' + item.id + '"></button>' +
+                '<span class="so-line-buttons">' +
+                    '<button type="button" class="so-btn so-btn-small" data-edit="' + item.id + '"></button>' +
+                    '<button type="button" class="so-btn so-btn-small so-btn-quiet" data-remove="' + item.id + '"></button>' +
+                '</span>' +
             '</div>' +
+            '<p class="so-field-error so-remove-error" data-remove-error></p>' +
             '<div class="so-edit" data-editor>' +
                 '<label class="so-label" for="so-price-' + item.id + '">Your price per ' + escapeHtml(priceUnitOf(item)) + '</label>' +
                 '<div class="so-edit-row">' +
@@ -591,6 +609,9 @@ function startSupplierOrderPage() {
             const price = priceFor(item);
             const changed = lineChanged(item);
             const unpriced = isUnpriced(item);
+            const removed = isRemoved(item);
+            row.classList.toggle('is-removed', removed);
+            row.querySelector('[data-remove]').textContent = removed ? 'Undo' : 'Remove';
             row.classList.toggle('is-editing', editing);
             row.classList.toggle('is-changed', changed && !unpriced);
 
@@ -598,9 +619,18 @@ function startSupplierOrderPage() {
             const total = row.querySelector('[data-total]');
             const delta = row.querySelector('[data-delta]');
             const editButton = row.querySelector('[data-edit]');
-            editButton.hidden = editing;
+            editButton.hidden = editing || removed;
             editButton.innerHTML = '<i class="icon icon-pencil" aria-hidden="true"></i>' +
                 (unpriced && !hasTypedPrice(item) ? 'Set price' : 'Edit price');
+
+            // A removed line shows crossed out, with the amounts left as they were
+            if (removed) {
+                const priceLine = unpriced ? '--' : peso(shownPrice(item.unit_cost, item)) + ' per ' + escapeHtml(priceUnitOf(item));
+                total.innerHTML = '<s>' + (unpriced ? '--' : peso(ours)) + '</s>';
+                delta.innerHTML = '';
+                row.querySelector('[data-price-text]').innerHTML = '<s>' + priceLine + '</s> <span class="so-gone">Not available</span>';
+                continue;
+            }
 
             if (unpriced) {
                 const typed = hasTypedPrice(item);
@@ -730,10 +760,11 @@ function startSupplierOrderPage() {
         if (!box || !draft.decision) return;
 
         if (draft.decision === 'decline') {
-            const dropped = Object.keys(draft.prices).length > 0 || discountAmount(totals().theirs) > 0;
+            const dropped = Object.keys(draft.prices).length > 0 || Object.keys(draft.removed).length > 0 ||
+                            discountAmount(totals().theirs) > 0;
             box.innerHTML = '<p class="so-summary-head is-decline"><i class="icon icon-circle-x" aria-hidden="true"></i>' +
                 'You are declining ' + escapeHtml(view.order.number) + '</p>' +
-                (dropped ? '<p class="so-summary-line">Price changes and discounts are not sent when you decline.</p>' : '');
+                (dropped ? '<p class="so-summary-line">Price changes, removed lines and discounts are not sent when you decline.</p>' : '');
             return;
         }
 
@@ -747,6 +778,8 @@ function startSupplierOrderPage() {
             pricesText = figures.missing > 0 ? '<em>' + figures.missing + ' still to set</em>' : 'set';
         }
         rows.push('<li><span>Prices</span><strong>' + pricesText + '</strong></li>');
+        const removedCount = view.items.length - keptCount();
+        if (removedCount > 0) rows.push('<li><span>Removed</span><strong>' + removedCount + (removedCount === 1 ? ' line' : ' lines') + '</strong></li>');
         if (figures.discount > 0) {
             rows.push('<li><span>Discount</span><strong class="so-fig">−' + peso(figures.discount) + '</strong></li>');
         }
@@ -788,6 +821,29 @@ function startSupplierOrderPage() {
         refreshSummary();
     }
 
+    // Remove a line the supplier cannot supply, or put it back
+    function toggleRemove(id) {
+        const item = findItem(id);
+        const messages = document.querySelectorAll('[data-remove-error]');
+        for (let i = 0; i < messages.length; i++) messages[i].textContent = '';
+        if (isRemoved(item)) {
+            delete draft.removed[id];
+        } else {
+            if (keptCount() <= 1) {
+                document.querySelector('.so-line[data-id="' + id + '"] [data-remove-error]').textContent =
+                    'Keep at least one line, or decline the order.';
+                return;
+            }
+            draft.removed[id] = true;
+            delete draft.editing[id];
+            lineError(id, '');
+        }
+        setError('');
+        refreshLines();
+        refreshDiscount();
+        refreshSummary();
+    }
+
     function wireQuote() {
         const lines = document.getElementById('so-lines');
 
@@ -795,7 +851,10 @@ function startSupplierOrderPage() {
             const edit = event.target.closest('[data-edit]');
             const save = event.target.closest('[data-save]');
             const cancel = event.target.closest('[data-cancel]');
-            if (edit) {
+            const remove = event.target.closest('[data-remove]');
+            if (remove) {
+                toggleRemove(remove.dataset.remove);
+            } else if (edit) {
                 const id = edit.dataset.edit;
                 const item = findItem(id);
                 const input = document.getElementById('so-price-' + id);
@@ -891,6 +950,7 @@ function startSupplierOrderPage() {
         }
         for (let i = 0; i < view.items.length; i++) {
             const item = view.items[i];
+            if (isRemoved(item)) continue;
             if (isUnpriced(item) && !hasTypedPrice(item)) {
                 draft.editing[item.id] = true;
                 refreshLines();
@@ -919,9 +979,13 @@ function startSupplierOrderPage() {
         if (draft.decision === 'decline') {
             answer({ accept: false, note: draft.reason.trim() });
         } else {
+            // Removed lines go in 'removed' and are left out of 'prices'
             const prices = [];
+            const removed = [];
             for (let i = 0; i < view.items.length; i++) {
-                if (lineChanged(view.items[i])) {
+                if (isRemoved(view.items[i])) {
+                    removed.push(view.items[i].id);
+                } else if (lineChanged(view.items[i])) {
                     prices.push({ id: view.items[i].id, unitCost: priceFor(view.items[i]) });
                 }
             }
@@ -929,7 +993,7 @@ function startSupplierOrderPage() {
             if (String(draft.discount).trim() !== '') {
                 discount = { type: draft.discountType, value: Number(draft.discount) };
             }
-            answer({ accept: true, shipDate: draft.shipDate, prices: prices, discount: discount,
+            answer({ accept: true, shipDate: draft.shipDate, prices: prices, removed: removed, discount: discount,
                      note: draft.note.trim() });
         }
     }
@@ -1042,6 +1106,17 @@ function startSupplierOrderPage() {
                 '<span class="so-rprice">' + (moved ? '<s>' + peso(shownPrice(original, item)) + '</s>' : '') +
                     peso(shownPrice(item.unit_cost, item)) + '<small>per ' + escapeHtml(priceUnitOf(item)) + '</small></span>' +
                 '<span class="so-fig">' + peso(item.line_cost) + '</span>' +
+            '</li>';
+        }
+
+        // Lines the supplier removed when accepting
+        const removedLines = view.removed || [];
+        for (let i = 0; i < removedLines.length; i++) {
+            rows += '<li class="so-rline is-removed">' +
+                '<span class="so-rname">' + escapeHtml(removedLines[i].product_name) +
+                    '<small>' + escapeHtml(lineQuantity(removedLines[i])) + '</small></span>' +
+                '<span class="so-rprice so-gone">Not available</span>' +
+                '<span class="so-fig"></span>' +
             '</li>';
         }
 

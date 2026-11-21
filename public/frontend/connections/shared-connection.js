@@ -361,6 +361,10 @@ function apiGetPurchaseOrderItems(poId) {
     return getJson('/api/purchase-orders/' + poId + '/items');
 }
 
+function apiGetPurchaseOrderRemovedItems(poId) {
+    return getJson('/api/purchase-orders/' + poId + '/removed-items');
+}
+
 function apiGetPurchaseOrderDocument(poId) {
     return getJson('/api/purchase-orders/' + poId + '/document');
 }
@@ -378,10 +382,6 @@ function apiDecidePurchaseOrder(poId, approve, note) {
 
 function apiSendPurchaseOrder(poId) {
     return sendJson('/api/purchase-orders/' + poId + '/send', 'POST', {});
-}
-
-function apiMarkPurchaseOrderSent(poId) {
-    return sendJson('/api/purchase-orders/' + poId + '/mark-sent', 'POST', {});
 }
 
 function apiReceivePurchaseOrder(poId, received, discount, remarks, seen) {
