@@ -826,7 +826,7 @@ function registerInventoryRoutes(app, deps) {
         " ORDER BY i.po_item_id LIMIT 1), o.unit_cost) AS line_cost, " +
         "COALESCE((SELECT SUM(i.quantity) FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id), 0) " +
         " AS received_quantity, " +
-        "o.pack_name, o.pack_size, o.pack_count, " +
+        "o.pack_name, o.pack_size, o.pack_count, p.pack_name AS product_pack_name, p.pack_size AS product_pack_size, " +
         "(SELECT COUNT(*) FROM stock_adjustments sa " +
         " WHERE sa.reason = CONCAT('Received on purchase order #', o.po_id)) AS receipt_count, " +
         "p.product_name, COALESCE(NULLIF(o.line_description, ''), p.description) AS description, " +
@@ -843,11 +843,14 @@ function registerInventoryRoutes(app, deps) {
         "ORDER BY o.ordered_item_id",
         [request.params.poId]
       );
-      if (orderedResult[0].length > 0) return response.json(orderedResult[0]);
+      if (orderedResult[0].length > 0) {
+        await addUnitsToItems(orderedResult[0]);
+        return response.json(orderedResult[0]);
+      }
 
       const rowsResult = await db.query(
         "SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
-        "i.pack_name, i.pack_size, i.pack_count, " +
+        "i.pack_name, i.pack_size, i.pack_count, p.pack_name AS product_pack_name, p.pack_size AS product_pack_size, " +
         "p.product_name, COALESCE(NULLIF(i.line_description, ''), p.description) AS description, " +
         "(SELECT COUNT(*) FROM stock_adjustments sa " +
         " WHERE sa.reason = CONCAT('Received on purchase order #', i.po_id)) AS receipt_count, " +
@@ -864,6 +867,7 @@ function registerInventoryRoutes(app, deps) {
         [request.params.poId]
       );
       const rows = rowsResult[0];
+      await addUnitsToItems(rows);
       response.json(rows);
     } catch (error) {
       console.error("PO items failed:", error.message);
@@ -876,6 +880,7 @@ function registerInventoryRoutes(app, deps) {
     try {
       const rowsResult = await db.query(
         "SELECT r.product_id, r.quantity, r.unit_cost, r.pack_name, r.pack_size, r.pack_count, r.removed_at, " +
+        "p.pack_name AS product_pack_name, p.pack_size AS product_pack_size, " +
         "p.product_name, u.unit_name " +
         "FROM purchase_order_removed_items r " +
         "JOIN products p ON p.product_id = r.product_id " +
@@ -884,6 +889,7 @@ function registerInventoryRoutes(app, deps) {
         "ORDER BY r.removed_item_id",
         [request.params.poId]
       );
+      await addUnitsToItems(rowsResult[0]);
       response.json(rowsResult[0]);
     } catch (error) {
       console.error("PO removed items failed:", error.message);
@@ -1053,6 +1059,46 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
+  // The units each material has, so a price or a quantity can be typed in any of them:
+  // the base unit, its selling units, the delivery pack of the product, then the pack of the line.
+  // Each item needs product_id, unit_name, product_pack_name, product_pack_size, pack_name, pack_size.
+  // One query gets the selling units of every product in the list.
+  async function addUnitsToItems(items) {
+    const sellingUnits = {};
+    if (items.length > 0) {
+      const productIds = [];
+      for (let i = 0; i < items.length; i++) productIds.push(items[i].product_id);
+      const unitsResult = await db.query(
+        "SELECT product_id, unit_name, units_per FROM product_units WHERE product_id IN (?) " +
+        "ORDER BY product_id, units_per, unit_name",
+        [productIds]
+      );
+      for (let i = 0; i < unitsResult[0].length; i++) {
+        const row = unitsResult[0][i];
+        if (!sellingUnits[row.product_id]) sellingUnits[row.product_id] = [];
+        sellingUnits[row.product_id].push({ name: row.unit_name, size: Number(row.units_per) });
+      }
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const units = [{ name: item.unit_name || "unit", size: 1 }];
+      const extras = (sellingUnits[item.product_id] || []).slice();
+      extras.push({ name: item.product_pack_name, size: Number(item.product_pack_size) });
+      extras.push({ name: item.pack_name, size: Number(item.pack_size) });
+      for (let n = 0; n < extras.length; n++) {
+        if (!extras[n].name || !(extras[n].size > 0)) continue;
+        // The same name (any letter case) and size is listed once
+        let listed = false;
+        for (let k = 0; k < units.length; k++) {
+          if (units[k].name.toLowerCase() === extras[n].name.toLowerCase() && units[k].size === extras[n].size) listed = true;
+        }
+        if (!listed) units.push(extras[n]);
+      }
+      item.units = units;
+    }
+  }
+
   async function readOrderDocument(poId) {
     const ordersResult = await db.query(
       "SELECT po.po_id, po.status, po.order_date, po.confirmed_at, " +
@@ -1127,42 +1173,7 @@ function registerInventoryRoutes(app, deps) {
       }
     }
 
-    // The units each material has, so the supplier can pick the unit a price is typed in:
-    // the base unit, its selling units, the delivery pack of the product, then the pack of the line
-    // One query gets the selling units of every product on the order
-    const sellingUnits = {};
-    if (items.length > 0) {
-      const productIds = [];
-      for (let i = 0; i < items.length; i++) productIds.push(items[i].product_id);
-      const unitsResult = await db.query(
-        "SELECT product_id, unit_name, units_per FROM product_units WHERE product_id IN (?) " +
-        "ORDER BY product_id, units_per, unit_name",
-        [productIds]
-      );
-      for (let i = 0; i < unitsResult[0].length; i++) {
-        const row = unitsResult[0][i];
-        if (!sellingUnits[row.product_id]) sellingUnits[row.product_id] = [];
-        sellingUnits[row.product_id].push({ name: row.unit_name, size: Number(row.units_per) });
-      }
-    }
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const units = [{ name: item.unit_name || "unit", size: 1 }];
-      const extras = (sellingUnits[item.product_id] || []).slice();
-      extras.push({ name: item.product_pack_name, size: Number(item.product_pack_size) });
-      extras.push({ name: item.pack_name, size: Number(item.pack_size) });
-      for (let n = 0; n < extras.length; n++) {
-        if (!extras[n].name || !(extras[n].size > 0)) continue;
-        // The same name (any letter case) and size is listed once
-        let listed = false;
-        for (let k = 0; k < units.length; k++) {
-          if (units[k].name.toLowerCase() === extras[n].name.toLowerCase() && units[k].size === extras[n].size) listed = true;
-        }
-        if (!listed) units.push(extras[n]);
-      }
-      item.units = units;
-    }
+    await addUnitsToItems(items);
 
     const settingsResult = await db.query(
       "SELECT store_name, address, tin, registration_type, invoice_note " +

@@ -1341,17 +1341,54 @@ function poLineRows() {
     return rows;
 }
 
-function poLinePack(row) {
-    const state = matState(row.dataset.picker);
-    const product = state.productId ? poFindProduct(poMaterials, state.productId) : null;
-    if (!product || !product.pack_name || !(Number(product.pack_size) > 0)) return null;
-    return { name: product.pack_name, size: Number(product.pack_size), unit: product.unit_name || 'unit' };
+// Adds a unit to a list unless the same name (any letter case) and size is already there
+function poAddUnit(units, name, size) {
+    size = Number(size);
+    // Only whole-number sizes: a unit like 0.305 cannot be counted in whole base units
+    if (!name || !(size > 0) || !Number.isInteger(size)) return;
+    for (let i = 0; i < units.length; i++) {
+        if (String(units[i].name).toLowerCase() === String(name).toLowerCase() && units[i].size === size) return;
+    }
+    units.push({ name: name, size: size });
 }
 
+// Every unit a material can be ordered in: the base unit, its selling units, then its delivery pack
+function poUnitsOfProduct(product) {
+    const units = [];
+    poAddUnit(units, product.unit_name || 'unit', 1);
+    const selling = Array.isArray(product.selling_units) ? product.selling_units : [];
+    for (let i = 0; i < selling.length; i++) poAddUnit(units, selling[i].unit_name, selling[i].units_per);
+    poAddUnit(units, product.pack_name, product.pack_size);
+    return units;
+}
+
+// The units of the material picked on this line (an empty list until one is picked)
+function poLineUnits(row) {
+    const state = matState(row.dataset.picker);
+    const product = state.productId ? poFindProduct(poMaterials, state.productId) : null;
+    return product ? poUnitsOfProduct(product) : [];
+}
+
+// The unit the line starts in: the delivery pack if the material has one, otherwise the base unit
+function poDefaultUnitIndex(row) {
+    const state = matState(row.dataset.picker);
+    const product = state.productId ? poFindProduct(poMaterials, state.productId) : null;
+    const units = poLineUnits(row);
+    if (!product || !product.pack_name || !(Number(product.pack_size) > 0)) return 0;
+    for (let i = 0; i < units.length; i++) {
+        if (units[i].name.toLowerCase() === product.pack_name.toLowerCase() && units[i].size === Number(product.pack_size)) return i;
+    }
+    return 0;
+}
+
+// The unit chosen on the line when it is bigger than the base unit, otherwise null
 function poLineIn(row) {
     const select = row.querySelector('.po-in');
-    const pack = poLinePack(row);
-    return pack && select && !select.hidden && select.value === 'pack' ? pack : null;
+    if (!select || select.hidden) return null;
+    const units = poLineUnits(row);
+    const chosen = units[Number(select.value)];
+    if (!chosen || chosen.size === 1) return null;
+    return { name: chosen.name, size: chosen.size, unit: units[0].name };
 }
 
 function syncPoLineUnits(pickerId) {
@@ -1361,24 +1398,32 @@ function syncPoLineUnits(pickerId) {
     const index = row.id.replace('po-line-', '');
     const select = row.querySelector('.po-in');
     const qtyLabel = document.getElementById('po-qty-label-' + index);
-    const pack = poLinePack(row);
+    const units = poLineUnits(row);
+    const state = matState(pickerId);
 
-    if (!pack) {
-        if (select) { select.hidden = true; select.innerHTML = ''; }
+    // One unit only: no select, and the line behaves as a plain quantity
+    if (units.length < 2) {
+        if (select) { select.hidden = true; select.innerHTML = ''; select.dataset.product = ''; }
         if (qtyLabel) qtyLabel.textContent = 'Quantity';
         return;
     }
 
     if (select) {
-        const was = select.hidden ? 'pack' : select.value;
-        select.innerHTML =
-            '<option value="pack">' + escapeHtml(pack.name) + ' of ' + escapeHtml(qtyText(pack.size, pack.unit)) + '</option>' +
-            '<option value="unit">' + escapeHtml(pack.unit) + '</option>';
-        select.value = was;
+        // Keep the chosen unit while the same material stays picked; a new material starts at its default
+        const sameMaterial = select.dataset.product === String(state.productId);
+        const was = select.value;
+        let options = '';
+        for (let i = 0; i < units.length; i++) {
+            options += '<option value="' + i + '">' + escapeHtml(units[i].name) +
+                (units[i].size === 1 ? '' : ' (' + escapeHtml(qtyText(units[i].size, units[0].name)) + ')') + '</option>';
+        }
+        select.innerHTML = options;
+        select.value = sameMaterial ? was : String(poDefaultUnitIndex(row));
+        select.dataset.product = String(state.productId);
         select.hidden = false;
     }
-    const inPack = select && select.value === 'pack';
-    if (qtyLabel) qtyLabel.textContent = inPack ? 'Quantity (' + pack.name + ')' : 'Quantity';
+    const pack = poLineIn(row);
+    if (qtyLabel) qtyLabel.textContent = pack ? 'Quantity (' + pack.name + ')' : 'Quantity';
 }
 
 function removePurchaseLine(index) {
@@ -2515,13 +2560,14 @@ function renderReceiveSheet() {
     for (let index = 0; index < poReceiving.lines.length; index++) {
         const line = poReceiving.lines[index];
         const item = line.item;
-        const pack = recvPackOf(item);
+        const units = item.units || [];
         rows += '<tr data-product="' + item.product_id + '">' +
             '<td class="cell-name">' + escapeHtml(item.product_name) + '</td>' +
-            '<td class="cell-num">' + escapeHtml(qtyText(line.expected, recvCountName(item))) + '</td>' +
+            '<td class="cell-num">' + escapeHtml(recvCountText(item, line.expected, line.owed)) + '</td>' +
             '<td class="cell-num"><input type="number" class="form-control adjust-line-qty" id="recv-qty-' + index + '" ' +
-                'min="0" step="' + (pack ? 'any' : '1') + '" value="' + line.expected + '" ' +
-                'oninput="renderReceiveShortages()" aria-label="Arrived: ' + escapeHtml(item.product_name) + '"></td>' +
+                'min="0" step="' + (units.length > 1 ? 'any' : '1') + '" value="' + line.expected + '" ' +
+                'oninput="renderReceiveShortages()" aria-label="Arrived: ' + escapeHtml(item.product_name) + '">' +
+                recvUnitSelectHtml(item, index) + '</td>' +
             '<td class="cell-num" id="recv-short-' + index + '">—</td>' +
         '</tr>';
     }
@@ -2541,10 +2587,10 @@ function receiveCounts() {
     if (!poReceiving) return counts;
     for (let index = 0; index < poReceiving.lines.length; index++) {
         const line = poReceiving.lines[index];
-        const pack = recvPackOf(line.item);
         const field = document.getElementById('recv-qty-' + index);
         const typed = Math.max(0, Number(field ? field.value : line.expected) || 0);
-        const arrived = Math.round(typed * (pack ? pack.size : 1));
+        // The typed number is in the unit chosen next to it; stock counts in the base unit
+        const arrived = Math.round(typed * recvArrivedSize(line.item, index));
         const short = Math.max(line.owed - arrived, 0);
         const over = Math.max(arrived - line.owed, 0);
         const amount = Math.round(short * (Number(line.item.unit_cost) || 0) * 100) / 100;
@@ -2564,11 +2610,11 @@ function renderReceiveShortages() {
         const size = pack ? pack.size : 1;
         cell.className = 'cell-num';
         if (counts[index].short > 0) {
-            cell.textContent = qtyText(Math.round(counts[index].short / size * 1000) / 1000, recvCountName(item)) +
+            cell.textContent = recvCountText(item, Math.round(counts[index].short / size * 1000) / 1000, counts[index].short) +
                 ' · ' + peso(counts[index].amount);
         } else if (counts[index].over > 0) {
             cell.className = 'cell-num recv-over';
-            cell.textContent = qtyText(Math.round(counts[index].over / size * 1000) / 1000, recvCountName(item)) +
+            cell.textContent = recvCountText(item, Math.round(counts[index].over / size * 1000) / 1000, counts[index].over) +
                 ' more than expected';
         } else {
             cell.textContent = '—';
@@ -2581,6 +2627,42 @@ function renderReceiveShortages() {
         box.hidden = !(total > 0);
         box.textContent = 'Total short: ' + peso(Math.round(total * 100) / 100);
     }
+}
+
+// Where the unit a line was ordered in sits in its list of units; the base unit if it has no pack
+function recvOrderedUnitIndex(item) {
+    const pack = recvPackOf(item);
+    const units = item.units || [];
+    if (!pack) return 0;
+    for (let i = 0; i < units.length; i++) {
+        if (units[i].name.toLowerCase() === item.pack_name.toLowerCase() && Number(units[i].size) === pack.size) return i;
+    }
+    return 0;
+}
+
+// The unit select beside the Arrived box, only for a material with more than one unit
+function recvUnitSelectHtml(item, index) {
+    const units = item.units || [];
+    if (units.length < 2) return '';
+    let options = '';
+    const start = recvOrderedUnitIndex(item);
+    for (let i = 0; i < units.length; i++) {
+        // Whole-number sizes only; the option value stays the place of the unit in item.units
+        if (!Number.isInteger(Number(units[i].size)) && i !== start) continue;
+        options += '<option value="' + i + '"' + (i === start ? ' selected' : '') + '>' + escapeHtml(units[i].name) +
+            (Number(units[i].size) === 1 ? '' : ' (' + escapeHtml(qtyText(Number(units[i].size), units[0].name)) + ')') + '</option>';
+    }
+    return '<select class="form-control" id="recv-in-' + index + '" onchange="renderReceiveShortages()" ' +
+        'aria-label="Unit arrived: ' + escapeHtml(item.product_name) + '">' + options + '</select>';
+}
+
+// How many base units one of the arrived unit is: the unit chosen beside the Arrived box
+function recvArrivedSize(item, index) {
+    const units = item.units || [];
+    const select = document.getElementById('recv-in-' + index);
+    if (select && units[Number(select.value)]) return Number(units[Number(select.value)].size);
+    const pack = recvPackOf(item);
+    return pack ? pack.size : 1;
 }
 
 function recvPackOf(item) {
@@ -2604,6 +2686,13 @@ function recvExpectedCount(item) {
     return pack ? Math.round(owed / pack.size * 1000) / 1000 : owed;
 }
 
+// A figure in the ordered unit; a fraction (0.25 box) also shows its base amount: 0.25 box (4 liter)
+function recvCountText(item, count, baseAmount) {
+    const text = qtyText(count, recvCountName(item));
+    if (!recvPackOf(item) || Number.isInteger(count)) return text;
+    return text + ' (' + qtyText(baseAmount, item.unit_name || '') + ')';
+}
+
 function recvCountName(item) {
     const pack = recvPackOf(item);
     return pack ? pack.name : (item.unit_name || '');
@@ -2613,6 +2702,43 @@ function poPackPrice(item) {
     const pack = recvPackOf(item);
     const unit = Number(item.unit_cost) || 0;
     return pack ? Math.round(unit * pack.size * 100) / 100 : unit;
+}
+
+// The price of one unit of a line in every other unit of the material, biggest unit first,
+// e.g. "₱600.00 per can · ₱150.00 per liter". Each figure is rounded to centavos.
+function poOtherPrices(item) {
+    const units = (item.units || []).slice();
+    const own = recvPackOf(item);
+    const ownSize = own ? own.size : 1;
+    const unitCost = Number(item.unit_cost) || 0;
+    if (units.length < 2 || !(unitCost > 0)) return '';
+    units.sort(function (a, b) { return Number(b.size) - Number(a.size); });
+    const parts = [];
+    for (let i = 0; i < units.length; i++) {
+        // Leave out the unit the line is already priced in
+        const sameName = own ? units[i].name.toLowerCase() === own.name.toLowerCase() : true;
+        if (Number(units[i].size) === ownSize && sameName) continue;
+        parts.push(peso(Math.round(unitCost * Number(units[i].size) * 100) / 100) + ' per ' + escapeHtml(units[i].name));
+    }
+    return parts.join(' · ');
+}
+
+// The price of the line in its own unit, then the other units under it in muted text
+function poPriceMain(item) {
+    if (poOtherPrices(item) === '') return peso(poPackPrice(item));
+    const own = recvPackOf(item);
+    const ownName = own ? own.name : (item.units[0] ? item.units[0].name : (item.unit_name || 'unit'));
+    return peso(poPackPrice(item)) + ' per ' + escapeHtml(ownName);
+}
+
+// The muted line under the main price (empty when the material has one unit)
+function poPriceOthers(item) {
+    const others = poOtherPrices(item);
+    return others === '' ? '' : '<br><span class="muted">' + others + '</span>';
+}
+
+function poPriceWithUnits(item) {
+    return poPriceMain(item) + poPriceOthers(item);
 }
 
 function addReceiveExtra() {
@@ -2892,11 +3018,11 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         if (it.unit_cost === null || it.unit_cost === undefined) return '<span class="muted">-</span>';
         const original = it.original_unit_cost;
         if (original === null || original === undefined || Number(original) === Number(it.unit_cost)) {
-            return peso(poPackPrice(it));
+            return poPriceWithUnits(it);
         }
         return '<s class="muted">' + peso(poPackPrice({ unit_cost: original, pack_name: it.pack_name, pack_size: it.pack_size, pack_count: it.pack_count })) +
-            '</s> ' + peso(poPackPrice(it)) +
-            ' <span class="po-answer is-warn">supplier\'s price</span>';
+            '</s> ' + poPriceMain(it) +
+            ' <span class="po-answer is-warn">supplier\'s price</span>' + poPriceOthers(it);
     };
     let lines;
     const lineRows = [];
@@ -2950,7 +3076,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
             const it = removedItems[i];
             removedRows.push([
                 materialCode(it.product_id), escapeHtml(it.product_name), escapeHtml(poQuantityText(it)),
-                Number(it.unit_cost) > 0 ? peso(poPackPrice(it)) : '<span class="muted">-</span>'
+                Number(it.unit_cost) > 0 ? poPriceWithUnits(it) : '<span class="muted">-</span>'
             ]);
         }
         removedHtml = '<h4 class="detail-subhead">Removed by supplier</h4>' +
