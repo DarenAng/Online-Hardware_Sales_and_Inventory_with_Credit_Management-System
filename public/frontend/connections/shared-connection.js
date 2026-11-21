@@ -405,6 +405,10 @@ function apiUndoReceiving(poId, reason) {
     return sendJson('/api/purchase-orders/' + poId + '/undo-receiving', 'POST', { reason: reason });
 }
 
+function apiCancelPurchaseOrder(poId, reason) {
+    return sendJson('/api/purchase-orders/' + poId + '/cancel', 'POST', { reason: reason });
+}
+
 function apiGetPurchaseOrderReport(poId) {
     return getJson('/api/purchase-orders/' + poId + '/reports');
 }

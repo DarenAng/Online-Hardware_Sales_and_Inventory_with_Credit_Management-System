@@ -1581,10 +1581,13 @@ const PO_STATES = [
     { status: 'Out for Delivery', label: 'Out for Delivery' },
     { status: 'Incomplete',       label: 'Incomplete' },
     { status: 'Received',         label: 'Received' },
-    { status: 'Declined',         label: 'Declined' }
+    { status: 'Declined',         label: 'Declined' },
+    { status: 'No Answer',        label: 'No Answer' },
+    { status: 'Cancelled',        label: 'Cancelled' }
 ];
 
 function poStage(po) {
+    if (po.status === 'Cancelled' && po.closed_as) return po.closed_as;
     if (po.status === 'Cancelled') return 'Declined';
     if (po.status !== 'Pending') return po.status;
     if (po.supplier_response === 'Accepted') return 'Out for Delivery';
@@ -1626,7 +1629,9 @@ const PO_STAGE_TONES = {
     'Out for Delivery': 'badge-info',
     'Incomplete': 'badge-warning',
     'Received': 'badge-success',
-    'Declined': 'badge-danger'
+    'Declined': 'badge-danger',
+    'No Answer': 'badge-neutral',
+    'Cancelled': 'badge-danger'
 };
 
 function poStatusBadge(po) {
@@ -2845,9 +2850,20 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         detailField('Raised', escapeHtml(String(po.order_date).slice(0, 16)) +
             (po.raised_by ? ' <span class="muted">by ' + escapeHtml(po.raised_by) + '</span>' : '')) +
         (po.confirmed_at
-            ? detailField(po.status === 'Cancelled' ? 'Declined by Manager' : 'Approved',
+            ? detailField(po.status === 'Cancelled' && !po.closed_as ? 'Declined by Manager' : 'Approved',
                 escapeHtml(String(po.confirmed_at).slice(0, 16)) +
                 (po.confirmed_by ? ' <span class="muted">by ' + escapeHtml(po.confirmed_by) + '</span>' : ''))
+            : '') +
+        (poStage(po) === 'Sent to Supplier'
+            ? detailField('Answer By', escapeHtml(poWhen(po.answer_by)))
+            : '') +
+        (po.closed_as === 'No Answer'
+            ? detailField('No Answer', escapeHtml(poWhen(po.closed_at)))
+            : '') +
+        (po.closed_as === 'Cancelled'
+            ? detailField('Cancelled', escapeHtml(poWhen(po.closed_at)) +
+                (po.closed_by ? ' <span class="muted">by ' + escapeHtml(po.closed_by) + '</span>' : '')) +
+              detailField('Reason', escapeHtml(po.closed_note))
             : '') +
         (po.supplier_response
             ? detailField('Supplier ' + (po.supplier_response === 'Accepted' ? 'Accepted' : 'Declined'),
@@ -2858,7 +2874,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
             : (po.supplier_ship_date
                 ? detailField('Arrives', escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po))
                 : '')) +
-        (po.status === 'Cancelled' && po.decision_note
+        (po.status === 'Cancelled' && !po.closed_as && po.decision_note
             ? detailField('Manager\'s Remarks', escapeHtml(po.decision_note))
             : '') +
         (po.supplier_response === 'Declined' && po.supplier_note
@@ -2979,6 +2995,11 @@ async function openPurchaseOrderDetail(poId, readOnly) {
     if (poCanUndoReceiving(po, items)) {
         foot += '<button type="button" class="btn btn-danger" onclick="undoReceiving(' + po.po_id + ')">' +
                 'Undo Receiving</button>';
+    }
+
+    if (poCanCancel(po) && !readOnly) {
+        foot += '<button type="button" class="btn btn-danger" onclick="cancelPurchaseOrder(' + po.po_id + ')">' +
+                'Cancel Order</button>';
     }
 
     const pages = [
@@ -3370,6 +3391,47 @@ async function undoReceiving(poId) {
 
         closeModal('detail-modal');
         notifySuccess(result.message, 'Receiving undone');
+        await refreshPurchaseOrders();
+        poAfterChange();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// The shop can cancel an order the supplier has not answered yet
+function poCanCancel(po) {
+    if (!poSetup.canDecide && !poSetup.canReceive) return false;
+    if (typeof holdsFeature !== 'function' || !holdsFeature('po-cancel')) return false;
+    return po.status === 'Pending' && !po.supplier_response;
+}
+
+async function cancelPurchaseOrder(poId) {
+    const po = findPurchaseOrder(poId);
+    if (!po) return;
+
+    const asked = await askInput({
+        title: 'Cancel this order?',
+        eyebrow: 'Purchase Orders',
+        message: poNumber(po.po_id) + ' is cancelled and ' + po.supplier_name + "'s link stops working.",
+        label: 'Reason',
+        confirmLabel: 'Cancel Order',
+        tone: 'danger',
+        check: function (value) {
+            return String(value).trim().length < 5 ? 'Write why the order is cancelled.' : null;
+        }
+    });
+    if (asked === false || asked === null) return;
+
+    try {
+        const response = await apiCancelPurchaseOrder(poId, String(asked).trim());
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not cancelled');
+            return;
+        }
+
+        closeModal('detail-modal');
+        notifySuccess(result.message, 'Order cancelled');
         await refreshPurchaseOrders();
         poAfterChange();
     } catch (error) {
