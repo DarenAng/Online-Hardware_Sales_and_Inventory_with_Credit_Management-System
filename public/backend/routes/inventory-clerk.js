@@ -721,11 +721,58 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
+  // The supplier has this many hours, counted from when the order was sent, to accept or decline it
+  const SUPPLIER_ANSWER_HOURS = 12;
+
+  // Closes every sent order whose answer time has run out. Returns how many it closed.
+  async function closeUnansweredOrders() {
+    const expiredResult = await db.query(
+      "SELECT po.po_id, s.supplier_name FROM purchase_orders po " +
+      "JOIN suppliers s ON s.supplier_id = po.supplier_id " +
+      "WHERE po.status = 'Pending' AND po.supplier_response IS NULL AND po.supplier_sent_at IS NOT NULL " +
+      "AND po.supplier_sent_at <= NOW() - INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR");
+    const expired = expiredResult[0];
+
+    let closed = 0;
+    for (let i = 0; i < expired.length; i++) {
+      // The same conditions again, so an order answered a moment ago is left alone
+      const result = await db.query(
+        "UPDATE purchase_orders SET status = 'Cancelled', closed_as = 'No Answer', closed_at = NOW() " +
+        "WHERE po_id = ? AND status = 'Pending' AND supplier_response IS NULL AND supplier_sent_at IS NOT NULL " +
+        "AND supplier_sent_at <= NOW() - INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR",
+        [expired[i].po_id]);
+      if (result[0].affectedRows === 0) continue;
+
+      closed += 1;
+      const number = helpers.poNumber(expired[i].po_id);
+      await writeAuditLog(null, "PURCHASE_ORDER_NO_ANSWER",
+        number + " closed: " + expired[i].supplier_name + " did not answer within " + SUPPLIER_ANSWER_HOURS + " hours",
+        { po_id: expired[i].po_id, supplier: expired[i].supplier_name });
+    }
+
+    if (closed > 0 && publishChange) {
+      publishChange("inventory", "orders closed without an answer", null);
+    }
+    return closed;
+  }
+
+  // "Nov 21, 2026 2:30 PM" for the supplier page
+  function supplierTime(value) {
+    const when = new Date(value);
+    const day = when.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    const time = when.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    return day + " " + time;
+  }
+
   app.get("/api/purchase-orders", async function (request, response) {
     try {
+      await closeUnansweredOrders();
       const rowsResult = await db.query(
         "SELECT po.po_id, po.status, po.order_date, " +
         "po.confirmed_at, po.decision_note, po.received_at, " +
+        "po.closed_as, po.closed_note, po.closed_at, cl.full_name AS closed_by, " +
+        "IF(po.supplier_sent_at IS NULL, NULL, DATE_ADD(po.supplier_sent_at, INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR)) " +
+        "AS answer_by, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
         "po.supplier_ship_date, " +
         "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
@@ -746,8 +793,10 @@ function registerInventoryRoutes(app, deps) {
         "JOIN suppliers s ON s.supplier_id = po.supplier_id " +
         "LEFT JOIN staff rb ON rb.staff_id = po.raised_by_staff_id " +
         "LEFT JOIN staff cb ON cb.staff_id = po.confirmed_by_staff_id " +
+        "LEFT JOIN staff cl ON cl.staff_id = po.closed_by_staff_id " +
         "LEFT JOIN purchase_order_items i ON i.po_id = po.po_id " +
         "GROUP BY po.po_id, po.status, po.order_date, po.confirmed_at, po.decision_note, po.received_at, po.discount, " +
+        "po.closed_as, po.closed_note, po.closed_at, cl.full_name, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
         "po.supplier_ship_date, po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
         "rb.full_name, cb.full_name, " +
@@ -984,7 +1033,9 @@ function registerInventoryRoutes(app, deps) {
   async function readOrderDocument(poId) {
     const ordersResult = await db.query(
       "SELECT po.po_id, po.status, po.order_date, po.confirmed_at, " +
-      "po.supplier_code, po.supplier_sent_at, " +
+      "po.supplier_code, po.supplier_sent_at, po.closed_as, po.closed_note, po.closed_at, " +
+      "IF(po.supplier_sent_at IS NULL, NULL, DATE_ADD(po.supplier_sent_at, INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR)) " +
+      "AS answer_by, " +
       "po.supplier_response, po.supplier_responded_at, po.supplier_note, po.supplier_ship_date, " +
       "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
       "po.discount, " +
@@ -1423,7 +1474,8 @@ function registerInventoryRoutes(app, deps) {
 
     // The mail is out; a failure while recording it must not be reported as "not emailed"
     try {
-      await db.query("UPDATE purchase_orders SET supplier_sent_at = NOW() WHERE po_id = ?", [poId]);
+      // Keep the first sent time: sending again must not give the supplier a fresh 12 hours
+      await db.query("UPDATE purchase_orders SET supplier_sent_at = COALESCE(supplier_sent_at, NOW()) WHERE po_id = ?", [poId]);
       await writeAuditLog(request, "PURCHASE_ORDER_SENT", number + " emailed to " + order.supplier_name + " at " + email,
         { po_id: order.po_id, supplier: order.supplier_name, email: email, emailed: true });
     } catch (error) {
@@ -1820,6 +1872,9 @@ function registerInventoryRoutes(app, deps) {
         supplier_note: order.supplier_note,
         supplier_ship_date: order.supplier_ship_date,
         discount: order.discount,
+        closed_as: order.closed_as,
+        closed_at: order.closed_at,
+        answer_by: order.answer_by,
         can_respond: order.status === "Pending" && !order.supplier_response,
         shortage_response: order.shortage_response,
         shortage_responded_at: order.shortage_responded_at,
@@ -1834,6 +1889,7 @@ function registerInventoryRoutes(app, deps) {
 
   app.get("/api/supplier-order/:code", async function (request, response) {
     try {
+      await closeUnansweredOrders();
       const document = await orderForCode(request.params.code);
       if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
       response.json(supplierView(document));
@@ -1915,6 +1971,7 @@ function registerInventoryRoutes(app, deps) {
 
     let connection = null;
     try {
+      await closeUnansweredOrders();
       const document = await orderForCode(request.params.code);
       if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
       const order = document.order;
@@ -2003,7 +2060,8 @@ function registerInventoryRoutes(app, deps) {
         "UPDATE purchase_orders " +
         "SET supplier_response = ?, supplier_responded_at = NOW(), supplier_note = ?, supplier_ship_date = ?, " +
         "discount = CASE WHEN ? THEN ? ELSE discount END " +
-        "WHERE po_id = ? AND status = 'Pending' AND supplier_response IS NULL",
+        "WHERE po_id = ? AND status = 'Pending' AND supplier_response IS NULL " +
+        "AND (supplier_sent_at IS NULL OR supplier_sent_at > NOW() - INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR)",
         [accept ? "Accepted" : "Declined", note || null, shipDate, accept, discount, order.po_id]);
       const result = queryResult[0];
 
@@ -2011,9 +2069,15 @@ function registerInventoryRoutes(app, deps) {
         await connection.rollback();
         connection.release();
         connection = null;
+        // The time may have run out between the first read and the update, so close it now
+        await closeUnansweredOrders();
         const again = await readOrderDocument(order.po_id);
         let why = number + " can no longer be answered here: it is " + String(again.order.status).toLowerCase() + ".";
-        if (again.order.supplier_response) {
+        if (again.order.closed_as === "No Answer") {
+          why = number + " expired on " + supplierTime(again.order.closed_at) + " without an answer. Contact the shop.";
+        } else if (again.order.closed_as === "Cancelled") {
+          why = number + " was cancelled by the shop. Contact the shop.";
+        } else if (again.order.supplier_response) {
           why = number + " was already " + again.order.supplier_response.toLowerCase() + ". Contact the shop to change it.";
         }
         return response.status(409).json({ error: why, view: supplierView(again) });

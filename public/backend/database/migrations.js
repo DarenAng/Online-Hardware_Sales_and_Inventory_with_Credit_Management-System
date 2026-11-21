@@ -953,6 +953,35 @@ async function migrateSupplierResponse() {
     "supplier_response, supplier_responded_at, supplier_note).");
 }
 
+async function migratePurchaseOrderClosing() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'\n" +
+      "       AND COLUMN_NAME IN ('closed_as', 'closed_note', 'closed_at', 'closed_by_staff_id')",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.length === 4) return;
+
+  if (names.indexOf("closed_as") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN closed_as ENUM('No Answer', 'Cancelled') NULL");
+  }
+  if (names.indexOf("closed_note") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN closed_note VARCHAR(255) NULL");
+  }
+  if (names.indexOf("closed_at") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN closed_at TIMESTAMP NULL");
+  }
+  if (names.indexOf("closed_by_staff_id") === -1) {
+    await db.query(
+      "ALTER TABLE purchase_orders ADD COLUMN closed_by_staff_id INT NULL,\n" +
+        "         ADD CONSTRAINT fk_purchase_orders_closed_by FOREIGN KEY (closed_by_staff_id)\n" +
+        "         REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE");
+  }
+  console.log("Added the purchase order closing columns (purchase_orders.closed_as, closed_note, " +
+    "closed_at, closed_by_staff_id).");
+}
+
 async function migrateSupplierQuote() {
   const columnsResult = await db.query(
     "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS\n" +
@@ -2030,6 +2059,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateSupplierQuote();
   await migrateShortage();
   await migrateLineDescription();
+  await migratePurchaseOrderClosing();
   await migrateQrPayments();
   await migratePaymentDetails();
   await migrateLoyaltySettings();
