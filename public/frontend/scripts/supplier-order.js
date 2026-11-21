@@ -6,6 +6,7 @@ function startSupplierOrderPage() {
     const draft = {
         decision: '',
         prices: {},
+        priceUnit: {},
         editing: {},
         removed: {},
         discount: '',
@@ -100,12 +101,50 @@ function startSupplierOrderPage() {
         return Boolean(item.pack_name) && Number(item.pack_size) > 0 && Number(item.pack_count) > 0;
     }
 
-    function packSizeOf(item) {
-        return isPackLine(item) ? Number(item.pack_size) : 1;
+    // The units a line's price can be typed in: the base unit first, then the others
+    function unitsOf(item) {
+        if (Array.isArray(item.units) && item.units.length > 0) return item.units;
+        const units = [{ name: item.base_unit || item.unit_name || 'unit', size: 1 }];
+        if (isPackLine(item)) units.push({ name: item.pack_name, size: Number(item.pack_size) });
+        return units;
+    }
+
+    // Which unit (its place in the list) the price is shown and typed in.
+    // The supplier's choice, else the pack the line was ordered in, else the base unit.
+    function unitIndexOf(item) {
+        if (has(draft.priceUnit, item.id)) return draft.priceUnit[item.id];
+        const units = unitsOf(item);
+        if (isPackLine(item)) {
+            for (let i = 0; i < units.length; i++) {
+                const sameName = String(units[i].name).toLowerCase() === String(item.pack_name).toLowerCase();
+                if (sameName && Number(units[i].size) === Number(item.pack_size)) return i;
+            }
+        }
+        return 0;
+    }
+
+    function unitSizeOf(item) {
+        return Number(unitsOf(item)[unitIndexOf(item)].size);
     }
 
     function priceUnitOf(item) {
-        return isPackLine(item) ? item.pack_name : (item.unit_name || 'unit');
+        return unitsOf(item)[unitIndexOf(item)].name;
+    }
+
+    // "can (4 liter)" for the list in the price editor
+    function unitLabel(item, unit) {
+        const base = unitsOf(item)[0].name;
+        if (Number(unit.size) === 1) return unit.name;
+        return unit.name + ' (' + quantityText(unit.size) + ' ' + base + ')';
+    }
+
+    function unitOptionsHtml(item) {
+        const units = unitsOf(item);
+        let html = '';
+        for (let i = 0; i < units.length; i++) {
+            html += '<option value="' + i + '">' + escapeHtml(unitLabel(item, units[i])) + '</option>';
+        }
+        return html;
     }
 
     function isUnpriced(item) {
@@ -118,7 +157,7 @@ function startSupplierOrderPage() {
     }
 
     function shownPrice(unitCost, item) {
-        return Math.round(Number(unitCost) * packSizeOf(item) * 100) / 100;
+        return Math.round(Number(unitCost) * unitSizeOf(item) * 100) / 100;
     }
 
     function lineAmount(price, item) {
@@ -129,7 +168,7 @@ function startSupplierOrderPage() {
         if (!has(draft.prices, item.id)) return null;
         const typed = parseFloat(draft.prices[item.id]);
         if (!Number.isFinite(typed)) return NaN;
-        return Math.round(Math.round(typed * 100) / 100 / packSizeOf(item) * 10000) / 10000;
+        return Math.round(Math.round(typed * 100) / 100 / unitSizeOf(item) * 10000) / 10000;
     }
 
     function lineChanged(item) {
@@ -576,11 +615,13 @@ function startSupplierOrderPage() {
             '</div>' +
             '<p class="so-field-error so-remove-error" data-remove-error></p>' +
             '<div class="so-edit" data-editor>' +
-                '<label class="so-label" for="so-price-' + item.id + '">Your price per ' + escapeHtml(priceUnitOf(item)) + '</label>' +
+                '<label class="so-label" for="so-unit-' + item.id + '">Your price per</label>' +
+                '<select class="so-select" id="so-unit-' + item.id + '" data-unit="' + item.id + '">' +
+                    unitOptionsHtml(item) + '</select>' +
                 '<div class="so-edit-row">' +
                     '<span class="so-money"><span aria-hidden="true">₱</span>' +
                         '<input type="number" inputmode="decimal" min="0.01" step="0.01" ' +
-                               'id="so-price-' + item.id + '" data-price="' + item.id + '"></span>' +
+                               'id="so-price-' + item.id + '" aria-label="Price" data-price="' + item.id + '"></span>' +
                     '<button type="button" class="so-btn so-btn-small so-btn-save" data-save="' + item.id + '">' +
                         '<i class="icon icon-check" aria-hidden="true"></i>Save</button>' +
                     '<button type="button" class="so-btn so-btn-small so-btn-quiet" data-cancel="' + item.id + '">' +
@@ -805,12 +846,17 @@ function startSupplierOrderPage() {
     function savePrice(id) {
         const item = findItem(id);
         const input = document.getElementById('so-price-' + id);
+        const unitIndex = Number(document.getElementById('so-unit-' + id).value);
         const typed = Math.round(parseFloat(input.value) * 100) / 100;
-        if (!Number.isFinite(typed) || typed <= 0) {
+        // The price per base unit has to stay above zero after dividing by the unit's size
+        const perBase = Math.round(typed / Number(unitsOf(item)[unitIndex].size) * 10000) / 10000;
+        if (!Number.isFinite(typed) || typed <= 0 || !(perBase > 0)) {
             lineError(id, 'Type a price above zero, or press Cancel.');
             input.focus();
             return;
         }
+        // From here the price is shown and read in the unit the supplier picked
+        draft.priceUnit[id] = unitIndex;
         if (typed === shownPrice(item.unit_cost, item)) delete draft.prices[id];
         else draft.prices[id] = String(typed);
         delete draft.editing[id];
@@ -858,6 +904,7 @@ function startSupplierOrderPage() {
                 const id = edit.dataset.edit;
                 const item = findItem(id);
                 const input = document.getElementById('so-price-' + id);
+                document.getElementById('so-unit-' + id).value = String(unitIndexOf(item));
                 if (has(draft.prices, id)) input.value = Number(draft.prices[id]).toFixed(2);
                 else if (isUnpriced(item)) input.value = '';
                 else input.value = shownPrice(item.unit_cost, item).toFixed(2);

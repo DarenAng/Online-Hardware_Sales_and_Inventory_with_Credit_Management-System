@@ -229,6 +229,21 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 .so-line.is-editing .so-edit { display: block; }
 .so-edit .so-label { margin-top: 8px; }
 .so-edit-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+/* The unit the price is typed in */
+.so-select {
+    display: block;
+    width: 260px;
+    max-width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 10px;
+    padding: 9px 10px;
+    border: 2px solid var(--chrome);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--ink);
+    font: 600 16px var(--font-ui);
+}
+.so-select:focus { outline: none; box-shadow: 0 0 0 3px var(--signal-dim); }
 .so-money {
     display: flex;
     align-items: center;
@@ -460,6 +475,7 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
     .so-line.is-changed { margin: 0 -14px; padding: 14px; }
     .so-line-bottom { margin-left: 0; flex-wrap: wrap; }
     .so-edit { margin-left: 0; }
+    .so-select { width: 100%; }
     .so-remove-error { margin-left: 0; }
     .so-choice { padding: 16px 6px; }
     .so-rline { grid-template-columns: minmax(0, 1fr) auto; }

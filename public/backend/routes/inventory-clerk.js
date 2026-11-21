@@ -1083,6 +1083,7 @@ function registerInventoryRoutes(app, deps) {
     const itemsResult = await db.query(
       "SELECT i.po_item_id, i.product_id, i.quantity, i.unit_cost, i.original_unit_cost, i.line_cost, " +
       "i.pack_name, i.pack_size, i.pack_count, " +
+      "p.pack_name AS product_pack_name, p.pack_size AS product_pack_size, " +
       "p.product_name, COALESCE(NULLIF(i.line_description, ''), p.description) AS description, " +
       "u.unit_name, c.category_name, b.brand_name " +
       "FROM purchase_order_items i " +
@@ -1103,6 +1104,7 @@ function registerInventoryRoutes(app, deps) {
         " ORDER BY i.po_item_id LIMIT 1), o.unit_cost, 0) AS unit_cost, " +
         "(SELECT i.original_unit_cost FROM purchase_order_items i WHERE i.po_id = o.po_id AND i.product_id = o.product_id " +
         " ORDER BY i.po_item_id LIMIT 1) AS original_unit_cost, " +
+        "p.pack_name AS product_pack_name, p.pack_size AS product_pack_size, " +
         "p.product_name, COALESCE(NULLIF(o.line_description, ''), p.description) AS description, " +
         "u.unit_name, c.category_name, b.brand_name " +
         "FROM purchase_order_ordered_items o " +
@@ -1123,6 +1125,43 @@ function registerInventoryRoutes(app, deps) {
           items.push(row);
         }
       }
+    }
+
+    // The units each material has, so the supplier can pick the unit a price is typed in:
+    // the base unit, its selling units, the delivery pack of the product, then the pack of the line
+    // One query gets the selling units of every product on the order
+    const sellingUnits = {};
+    if (items.length > 0) {
+      const productIds = [];
+      for (let i = 0; i < items.length; i++) productIds.push(items[i].product_id);
+      const unitsResult = await db.query(
+        "SELECT product_id, unit_name, units_per FROM product_units WHERE product_id IN (?) " +
+        "ORDER BY product_id, units_per, unit_name",
+        [productIds]
+      );
+      for (let i = 0; i < unitsResult[0].length; i++) {
+        const row = unitsResult[0][i];
+        if (!sellingUnits[row.product_id]) sellingUnits[row.product_id] = [];
+        sellingUnits[row.product_id].push({ name: row.unit_name, size: Number(row.units_per) });
+      }
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const units = [{ name: item.unit_name || "unit", size: 1 }];
+      const extras = (sellingUnits[item.product_id] || []).slice();
+      extras.push({ name: item.product_pack_name, size: Number(item.product_pack_size) });
+      extras.push({ name: item.pack_name, size: Number(item.pack_size) });
+      for (let n = 0; n < extras.length; n++) {
+        if (!extras[n].name || !(extras[n].size > 0)) continue;
+        // The same name (any letter case) and size is listed once
+        let listed = false;
+        for (let k = 0; k < units.length; k++) {
+          if (units[k].name.toLowerCase() === extras[n].name.toLowerCase() && units[k].size === extras[n].size) listed = true;
+        }
+        if (!listed) units.push(extras[n]);
+      }
+      item.units = units;
     }
 
     const settingsResult = await db.query(
@@ -1938,7 +1977,8 @@ function registerInventoryRoutes(app, deps) {
         description: item.description,
         quantity: item.quantity, unit_name: item.unit_name, unit_cost: item.unit_cost, line_cost: item.line_cost,
         original_unit_cost: item.original_unit_cost,
-        pack_name: item.pack_name, pack_size: item.pack_size, pack_count: item.pack_count
+        pack_name: item.pack_name, pack_size: item.pack_size, pack_count: item.pack_count,
+        base_unit: item.unit_name || "unit", units: item.units
       });
     }
 
