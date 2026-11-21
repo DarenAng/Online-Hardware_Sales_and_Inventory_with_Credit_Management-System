@@ -213,9 +213,12 @@ function startSupplierOrderPage() {
                 '</span><span class="so-stop-label">' + label + '</span>' +
                 '<span class="so-stop-sub">' + escapeHtml(sub) + '</span></li>';
         }
-        // While waiting for the answer, show the deadline
+        // While waiting for the answer, show the deadline (not once the order is closed)
         let answerSub = order.supplier_response ? order.supplier_response : 'Now';
-        if (!order.supplier_response && order.answer_by) answerSub = 'By ' + stampText(order.answer_by);
+        if (!order.supplier_response && order.answer_by && !order.closed_as) answerSub = 'By ' + stampText(order.answer_by);
+        // A closed order shows how it closed
+        if (order.closed_as === 'No Answer') answerSub = 'No answer';
+        if (order.closed_as === 'Cancelled') answerSub = 'Cancelled';
         return '<ol class="so-track">' +
             stop(0, 'Order sent', String(order.order_date || '').slice(0, 10)) +
             stop(1, 'Your answer', answerSub) +

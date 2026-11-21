@@ -3415,6 +3415,7 @@ async function cancelPurchaseOrder(poId) {
         message: poNumber(po.po_id) + ' is cancelled and ' + po.supplier_name + "'s link stops working.",
         label: 'Reason',
         confirmLabel: 'Cancel Order',
+        cancelLabel: 'Go back',
         tone: 'danger',
         check: function (value) {
             return String(value).trim().length < 5 ? 'Write why the order is cancelled.' : null;

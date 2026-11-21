@@ -795,9 +795,10 @@ function registerManagerRoutes(app, deps) {
       "(SELECT COUNT(*) FROM purchase_order_items i WHERE i.po_id = po.po_id), ' line(s) (', po.status, ')') " +
       "FROM purchase_orders po JOIN suppliers sup ON sup.supplier_id = po.supplier_id " +
       "UNION ALL " +
-      "SELECT IF(po.status = 'Cancelled', 'PO_DECLINED', 'PO_CONFIRMED'), po.confirmed_at, po.confirmed_by_staff_id, po.po_id, " +
+      // Only the manager's own decline counts as declined; an order closed later was still confirmed
+      "SELECT IF(po.status = 'Cancelled' AND po.closed_as IS NULL, 'PO_DECLINED', 'PO_CONFIRMED'), po.confirmed_at, po.confirmed_by_staff_id, po.po_id, " +
       "CONCAT('PO #', po.po_id, ' to ', sup.supplier_name, " +
-      "IF(po.status = 'Cancelled', ' declined', ' confirmed'), " +
+      "IF(po.status = 'Cancelled' AND po.closed_as IS NULL, ' declined', ' confirmed'), " +
       "IF(po.decision_note IS NULL OR po.decision_note = '', '', CONCAT(', ', po.decision_note))) " +
       "FROM purchase_orders po JOIN suppliers sup ON sup.supplier_id = po.supplier_id " +
       "WHERE po.confirmed_at IS NOT NULL " +

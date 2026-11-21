@@ -51,6 +51,8 @@ function registerInventoryRoutes(app, deps) {
 
   app.get("/api/inventory/summary", async function (request, response) {
     try {
+      // Close orders that ran out of answer time so they are not counted as pending
+      await closeUnansweredOrders();
       const stockRowsResult = await db.query(
         "SELECT COUNT(*) AS product_count, " +
         "COALESCE(SUM(CASE WHEN COALESCE(i.quantity_in_stock, 0) = 0 THEN 1 ELSE 0 END), 0) AS out_of_stock, " +
@@ -1424,6 +1426,8 @@ function registerInventoryRoutes(app, deps) {
   // Emails an approved order to its supplier (PDF and accept link). Returns { ok: true, message, linked }
   // or { ok: false, status, problem }. Throws if something unexpected breaks.
   async function emailOrderToSupplier(request, poId) {
+    // An order past its answer deadline is closed first, so it is not sent with a dead link
+    await closeUnansweredOrders();
     const document = await readOrderDocument(poId);
     if (!document) return { ok: false, status: 404, problem: "That purchase order does not exist" };
 
@@ -1737,7 +1741,7 @@ function registerInventoryRoutes(app, deps) {
         if (order.status === "For Approval") {
           return response.status(409).json({ error: number + " is not approved yet. The manager can decline it instead." });
         }
-        if (order.supplier_response === "Accepted") {
+        if (order.status === "Pending" && order.supplier_response === "Accepted") {
           return response.status(409).json({
             error: order.supplier_name + " already accepted " + number + ". Phone them to stop the delivery." });
         }

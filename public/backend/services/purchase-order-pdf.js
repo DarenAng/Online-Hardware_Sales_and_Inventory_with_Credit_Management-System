@@ -45,7 +45,8 @@ function lineQuantity(item) {
 
 function statusWords(order) {
   if (order.status === "For Approval") return "For Approval";
-  if (order.status === "Cancelled") return "Declined";
+  // An order closed by no answer or by the shop says so; the manager's decline says Declined
+  if (order.status === "Cancelled") return order.closed_as || "Declined";
   if (order.status === "Incomplete") return "Incomplete delivery";
   if (order.status === "Pending") {
     if (order.supplier_response === "Accepted") return "Accepted";
@@ -311,4 +312,4 @@ function purchaseOrderPdf(details) {
   return done;
 }
 
-module.exports = { purchaseOrderPdf: purchaseOrderPdf };
+module.exports = { purchaseOrderPdf: purchaseOrderPdf, statusWords: statusWords };
