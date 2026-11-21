@@ -993,7 +993,9 @@ INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_cost) VALUES
 (14, 5, 100, 123.80),
 (14, 13, 10, 994.88),
 (14, 10, 10, 4846.65),
-(14, 11, 2, 5730.16);
+(14, 11, 2, 5730.16),
+(15, 9, 4, 2150.00),
+(15, 12, 2, 2890.00);
 
 INSERT INTO sales (sale_id, customer_id, walk_in_name, cashier_staff_id, total_amount, discount, amount_paid, payment_method, payment_status, reference_no, sale_date, tax_registration, vat_rate, vatable_sale, vat_amount) VALUES
 (11, 9, NULL, 4, 5440.00, 50.00, 5390.00, 'Cash', 'Paid', NULL, '2026-03-22 17:40:28', 'VAT', 12.00, 4812.50, 577.50),

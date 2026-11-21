@@ -2662,15 +2662,11 @@ async function submitReceiveOrder() {
     const counts = receiveCounts();
     const received = [];
     let shortLines = 0;
-    let totalShort = 0;
     let arrivedAny = false;
     for (let i = 0; i < counts.length; i++) {
         received.push({ productId: counts[i].line.item.product_id, quantity: counts[i].arrived });
         if (counts[i].arrived > 0) arrivedAny = true;
-        if (counts[i].short > 0) {
-            shortLines++;
-            totalShort += counts[i].amount;
-        }
+        if (counts[i].short > 0) shortLines++;
     }
     const extras = document.querySelectorAll('#recv-extras .recv-line');
 
@@ -2721,7 +2717,6 @@ async function submitReceiveOrder() {
         return;
     }
 
-    totalShort = Math.round(totalShort * 100) / 100;
     const number = poNumber(poReceiving.poId);
     const overLines = [];
     for (let i = 0; i < counts.length; i++) {
@@ -2738,8 +2733,8 @@ async function submitReceiveOrder() {
     const yes = await askConfirm(
         shortLines > 0
             ? 'The figures on this sheet go straight onto the shelf. ' + number + ' stays open as Incomplete: ' +
-              shortLines + (shortLines === 1 ? ' line is' : ' lines are') + ' short, ' + peso(totalShort) +
-              ' in all, and the supplier is emailed what is missing.'
+              shortLines + (shortLines === 1 ? ' line is' : ' lines are') +
+              ' short on this sheet, and the supplier is emailed what is missing.'
             : 'The figures on this sheet go straight onto the shelf, and ' + number + ' is received and closed.',
         { title: 'Receive this delivery?', eyebrow: 'Receive Deliveries', confirmLabel: 'Receive it',
           detail: overLines.length > 0 ? overLines : undefined });
@@ -2969,19 +2964,24 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         detailField('Email', po.supplier_email ? escapeHtml(po.supplier_email) : '<span class="muted">None on file</span>') +
         '</div>';
 
+    // An order with no items can only be declined or cancelled: no print, approve or email
+    const hasItems = items.length > 0;
+
     // Once an order has been sent to the supplier it is no longer printed from here
     let foot = '';
-    if (po.status !== 'Pending' || !po.supplier_sent_at) {
+    if (hasItems && (po.status !== 'Pending' || !po.supplier_sent_at)) {
         foot += '<button type="button" class="btn btn-ghost" onclick="printPurchaseOrder(' + po.po_id + ')">' +
                 (po.status === 'Pending' ? 'Print Purchase Order' : 'Print PDF') + '</button>';
     }
     if (canDecide && waiting) {
         foot += '<button type="button" class="btn btn-danger" onclick="decidePurchaseOrder(' + po.po_id + ', false)">' +
-                'Decline</button>' +
-                '<button type="button" class="btn btn-success" onclick="decidePurchaseOrder(' + po.po_id + ', true)">' +
-                'Approve Order</button>';
+                'Decline</button>';
+        if (hasItems) {
+            foot += '<button type="button" class="btn btn-success" onclick="decidePurchaseOrder(' + po.po_id + ', true)">' +
+                    'Approve Order</button>';
+        }
     }
-    if (canReceive && po.status === 'Pending' && !po.supplier_response && po.supplier_email) {
+    if (hasItems && canReceive && po.status === 'Pending' && !po.supplier_response && po.supplier_email) {
         foot += '<button type="button" class="btn btn-ghost" onclick="sendPurchaseOrder(' + po.po_id + ')">' +
                 (po.supplier_sent_at ? 'Email It Again' : 'Email to Supplier') + '</button>';
     }

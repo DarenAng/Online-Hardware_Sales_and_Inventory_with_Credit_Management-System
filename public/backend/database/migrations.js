@@ -2019,6 +2019,44 @@ async function migratePolicyWording() {
 }
 
 // Lines a supplier removed before accepting an order, kept so the shop can see what they could not supply
+// Purchase orders saved with no items (old sample data) are deleted once. New orders cannot be
+// saved empty any more. An order that ever had lines (ordered, received or removed by the
+// supplier) or a return report is never touched.
+async function removeEmptyPurchaseOrders() {
+  const tablesResult = await db.query(
+    "SELECT TABLE_NAME FROM information_schema.TABLES\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME IN ('purchase_orders', 'purchase_order_items',\n" +
+      "       'purchase_order_ordered_items', 'purchase_order_removed_items', 'returned_items', 'app_flags')",
+    [DB_NAME]
+  );
+  if (tablesResult[0].length < 6) return;
+
+  const flagKey = "remove_empty_purchase_orders";
+  const flagResult = await db.query("SELECT flag_key FROM app_flags WHERE flag_key = ?", [flagKey]);
+  if (flagResult[0].length > 0) return;
+
+  const emptyResult = await db.query(
+    "SELECT po.po_id FROM purchase_orders po\n" +
+      "     WHERE po.status IN ('For Approval', 'Pending', 'Cancelled')\n" +
+      "       AND NOT EXISTS (SELECT 1 FROM purchase_order_items i WHERE i.po_id = po.po_id)\n" +
+      "       AND NOT EXISTS (SELECT 1 FROM purchase_order_ordered_items o WHERE o.po_id = po.po_id)\n" +
+      "       AND NOT EXISTS (SELECT 1 FROM purchase_order_removed_items r WHERE r.po_id = po.po_id)\n" +
+      "       AND NOT EXISTS (SELECT 1 FROM returned_items ri WHERE ri.po_id = po.po_id)");
+  const emptyIds = [];
+  for (let i = 0; i < emptyResult[0].length; i++) {
+    emptyIds.push(emptyResult[0][i].po_id);
+  }
+
+  if (emptyIds.length > 0) {
+    await db.query("DELETE FROM purchase_orders WHERE po_id IN (?)", [emptyIds]);
+  }
+  await db.query(
+    "INSERT INTO app_flags (flag_key, flag_value, updated_at) VALUES (?, 'done', ?)",
+    [flagKey, Date.now()]);
+  console.log("Removed " + emptyIds.length + " purchase order(s) that had no items" +
+    (emptyIds.length > 0 ? " (#" + emptyIds.join(", #") + ")" : "") + ". This runs once.");
+}
+
 async function migrateRemovedItems() {
   await db.query(
     "CREATE TABLE IF NOT EXISTS purchase_order_removed_items (\n" +
@@ -2103,6 +2141,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateStaffWorkDays();
   await migratePolicyWording();
   await migrateRemovedItems();
+  await removeEmptyPurchaseOrders();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();
   await warnIfAdminPasswordIsDefault();

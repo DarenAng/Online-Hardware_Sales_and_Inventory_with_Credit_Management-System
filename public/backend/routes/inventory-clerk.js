@@ -1331,6 +1331,13 @@ function registerInventoryRoutes(app, deps) {
         }
         lineOfProduct[pickedId] = i + 1;
       }
+      // Every line needs a material and a quantity, so an order can never be saved empty
+      if (!pickedId && String(item.newName || item.new_name || "").trim() === "") {
+        return response.status(400).json({ error: "Line " + (i + 1) + " has no material. Pick one or remove the line." });
+      }
+      if (!(Number(item.quantity) > 0)) {
+        return response.status(400).json({ error: "Line " + (i + 1) + " needs a quantity above zero." });
+      }
       const lineDescription = String(item.description || "").trim().replace(/\s+/g, " ");
       if (lineDescription.length > 255) {
         return response.status(400).json({ error: "A description is at most 255 characters." });
@@ -1452,6 +1459,14 @@ function registerInventoryRoutes(app, deps) {
     try {
       const poId = Number(request.params.poId);
 
+      // An order with no items cannot be approved (declining it is still allowed)
+      if (approve) {
+        const countResult = await db.query("SELECT COUNT(*) AS line_count FROM purchase_order_items WHERE po_id = ?", [poId]);
+        if (Number(countResult[0][0].line_count) === 0) {
+          return response.status(409).json({ error: helpers.poNumber(poId) + " has no items, so it cannot be approved." });
+        }
+      }
+
       const output = await inventoryClerkProcedures.decidePurchaseOrder(
         [poId, approve, note || null, getActorId(request)]
       );
@@ -1512,6 +1527,10 @@ function registerInventoryRoutes(app, deps) {
           ? number + " is not approved yet. The manager approves it before it goes to the supplier."
           : number + " is " + String(order.status).toLowerCase() + "; there is nothing to send."
       };
+    }
+    // An order with no items is never sent to a supplier
+    if (document.items.length === 0) {
+      return { ok: false, status: 409, problem: number + " has no items. Cancel it and raise a new order." };
     }
 
     const email = String(order.supplier_email || "").trim();
