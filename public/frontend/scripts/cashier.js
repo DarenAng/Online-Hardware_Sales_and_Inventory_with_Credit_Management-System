@@ -1493,8 +1493,8 @@ function renderCartFigures() {
         } else if (t.onAccount) {
             html += '<div class="total-row total-note"><span>Collected on delivery</span><span>' +
                     peso(t.due) + '</span></div>';
-        } else if (t.method === 'Bank Transfer') {
-            html += '<div class="total-row total-note"><span>Paid by bank transfer</span><span>' +
+        } else if (paidByQr(t.method)) {
+            html += '<div class="total-row total-note"><span>Paid by ' + qrMethodWords(t.method) + '</span><span>' +
                     peso(t.due) + '</span></div>';
         } else if (t.tendered < t.due) {
             html += '<div class="total-row total-short"><span>Short by</span><span>' +
@@ -1525,12 +1525,23 @@ function renderCartFigures() {
     const qrButton = document.getElementById('qr-pay-btn');
     if (qrButton) {
         qrButton.hidden = QR_METHODS.indexOf(taken) === -1;
-        const short = !t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due;
+        const short = !t.onAccount && !paidByQr(t.method) && t.tendered < t.due;
         qrButton.disabled = cart.length === 0 || short;
         qrButton.textContent = 'Pay by QR';
     }
 
     qrAmountChanged('sale', t.onCredit ? t.down : t.due);
+}
+
+// GCash, PayMaya and Bank Transfer are paid by QR for the whole amount due, so no amount is typed.
+// To pay only part of a sale online, the cashier picks Credit and pays the part now by QR.
+function paidByQr(method) {
+    return QR_METHODS.indexOf(method) !== -1;
+}
+
+function qrMethodWords(method) {
+    if (method === 'Bank Transfer') return 'bank transfer';
+    return method;
 }
 
 function checkoutLabel(t) {
@@ -1621,7 +1632,7 @@ function onPaymentMethodChange(method) {
     const onCredit = method === 'Credit';
     const onAccount = onCredit || method === 'COD';
 
-    if (tender) tender.style.display = (onAccount || method === 'Bank Transfer') ? 'none' : 'block';
+    if (tender) tender.style.display = (onAccount || paidByQr(method)) ? 'none' : 'block';
     if (down) down.style.display = onCredit ? 'block' : 'none';
 
     renderCart();
@@ -1886,8 +1897,8 @@ function checkoutQuestion(t, customerName) {
         } else {
             detail.push('Balance: ' + peso(0));
         }
-    } else if (t.method === 'Bank Transfer') {
-        detail.push('Paid by bank transfer: ' + peso(t.due));
+    } else if (paidByQr(t.method)) {
+        detail.push('Paid by ' + qrMethodWords(t.method) + ': ' + peso(t.due));
     } else {
         detail.push('Amount entered: ' + peso(t.tendered));
         detail.push('Change: ' + peso(t.change));
@@ -1966,7 +1977,7 @@ async function handleCheckout(event, viaQr) {
     t = cartTotals();
     renderCart();
 
-    if (!t.onAccount && t.method !== 'Bank Transfer' && t.tendered < t.due) {
+    if (!t.onAccount && !paidByQr(t.method) && t.tendered < t.due) {
         notifyWarning('The amount entered is less than the amount due.', 'Sale not completed');
         return;
     }
