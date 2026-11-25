@@ -694,7 +694,39 @@ async function shortageMessage(details) {
   };
 }
 
+// The notice sent when the shop cancels an order the supplier had already accepted
+function cancelledOrderMessage(details) {
+  const order = details.order;
+  const shop = details.shop;
+
+  let shopName = "the hardware shop";
+  if (shop && shop.store_name) shopName = shop.store_name;
+
+  const sender = MAIL_FROM_NAME || shopName;
+  const number = helpers.poNumber(order.po_id);
+
+  let greeting = "Hello";
+  if (order.contact_person) {
+    greeting = "Hello " + order.contact_person;
+  }
+
+  return {
+    to: order.supplier_email,
+    fromName: sender,
+    subject: "Purchase order " + number + " is cancelled",
+    body:
+      greeting + ",\n\n" +
+      shopName + " has cancelled purchase order " + number + ", which you accepted. " +
+      "Please do not ship it.\n\n" +
+      "    Reason:  " + details.reason + "\n\n" +
+      "-- \n" +
+      sender + "\n" +
+      "This message was sent automatically. To reply, contact the shop directly.\n"
+  };
+}
+
 module.exports = {
+  cancelledOrderMessage: cancelledOrderMessage,
   shortageMessage: shortageMessage,
   isMailConfigured: isMailConfigured,
   sendMail: sendMail,

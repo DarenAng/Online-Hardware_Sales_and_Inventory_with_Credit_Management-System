@@ -2741,6 +2741,16 @@ function poPriceWithUnits(item) {
     return poPriceMain(item) + poPriceOthers(item);
 }
 
+// "Last paid ₱85.00/kg" under the line price, only when the last buying price per unit
+// is known and is not the same as this line's price per unit
+function poLastPaidText(item) {
+    const last = Number(item.last_cost) || 0;
+    const now = Number(item.unit_cost) || 0;
+    if (!(last > 0) || !(now > 0)) return '';
+    if (Math.round(last * 100) === Math.round(now * 100)) return '';
+    return '<br><span class="muted">Last paid ' + peso(last) + '/' + escapeHtml(item.unit_name || 'unit') + '</span>';
+}
+
 function addReceiveExtra() {
     const box = document.getElementById('recv-extras');
     if (!box) return;
@@ -3018,11 +3028,11 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         if (it.unit_cost === null || it.unit_cost === undefined) return '<span class="muted">-</span>';
         const original = it.original_unit_cost;
         if (original === null || original === undefined || Number(original) === Number(it.unit_cost)) {
-            return poPriceWithUnits(it);
+            return poPriceWithUnits(it) + poLastPaidText(it);
         }
         return '<s class="muted">' + peso(poPackPrice({ unit_cost: original, pack_name: it.pack_name, pack_size: it.pack_size, pack_count: it.pack_count })) +
             '</s> ' + poPriceMain(it) +
-            ' <span class="po-answer is-warn">supplier\'s price</span>' + poPriceOthers(it);
+            ' <span class="po-answer is-warn">supplier\'s price</span>' + poPriceOthers(it) + poLastPaidText(it);
     };
     let lines;
     const lineRows = [];
@@ -3510,17 +3520,23 @@ async function undoReceiving(poId) {
 function poCanCancel(po) {
     if (!poSetup.canDecide && !poSetup.canReceive) return false;
     if (typeof holdsFeature !== 'function' || !holdsFeature('po-cancel')) return false;
-    return po.status === 'Pending' && !po.supplier_response;
+    // Not answered yet, or accepted and the goods have not arrived
+    return po.status === 'Pending' && po.supplier_response !== 'Declined';
 }
 
 async function cancelPurchaseOrder(poId) {
     const po = findPurchaseOrder(poId);
     if (!po) return;
 
+    let askMessage = poNumber(po.po_id) + ' is cancelled and ' + po.supplier_name + "'s link stops working.";
+    if (po.supplier_response === 'Accepted') {
+        askMessage = poNumber(po.po_id) + ' is cancelled and ' + po.supplier_name + "'s link stops working. " +
+            po.supplier_name + ' already accepted it.';
+    }
     const asked = await askInput({
         title: 'Cancel this order?',
         eyebrow: 'Purchase Orders',
-        message: poNumber(po.po_id) + ' is cancelled and ' + po.supplier_name + "'s link stops working.",
+        message: askMessage,
         label: 'Reason',
         confirmLabel: 'Cancel Order',
         cancelLabel: 'Go back',

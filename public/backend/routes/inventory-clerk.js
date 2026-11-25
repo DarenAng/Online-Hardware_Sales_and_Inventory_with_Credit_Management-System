@@ -6,6 +6,7 @@ const isMailConfigured = mailer.isMailConfigured;
 const sendMail = mailer.sendMail;
 const purchaseOrderMessage = mailer.purchaseOrderMessage;
 const shortageMessage = mailer.shortageMessage;
+const cancelledOrderMessage = mailer.cancelledOrderMessage;
 const supplierOrderLink = mailer.supplierOrderLink;
 const qrPng = mailer.qrPng;
 const purchaseOrderPdf = require("../services/purchase-order-pdf").purchaseOrderPdf;
@@ -868,6 +869,10 @@ function registerInventoryRoutes(app, deps) {
       );
       const rows = rowsResult[0];
       await addUnitsToItems(rows);
+      // The cashier does not see buying prices
+      if (request.actor && request.actor.roleName === CASHIER) {
+        for (let i = 0; i < rows.length; i++) delete rows[i].last_cost;
+      }
       response.json(rows);
     } catch (error) {
       console.error("PO items failed:", error.message);
@@ -1131,7 +1136,7 @@ function registerInventoryRoutes(app, deps) {
       "i.pack_name, i.pack_size, i.pack_count, " +
       "p.pack_name AS product_pack_name, p.pack_size AS product_pack_size, " +
       "p.product_name, COALESCE(NULLIF(i.line_description, ''), p.description) AS description, " +
-      "u.unit_name, c.category_name, b.brand_name " +
+      "p.last_cost, u.unit_name, c.category_name, b.brand_name " +
       "FROM purchase_order_items i " +
       "JOIN products p ON p.product_id = i.product_id " +
       "LEFT JOIN units u ON u.unit_id = p.unit_id " +
@@ -1290,6 +1295,9 @@ function registerInventoryRoutes(app, deps) {
       }
       const answer = await supplierAnswerLink(request, document.order);
       delete document.order.supplier_code;
+      if (request.actor && request.actor.roleName === CASHIER) {
+        for (let i = 0; i < document.items.length; i++) delete document.items[i].last_cost;
+      }
       if (answer) {
         document.supplier_link = answer.link;
         document.supplier_qr = "data:image/png;base64," + answer.qr.toString("base64");
@@ -1813,7 +1821,8 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // Cancel Order: the shop withdraws an order the supplier has not answered yet. The supplier's link stops working.
+  // Cancel Order: the shop withdraws an order whose goods have not arrived. The supplier's link stops working.
+  // An order the supplier already accepted can be cancelled too, and the supplier is emailed.
   app.post("/api/purchase-orders/:poId/cancel", async function (request, response) {
     const poId = Number(request.params.poId);
     const reason = String((request.body && request.body.reason) || "").trim().slice(0, 255);
@@ -1824,10 +1833,12 @@ function registerInventoryRoutes(app, deps) {
       // An order that ran out of answer time is closed first, so it is reported as closed
       await closeUnansweredOrders();
 
-      // Only an approved order the supplier has not answered can be cancelled
+      // An approved order can be cancelled when the supplier has not answered it, or accepted it
+      // and nothing has been received yet (a received order is no longer Pending)
       const result = await db.query(
         "UPDATE purchase_orders SET status = 'Cancelled', closed_as = 'Cancelled', closed_note = ?, " +
-        "closed_at = NOW(), closed_by_staff_id = ? WHERE po_id = ? AND status = 'Pending' AND supplier_response IS NULL",
+        "closed_at = NOW(), closed_by_staff_id = ? WHERE po_id = ? AND status = 'Pending' " +
+        "AND (supplier_response IS NULL OR supplier_response = 'Accepted')",
         [reason, getActorId(request), poId]);
 
       // The order and its supplier, for the messages below
@@ -1842,18 +1853,50 @@ function registerInventoryRoutes(app, deps) {
         if (order.status === "For Approval") {
           return response.status(409).json({ error: number + " is not approved yet. The manager can decline it instead." });
         }
-        if (order.status === "Pending" && order.supplier_response === "Accepted") {
-          return response.status(409).json({
-            error: order.supplier_name + " already accepted " + number + ". Phone them to stop the delivery." });
-        }
         return response.status(409).json({ error: number + " is already closed." });
       }
 
+      // The cancel does not change the supplier's answer, so this is what they had answered
+      const wasAccepted = order.supplier_response === "Accepted";
+
       await writeAuditLog(request, "PURCHASE_ORDER_CANCELLED", number + " cancelled: " + reason,
-        { po_id: poId, supplier: order.supplier_name });
+        { po_id: poId, supplier: order.supplier_name, was_accepted: wasAccepted });
       if (publishChange) publishChange("inventory", "cancelled " + number, request.headers["x-client-id"] || null);
 
-      response.json({ message: number + " is cancelled. " + order.supplier_name + "'s link no longer works." });
+      if (!wasAccepted) {
+        return response.json({ message: number + " is cancelled. " + order.supplier_name + "'s link no longer works." });
+      }
+
+      // The supplier had accepted it: tell the shop, and email the supplier when that is possible.
+      // A failed email does not undo the cancel.
+      let emailed = false;
+      try {
+        const document = await readOrderDocument(poId);
+        const email = String(document.order.supplier_email || "").trim();
+        if (email && isMailConfigured()) {
+          await sendMail(cancelledOrderMessage({
+            order: Object.assign({}, document.order, { supplier_email: email }),
+            shop: document.shop,
+            reason: reason
+          }));
+          emailed = true;
+        }
+      } catch (mailError) {
+        console.error("The cancelled order was saved, but emailing the supplier failed:", mailError.message);
+      }
+
+      try {
+        await tellManagerAndClerk(
+          number + " cancelled",
+          number + " to " + order.supplier_name + " was cancelled after they accepted it. Reason: " + reason);
+      } catch (tellError) {
+        console.error("The order was cancelled, but the notification failed:", tellError.message);
+      }
+
+      response.json({
+        message: number + " is cancelled. " +
+          (emailed ? order.supplier_name + " has been emailed." : "Tell " + order.supplier_name + " by phone.")
+      });
     } catch (error) {
       console.error("Cancelling the purchase order failed:", error.message);
       response.status(500).json({ error: "Unable to cancel the purchase order" });
@@ -2300,10 +2343,47 @@ function registerInventoryRoutes(app, deps) {
                       " they cannot supply: " + removedNames.join("; ") + ".";
       }
 
+      // Lines whose price per unit is not what was paid on the last order. unit_cost and
+      // products.last_cost are both per base unit, so they compare directly.
+      const lastPaidChanges = [];
+      if (accept) {
+        for (let i = 0; i < keptLines.length; i++) {
+          const item = keptLines[i];
+          const lastCost = Number(item.last_cost);
+          if (!(lastCost > 0)) continue;
+          let newPrice = Number(item.unit_cost);
+          for (let n = 0; n < changes.length; n++) {
+            if (changes[n].item === item) newPrice = changes[n].price;
+          }
+          if (Math.round(newPrice * 100) === Math.round(lastCost * 100)) continue;
+          lastPaidChanges.push({
+            product: item.product_name, from: lastCost, to: newPrice, unit: item.unit_name || "unit"
+          });
+        }
+      }
+      let lastPaidText = "";
+      let lastPaidList = "";
+      if (lastPaidChanges.length > 0) {
+        const lastPaidParts = [];
+        for (let i = 0; i < lastPaidChanges.length; i++) {
+          const change = lastPaidChanges[i];
+          lastPaidParts.push(change.product + " " + pesoText(change.from) + " to " + pesoText(change.to) +
+            " per " + change.unit);
+        }
+        lastPaidList = lastPaidParts.join("; ");
+        lastPaidText = " Prices changed from the last order: " + lastPaidList +
+          ". Cancel the order if the new prices are too high.";
+      }
+
       let title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id);
       let message = order.supplier_name + " accepted " + number + " and will ship it on " + dayText(shipDate) + ".";
+      if (lastPaidChanges.length > 0) {
+        title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id) + " with price changes";
+      }
       if (repriced.length > 0) {
-        title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id) + " with new prices";
+        if (lastPaidChanges.length === 0) {
+          title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id) + " with new prices";
+        }
         const priceChanges = [];
         for (let i = 0; i < repriced.length; i++) {
           const change = repriced[i];
@@ -2321,6 +2401,7 @@ function registerInventoryRoutes(app, deps) {
       if (discount > 0) {
         message += " They gave a discount of " + pesoText(discount) + ", so the order comes to " + pesoText(after - discount) + ".";
       }
+      message += lastPaidText;
       if (note) message += " Their note: " + note;
       if (!accept) {
         title = order.supplier_name + " cannot fill purchase order " + helpers.poNumber(order.po_id);
@@ -2344,6 +2425,9 @@ function registerInventoryRoutes(app, deps) {
           priceNote + removedText.replace(" They removed", ", removed").replace(/\.$/, "") +
           (discount > 0 ? ", discount " + pesoText(discount) : "") +
           (note ? ": " + note : "");
+        if (lastPaidChanges.length > 0) {
+          details += " (prices changed from the last order: " + lastPaidList + ")";
+        }
       }
       const auditPrices = [];
       for (let i = 0; i < changes.length; i++) {
@@ -2353,7 +2437,7 @@ function registerInventoryRoutes(app, deps) {
       await writeAuditLog(request, accept ? "PURCHASE_ORDER_ACCEPTED" : "PURCHASE_ORDER_DECLINED_BY_SUPPLIER",
         details,
         { po_id: order.po_id, supplier: order.supplier_name, accepted: accept, ship_date: shipDate, discount: discount,
-          prices: auditPrices });
+          prices: auditPrices, changed_from_last_order: lastPaidChanges });
 
       if (publishChange) {
         publishChange("notifications", "supplier answered " + number, null);

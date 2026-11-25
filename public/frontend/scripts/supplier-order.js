@@ -257,10 +257,13 @@ function startSupplierOrderPage() {
         let stage = 1;
         if (order.supplier_response === 'Accepted') stage = 2;
         if (order.status === 'Received') stage = 3;
+        // Accepted, then cancelled by the shop: the answer is done and the last step is the cancel
+        const cancelledAfterAccept = order.closed_as === 'Cancelled' && order.supplier_response === 'Accepted';
         function stop(index, label, sub) {
             let state = '';
             if (index < stage) state = 'is-done';
             else if (index === stage) state = 'is-now';
+            if (cancelledAfterAccept && index === 2) state = 'is-cancelled';
             return '<li class="so-stop ' + state + '"><span class="so-dot">' +
                 (index < stage ? '<i class="icon icon-check" aria-hidden="true"></i>' : index + 1) +
                 '</span><span class="so-stop-label">' + label + '</span>' +
@@ -271,11 +274,13 @@ function startSupplierOrderPage() {
         if (!order.supplier_response && order.answer_by && !order.closed_as) answerSub = 'By ' + stampText(order.answer_by);
         // A closed order shows how it closed
         if (order.closed_as === 'No Answer') answerSub = 'No answer';
-        if (order.closed_as === 'Cancelled') answerSub = 'Cancelled';
+        if (order.closed_as === 'Cancelled' && !cancelledAfterAccept) answerSub = 'Cancelled';
+        let lastStop = stop(2, 'Shipped', order.supplier_ship_date ? dayText(order.supplier_ship_date) : 'Next');
+        if (cancelledAfterAccept) lastStop = stop(2, 'Cancelled', String(order.closed_at || '').slice(0, 10));
         return '<ol class="so-track">' +
             stop(0, 'Order sent', String(order.order_date || '').slice(0, 10)) +
             stop(1, 'Your answer', answerSub) +
-            stop(2, 'Shipped', order.supplier_ship_date ? dayText(order.supplier_ship_date) : 'Next') +
+            lastStop +
             '</ol>';
     }
 
@@ -578,8 +583,7 @@ function startSupplierOrderPage() {
             '</section>' +
 
             '<section class="so-panel" id="so-decline-part" hidden>' +
-                '<header class="so-step"><span class="so-num">3</span><div><h2>Why can you not fill it?</h2>' +
-                    '<p>Tell the shop why, so they can order elsewhere.</p></div></header>' +
+                '<header class="so-step"><span class="so-num">3</span><div><h2>Reason</h2></div></header>' +
                 '<textarea id="so-why" class="so-input" maxlength="255" rows="2" ' +
                     'placeholder="The Boysen enamel is out of stock until next month">' +
                     escapeHtml(draft.reason) + '</textarea>' +
@@ -1097,6 +1101,12 @@ function startSupplierOrderPage() {
         if (order.status === 'Received') {
             title = 'Order received';
             sub = 'This order has been delivered and counted in.';
+        } else if (order.closed_as === 'Cancelled') {
+            // Cancelled by the shop, before or after the supplier answered
+            mark = 'icon-lock';
+            tone = 'is-closed';
+            title = 'Order cancelled';
+            sub = 'The shop cancelled ' + order.number + ' on ' + stampText(order.closed_at) + '. Contact the shop.';
         } else if (order.supplier_response === 'Declined') {
             mark = 'icon-x';
             tone = 'is-stop';
@@ -1110,9 +1120,6 @@ function startSupplierOrderPage() {
             } else if (order.closed_as === 'No Answer') {
                 title = 'Order expired';
                 sub = order.number + ' expired on ' + stampText(order.closed_at) + ' without an answer. Contact the shop.';
-            } else if (order.closed_as === 'Cancelled') {
-                title = 'Order cancelled';
-                sub = 'The shop cancelled ' + order.number + ' on ' + stampText(order.closed_at) + '. Contact the shop.';
             } else if (order.status === 'Cancelled') {
                 sub = 'The shop cancelled this order.';
             } else {
@@ -1168,7 +1175,7 @@ function startSupplierOrderPage() {
         }
 
         const facts = [];
-        if (order.supplier_ship_date) {
+        if (order.supplier_ship_date && order.closed_as !== 'Cancelled') {
             facts.push('<div><span class="so-tag">Ships</span><strong>' +
                 escapeHtml(dayText(order.supplier_ship_date, true)) + '</strong></div>');
         }
@@ -1198,7 +1205,7 @@ function startSupplierOrderPage() {
                 trackHtml(order) +
                 '<div class="so-rfacts">' + facts.join('') + '</div>' +
                 '<ol class="so-rlines">' + rows + '</ol>' +
-                (order.supplier_response === 'Accepted'
+                (order.supplier_response === 'Accepted' && order.closed_as !== 'Cancelled'
                     ? '<p class="so-quote">Quote <strong>' + escapeHtml(order.number) +
                         '</strong> on the delivery receipt and the invoice. To change anything, contact the shop.</p>'
                     : '') +

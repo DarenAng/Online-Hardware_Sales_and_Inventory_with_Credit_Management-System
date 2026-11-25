@@ -176,7 +176,7 @@ const FEATURES = [
              ["GET", /^\/api\/purchase-orders\/\d+\/document$/],
              ["POST", /^\/api\/purchase-orders\/\d+\/undo-receiving$/]] },
   { key: "po-cancel", name: "Cancel Purchase Orders", module: "Inventory",
-    description: "Cancel an order the supplier has not answered yet. The supplier's link stops working at once.",
+    description: "Cancel an order before its goods arrive. The supplier's link stops working at once.",
     available: [MANAGER, CLERK], defaults: [MANAGER, CLERK],
     routes: [["GET", /^\/api\/purchase-orders$/], ["GET", /^\/api\/purchase-orders\/\d+\/items$/], ["GET", /^\/api\/purchase-orders\/\d+\/removed-items$/],
              ["GET", /^\/api\/purchase-orders\/\d+\/document$/],

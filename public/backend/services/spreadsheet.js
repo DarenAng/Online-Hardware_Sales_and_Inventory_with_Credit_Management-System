@@ -119,6 +119,34 @@ async function buildWorkbook(sheets, header) {
       }
     }
 
+    // A bold Total row under the last row, with one empty row between so sorting
+    // and filtering do not pull it into the data.
+    if (money.length > 0 && rows.length > 0) {
+      const totalRow = ws.getRow(headerRow + 2 + rows.length);
+      if (!money.includes(0)) {
+        totalRow.getCell(1).value = "Total";
+      }
+      for (let m = 0; m < money.length; m++) {
+        const column = money[m];
+        if (!Number.isInteger(column) || column < 0) continue;
+        let sum = 0;
+        for (let rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+          if (Array.isArray(rows[rowIndex]) && typeof rows[rowIndex][column] === "number" &&
+              Number.isFinite(rows[rowIndex][column])) {
+            sum += rows[rowIndex][column];
+          }
+        }
+        sum = Math.round(sum * 100) / 100;
+        const cell = totalRow.getCell(column + 1);
+        cell.value = sum;
+        cell.numFmt = "#,##0.00";
+        if (column < widths.length) {
+          widths[column] = Math.max(widths[column], Math.min(sum.toFixed(2).length + 5, MAX_WIDTH));
+        }
+      }
+      totalRow.font = { bold: true };
+    }
+
     for (let index = 0; index < widths.length; index++) {
       ws.getColumn(index + 1).width = widths[index];
     }

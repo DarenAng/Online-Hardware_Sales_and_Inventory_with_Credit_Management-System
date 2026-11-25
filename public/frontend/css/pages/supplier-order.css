@@ -155,6 +155,7 @@ s { color: var(--steel-soft); font-weight: 400; text-decoration-thickness: 1.5px
 }
 .so-stop.is-done .so-dot { background: var(--ok); border-color: var(--ok); color: #fff; }
 .so-stop.is-now .so-dot { border-color: var(--go); color: var(--go); box-shadow: 0 0 0 4px var(--go-dim); }
+.so-stop.is-cancelled .so-dot { border-color: var(--stop); color: var(--stop); }
 .so-stop-label { font-size: 13px; font-weight: 600; }
 .so-stop-sub { font-size: 12px; color: var(--steel-soft); }
 

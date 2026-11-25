@@ -579,8 +579,10 @@ function panelSheet(key) {
     const headers = [];
     for (let h = 0; h < heads.length; h++) {
         const text = heads[h].textContent.trim();
-        keep.push(text !== '');
-        if (text !== '') {
+        // A Status column is left out of the file, its header and its cells
+        const wanted = text !== '' && text !== 'Status';
+        keep.push(wanted);
+        if (wanted) {
             headers.push(text);
         }
     }
