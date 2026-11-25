@@ -1622,6 +1622,7 @@ const PO_STATES = [
     { status: 'To Send',          label: 'To Send' },
     { status: 'Sent to Supplier', label: 'Sent to Supplier' },
     { status: 'Price Approval',   label: 'Price Approval' },
+    { status: 'Waiting for Ship Date', label: 'Waiting for Ship Date' },
     { status: 'Out for Delivery', label: 'Out for Delivery' },
     { status: 'Incomplete',       label: 'Incomplete' },
     { status: 'Received',         label: 'Received' },
@@ -1636,6 +1637,7 @@ function poStage(po) {
     if (po.status === 'Cancelled') return 'Declined';
     if (po.status !== 'Pending') return po.status;
     if (po.supplier_response === 'Accepted' && po.price_review === 'Waiting') return 'Price Approval';
+    if (po.supplier_response === 'Accepted' && !po.supplier_ship_date) return 'Waiting for Ship Date';
     if (po.supplier_response === 'Accepted') return 'Out for Delivery';
     if (po.supplier_response === 'Declined') return 'Declined';
     if (po.supplier_sent_at) return 'Sent to Supplier';
@@ -1652,7 +1654,7 @@ function poAwaitsDelivery(po) {
 function poSupplierStageWord(po) {
     const stage = poStage(po);
     if (stage === 'To Send') return 'Sent to Supplier';
-    if (stage === 'Out for Delivery' || stage === 'Price Approval') return 'Accepted';
+    if (stage === 'Out for Delivery' || stage === 'Price Approval' || stage === 'Waiting for Ship Date') return 'Accepted';
     if (stage === 'Incomplete') return 'Incomplete delivery';
     return poStatusWord(stage);
 }
@@ -1673,6 +1675,7 @@ const PO_STAGE_TONES = {
     'To Send': 'badge-warning',
     'Sent to Supplier': 'badge-info',
     'Price Approval': 'badge-warning',
+    'Waiting for Ship Date': 'badge-info',
     'Out for Delivery': 'badge-info',
     'Incomplete': 'badge-warning',
     'Received': 'badge-success',
@@ -1721,7 +1724,6 @@ function poWaitingForSupplier(po) {
 
 function poArrivesCell(po) {
     if (poWaitingForSupplier(po)) return '<span class="muted">Waiting for supplier</span>';
-    if (poStage(po) === 'Price Approval' && po.supplier_ship_date) return escapeHtml(poShipDay(po.supplier_ship_date));
     if (!poAwaitsDelivery(po) || !po.supplier_ship_date) return '<span class="muted">--</span>';
     return escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po);
 }
@@ -2493,7 +2495,7 @@ function renderPurchaseOrderDocument() {
                         '<div class="po-doc-answer-text">' +
                             '<div class="po-doc-answer-title">Check prices and accept online</div>' +
                             '<p>Scan the QR code with your phone\'s camera, or open the link below. Correct any price ' +
-                            'that does not match yours, pick the day it ships, and accept, or tell us you cannot ' +
+                            'that does not match yours, and accept, or tell us you cannot ' +
                             'fill it. No account needed.</p>' +
                             '<div class="po-doc-link">' + escapeHtml(poDocument.supplier_link) + '</div>' +
                         '</div>' +
@@ -3455,6 +3457,7 @@ async function emailShortageAgain(poId) {
 // The manager can close an order that came in short, or one the supplier accepted but never delivered
 function poCanCloseShort(po) {
     if (po.price_review === 'Waiting') return false;
+    if (po.status === 'Pending' && po.supplier_response === 'Accepted' && !po.supplier_ship_date) return false;
     return po.status === 'Incomplete' || (po.status === 'Pending' && po.supplier_response === 'Accepted');
 }
 

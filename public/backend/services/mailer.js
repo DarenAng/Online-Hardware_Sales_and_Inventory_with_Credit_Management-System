@@ -419,7 +419,7 @@ async function purchaseOrderMessage(details) {
     nextStepText =
       "Once you have read it, open this link to answer. There you can " +
       (priced ? "correct any price that does not match yours" : "type your price for each line") +
-      ", tell us the day it ships, and accept the order (or tell us you cannot fill it). " +
+      ", and accept the order (or tell us you cannot fill it). " +
       "Our manager is told the moment you answer:\n\n    " + link + "\n\n";
   } else {
     nextStepText = "Once you have read it, contact " + shopName + " to confirm the order.\n\n";
@@ -485,7 +485,7 @@ async function purchaseOrderMessage(details) {
                 "On the order's page you can " +
                 (priced ? "<strong>correct a price</strong> that does not match yours, "
                         : "<strong>type your price</strong> for each line, ") +
-                "<strong>pick the day it ships</strong>, and accept it, or tell us you cannot fill it. " +
+                "and accept it, or tell us you cannot fill it. " +
                 "Our manager is told the moment you answer.</div>" +
               "<a href=\"" + htmlText(link) + "\" style=\"" + button + "\">" +
                 (priced ? "Check prices and accept" : "Set prices and accept") + "</a>" +
@@ -741,13 +741,19 @@ function pricesConfirmedMessage(details) {
     greeting = "Hello " + order.contact_person;
   }
 
+  let linkText = "Please open the order link from our earlier email to set the ship date.\n\n";
+  if (details.link) {
+    linkText = "Please open this link to set the ship date:\n\n    " + details.link + "\n\n";
+  }
+
   return {
     to: order.supplier_email,
     fromName: sender,
     subject: "Purchase order " + number + " is confirmed",
     body:
       greeting + ",\n\n" +
-      number + " is confirmed at your prices. Please ship it on " + details.shipDate + ".\n\n" +
+      number + " is confirmed at your prices.\n\n" +
+      linkText +
       "-- \n" +
       sender + "\n" +
       "This message was sent automatically. To reply, contact the shop directly.\n"

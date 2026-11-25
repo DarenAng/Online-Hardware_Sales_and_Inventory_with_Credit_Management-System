@@ -164,6 +164,7 @@ const ACCESS_RULES = [
   ["GET",   /^\/api\/supplier-order\/[A-Za-z0-9_-]{43}\/pdf$/,     PUBLIC],
   ["POST",  /^\/api\/supplier-order\/[A-Za-z0-9_-]{43}\/respond$/, PUBLIC],
   ["POST",  /^\/api\/supplier-order\/[A-Za-z0-9_-]{43}\/shortage$/, PUBLIC],
+  ["POST",  /^\/api\/supplier-order\/[A-Za-z0-9_-]{43}\/ship-date$/, PUBLIC],
 
   ["POST",  /^\/api\/materials$/,                      [CLERK]],
 

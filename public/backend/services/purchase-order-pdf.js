@@ -271,7 +271,7 @@ function purchaseOrderPdf(details) {
       .text("CHECK PRICES AND ACCEPT ONLINE", textX, y + 14, { width: textWidth, characterSpacing: 1 });
     doc.font("Helvetica").fontSize(9.5).fillColor(INK)
       .text("Scan the QR code with your phone's camera, or open the link below. Correct any price " +
-            "that does not match yours, pick the day it ships, and accept, or tell us you cannot fill it.",
+            "that does not match yours, and accept, or tell us you cannot fill it.",
             textX, doc.y + 5, { width: textWidth });
     doc.font("Helvetica").fontSize(8).fillColor(GO)
       .text(pdfText(details.link), textX, doc.y + 6, { width: textWidth, link: details.link, underline: true });

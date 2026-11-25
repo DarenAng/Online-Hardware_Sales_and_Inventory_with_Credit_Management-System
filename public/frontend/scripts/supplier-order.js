@@ -280,6 +280,7 @@ function startSupplierOrderPage() {
         if (order.closed_as === 'Denied' && !cancelledAfterAccept) answerSub = 'Denied';
         let lastStop = stop(2, 'Shipped', order.supplier_ship_date ? dayText(order.supplier_ship_date) : 'Next');
         if (confirmingPrices) lastStop = stop(2, 'Shop confirming prices', 'Waiting');
+        if (order.can_set_ship_date) lastStop = stop(2, 'Ship date', 'Now');
         if (cancelledAfterAccept) lastStop = stop(2, order.closed_as, String(order.closed_at || '').slice(0, 10));
         return '<ol class="so-track">' +
             stop(0, 'Order sent', String(order.order_date || '').slice(0, 10)) +
@@ -291,6 +292,7 @@ function startSupplierOrderPage() {
     function render(message) {
         fillHeader();
         if (view.order.can_respond) renderQuote();
+        else if (view.order.can_set_ship_date) renderShipDate(message);
         else if (view.order.can_answer_shortage) renderShortage();
         else if (view.order.status === 'Incomplete') renderShortageReceipt(message);
         else renderReceipt(message);
@@ -518,6 +520,91 @@ function startSupplierOrderPage() {
             '</section>';
     }
 
+    // The order is accepted and its prices are settled: the supplier says when it ships
+    function renderShipDate(message) {
+        const pdf = '/api/supplier-order/' + encodeURIComponent(code) + '/pdf';
+
+        main.innerHTML =
+            (message ? '<p class="so-flash is-ok">' + escapeHtml(message) + '</p>' : '') +
+            '<section class="so-hero">' + trackHtml(view.order) + '</section>' +
+
+            '<section class="so-panel">' +
+                '<header class="so-step"><span class="so-num">1</span><div><h2>When will it ship?</h2>' +
+                    '<p>The day the goods leave you for our store.</p></div></header>' +
+                '<label class="so-label" for="so-date">Ship date</label>' +
+                '<span class="so-date-box">' +
+                    '<input type="date" id="so-date" min="' + dayFromNow(1) + '" max="' + dayFromNow(365) + '"></span>' +
+                '<p class="so-when" id="so-when"></p>' +
+                '<a class="so-btn so-btn-quiet so-pdf" href="' + pdf + '" target="_blank" rel="noopener">' +
+                    '<i class="icon icon-file-text" aria-hidden="true"></i>Open the printable order (PDF)</a>' +
+            '</section>' +
+
+            '<section class="so-send">' +
+                '<p class="so-error" id="so-error" role="alert"></p>' +
+                '<button type="button" class="so-btn so-btn-big is-accept" id="so-send">' +
+                    '<i class="icon icon-send" aria-hidden="true"></i>Set ship date</button>' +
+            '</section>';
+
+        const picker = document.getElementById('so-date');
+        function pickDate() {
+            draft.shipDate = picker.value;
+            setError('');
+            refreshWhen();
+        }
+        picker.addEventListener('change', pickDate);
+        picker.addEventListener('input', pickDate);
+        document.getElementById('so-send').addEventListener('click', sendShipDate);
+        refreshWhen();
+    }
+
+    async function sendShipDate() {
+        if (!draft.shipDate) {
+            setError('Pick the ship date.');
+            document.getElementById('so-date').focus();
+            return;
+        }
+        if (dateProblem()) {
+            setError(dateProblem());
+            document.getElementById('so-date').focus();
+            return;
+        }
+        setError('');
+
+        const button = document.getElementById('so-send');
+        button.disabled = true;
+        button.innerHTML = 'Sending&hellip;';
+
+        try {
+            const response = await fetch('/api/supplier-order/' + encodeURIComponent(code) + '/ship-date', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ shipDate: draft.shipDate })
+            });
+            const result = await response.json().catch(function () { return {}; });
+
+            if (!response.ok) {
+                if (result.view) {
+                    view = result.view;
+                    render();
+                    showBanner(result.error || '', 'is-stop');
+                    return;
+                }
+                setError(result.error || 'The ship date could not be saved. Try again in a moment.');
+                button.disabled = false;
+                button.innerHTML = '<i class="icon icon-send" aria-hidden="true"></i>Set ship date';
+                return;
+            }
+
+            view = result.view;
+            render(result.message);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (problem) {
+            setError('The shop could not be reached. Check your connection and try again.');
+            button.disabled = false;
+            button.innerHTML = '<i class="icon icon-send" aria-hidden="true"></i>Set ship date';
+        }
+    }
+
     function renderQuote() {
         const order = view.order;
         const pdf = '/api/supplier-order/' + encodeURIComponent(code) + '/pdf';
@@ -575,14 +662,9 @@ function startSupplierOrderPage() {
             '</section>' +
 
             '<section class="so-panel" id="so-accept-part" hidden>' +
-                '<header class="so-step"><span class="so-num">3</span><div><h2>When will it ship?</h2>' +
-                    '<p>The day the goods leave you for our store.</p></div></header>' +
-                '<label class="so-label" for="so-date">Ship date</label>' +
-                '<span class="so-date-box">' +
-                    '<input type="date" id="so-date" min="' + dayFromNow(1) + '" max="' + dayFromNow(365) + '"></span>' +
-                '<p class="so-when" id="so-when"></p>' +
-                '<label class="so-label" for="so-note">Remarks <span>optional</span></label>' +
-                '<textarea id="so-note" class="so-input" maxlength="255" rows="2" ' +
+                '<header class="so-step"><span class="so-num">3</span><div><h2>Remarks</h2>' +
+                    '<p>Optional.</p></div></header>' +
+                '<textarea id="so-note" class="so-input" maxlength="255" rows="2" aria-label="Remarks" ' +
                     'placeholder="Two sacks arrive a day after the rest">' + escapeHtml(draft.note) + '</textarea>' +
             '</section>' +
 
@@ -644,7 +726,6 @@ function startSupplierOrderPage() {
         refreshLines();
         refreshDiscount();
         refreshDecision();
-        refreshWhen();
         refreshSummary();
     }
 
@@ -819,9 +900,6 @@ function startSupplierOrderPage() {
 
         const figures = totals();
         const rows = [];
-        rows.push('<li><span>Ships</span><strong>' +
-            (draft.shipDate && !dateProblem() ? escapeHtml(dayText(draft.shipDate, true)) : '<em>pick a date above</em>') +
-            '</strong></li>');
         let pricesText = figures.changed ? figures.changed + ' changed' : 'as ordered';
         if (figures.unpriced > 0) {
             pricesText = figures.missing > 0 ? '<em>' + figures.missing + ' still to set</em>' : 'set';
@@ -974,16 +1052,6 @@ function startSupplierOrderPage() {
             });
         }
 
-        const picker = document.getElementById('so-date');
-        function pickDate() {
-            draft.shipDate = picker.value;
-            setError('');
-            refreshWhen();
-            refreshSummary();
-        }
-        picker.addEventListener('change', pickDate);
-        picker.addEventListener('input', pickDate);
-
         document.getElementById('so-note').addEventListener('input', function (event) {
             draft.note = event.target.value;
         });
@@ -1013,8 +1081,6 @@ function startSupplierOrderPage() {
             }
         }
         if (discountProblem()) return { text: discountProblem(), focus: 'so-discount' };
-        if (!draft.shipDate) return { text: 'Pick the ship date.', focus: 'so-date' };
-        if (dateProblem()) return { text: dateProblem(), focus: 'so-date' };
         return null;
     }
 
@@ -1048,7 +1114,7 @@ function startSupplierOrderPage() {
             if (String(draft.discount).trim() !== '') {
                 discount = { type: draft.discountType, value: Number(draft.discount) };
             }
-            answer({ accept: true, shipDate: draft.shipDate, prices: prices, removed: removed, discount: discount,
+            answer({ accept: true, prices: prices, removed: removed, discount: discount,
                      note: draft.note.trim() });
         }
     }

@@ -1757,6 +1757,13 @@ function registerInventoryRoutes(app, deps) {
         return response.status(409).json({
           error: number + " is not out for delivery or incomplete, so it cannot be closed with a shortage." });
       }
+      if (neverArrived && order.price_review === "Waiting") {
+        return response.status(409).json({
+          error: number + " is waiting for the Manager to confirm the new prices." });
+      }
+      if (neverArrived && !order.supplier_ship_date) {
+        return response.status(409).json({ error: number + " has no ship date yet. Cancel it instead." });
+      }
 
       let shortLines = 0;
       let shortTotal = 0;
@@ -1771,7 +1778,8 @@ function registerInventoryRoutes(app, deps) {
           await connection.beginTransaction();
           const closedNow = await connection.query(
             "UPDATE purchase_orders SET status = 'Received', received_at = NOW(), decision_note = ? " +
-            "WHERE po_id = ? AND status = 'Pending' AND supplier_response = 'Accepted'",
+            "WHERE po_id = ? AND status = 'Pending' AND supplier_response = 'Accepted' " +
+            "AND supplier_ship_date IS NOT NULL AND (price_review IS NULL OR price_review = 'Confirmed')",
             [reason, poId]);
           if (closedNow[0].affectedRows === 0) {
             await connection.rollback();
@@ -1945,7 +1953,7 @@ function registerInventoryRoutes(app, deps) {
       }
 
       const orderResult = await db.query(
-        "SELECT po.supplier_ship_date, s.supplier_name FROM purchase_orders po " +
+        "SELECT s.supplier_name FROM purchase_orders po " +
         "JOIN suppliers s ON s.supplier_id = po.supplier_id WHERE po.po_id = ?", [poId]);
       const order = orderResult[0][0];
 
@@ -1953,16 +1961,26 @@ function registerInventoryRoutes(app, deps) {
         number + " confirmed at the prices set by " + order.supplier_name,
         { po_id: poId, supplier: order.supplier_name });
 
-      const shipText = dayText(order.supplier_ship_date);
+      // The supplier sets the ship date on the order link, so the email carries the link
+      let shipLink = "";
+      try {
+        const codeResult = await db.query("SELECT supplier_code FROM purchase_orders WHERE po_id = ?", [poId]);
+        const supplierCode = codeResult[0][0] ? codeResult[0][0].supplier_code : null;
+        if (supplierCode) {
+          shipLink = supplierOrderLink(request.protocol + "://" + request.get("host"), supplierCode) || "";
+        }
+      } catch (linkError) {
+        console.error("The prices were confirmed, but the order link could not be made:", linkError.message);
+      }
       const emailed = await mailSupplier(poId, function (mailOrder, shop) {
-        return pricesConfirmedMessage({ order: mailOrder, shop: shop, shipDate: shipText });
+        return pricesConfirmedMessage({ order: mailOrder, shop: shop, link: shipLink });
       });
 
       try {
         await tellManagerAndClerk(
           number + " prices confirmed",
-          "The new prices on " + number + " from " + order.supplier_name + " are confirmed. It is out for delivery on " +
-          shipText + ".");
+          "The new prices on " + number + " from " + order.supplier_name + " are confirmed. " +
+          order.supplier_name + " sets the ship date next.");
       } catch (tellError) {
         console.error("The prices were confirmed, but the notification failed:", tellError.message);
       }
@@ -2285,6 +2303,8 @@ function registerInventoryRoutes(app, deps) {
         price_review: order.price_review,
         answer_by: order.answer_by,
         can_respond: order.status === "Pending" && !order.supplier_response,
+        can_set_ship_date: order.status === "Pending" && order.supplier_response === "Accepted" &&
+          !order.supplier_ship_date && order.price_review !== "Waiting" && !order.closed_as,
         shortage_response: order.shortage_response,
         shortage_responded_at: order.shortage_responded_at,
         shortage_note: order.shortage_note,
@@ -2358,23 +2378,6 @@ function registerInventoryRoutes(app, deps) {
 
     if (!accept && note.length < 5) {
       return response.status(400).json({ error: "Say why the order cannot be filled, so the shop can act on it." });
-    }
-
-    let shipDate = null;
-    if (accept) {
-      shipDate = String(body.shipDate || "").trim();
-      const parsed = new Date(shipDate + "T00:00:00");
-      const real = /^\d{4}-\d{2}-\d{2}$/.test(shipDate) && !Number.isNaN(parsed.getTime()) &&
-                   isoDay(parsed) === shipDate;
-      if (!real) {
-        return response.status(400).json({ error: "Pick the date the order will ship." });
-      }
-      if (shipDate <= calendarDay(0)) {
-        return response.status(400).json({ error: "Pick a ship date after today." });
-      }
-      if (shipDate > calendarDay(365)) {
-        return response.status(400).json({ error: "Pick a ship date within the next year." });
-      }
     }
 
     let asked = [];
@@ -2540,11 +2543,11 @@ function registerInventoryRoutes(app, deps) {
 
       const queryResult = await connection.query(
         "UPDATE purchase_orders " +
-        "SET supplier_response = ?, supplier_responded_at = NOW(), supplier_note = ?, supplier_ship_date = ?, " +
+        "SET supplier_response = ?, supplier_responded_at = NOW(), supplier_note = ?, supplier_ship_date = NULL, " +
         "discount = CASE WHEN ? THEN ? ELSE discount END, price_review = ? " +
         "WHERE po_id = ? AND status = 'Pending' AND supplier_response IS NULL " +
         "AND (supplier_sent_at IS NULL OR supplier_sent_at > NOW() - INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR)",
-        [accept ? "Accepted" : "Declined", note || null, shipDate, accept, discount,
+        [accept ? "Accepted" : "Declined", note || null, accept, discount,
          needsReview ? "Waiting" : null, order.po_id]);
       const result = queryResult[0];
 
@@ -2604,7 +2607,7 @@ function registerInventoryRoutes(app, deps) {
       }
 
       let title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id);
-      let message = order.supplier_name + " accepted " + number + " and will ship it on " + dayText(shipDate) + ".";
+      let message = order.supplier_name + " accepted " + number + ".";
       if (lastPaidChanges.length > 0) {
         title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id) +
           (anyChanged ? " with price changes" : " with prices to confirm");
@@ -2630,6 +2633,7 @@ function registerInventoryRoutes(app, deps) {
       if (discount > 0) {
         message += " They gave a discount of " + pesoText(discount) + ", so the order comes to " + pesoText(after - discount) + ".";
       }
+      if (!needsReview) message += " They will set the ship date on the order link.";
       // The Manager is asked to confirm the prices; the clerk is only told that the Manager will
       let managerMessage = message + lastPaidText + (lastPaidText ? " Confirm or deny the new prices on the order." : "");
       let clerkMessage = message + lastPaidText + (lastPaidText ? " The Manager confirms or denies the new prices." : "");
@@ -2660,7 +2664,7 @@ function registerInventoryRoutes(app, deps) {
         } else if (repriced.length > 0) {
           priceNote = ", " + repriced.length + " price(s) changed, total " + pesoText(before) + " to " + pesoText(after);
         }
-        details = number + " accepted by " + order.supplier_name + " from the link on the order, shipping " + shipDate +
+        details = number + " accepted by " + order.supplier_name + " from the link on the order" +
           priceNote + removedText.replace(" They removed", ", removed").replace(/\.$/, "") +
           (discount > 0 ? ", discount " + pesoText(discount) : "") +
           (note ? ": " + note : "");
@@ -2675,7 +2679,7 @@ function registerInventoryRoutes(app, deps) {
       }
       await writeAuditLog(request, accept ? "PURCHASE_ORDER_ACCEPTED" : "PURCHASE_ORDER_DECLINED_BY_SUPPLIER",
         details,
-        { po_id: order.po_id, supplier: order.supplier_name, accepted: accept, ship_date: shipDate, discount: discount,
+        { po_id: order.po_id, supplier: order.supplier_name, accepted: accept, discount: discount,
           prices: auditPrices, changed_from_last_order: lastPaidChanges });
 
       if (publishChange) {
@@ -2685,7 +2689,10 @@ function registerInventoryRoutes(app, deps) {
 
       response.json({
         message: accept
-          ? "Thank you. " + number + " is accepted, and " + (document.shop.store_name || "the shop") + " has been told."
+          ? (needsReview
+            ? "Thank you. " + number + " is accepted. " + (document.shop.store_name || "The shop") +
+              " will confirm the prices before you set the ship date."
+            : "Thank you. " + number + " is accepted. Set the ship date below.")
           : "Thank you. " + (document.shop.store_name || "The shop") + " has been told that " + number + " cannot be filled.",
         view: supplierView(await readOrderDocument(order.po_id))
       });
@@ -2699,6 +2706,82 @@ function registerInventoryRoutes(app, deps) {
       }
       console.error("Supplier response failed:", error.message);
       response.status(500).json({ error: "Your answer could not be saved. Try again in a moment." });
+    }
+  });
+
+  // The supplier sets the ship date once the order is accepted and its prices are settled
+  app.post("/api/supplier-order/:code/ship-date", async function (request, response) {
+    const body = request.body || {};
+
+    const shipDate = String(body.shipDate || "").trim();
+    const parsed = new Date(shipDate + "T00:00:00");
+    const real = /^\d{4}-\d{2}-\d{2}$/.test(shipDate) && !Number.isNaN(parsed.getTime()) &&
+                 isoDay(parsed) === shipDate;
+    if (!real) {
+      return response.status(400).json({ error: "Pick the date the order will ship." });
+    }
+    if (shipDate <= calendarDay(0)) {
+      return response.status(400).json({ error: "Pick a ship date after today." });
+    }
+    if (shipDate > calendarDay(365)) {
+      return response.status(400).json({ error: "Pick a ship date within the next year." });
+    }
+
+    try {
+      await closeUnansweredOrders();
+      const document = await orderForCode(request.params.code);
+      if (!document) return response.status(404).json({ error: UNKNOWN_LINK });
+      const order = document.order;
+      const number = helpers.poNumber(order.po_id);
+
+      const queryResult = await db.query(
+        "UPDATE purchase_orders SET supplier_ship_date = ? " +
+        "WHERE po_id = ? AND status = 'Pending' AND supplier_response = 'Accepted' " +
+        "AND supplier_ship_date IS NULL AND (price_review IS NULL OR price_review = 'Confirmed')",
+        [shipDate, order.po_id]);
+
+      if (queryResult[0].affectedRows === 0) {
+        const again = await readOrderDocument(order.po_id);
+        let why = number + " can no longer be answered here: it is " + String(again.order.status).toLowerCase() + ".";
+        if (again.order.closed_as === "Cancelled") {
+          why = number + " was cancelled by the shop. Contact the shop.";
+        } else if (again.order.closed_as === "Denied") {
+          why = number + " was denied by the shop. Contact the shop.";
+        } else if (again.order.closed_as === "No Answer") {
+          why = number + " expired without an answer. Contact the shop.";
+        } else if (again.order.supplier_response === "Declined") {
+          why = number + " was declined. Contact the shop.";
+        } else if (!again.order.supplier_response) {
+          why = number + " has not been accepted yet.";
+        } else if (again.order.price_review === "Waiting") {
+          why = "The shop is still confirming the prices on " + number + ". You can set the ship date after that.";
+        } else if (again.order.supplier_ship_date) {
+          why = "The ship date for " + number + " is already set. Contact the shop to change it.";
+        }
+        return response.status(409).json({ error: why, view: supplierView(again) });
+      }
+
+      const dateText = dayText(shipDate);
+      const title = order.supplier_name + " set the ship date for " + number;
+      const message = order.supplier_name + " will ship " + number + " on " + dateText + ".";
+
+      // The date is saved; a failure while telling the shop must not turn into an error for the supplier
+      try {
+        await tellManagerAndClerk(title, message);
+        await writeAuditLog(request, "PURCHASE_ORDER_SHIP_DATE_SET",
+          number + " ship date set by " + order.supplier_name + " from the link on the order: " + shipDate,
+          { po_id: order.po_id, supplier: order.supplier_name, ship_date: shipDate });
+      } catch (afterError) {
+        console.error("The ship date was saved, but the notification or log failed:", afterError.message);
+      }
+
+      response.json({
+        message: "Thank you. " + number + " ships on " + dateText + ".",
+        view: supplierView(await readOrderDocument(order.po_id))
+      });
+    } catch (error) {
+      console.error("Setting the ship date failed:", error.message);
+      response.status(500).json({ error: "The ship date could not be saved. Try again in a moment." });
     }
   });
 
@@ -2818,12 +2901,20 @@ function registerInventoryRoutes(app, deps) {
 
     try {
       const stateResult = await db.query(
-        "SELECT status, supplier_response, price_review FROM purchase_orders WHERE po_id = ?", [Number(request.params.poId)]);
+        "SELECT po.status, po.supplier_response, po.price_review, po.supplier_ship_date, s.supplier_name " +
+        "FROM purchase_orders po JOIN suppliers s ON s.supplier_id = po.supplier_id WHERE po.po_id = ?",
+        [Number(request.params.poId)]);
       const state = stateResult[0][0];
       if (!state) return response.status(404).json({ error: "That purchase order does not exist" });
       if (state.status === "Pending" && state.price_review === "Waiting") {
         return response.status(409).json({
           error: "Purchase order " + helpers.poNumber(request.params.poId) + " is waiting for the Manager to confirm the new prices."
+        });
+      }
+      if (state.status === "Pending" && state.supplier_response === "Accepted" && !state.supplier_ship_date) {
+        return response.status(409).json({
+          error: helpers.poNumber(request.params.poId) + " is waiting for " +
+            (state.supplier_name || "the supplier") + " to set the ship date."
         });
       }
       if (state.status === "Pending" && state.supplier_response !== "Accepted") {
