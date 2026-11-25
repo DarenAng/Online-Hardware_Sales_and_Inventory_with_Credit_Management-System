@@ -56,10 +56,6 @@
             </header>
 
             <div class="content-area">
-        <section class="card cp-panel" id="panel-account" hidden>
-            <div class="detail-grid" id="account-facts"></div>
-        </section>
-
         <section class="card cp-panel" id="panel-credits">
             <div class="subnav" aria-label="Credits">
                 <button type="button" class="subnav-tab is-current" id="credit-Unpaid" onclick="pickCreditTab('Unpaid')">Unpaid</button>
@@ -89,7 +85,7 @@
             <p id="delivery-message" role="status"></p>
             <div class="table-responsive">
                 <table id="deliveries-table">
-                    <thead><tr><th>ID</th><th>Destination</th><th>Scheduled</th><th>Status</th><th>Delivery Progress</th></tr></thead>
+                    <thead><tr><th>ID</th><th>Destination</th><th>Scheduled</th><th>Status</th><th>Delivered</th></tr></thead>
                     <tbody></tbody>
                 </table>
             </div>
@@ -199,47 +195,71 @@
         </div>
     </div>
 
-    <div class="modal" id="password-modal" data-modal-locked>
+    <div class="modal" id="account-modal">
         <div class="modal-box">
             <div class="modal-head">
                 <div class="modal-identity">
-                    <div class="avatar"><i class="icon icon-lock" aria-hidden="true"></i></div>
+                    <div class="avatar" id="account-avatar">--</div>
                     <div>
-                        <h3>Change Password</h3>
+                        <h3 id="account-name">My Account</h3>
+                        <span class="modal-role" id="account-role">Customer</span>
                     </div>
                 </div>
+                <button type="button" class="modal-close" id="account-close" onclick="requestCloseModal('account-modal')" aria-label="Close">&times;</button>
             </div>
-            <form id="password-form" onsubmit="handleChangePassword(event)" autocomplete="off">
-                <div class="modal-body">
+
+            <div class="modal-tabs" id="account-tabs">
+                <button type="button" class="modal-tab active" id="account-tab-view"
+                        onclick="showAccountTab('view')">Credentials</button>
+                <button type="button" class="modal-tab" id="account-tab-password"
+                        onclick="showAccountTab('password')">Password</button>
+            </div>
+
+            <div class="modal-body">
+                <div class="detail-grid" id="account-view"></div>
+
+                <div id="account-password" style="display: none;">
                     <p id="password-required" hidden>Please change your temporary password before using your account.</p>
                     <p class="login-alert" id="password-alert" role="alert" hidden></p>
-                    <div class="form-group">
-                        <label for="pw-current">Current password</label>
-                        <input type="password" id="pw-current" name="currentPassword" class="form-control"
-                               autocomplete="current-password" required>
-                    </div>
-                    <div class="form-group">
-                        <label for="pw-new">New password</label>
-                        <input type="password" id="pw-new" name="newPassword" class="form-control"
-                               autocomplete="new-password" required>
-                        <ul class="password-rules" data-rules-for="pw-new"></ul>
-                    </div>
-                    <div class="form-group">
-                        <label for="pw-again">Type it again</label>
-                        <input type="password" id="pw-again" name="confirmPassword" class="form-control"
-                               autocomplete="new-password" required>
-                    </div>
-                    <div class="password-reveal">
-                        <button type="button" class="password-toggle" data-password-for="pw-current,pw-new,pw-again"
-                                aria-pressed="false">Show passwords</button>
-                    </div>
+                    <form id="account-password-form" onsubmit="handleChangePassword(event)" autocomplete="off">
+                        <div class="form-group">
+                            <label for="me-current">Current password</label>
+                            <div class="password-field">
+                                <input type="password" id="me-current" name="currentPassword"
+                                       class="form-control" required autocomplete="current-password">
+                                <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                            </div>
+                        </div>
+                        <div class="grid-2">
+                            <div class="form-group">
+                                <label for="me-new">New password</label>
+                                <div class="password-field">
+                                    <input type="password" id="me-new" name="newPassword" class="form-control"
+                                           minlength="8" required autocomplete="new-password">
+                                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                                </div>
+                                <ul class="password-rules" data-rules-for="me-new"></ul>
+                            </div>
+                            <div class="form-group">
+                                <label for="me-confirm">Confirm new password</label>
+                                <div class="password-field">
+                                    <input type="password" id="me-confirm" name="confirmPassword"
+                                           class="form-control" minlength="8" required autocomplete="new-password">
+                                    <button type="button" class="password-toggle" aria-pressed="false" aria-label="Show password">Show</button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
                 </div>
-                <div class="modal-foot">
-                    <button type="button" class="btn btn-ghost" id="password-cancel" onclick="closeModal('password-modal')">Cancel</button>
+            </div>
+
+            <div class="modal-foot" id="account-foot">
+                <div class="detail-foot-actions" id="account-foot-password" hidden>
+                    <button type="button" class="btn btn-ghost" id="password-cancel" onclick="cancelAccountForm()">Cancel</button>
                     <button type="button" class="btn btn-ghost" id="password-logout" onclick="handleLogout()" hidden>Log out</button>
-                    <button type="submit" class="btn btn-accent" id="password-save-btn">Save the new password</button>
+                    <button type="submit" form="account-password-form" class="btn btn-success" id="password-save-btn">Change Password</button>
                 </div>
-            </form>
+            </div>
         </div>
     </div>
 

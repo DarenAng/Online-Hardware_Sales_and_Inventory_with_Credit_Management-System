@@ -67,12 +67,6 @@ document.addEventListener('click', function () {
     if (menu) menu.hidden = true;
 });
 
-// "Account" in the name menu at the top right opens the account summary.
-function openAccount() {
-    toggleSidebar(false);
-    showTab('account');
-}
-
 // ---- Small helpers ----
 
 function dayText(stamp) {
@@ -135,8 +129,8 @@ function turnPage(name, step) {
 
 // ---- Tabs ----
 
-const TABS = ['account', 'credits', 'deliveries', 'payments', 'loyalty'];
-const TAB_TITLES = { account: 'Account', credits: 'Credits', deliveries: 'Deliveries', payments: 'Payment History', loyalty: 'Loyalty Discount' };
+const TABS = ['credits', 'deliveries', 'payments', 'loyalty'];
+const TAB_TITLES = { credits: 'Credits', deliveries: 'Deliveries', payments: 'Payment History', loyalty: 'Loyalty Discount' };
 
 // A sidebar link was clicked: open that section and close the sidebar on a phone.
 function pickSection(event, name) {
@@ -149,14 +143,11 @@ async function showTab(name) {
     if (mustChangePassword) { openChangePassword(); return; }
     for (let i = 0; i < TABS.length; i++) {
         document.getElementById('panel-' + TABS[i]).hidden = TABS[i] !== name;
-        // Account has no sidebar link (it is in the name menu), so only the others get highlighted.
-        const link = document.getElementById('tab-' + TABS[i]);
-        if (link) link.classList.toggle('active', TABS[i] === name);
+        document.getElementById('tab-' + TABS[i]).classList.toggle('active', TABS[i] === name);
     }
     document.getElementById('cp-title').textContent = TAB_TITLES[name];
 
     try {
-        if (name === 'account') await loadAccount();
         if (name === 'credits') await loadCredits();
         if (name === 'deliveries') await loadDeliveries();
         if (name === 'payments') await loadPayments();
@@ -168,24 +159,89 @@ async function showTab(name) {
 
 // ---- Account ----
 
+let portalAccount = null;
+
+// Reads the customer's own facts and shows them in the Account window.
 async function loadAccount() {
     const result = await apiPortalAccount();
     if (!result.ok) {
         notifyError(result.body.error || 'Your account could not be read.', 'Nothing to show');
         return;
     }
+    portalAccount = result.body;
+    document.getElementById('cp-name').textContent = portalAccount.name;
+    renderAccount();
+}
 
-    const a = result.body;
-    document.getElementById('cp-name').textContent = a.name;
-    document.getElementById('account-facts').innerHTML =
-        detailField('Name', escapeHtml(a.name)) +
-        detailField('User ID', customerCode(a.customerId)) +
-        detailField('Email', escapeHtml(a.email || '')) +
-        detailField('Credit Limit', peso(a.creditLimit)) +
-        detailField('Current Balance', '<span class="' + (a.balance > 0 ? 'cell-due' : '') + '">' + peso(a.balance) + '</span>') +
-        detailField('Available Credit', peso(a.available)) +
+function renderAccount() {
+    const a = portalAccount;
+    if (!a) return;
+
+    document.getElementById('account-name').textContent = a.name;
+    document.getElementById('account-role').textContent = 'Customer';
+    const words = String(a.name || '?').trim().split(/\s+/);
+    document.getElementById('account-avatar').textContent =
+        (words[0][0] + (words.length > 1 ? words[words.length - 1][0] : '')).toUpperCase();
+
+    document.getElementById('account-view').innerHTML =
+        detailField('User ID', customerCode(a.customerId), true) +
+        detailField('Full Name', escapeHtml(a.name), true) +
+        detailField('Username / Email', escapeHtml(a.email || ''), true) +
+        detailField('Credit Limit', peso(a.creditLimit), true) +
+        detailField('Current Balance', '<span class="' + (a.balance > 0 ? 'cell-due' : '') + '">' + peso(a.balance) + '</span>', true) +
+        detailField('Available Credit', peso(a.available), true) +
         detailField('Credit Status', '<span class="badge ' + (STANDING_TONE[a.standing] || 'badge-neutral') + '">' +
-            escapeHtml(STANDING_WORD[a.standing] || a.standing) + '</span>');
+            escapeHtml(STANDING_WORD[a.standing] || a.standing) + '</span>', true);
+}
+
+function showAccountTab(tab) {
+    document.getElementById('account-foot-password').hidden = tab !== 'password';
+    const names = ['view', 'password'];
+    for (let i = 0; i < names.length; i++) {
+        const panel = document.getElementById('account-' + names[i]);
+        panel.style.display = names[i] !== tab ? 'none' : (names[i] === 'view' ? 'grid' : 'block');
+        document.getElementById('account-tab-' + names[i]).classList.toggle('active', names[i] === tab);
+    }
+}
+
+// Opens the Account window. A first sign-in with a temporary password opens it locked on the Password tab.
+async function openAccount(tab) {
+    toggleSidebar(false);
+    const modal = document.getElementById('account-modal');
+    const form = document.getElementById('account-password-form');
+    form.reset();
+    showPasswordRules();
+    rememberForm('account-password', form);
+    document.getElementById('password-alert').hidden = true;
+    document.getElementById('password-save-btn').disabled = false;
+    document.getElementById('password-required').hidden = !mustChangePassword;
+    document.getElementById('password-cancel').hidden = mustChangePassword;
+    document.getElementById('password-logout').hidden = !mustChangePassword;
+    document.getElementById('account-close').hidden = mustChangePassword;
+    document.getElementById('account-tabs').hidden = mustChangePassword;
+    if (mustChangePassword) modal.setAttribute('data-modal-locked', '');
+    else modal.removeAttribute('data-modal-locked');
+
+    showAccountTab(mustChangePassword ? 'password' : (tab || 'view'));
+    showModal('account-modal');
+    // The account details stay closed until a temporary password is changed
+    if (mustChangePassword) return;
+    try {
+        await loadAccount();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+async function cancelAccountForm() {
+    const form = document.getElementById('account-password-form');
+    if (formChanged('account-password', form)) {
+        if (!(await askDiscard('your new password'))) return;
+    }
+    form.reset();
+    showPasswordRules();
+    rememberForm('account-password', form);
+    showAccountTab('view');
 }
 
 // ---- Credits ----
@@ -441,31 +497,13 @@ function renderDeliveries() {
         return row.status === 'Pending' || row.status === 'Out for Delivery' || row.status === 'Delayed';
     });
     drawTable('deliveries', rows, 5, function (row) {
-        // Which step the delivery is on: 1 Pending, 2 Out for Delivery, 3 Completed
-        let step = 1;
-        if (row.status === 'Out for Delivery' || row.status === 'Delayed' || row.status === 'Failed') step = 2;
-        if (row.status === 'Delivered') step = 3;
         const status = row.status === 'Delivered' ? 'Completed' : row.status;
-        const stopped = row.status === 'Failed' || row.status === 'Cancelled';
-        const names = ['Pending', 'Out for Delivery', 'Completed'];
-        let steps = '';
-        for (let i = 1; i <= 3; i++) {
-            let state = '';
-            if (i < step || row.status === 'Delivered') state = 'done';
-            else if (i === step) state = stopped ? 'stop' : 'now';
-            steps += '<li class="dstep-item ' + state + '">' +
-                '<span class="dstep-dot">' + (state === 'done' ? '&#10003;' : i) + '</span>' +
-                '<span class="dstep-text"><span class="dstep-name">' + names[i - 1] + '</span></span></li>';
-        }
-        let tracking = '<div class="cp-tracking"><ol class="dstep-list" aria-label="Delivery progress: ' + escapeHtml(status) + '">' + steps + '</ol>';
-        if (row.status === 'Delayed') tracking += '<small>Delayed — awaiting a delivery update.</small>';
-        if (stopped) tracking += '<small>' + escapeHtml(status) + ' — contact the store for assistance.</small>';
-        if (row.delivered_at) tracking += '<small>Delivered on ' + dayText(row.delivered_at) + '</small>';
-        tracking += '</div>';
+        const tone = { Completed: 'badge-success', Failed: 'badge-danger', Cancelled: 'badge-danger', Delayed: 'badge-warning' };
         return '<tr class="row-clickable" onclick="openCustomerDelivery(' + Number(row.delivery_id) + ')">' +
             '<td class="cell-id">D' + String(row.delivery_id).padStart(4, '0') + '</td>' +
             '<td>' + escapeHtml(row.delivery_address) + '</td><td>' + dayText(row.scheduled_date) + '</td>' +
-            '<td>' + escapeHtml(status) + '</td><td>' + tracking + '</td></tr>';
+            '<td><span class="badge ' + (tone[status] || 'badge-neutral') + '">' + escapeHtml(status) + '</span></td>' +
+            '<td>' + (row.delivered_at ? dayText(row.delivered_at) : '-') + '</td></tr>';
     }, 'No ' + deliveryTab.toLowerCase() + ' deliveries.');
 }
 
@@ -791,16 +829,7 @@ async function askCancelQr() {
 // ---- Change password ----
 
 function openChangePassword() {
-    document.getElementById('password-required').hidden = !mustChangePassword;
-    document.getElementById('password-cancel').hidden = mustChangePassword;
-    document.getElementById('password-logout').hidden = !mustChangePassword;
-    const form = document.getElementById('password-form');
-    form.reset();
-    document.getElementById('password-alert').hidden = true;
-    document.getElementById('password-save-btn').disabled = false;
-    showPasswordRules();
-    showModal('password-modal');
-    document.getElementById('pw-current').focus();
+    return openAccount('password');
 }
 
 async function handleChangePassword(event) {
@@ -839,7 +868,10 @@ async function handleChangePassword(event) {
         }
         const wasRequired = mustChangePassword;
         mustChangePassword = false;
-        closeModal('password-modal');
+        form.reset();
+        showPasswordRules();
+        rememberForm('account-password', form);
+        closeModal('account-modal');
         if (wasRequired) showTab('credits');
         notifySuccess('Your password was changed.', 'Password changed');
     } catch (error) {
@@ -849,3 +881,10 @@ async function handleChangePassword(event) {
 }
 
 document.addEventListener('DOMContentLoaded', startPortal);
+
+setModalCloseGuard('account-modal', function () {
+    if (formChanged('account-password', document.getElementById('account-password-form'))) {
+        return askDiscard('your new password');
+    }
+    return true;
+});

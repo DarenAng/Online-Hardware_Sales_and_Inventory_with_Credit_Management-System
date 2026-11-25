@@ -137,7 +137,7 @@ function purchaseOrderPdf(details) {
 
   const columns = [
     { title: "NO", width: 30, align: "left" },
-    { title: "MATERIAL NAME", width: 0, align: "left" },
+    { title: "PRODUCT NAME", width: 0, align: "left" },
     { title: "CATEGORY", width: 76, align: "left" },
     { title: "DESCRIPTION", width: 86, align: "left" },
     { title: "QTY", width: 56, align: "right" },

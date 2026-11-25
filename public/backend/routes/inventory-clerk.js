@@ -7,6 +7,8 @@ const sendMail = mailer.sendMail;
 const purchaseOrderMessage = mailer.purchaseOrderMessage;
 const shortageMessage = mailer.shortageMessage;
 const cancelledOrderMessage = mailer.cancelledOrderMessage;
+const pricesConfirmedMessage = mailer.pricesConfirmedMessage;
+const pricesDeniedMessage = mailer.pricesDeniedMessage;
 const supplierOrderLink = mailer.supplierOrderLink;
 const qrPng = mailer.qrPng;
 const purchaseOrderPdf = require("../services/purchase-order-pdf").purchaseOrderPdf;
@@ -777,7 +779,7 @@ function registerInventoryRoutes(app, deps) {
         "IF(po.supplier_sent_at IS NULL, NULL, DATE_ADD(po.supplier_sent_at, INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR)) " +
         "AS answer_by, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
-        "po.supplier_ship_date, " +
+        "po.supplier_ship_date, po.price_review, po.price_review_at, " +
         "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
         "rb.full_name AS raised_by, cb.full_name AS confirmed_by, " +
         "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, " +
@@ -802,7 +804,8 @@ function registerInventoryRoutes(app, deps) {
         "GROUP BY po.po_id, po.status, po.order_date, po.confirmed_at, po.decision_note, po.received_at, po.discount, " +
         "po.closed_as, po.closed_note, po.closed_at, cl.full_name, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
-        "po.supplier_ship_date, po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
+        "po.supplier_ship_date, po.price_review, po.price_review_at, " +
+        "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
         "rb.full_name, cb.full_name, " +
         "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, s.email " +
         "ORDER BY FIELD(po.status, 'For Approval', 'Pending', 'Incomplete', 'Received', 'Cancelled'), po.po_id DESC"
@@ -1111,6 +1114,7 @@ function registerInventoryRoutes(app, deps) {
       "IF(po.supplier_sent_at IS NULL, NULL, DATE_ADD(po.supplier_sent_at, INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR)) " +
       "AS answer_by, " +
       "po.supplier_response, po.supplier_responded_at, po.supplier_note, po.supplier_ship_date, " +
+      "po.price_review, po.price_review_at, " +
       "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
       "po.discount, " +
       "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, " +
@@ -1837,7 +1841,7 @@ function registerInventoryRoutes(app, deps) {
       // and nothing has been received yet (a received order is no longer Pending)
       const result = await db.query(
         "UPDATE purchase_orders SET status = 'Cancelled', closed_as = 'Cancelled', closed_note = ?, " +
-        "closed_at = NOW(), closed_by_staff_id = ? WHERE po_id = ? AND status = 'Pending' " +
+        "closed_at = NOW(), closed_by_staff_id = ?, price_review = NULL WHERE po_id = ? AND status = 'Pending' " +
         "AND (supplier_response IS NULL OR supplier_response = 'Accepted')",
         [reason, getActorId(request), poId]);
 
@@ -1901,6 +1905,213 @@ function registerInventoryRoutes(app, deps) {
       console.error("Cancelling the purchase order failed:", error.message);
       response.status(500).json({ error: "Unable to cancel the purchase order" });
     }
+  });
+
+  // Emails the supplier a message built from the order. Returns true when it was sent, false when mail is
+  // not set up or the supplier has no email. A failed email is logged and never undoes what was saved.
+  async function mailSupplier(poId, buildMessage) {
+    try {
+      const document = await readOrderDocument(poId);
+      const email = String(document.order.supplier_email || "").trim();
+      if (!email || !isMailConfigured()) return false;
+      await sendMail(buildMessage(Object.assign({}, document.order, { supplier_email: email }), document.shop));
+      return true;
+    } catch (mailError) {
+      console.error("The order was saved, but emailing the supplier failed:", mailError.message);
+      return false;
+    }
+  }
+
+  // Why a price decision was refused: the order is missing, or not waiting for the manager
+  async function priceReviewRefusal(poId) {
+    const rowsResult = await db.query("SELECT po_id FROM purchase_orders WHERE po_id = ?", [poId]);
+    if (!rowsResult[0][0]) return { status: 404, error: "That purchase order does not exist" };
+    return { status: 409, error: helpers.poNumber(poId) + " is not waiting for the new prices to be confirmed." };
+  }
+
+  // The manager confirms the prices the supplier set. The order goes ahead and the supplier is emailed.
+  app.post("/api/purchase-orders/:poId/confirm-prices", async function (request, response) {
+    const poId = Number(request.params.poId);
+    const number = helpers.poNumber(poId);
+    try {
+      const result = await db.query(
+        "UPDATE purchase_orders SET price_review = 'Confirmed', price_review_at = NOW(), " +
+        "price_review_by_staff_id = ? WHERE po_id = ? AND status = 'Pending' " +
+        "AND supplier_response = 'Accepted' AND price_review = 'Waiting'",
+        [getActorId(request), poId]);
+      if (result[0].affectedRows === 0) {
+        const refusal = await priceReviewRefusal(poId);
+        return response.status(refusal.status).json({ error: refusal.error });
+      }
+
+      const orderResult = await db.query(
+        "SELECT po.supplier_ship_date, s.supplier_name FROM purchase_orders po " +
+        "JOIN suppliers s ON s.supplier_id = po.supplier_id WHERE po.po_id = ?", [poId]);
+      const order = orderResult[0][0];
+
+      await writeAuditLog(request, "PURCHASE_ORDER_PRICES_CONFIRMED",
+        number + " confirmed at the prices set by " + order.supplier_name,
+        { po_id: poId, supplier: order.supplier_name });
+
+      const shipText = dayText(order.supplier_ship_date);
+      const emailed = await mailSupplier(poId, function (mailOrder, shop) {
+        return pricesConfirmedMessage({ order: mailOrder, shop: shop, shipDate: shipText });
+      });
+
+      try {
+        await tellManagerAndClerk(
+          number + " prices confirmed",
+          "The new prices on " + number + " from " + order.supplier_name + " are confirmed. It is out for delivery on " +
+          shipText + ".");
+      } catch (tellError) {
+        console.error("The prices were confirmed, but the notification failed:", tellError.message);
+      }
+
+      response.json({
+        message: number + " is confirmed. " +
+          (emailed ? order.supplier_name + " has been emailed." : "Tell " + order.supplier_name + " by phone.")
+      });
+    } catch (error) {
+      console.error("Confirming the prices failed:", error.message);
+      response.status(500).json({ error: "Unable to confirm the prices" });
+    }
+  });
+
+  // The manager denies the prices the supplier set. The order is closed and the supplier is emailed.
+  app.post("/api/purchase-orders/:poId/deny-prices", async function (request, response) {
+    const poId = Number(request.params.poId);
+    const number = helpers.poNumber(poId);
+    const reason = String((request.body && request.body.reason) || "").trim().slice(0, 255);
+    if (reason.length < 5) {
+      return response.status(400).json({ error: "Write why the prices are denied." });
+    }
+    try {
+      const result = await db.query(
+        "UPDATE purchase_orders SET status = 'Cancelled', closed_as = 'Denied', closed_note = ?, " +
+        "closed_at = NOW(), closed_by_staff_id = ? WHERE po_id = ? AND status = 'Pending' " +
+        "AND supplier_response = 'Accepted' AND price_review = 'Waiting'",
+        [reason, getActorId(request), poId]);
+      if (result[0].affectedRows === 0) {
+        const refusal = await priceReviewRefusal(poId);
+        return response.status(refusal.status).json({ error: refusal.error });
+      }
+
+      const orderResult = await db.query(
+        "SELECT s.supplier_name FROM purchase_orders po " +
+        "JOIN suppliers s ON s.supplier_id = po.supplier_id WHERE po.po_id = ?", [poId]);
+      const order = orderResult[0][0];
+
+      await writeAuditLog(request, "PURCHASE_ORDER_PRICES_DENIED",
+        number + " denied, the prices set by " + order.supplier_name + " were not accepted: " + reason,
+        { po_id: poId, supplier: order.supplier_name });
+      if (publishChange) publishChange("inventory", "denied " + number, request.headers["x-client-id"] || null);
+
+      const emailed = await mailSupplier(poId, function (mailOrder, shop) {
+        return pricesDeniedMessage({ order: mailOrder, shop: shop, reason: reason });
+      });
+
+      try {
+        await tellManagerAndClerk(
+          number + " denied",
+          "The new prices on " + number + " from " + order.supplier_name + " were denied. Reason: " + reason);
+      } catch (tellError) {
+        console.error("The prices were denied, but the notification failed:", tellError.message);
+      }
+
+      response.json({
+        message: number + " is denied and closed. " +
+          (emailed ? order.supplier_name + " has been emailed." : "Tell " + order.supplier_name + " by phone.")
+      });
+    } catch (error) {
+      console.error("Denying the prices failed:", error.message);
+      response.status(500).json({ error: "Unable to deny the prices" });
+    }
+  });
+
+  // Delete Order: an order that is still waiting for the manager's approval can be removed for good
+  app.delete("/api/purchase-orders/:poId", async function (request, response) {
+    const poId = Number(request.params.poId);
+    const number = helpers.poNumber(poId);
+
+    let connection = null;
+    let supplierName = "";
+    let lineCount = 0;
+    const removedProducts = [];
+    try {
+      connection = await db.getConnection();
+      await connection.beginTransaction();
+
+      const orderResult = await connection.query(
+        "SELECT po.status, po.order_date, s.supplier_name FROM purchase_orders po " +
+        "JOIN suppliers s ON s.supplier_id = po.supplier_id WHERE po.po_id = ? FOR UPDATE", [poId]);
+      const order = orderResult[0][0];
+      if (!order) {
+        await connection.rollback();
+        return response.status(404).json({ error: "That purchase order does not exist" });
+      }
+      if (order.status !== "For Approval") {
+        await connection.rollback();
+        return response.status(409).json({ error: number + " is already approved or closed, so it cannot be deleted." });
+      }
+      supplierName = order.supplier_name;
+
+      const countResult = await connection.query(
+        "SELECT COUNT(*) AS line_total FROM purchase_order_items WHERE po_id = ?", [poId]);
+      lineCount = Number(countResult[0][0].line_total);
+
+      // The products on the order lines, to look at once the order is gone
+      const productResult = await connection.query(
+        "SELECT p.product_id, p.product_name FROM products p WHERE p.product_id IN " +
+        "(SELECT product_id FROM purchase_order_items WHERE po_id = ?)", [poId]);
+      const lineProducts = productResult[0];
+
+      await connection.query("DELETE FROM purchase_order_items WHERE po_id = ?", [poId]);
+      await connection.query("DELETE FROM purchase_order_ordered_items WHERE po_id = ?", [poId]);
+      await connection.query("DELETE FROM purchase_order_removed_items WHERE po_id = ?", [poId]);
+      await connection.query("DELETE FROM purchase_orders WHERE po_id = ? AND status = 'For Approval'", [poId]);
+
+      // A product this order created and nothing else uses goes with it: no stock, never bought,
+      // on no other order, sale, stock movement or return, and made on or after the order.
+      // If anything else holds on to the product, the delete is refused and the product stays.
+      for (let i = 0; i < lineProducts.length; i++) {
+        try {
+          const gone = await connection.query(
+            "DELETE FROM products WHERE product_id = ? AND last_cost IS NULL AND created_at >= ? " +
+            "AND NOT EXISTS (SELECT 1 FROM inventory i WHERE i.product_id = products.product_id AND i.quantity_in_stock <> 0) " +
+            "AND NOT EXISTS (SELECT 1 FROM purchase_order_items x WHERE x.product_id = products.product_id) " +
+            "AND NOT EXISTS (SELECT 1 FROM purchase_order_ordered_items x WHERE x.product_id = products.product_id) " +
+            "AND NOT EXISTS (SELECT 1 FROM purchase_order_removed_items x WHERE x.product_id = products.product_id) " +
+            "AND NOT EXISTS (SELECT 1 FROM sale_items x WHERE x.product_id = products.product_id) " +
+            "AND NOT EXISTS (SELECT 1 FROM stock_adjustments x WHERE x.product_id = products.product_id) " +
+            "AND NOT EXISTS (SELECT 1 FROM returned_items x WHERE x.product_id = products.product_id)",
+            [lineProducts[i].product_id, order.order_date]);
+          if (gone[0].affectedRows > 0) removedProducts.push(lineProducts[i].product_name);
+        } catch (productError) {
+          console.error("A product on the deleted order was kept:", productError.message);
+        }
+      }
+      await connection.commit();
+    } catch (error) {
+      if (connection) {
+        try { await connection.rollback(); } catch (ignored) { }
+      }
+      console.error("Deleting the purchase order failed:", error.message);
+      return response.status(500).json({ error: "Unable to delete the purchase order" });
+    } finally {
+      if (connection) connection.release();
+    }
+
+    try {
+      await writeAuditLog(request, "PURCHASE_ORDER_DELETED",
+        number + " to " + supplierName + " deleted, " + lineCount + (lineCount === 1 ? " line" : " lines") +
+        (removedProducts.length > 0 ? ". Products removed with it: " + removedProducts.join("; ") : ""),
+        { po_id: poId, supplier: supplierName, lines: lineCount, removed_products: removedProducts });
+      if (publishChange) publishChange("inventory", "deleted " + number, request.headers["x-client-id"] || null);
+    } catch (afterError) {
+      console.error("The order was deleted, but logging it failed:", afterError.message);
+    }
+
+    response.json({ message: number + " is deleted." });
   });
 
   // Undo Receiving: a delivery was counted in but the goods never came. Every quantity received on the
@@ -2070,6 +2281,8 @@ function registerInventoryRoutes(app, deps) {
         discount: order.discount,
         closed_as: order.closed_as,
         closed_at: order.closed_at,
+        closed_note: order.closed_as === "Denied" ? order.closed_note : null,
+        price_review: order.price_review,
         answer_by: order.answer_by,
         can_respond: order.status === "Pending" && !order.supplier_response,
         shortage_response: order.shortage_response,
@@ -2278,16 +2491,61 @@ function registerInventoryRoutes(app, deps) {
         }
       }
 
+      // Lines whose price per unit is not what was paid on the last order, and lines for a product
+      // that was never bought before. unit_cost and products.last_cost are both per base unit,
+      // so they compare directly. Any such line sends the order to the manager to confirm.
+      const lastPaidChanges = [];
+      if (accept) {
+        for (let i = 0; i < keptLines.length; i++) {
+          const item = keptLines[i];
+          const lastCost = Number(item.last_cost);
+          let newPrice = Number(item.unit_cost);
+          for (let n = 0; n < changes.length; n++) {
+            if (changes[n].item === item) newPrice = changes[n].price;
+          }
+          if (!(lastCost > 0)) {
+            lastPaidChanges.push({
+              product: item.product_name, from: null, to: newPrice, unit: item.unit_name || "unit", first: true
+            });
+            continue;
+          }
+          if (Math.round(newPrice * 100) === Math.round(lastCost * 100)) continue;
+          lastPaidChanges.push({
+            product: item.product_name, from: lastCost, to: newPrice, unit: item.unit_name || "unit", first: false
+          });
+        }
+      }
+      let lastPaidText = "";
+      let lastPaidList = "";
+      let anyChanged = false;
+      if (lastPaidChanges.length > 0) {
+        const lastPaidParts = [];
+        for (let i = 0; i < lastPaidChanges.length; i++) {
+          const change = lastPaidChanges[i];
+          if (change.first) {
+            lastPaidParts.push(change.product + " " + pesoText(change.to) + " per " + change.unit + " (first order)");
+          } else {
+            anyChanged = true;
+            lastPaidParts.push(change.product + " " + pesoText(change.from) + " to " + pesoText(change.to) +
+              " per " + change.unit);
+          }
+        }
+        lastPaidList = lastPaidParts.join("; ");
+        lastPaidText = (anyChanged ? " Prices changed from the last order: " : " Prices to confirm: ") + lastPaidList + ".";
+      }
+      const needsReview = lastPaidChanges.length > 0;
+
       connection = await db.getConnection();
       await connection.beginTransaction();
 
       const queryResult = await connection.query(
         "UPDATE purchase_orders " +
         "SET supplier_response = ?, supplier_responded_at = NOW(), supplier_note = ?, supplier_ship_date = ?, " +
-        "discount = CASE WHEN ? THEN ? ELSE discount END " +
+        "discount = CASE WHEN ? THEN ? ELSE discount END, price_review = ? " +
         "WHERE po_id = ? AND status = 'Pending' AND supplier_response IS NULL " +
         "AND (supplier_sent_at IS NULL OR supplier_sent_at > NOW() - INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR)",
-        [accept ? "Accepted" : "Declined", note || null, shipDate, accept, discount, order.po_id]);
+        [accept ? "Accepted" : "Declined", note || null, shipDate, accept, discount,
+         needsReview ? "Waiting" : null, order.po_id]);
       const result = queryResult[0];
 
       if (result.affectedRows === 0) {
@@ -2302,6 +2560,8 @@ function registerInventoryRoutes(app, deps) {
           why = number + " expired on " + supplierTime(again.order.closed_at) + " without an answer. Contact the shop.";
         } else if (again.order.closed_as === "Cancelled") {
           why = number + " was cancelled by the shop. Contact the shop.";
+        } else if (again.order.closed_as === "Denied") {
+          why = number + " was denied by the shop. Contact the shop.";
         } else if (again.order.supplier_response) {
           why = number + " was already " + again.order.supplier_response.toLowerCase() + ". Contact the shop to change it.";
         }
@@ -2343,42 +2603,11 @@ function registerInventoryRoutes(app, deps) {
                       " they cannot supply: " + removedNames.join("; ") + ".";
       }
 
-      // Lines whose price per unit is not what was paid on the last order. unit_cost and
-      // products.last_cost are both per base unit, so they compare directly.
-      const lastPaidChanges = [];
-      if (accept) {
-        for (let i = 0; i < keptLines.length; i++) {
-          const item = keptLines[i];
-          const lastCost = Number(item.last_cost);
-          if (!(lastCost > 0)) continue;
-          let newPrice = Number(item.unit_cost);
-          for (let n = 0; n < changes.length; n++) {
-            if (changes[n].item === item) newPrice = changes[n].price;
-          }
-          if (Math.round(newPrice * 100) === Math.round(lastCost * 100)) continue;
-          lastPaidChanges.push({
-            product: item.product_name, from: lastCost, to: newPrice, unit: item.unit_name || "unit"
-          });
-        }
-      }
-      let lastPaidText = "";
-      let lastPaidList = "";
-      if (lastPaidChanges.length > 0) {
-        const lastPaidParts = [];
-        for (let i = 0; i < lastPaidChanges.length; i++) {
-          const change = lastPaidChanges[i];
-          lastPaidParts.push(change.product + " " + pesoText(change.from) + " to " + pesoText(change.to) +
-            " per " + change.unit);
-        }
-        lastPaidList = lastPaidParts.join("; ");
-        lastPaidText = " Prices changed from the last order: " + lastPaidList +
-          ". Cancel the order if the new prices are too high.";
-      }
-
       let title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id);
       let message = order.supplier_name + " accepted " + number + " and will ship it on " + dayText(shipDate) + ".";
       if (lastPaidChanges.length > 0) {
-        title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id) + " with price changes";
+        title = order.supplier_name + " accepted purchase order " + helpers.poNumber(order.po_id) +
+          (anyChanged ? " with price changes" : " with prices to confirm");
       }
       if (repriced.length > 0) {
         if (lastPaidChanges.length === 0) {
@@ -2401,17 +2630,27 @@ function registerInventoryRoutes(app, deps) {
       if (discount > 0) {
         message += " They gave a discount of " + pesoText(discount) + ", so the order comes to " + pesoText(after - discount) + ".";
       }
-      message += lastPaidText;
-      if (note) message += " Their note: " + note;
+      // The Manager is asked to confirm the prices; the clerk is only told that the Manager will
+      let managerMessage = message + lastPaidText + (lastPaidText ? " Confirm or deny the new prices on the order." : "");
+      let clerkMessage = message + lastPaidText + (lastPaidText ? " The Manager confirms or denies the new prices." : "");
+      if (note) {
+        managerMessage += " Their note: " + note;
+        clerkMessage += " Their note: " + note;
+      }
       if (!accept) {
         title = order.supplier_name + " cannot fill purchase order " + helpers.poNumber(order.po_id);
-        message = order.supplier_name + " declined " + number + ": " + note + " Order the materials elsewhere, " +
+        managerMessage = order.supplier_name + " declined " + number + ": " + note + " Order the materials elsewhere, " +
                   "or contact the supplier.";
+        clerkMessage = managerMessage;
       }
       await db.query(
         "INSERT INTO notifications (target_role_id, notif_type, title, message) " +
-        "SELECT role_id, 'Purchase Order', ?, ? FROM roles WHERE role_name IN ('Manager', 'Inventory Clerk')",
-        [title.slice(0, 150), message]);
+        "SELECT role_id, 'Purchase Order', ?, ? FROM roles WHERE role_name = 'Manager'",
+        [title.slice(0, 150), managerMessage]);
+      await db.query(
+        "INSERT INTO notifications (target_role_id, notif_type, title, message) " +
+        "SELECT role_id, 'Purchase Order', ?, ? FROM roles WHERE role_name = 'Inventory Clerk'",
+        [title.slice(0, 150), clerkMessage]);
 
       let details = number + " declined by " + order.supplier_name + " from the link on the order: " + note;
       if (accept) {
@@ -2426,7 +2665,7 @@ function registerInventoryRoutes(app, deps) {
           (discount > 0 ? ", discount " + pesoText(discount) : "") +
           (note ? ": " + note : "");
         if (lastPaidChanges.length > 0) {
-          details += " (prices changed from the last order: " + lastPaidList + ")";
+          details += (anyChanged ? " (prices changed from the last order: " : " (prices to confirm: ") + lastPaidList + ")";
         }
       }
       const auditPrices = [];
@@ -2579,9 +2818,14 @@ function registerInventoryRoutes(app, deps) {
 
     try {
       const stateResult = await db.query(
-        "SELECT status, supplier_response FROM purchase_orders WHERE po_id = ?", [Number(request.params.poId)]);
+        "SELECT status, supplier_response, price_review FROM purchase_orders WHERE po_id = ?", [Number(request.params.poId)]);
       const state = stateResult[0][0];
       if (!state) return response.status(404).json({ error: "That purchase order does not exist" });
+      if (state.status === "Pending" && state.price_review === "Waiting") {
+        return response.status(409).json({
+          error: "Purchase order " + helpers.poNumber(request.params.poId) + " is waiting for the Manager to confirm the new prices."
+        });
+      }
       if (state.status === "Pending" && state.supplier_response !== "Accepted") {
         return response.status(409).json({
           error: "Purchase order " + helpers.poNumber(request.params.poId) + " can only be referred once the supplier has accepted it."

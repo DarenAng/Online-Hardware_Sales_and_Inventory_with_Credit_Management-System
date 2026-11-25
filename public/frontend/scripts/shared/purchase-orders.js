@@ -111,7 +111,7 @@ async function ensurePoMaterials(force) {
 async function matReload(id) {
     const list = document.getElementById(id + '-list');
     if (list && !list.hidden) {
-        list.innerHTML = '<li class="suggest-head" role="presentation">Loading the material list...</li>';
+        list.innerHTML = '<li class="suggest-head" role="presentation">Loading the product list...</li>';
     }
     await ensurePoMaterials(true);
     matOpen(id);
@@ -140,10 +140,10 @@ function matBox(id) { return document.getElementById(id + '-box'); }
 function materialPickerHtml(id, label) {
     return '' +
         '<div class="form-group">' +
-            '<label for="' + id + '-box">' + escapeHtml(label || 'Material name') + '</label>' +
+            '<label for="' + id + '-box">' + escapeHtml(label || 'Product name') + '</label>' +
             '<div class="suggest-wrap mat-wrap">' +
                 '<input type="text" class="form-control" id="' + id + '-box" autocomplete="off" ' +
-                       'placeholder="Pick a material, or type a new name" ' +
+                       'placeholder="Pick a product, or type a new name" ' +
                        'role="combobox" aria-expanded="false" aria-autocomplete="list" ' +
                        'aria-controls="' + id + '-list" ' +
                        'oninput="matInput(\'' + id + '\', this.value)" ' +
@@ -151,7 +151,7 @@ function materialPickerHtml(id, label) {
                        'onclick="matOpen(\'' + id + '\')" ' +
                        'onkeydown="matKey(\'' + id + '\', event)">' +
                 '<button type="button" class="mat-caret" tabindex="-1" ' +
-                        'aria-label="Show the materials this company supplies" ' +
+                        'aria-label="Show the products this company supplies" ' +
                         'onmousedown="event.preventDefault()" ' +
                         'onclick="matToggle(\'' + id + '\')">' +
                     '<span aria-hidden="true">&#9662;</span>' +
@@ -169,9 +169,9 @@ function makeCardHtml(id) {
         '<div class="make-card" id="' + id + '-make" hidden>' +
             '<div class="make-card-stripe"></div>' +
             '<div class="make-card-body">' +
-                '<h4>New material</h4>' +
+                '<h4>New product</h4>' +
                 '<p class="make-card-sub" id="' + id + '-make-sub">' +
-                    'This is not on the material list yet. Fill these in and it joins the list ' +
+                    'This is not on the product list yet. Fill these in and it joins the list ' +
                     'when the order is sent.</p>' +
                 '<div class="make-grid">' +
                     '<div class="form-group">' +
@@ -468,7 +468,7 @@ function renderMatSuggestions(id, text) {
             'onclick="matMakeNew(\'' + id + '\')">' +
             '<span class="make-mark" aria-hidden="true">+</span>' +
             '<span>Add <span class="make-quoted">' + escapeHtml(text) +
-                '</span> as a new material</span>' +
+                '</span> as a new product</span>' +
         '</li>';
     }
 
@@ -491,28 +491,28 @@ function matHeadHtml(id, browsing, count) {
     if (poMaterialsFailed) {
         return '<li class="suggest-item is-retry" role="option" onmousedown="event.preventDefault()" ' +
                 'onclick="matReload(\'' + id + '\')">' +
-            '<span class="suggest-name">The material list could not be loaded</span>' +
+            '<span class="suggest-name">The product list could not be loaded</span>' +
             '<span class="suggest-note">Press here to try again.</span>' +
         '</li>';
     }
 
     if (!matIsOrderLine(id)) {
         if (count === 0) {
-            return line('Nothing is on the material list yet. Type a name to add it as new.');
+            return line('Nothing is on the product list yet. Type a name to add it as new.');
         } else {
-            return line(count + ' material' + (count === 1 ? '' : 's') + ' on the list');
+            return line(count + ' product' + (count === 1 ? '' : 's') + ' on the list');
         }
     }
 
     if (!poSupplier) {
         return line('A new company supplies nothing yet. Type a name and it joins the ' +
-            'list as a new material.');
+            'list as a new product.');
     }
 
     if (count === 0) {
         return line(poSupplier.name + ' has nothing on the list yet. Type a name to add it as new.');
     } else {
-        return line(count + ' material' + (count === 1 ? '' : 's') + ' ' + poSupplier.name + ' supplies');
+        return line(count + ' product' + (count === 1 ? '' : 's') + ' ' + poSupplier.name + ' supplies');
     }
 }
 
@@ -723,7 +723,7 @@ function matMakeNew(id) {
         }
     }
     if (sub) {
-        sub.textContent = '"' + state.newName + '" is not on the material list. Fill these in ' +
+        sub.textContent = '"' + state.newName + '" is not on the product list. Fill these in ' +
             'and it joins the list when this is sent.';
     }
 
@@ -930,7 +930,7 @@ function renderSupplierSuggestions(text) {
             '<span class="suggest-name">' + escapeHtml(s.name) + '</span>' +
             '<span class="suggest-note">' +
                 escapeHtml(s.contact_person || 'No contact on file') +
-                ' · ' + s.product_count + ' material(s) supplied</span>' +
+                ' · ' + s.product_count + ' product(s) supplied</span>' +
         '</li>';
     }
     list.innerHTML = supplierItems;
@@ -1014,7 +1014,7 @@ function renderPoLinesGate() {
         }
         if (picked) {
             resetPurchaseLines();
-            notifyWarning('The company changed, so the materials picked for the other company ' +
+            notifyWarning('The company changed, so the products picked for the other company ' +
                 'were taken off the order.', 'Lines cleared');
         }
         poLinesSupplierId = supplierId;
@@ -1050,7 +1050,7 @@ function renderCriticalStocks() {
 
     if (!poMaterialsLoaded) {
         list.innerHTML = '<li class="po-roster-empty">' +
-            (poMaterialsFailed ? 'The materials could not be loaded.' : 'Loading the materials...') + '</li>';
+            (poMaterialsFailed ? 'The products could not be loaded.' : 'Loading the products...') + '</li>';
         return;
     }
 
@@ -1072,7 +1072,7 @@ function renderCriticalStocks() {
 
     if (critical.length === 0) {
         list.innerHTML = '<li class="po-roster-empty">' +
-            (query ? 'No critical material matches that.' : 'No material is low or out of stock.') + '</li>';
+            (query ? 'No critical product matches that.' : 'No product is low or out of stock.') + '</li>';
         renderCriticalPager(1);
         return;
     }
@@ -1263,7 +1263,7 @@ function renderSupplierState() {
                 (poSupplier.contact_number ? ' · ' + escapeHtml(poSupplier.contact_number) : '') +
                 (poSupplier.address ? '<br>' + escapeHtml(poSupplier.address) : '') +
                 '<br>The lines below offer the ' + poSupplier.product_count +
-                ' material(s) this company supplies.';
+                ' product(s) this company supplies.';
         }
         if (card) card.hidden = true;
         renderPoLinesGate();
@@ -1312,7 +1312,7 @@ function addPurchaseLine(fromButton) {
             '<div class="form-group"><label for="po-cat-' + index + '">Category</label>' +
             '<select id="po-cat-' + index + '" class="form-control po-cat" onchange="poCategoryChanged(' + index + ')">' +
                 '<option value="">Every category</option></select></div>' +
-            materialPickerHtml(pickerId, 'Material name') +
+            materialPickerHtml(pickerId, 'Product name') +
             '<div class="form-group"><label for="po-qty-' + index + '" id="po-qty-label-' + index + '">Quantity</label>' +
             '<input type="number" id="po-qty-' + index + '" class="form-control po-qty" min="1" value="1" ' +
                    'oninput="renderPoTotals()">' +
@@ -1490,7 +1490,7 @@ async function handleCreatePurchaseOrder(event) {
     const lineOfProduct = {};
 
     if (rows.length === 0) {
-        notifyWarning('Add at least one material to the order.', 'Order not sent');
+        notifyWarning('Add at least one product to the order.', 'Order not sent');
         return;
     }
 
@@ -1500,7 +1500,7 @@ async function handleCreatePurchaseOrder(event) {
 
         if (picked.ok && !picked.isNew &&
             !poFindProduct(matAllChoices(row.dataset.picker), picked.productId)) {
-            notifyWarning('A line names a material ' + company + ' does not supply. ' +
+            notifyWarning('A line names a product ' + company + ' does not supply. ' +
                 'Pick one from their list, or add it as new.', 'Order not sent');
             const field = document.getElementById(row.dataset.picker + '-box');
             if (field) field.focus();
@@ -1508,8 +1508,8 @@ async function handleCreatePurchaseOrder(event) {
         }
 
         if (!picked.ok) {
-            notifyWarning('Every line needs a material. Pick one from the list, or add it as ' +
-                'a new material.', 'Order not sent');
+            notifyWarning('Every line needs a product. Pick one from the list, or add it as ' +
+                'a new product.', 'Order not sent');
             const field = document.getElementById(row.dataset.picker + '-box');
             if (field) field.focus();
             return;
@@ -1518,8 +1518,8 @@ async function handleCreatePurchaseOrder(event) {
         if (picked.productId) {
             if (lineOfProduct[picked.productId]) {
                 const again = poFindProduct(poMaterials, picked.productId);
-                notifyWarning((again ? again.product_name : 'This material') + ' is already on line ' +
-                    lineOfProduct[picked.productId] + '.', 'Same material twice');
+                notifyWarning((again ? again.product_name : 'This product') + ' is already on line ' +
+                    lineOfProduct[picked.productId] + '.', 'Same product twice');
                 const field = document.getElementById(row.dataset.picker + '-box');
                 if (field) field.focus();
                 return;
@@ -1621,10 +1621,12 @@ const PO_STATES = [
     { status: 'For Approval',     label: 'For Approval' },
     { status: 'To Send',          label: 'To Send' },
     { status: 'Sent to Supplier', label: 'Sent to Supplier' },
+    { status: 'Price Approval',   label: 'Price Approval' },
     { status: 'Out for Delivery', label: 'Out for Delivery' },
     { status: 'Incomplete',       label: 'Incomplete' },
     { status: 'Received',         label: 'Received' },
     { status: 'Declined',         label: 'Declined' },
+    { status: 'Denied',           label: 'Denied' },
     { status: 'No Answer',        label: 'No Answer' },
     { status: 'Cancelled',        label: 'Cancelled' }
 ];
@@ -1633,6 +1635,7 @@ function poStage(po) {
     if (po.status === 'Cancelled' && po.closed_as) return po.closed_as;
     if (po.status === 'Cancelled') return 'Declined';
     if (po.status !== 'Pending') return po.status;
+    if (po.supplier_response === 'Accepted' && po.price_review === 'Waiting') return 'Price Approval';
     if (po.supplier_response === 'Accepted') return 'Out for Delivery';
     if (po.supplier_response === 'Declined') return 'Declined';
     if (po.supplier_sent_at) return 'Sent to Supplier';
@@ -1649,7 +1652,7 @@ function poAwaitsDelivery(po) {
 function poSupplierStageWord(po) {
     const stage = poStage(po);
     if (stage === 'To Send') return 'Sent to Supplier';
-    if (stage === 'Out for Delivery') return 'Accepted';
+    if (stage === 'Out for Delivery' || stage === 'Price Approval') return 'Accepted';
     if (stage === 'Incomplete') return 'Incomplete delivery';
     return poStatusWord(stage);
 }
@@ -1669,10 +1672,12 @@ const PO_STAGE_TONES = {
     'For Approval': 'badge-warning',
     'To Send': 'badge-warning',
     'Sent to Supplier': 'badge-info',
+    'Price Approval': 'badge-warning',
     'Out for Delivery': 'badge-info',
     'Incomplete': 'badge-warning',
     'Received': 'badge-success',
     'Declined': 'badge-danger',
+    'Denied': 'badge-danger',
     'No Answer': 'badge-neutral',
     'Cancelled': 'badge-danger'
 };
@@ -1690,7 +1695,7 @@ function poStatusBadge(po) {
 
 function poNeedsMe(po) {
     const stage = poStage(po);
-    return (poSetup.canDecide && stage === 'For Approval') ||
+    return (poSetup.canDecide && (stage === 'For Approval' || stage === 'Price Approval')) ||
            (poSetup.canReceive && (stage === 'To Send' || stage === 'Out for Delivery' || stage === 'Incomplete'));
 }
 
@@ -1716,6 +1721,7 @@ function poWaitingForSupplier(po) {
 
 function poArrivesCell(po) {
     if (poWaitingForSupplier(po)) return '<span class="muted">Waiting for supplier</span>';
+    if (poStage(po) === 'Price Approval' && po.supplier_ship_date) return escapeHtml(poShipDay(po.supplier_ship_date));
     if (!poAwaitsDelivery(po) || !po.supplier_ship_date) return '<span class="muted">--</span>';
     return escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po);
 }
@@ -2465,7 +2471,7 @@ function renderPurchaseOrderDocument() {
 
                 '<table>' +
                     '<thead><tr>' +
-                        '<th style="width:80px">Material ID</th><th class="num" style="width:44px">No</th><th>Material name</th><th>Category</th><th>Description</th>' +
+                        '<th style="width:80px">Product ID</th><th class="num" style="width:44px">No</th><th>Product name</th><th>Category</th><th>Description</th>' +
                         '<th class="num" style="width:150px">Quantity</th>' +
                         '<th class="num" style="width:110px">Unit price</th>' +
                         '<th class="num" style="width:120px">Amount</th>' +
@@ -2812,7 +2818,7 @@ async function submitReceiveOrder() {
         const picked = matValue(row.dataset.picker);
 
         if (!picked.ok) {
-            notifyWarning('An extra line has no material on it. Pick one, add it as new, or ' +
+            notifyWarning('An extra line has no product on it. Pick one, add it as new, or ' +
                 'remove the line.', 'Nothing received');
             return;
         }
@@ -2987,6 +2993,11 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         (po.closed_as === 'No Answer'
             ? detailField('No Answer', escapeHtml(poWhen(po.closed_at)))
             : '') +
+        (po.closed_as === 'Denied'
+            ? detailField('Denied', escapeHtml(poWhen(po.closed_at)) +
+                (po.closed_by ? ' <span class="muted">by ' + escapeHtml(po.closed_by) + '</span>' : '')) +
+              detailField('Reason', escapeHtml(po.closed_note))
+            : '') +
         (po.closed_as === 'Cancelled'
             ? detailField('Cancelled', escapeHtml(poWhen(po.closed_at)) +
                 (po.closed_by ? ' <span class="muted">by ' + escapeHtml(po.closed_by) + '</span>' : '')) +
@@ -2997,9 +3008,9 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 escapeHtml(poWhen(po.supplier_responded_at)))
             : '') +
         (poWaitingForSupplier(po)
-            ? detailField('Arrives', poArrivesCell(po))
+            ? detailField('Delivery Date', poArrivesCell(po))
             : (po.supplier_ship_date
-                ? detailField('Arrives', escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po))
+                ? detailField('Delivery Date', escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po))
                 : '')) +
         (po.status === 'Cancelled' && !po.closed_as && po.decision_note
             ? detailField('Manager\'s Remarks', escapeHtml(po.decision_note))
@@ -3053,10 +3064,10 @@ async function openPurchaseOrderDetail(poId, readOnly) {
             lineRows.push(row);
         }
         if (priced) {
-            lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Ordered', 'Received', owedLabel, 'Unit Cost', 'Line Cost'],
+            lines = detailTable(['Product ID', 'Product name', 'Category', 'Description', 'Ordered', 'Received', owedLabel, 'Unit Cost', 'Line Cost'],
                 lineRows, [4, 5, 6, 7, 8], [0]);
         } else {
-            lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Ordered', 'Received', owedLabel],
+            lines = detailTable(['Product ID', 'Product name', 'Category', 'Description', 'Ordered', 'Received', owedLabel],
                 lineRows, [4, 5, 6], [0]);
         }
     } else if (priced) {
@@ -3068,14 +3079,14 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 it.line_cost === null || it.line_cost === undefined ? '<span class="muted">-</span>' : peso(it.line_cost)
             ]);
         }
-        lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Qty', 'Unit Cost', 'Line Cost'],
+        lines = detailTable(['Product ID', 'Product name', 'Category', 'Description', 'Qty', 'Unit Cost', 'Line Cost'],
             lineRows, [4, 5, 6], [0]);
     } else {
         for (let i = 0; i < items.length; i++) {
             lineRows.push([materialCode(items[i].product_id), escapeHtml(items[i].product_name), poCategoryCell(items[i]),
                 poDescriptionCell(items[i]), escapeHtml(poQuantityText(items[i]))]);
         }
-        lines = detailTable(['Material ID', 'Material name', 'Category', 'Description', 'Qty'], lineRows, [4], [0]);
+        lines = detailTable(['Product ID', 'Product name', 'Category', 'Description', 'Qty'], lineRows, [4], [0]);
     }
 
     // Removed by the supplier: same columns as the ordered items, numbers on the right
@@ -3090,7 +3101,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
             ]);
         }
         removedHtml = '<h4 class="detail-subhead">Removed by supplier</h4>' +
-            detailTable(['Material ID', 'Material name', 'Qty', 'Unit Cost'], removedRows, [2, 3], [0]);
+            detailTable(['Product ID', 'Product name', 'Qty', 'Unit Cost'], removedRows, [2, 3], [0]);
     }
 
     const contact = '<h4 class="detail-subhead">Supplier contact</h4>' +
@@ -3142,6 +3153,16 @@ async function openPurchaseOrderDetail(poId, readOnly) {
                 'Undo Receiving</button>';
     }
 
+    if (!readOnly && poCanConfirmPrices(po)) {
+        foot += '<button type="button" class="btn btn-danger" onclick="denyPrices(' + po.po_id + ')">' +
+                'Deny</button>';
+        foot += '<button type="button" class="btn btn-success" onclick="confirmPrices(' + po.po_id + ')">' +
+                'Confirm Prices</button>';
+    }
+    if (!readOnly && po.status === 'For Approval' && typeof holdsFeature === 'function' && holdsFeature('po-delete')) {
+        foot += '<button type="button" class="btn btn-danger" onclick="deletePurchaseOrder(' + po.po_id + ')">' +
+                'Delete Order</button>';
+    }
     if (poCanCancel(po) && !readOnly) {
         foot += '<button type="button" class="btn btn-danger" onclick="cancelPurchaseOrder(' + po.po_id + ')">' +
                 'Cancel Order</button>';
@@ -3189,7 +3210,7 @@ function poDeliveryReportHtml(report) {
                 '<p><span class="po-report-label">Date reported:</span> ' +
                     (report.reported_at ? escapeHtml(poWhen(report.reported_at)) : '<span class="muted">Not recorded</span>') + '</p>' +
             '</div>' +
-            detailTable(['Material ID', 'Material name', 'Quantity', 'Reason'], rows, [2], [0]) +
+            detailTable(['Product ID', 'Product name', 'Quantity', 'Reason'], rows, [2], [0]) +
             '<p class="po-report-remarks"><span class="po-report-label">Remarks:</span> ' +
                 (report.remarks ? escapeHtml(report.remarks) : '<span class="muted">None</span>') + '</p>' +
         '</div>';
@@ -3433,6 +3454,7 @@ async function emailShortageAgain(poId) {
 
 // The manager can close an order that came in short, or one the supplier accepted but never delivered
 function poCanCloseShort(po) {
+    if (po.price_review === 'Waiting') return false;
     return po.status === 'Incomplete' || (po.status === 'Pending' && po.supplier_response === 'Accepted');
 }
 
@@ -3522,6 +3544,101 @@ function poCanCancel(po) {
     if (typeof holdsFeature !== 'function' || !holdsFeature('po-cancel')) return false;
     // Not answered yet, or accepted and the goods have not arrived
     return po.status === 'Pending' && po.supplier_response !== 'Declined';
+}
+
+// The manager confirms or denies the prices a supplier changed when accepting an order
+function poCanConfirmPrices(po) {
+    if (!poSetup.canDecide) return false;
+    if (typeof holdsFeature !== 'function' || !holdsFeature('po-confirm-prices')) return false;
+    return poStage(po) === 'Price Approval';
+}
+
+async function confirmPrices(poId) {
+    const po = findPurchaseOrder(poId);
+    if (!po || !poCanConfirmPrices(po)) return;
+
+    const yes = await askConfirm(
+        poNumber(po.po_id) + ' goes ahead at the prices ' + po.supplier_name + ' set.',
+        { title: 'Confirm these prices?', eyebrow: 'Purchase Orders', confirmLabel: 'Confirm Prices' });
+    if (!yes) return;
+
+    try {
+        const response = await apiConfirmPrices(poId);
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not confirmed');
+            return;
+        }
+
+        closeModal('detail-modal');
+        notifySuccess(result.message, 'Prices confirmed');
+        await refreshPurchaseOrders();
+        poAfterChange();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+async function denyPrices(poId) {
+    const po = findPurchaseOrder(poId);
+    if (!po || !poCanConfirmPrices(po)) return;
+
+    const asked = await askInput({
+        title: 'Deny these prices?',
+        eyebrow: 'Purchase Orders',
+        message: poNumber(po.po_id) + ' is closed and ' + po.supplier_name + "'s link shows it is denied.",
+        label: 'Reason',
+        confirmLabel: 'Deny',
+        cancelLabel: 'Go back',
+        tone: 'danger',
+        check: function (value) {
+            return String(value).trim().length < 5 ? 'Write why the prices are denied.' : null;
+        }
+    });
+    if (asked === false || asked === null) return;
+
+    try {
+        const response = await apiDenyPrices(poId, String(asked).trim());
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not denied');
+            return;
+        }
+
+        closeModal('detail-modal');
+        notifySuccess(result.message, 'Prices denied');
+        await refreshPurchaseOrders();
+        poAfterChange();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// The order was raised with a mistake and has not been approved yet: it is removed for good
+async function deletePurchaseOrder(poId) {
+    const po = findPurchaseOrder(poId);
+    if (!po || po.status !== 'For Approval') return;
+
+    const yes = await askConfirm(
+        'Delete ' + poNumber(po.po_id) + '? It is removed for good.',
+        { title: 'Delete this order?', eyebrow: 'Purchase Orders', confirmLabel: 'Delete Order', tone: 'danger' });
+    if (!yes) return;
+
+    try {
+        const response = await apiDeletePurchaseOrder(poId);
+        const result = await response.json();
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not deleted');
+            return;
+        }
+
+        closeModal('detail-modal');
+        notifySuccess(result.message, 'Order deleted');
+        await refreshPurchaseOrders();
+        poAfterChange();
+    } catch (error) {
+        notifyOffline();
+    }
 }
 
 async function cancelPurchaseOrder(poId) {
@@ -3647,7 +3764,7 @@ function renderShortageNotice() {
 
                 '<table>' +
                     '<thead><tr>' +
-                        '<th style="width:80px">Material ID</th><th class="num" style="width:44px">No</th><th>Material name</th>' +
+                        '<th style="width:80px">Product ID</th><th class="num" style="width:44px">No</th><th>Product name</th>' +
                         '<th class="num" style="width:90px">Ordered</th>' +
                         '<th class="num" style="width:90px">Received</th>' +
                         '<th class="num" style="width:90px">Short</th>' +

@@ -725,7 +725,68 @@ function cancelledOrderMessage(details) {
   };
 }
 
+// The notice sent when the manager confirms the prices the supplier set
+function pricesConfirmedMessage(details) {
+  const order = details.order;
+  const shop = details.shop;
+
+  let shopName = "the hardware shop";
+  if (shop && shop.store_name) shopName = shop.store_name;
+
+  const sender = MAIL_FROM_NAME || shopName;
+  const number = helpers.poNumber(order.po_id);
+
+  let greeting = "Hello";
+  if (order.contact_person) {
+    greeting = "Hello " + order.contact_person;
+  }
+
+  return {
+    to: order.supplier_email,
+    fromName: sender,
+    subject: "Purchase order " + number + " is confirmed",
+    body:
+      greeting + ",\n\n" +
+      number + " is confirmed at your prices. Please ship it on " + details.shipDate + ".\n\n" +
+      "-- \n" +
+      sender + "\n" +
+      "This message was sent automatically. To reply, contact the shop directly.\n"
+  };
+}
+
+// The notice sent when the manager denies the prices the supplier set
+function pricesDeniedMessage(details) {
+  const order = details.order;
+  const shop = details.shop;
+
+  let shopName = "the hardware shop";
+  if (shop && shop.store_name) shopName = shop.store_name;
+
+  const sender = MAIL_FROM_NAME || shopName;
+  const number = helpers.poNumber(order.po_id);
+
+  let greeting = "Hello";
+  if (order.contact_person) {
+    greeting = "Hello " + order.contact_person;
+  }
+
+  return {
+    to: order.supplier_email,
+    fromName: sender,
+    subject: "Purchase order " + number + " is denied",
+    body:
+      greeting + ",\n\n" +
+      shopName + " has denied purchase order " + number + ". Please do not ship it.\n\n" +
+      "    Reason:  " + details.reason + "\n\n" +
+      "-- \n" +
+      sender + "\n" +
+      "This message was sent automatically. To reply, contact the shop directly.\n"
+  };
+}
+
 module.exports = {
+  pricesConfirmedMessage: pricesConfirmedMessage,
+  pricesDeniedMessage: pricesDeniedMessage,
   cancelledOrderMessage: cancelledOrderMessage,
   shortageMessage: shortageMessage,
   isMailConfigured: isMailConfigured,

@@ -252,10 +252,14 @@ CREATE TABLE purchase_orders (
     shortage_response ENUM('Will deliver', 'Cannot deliver') NULL,
     shortage_responded_at TIMESTAMP NULL,
     shortage_note VARCHAR(255) NULL,
+    price_review VARCHAR(10) NULL,
+    price_review_at DATETIME NULL,
+    price_review_by_staff_id INT NULL,
     UNIQUE INDEX idx_purchase_orders_supplier_code (supplier_code),
     FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id) ON DELETE RESTRICT ON UPDATE CASCADE,
     FOREIGN KEY (raised_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
-    FOREIGN KEY (confirmed_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
+    FOREIGN KEY (confirmed_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,
+    FOREIGN KEY (price_review_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 CREATE TABLE purchase_order_items (

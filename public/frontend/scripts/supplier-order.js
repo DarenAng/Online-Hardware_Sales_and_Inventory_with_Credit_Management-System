@@ -257,8 +257,10 @@ function startSupplierOrderPage() {
         let stage = 1;
         if (order.supplier_response === 'Accepted') stage = 2;
         if (order.status === 'Received') stage = 3;
-        // Accepted, then cancelled by the shop: the answer is done and the last step is the cancel
-        const cancelledAfterAccept = order.closed_as === 'Cancelled' && order.supplier_response === 'Accepted';
+        // Accepted, then cancelled or denied by the shop: the answer is done and the last step is the cancel or denial
+        const cancelledAfterAccept = (order.closed_as === 'Cancelled' || order.closed_as === 'Denied') &&
+            order.supplier_response === 'Accepted';
+        const confirmingPrices = order.price_review === 'Waiting' && order.status === 'Pending';
         function stop(index, label, sub) {
             let state = '';
             if (index < stage) state = 'is-done';
@@ -275,8 +277,10 @@ function startSupplierOrderPage() {
         // A closed order shows how it closed
         if (order.closed_as === 'No Answer') answerSub = 'No answer';
         if (order.closed_as === 'Cancelled' && !cancelledAfterAccept) answerSub = 'Cancelled';
+        if (order.closed_as === 'Denied' && !cancelledAfterAccept) answerSub = 'Denied';
         let lastStop = stop(2, 'Shipped', order.supplier_ship_date ? dayText(order.supplier_ship_date) : 'Next');
-        if (cancelledAfterAccept) lastStop = stop(2, 'Cancelled', String(order.closed_at || '').slice(0, 10));
+        if (confirmingPrices) lastStop = stop(2, 'Shop confirming prices', 'Waiting');
+        if (cancelledAfterAccept) lastStop = stop(2, order.closed_as, String(order.closed_at || '').slice(0, 10));
         return '<ol class="so-track">' +
             stop(0, 'Order sent', String(order.order_date || '').slice(0, 10)) +
             stop(1, 'Your answer', answerSub) +
@@ -1107,6 +1111,12 @@ function startSupplierOrderPage() {
             tone = 'is-closed';
             title = 'Order cancelled';
             sub = 'The shop cancelled ' + order.number + ' on ' + stampText(order.closed_at) + '. Contact the shop.';
+        } else if (order.closed_as === 'Denied') {
+            // The shop did not accept the prices
+            mark = 'icon-x';
+            tone = 'is-stop';
+            title = 'Order denied';
+            sub = 'The shop denied ' + order.number + ': ' + (order.closed_note || '');
         } else if (order.supplier_response === 'Declined') {
             mark = 'icon-x';
             tone = 'is-stop';
@@ -1175,7 +1185,7 @@ function startSupplierOrderPage() {
         }
 
         const facts = [];
-        if (order.supplier_ship_date && order.closed_as !== 'Cancelled') {
+        if (order.supplier_ship_date && !order.closed_as && order.price_review !== 'Waiting') {
             facts.push('<div><span class="so-tag">Ships</span><strong>' +
                 escapeHtml(dayText(order.supplier_ship_date, true)) + '</strong></div>');
         }
@@ -1205,7 +1215,7 @@ function startSupplierOrderPage() {
                 trackHtml(order) +
                 '<div class="so-rfacts">' + facts.join('') + '</div>' +
                 '<ol class="so-rlines">' + rows + '</ol>' +
-                (order.supplier_response === 'Accepted' && order.closed_as !== 'Cancelled'
+                (order.supplier_response === 'Accepted' && !order.closed_as
                     ? '<p class="so-quote">Quote <strong>' + escapeHtml(order.number) +
                         '</strong> on the delivery receipt and the invoice. To change anything, contact the shop.</p>'
                     : '') +

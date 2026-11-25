@@ -1777,6 +1777,43 @@ async function migrateManualReorderPoints() {
   }
 }
 
+// A supplier who changes a price waits for the manager: price_review is NULL (not needed), 'Waiting' or 'Confirmed'.
+// A denied order is closed as 'Denied', so closed_as grows by one value.
+async function migratePriceReview() {
+  const columnsResult = await db.query(
+    "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'\n" +
+      "       AND COLUMN_NAME IN ('price_review', 'price_review_at', 'price_review_by_staff_id')",
+    [DB_NAME]
+  );
+  const names = columnNamesOf(columnsResult[0]);
+  if (names.indexOf("price_review") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN price_review VARCHAR(10) NULL");
+  }
+  if (names.indexOf("price_review_at") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN price_review_at DATETIME NULL");
+  }
+  if (names.indexOf("price_review_by_staff_id") === -1) {
+    await db.query(
+      "ALTER TABLE purchase_orders ADD COLUMN price_review_by_staff_id INT NULL,\n" +
+        "         ADD CONSTRAINT fk_purchase_orders_price_review_by FOREIGN KEY (price_review_by_staff_id)\n" +
+        "         REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE");
+  }
+
+  const typeResult = await db.query(
+    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
+      "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders' AND COLUMN_NAME = 'closed_as'",
+    [DB_NAME]
+  );
+  if (typeResult[0].length > 0 && String(typeResult[0][0].COLUMN_TYPE).indexOf("Denied") === -1) {
+    await db.query("ALTER TABLE purchase_orders MODIFY COLUMN closed_as ENUM('No Answer', 'Cancelled', 'Denied') NULL");
+    console.log("purchase_orders.closed_as can now be Denied.");
+  }
+  if (names.length < 3) {
+    console.log("Added the price review columns (purchase_orders.price_review, price_review_at, price_review_by_staff_id).");
+  }
+}
+
 // Customer deliveries: "In Transit" is gone (it is Out for Delivery now) and "Cancelled" is new
 async function migrateDeliveryCancelled() {
   const typeResult = await db.query(
@@ -2141,6 +2178,7 @@ async function migrateDatabase(runSqlScript) {
   await migrateStaffWorkDays();
   await migratePolicyWording();
   await migrateRemovedItems();
+  await migratePriceReview();
   await removeEmptyPurchaseOrders();
   await loadProceduresIfMissing(runSqlScript);
   await hashLegacyPasswords();

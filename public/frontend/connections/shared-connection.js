@@ -409,6 +409,18 @@ function apiCancelPurchaseOrder(poId, reason) {
     return sendJson('/api/purchase-orders/' + poId + '/cancel', 'POST', { reason: reason });
 }
 
+function apiConfirmPrices(poId) {
+    return sendJson('/api/purchase-orders/' + poId + '/confirm-prices', 'POST', {});
+}
+
+function apiDenyPrices(poId, reason) {
+    return sendJson('/api/purchase-orders/' + poId + '/deny-prices', 'POST', { reason: reason });
+}
+
+function apiDeletePurchaseOrder(poId) {
+    return sendJson('/api/purchase-orders/' + poId, 'DELETE', {});
+}
+
 function apiGetPurchaseOrderReport(poId) {
     return getJson('/api/purchase-orders/' + poId + '/reports');
 }
