@@ -308,6 +308,37 @@ function firstPasswordMessage(details) {
   };
 }
 
+// A new customer's temporary customer portal password, sent when the cashier adds them
+function customerPortalPasswordMessage(details) {
+  const shop = details.storeName || "the hardware shop";
+  const sender = MAIL_FROM_NAME || shop;
+
+  let signInText = "Ask the store for the address of the customer portal.\n\n";
+  const site = siteAddress(details.site);
+  if (site) {
+    signInText = "Sign in here (choose Customer log in):\n\n    " + site + "Login.html\n\n";
+  }
+
+  return {
+    to: details.email,
+    fromName: sender,
+    subject: "Your " + sender + " customer portal sign-in details",
+    body:
+      "Hello " + details.name + ",\n\n" +
+      "An account has been opened for you at " + shop + ". In the customer portal you can see " +
+      "your balance, your purchases and your payments.\n\n" +
+      "    User ID:   " + details.userId + "\n" +
+      "    Password:  " + details.password + "\n\n" +
+      signInText +
+      "This password is temporary. The portal will ask you to choose your own password the " +
+      "first time you sign in, and this one stops working the moment you do.\n\n" +
+      "Nobody from the store will ever ask you for your password, by mail or otherwise.\n\n" +
+      "-- \n" +
+      sender + "\n" +
+      "This message was sent automatically. There is nobody at this address to reply to.\n"
+  };
+}
+
 function passwordResetMessage(details) {
   const name = details.name;
   const email = details.email;
@@ -818,6 +849,7 @@ module.exports = {
   isMailConfigured: isMailConfigured,
   sendMail: sendMail,
   firstPasswordMessage: firstPasswordMessage,
+  customerPortalPasswordMessage: customerPortalPasswordMessage,
   passwordResetMessage: passwordResetMessage,
   purchaseOrderMessage: purchaseOrderMessage,
   supplierOrderLink: supplierOrderLink,

@@ -4340,7 +4340,6 @@ async function openCustomerCredit(customerId, tab) {
         if (pay) pay.hidden = !hasUnpaid;
 
         document.getElementById('customer-print-card').hidden = !holdsFeature('customer-card-print');
-        document.getElementById('customer-portal-btn').hidden = !holdsFeature('customer-portal-password');
 
         let open = 'account';
         if (tab === 'unpaid' && hasUnpaid) open = 'unpaid';
@@ -4804,7 +4803,11 @@ async function handleAddCustomer(event) {
     } else if (phoneProblem) {
         complain('phone', phoneProblem);
     }
-    if (email !== '' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) complain('email', 'Enter a valid email, like name@gmail.com.');
+    if (email === '') {
+        complain('email', 'Enter the customer\'s email.');
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        complain('email', 'Enter a valid email, like name@gmail.com.');
+    }
     if (province.length < 2) complain('province', 'Enter the province.');
     if (city.length < 2) complain('city', 'Enter the town or city.');
     if (street !== '' && street.length < 2) complain('street', 'The house number and street is too short; leave it empty if there is none.');
@@ -4871,6 +4874,11 @@ async function handleAddCustomer(event) {
 
         closeModal('add-customer-modal');
         notifySuccess(result.message, 'Customer added');
+        if (result.portalEmailed) {
+            notifyInfo('The portal password was sent to ' + result.portalEmail + '.', 'Password emailed');
+        } else if (result.portalEmailProblem) {
+            notifyWarning(result.portalEmailProblem + ' Give the customer the password shown next.', 'Password not emailed');
+        }
 
         customerDirectoryLoaded = false;
 
@@ -4927,34 +4935,6 @@ function closePortalPassword() {
     if (portalPasswordDone) {
         portalPasswordDone();
         portalPasswordDone = null;
-    }
-}
-
-async function issuePortalPassword() {
-    if (!openCustomerId) return;
-    const name = document.getElementById('customer-modal-name').textContent;
-    const yes = await askConfirm('Issue a new portal password for ' + name + '? The old one stops working.', {
-        title: 'Issue a portal password?',
-        eyebrow: 'Customer portal',
-        confirmLabel: 'Issue Password',
-        cancelLabel: 'Not now'
-    });
-    if (!yes) return;
-
-    try {
-        const response = await apiIssuePortalPassword(openCustomerId);
-        const result = await response.json();
-        if (!response.ok) {
-            if (!handleAuthFailure(response, result)) {
-                notifyError(result.error || 'The portal password was not issued.', 'Not issued');
-            }
-            return;
-        }
-        await showPortalPassword(result.customerId, result.name, result.password);
-        // Offer a card with the new password printed on its back, while it is still known.
-        await offerCustomerCardPrint(result.customerId, result.name, result.password, 'Customer portal');
-    } catch (error) {
-        notifyOffline();
     }
 }
 

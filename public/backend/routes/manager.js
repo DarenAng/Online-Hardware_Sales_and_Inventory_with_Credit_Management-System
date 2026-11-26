@@ -1,6 +1,6 @@
 const managerProcedures = require("../database/procedures/manager-procedures");
 const issuePortalPassword = require("../portal-password").issuePortalPassword;
-const heldFeatures = require("../features").heldFeatures;
+const mailer = require("../services/mailer");
 const helpers = require("../helpers");
 const tidy = helpers.tidy;
 const buildFullAddress = helpers.buildFullAddress;
@@ -14,7 +14,7 @@ const receiptLayoutFrom = require("../store-settings").receiptLayoutFrom;
 
 // A customer's email (optional). It is also what they can sign in to the customer portal with.
 function customerEmailProblem(email) {
-  if (email === "") return null;
+  if (email === "") return "Enter the customer's email.";
   if (email.length > 255) return "The email is at most 255 characters.";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return "Enter a valid email, like name@gmail.com.";
   return null;
@@ -410,7 +410,7 @@ function registerManagerRoutes(app, deps) {
     let subtitle = range.label + ", " + range.from + " to " + range.to;
     if (data.cashier) {
       subtitle += ", Cashier: " + data.cashier.name;
-    } else {
+    } else if (name !== "income-breakdown") {
       subtitle += ", All cashiers";
     }
     if (name !== "income-breakdown") {
@@ -418,13 +418,15 @@ function registerManagerRoutes(app, deps) {
                 headers: plan.headers, rows: plan.rows(data), money: EXPORT_MONEY[name] || [] }];
     }
 
-    // Total Sales goes on its own bold line at the bottom of the Summary sheet
+    // The Sales Summary file holds only what its screen shows: the totals and the payment
+    // methods for the chosen period. Total Sales goes on its own bold line at the bottom.
     const allSummary = EXPORTS["income-summary"].rows(data).slice(3);
     const summary = [];
     const summaryMoney = [];
     for (let i = 0; i < allSummary.length; i++) {
       const label = allSummary[i][0];
       if (label === "Total Sales") continue;
+      if (label === "Cashier" && !data.cashier) continue;
       if (label === "Collected" || label === "Unpaid") summaryMoney.push(summary.length);
       summary.push(allSummary[i]);
     }
@@ -436,12 +438,6 @@ function registerManagerRoutes(app, deps) {
         headers: EXPORTS["payment-methods"].headers, rows: EXPORTS["payment-methods"].rows(data),
         money: EXPORT_MONEY["payment-methods"] }
     ];
-
-    if (!isSingleDay(range)) {
-      sheets.push({ name: "By Day", title: "Sales by Day", subtitle: subtitle,
-        headers: EXPORTS["income-series"].headers, rows: EXPORTS["income-series"].rows(data),
-        money: EXPORT_MONEY["income-series"] });
-    }
     return sheets;
   }
 
@@ -1703,19 +1699,41 @@ function registerManagerRoutes(app, deps) {
             phone: phoneText || null, email: email || null, address: addressLine });
       }
 
-      // A new customer gets a customer portal password, shown once to hand over, but only when the
-      // person adding them holds the "Issue Portal Password" screen in Access Control.
+      // A new customer gets a temporary customer portal password, sent to their email.
+      // Only when the email cannot be sent is the password handed back for the cashier to give them.
       let portalPassword = null;
+      let portalEmailed = false;
+      let portalEmailProblem = null;
       if (created) {
         try {
-          const held = await heldFeatures(request.actor.roleName);
-          if (held.held["customer-portal-password"] === true) {
-            portalPassword = await issuePortalPassword(Number(output.customer_id));
-          }
-          if (portalPassword) {
+          const password = await issuePortalPassword(Number(output.customer_id));
+          if (password) {
             await writeAuditLog(request, "ISSUE_PORTAL_PASSWORD",
               "Portal password issued for new customer " + fullName + " (customer " + helpers.customerCode(output.customer_id) + ")",
               { customer_id: Number(output.customer_id), issued_by_staff_id: getActorId(request) });
+
+            if (!mailer.isMailConfigured()) {
+              portalPassword = password;
+              portalEmailProblem = "Mail is not set up on this server, so the password could not be emailed.";
+            } else {
+              try {
+                const storeResult = await db.query("SELECT store_name FROM store_settings WHERE setting_id = 1");
+                const store = storeResult[0][0];
+                await mailer.sendMail(mailer.customerPortalPasswordMessage({
+                  name: fullName,
+                  email: email,
+                  userId: helpers.customerCode(output.customer_id),
+                  password: password,
+                  storeName: store ? store.store_name : null,
+                  site: request.protocol + "://" + request.get("host")
+                }));
+                portalEmailed = true;
+              } catch (error) {
+                console.error("Emailing the portal password of a new customer failed:", error.message);
+                portalPassword = password;
+                portalEmailProblem = "The mail server refused the message: " + error.message;
+              }
+            }
           }
         } catch (error) {
           console.error("Issuing the portal password of a new customer failed:", error.message);
@@ -1727,7 +1745,10 @@ function registerManagerRoutes(app, deps) {
         message: created ? fullName + " was added to Customers Record." : output.message,
         customerId: output.customer_id,
         created: created,
-        portalPassword: portalPassword
+        portalEmailed: portalEmailed,
+        portalEmail: portalEmailed ? email : null,
+        portalPassword: portalPassword,
+        portalEmailProblem: portalEmailProblem
       });
     } catch (error) {
       console.error("Create customer failed:", error.message);

@@ -661,3 +661,7 @@
     font-size: 22px;
     letter-spacing: 0.12em;
 }
+
+/* Add / Edit Customer opens on top of whatever popup it was opened from (the customer card,
+   the Payment popup), so it always shows in front */
+#add-customer-modal { z-index: 2100; }

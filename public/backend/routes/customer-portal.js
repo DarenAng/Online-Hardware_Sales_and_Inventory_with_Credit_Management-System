@@ -1,7 +1,6 @@
 const helpers = require("../helpers");
 const crypto = require("crypto");
 const customerSessions = require("../customer-sessions");
-const portalPassword = require("../portal-password");
 const deliveryProcedures = require("../database/procedures/delivery-procedures");
 const UNSAVED_NOTE = require("./qr-payments").UNSAVED_NOTE;
 
@@ -503,41 +502,6 @@ function registerCustomerPortalRoutes(app, deps) {
     }
     response.json(qrAnswer(row));
   }));
-
-  // ---- The cashier gives a customer a new portal password ----
-
-  app.post("/api/customers/:customerId/portal-password", async function (request, response) {
-    const customerId = Number(request.params.customerId);
-
-    try {
-      const customerResult = await db.query(
-        "SELECT full_name FROM customers WHERE customer_id = ? AND is_archived = FALSE", [customerId]);
-      const customer = customerResult[0][0];
-      if (!customer) {
-        return response.status(404).json({ error: "That customer was not found." });
-      }
-
-      const password = await portalPassword.issuePortalPassword(customerId);
-      if (!password) {
-        return response.status(404).json({ error: "That customer was not found." });
-      }
-
-      await writeAuditLog(request, "ISSUE_PORTAL_PASSWORD",
-        "New portal password issued for " + customer.full_name + " (customer " + helpers.customerCode(customerId) + ")",
-        { customer_id: customerId, issued_by_staff_id: getActorId(request) });
-
-      response.set("Cache-Control", "no-store");
-      response.json({
-        customerId: customerId,
-        name: customer.full_name,
-        password: password,
-        message: "A new portal password was issued for " + customer.full_name + "."
-      });
-    } catch (error) {
-      console.error("Issue portal password failed:", error.message);
-      response.status(500).json({ error: "Unable to issue the portal password" });
-    }
-  });
 
   // ---- A paid portal QR payment is always written on its sale, exactly once ----
 

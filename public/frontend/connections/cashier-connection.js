@@ -10,9 +10,6 @@ function apiCreateCustomer(customer) {
     return sendJson('/api/customers', 'POST', customer);
 }
 
-function apiIssuePortalPassword(customerId) {
-    return sendJson('/api/customers/' + customerId + '/portal-password', 'POST', {});
-}
 
 function apiCreateDelivery(delivery) {
     return sendJson('/api/deliveries', 'POST', delivery);

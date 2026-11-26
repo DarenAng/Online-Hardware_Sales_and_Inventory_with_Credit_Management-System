@@ -193,7 +193,6 @@ const ACCESS_RULES = [
   ["PUT",   /^\/api\/loyalty\/policy$/,                [MANAGER]],
 
   ["POST",  /^\/api\/customers$/,                      [MANAGER, CASHIER]],
-  ["POST",  /^\/api\/customers\/\d+\/portal-password$/, [CASHIER]],
 
   ["GET",   /^\/api\/records\/\w+$/,                   [MANAGER, CASHIER, CLERK]],
   ["GET",   /^\/api\/archives$/,                       MANAGEMENT],
