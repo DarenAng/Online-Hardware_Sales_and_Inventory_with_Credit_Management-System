@@ -740,12 +740,65 @@ function addPrintTotals(container, panel) {
     return block;
 }
 
+// The store name and address printed at the top of every report
+let printStore = null;
+
+async function printStoreInfo() {
+    if (printStore) return printStore;
+    try {
+        const settings = await apiGetStoreSettings();
+        let address = settings.address || '';
+        // Left off while it is still the "Set your address..." placeholder
+        if (address.indexOf('Set your address') === 0) address = '';
+        printStore = { name: settings.store_name || 'Lucelyn Hardware', address: address };
+        return printStore;
+    } catch (error) {
+        return { name: 'Lucelyn Hardware', address: '' };
+    }
+}
+
+function printWho() {
+    const user = getCurrentUser();
+    let who = staffName(user) || 'Unknown';
+    if (user && user.role_name) who += ' (' + user.role_name + ')';
+    return who;
+}
+
+// "November 27, 2026, 12:15 AM"
+function printWhen() {
+    const now = new Date();
+    return now.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' }) + ', ' +
+        now.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
+}
+
+// Store, report title, period, and who printed it and when: the top of a printed report
+function printHeadHtml(store, title, period) {
+    let html = '<p class="print-store">' + escapeHtml(store.name) + '</p>';
+    if (store.address) html += '<p class="print-address">' + escapeHtml(store.address) + '</p>';
+    html += '<h2 class="print-title">' + escapeHtml(title) + '</h2>';
+    if (period) html += '<p class="print-period">Period: ' + escapeHtml(period) + '</p>';
+    html += '<div class="print-meta"><span>Printed by: ' + escapeHtml(printWho()) + '</span>' +
+        '<span>Printed on: ' + escapeHtml(printWhen()) + '</span></div>';
+    return html;
+}
+
+// Prepared by (the person printing) and Noted by: the bottom of a printed report
+function printSignsHtml() {
+    const user = getCurrentUser();
+    const name = staffName(user) || '';
+    const role = user && user.role_name ? ' (' + user.role_name + ')' : '';
+    return '<div class="print-sign"><p class="print-sign-name">' + (name ? escapeHtml(name) : '&nbsp;') + '</p>' +
+            '<p class="print-sign-role">Prepared by' + escapeHtml(role) + '</p></div>' +
+        '<div class="print-sign"><p class="print-sign-name">&nbsp;</p>' +
+            '<p class="print-sign-role">Noted by</p></div>';
+}
+
 // The print itself happens in the browser, so the server is told for the audit log
 function logReportPrint(name) {
     apiLogReportPrint(name).catch(function () {});
 }
 
-function printReport(keys) {
+async function printReport(keys) {
     if (typeof finishCreditPrint === 'function') finishCreditPrint();
     if (printRestore) printRestore();
 
@@ -753,6 +806,8 @@ function printReport(keys) {
         notifyWarning('Printing a report is a manager action.', 'Not allowed');
         return;
     }
+
+    const store = await printStoreInfo();
 
     const panelKeys = printKeys(keys);
     const panels = [];
@@ -809,20 +864,29 @@ function printReport(keys) {
         if (block) totalBlocks.push(block);
     }
 
-    // Who printed it and when, under the title of each report
+    // The store, title, period and who printed it at the top; the signatures at the bottom
     const printedBy = [];
     const reportNames = [];
     for (let i = 0; i < reports.length; i++) {
-        const line = document.createElement('p');
-        line.className = 'print-by';
-        line.textContent = printedByText();
-        const head = reports[i].querySelector('.panel-head');
-        if (head) head.after(line);
-        else reports[i].prepend(line);
-        printedBy.push(line);
-
         const title = reports[i].querySelector('.panel-head h3');
-        if (title && title.textContent.trim() !== '') reportNames.push(title.textContent.trim());
+        const titleText = title ? title.textContent.trim() : '';
+        if (titleText !== '') reportNames.push(titleText);
+
+        // Only the Sales Summary shows a period (its range note); the other notes describe the screen
+        const range = reports[i].querySelector('#income-range-note');
+        const period = range ? range.textContent.trim() : '';
+
+        const head = document.createElement('div');
+        head.className = 'print-head';
+        head.innerHTML = printHeadHtml(store, titleText, period);
+        reports[i].prepend(head);
+        printedBy.push(head);
+
+        const signs = document.createElement('div');
+        signs.className = 'print-signs';
+        signs.innerHTML = printSignsHtml();
+        reports[i].appendChild(signs);
+        printedBy.push(signs);
     }
     logReportPrint(reportNames.length > 0 ? reportNames.join(', ') : panelKeys.join(', '));
 
