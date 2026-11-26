@@ -3060,6 +3060,10 @@ table th.th-sortable[aria-sort="descending"]::after { content: "\25BC"; opacity:
 .adjust-lines-table thead th { position: sticky; top: 0; z-index: 1; }
 .adjust-lines-table .cell-sub { display: block; font-size: 12px; color: var(--steel-soft); }
 .adjust-line-qty { width: 100px; margin-left: auto; text-align: left; }
+/* Receive Deliveries: the arrived count with its unit beside it; the unit is fixed */
+.recv-arrived { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
+.recv-arrived .adjust-line-qty { margin-left: 0; }
+.recv-arrived .recv-unit { width: 110px; background: var(--paper); color: var(--steel-soft); cursor: not-allowed; }
 .adjust-line-note { display: block; font-size: 12px; font-weight: 600; }
 .adjust-line-note:empty { display: none; }
 .adjust-line-note.is-under { color: var(--signal-ink); }

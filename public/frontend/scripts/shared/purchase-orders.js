@@ -1789,7 +1789,7 @@ function buildPurchaseOrderPanel() {
             '<td class="cell-id">' + poNumber(po.po_id) + '</td>' +
             '<td class="cell-name">' + escapeHtml(po.supplier_name) + '</td>' +
             '<td class="cell-id">' + escapeHtml(String(po.order_date).slice(0, 10)) + '</td>' +
-            (poSetup.showLines ? '<td class="cell-num">' + po.line_count + '</td>' : '') +
+            (poSetup.showLines ? '<td class="cell-num">' + escapeHtml(qtyText(po.total_units)) + '</td>' : '') +
             '<td class="cell-num">' + poValueCell(po) + '</td>' +
             '<td class="cell-id">' + poArrivesCell(po) + '</td>' +
             '<td>' + poStatusBadge(po) + '</td></tr>';
@@ -2574,10 +2574,13 @@ function renderReceiveSheet() {
         rows += '<tr data-product="' + item.product_id + '">' +
             '<td class="cell-name">' + escapeHtml(item.product_name) + '</td>' +
             '<td class="cell-num">' + escapeHtml(recvCountText(item, line.expected, line.owed)) + '</td>' +
-            '<td class="cell-num"><input type="number" class="form-control adjust-line-qty" id="recv-qty-' + index + '" ' +
+            '<td class="cell-num"><div class="recv-arrived">' +
+                '<input type="number" class="form-control adjust-line-qty" id="recv-qty-' + index + '" ' +
                 'min="0" step="' + (units.length > 1 ? 'any' : '1') + '" value="' + line.expected + '" ' +
                 'oninput="renderReceiveShortages()" aria-label="Arrived: ' + escapeHtml(item.product_name) + '">' +
-                recvUnitSelectHtml(item, index) + '</td>' +
+                '<input type="text" class="form-control recv-unit" value="' + escapeHtml(recvOrderedUnitName(item)) + '" ' +
+                'readonly tabindex="-1" aria-label="Unit: ' + escapeHtml(item.product_name) + '">' +
+                '</div></td>' +
             '<td class="cell-num" id="recv-short-' + index + '">—</td>' +
         '</tr>';
     }
@@ -2599,8 +2602,8 @@ function receiveCounts() {
         const line = poReceiving.lines[index];
         const field = document.getElementById('recv-qty-' + index);
         const typed = Math.max(0, Number(field ? field.value : line.expected) || 0);
-        // The typed number is in the unit chosen next to it; stock counts in the base unit
-        const arrived = Math.round(typed * recvArrivedSize(line.item, index));
+        // The typed number is in the unit the line was ordered in; stock counts in the base unit
+        const arrived = Math.round(typed * recvArrivedSize(line.item));
         const short = Math.max(line.owed - arrived, 0);
         const over = Math.max(arrived - line.owed, 0);
         const amount = Math.round(short * (Number(line.item.unit_cost) || 0) * 100) / 100;
@@ -2650,27 +2653,18 @@ function recvOrderedUnitIndex(item) {
     return 0;
 }
 
-// The unit select beside the Arrived box, only for a material with more than one unit
-function recvUnitSelectHtml(item, index) {
+// The unit shown beside the Arrived box: the one the line was ordered in. It cannot be changed.
+function recvOrderedUnitName(item) {
     const units = item.units || [];
-    if (units.length < 2) return '';
-    let options = '';
-    const start = recvOrderedUnitIndex(item);
-    for (let i = 0; i < units.length; i++) {
-        // Whole-number sizes only; the option value stays the place of the unit in item.units
-        if (!Number.isInteger(Number(units[i].size)) && i !== start) continue;
-        options += '<option value="' + i + '"' + (i === start ? ' selected' : '') + '>' + escapeHtml(units[i].name) +
-            (Number(units[i].size) === 1 ? '' : ' (' + escapeHtml(qtyText(Number(units[i].size), units[0].name)) + ')') + '</option>';
-    }
-    return '<select class="form-control" id="recv-in-' + index + '" onchange="renderReceiveShortages()" ' +
-        'aria-label="Unit arrived: ' + escapeHtml(item.product_name) + '">' + options + '</select>';
+    const unit = units[recvOrderedUnitIndex(item)];
+    if (unit) return unit.name;
+    const pack = recvPackOf(item);
+    if (pack) return pack.name;
+    return item.unit_name || '';
 }
 
-// How many base units one of the arrived unit is: the unit chosen beside the Arrived box
-function recvArrivedSize(item, index) {
-    const units = item.units || [];
-    const select = document.getElementById('recv-in-' + index);
-    if (select && units[Number(select.value)]) return Number(units[Number(select.value)].size);
+// How many base units one of the arrived unit is: the pack the line was ordered in, else 1
+function recvArrivedSize(item) {
     const pack = recvPackOf(item);
     return pack ? pack.size : 1;
 }
@@ -3165,7 +3159,7 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         foot += '<button type="button" class="btn btn-danger" onclick="denyPrices(' + po.po_id + ')">' +
                 'Deny</button>';
         foot += '<button type="button" class="btn btn-success" onclick="confirmPrices(' + po.po_id + ')">' +
-                'Confirm Prices</button>';
+                'Confirm</button>';
     }
     if (!readOnly && po.status === 'For Approval' && typeof holdsFeature === 'function' && holdsFeature('po-delete')) {
         foot += '<button type="button" class="btn btn-danger" onclick="deletePurchaseOrder(' + po.po_id + ')">' +
@@ -3568,7 +3562,7 @@ async function confirmPrices(poId) {
 
     const yes = await askConfirm(
         poNumber(po.po_id) + ' goes ahead at the prices ' + po.supplier_name + ' set.',
-        { title: 'Confirm these prices?', eyebrow: 'Purchase Orders', confirmLabel: 'Confirm Prices' });
+        { title: 'Confirm these prices?', eyebrow: 'Purchase Orders', confirmLabel: 'Confirm' });
     if (!yes) return;
 
     try {
