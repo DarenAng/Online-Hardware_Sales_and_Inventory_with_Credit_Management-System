@@ -1723,6 +1723,8 @@ function poWaitingForSupplier(po) {
 }
 
 function poArrivesCell(po) {
+    // A received order shows the day it came in
+    if (po.status === 'Received' && po.received_at) return escapeHtml(poShipDay(po.received_at));
     if (poWaitingForSupplier(po)) return '<span class="muted">Waiting for supplier</span>';
     if (!poAwaitsDelivery(po) || !po.supplier_ship_date) return '<span class="muted">--</span>';
     return escapeHtml(poShipDay(po.supplier_ship_date)) + poLateBadge(po);
