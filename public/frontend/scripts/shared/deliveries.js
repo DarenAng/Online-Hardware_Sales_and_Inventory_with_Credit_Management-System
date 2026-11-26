@@ -249,7 +249,7 @@ async function fillDeliveryItems(deliveryId, page, pages) {
             ]);
         }
 
-        body = detailTable(['Material ID', 'Material name', 'Qty', 'Unit Price', 'Subtotal'], rows, [2, 3, 4], [0]);
+        body = detailTable(['Product ID', 'Product', 'Qty', 'Unit Price', 'Subtotal'], rows, [2, 3, 4], [0]);
         page.label = 'Items (' + items.length + ')';
     } catch (error) {
         body = '<p class="detail-empty">The items could not be loaded.</p>';

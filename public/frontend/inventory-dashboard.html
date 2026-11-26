@@ -29,7 +29,7 @@
                         Inventory Management <span class="nav-caret" aria-hidden="true"><span>&#9660;</span></span>
                     </a>
                     <ul id="inventory-dropdown" class="nav-sub" style="display: none;">
-                        <li data-feature="material-list"><a href="#" data-panel-link="panel-inventory" onclick="loadInventoryAll(event)"><i class="icon icon-list nav-icon" aria-hidden="true"></i>Material List</a></li>
+                        <li data-feature="material-list"><a href="#" data-panel-link="panel-inventory" onclick="loadInventoryAll(event)"><i class="icon icon-list nav-icon" aria-hidden="true"></i>Product List</a></li>
                         <li data-feature="stock-adjustment"><a href="#" data-panel-link="panel-adjust" onclick="showAdjust(event)"><i class="icon icon-sliders-horizontal nav-icon" aria-hidden="true"></i>Stock Adjustment</a></li>
                         <li data-feature="adjustment-history"><a href="#" data-panel-link="panel-adjust-log" onclick="showAdjustmentHistory(event)"><i class="icon icon-history nav-icon" aria-hidden="true"></i>Adjustment History</a></li>
                         <li data-feature="reorder-points"><a href="#" data-panel-link="panel-reorder" onclick="showReorder(event)"><i class="icon icon-triangle-alert nav-icon" aria-hidden="true"></i>
@@ -84,7 +84,7 @@
                 <div class="card" id="panel-inventory" data-panel>
                     <div class="panel-head">
                         <div>
-                            <h3>Material List</h3>
+                            <h3>Product List</h3>
                         </div>
                         <div class="panel-actions">
                             <button type="button" class="btn btn-accent" data-feature="product-add"
@@ -135,7 +135,7 @@
                     <div class="table-responsive grid-10">
                         <table id="inv-table">
                             <thead>
-                                <tr><th>ID</th><th>Material</th><th>Supplier</th><th>Unit Price</th><th>On Hand</th><th>Status</th></tr>
+                                <tr><th>Product ID</th><th>Products</th><th>Supplier</th><th>Unit Price</th><th>On Hand</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -273,7 +273,7 @@
                     <div class="table-responsive grid-10">
                         <table id="adjust-table">
                             <thead>
-                                <tr><th>Material ID</th><th>When</th><th>Material name</th><th>Type</th><th>Before</th>
+                                <tr><th>Product ID</th><th>Date Adjusted</th><th>Product</th><th>Type</th><th>Before</th>
                                     <th>Change</th><th>After</th><th>By</th></tr>
                             </thead>
                             <tbody></tbody>
@@ -309,7 +309,7 @@
                     <div class="table-responsive grid-10">
                         <table id="reorder-table">
                             <thead>
-                                <tr><th>ID</th><th>Material</th><th>Stock Level</th><th>Reorder At</th><th>Suggested Order</th><th>Status</th></tr>
+                                <tr><th>Product ID</th><th>Products</th><th>Stock Level</th><th>Reorder At</th><th>Suggested Order</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -551,7 +551,7 @@
                     <div class="table-responsive grid-10">
                         <table id="returns-table">
                             <thead>
-                                <tr><th>ID</th><th>Material ID</th><th>Type</th><th>Material name</th><th>Qty</th><th>Adjustment</th><th>Filed</th><th>Status</th></tr>
+                                <tr><th>ID</th><th>Product ID</th><th>Type</th><th>Product</th><th>Qty</th><th>Adjustment</th><th>Filed</th><th>Status</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>
@@ -618,7 +618,7 @@
                     <div class="table-responsive grid-10">
                         <table id="arch-table">
                             <thead>
-                                <tr><th>ID</th><th>Material</th><th>Category</th><th>On Hand</th><th>Archived On</th></tr>
+                                <tr><th>Product ID</th><th>Products</th><th>Category</th><th>On Hand</th><th>Archived On</th></tr>
                             </thead>
                             <tbody></tbody>
                         </table>

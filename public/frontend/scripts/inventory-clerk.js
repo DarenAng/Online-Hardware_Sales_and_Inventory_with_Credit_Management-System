@@ -1417,7 +1417,7 @@ function renderAdjustLines() {
         '<p class="adjust-lines-head">' + count + (count === 1 ? ' item' : ' items') + '</p>' +
         '<div class="adjust-lines-scroll">' +
             '<table class="mini-table adjust-lines-table">' +
-                '<thead><tr><th>Material ID</th><th>Material name</th><th>Unit</th><th class="col-num">Quantity</th></tr></thead>' +
+                '<thead><tr><th>Product ID</th><th>Product</th><th>Unit</th><th class="col-num">Quantity</th></tr></thead>' +
                 '<tbody>' + rows + '</tbody>' +
             '</table>' +
         '</div>';
@@ -1772,7 +1772,7 @@ let clerkRecordType = 'supplier';
 
 const CLERK_RECORD_COLUMNS = {
     supplier: [['name', 'Supplier'], ['contact_person', 'Contact'], ['contact_number', 'Number'], ['email', 'Email'], ['product_count', 'Products']],
-    product:  [['id', 'ID'], ['name', 'Product'], ['category_name', 'Category'], ['brand_name', 'Brand'], ['price', 'Price'], ['quantity_in_stock', 'On Hand']],
+    product:  [['id', 'Product ID'], ['name', 'Product'], ['category_name', 'Category'], ['brand_name', 'Brand'], ['price', 'Price'], ['quantity_in_stock', 'On Hand']],
     category: [['name', 'Category'], ['product_count', 'Products'], ['total_stock', 'Total Stock']],
     unit:     [['name', 'Unit'], ['product_count', 'Products']]
 };
@@ -1986,7 +1986,7 @@ async function openClerkRecord(index) {
                 ]);
             }
             pages.push({ label: 'Products (' + rows.length + ')', body: detailTable(
-                ['ID', 'Product', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'], rows, [4, 5], [0]) });
+                ['Product ID', 'Product', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'], rows, [4, 5], [0]) });
         } catch (error) {
             pages.push({ label: 'Products', body: '<p class="detail-note detail-warn">The products could not be loaded.</p>' });
         }
@@ -2193,7 +2193,7 @@ function openAdjustmentDetail(adjustmentId) {
 
     const why = '<div class="detail-grid">' +
         detailField('Adjusted By', escapeHtml(a.adjusted_by)) +
-        detailField('When', escapeHtml(a.created_at)) +
+        detailField('Date Adjusted', escapeHtml(a.created_at)) +
         '</div>' +
         '<h4 class="detail-subhead">Reason</h4>' +
         '<p class="detail-note">' + escapeHtml(a.reason || 'No reason given.') + '</p>';

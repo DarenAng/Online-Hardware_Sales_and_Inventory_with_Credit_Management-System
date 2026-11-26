@@ -17,7 +17,7 @@ function idCode(prefix, id) {
 
 function customerCode(id) { return idCode('C', id); }
 function staffCode(id) { return idCode('S', id); }
-function materialCode(id) { return idCode('M', id); }
+function materialCode(id) { return idCode('P', id); }
 function supplierCode(id) { return idCode('SP', id); }
 function deliveryCode(id) { return idCode('D', id); }
 function categoryCode(id) { return idCode('CT', id); }
@@ -43,7 +43,7 @@ function poNumber(poId) {
 
 // The code for a row of the Records screens: the kind of record decides the prefix.
 function recordCode(type, id) {
-    const prefixes = { customer: 'C', product: 'M', inventory: 'M', staff: 'S', supplier: 'SP', category: 'CT', brand: 'B', unit: 'U' };
+    const prefixes = { customer: 'C', product: 'P', inventory: 'P', staff: 'S', supplier: 'SP', category: 'CT', brand: 'B', unit: 'U' };
     return idCode(prefixes[type] || 'ID', id);
 }
 
@@ -92,10 +92,10 @@ function loyaltyFactHtml(status) {
     const thisPaid = peso(status.thisMonthPaid);
 
     if (status.qualifies) {
-        return rate + ' off sales paid in full this month <span class="muted">(paid ' + lastPaid +
+        return rate + ' off sales paid in full this month<br><span class="muted">(paid ' + lastPaid +
             ' last month; ' + thisPaid + ' so far this month)</span>';
     }
-    return 'None this month <span class="muted">(paid ' + lastPaid + ' last month, ' +
+    return 'None this month<br><span class="muted">(paid ' + lastPaid + ' last month, ' +
         peso(status.threshold) + ' needed; ' + thisPaid + ' so far this month)</span>';
 }
 

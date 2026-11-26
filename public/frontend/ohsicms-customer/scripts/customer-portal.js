@@ -474,12 +474,12 @@ async function openCustomerDelivery(id) {
             detailField('Balance Due', peso(d.balance_due)) +
             detailField('Payment Status', escapeHtml(d.payment_status)) + '</div>';
         const items = result.body.items.map(function (item) {
-            return ['M' + String(item.product_id).padStart(4, '0'), escapeHtml(item.product_name),
+            return ['P' + String(item.product_id).padStart(4, '0'), escapeHtml(item.product_name),
                 Number(item.quantity) + ' ' + escapeHtml(item.unit_name || ''), peso(item.unit_price), peso(item.subtotal)];
         });
         const body = '<div class="cp-delivery-details"><div><h4 class="detail-subhead">Route</h4>' + route +
             '<h4 class="detail-subhead">Payment</h4>' + payment + '</div><div><h4 class="detail-subhead">Items (' +
-            items.length + ')</h4>' + detailTable(['Material ID', 'Material name', 'Qty', 'Unit Price', 'Subtotal'], items, [2, 3, 4]) + '</div></div>';
+            items.length + ')</h4>' + detailTable(['Product ID', 'Product', 'Qty', 'Unit Price', 'Subtotal'], items, [2, 3, 4]) + '</div></div>';
         openDetailModal('Delivery ' + code, d.customer_name + ' · ' + d.status, code,
             [{ label: 'Delivery', body: body }], '', { wide: 'xl', scroll: true, top: deliveryStepper(d) });
     } catch (error) { notifyOffline(); }

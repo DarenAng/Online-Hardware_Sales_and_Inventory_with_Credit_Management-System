@@ -2428,7 +2428,7 @@ function renderDriverOptions(rows) {
 const RECORD_COLUMNS = {
     supplier: [['name', 'Supplier'], ['contact_person', 'Contact'], ['contact_number', 'Number'], ['email', 'Email'], ['product_count', 'Materials']],
     customer: [['name', 'Customer'], ['phone', 'Phone'], ['credit_limit', 'Credit Limit'], ['current_credit', 'Balance']],
-    product:  [['id', 'ID'], ['name', 'Material name'], ['description', 'Description'], ['category_name', 'Category'], ['brand_name', 'Brand'], ['price', 'Price'], ['quantity_in_stock', 'On Hand']],
+    product:  [['id', 'Product ID'], ['name', 'Product'], ['description', 'Description'], ['category_name', 'Category'], ['brand_name', 'Brand'], ['price', 'Price'], ['quantity_in_stock', 'On Hand']],
     category: [['name', 'Category'], ['product_count', 'Materials'], ['total_stock', 'Total Stock']],
     unit:     [['name', 'Unit'], ['product_count', 'Materials']]
 };
@@ -2881,7 +2881,7 @@ async function openSaleDetail(saleId) {
                 peso(it.subtotal)
             ]);
         }
-        const items = detailTable(['Material ID', 'Material name', 'Qty', 'Unit Price', 'Subtotal'], itemRows, [2, 3, 4], [0]);
+        const items = detailTable(['Product ID', 'Product', 'Qty', 'Unit Price', 'Subtotal'], itemRows, [2, 3, 4], [0]);
 
         const paidList = [];
         const references = {};
@@ -3065,8 +3065,8 @@ function openStockDetail(productId, fromReorderAlerts) {
     if (!p) return;
 
     const stock = '<div class="detail-grid">' +
-        detailField('Material ID', materialCode(p.product_id)) +
-        detailField('Material name', escapeHtml(p.product_name)) +
+        detailField('Product ID', materialCode(p.product_id)) +
+        detailField('Product', escapeHtml(p.product_name)) +
         detailField('Description', descriptionText(p.description)) +
         detailField('On Hand', p.quantity_in_stock + ' ' + escapeHtml(p.unit_name || '')) +
         detailField('Reorder Point', String(p.reorder_point)) +
@@ -3164,7 +3164,7 @@ async function openRecordDetail(index) {
                 ]);
             }
             productsBody = detailTable(
-                ['ID', 'Material name', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'],
+                ['Product ID', 'Product', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'],
                 productRows, [4, 5], [0]);
             pages.push({ label: 'Materials (' + productRows.length + ')', body: productsBody });
         } catch (error) {

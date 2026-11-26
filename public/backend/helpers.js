@@ -104,7 +104,7 @@ function idCode(prefix, id) {
 
 function customerCode(id) { return idCode("C", id); }
 function staffCode(id) { return idCode("S", id); }
-function materialCode(id) { return idCode("M", id); }
+function materialCode(id) { return idCode("P", id); }
 function supplierCode(id) { return idCode("SP", id); }
 function deliveryCode(id) { return idCode("D", id); }
 function categoryCode(id) { return idCode("CT", id); }
@@ -121,7 +121,7 @@ function paymentCode(id) { return idCode("PY", id); }
 
 // The code for a record of a kind named by a module or table (Supplier, Inventory, Category...).
 function recordCode(kind, id) {
-  const prefixes = { customer: "C", product: "M", inventory: "M", staff: "S", supplier: "SP", category: "CT", brand: "B", unit: "U" };
+  const prefixes = { customer: "C", product: "P", inventory: "P", staff: "S", supplier: "SP", category: "CT", brand: "B", unit: "U" };
   return idCode(prefixes[String(kind).toLowerCase()] || "ID", id);
 }
 
