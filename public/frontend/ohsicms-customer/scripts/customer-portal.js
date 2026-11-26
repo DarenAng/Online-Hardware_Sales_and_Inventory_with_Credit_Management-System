@@ -469,7 +469,7 @@ async function openCustomerDelivery(id) {
         const payment = collectBanner(d) + '<div class="detail-grid">' +
             detailField('Customer', escapeHtml(d.customer_name)) +
             detailField('Phone', escapeHtml(d.customer_phone || 'Not set')) +
-            detailField('Order Amount', peso(d.final_amount)) +
+            detailField('Total Amount', peso(d.final_amount)) +
             detailField('Amount Paid', peso(d.amount_paid)) +
             detailField('Balance Due', peso(d.balance_due)) +
             detailField('Payment Status', escapeHtml(d.payment_status)) + '</div>';

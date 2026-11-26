@@ -10,7 +10,8 @@ const NEXT_DELIVERY_STATUS = {
 function deliveryStepper(d) {
     const stages = ['Pending', 'Out for Delivery', 'Delivered'];
     const names = ['Pending', 'Out for Delivery', 'Delivered'];
-    const notes = ['Sale made at the counter.', 'Loaded and on the road.', 'Paid and handed over.'];
+    // Only a delivered stop shows a note under its step: the day it was delivered
+    const notes = ['', '', ''];
     let reached = stages.indexOf(d.status);
     if (d.status === 'Delayed') reached = stages.indexOf('Out for Delivery');
 
@@ -27,14 +28,6 @@ function deliveryStepper(d) {
         }
     }
 
-    const hasBalance = d.balance_due !== undefined && d.balance_due !== null && d.balance_due !== '';
-    let paid;
-    if (hasBalance) {
-        paid = Number(d.balance_due) <= 0;
-    } else {
-        paid = d.payment_status === 'Paid';
-    }
-
     if (d.status === 'Delivered' && d.delivered_at) notes[2] = escapeHtml(d.delivered_at);
 
     let items = '';
@@ -42,30 +35,8 @@ function deliveryStepper(d) {
         items += '<li class="dstep-item ' + states[i] + '">' +
             '<span class="dstep-dot">' + (states[i] === 'done' ? '&#10003;' : (i + 1)) + '</span>' +
             '<span class="dstep-text"><span class="dstep-name">' + names[i] + '</span>' +
-            '<span class="dstep-note">' + notes[i] + '</span></span>' +
+            (notes[i] ? '<span class="dstep-note">' + notes[i] + '</span>' : '') + '</span>' +
         '</li>';
-    }
-
-    let summary;
-    let tone = '';
-    if (d.status === 'Pending') {
-        summary = 'Waiting to go out.';
-    } else if (d.status === 'Out for Delivery') {
-        summary = 'On the way.';
-    } else if (d.status === 'Delivered') {
-        summary = paid ? 'This delivery is finished.' : 'Delivered. Balance still owed.';
-        tone = paid ? 'is-ok' : 'is-warn';
-    } else if (d.status === 'Delayed') {
-        summary = 'Delayed.';
-        tone = 'is-warn';
-    } else if (d.status === 'Failed') {
-        summary = 'Failed.';
-        tone = 'is-fail';
-    } else if (d.status === 'Cancelled') {
-        summary = 'Cancelled.';
-        tone = 'is-fail';
-    } else {
-        summary = escapeHtml(d.status || '');
     }
 
     let message = '';
@@ -85,8 +56,7 @@ function deliveryStepper(d) {
     }
 
     return '<div class="dstep' + (message ? ' has-message' : '') + '">' +
-        '<div class="dstep-row"><ol class="dstep-list">' + items + '</ol>' +
-        '<div class="dstep-summary ' + tone + '">' + summary + '</div></div>' +
+        '<div class="dstep-row"><ol class="dstep-list">' + items + '</ol></div>' +
         message +
         '</div>';
 }
@@ -95,17 +65,11 @@ function collectBanner(d) {
     if (d.balance_due === undefined || d.balance_due === null) return '';
 
     if (Number(d.balance_due) > 0) {
-        let total = d.final_amount;
-        if (d.amount_due !== undefined && d.amount_due !== null) total = d.amount_due;
-        let note = 'Of ' + peso(total) + ', ' + peso(d.amount_paid) + ' is paid already.';
-        if (d.status === 'Delivered') note = 'Delivered, but ' + peso(d.balance_due) + ' is still to be collected. ' + note;
-        return '<div class="collect-banner is-owed"><span class="collect-label">To collect</span>' +
-            '<strong class="collect-figure">' + peso(d.balance_due) + '</strong>' +
-            '<span class="collect-note">' + escapeHtml(note) + '</span></div>';
+        return '<div class="collect-banner is-owed"><span class="collect-label">Balance</span>' +
+            '<strong class="collect-figure">' + peso(d.balance_due) + '</strong></div>';
     }
     return '<div class="collect-banner is-paid"><span class="collect-label">Payment</span>' +
-        '<strong class="collect-figure">Paid in full</strong>' +
-        '<span class="collect-note">Nothing to collect on this delivery.</span></div>';
+        '<strong class="collect-figure">Paid in full</strong></div>';
 }
 
 function showDeliveryRecord(d, canUpdate, onlyStatuses) {
@@ -131,7 +95,7 @@ function showDeliveryRecord(d, canUpdate, onlyStatuses) {
 
     let money = detailField('Customer', escapeHtml(d.customer_name)) +
         detailField('Phone', d.customer_phone ? escapeHtml(d.customer_phone) : '<span class="muted">Not set</span>') +
-        detailField('Order Amount', peso(d.final_amount));
+        detailField('Total Amount', peso(d.final_amount));
 
     if (d.balance_due !== undefined) {
         money += detailField('Amount Paid', peso(d.amount_paid)) +
