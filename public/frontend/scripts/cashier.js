@@ -968,8 +968,8 @@ function renderCustomerVerdict() {
     if (addButton) addButton.hidden = !offerAdd;
 
     if (id) {
-        box.className = 'customer-verdict is-good';
-        box.textContent = 'A customer on record. This sale is saved under their name.';
+        box.className = 'customer-verdict';
+        box.textContent = '';
         return;
     }
 
@@ -1477,7 +1477,7 @@ function renderCartFigures() {
         html += '<div class="total-row total-due"><span>Amount Due</span><span>' + peso(t.due) + '</span></div>';
 
         if (t.onCredit) {
-            html += '<div class="total-row"><span>Paid now</span><span>' + peso(t.down) + '</span></div>';
+            html += '<div class="total-row"><span>Amount Paid</span><span>' + peso(t.down) + '</span></div>';
             if (t.amountOnAccount > 0) {
                 html += '<div class="total-row"><span>On account</span><span>' + peso(t.amountOnAccount) + '</span></div>';
                 if (t.creditTermsValid) {
@@ -1821,9 +1821,8 @@ function renderCreditVerdict(totals) {
         return;
     }
 
-    box.className = 'credit-verdict is-good';
-    box.innerHTML = peso(t.owedOnAccount) + ' goes on ' + escapeHtml(name) + "'s account, leaving " +
-        peso(available - t.owedOnAccount) + ' of their limit.';
+    box.className = 'credit-verdict';
+    box.innerHTML = '';
 }
 
 function fillDownPayment(share) {
@@ -2067,7 +2066,7 @@ async function handleCheckout(event, viaQr) {
     if (viaQr) {
         if (QR_METHODS.indexOf(taken) === -1) return;
         let qrWhat = 'For this sale';
-        if (t.onCredit) qrWhat = 'Paid now on this credit sale';
+        if (t.onCredit) qrWhat = 'Amount paid on this credit sale';
         qr = await collectQrPayment(amountPaid, qrWhat, taken, 'sale', null, transferDetails);
         if (!qr) return;
     }

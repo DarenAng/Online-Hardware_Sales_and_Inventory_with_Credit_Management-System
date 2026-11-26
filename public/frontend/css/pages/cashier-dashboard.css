@@ -429,10 +429,10 @@
 .order-summary .panel-head { align-items: center; }
 .order-summary .panel-actions .btn { white-space: nowrap; }
 
-.pay-totals { margin: 0 0 16px; padding: 10px 0 12px; }
+.pay-totals { margin: 16px 0 0; padding: 10px 0 12px; }
 .checkout-foot { flex-wrap: wrap; }
 .checkout-foot #checkout-btn { min-height: 46px; font-size: 16.5px; }
-.checkout-foot #qr-pay-btn { min-height: 46px; }
+.checkout-foot #qr-pay-btn { min-height: 46px; margin-left: auto; }
 .checkout-foot .btn { white-space: nowrap; }
 .checkout-foot #checkout-btn { margin-left: auto; }
 
