@@ -97,6 +97,7 @@ function registerAdminRoutes(app, deps) {
     const name = details.name;
     const roleName = details.roleName;
     const password = details.password;
+    const site = details.site;
 
     if (!isMailConfigured()) {
       return {
@@ -117,7 +118,8 @@ function registerAdminRoutes(app, deps) {
         email: email,
         roleName: roleName,
         password: password,
-        storeName: storeName
+        storeName: storeName,
+        site: site
       }));
 
       return { emailed: true };
@@ -547,7 +549,8 @@ function registerAdminRoutes(app, deps) {
         email: details.email,
         name: name,
         roleName: details.roleName,
-        password: draft.password
+        password: draft.password,
+        site: request.protocol + "://" + request.get("host")
       });
 
       await writeAuditLog(
@@ -806,7 +809,8 @@ function registerAdminRoutes(app, deps) {
         email: details.email,
         name: details.fullName || "there",
         roleName: details.roleName || "staff",
-        password: draft.password
+        password: draft.password,
+        site: request.protocol + "://" + request.get("host")
       });
 
       await writeAuditLog(
@@ -884,7 +888,8 @@ function registerAdminRoutes(app, deps) {
       email: rows[0].email,
       name: rows[0].full_name,
       roleName: rows[0].role_name,
-      password: password
+      password: password,
+      site: request.protocol + "://" + request.get("host")
     });
 
     await writeAuditLog(request, "RESET_PASSWORD",

@@ -255,6 +255,7 @@ CREATE TABLE purchase_orders (
     price_review VARCHAR(10) NULL,
     price_review_at DATETIME NULL,
     price_review_by_staff_id INT NULL,
+    price_review_note VARCHAR(255) NULL,
     UNIQUE INDEX idx_purchase_orders_supplier_code (supplier_code),
     FOREIGN KEY (supplier_id) REFERENCES suppliers(supplier_id) ON DELETE RESTRICT ON UPDATE CASCADE,
     FOREIGN KEY (raised_by_staff_id) REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE,

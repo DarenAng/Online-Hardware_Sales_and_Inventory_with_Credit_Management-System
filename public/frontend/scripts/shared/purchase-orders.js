@@ -2995,6 +2995,10 @@ async function openPurchaseOrderDetail(poId, readOnly) {
         (po.closed_as === 'No Answer'
             ? detailField('No Answer', escapeHtml(poWhen(po.closed_at)))
             : '') +
+        (po.price_review === 'Denied'
+            ? detailField('Prices Denied', escapeHtml(poWhen(po.price_review_at))) +
+              detailField('Reason', escapeHtml(po.price_review_note))
+            : '') +
         (po.closed_as === 'Denied'
             ? detailField('Denied', escapeHtml(poWhen(po.closed_at)) +
                 (po.closed_by ? ' <span class="muted">by ' + escapeHtml(po.closed_by) + '</span>' : '')) +
@@ -3589,7 +3593,8 @@ async function denyPrices(poId) {
     const asked = await askInput({
         title: 'Deny these prices?',
         eyebrow: 'Purchase Orders',
-        message: poNumber(po.po_id) + ' is closed and ' + po.supplier_name + "'s link shows it is denied.",
+        message: poNumber(po.po_id) + ' goes back to ' + po.supplier_name +
+            ', who is emailed the order link to edit the prices.',
         label: 'Reason',
         confirmLabel: 'Deny',
         cancelLabel: 'Go back',

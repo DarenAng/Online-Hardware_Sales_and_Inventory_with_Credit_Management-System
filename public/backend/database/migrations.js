@@ -1777,13 +1777,14 @@ async function migrateManualReorderPoints() {
   }
 }
 
-// A supplier who changes a price waits for the manager: price_review is NULL (not needed), 'Waiting' or 'Confirmed'.
+// A supplier who changes a price waits for the manager: price_review is NULL (not needed), 'Waiting', 'Confirmed'
+// or 'Denied'. A denied price goes back to the supplier to edit, with the manager's reason in price_review_note.
 // A denied order is closed as 'Denied', so closed_as grows by one value.
 async function migratePriceReview() {
   const columnsResult = await db.query(
     "SELECT COLUMN_NAME FROM information_schema.COLUMNS\n" +
       "     WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'purchase_orders'\n" +
-      "       AND COLUMN_NAME IN ('price_review', 'price_review_at', 'price_review_by_staff_id')",
+      "       AND COLUMN_NAME IN ('price_review', 'price_review_at', 'price_review_by_staff_id', 'price_review_note')",
     [DB_NAME]
   );
   const names = columnNamesOf(columnsResult[0]);
@@ -1799,6 +1800,10 @@ async function migratePriceReview() {
         "         ADD CONSTRAINT fk_purchase_orders_price_review_by FOREIGN KEY (price_review_by_staff_id)\n" +
         "         REFERENCES staff(staff_id) ON DELETE SET NULL ON UPDATE CASCADE");
   }
+  if (names.indexOf("price_review_note") === -1) {
+    await db.query("ALTER TABLE purchase_orders ADD COLUMN price_review_note VARCHAR(255) NULL");
+    console.log("Added purchase_orders.price_review_note (the reason a price was denied).");
+  }
 
   const typeResult = await db.query(
     "SELECT COLUMN_TYPE FROM information_schema.COLUMNS\n" +
@@ -1809,7 +1814,7 @@ async function migratePriceReview() {
     await db.query("ALTER TABLE purchase_orders MODIFY COLUMN closed_as ENUM('No Answer', 'Cancelled', 'Denied') NULL");
     console.log("purchase_orders.closed_as can now be Denied.");
   }
-  if (names.length < 3) {
+  if (names.indexOf("price_review") === -1) {
     console.log("Added the price review columns (purchase_orders.price_review, price_review_at, price_review_by_staff_id).");
   }
 }

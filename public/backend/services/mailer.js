@@ -280,6 +280,13 @@ function firstPasswordMessage(details) {
   const shop = details.storeName || "the hardware shop";
   const sender = MAIL_FROM_NAME || shop;
 
+  // The sign-in page of the system: HARDWARE_SITE_URL, or the address the administrator is using
+  let signInText = "Ask the person who set this up for the address of the system.\n\n";
+  const site = siteAddress(details.site);
+  if (site) {
+    signInText = "Sign in here:\n\n    " + site + "Login.html\n\n";
+  }
+
   return {
     to: email,
     fromName: sender,
@@ -290,12 +297,10 @@ function firstPasswordMessage(details) {
       "system, as " + roleName + ".\n\n" +
       "    Sign in with:  " + email + "\n" +
       "    Password:      " + password + "\n\n" +
+      signInText +
       "The system will ask you to choose your own password the first time you " +
       "sign in, and this one stops working the moment you do. Until then, treat " +
       "it as you would a key to the shop.\n\n" +
-      "Ask the person who set this up for the address of the system. It is not " +
-      "in this message on purpose: a mail with a password and a link in it is " +
-      "what a fake one looks like, so this system never sends one.\n\n" +
       "Nobody here will ever ask you for your password, by mail or otherwise.\n\n" +
       "-- \n" +
       sender + "\n" +
@@ -760,7 +765,8 @@ function pricesConfirmedMessage(details) {
   };
 }
 
-// The notice sent when the manager denies the prices the supplier set
+// The notice sent when the manager denies the prices the supplier set. The order goes back to the
+// supplier, so the email carries the order link where the prices can be edited.
 function pricesDeniedMessage(details) {
   const order = details.order;
   const shop = details.shop;
@@ -776,14 +782,28 @@ function pricesDeniedMessage(details) {
     greeting = "Hello " + order.contact_person;
   }
 
+  let hoursText = "";
+  if (details.hours) {
+    hoursText = " within " + details.hours + " hours";
+  }
+
+  let linkText = "Please open the order link from our earlier email to edit the prices and answer again" +
+    hoursText + ".\n\n";
+  if (details.link) {
+    linkText = "Please open this link to edit the prices and answer again" + hoursText + ":\n\n" +
+      "    " + details.link + "\n\n";
+  }
+
   return {
     to: order.supplier_email,
     fromName: sender,
-    subject: "Purchase order " + number + " is denied",
+    subject: "Purchase order " + number + ": please edit your prices",
     body:
       greeting + ",\n\n" +
-      shopName + " has denied purchase order " + number + ". Please do not ship it.\n\n" +
+      shopName + " did not accept the prices on purchase order " + number + ". Please do not ship it yet.\n\n" +
       "    Reason:  " + details.reason + "\n\n" +
+      linkText +
+      "You can also decline the order on the same page if you cannot change the prices.\n\n" +
       "-- \n" +
       sender + "\n" +
       "This message was sent automatically. To reply, contact the shop directly.\n"

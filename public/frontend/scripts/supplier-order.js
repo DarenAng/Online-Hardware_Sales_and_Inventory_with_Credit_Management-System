@@ -617,8 +617,16 @@ function startSupplierOrderPage() {
             ? 'Press <strong>Set price</strong> on each line and type your price.'
             : 'Price not what you sell it for? Press <strong>Edit price</strong> on that line.';
 
+        // The shop did not accept the prices: the supplier edits them and answers again
+        let deniedHtml = '';
+        if (order.price_review === 'Denied') {
+            deniedHtml = '<p class="so-flash is-stop">Prices not accepted: ' +
+                escapeHtml(order.price_review_note || '') + '</p>';
+        }
+
         main.innerHTML =
             '<section class="so-hero">' + trackHtml(order) + '</section>' +
+            deniedHtml +
 
             '<section class="so-panel">' +
                 '<header class="so-step"><span class="so-num">1</span><div><h2>Check the order</h2>' +

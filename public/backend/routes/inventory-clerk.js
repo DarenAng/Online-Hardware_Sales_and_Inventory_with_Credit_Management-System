@@ -779,7 +779,7 @@ function registerInventoryRoutes(app, deps) {
         "IF(po.supplier_sent_at IS NULL, NULL, DATE_ADD(po.supplier_sent_at, INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR)) " +
         "AS answer_by, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
-        "po.supplier_ship_date, po.price_review, po.price_review_at, " +
+        "po.supplier_ship_date, po.price_review, po.price_review_at, po.price_review_note, " +
         "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
         "rb.full_name AS raised_by, cb.full_name AS confirmed_by, " +
         "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, " +
@@ -804,7 +804,7 @@ function registerInventoryRoutes(app, deps) {
         "GROUP BY po.po_id, po.status, po.order_date, po.confirmed_at, po.decision_note, po.received_at, po.discount, " +
         "po.closed_as, po.closed_note, po.closed_at, cl.full_name, " +
         "po.supplier_sent_at, po.supplier_response, po.supplier_responded_at, po.supplier_note, " +
-        "po.supplier_ship_date, po.price_review, po.price_review_at, " +
+        "po.supplier_ship_date, po.price_review, po.price_review_at, po.price_review_note, " +
         "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
         "rb.full_name, cb.full_name, " +
         "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, s.email " +
@@ -1114,7 +1114,7 @@ function registerInventoryRoutes(app, deps) {
       "IF(po.supplier_sent_at IS NULL, NULL, DATE_ADD(po.supplier_sent_at, INTERVAL " + SUPPLIER_ANSWER_HOURS + " HOUR)) " +
       "AS answer_by, " +
       "po.supplier_response, po.supplier_responded_at, po.supplier_note, po.supplier_ship_date, " +
-      "po.price_review, po.price_review_at, " +
+      "po.price_review, po.price_review_at, po.price_review_note, " +
       "po.shortage_sent_at, po.shortage_response, po.shortage_responded_at, po.shortage_note, " +
       "po.discount, " +
       "s.supplier_id, s.supplier_name, s.contact_person, s.contact_number, " +
@@ -1995,7 +1995,8 @@ function registerInventoryRoutes(app, deps) {
     }
   });
 
-  // The manager denies the prices the supplier set. The order is closed and the supplier is emailed.
+  // The manager denies the prices the supplier set. The order goes back to the supplier, who edits the
+  // prices on the order link and answers again within the answer time. The supplier is emailed the link.
   app.post("/api/purchase-orders/:poId/deny-prices", async function (request, response) {
     const poId = Number(request.params.poId);
     const number = helpers.poNumber(poId);
@@ -2005,10 +2006,11 @@ function registerInventoryRoutes(app, deps) {
     }
     try {
       const result = await db.query(
-        "UPDATE purchase_orders SET status = 'Cancelled', closed_as = 'Denied', closed_note = ?, " +
-        "closed_at = NOW(), closed_by_staff_id = ? WHERE po_id = ? AND status = 'Pending' " +
+        "UPDATE purchase_orders SET supplier_response = NULL, supplier_responded_at = NULL, " +
+        "supplier_ship_date = NULL, supplier_sent_at = NOW(), price_review = 'Denied', price_review_at = NOW(), " +
+        "price_review_by_staff_id = ?, price_review_note = ? WHERE po_id = ? AND status = 'Pending' " +
         "AND supplier_response = 'Accepted' AND price_review = 'Waiting'",
-        [reason, getActorId(request), poId]);
+        [getActorId(request), reason, poId]);
       if (result[0].affectedRows === 0) {
         const refusal = await priceReviewRefusal(poId);
         return response.status(refusal.status).json({ error: refusal.error });
@@ -2020,25 +2022,41 @@ function registerInventoryRoutes(app, deps) {
       const order = orderResult[0][0];
 
       await writeAuditLog(request, "PURCHASE_ORDER_PRICES_DENIED",
-        number + " denied, the prices set by " + order.supplier_name + " were not accepted: " + reason,
+        "The prices on " + number + " set by " + order.supplier_name + " were denied and sent back to edit: " + reason,
         { po_id: poId, supplier: order.supplier_name });
-      if (publishChange) publishChange("inventory", "denied " + number, request.headers["x-client-id"] || null);
+      if (publishChange) publishChange("inventory", "prices denied " + number, request.headers["x-client-id"] || null);
 
+      // The supplier edits the prices on the order link, so the email carries the link
+      let editLink = "";
+      try {
+        const codeResult = await db.query("SELECT supplier_code FROM purchase_orders WHERE po_id = ?", [poId]);
+        const supplierCode = codeResult[0][0] ? codeResult[0][0].supplier_code : null;
+        if (supplierCode) {
+          editLink = supplierOrderLink(request.protocol + "://" + request.get("host"), supplierCode) || "";
+        }
+      } catch (linkError) {
+        console.error("The prices were denied, but the order link could not be made:", linkError.message);
+      }
       const emailed = await mailSupplier(poId, function (mailOrder, shop) {
-        return pricesDeniedMessage({ order: mailOrder, shop: shop, reason: reason });
+        return pricesDeniedMessage({
+          order: mailOrder, shop: shop, reason: reason, link: editLink, hours: SUPPLIER_ANSWER_HOURS
+        });
       });
 
       try {
         await tellManagerAndClerk(
-          number + " denied",
-          "The new prices on " + number + " from " + order.supplier_name + " were denied. Reason: " + reason);
+          number + " prices denied",
+          "The new prices on " + number + " from " + order.supplier_name + " were denied. Reason: " + reason +
+          ". " + order.supplier_name + " can edit the prices on the order link.");
       } catch (tellError) {
         console.error("The prices were denied, but the notification failed:", tellError.message);
       }
 
       response.json({
-        message: number + " is denied and closed. " +
-          (emailed ? order.supplier_name + " has been emailed." : "Tell " + order.supplier_name + " by phone.")
+        message: "The prices on " + number + " are denied. " + order.supplier_name +
+          " can edit them on the order link within " + SUPPLIER_ANSWER_HOURS + " hours. " +
+          (emailed ? order.supplier_name + " has been emailed the link." : "Send " + order.supplier_name +
+            " the order link by phone or message.")
       });
     } catch (error) {
       console.error("Denying the prices failed:", error.message);
@@ -2301,6 +2319,7 @@ function registerInventoryRoutes(app, deps) {
         closed_at: order.closed_at,
         closed_note: order.closed_as === "Denied" ? order.closed_note : null,
         price_review: order.price_review,
+        price_review_note: order.price_review === "Denied" ? order.price_review_note : null,
         answer_by: order.answer_by,
         can_respond: order.status === "Pending" && !order.supplier_response,
         can_set_ship_date: order.status === "Pending" && order.supplier_response === "Accepted" &&
