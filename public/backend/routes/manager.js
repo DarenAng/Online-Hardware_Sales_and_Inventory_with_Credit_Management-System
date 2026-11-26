@@ -418,10 +418,20 @@ function registerManagerRoutes(app, deps) {
                 headers: plan.headers, rows: plan.rows(data), money: EXPORT_MONEY[name] || [] }];
     }
 
-    const summary = EXPORTS["income-summary"].rows(data).slice(3);
+    // Total Sales goes on its own bold line at the bottom of the Summary sheet
+    const allSummary = EXPORTS["income-summary"].rows(data).slice(3);
+    const summary = [];
+    const summaryMoney = [];
+    for (let i = 0; i < allSummary.length; i++) {
+      const label = allSummary[i][0];
+      if (label === "Total Sales") continue;
+      if (label === "Collected" || label === "Unpaid") summaryMoney.push(summary.length);
+      summary.push(allSummary[i]);
+    }
     const sheets = [
       { name: "Summary", title: "Sales Summary", subtitle: subtitle,
-        headers: ["Figure", "Value"], rows: summary, money: [] },
+        headers: ["Figure", "Value"], rows: summary, money: [], moneyRows: summaryMoney,
+        totalLine: ["Total Sales", data.totals.billed] },
       { name: "By Payment Method", title: "By Payment Method", subtitle: subtitle,
         headers: EXPORTS["payment-methods"].headers, rows: EXPORTS["payment-methods"].rows(data),
         money: EXPORT_MONEY["payment-methods"] }

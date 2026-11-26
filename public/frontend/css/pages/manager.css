@@ -254,6 +254,7 @@
     body.is-printing .print-totals h3 { font-size: 14px; margin-bottom: 6px; }
     body.is-printing .print-totals table { width: auto; min-width: 280px; }
     body.is-printing .print-totals td { padding: 4px 14px 4px 0; }
+    body.is-printing .print-totals tr:last-child td { font-weight: 700; }
 
     body.is-printing .panel-view:not(.is-print-target) { display: none !important; }
 }

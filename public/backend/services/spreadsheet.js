@@ -63,6 +63,11 @@ async function buildWorkbook(sheets, header) {
     if (Array.isArray(sheet.money)) {
       money = sheet.money;
     }
+    // Rows (by position) whose numbers are peso amounts, for a Figure/Value sheet
+    let moneyRows = [];
+    if (Array.isArray(sheet.moneyRows)) {
+      moneyRows = sheet.moneyRows;
+    }
     let columnCount = Math.max(headers.length, 1);
     for (let i = 0; i < rows.length; i++) {
       if (Array.isArray(rows[i]) && rows[i].length > columnCount) {
@@ -108,7 +113,8 @@ async function buildWorkbook(sheets, header) {
       for (let index = 0; index < cells.length; index++) {
         const cell = added.getCell(index + 1);
         cell.value = cellValue(cells[index]);
-        const isMoneyNumber = typeof cell.value === "number" && money.includes(index);
+        const isMoneyNumber = typeof cell.value === "number" &&
+          (money.includes(index) || moneyRows.includes(rowIndex));
         if (isMoneyNumber) cell.numFmt = "#,##0.00";
         let shown = String(cell.value).length;
         if (isMoneyNumber) {
@@ -145,6 +151,21 @@ async function buildWorkbook(sheets, header) {
         }
       }
       totalRow.font = { bold: true };
+    }
+
+    // A bold label and peso amount under the last row, e.g. ["Total Sales", 2370]
+    if (Array.isArray(sheet.totalLine) && sheet.totalLine.length === 2) {
+      const line = ws.getRow(headerRow + 2 + rows.length);
+      line.getCell(1).value = String(sheet.totalLine[0]);
+      let amount = Math.round(Number(sheet.totalLine[1]) * 100) / 100;
+      if (!Number.isFinite(amount)) amount = 0;
+      line.getCell(2).value = amount;
+      line.getCell(2).numFmt = "#,##0.00";
+      line.font = { bold: true };
+      widths[0] = Math.max(widths[0], String(sheet.totalLine[0]).length + 2);
+      if (widths.length > 1) {
+        widths[1] = Math.max(widths[1], Math.min(amount.toFixed(2).length + 5, MAX_WIDTH));
+      }
     }
 
     for (let index = 0; index < widths.length; index++) {

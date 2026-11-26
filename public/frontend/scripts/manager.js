@@ -690,14 +690,19 @@ const PRINT_DELIVERY_STATES = ['Pending Payment', 'Completed', 'Out for Delivery
 function printTotalRows(container, panel) {
     const rows = [];
 
+    // Total Sales is always the last line, at the bottom
+    let totalSales = null;
     const cards = container.querySelectorAll('.kpi-card');
     for (let i = 0; i < cards.length; i++) {
         const label = cards[i].querySelector('.kpi-label');
         const value = cards[i].querySelector('.kpi-value');
         if (label && value) {
-            rows.push([label.textContent.trim(), value.textContent.trim()]);
+            const row = [label.textContent.trim(), value.textContent.trim()];
+            if (row[0] === 'Total Sales') totalSales = row;
+            else rows.push(row);
         }
     }
+    if (totalSales) rows.push(totalSales);
 
     if (panel && panel.key === 'mgr-deliveries' && panel.state === 'ready') {
         let total = 0;
