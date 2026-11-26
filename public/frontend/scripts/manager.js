@@ -1547,9 +1547,14 @@ async function changePrice(product) {
     const noPrice = isUnpriced(product);
     const lastCost = Number(product.last_cost) || 0;
 
+    // What the store paid the supplier for it, when it has been bought before (per the same unit)
+    const boughtAt = [];
+    if (lastCost > 0) boughtAt.push('Bought at: ' + peso(lastCost) + unit);
+
     const asked = await askInput({
         title: noPrice ? 'Set the price' : 'Change the price',
         eyebrow: product.product_name,
+        detail: boughtAt,
         label: 'New price' + unit,
         type: 'number',
         money: true,
