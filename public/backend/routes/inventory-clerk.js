@@ -237,7 +237,7 @@ function registerInventoryRoutes(app, deps) {
         "FROM products p LEFT JOIN units u ON u.unit_id = p.unit_id " +
         "WHERE p.product_id = ?", [productId]);
       const products = productsResult[0];
-      if (products.length === 0) return response.status(404).json({ error: "That material was not found." });
+      if (products.length === 0) return response.status(404).json({ error: "That product was not found." });
       const product = products[0];
 
       if (price !== null && !(Number(product.price) > 0)) {
@@ -445,7 +445,7 @@ function registerInventoryRoutes(app, deps) {
           "SELECT product_name, is_archived FROM products WHERE product_id = ?", [productId]);
         const same = sameResult[0][0];
         const sameName = same ? same.product_name : name;
-        let message = "\"" + sameName + "\" is already on the material list. Nothing was added.";
+        let message = "\"" + sameName + "\" is already on the product list. Nothing was added.";
         if (same && same.is_archived) {
           message = "\"" + sameName + "\" is already on file but was put away in the Archive. " +
                     "Restore it from the Archive screen instead of adding it again.";
@@ -478,7 +478,7 @@ function registerInventoryRoutes(app, deps) {
           "INSERT INTO notifications (target_role_id, notif_type, title, message, product_id, created_by_staff_id) " +
           "SELECT role_id, 'New Product', ?, ?, ?, ? FROM roles WHERE role_name = 'Manager'",
           [("New product added: " + name + " by " + clerkName).slice(0, 150),
-           name + " was added to the material list and has no price yet. Set its price under Stocks Overview; " +
+           name + " was added to the product list and has no price yet. Set its price under Stocks Overview; " +
            "until then the till cannot sell it.",
            productId, getActorId(request)]);
       } catch (error) {
@@ -488,7 +488,7 @@ function registerInventoryRoutes(app, deps) {
       publishChange("notifications", "new product " + productId, request.headers["x-client-id"] || null);
 
       response.json({
-        message: name + " was added to the material list with no price. The manager has been told to set it.",
+        message: name + " was added to the product list with no price. The manager has been told to set it.",
         productId: productId,
         created: true
       });
@@ -1349,14 +1349,14 @@ function registerInventoryRoutes(app, deps) {
       if (pickedId) {
         if (lineOfProduct[pickedId]) {
           return response.status(400).json({
-            error: "Line " + (i + 1) + " is the same material as line " + lineOfProduct[pickedId] + "."
+            error: "Line " + (i + 1) + " is the same product as line " + lineOfProduct[pickedId] + "."
           });
         }
         lineOfProduct[pickedId] = i + 1;
       }
       // Every line needs a material and a quantity, so an order can never be saved empty
       if (!pickedId && String(item.newName || item.new_name || "").trim() === "") {
-        return response.status(400).json({ error: "Line " + (i + 1) + " has no material. Pick one or remove the line." });
+        return response.status(400).json({ error: "Line " + (i + 1) + " has no product. Pick one or remove the line." });
       }
       if (!(Number(item.quantity) > 0)) {
         return response.status(400).json({ error: "Line " + (i + 1) + " needs a quantity above zero." });
@@ -2662,7 +2662,7 @@ function registerInventoryRoutes(app, deps) {
       }
       if (!accept) {
         title = order.supplier_name + " cannot fill purchase order " + helpers.poNumber(order.po_id);
-        managerMessage = order.supplier_name + " declined " + number + ": " + note + " Order the materials elsewhere, " +
+        managerMessage = order.supplier_name + " declined " + number + ": " + note + " Order the products elsewhere, " +
                   "or contact the supplier.";
         clerkMessage = managerMessage;
       }
@@ -3301,7 +3301,7 @@ function registerInventoryRoutes(app, deps) {
       }
 
       if (!Number.isInteger(productId) || productId <= 0) {
-        return response.status(400).json({ error: "An item in the report has no material." });
+        return response.status(400).json({ error: "An item in the report has no product." });
       }
       if (!Number.isFinite(quantity) || quantity <= 0) {
         return response.status(400).json({ error: "Every item needs a quantity greater than zero." });
@@ -3313,7 +3313,7 @@ function registerInventoryRoutes(app, deps) {
         refund = 0;
       }
       if (seen.includes(productId)) {
-        return response.status(400).json({ error: "A material can be listed only once in a report." });
+        return response.status(400).json({ error: "A product can be listed only once in a report." });
       }
       seen.push(productId);
       items.push({ product_id: productId, quantity: quantity, refund_amount: refund });

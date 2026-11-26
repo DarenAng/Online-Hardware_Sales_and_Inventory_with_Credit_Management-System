@@ -23,8 +23,8 @@ const NOTIF_TONE = {
 };
 
 const NOTIF_ABOUT = {
-    'Out of Stock':     ['Stock alert',       'A material has run out and cannot be sold until it is restocked.'],
-    'Low Stock':        ['Stock alert',       'A material has fallen to its reorder point.'],
+    'Out of Stock':     ['Stock alert',       'A product has run out and cannot be sold until it is restocked.'],
+    'Low Stock':        ['Stock alert',       'A product has fallen to its reorder point.'],
     'Damage Report':    ['Returns report',    'Damaged goods were reported and taken off the shelf.'],
     'Refund Report':    ['Returns report',    'A refund was filed at the counter.'],
     'Purchase Order':   ['Purchase order',    'An order to a supplier was raised, confirmed or declined, or its delivery came up short.'],

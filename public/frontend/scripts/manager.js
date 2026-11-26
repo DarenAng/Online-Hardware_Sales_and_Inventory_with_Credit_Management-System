@@ -1412,7 +1412,7 @@ async function loadPriceBanner() {
         return;
     }
 
-    const words = count === 1 ? '1 material has no price set' : count + ' materials have no price set';
+    const words = count === 1 ? '1 product has no price set' : count + ' products have no price set';
     let button = '';
     if (holdsFeature('records')) {
         button = '<button type="button" class="btn btn-sm" onclick="openUnpricedProducts()">Set prices</button>';
@@ -1529,7 +1529,7 @@ async function changePrice(product) {
             : product.product_name + ': ' + peso(current) + ' to ' + peso(next) + unit + change + '.',
         {
             title: noPrice ? 'Set the price?' : (up ? 'Raise the price?' : 'Lower the price?'),
-            eyebrow: 'Materials',
+            eyebrow: 'Products',
             confirmLabel: 'Set the price',
             tone: belowCost || (share !== null && share >= 0.5) ? 'danger' : undefined,
             detail: detail
@@ -2431,16 +2431,16 @@ function renderDriverOptions(rows) {
 }
 
 const RECORD_COLUMNS = {
-    supplier: [['name', 'Supplier'], ['contact_person', 'Contact'], ['contact_number', 'Number'], ['email', 'Email'], ['product_count', 'Materials']],
+    supplier: [['name', 'Supplier'], ['contact_person', 'Contact'], ['contact_number', 'Number'], ['email', 'Email'], ['product_count', 'Products']],
     customer: [['name', 'Customer'], ['phone', 'Phone'], ['credit_limit', 'Credit Limit'], ['current_credit', 'Balance']],
     product:  [['id', 'Product ID'], ['name', 'Product'], ['description', 'Description'], ['category_name', 'Category'], ['brand_name', 'Brand'], ['price', 'Price'], ['quantity_in_stock', 'On Hand']],
-    category: [['name', 'Category'], ['product_count', 'Materials'], ['total_stock', 'Total Stock']],
-    unit:     [['name', 'Unit'], ['product_count', 'Materials']]
+    category: [['name', 'Category'], ['product_count', 'Products'], ['total_stock', 'Total Stock']],
+    unit:     [['name', 'Unit'], ['product_count', 'Products']]
 };
 const MONEY_FIELDS = ['price', 'credit_limit', 'current_credit', 'total_purchase', 'stock_value'];
 
 const RECORD_TITLES = {
-    supplier: 'Suppliers', customer: 'Customers', product: 'Materials',
+    supplier: 'Suppliers', customer: 'Customers', product: 'Products',
     category: 'Categories', unit: 'Units'
 };
 
@@ -2677,7 +2677,7 @@ async function saveAddRecord(event) {
 }
 
 const ARCHIVE_TYPE_NAMES = {
-    Customer: 'Customer', Inventory: 'Material', Unit: 'Unit',
+    Customer: 'Customer', Inventory: 'Product', Unit: 'Unit',
     Category: 'Category', Supplier: 'Supplier', Staff: 'User'
 };
 
@@ -3094,7 +3094,7 @@ function openStockDetail(productId, fromReorderAlerts) {
     const product = '<div class="detail-grid">' +
         detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
         detailField('Brand', escapeHtml(p.brand_name || 'No brand')) +
-        detailField('Material Status', statusBadge(p.status)) +
+        detailField('Product Status', statusBadge(p.status)) +
         detailField('Selling Price', priceOrBadge(p)) +
         detailField('Last Buying Price', lastCostText(p.last_cost)) +
         detailField('Last Updated', escapeHtml(p.last_updated || 'Never')) +
@@ -3109,7 +3109,7 @@ function openStockDetail(productId, fromReorderAlerts) {
     const pages = [
         { label: 'Stock', body: stock },
         { label: 'Reorder Point', body: reorder },
-        { label: 'Material', body: product },
+        { label: 'Product', body: product },
         { label: 'Supplier', body: supplier }
     ];
 
@@ -3145,7 +3145,7 @@ async function openRecordDetail(index) {
         fields +
         '</div>' +
         (type === 'product' && isUnpriced(row)
-            ? '<p class="detail-note detail-warn">This material has no price yet, so the till cannot sell it.</p>'
+            ? '<p class="detail-note detail-warn">This product has no price yet, so the till cannot sell it.</p>'
             : '');
     const pages = [{ label: 'Details', body: body }];
 
@@ -3171,13 +3171,13 @@ async function openRecordDetail(index) {
             productsBody = detailTable(
                 ['Product ID', 'Product', 'Brand', type === 'supplier' ? 'Category' : 'Supplier', 'Price', 'On Hand'],
                 productRows, [4, 5], [0]);
-            pages.push({ label: 'Materials (' + productRows.length + ')', body: productsBody });
+            pages.push({ label: 'Products (' + productRows.length + ')', body: productsBody });
         } catch (error) {
             let where = 'using this unit';
             if (type === 'category') where = 'in this category';
             else if (type === 'supplier') where = 'from this supplier';
-            pages.push({ label: 'Materials', body:
-                '<p class="detail-note detail-warn">The materials ' + where + ' could not be loaded.</p>' });
+            pages.push({ label: 'Products', body:
+                '<p class="detail-note detail-warn">The products ' + where + ' could not be loaded.</p>' });
         }
     }
 
@@ -4031,7 +4031,7 @@ if (window.location.pathname.toLowerCase().endsWith('manager.html')) {
                 key: 'mgr-stock-moves'
             },
             'New Product':      {
-                label: 'Materials', panelId: 'panel-records',
+                label: 'Products', panelId: 'panel-records',
                 open: function () {
                     openUnpricedProducts();
                 }

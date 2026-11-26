@@ -95,7 +95,7 @@
                     <div class="panel-toolbar">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="inv-search"
-                                   placeholder="Search by material, category, or supplier"
+                                   placeholder="Search by product, category, or supplier"
                                    oninput="dataPanelSearchInput('clerk-materials', event)" onkeydown="dataPanelSearchKey('clerk-materials', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
@@ -116,10 +116,10 @@
                             </select>
                         </div>
                         <div class="toolbar-field">
-                            <label for="inv-material">Material</label>
+                            <label for="inv-material">Product</label>
                             <select id="inv-material"
                                     onchange="dataPanelFilter('clerk-materials', 'material', this.value)">
-                                <option value="all">Every material</option>
+                                <option value="all">Every product</option>
                             </select>
                         </div>
                         <div class="toolbar-field">
@@ -158,10 +158,10 @@
                                 <div class="adjust-lines" id="adjust-lines" hidden></div>
 
                                 <div class="form-group" id="adjust-material-field">
-                                    <label for="adjust-material">Material</label>
+                                    <label for="adjust-material">Product</label>
                                     <div class="suggest-wrap">
                                         <input type="text" id="adjust-material" class="form-control"
-                                               autocomplete="off" placeholder="Type a material, brand, or category"
+                                               autocomplete="off" placeholder="Type a product, brand, or category"
                                                role="combobox" aria-expanded="false"
                                                aria-controls="adjust-suggest" aria-autocomplete="list"
                                                oninput="onAdjustMaterialInput(this.value)"
@@ -169,7 +169,7 @@
                                                onkeydown="onAdjustMaterialKey(event)">
                                         <input type="hidden" name="productId" value="">
                                         <button type="button" class="suggest-clear" id="adjust-material-clear"
-                                                onclick="clearAdjustMaterial()" aria-label="Clear the material"
+                                                onclick="clearAdjustMaterial()" aria-label="Clear the product"
                                                 hidden>&times;</button>
                                         <ul class="suggest-list" id="adjust-suggest" role="listbox" hidden></ul>
                                     </div>
@@ -191,7 +191,7 @@
                                     <div class="form-group" id="adjust-unit-field">
                                         <label for="adjust-unit">Unit</label>
                                         <input type="text" id="adjust-unit" name="unitName" class="form-control"
-                                               placeholder="Filled in from the material" readonly tabindex="-1">
+                                               placeholder="Filled in from the product" readonly tabindex="-1">
                                     </div>
 
                                     <div class="form-group" id="adjust-qty-field">
@@ -225,7 +225,7 @@
                             <div class="panel-toolbar reference-toolbar">
                                 <div class="search-wrap">
                                     <input type="search" class="form-control search-input" id="reference-search"
-                                           placeholder="Search material or report"
+                                           placeholder="Search product or report"
                                            autocomplete="off" oninput="onReferenceSearch(this.value)">
                                 </div>
                                 <div class="toolbar-field">
@@ -233,11 +233,11 @@
                                     <select id="reference-type" onchange="onReferenceType(this.value)">
                                         <option value="all">Every type</option>
                                         <option value="return">Returned Items</option>
-                                        <option value="material">Material</option>
+                                        <option value="material">Product</option>
                                     </select>
                                 </div>
                             </div>
-                            <p class="attention-hint">Open returned items, then every material, most short first. Click one to fill the form.</p>
+                            <p class="attention-hint">Open returned items, then every product, most short first. Click one to fill the form.</p>
                             <ul class="attention-list" id="attention-list"></ul>
                             <div class="pager attention-more" id="attention-more" hidden></div>
                         </div>
@@ -254,7 +254,7 @@
                     <div class="panel-toolbar">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="adjust-search"
-                                   placeholder="Search by material, reason, or who adjusted it"
+                                   placeholder="Search by product, reason, or who adjusted it"
                                    oninput="dataPanelSearchInput('clerk-adjustments', event)" onkeydown="dataPanelSearchKey('clerk-adjustments', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
@@ -291,7 +291,7 @@
                     <div class="panel-toolbar">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="reorder-search"
-                                   placeholder="Search by material"
+                                   placeholder="Search by product"
                                    oninput="dataPanelSearchInput('clerk-reorder', event)" onkeydown="dataPanelSearchKey('clerk-reorder', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
@@ -531,7 +531,7 @@
                     <div class="panel-toolbar">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="returns-search"
-                                   placeholder="Search by material or reason"
+                                   placeholder="Search by product or reason"
                                    oninput="dataPanelSearchInput('clerk-returns', event)" onkeydown="dataPanelSearchKey('clerk-returns', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-field">
@@ -602,7 +602,7 @@
                 <div class="card" id="panel-archive" data-panel style="display: none;">
                     <div class="panel-head">
                         <div>
-                            <h3>Archived Materials</h3>
+                            <h3>Archived Products</h3>
                         </div>
                         <div class="panel-actions">
                         </div>
@@ -610,7 +610,7 @@
                     <div class="panel-toolbar">
                         <div class="search-wrap">
                             <input type="search" class="form-control search-input" id="arch-search"
-                                   placeholder="Search archived materials"
+                                   placeholder="Search archived products"
                                    oninput="dataPanelSearchInput('clerk-archive', event)" onkeydown="dataPanelSearchKey('clerk-archive', event)" title="Type one letter or more; it finds words that start with it">
                         </div>
                         <div class="toolbar-spacer"></div>

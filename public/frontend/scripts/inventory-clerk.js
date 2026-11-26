@@ -76,7 +76,7 @@ function buildMaterialsPanel() {
         idField: 'product_id',
         filters: { status: 'all', supplier: 'all', material: 'all', category: 'all' },
 
-        gate: { title: 'No materials loaded' },
+        gate: { title: 'No products loaded' },
 
         load: async function () {
             invProducts = await apiGetProducts();
@@ -110,7 +110,7 @@ function buildMaterialsPanel() {
 
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openMaterialDetail(' + p.product_id + ')" title="Open this material">' +
+                'onclick="openMaterialDetail(' + p.product_id + ')" title="Open this product">' +
             '<td class="cell-id">' + materialCode(p.product_id) + '</td>' +
             '<td class="cell-name">' + escapeHtml(p.product_name) +
                 '<span class="cell-sub">' + materialKindText(p) + '</span></td>' +
@@ -164,7 +164,7 @@ function fillMaterialNameFilter() {
         choices.push({ value: invProducts[i].product_id, label: invProducts[i].product_name });
     }
     choices.sort(function (a, b) { return String(a.label).localeCompare(String(b.label)); });
-    setFilterOptions('inv-material', 'Every material', choices);
+    setFilterOptions('inv-material', 'Every product', choices);
 }
 
 function findProductById(productId) {
@@ -345,7 +345,7 @@ async function saveNewProduct(event) {
 
     const same = findProductByName(name);
     if (same) {
-        notifyWarning('"' + same.product_name + '" is already on the material list. Nothing was added.',
+        notifyWarning('"' + same.product_name + '" is already on the product list. Nothing was added.',
             'Already on the list');
         form.elements.productName.focus();
         return;
@@ -365,7 +365,7 @@ async function saveNewProduct(event) {
     lines.push('Category: ' + categoryName, 'Unit: ' + unitName, 'Supplier: ' + supplierName);
     lines.push('It starts with no price and no stock: the manager sets the price, and stock comes in by a delivery or a stock adjustment.');
 
-    const yes = await askConfirm('Add ' + name + ' to the material list?', {
+    const yes = await askConfirm('Add ' + name + ' to the product list?', {
         title: 'Add this product?',
         eyebrow: 'Inventory',
         confirmLabel: 'Add product',
@@ -436,13 +436,13 @@ async function loadStockBanner() {
         const out = Number(s.outOfStock);
 
         if (low === 0 && out === 0) {
-            box.innerHTML = '<div class="banner banner-ok">Every material is above its reorder point.</div>';
+            box.innerHTML = '<div class="banner banner-ok">Every product is above its reorder point.</div>';
             return;
         }
 
         const parts = [];
-        if (out > 0) parts.push(out + (out === 1 ? ' material is out of stock' : ' materials are out of stock'));
-        if (low > 0) parts.push(low + (low === 1 ? ' material is low' : ' materials are low'));
+        if (out > 0) parts.push(out + (out === 1 ? ' product is out of stock' : ' products are out of stock'));
+        if (low > 0) parts.push(low + (low === 1 ? ' product is low' : ' products are low'));
 
         box.innerHTML = '<div class="banner ' + (out > 0 ? 'banner-danger' : 'banner-warn') + '">' +
             '<span class="banner-text"><strong>Stock warning.</strong> ' + parts.join(' and ') +
@@ -483,7 +483,7 @@ function adjustScreenOpen() {
 
 function afterMaterialsLoaded(loaded) {
     if (!loaded) {
-        attentionMessage('The materials could not be loaded.');
+        attentionMessage('The products could not be loaded.');
         return;
     }
 
@@ -676,7 +676,7 @@ function renderAttentionList() {
         let empty = 'Nothing to show.';
         if (query) empty = 'Nothing matches that search.';
         else if (referenceType === 'return') empty = 'No returned item is open.';
-        else if (referenceType === 'material' && !invLoaded) empty = 'Loading materials...';
+        else if (referenceType === 'material' && !invLoaded) empty = 'Loading products...';
         list.innerHTML = note + '<li class="attention-empty">' + escapeHtml(empty) + '</li>';
         more.hidden = true;
         more.innerHTML = '';
@@ -963,7 +963,7 @@ function renderAdjustMaterialVerdict(insist) {
 
     if (insist) {
         box.className = 'pick-verdict is-stop';
-        box.textContent = 'Choose a material from the list.';
+        box.textContent = 'Choose a product from the list.';
     } else if (typed !== '') {
         box.className = 'pick-verdict is-stop';
         box.textContent = 'Nothing matches "' + typed + '". Try a name, brand, or category.';
@@ -1134,8 +1134,8 @@ async function handleAdjustStock(event) {
     if (adjustSource && adjustSource.kind === 'return') { await applyReturnAdjustment(); return; }
 
     if (!adjustMaterial || !form.elements.productId.value) {
-        notifyWarning('Type a few letters of the material and choose it from the list. ' +
-            'An adjustment moves a real figure, so it has to name one.', 'No material chosen');
+        notifyWarning('Type a few letters of the product and choose it from the list. ' +
+            'An adjustment moves a real figure, so it has to name one.', 'No product chosen');
         const box = adjustMaterialBox();
         if (box) { box.focus(); box.select(); }
         renderAdjustMaterialVerdict(true);
@@ -1211,7 +1211,7 @@ async function handleAdjustStock(event) {
             confirmLabel: askLabel,
             tone: isRemove || (isCount && afterStock < onHand) ? 'danger' : undefined,
             detail: [
-                'Material: ' + adjustMaterial.product_name,
+                'Product: ' + adjustMaterial.product_name,
                 'Adjustment: ' + askAdjustment,
                 'Stock before: ' + qtyText(onHand, data.unitName),
                 'Stock after: ' + qtyText(afterStock, data.unitName),
@@ -1572,7 +1572,7 @@ function buildReorderPanel() {
         idField: 'product_id',
         filters: { status: 'all' },
 
-        gate: { title: 'No materials loaded' },
+        gate: { title: 'No products loaded' },
 
         load: function () {
             return apiGetProducts();
@@ -1738,7 +1738,7 @@ function buildInventoryArchivePanel() {
 
         renderRow: function (p, index) {
             return '<tr class="row-clickable row-reveal" style="animation-delay:' + (index % 10) * 28 + 'ms" ' +
-                'onclick="openArchivedMaterial(' + p.product_id + ')" title="Open this material">' +
+                'onclick="openArchivedMaterial(' + p.product_id + ')" title="Open this product">' +
             '<td class="cell-id">' + materialCode(p.product_id) + '</td>' +
             '<td class="cell-name">' + escapeHtml(p.product_name) + '</td>' +
             '<td>' + escapeHtml(p.category_name || 'Uncategorised') + '</td>' +
@@ -1754,18 +1754,18 @@ function openArchivedMaterial(productId) {
     if (!p) return;
 
     const body = '<div class="detail-grid">' +
-        detailField('Material', escapeHtml(p.product_name)) +
+        detailField('Product', escapeHtml(p.product_name)) +
         detailField('Category', escapeHtml(p.category_name || 'Uncategorised')) +
         detailField('On Hand', escapeHtml(String(p.quantity_in_stock))) +
         detailField('Archived On', escapeHtml(p.archived_at || 'Unknown')) +
         '</div>' +
-        '<p class="detail-note">Restoring puts it back on the material list and makes it sellable again.</p>';
+        '<p class="detail-note">Restoring puts it back on the product list and makes it sellable again.</p>';
 
     const foot = '<button type="button" class="btn btn-ghost" onclick="requestCloseModal(\'detail-modal\')">Cancel</button>' +
-        '<button type="button" class="btn btn-success" id="restore-material-button" onclick="restoreMaterial(' + p.product_id + ')">Restore This Material</button>';
+        '<button type="button" class="btn btn-success" id="restore-material-button" onclick="restoreMaterial(' + p.product_id + ')">Restore This Product</button>';
 
     openDetailModal(p.product_name, (p.category_name || 'Uncategorised') + ' · archived',
-        initialsOf(p.product_name), [{ label: 'Archived Material', body: body }], foot);
+        initialsOf(p.product_name), [{ label: 'Archived Product', body: body }], foot);
 }
 
 let clerkRecordType = 'supplier';
@@ -1997,9 +1997,9 @@ async function openClerkRecord(index) {
 
 async function archiveMaterial(productId) {
     const yes = await askConfirm(
-        'Are you sure you want to archive this material? Once archived, it will no longer show in the POS ' +
+        'Are you sure you want to archive this product? Once archived, it will no longer show in the POS ' +
         'or in Inventory. It moves to the Archive screen, where it can be restored at any time.',
-        { title: 'Archive this material?', eyebrow: 'Inventory', confirmLabel: 'Archive it', tone: 'danger' });
+        { title: 'Archive this product?', eyebrow: 'Inventory', confirmLabel: 'Archive it', tone: 'danger' });
 
     if (!yes) return;
 
@@ -2008,7 +2008,7 @@ async function archiveMaterial(productId) {
         const result = await response.json();
         if (!response.ok) { if (!handleAuthFailure(response, result)) notifyError(result.error); return; }
 
-        notifySuccess('It drops off the material list until it is restored.', 'Material archived');
+        notifySuccess('It drops off the product list until it is restored.', 'Product archived');
         closeModal('detail-modal');
         invLoaded = false;
 
@@ -2026,8 +2026,8 @@ async function archiveMaterial(productId) {
 
 async function restoreMaterial(productId) {
     const yes = await askConfirm(
-        'It goes back onto the material list and becomes sellable again.',
-        { title: 'Restore this material?', eyebrow: 'Inventory', confirmLabel: 'Restore it' });
+        'It goes back onto the product list and becomes sellable again.',
+        { title: 'Restore this product?', eyebrow: 'Inventory', confirmLabel: 'Restore it' });
 
     if (!yes) return;
 
@@ -2043,7 +2043,7 @@ async function restoreMaterial(productId) {
             return;
         }
 
-        notifySuccess('It is back on the material list.', 'Material restored');
+        notifySuccess('It is back on the product list.', 'Product restored');
         closeModal('detail-modal');
         invLoaded = false;
 
@@ -2089,7 +2089,7 @@ function openMaterialDetail(productId) {
                 '</div>' +
             '</div>';
     } else {
-        supplierBlock = '<p class="detail-empty">No supplier on file for this material. Raising a purchase ' +
+        supplierBlock = '<p class="detail-empty">No supplier on file for this product. Raising a purchase ' +
             'order for it from a company records one.</p>';
     }
 
@@ -2126,9 +2126,9 @@ function openMaterialDetail(productId) {
         detailField('Added On', escapeHtml(p.created_at || 'Unknown')) +
         '</div>' +
         (p.stock_status !== 'In Stock'
-            ? '<p class="detail-note detail-warn">This material is at or below its reorder point. The manager has been notified.</p>' : '') +
+            ? '<p class="detail-note detail-warn">This product is at or below its reorder point. The manager has been notified.</p>' : '') +
         '<div class="detail-actions">' +
-        '<button type="button" class="btn btn-danger" onclick="archiveMaterial(' + p.product_id + ')">Archive This Material</button>' +
+        '<button type="button" class="btn btn-danger" onclick="archiveMaterial(' + p.product_id + ')">Archive This Product</button>' +
         '</div>';
 
     openDetailModal(p.product_name,
@@ -2175,7 +2175,7 @@ function openAdjustmentDetail(adjustmentId) {
 
     const change = '<div class="detail-grid">' +
         detailField('Adjustment ID', adjustmentCode(a.adjustment_id)) +
-        detailField('Material', escapeHtml(a.product_name)) +
+        detailField('Product', escapeHtml(a.product_name)) +
         detailField('Type', statusBadge(a.adjustment_type)) +
         detailField('Unit', a.unit_name
             ? escapeHtml(a.unit_name)
@@ -2186,7 +2186,7 @@ function openAdjustmentDetail(adjustmentId) {
         '</div>' +
         (a.current_unit && a.unit_name &&
          String(a.current_unit).toLowerCase() !== String(a.unit_name).toLowerCase()
-            ? '<p class="detail-note detail-warn">This material is counted in ' +
+            ? '<p class="detail-note detail-warn">This product is counted in ' +
               escapeHtml(a.current_unit) + ' now. This entry counted ' +
               escapeHtml(a.unit_name) + ', and says so.</p>'
             : '');
@@ -2214,7 +2214,7 @@ function openReturnDetail(returnId) {
     const report = '<div class="detail-grid">' +
         detailField('Report ID', returnCode(r.return_id)) +
         detailField('Type', statusBadge(r.report_type)) +
-        detailField('Material', escapeHtml(r.product_name)) +
+        detailField('Product', escapeHtml(r.product_name)) +
         detailField(missing ? 'Quantity Missing' : 'Quantity', r.quantity + ' ' + escapeHtml(r.unit_name || '')) +
         (missing ? detailField('Purchase Order', poNumber(r.po_id)) : detailField('Refund Amount', peso(r.refund_amount))) +
         detailField('Status', statusBadge(r.status)) +

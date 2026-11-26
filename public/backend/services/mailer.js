@@ -433,7 +433,7 @@ async function purchaseOrderMessage(details) {
   const body =
     greeting + ",\n\n" +
     shopName + " would like to place purchase order " + number + " with " + order.supplier_name + ". " +
-    "The full order is attached as " + fileName + ": open it to see every material, quantity and price.\n\n" +
+    "The full order is attached as " + fileName + ": open it to see every product, quantity and price.\n\n" +
     "    Purchase order:   " + number + "\n" +
     "    Date:             " + date + "\n" +
     "    Lines:            " + items.length + "\n" +
@@ -537,7 +537,7 @@ async function purchaseOrderMessage(details) {
         "<p style=\"margin:0 0 12px;\">" + htmlText(greeting) + ",</p>" +
         "<p style=\"margin:0;\">" + htmlText(shopName) + " would like to place purchase order " +
           "<strong>" + htmlText(number) + "</strong> with <strong>" + htmlText(order.supplier_name) + "</strong>. " +
-          "The full order is attached as a PDF: open it to see every material, quantity and price.</p>" +
+          "The full order is attached as a PDF: open it to see every product, quantity and price.</p>" +
       "</td></tr>" +
 
       "<tr><td style=\"padding:18px 28px 0;\">" +
