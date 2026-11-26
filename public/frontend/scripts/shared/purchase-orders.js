@@ -793,6 +793,13 @@ function renderMatVerdict(id) {
     const make = document.getElementById(id + '-make');
     const newMode = make && !make.hidden;
 
+    // While a new product is being added, its category is set in the New product box,
+    // so the line's Category beside the product name is locked
+    if (matIsOrderLine(id)) {
+        const lineCategory = document.getElementById('po-cat-' + id.replace('po-mat-', ''));
+        if (lineCategory) lineCategory.disabled = Boolean(newMode);
+    }
+
     if (state.productId) {
         const product = poFindProduct(poMaterials, state.productId);
         box.className = 'pick-verdict';
