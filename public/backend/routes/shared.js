@@ -641,6 +641,7 @@ function registerSharedRoutes(app, deps) {
 
     const steps = {
       archives: function () { return adminModule.runArchiveSweep(); },
+      penalties: function () { return managerModule.runPenaltySweep(); },
       backup: function () { return adminModule.runDailyBackup(); },
       sessions: function () { return removeExpiredSessions(); },
       portalSessions: function () { return portalModule.removeExpiredCustomerSessions(); },

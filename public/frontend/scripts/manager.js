@@ -143,6 +143,7 @@ function showSalesTransactions(event) {
 async function showCreditMaintenance(event) {
     showManagerPanel('panel-credit-maintenance', 'Credit Maintenance', event);
     await loadPolicies();
+    if (holdsFeature('late-payment-penalty')) await loadPenaltyPolicy();
 }
 
 async function showLoyaltyMaintenance(event) {
@@ -1927,6 +1928,57 @@ function syncLoyaltyLayout() {
     if (layout) layout.classList.toggle('is-single', !holdsFeature('discount-policy'));
 }
 
+let penaltyPolicy = null;
+
+async function loadPenaltyPolicy() {
+    const form = document.getElementById('penalty-form');
+    try {
+        penaltyPolicy = await apiGetPenaltyPolicy();
+    } catch (error) {
+        explainReadFailure(error, 'The late payment penalty could not be read.', 'Nothing to show');
+        return;
+    }
+    if (form) form.elements.rate.value = Number(penaltyPolicy.penalty_rate).toFixed(2);
+    previewCardBack();
+}
+
+async function savePenaltyPolicy(event) {
+    event.preventDefault();
+    const form = event.target;
+    const rate = Number(form.elements.rate.value);
+
+    if (form.elements.rate.value.trim() === '' || !Number.isFinite(rate) || rate < 1 || rate > 3) {
+        notifyWarning('The late-payment rate is 1 to 3 percent a month.', 'Not saved');
+        return;
+    }
+
+    try {
+        const response = await apiSavePenaltyPolicy(rate);
+        const result = await response.json();
+
+        if (!response.ok) {
+            if (!handleAuthFailure(response, result)) notifyError(result.error, 'Not saved');
+            return;
+        }
+
+        notifySuccess(result.message, 'Penalty saved');
+        if (policyData) policyData.penaltyRate = Number(result.penalty_rate);
+        await loadPenaltyPolicy();
+    } catch (error) {
+        notifyOffline();
+    }
+}
+
+// The rate shown on the card preview: the typed one when it is 1 to 3, else the saved one
+function penaltyRateNow() {
+    const form = document.getElementById('penalty-form');
+    if (form && form.elements.rate.value.trim() !== '') {
+        const typed = Number(form.elements.rate.value);
+        if (Number.isFinite(typed) && typed >= 1 && typed <= 3) return typed;
+    }
+    return policyData.penaltyRate;
+}
+
 const POLICY_KINDS = ['credit', 'data-terms', 'refund', 'discount'];
 let policyData = null;
 
@@ -1957,6 +2009,7 @@ function previewCardBack() {
     for (let i = 0; i < POLICY_KINDS.length; i++) {
         policies[POLICY_KINDS[i]] = cardPolicyLines(policyTextNow(POLICY_KINDS[i]));
     }
+    policies.credit.push(latePenaltyLine(penaltyRateNow()));
 
     const boxes = document.querySelectorAll('[data-card-preview]');
     for (let i = 0; i < boxes.length; i++) {
@@ -1997,6 +2050,11 @@ function policyChangesUnsaved() {
             return 'the loyalty discount';
         }
     }
+    const penaltyForm = document.getElementById('penalty-form');
+    if (penaltyForm && penaltyPolicy && penaltyForm.elements.rate.value.trim() !== '' &&
+        Number(penaltyForm.elements.rate.value) !== Number(penaltyPolicy.penalty_rate)) {
+        return 'the late-payment penalty';
+    }
     if (policyData) {
         for (let i = 0; i < POLICY_KINDS.length; i++) {
             const kind = POLICY_KINDS[i];
@@ -2011,6 +2069,8 @@ function policyChangesUnsaved() {
 }
 
 function discardPolicyChanges() {
+    const penaltyForm = document.getElementById('penalty-form');
+    if (penaltyForm && penaltyPolicy) penaltyForm.elements.rate.value = Number(penaltyPolicy.penalty_rate).toFixed(2);
     if (loyaltyPolicyRead) fillLoyaltyForm(true);
     if (policyData) {
         for (let i = 0; i < POLICY_KINDS.length; i++) {

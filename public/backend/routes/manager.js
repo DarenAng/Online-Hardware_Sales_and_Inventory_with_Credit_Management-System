@@ -1114,6 +1114,46 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
+  app.get("/api/credit/penalty-policy", requireRole(MANAGER), async function (request, response) {
+    try {
+      const rowsResult = await db.query("SELECT penalty_rate FROM store_settings WHERE setting_id = 1");
+      const row = rowsResult[0][0] || { penalty_rate: "3.00" };
+      response.json({ penalty_rate: Number(row.penalty_rate).toFixed(2) });
+    } catch (error) {
+      console.error("Penalty policy read failed:", error.message);
+      response.status(500).json({ error: "Unable to read the late-payment penalty" });
+    }
+  });
+
+  app.put("/api/credit/penalty-policy", requireRole(MANAGER), async function (request, response) {
+    const rawRate = (request.body || {}).penaltyRate;
+    const rateIsValidType = typeof rawRate === "number" ||
+      (typeof rawRate === "string" && rawRate.trim() !== "");
+    const rate = rateIsValidType ? Math.round(Number(rawRate) * 100) / 100 : NaN;
+    if (!Number.isFinite(rate) || rate < 1 || rate > 3) {
+      return response.status(400).json({
+        error: "The late-payment rate is 1 to 3 percent a month."
+      });
+    }
+
+    try {
+      const output = await managerProcedures.setPenaltyPolicy(
+        [rate, getActorId(request)]
+      );
+
+      if (output.status_code !== 200) {
+        return response.status(output.status_code).json({ error: output.message });
+      }
+
+      publishChange("credit", "penalty-policy", null);
+
+      response.json({ message: "Late-payment penalty saved.", penalty_rate: rate.toFixed(2) });
+    } catch (error) {
+      console.error("Penalty policy failed:", error.message);
+      response.status(500).json({ error: "Unable to save the late-payment penalty" });
+    }
+  });
+
   app.get("/api/loyalty/policy", async function (request, response) {
     try {
       const rowsResult = await db.query(
@@ -1252,6 +1292,10 @@ function registerManagerRoutes(app, deps) {
     const policies = await policyTexts();
     const terms = policies.credit;
 
+    const penaltyResult = await db.query("SELECT penalty_rate FROM store_settings WHERE setting_id = 1");
+    const penaltyRow = penaltyResult[0][0];
+    const penaltyRate = penaltyRow ? Number(penaltyRow.penalty_rate) : 3;
+
     return {
       store: {
         name: store.store_name || "Lucelyn Hardware",
@@ -1276,6 +1320,7 @@ function registerManagerRoutes(app, deps) {
       },
       terms: {
         due_days: CREDIT_DUE_DAYS,
+        penalty_rate: penaltyRate,
         lines: linesOf(terms.text)
       },
       policies: {
@@ -1316,8 +1361,11 @@ function registerManagerRoutes(app, deps) {
       const storeResult = await db.query(
         "SELECT store_name, address, receipt_layout FROM store_settings WHERE setting_id = 1");
       const store = storeResult[0][0] || {};
+      const penaltyResult = await db.query("SELECT penalty_rate FROM store_settings WHERE setting_id = 1");
+      const penaltyRow = penaltyResult[0][0];
       response.json({
         policies: texts,
+        penaltyRate: penaltyRow ? Number(penaltyRow.penalty_rate) : 3,
         store: {
           name: store.store_name || "Lucelyn Hardware",
           address: store.address || "",
@@ -1963,8 +2011,40 @@ function registerManagerRoutes(app, deps) {
     }
   });
 
-  // No late-payment penalty is charged any more (the daily sweep is gone)
-  return {};
+  const PENALTY_SWEEP_MS = 60 * 60 * 1000;
+
+  // Charges a month's penalty on every overdue credit sale that has not been charged for that month yet
+  async function runPenaltySweep() {
+    if (await proceduresAreMissing()) return;
+
+    try {
+      const output = await managerProcedures.applyLatePenalties();
+
+      const applied = Number(output.applied) || 0;
+      const total = Number(output.total) || 0;
+      if (applied < 0) {
+        console.error("Late-payment sweep failed inside the database (" + output.err_no + "): " + output.err_text);
+        return;
+      }
+      if (applied > 0) {
+        console.log("Late-payment sweep: " + applied + " overdue " + (applied === 1 ? "sale" : "sales") + " charged " +
+          "a month's penalty, " + total.toFixed(2) + " in all.");
+        publishChange("credit", "penalties", null);
+        publishChange("sales", "penalties", null);
+        publishChange("notifications", "penalties", null);
+      }
+    } catch (error) {
+      console.error("Late-payment sweep failed:", error.message);
+    }
+  }
+
+  function startPenaltySweep() {
+    runPenaltySweep();
+    const timer = setInterval(runPenaltySweep, PENALTY_SWEEP_MS);
+    if (typeof timer.unref === "function") timer.unref();
+  }
+
+  return { startPenaltySweep: startPenaltySweep, runPenaltySweep: runPenaltySweep };
 }
 
 module.exports = { registerManagerRoutes: registerManagerRoutes };

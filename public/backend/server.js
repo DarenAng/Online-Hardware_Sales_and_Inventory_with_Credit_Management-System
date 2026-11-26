@@ -127,6 +127,7 @@ const startup = db.getConnection()
     if (!IS_VERCEL) {
       adminModule.startAutoBackup();
       adminModule.startArchiveSweep();
+      managerModule.startPenaltySweep();
       const sessionTimer = setInterval(function () {
         removeExpiredSessions().catch(function (error) {
           console.error("Session sweep failed:", error.message);

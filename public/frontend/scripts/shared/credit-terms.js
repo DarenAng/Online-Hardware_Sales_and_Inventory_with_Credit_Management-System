@@ -39,6 +39,10 @@ function creditPrintFoot(data) {
     return '<p class="cp-foot">' + escapeHtml(text) + '</p>';
 }
 
+function latePenaltyLine(rate) {
+    return 'A late payment is charged ' + penaltyRateWord(rate) + ' a month of the unpaid balance, for each month past the due date.';
+}
+
 function creditTermsPage(data) {
     const c = data.customer;
     const t = data.terms;
@@ -46,9 +50,11 @@ function creditTermsPage(data) {
     // Interest is charged once on what is put on account, for the whole term of the sale
     const interestText = 'Charged once on the amount put on account, at the rate shown on the receipt of each credit purchase';
 
+    const penaltyLine = latePenaltyLine(t.penalty_rate);
+    const termLines = t.lines.concat([penaltyLine]);
     let termsHtml = '';
-    for (let i = 0; i < t.lines.length; i++) {
-        termsHtml += '<li>' + escapeHtml(t.lines[i]) + '</li>';
+    for (let i = 0; i < termLines.length; i++) {
+        termsHtml += '<li>' + escapeHtml(termLines[i]) + '</li>';
     }
 
     return '<section class="cp-page">' +
@@ -67,6 +73,7 @@ function creditTermsPage(data) {
             creditPrintRow('Credit limit', peso(c.credit_limit), true) +
             creditPrintRow('Payment due', 'The due date on the receipt of each credit purchase, 1 to 12 months after the purchase') +
             creditPrintRow('Interest', interestText) +
+            creditPrintRow('Late payment', escapeHtml(penaltyLine)) +
         '</table>' +
 
         '<h3>Terms</h3>' +
@@ -194,7 +201,7 @@ const CARD_SMALLEST_READABLE_PT = 4.5;
 
 function customerCardSheet(data, portalPassword) {
     const policies = {
-        credit: data.terms.lines,
+        credit: data.terms.lines.concat([latePenaltyLine(data.terms.penalty_rate)]),
         'data-terms': data.policies ? data.policies.data_terms : [],
         refund: data.policies ? data.policies.refund_policy : [],
         discount: data.policies ? data.policies.discount_policy : []

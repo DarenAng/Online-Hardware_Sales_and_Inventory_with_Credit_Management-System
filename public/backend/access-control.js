@@ -187,6 +187,8 @@ const ACCESS_RULES = [
   ["POST",  /^\/api\/credit\/requests\/\d+\/decide$/,  [MANAGER]],
   ["GET",   /^\/api\/customers\/\d+\/history$/,        [MANAGER, CASHIER]],
   ["GET",   /^\/api\/customers\/\d+\/loyalty$/,        [MANAGER, CASHIER]],
+  ["GET",   /^\/api\/credit\/penalty-policy$/,         [MANAGER]],
+  ["PUT",   /^\/api\/credit\/penalty-policy$/,         [MANAGER]],
   ["GET",   /^\/api\/loyalty\/policy$/,                [MANAGER]],
   ["PUT",   /^\/api\/loyalty\/policy$/,                [MANAGER]],
 
